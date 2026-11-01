@@ -74,6 +74,7 @@ import { isChatGptWebCodexModel } from "@/shared/constants/chatgptWebCodex";
 import { deleteHandoff, getHandoff } from "@/lib/db/contextHandoffs";
 import { getComboByName, updateCombo } from "@/lib/db/combos";
 import { isModelAllowedForKey } from "@/lib/db/apiKeys";
+import { isProviderBlockedByIdOrAlias } from "@/shared/utils/noAuthProviders";
 import { promoteSuccessfulComboModel } from "@/lib/combos/autoPromote";
 import {
   deleteSessionAccountAffinity,
@@ -1122,6 +1123,8 @@ async function handleChatImplementation(
       }
       if (modelInfo?.errorType === "model_not_found") return "model_not_in_catalog";
       const provider = comboCheckProvider(modelString, modelInfo, target?.providerId);
+      const { blockedProviders } = settings as { blockedProviders?: unknown };
+      if (isProviderBlockedByIdOrAlias(provider, blockedProviders)) return false;
       const resolvedModel = modelInfo.model || modelString;
       const githubGate = await ghComboGate(comboPreselectedCredentials, provider, resolvedModel);
       if (githubGate !== null) return githubGate;
@@ -1616,6 +1619,14 @@ async function handleSingleModelChat(
     if (modelStr.startsWith(runtimeOptions.providerId + "/")) return resolvedProvider;
     return runtimeOptions.providerId;
   })();
+  const providerSettings =
+    runtimeOptions.cachedSettings ?? (await getCachedSettings().catch(() => ({})));
+  if (isProviderBlockedByIdOrAlias(provider, providerSettings.blockedProviders)) {
+    return errorResponse(HTTP_STATUS.SERVICE_UNAVAILABLE, `Provider '${provider}' is unavailable`, {
+      type: "provider_error",
+      code: "provider_unavailable",
+    });
+  }
   const resolvedModelGate = resolvedPolicy.createVisibleResolvedModelGate({
     apiKeyInfo,
     apiKey: (await resolveClientApiKey(request)).apiKey,

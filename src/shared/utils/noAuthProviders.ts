@@ -9,6 +9,11 @@ type ProviderWithAlias = { alias?: string };
 type NoAuthProviderEntry = { id: string; alias?: string };
 
 const noAuthProviderEntries = Object.values(NOAUTH_PROVIDERS) as NoAuthProviderEntry[];
+// Blocking the family name "opencode" also blocks its sibling routes, so a combo
+// cannot bypass the block by naming opencode-zen / opencode-go directly. Blocking
+// one sibling on its own still leaves the other reachable.
+const OPENCODE_FAMILY_KEY = "opencode";
+const OPENCODE_PROVIDER_FAMILY = new Set(["opencode", "opencode-zen", "opencode-go"]);
 
 export function normalizeBlockedProviderSet(blockedProviders: unknown): Set<string> {
   const entries = blockedProviders instanceof Set ? Array.from(blockedProviders) : blockedProviders;
@@ -28,7 +33,10 @@ export function isProviderBlockedByIdOrAlias(
   const blockedProviderSet = normalizeBlockedProviderSet(blockedProviders);
   const provider = getProviderById(providerId) as ProviderWithAlias | undefined;
   const baseId = providerId.replace(/-search$/, "");
+  const blockedOpenCodeFamily =
+    OPENCODE_PROVIDER_FAMILY.has(providerId) && blockedProviderSet.has(OPENCODE_FAMILY_KEY);
   return (
+    blockedOpenCodeFamily ||
     blockedProviderSet.has(providerId) ||
     blockedProviderSet.has(baseId) ||
     (typeof provider?.alias === "string" && blockedProviderSet.has(provider.alias))
