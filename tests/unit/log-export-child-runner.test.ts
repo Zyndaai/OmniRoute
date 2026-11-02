@@ -229,7 +229,8 @@ test("hung destination is terminated at timeout, escalating past ignored SIGTERM
   assert.equal(dbDest.getLogExportDestination(dest.id)?.lastStatus, "failure");
   assert.equal(result.cursorRowId, 0);
   assertGone();
-  assert.equal(child?.signalCode, "SIGKILL");
+  // Windows has no signals: any kill() reports SIGTERM, so SIGKILL escalation is POSIX-only.
+  if (process.platform !== "win32") assert.equal(child?.signalCode, "SIGKILL");
 });
 
 test("secret travels over IPC only, not argv/env, and child gets explicit heap limit", async () => {
@@ -288,23 +289,30 @@ test("partial send failure retains the last acknowledged cursor and redacts the 
 test("runtime resolver covers adjacent, standalone, cwd, TS development and missing layouts", async () => {
   const { resolveLogExportChild } = await import("../../src/lib/logExport/childRunner.ts");
   const relative = "src/lib/logExport/exportChild.js";
-  const context = { moduleDir: "/module", cwd: "/cwd", entryFile: "/standalone/server.js" };
+  // path.resolve gives these a drive letter on Windows (the resolver resolves entryFile/cwd).
+  const context = {
+    moduleDir: path.resolve("/module"),
+    cwd: path.resolve("/cwd"),
+    entryFile: path.resolve("/standalone/server.js"),
+  };
+  const standaloneJs = path.join(path.resolve("/standalone"), relative);
   for (const candidate of [
-    "/module/exportChild.js",
-    `/standalone/${relative}`,
-    `/cwd/${relative}`,
+    path.join(context.moduleDir, "exportChild.js"),
+    standaloneJs,
+    path.join(context.cwd, relative),
   ]) {
     assert.deepEqual(
       resolveLogExportChild({ ...context, fileExists: (file) => file === candidate }),
       { childFile: candidate, execArgv: [] }
     );
   }
-  assert.deepEqual(
-    resolveLogExportChild({ ...context, fileExists: (file) => file === "/module/exportChild.ts" }),
-    { childFile: "/module/exportChild.ts", execArgv: ["--import", "tsx/esm"] }
-  );
+  const moduleTs = path.join(context.moduleDir, "exportChild.ts");
+  assert.deepEqual(resolveLogExportChild({ ...context, fileExists: (file) => file === moduleTs }), {
+    childFile: moduleTs,
+    execArgv: ["--import", "tsx/esm"],
+  });
   assert.deepEqual(resolveLogExportChild({ ...context, fileExists: () => false }), {
-    childFile: `/standalone/${relative}`,
+    childFile: standaloneJs,
     execArgv: [],
   });
 });
@@ -548,6 +556,9 @@ test("R1 real child routes public HTTP and HTTPS through env proxy, NO_PROXY and
     sockets.add(upstream);
     sockets.add(client as net.Socket);
     upstream.on("error", () => client.destroy());
+    // A CONNECT socket is detached from the http server's error handling; an abrupt peer
+    // close (ECONNRESET, common on Windows) would otherwise surface as an uncaughtException.
+    client.on("error", () => upstream.destroy());
   });
   const port = await listen(origin);
   const securePort = await listen(secureOrigin);

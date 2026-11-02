@@ -153,6 +153,10 @@ test("console log API returns an empty list for a missing file and surfaces read
   assert.equal(missingResponse.status, 200);
   assert.deepEqual(await missingResponse.json(), []);
 
+  // Reading a directory as a log file only fails on POSIX (EISDIR); on Windows a directory
+  // stats as size 0 and the route returns an empty list.
+  if (process.platform === "win32") return;
+
   const brokenPath = path.join(TEST_LOG_DIR, "dir-log");
   fs.mkdirSync(brokenPath, { recursive: true });
   process.env.APP_LOG_FILE_PATH = brokenPath;

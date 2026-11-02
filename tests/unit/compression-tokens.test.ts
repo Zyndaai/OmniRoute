@@ -25,8 +25,9 @@ function setupTempDataDir() {
 
 test("tokensCompressed round-trips through saveCallLog → getCallLogs", async () => {
   const dir = setupTempDataDir();
+  let core: { resetDbInstance: () => void; getDbInstance: () => unknown } | undefined;
   try {
-    const core = await freshImport("../../src/lib/db/core.ts");
+    core = await freshImport("../../src/lib/db/core.ts");
     core.resetDbInstance();
 
     const db = core.getDbInstance();
@@ -81,6 +82,10 @@ test("tokensCompressed round-trips through saveCallLog → getCallLogs", async (
     assert.equal(logComp.tokens?.in, 1000);
     assert.equal(logComp.tokens?.out, 500);
   } finally {
+    // Windows cannot delete a SQLite file that is still open. callLogs.ts opens the DB
+    // through the plain (non-fresh) core module, so close that instance too.
+    core?.resetDbInstance();
+    (await import("../../src/lib/db/core.ts")).resetDbInstance();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

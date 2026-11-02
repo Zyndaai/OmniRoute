@@ -17,48 +17,57 @@ test.after(() => {
   }
 });
 
-test("Adobe Firefly session dir/file are created with restrictive permissions (0700/0600)", async () => {
-  const { markAdobeFireflyArpSuccess, fingerprintAdobeCredential } = await import(
-    "../../open-sse/services/adobeFireflySession.ts"
-  );
+const posixModesSkip =
+  process.platform === "win32" && "POSIX file modes are not enforced on Windows";
 
-  const fp = fingerprintAdobeCredential("probe-credential-blob");
+test(
+  "Adobe Firefly session dir/file are created with restrictive permissions (0700/0600)",
+  { skip: posixModesSkip },
+  async () => {
+    const { markAdobeFireflyArpSuccess, fingerprintAdobeCredential } =
+      await import("../../open-sse/services/adobeFireflySession.ts");
 
-  // Triggers sessionFilePath() -> ensureSecureDir(dir) with no cached session and no
-  // pre-existing file on disk (mirrors first-touch creation of the adobe-firefly-sessions
-  // directory in production).
-  markAdobeFireflyArpSuccess(fp, "arp-probe-1");
+    const fp = fingerprintAdobeCredential("probe-credential-blob");
 
-  const sessionDir = join(probeDataDir, "adobe-firefly-sessions");
-  const dirMode = statSync(sessionDir).mode & 0o777;
+    // Triggers sessionFilePath() -> ensureSecureDir(dir) with no cached session and no
+    // pre-existing file on disk (mirrors first-touch creation of the adobe-firefly-sessions
+    // directory in production).
+    markAdobeFireflyArpSuccess(fp, "arp-probe-1");
 
-  assert.equal(
-    dirMode & 0o077,
-    0,
-    `expected adobe-firefly-sessions dir to be 0700 (no group/other access), got mode ${dirMode.toString(8)}`
-  );
-});
+    const sessionDir = join(probeDataDir, "adobe-firefly-sessions");
+    const dirMode = statSync(sessionDir).mode & 0o777;
 
-test("ensureSecureDir tightens an already-existing looser directory to 0700", async () => {
-  const { ensureSecureDir } = await import("../../open-sse/utils/secureFileWrite.ts");
-  const dir = join(probeDataDir, "already-loose-dir");
-  mkdirSync(dir, { recursive: true, mode: 0o777 });
-  chmodSync(dir, 0o777);
+    assert.equal(
+      dirMode & 0o077,
+      0,
+      `expected adobe-firefly-sessions dir to be 0700 (no group/other access), got mode ${dirMode.toString(8)}`
+    );
+  }
+);
 
-  ensureSecureDir(dir);
+test(
+  "ensureSecureDir tightens an already-existing looser directory to 0700",
+  { skip: posixModesSkip },
+  async () => {
+    const { ensureSecureDir } = await import("../../open-sse/utils/secureFileWrite.ts");
+    const dir = join(probeDataDir, "already-loose-dir");
+    mkdirSync(dir, { recursive: true, mode: 0o777 });
+    chmodSync(dir, 0o777);
 
-  const dirMode = statSync(dir).mode & 0o777;
-  assert.equal(
-    dirMode & 0o077,
-    0,
-    `expected already-loose-dir to be tightened to 0700, got mode ${dirMode.toString(8)}`
-  );
-});
+    ensureSecureDir(dir);
 
-test("writeSecureFile writes files with 0600 permissions", async () => {
-  const { writeSecureFile, ensureSecureDir } = await import(
-    "../../open-sse/utils/secureFileWrite.ts"
-  );
+    const dirMode = statSync(dir).mode & 0o777;
+    assert.equal(
+      dirMode & 0o077,
+      0,
+      `expected already-loose-dir to be tightened to 0700, got mode ${dirMode.toString(8)}`
+    );
+  }
+);
+
+test("writeSecureFile writes files with 0600 permissions", { skip: posixModesSkip }, async () => {
+  const { writeSecureFile, ensureSecureDir } =
+    await import("../../open-sse/utils/secureFileWrite.ts");
   const dir = join(probeDataDir, "secure-file-write-probe");
   ensureSecureDir(dir);
   const filePath = join(dir, "probe.json");

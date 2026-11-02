@@ -25,7 +25,10 @@ function getTool(name: string) {
 function writeTestPlugin(opts?: { name?: string; onRequest?: boolean }) {
   const name = opts?.name ?? "test-tools-plugin";
   const onRequest = opts?.onRequest ?? true;
-  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-plugin-src-"));
+  // realpath expands Windows 8.3 short names (ABDULH~1), which validatePluginPath rejects ("~").
+  const sourceDir = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-plugin-src-"))
+  );
   const pluginDir = path.join(sourceDir, name);
   fs.mkdirSync(pluginDir, { recursive: true });
   const manifest = {

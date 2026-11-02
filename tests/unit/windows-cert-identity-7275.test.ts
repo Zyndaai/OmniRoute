@@ -27,6 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const LEGACY_HARDCODED_HOST = "daily-cloudcode-pa.googleapis.com";
 
@@ -41,16 +42,37 @@ fs.writeFileSync(captureFile, "");
 
 // A real executable on PATH — not a child_process mock — so
 // checkCertInstalledWindows() exercises the genuine execFile() code path.
-const certutilStubPath = path.join(binDir, "certutil");
-fs.writeFileSync(
-  certutilStubPath,
-  `#!/usr/bin/env node
-const fs = require("fs");
+const stubBody = `const fs = require("fs");
 fs.appendFileSync(${JSON.stringify(captureFile)}, process.argv.slice(2).join(" ") + "\\n");
 process.exit(0);
-`,
-  { mode: 0o755 }
-);
+`;
+let certutilStubUnavailable: string | false = false;
+if (process.platform === "win32") {
+  // On real Windows execFile("certutil") only runs a PE binary (`certutil[.com|.exe]`): a shebang
+  // script is not executable and would fall through to the real System32 certutil. Build a
+  // single-executable app (node --build-sea) that runs the same stub.
+  const stubScript = path.join(tmpRoot, "certutil-stub.cjs");
+  const seaConfig = path.join(tmpRoot, "certutil-sea.json");
+  fs.writeFileSync(stubScript, stubBody);
+  fs.writeFileSync(
+    seaConfig,
+    JSON.stringify({
+      main: stubScript,
+      output: path.join(binDir, "certutil.exe"),
+      disableExperimentalSEAWarning: true,
+    })
+  );
+  try {
+    execFileSync(process.execPath, ["--build-sea", seaConfig], { stdio: "ignore" });
+  } catch {
+    // `--build-sea` needs Node >= 25.5; on an older Windows Node only the stub tests skip.
+    certutilStubUnavailable = "needs node --build-sea (Node >= 25.5) to build a certutil.exe stub";
+  }
+} else {
+  fs.writeFileSync(path.join(binDir, "certutil"), `#!/usr/bin/env node\n${stubBody}`, {
+    mode: 0o755,
+  });
+}
 
 Object.defineProperty(process, "platform", { value: "win32", configurable: true });
 process.env.PATH = `${binDir}${path.delimiter}${originalPath}`;
@@ -79,34 +101,46 @@ function fakeCertFile(seed: string): string {
   return certPath;
 }
 
-test("checkCertInstalledWindows() keys off the real cert's thumbprint, not the legacy hardcoded host", async () => {
-  const certPath = fakeCertFile("probe-a");
-  const expectedThumbprint = certutilThumbprint(certPath);
+test(
+  "checkCertInstalledWindows() keys off the real cert's thumbprint, not the legacy hardcoded host",
+  { skip: certutilStubUnavailable },
+  async () => {
+    const certPath = fakeCertFile("probe-a");
+    const expectedThumbprint = certutilThumbprint(certPath);
 
-  const isInstalled = await checkCertInstalled(certPath);
-  assert.equal(isInstalled, true, "the certutil stub always exits 0 → should report installed");
+    const isInstalled = await checkCertInstalled(certPath);
+    assert.equal(isInstalled, true, "the certutil stub always exits 0 → should report installed");
 
-  const capturedArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
-  // Exact-equality is strictly stronger than a negative substring check: an argv
-  // that IS `-store Root <thumbprint>` cannot also carry the legacy hostname.
-  assert.equal(
-    capturedArgv,
-    `-store Root ${expectedThumbprint}`,
-    "certutil must be queried with the real cert's thumbprint, not the legacy hostname"
-  );
-});
+    const capturedArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
+    // Exact-equality is strictly stronger than a negative substring check: an argv
+    // that IS `-store Root <thumbprint>` cannot also carry the legacy hostname.
+    assert.equal(
+      capturedArgv,
+      `-store Root ${expectedThumbprint}`,
+      "certutil must be queried with the real cert's thumbprint, not the legacy hostname"
+    );
+  }
+);
 
-test("checkCertInstalledWindows() tracks certPath — a different cert yields a different query", async () => {
-  fs.writeFileSync(captureFile, "");
-  const certPathB = fakeCertFile("probe-b");
-  const thumbprintA = certutilThumbprint(fakeCertFile("probe-a"));
-  const thumbprintB = certutilThumbprint(certPathB);
-  assert.notEqual(thumbprintA, thumbprintB, "sanity: distinct cert content → distinct thumbprint");
+test(
+  "checkCertInstalledWindows() tracks certPath — a different cert yields a different query",
+  { skip: certutilStubUnavailable },
+  async () => {
+    fs.writeFileSync(captureFile, "");
+    const certPathB = fakeCertFile("probe-b");
+    const thumbprintA = certutilThumbprint(fakeCertFile("probe-a"));
+    const thumbprintB = certutilThumbprint(certPathB);
+    assert.notEqual(
+      thumbprintA,
+      thumbprintB,
+      "sanity: distinct cert content → distinct thumbprint"
+    );
 
-  await checkCertInstalled(certPathB);
-  const capturedArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
-  assert.equal(capturedArgv, `-store Root ${thumbprintB}`);
-});
+    await checkCertInstalled(certPathB);
+    const capturedArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
+    assert.equal(capturedArgv, `-store Root ${thumbprintB}`);
+  }
+);
 
 test("buildWindowsDelstoreScript() embeds the cert's own thumbprint, not the legacy hardcoded host", () => {
   const certPath = fakeCertFile("probe-c");
@@ -125,22 +159,26 @@ test("buildWindowsDelstoreScript() embeds the cert's own thumbprint, not the leg
   );
 });
 
-test("check and uninstall derive identity from the SAME source (certutilThumbprint(certPath)) — immune to ANTIGRAVITY_TARGET.hosts reordering", async () => {
-  fs.writeFileSync(captureFile, "");
-  const certPath = fakeCertFile("probe-d");
+test(
+  "check and uninstall derive identity from the SAME source (certutilThumbprint(certPath)) — immune to ANTIGRAVITY_TARGET.hosts reordering",
+  { skip: certutilStubUnavailable },
+  async () => {
+    fs.writeFileSync(captureFile, "");
+    const certPath = fakeCertFile("probe-d");
 
-  await checkCertInstalled(certPath);
-  const checkArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
-  const checkThumbprint = checkArgv.replace("-store Root ", "");
+    await checkCertInstalled(certPath);
+    const checkArgv = fs.readFileSync(captureFile, "utf8").trim().split("\n").at(-1)!;
+    const checkThumbprint = checkArgv.replace("-store Root ", "");
 
-  const delstoreScript = buildWindowsDelstoreScript(certutilThumbprint(certPath));
+    const delstoreScript = buildWindowsDelstoreScript(certutilThumbprint(certPath));
 
-  assert.ok(
-    delstoreScript.includes(checkThumbprint),
-    "uninstall must target the exact same identity the check used — " +
-      "no coincidence-based coupling through a hardcoded hostname"
-  );
-});
+    assert.ok(
+      delstoreScript.includes(checkThumbprint),
+      "uninstall must target the exact same identity the check used — " +
+        "no coincidence-based coupling through a hardcoded hostname"
+    );
+  }
+);
 
 test("source no longer hardcodes the legacy host for the Windows check/uninstall paths", () => {
   const source = fs.readFileSync(

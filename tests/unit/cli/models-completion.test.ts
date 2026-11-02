@@ -24,6 +24,7 @@ async function invoke(args: string[], dataDir: string) {
         ...process.env,
         DATA_DIR: dataDir,
         HOME: dataDir,
+        USERPROFILE: dataDir, // Windows os.homedir() reads USERPROFILE
         OMNIROUTE_CLI_TOKEN: "fixture",
         OMNIROUTE_API_KEY: "ambient-not-used",
         OMNIROUTE_BASE_URL: "http://127.0.0.1:1",

@@ -57,24 +57,30 @@ test("saveContexts persiste e loadContexts relê", async () => {
   assert.equal(cfg2.contexts.test?.baseUrl, "http://test:9999");
 });
 
-test("saveContexts replaces a hostile symlink atomically with a private regular file", async () => {
-  const { configPath, saveContexts } = await import("../../bin/cli/contexts.mjs");
-  const path = configPath();
-  const victim = join(tmpDir, "victim.json");
-  rmSync(path, { force: true });
-  writeFileSync(victim, "do-not-overwrite");
-  symlinkSync(victim, path);
+test(
+  "saveContexts replaces a hostile symlink atomically with a private regular file",
+  {
+    skip: process.platform === "win32" && "POSIX 0600 file modes are not enforced on Windows",
+  },
+  async () => {
+    const { configPath, saveContexts } = await import("../../bin/cli/contexts.mjs");
+    const path = configPath();
+    const victim = join(tmpDir, "victim.json");
+    rmSync(path, { force: true });
+    writeFileSync(victim, "do-not-overwrite");
+    symlinkSync(victim, path);
 
-  saveContexts({
-    version: 1,
-    currentContext: "default",
-    contexts: { default: { baseUrl: "http://localhost:20128", apiKey: null } },
-  });
+    saveContexts({
+      version: 1,
+      currentContext: "default",
+      contexts: { default: { baseUrl: "http://localhost:20128", apiKey: null } },
+    });
 
-  assert.equal(readFileSync(victim, "utf8"), "do-not-overwrite");
-  assert.equal(lstatSync(path).isSymbolicLink(), false);
-  assert.equal(statSync(path).mode & 0o777, 0o600);
-});
+    assert.equal(readFileSync(victim, "utf8"), "do-not-overwrite");
+    assert.equal(lstatSync(path).isSymbolicLink(), false);
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  }
+);
 
 test("resolveActiveContext retorna contexto ativo", async () => {
   const { resolveActiveContext, loadContexts, saveContexts } =
@@ -317,43 +323,49 @@ test("secret-bearing context export fails closed when a keychain reference is un
   );
 });
 
-test("context export defaults to a redacted atomic private output file", async () => {
-  const { saveContexts } = await import("../../bin/cli/contexts.mjs");
-  const { createProgram } = await import("../../bin/cli/program.mjs");
-  saveContexts({
-    version: 1,
-    currentContext: "remote",
-    contexts: {
-      remote: {
-        baseUrl: "https://remote.example.com",
-        accessToken: "oma-file-secret",
-        apiKey: "sk-file-secret",
+test(
+  "context export defaults to a redacted atomic private output file",
+  {
+    skip: process.platform === "win32" && "POSIX 0600 file modes are not enforced on Windows",
+  },
+  async () => {
+    const { saveContexts } = await import("../../bin/cli/contexts.mjs");
+    const { createProgram } = await import("../../bin/cli/program.mjs");
+    saveContexts({
+      version: 1,
+      currentContext: "remote",
+      contexts: {
+        remote: {
+          baseUrl: "https://remote.example.com",
+          accessToken: "oma-file-secret",
+          apiKey: "sk-file-secret",
+        },
       },
-    },
-  });
-  const victim = join(tmpDir, "export-victim.json");
-  const output = join(tmpDir, "contexts-export.json");
-  rmSync(output, { force: true });
-  writeFileSync(victim, "do-not-overwrite");
-  symlinkSync(victim, output);
-  const stdout: string[] = [];
-  const originalWrite = process.stdout.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write;
+    });
+    const victim = join(tmpDir, "export-victim.json");
+    const output = join(tmpDir, "contexts-export.json");
+    rmSync(output, { force: true });
+    writeFileSync(victim, "do-not-overwrite");
+    symlinkSync(victim, output);
+    const stdout: string[] = [];
+    const originalWrite = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
 
-  try {
-    await createProgram().parseAsync(["node", "omniroute", "context", "export", "--out", output]);
-  } finally {
-    process.stdout.write = originalWrite;
+    try {
+      await createProgram().parseAsync(["node", "omniroute", "context", "export", "--out", output]);
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+
+    assert.equal(readFileSync(victim, "utf8"), "do-not-overwrite");
+    assert.equal(lstatSync(output).isSymbolicLink(), false);
+    assert.equal(statSync(output).mode & 0o777, 0o600);
+    const exported = readFileSync(output, "utf8");
+    assert.ok(!exported.includes("oma-file-secret"));
+    assert.ok(!exported.includes("sk-file-secret"));
+    assert.match(stdout.join(""), /Exported to/);
   }
-
-  assert.equal(readFileSync(victim, "utf8"), "do-not-overwrite");
-  assert.equal(lstatSync(output).isSymbolicLink(), false);
-  assert.equal(statSync(output).mode & 0o777, 0o600);
-  const exported = readFileSync(output, "utf8");
-  assert.ok(!exported.includes("oma-file-secret"));
-  assert.ok(!exported.includes("sk-file-secret"));
-  assert.match(stdout.join(""), /Exported to/);
-});
+);

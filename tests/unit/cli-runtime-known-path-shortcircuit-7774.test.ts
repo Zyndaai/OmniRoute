@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 // #13717 turned the startup DB health/integrity check into an opt-in deferred
@@ -120,7 +121,7 @@ function runCase(deferred: "0" | "1") {
         APP_LOG_TO_FILE: "false",
         DISABLE_SQLITE_AUTO_BACKUP: "true",
         OMNIROUTE_TEST_DEFERRED: deferred,
-        OMNI_CORE_TS_PATH: path.join(process.cwd(), "src/lib/db/core.ts"),
+        OMNI_CORE_TS_PATH: pathToFileURL(path.join(process.cwd(), "src/lib/db/core.ts")).href,
       },
       encoding: "utf8",
       timeout: 60000,

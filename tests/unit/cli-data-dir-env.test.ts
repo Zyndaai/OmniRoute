@@ -26,6 +26,7 @@ async function withTempEnv(
   delete process.env.XDG_CONFIG_HOME;
   delete process.env.APPDATA;
   process.env.HOME = home;
+  process.env.USERPROFILE = home; // Windows os.homedir() reads USERPROFILE
   process.chdir(cwd);
 
   try {

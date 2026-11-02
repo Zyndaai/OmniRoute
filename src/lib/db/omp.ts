@@ -28,12 +28,18 @@ export function getOmpCredentials(providerId: string) {
   const dbPath = getOmpDbPath();
   try {
     const db = new Database(dbPath, databaseOptions(true));
-    const row = db
-      .prepare(
-        "SELECT data FROM auth_credentials WHERE provider = ? AND credential_type = 'api_key'"
-      )
-      .get(providerId) as { data: string } | undefined;
-    db.close();
+    let row: { data: string } | undefined;
+    try {
+      row = db
+        .prepare(
+          "SELECT data FROM auth_credentials WHERE provider = ? AND credential_type = 'api_key'"
+        )
+        .get(providerId) as { data: string } | undefined;
+    } finally {
+      // Close even when the query throws (e.g. missing table): a leaked handle locks the file
+      // on Windows.
+      db.close();
+    }
 
     if (row?.data) {
       const parsed = JSON.parse(row.data);

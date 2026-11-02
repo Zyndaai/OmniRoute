@@ -49,23 +49,29 @@ test("resolveClineTarget: explicit --api-key wins", () => {
   assert.equal(apiKey, "sk-explicit");
 });
 
-test("setup-cline creates credential files private from first write", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "omniroute-cline-private-"));
-  try {
-    assert.equal(
-      await runSetupClineCommand({
-        clineDir: directory,
-        remote: "http://127.0.0.1:20128",
-        apiKey: "provider-secret",
-        model: "glm/glm-5.2",
-        yes: true,
-        allowContainerWrite: true,
-      }),
-      0
-    );
-    assert.equal(statSync(join(directory, "globalState.json")).mode & 0o777, 0o600);
-    assert.equal(statSync(join(directory, "secrets.json")).mode & 0o777, 0o600);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
+test(
+  "setup-cline creates credential files private from first write",
+  {
+    skip: process.platform === "win32" && "POSIX 0600 file modes are not enforced on Windows",
+  },
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omniroute-cline-private-"));
+    try {
+      assert.equal(
+        await runSetupClineCommand({
+          clineDir: directory,
+          remote: "http://127.0.0.1:20128",
+          apiKey: "provider-secret",
+          model: "glm/glm-5.2",
+          yes: true,
+          allowContainerWrite: true,
+        }),
+        0
+      );
+      assert.equal(statSync(join(directory, "globalState.json")).mode & 0o777, 0o600);
+      assert.equal(statSync(join(directory, "secrets.json")).mode & 0o777, 0o600);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
-});
+);

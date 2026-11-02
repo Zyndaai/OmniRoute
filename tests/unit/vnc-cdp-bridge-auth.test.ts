@@ -55,7 +55,8 @@ function startUpstream(): Promise<{ server: net.Server; receivedAnyBytes: () => 
 }
 
 function startBridge(): ChildProcessWithoutNullStreams {
-  return spawn("python3", [BRIDGE_SCRIPT], {
+  // Windows Python installs expose `python`, not `python3`.
+  return spawn(process.platform === "win32" ? "python" : "python3", [BRIDGE_SCRIPT], {
     stdio: ["ignore", "ignore", "pipe"],
     env: { ...process.env, CDP_BRIDGE_TOKEN: TOKEN },
   });
@@ -100,9 +101,7 @@ test("cdp-bridge.py forwards bytes once the caller presents the configured token
 
     await new Promise<void>((resolve, reject) => {
       const client = net.createConnection({ host: "127.0.0.1", port: BRIDGE_PORT }, () => {
-        client.write(
-          `GET /json/version HTTP/1.1\r\nHost: x\r\nX-Omni-Cdp-Token: ${TOKEN}\r\n\r\n`
-        );
+        client.write(`GET /json/version HTTP/1.1\r\nHost: x\r\nX-Omni-Cdp-Token: ${TOKEN}\r\n\r\n`);
       });
       client.once("error", reject);
       setTimeout(() => {

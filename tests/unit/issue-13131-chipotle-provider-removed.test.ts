@@ -17,7 +17,10 @@ const { hasSpecializedExecutor } = await import("../../open-sse/executors/index.
 const { REGISTRY } = await import("../../open-sse/config/providers/index.ts");
 const { NOAUTH_PROVIDERS } = await import("../../src/shared/constants/providers/noauth.ts");
 
-test.after(() => {
+test.after(async () => {
+  // Windows cannot delete a data dir whose storage.sqlite is still open.
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

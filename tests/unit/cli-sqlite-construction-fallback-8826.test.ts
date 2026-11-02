@@ -5,6 +5,7 @@ import Module from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // #8826: better-sqlite3 v12 loads its native addon lazily -- import("better-sqlite3")
 // SUCCEEDS and only new Database() throws "Could not locate the bindings file" when
@@ -12,11 +13,11 @@ import path from "node:path";
 // openSqliteDatabase() only fell back when the *import* failed; the construction-time
 // failure was translated into "Run: omniroute runtime repair" guidance and aborted.
 
-const FIXTURE_DIR = new URL("fixtures/", import.meta.url).pathname;
+const FIXTURE_DIR = fileURLToPath(new URL("fixtures/", import.meta.url));
 const hookPath = path.join(FIXTURE_DIR, "8826-mock-better-sqlite3.mjs");
 
 // Register the ESM hook to return a module whose Database constructor throws
-register(hookPath, import.meta.url);
+register(pathToFileURL(hookPath).href, import.meta.url);
 
 // Patch Module._load so CJS createRequire("better-sqlite3") in driverFactory.ts
 // also gets a constructor that throws the bindings error.

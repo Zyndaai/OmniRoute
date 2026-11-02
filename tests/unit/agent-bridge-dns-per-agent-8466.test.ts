@@ -17,10 +17,16 @@ afterEach(() => {
   mock.restoreAll();
 });
 
+// The hosts file is /etc/hosts on POSIX and System32\drivers\etc\hosts on Windows.
+function isHostsFilePath(p: unknown): boolean {
+  const pathStr = String(p);
+  return pathStr === "/etc/hosts" || pathStr.includes("System32\\drivers\\etc\\hosts");
+}
+
 test("FALSE NEGATIVE: Claude Code host correctly spoofed, no Antigravity host present -> dnsConfigured should be true when checked for claude-code", async () => {
   const realReadFileSync = fs.readFileSync.bind(fs);
   mock.method(fs, "readFileSync", (p: string, enc?: BufferEncoding) => {
-    if (p === "/etc/hosts") {
+    if (isHostsFilePath(p)) {
       // Claude Code target hosts = ["api.anthropic.com"] (src/mitm/targets/claudeCode.ts).
       // The user correctly spoofed it. No Antigravity host present at all.
       return "127.0.0.1 localhost\n127.0.0.1 api.anthropic.com\n::1 api.anthropic.com\n";
@@ -41,7 +47,7 @@ test("FALSE NEGATIVE: Claude Code host correctly spoofed, no Antigravity host pr
 test("FALSE POSITIVE: only a leftover Antigravity host is present, Claude Code host is missing -> dnsConfigured should be false when checked for claude-code", async () => {
   const realReadFileSync = fs.readFileSync.bind(fs);
   mock.method(fs, "readFileSync", (p: string, enc?: BufferEncoding) => {
-    if (p === "/etc/hosts") {
+    if (isHostsFilePath(p)) {
       // Leftover Antigravity entry from a previous setup. Claude Code's host
       // (api.anthropic.com) is NOT present.
       return "127.0.0.1 localhost\n127.0.0.1 daily-cloudcode-pa.googleapis.com\n";
@@ -89,7 +95,7 @@ test("no-agentId call sites: still Antigravity-only but Windows-aware (#8656)", 
 test("diagnose route: threads ?agentId= query param through to getMitmStatus", async () => {
   const realReadFileSync = fs.readFileSync.bind(fs);
   mock.method(fs, "readFileSync", (p: string, enc?: BufferEncoding) => {
-    if (p === "/etc/hosts") {
+    if (isHostsFilePath(p)) {
       return "127.0.0.1 localhost\n127.0.0.1 api.anthropic.com\n::1 api.anthropic.com\n";
     }
     return realReadFileSync(p, enc);

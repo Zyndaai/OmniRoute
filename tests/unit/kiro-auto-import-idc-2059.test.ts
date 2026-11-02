@@ -49,6 +49,7 @@ const core = await import("../../src/lib/db/core.ts");
 const { GET } = await import("../../src/app/api/oauth/kiro/auto-import/route.ts");
 
 const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const ORIGINAL_APPDATA = process.env.APPDATA;
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -60,6 +61,8 @@ test.beforeEach(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.HOME = tmpHome;
+  // Windows os.homedir() reads USERPROFILE, not HOME.
+  process.env.USERPROFILE = tmpHome;
   delete process.env.APPDATA;
   // Reset fetch so tests with mocks don't bleed into each other.
   globalThis.fetch = ORIGINAL_FETCH;
@@ -67,6 +70,8 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   process.env.HOME = ORIGINAL_HOME;
+  if (ORIGINAL_USERPROFILE === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = ORIGINAL_USERPROFILE;
   if (ORIGINAL_APPDATA !== undefined) {
     process.env.APPDATA = ORIGINAL_APPDATA;
   } else {

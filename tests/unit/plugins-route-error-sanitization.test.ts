@@ -123,7 +123,7 @@ test("all /api/plugins route files are covered by this test suite", () => {
       if (entry.isDirectory()) {
         walk(full);
       } else if (entry.name === "route.ts") {
-        found.push(path.relative(REPO_ROOT, full));
+        found.push(path.relative(REPO_ROOT, full).split(path.sep).join("/"));
       }
     }
   }

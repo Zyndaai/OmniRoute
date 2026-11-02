@@ -140,6 +140,10 @@ function writeRetainedRun(args: Args, status: number): void {
   if (args.candidatePatch && candidatePatchCopy)
     fs.copyFileSync(args.candidatePatch, candidatePatchCopy);
 
+  // Manifest paths are portable data: always "/"-separated, even when written on Windows.
+  const relToRun = (target: string): string =>
+    path.relative(runDir, target).split(path.sep).join("/");
+
   const manifest: GateManifest = {
     schemaVersion: 1,
     kind: "router-eval-gate-run",
@@ -161,22 +165,22 @@ function writeRetainedRun(args: Args, status: number): void {
         : {}),
     },
     inputs: {
-      baseline: path.relative(runDir, baselineCopy),
-      candidate: path.relative(runDir, candidateCopy),
+      baseline: relToRun(baselineCopy),
+      candidate: relToRun(candidateCopy),
       ...(baselinePatchCopy && candidatePatchCopy
         ? {
-            baselinePatch: path.relative(runDir, baselinePatchCopy),
-            candidatePatch: path.relative(runDir, candidatePatchCopy),
+            baselinePatch: relToRun(baselinePatchCopy),
+            candidatePatch: relToRun(candidatePatchCopy),
           }
         : {}),
     },
     outputs: {
-      markdown: path.relative(runDir, args.output),
-      json: path.relative(runDir, args.jsonOutput),
+      markdown: relToRun(args.output),
+      json: relToRun(args.jsonOutput),
       ...(args.baselinePatch && args.candidatePatch
         ? {
-            patchMarkdown: path.relative(runDir, args.patchOutput),
-            patchJson: path.relative(runDir, args.patchJsonOutput),
+            patchMarkdown: relToRun(args.patchOutput),
+            patchJson: relToRun(args.patchJsonOutput),
           }
         : {}),
     },

@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,9 +38,8 @@ test("isStreamWritable accepts a healthy stream", () => {
 // its own diagnostics there — so this runs in a child, which also proves the property that
 // actually matters: the process survives and file logging still happens.
 test("error() with a destroyed stderr does not crash, and still writes to the log file (#8181)", () => {
-  const loggerPath = fileURLToPath(
-    new URL("../../../src/shared/utils/structuredLogger.ts", import.meta.url)
-  );
+  // file:// URL: a bare Windows absolute path is rejected by the ESM loader in the child.
+  const loggerPath = new URL("../../../src/shared/utils/structuredLogger.ts", import.meta.url).href;
   const dir = mkdtempSync(join(tmpdir(), "omniroute-rawwrite-8181-"));
   const logFile = join(dir, "logs", "application", "app.log");
   const childFile = join(dir, "probe.mts");

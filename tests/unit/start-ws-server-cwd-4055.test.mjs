@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 // #4055: the LiveWS sidecar launcher re-spawns itself with `node --import tsx`.
@@ -10,33 +11,26 @@ import { pathToFileURL } from "node:url";
 // therefore pin `cwd` to the package root (the dir above `scripts/`).
 const mod = await import("../../scripts/start-ws-server.mjs");
 
+// path.resolve keeps "/opt/..." as is on POSIX and adds the drive letter on Windows.
+const PACKAGE_ROOT = path.resolve("/opt/homebrew/lib/node_modules/omniroute");
+const SCRIPT_PATH = path.join(PACKAGE_ROOT, "scripts", "start-ws-server.mjs");
+
 test("#4055: resolvePackageRoot points at the dir above scripts/", () => {
-  const scriptUrl = pathToFileURL(
-    "/opt/homebrew/lib/node_modules/omniroute/scripts/start-ws-server.mjs"
-  ).href;
-  assert.equal(
-    mod.resolvePackageRoot(scriptUrl),
-    "/opt/homebrew/lib/node_modules/omniroute"
-  );
+  const scriptUrl = pathToFileURL(SCRIPT_PATH).href;
+  assert.equal(mod.resolvePackageRoot(scriptUrl), PACKAGE_ROOT);
 });
 
 test("#4055: the bootstrap spawn pins cwd to the package root so tsx + @/ aliases resolve", () => {
-  const scriptUrl = pathToFileURL(
-    "/opt/homebrew/lib/node_modules/omniroute/scripts/start-ws-server.mjs"
-  ).href;
+  const scriptUrl = pathToFileURL(SCRIPT_PATH).href;
   const spec = mod.buildSidecarSpawn(scriptUrl, { PATH: "/usr/bin" });
 
   // The whole point of #4055: cwd must be the package root, not inherited from
   // wherever the process manager launched us.
-  assert.equal(spec.options.cwd, "/opt/homebrew/lib/node_modules/omniroute");
+  assert.equal(spec.options.cwd, PACKAGE_ROOT);
 
   // Spawn shape is preserved: node --import tsx <self>.
   assert.equal(spec.command, process.execPath);
-  assert.deepEqual(spec.args, [
-    "--import",
-    "tsx",
-    "/opt/homebrew/lib/node_modules/omniroute/scripts/start-ws-server.mjs",
-  ]);
+  assert.deepEqual(spec.args, ["--import", "tsx", SCRIPT_PATH]);
 
   // Bootstrap guard + auto-start suppression are still wired through the env.
   assert.equal(spec.options.env.OMNIROUTE_LIVE_WS_BOOTSTRAPPED, "1");

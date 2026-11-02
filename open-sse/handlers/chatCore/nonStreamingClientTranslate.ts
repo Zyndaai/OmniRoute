@@ -31,6 +31,7 @@ import {
 } from "../responseSanitizer.ts";
 import { isStripReasoningRequested } from "./headers.ts";
 import { applyClientUsageBuffer } from "./clientUsageBuffer.ts";
+import { foldCacheWriteIntoPromptTokens } from "../../utils/usageTracking.ts";
 import { storeClaudeThinkingFromResponse } from "../../services/claudeThinkingStore.ts";
 import { resolveRequestToolIdentity } from "../../translator/response/openai-responses/requestToolIdentity.ts";
 import { matchesCustomToolDeclaration } from "../../utils/toolCallName.ts";
@@ -264,6 +265,16 @@ export function translateNonStreamingClientResponse(
   // ── Client usage buffer (#8331) ───────────────────────────────────────────
   // Only apply for final phase; intermediate preserves raw usage for aggregation.
   if (phase === "final") {
+    // Anthropic upstream → Chat Completions client: cache WRITES belong inside prompt_tokens
+    // (the pivot shape keeps them outside). Client payload only — callers extract their own
+    // billing usage from the raw provider body, not from this response.
+    if (
+      responsePayloadFormat === FORMATS.CLAUDE &&
+      clientResponseFormat === FORMATS.OPENAI &&
+      translatedResponse?.usage
+    ) {
+      translatedResponse.usage = foldCacheWriteIntoPromptTokens(translatedResponse.usage);
+    }
     applyClientUsageBuffer(translatedResponse, finalBody || responseBody, clientResponseFormat, {
       preserveContextBudgetInVisibleUsage: isClaudeCodeCompatible,
     });

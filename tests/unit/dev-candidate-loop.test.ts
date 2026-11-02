@@ -134,7 +134,7 @@ test("sanitizeCandidateId keeps ids to one safe path segment and reserves slot n
 // ── path planning ───────────────────────────────────────────────────────────────────
 
 test("planCandidatePaths keeps everything under <repo>/_artifacts/candidate by default", () => {
-  const repo = "/work/omniroute";
+  const repo = path.resolve("/work/omniroute");
   const p = planCandidatePaths({ repoRoot: repo, id: "abc123" });
   assert.equal(CANDIDATE_ROOT_REL, path.join("_artifacts", "candidate"));
   assert.equal(p.root, path.join(repo, "_artifacts", "candidate"));
@@ -152,8 +152,8 @@ test("planCandidatePaths keeps everything under <repo>/_artifacts/candidate by d
 
 test("planCandidatePaths: --target moves the active slot, previous sits next to it", () => {
   const p = planCandidatePaths({ repoRoot: "/work/omniroute", id: "abc", target: "/srv/active" });
-  assert.equal(p.current, "/srv/active");
-  assert.equal(p.previous, "/srv/active.previous");
+  assert.equal(p.current, path.resolve("/srv/active"));
+  assert.equal(p.previous, `${path.resolve("/srv/active")}.previous`);
   // The candidate itself is still built inside the repo's _artifacts.
   assert.equal(p.candidateDir, path.join("/work/omniroute", "_artifacts", "candidate", "abc"));
 });
@@ -171,7 +171,7 @@ test("packagePathsFor resolves the npm global-prefix layout per platform", () =>
 });
 
 test("resolveTarget refuses the filesystem root, home, the repo and ancestors of the candidate root", () => {
-  const repo = "/work/omniroute";
+  const repo = path.resolve("/work/omniroute");
   assert.throws(() => resolveTarget(repo, "/"), /refus/i);
   assert.throws(() => resolveTarget(repo, os.homedir()), /refus/i);
   assert.throws(() => resolveTarget(repo, repo), /refus/i);
@@ -180,7 +180,7 @@ test("resolveTarget refuses the filesystem root, home, the repo and ancestors of
     () => resolveTarget(repo, path.join(repo, "_artifacts", "candidate", "abc")),
     /refus/i
   );
-  assert.equal(resolveTarget(repo, "/srv/omniroute-active"), "/srv/omniroute-active");
+  assert.equal(resolveTarget(repo, "/srv/omniroute-active"), path.resolve("/srv/omniroute-active"));
   assert.equal(resolveTarget(repo, "rel/active"), path.join(repo, "rel/active"));
 });
 
@@ -228,7 +228,10 @@ test("buildCandidateEnv isolates DATA_DIR/port, injects fake secrets and strips 
   assert.equal(env.HOME, "/c/slot/home");
   assert.equal(env.USERPROFILE, "/c/slot/home");
   for (const key of ["XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "APPDATA"]) {
-    assert.ok(String(env[key]).startsWith("/c/slot/home"), `${key} not isolated: ${env[key]}`);
+    assert.ok(
+      String(env[key]).startsWith(path.join("/c/slot/home")),
+      `${key} not isolated: ${env[key]}`
+    );
   }
   for (const key of ["JWT_SECRET", "API_KEY_SECRET"]) {
     assert.ok(env[key], `${key} missing`);

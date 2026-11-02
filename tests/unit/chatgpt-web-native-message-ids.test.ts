@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { applyReasoningInputPolicy } from "../../open-sse/services/reasoningInputPolicy.ts";
 
 for (const provider of ["chatgpt-web-codex", "codex", "openai"]) {
@@ -62,5 +63,6 @@ test("native environment remains verifiable after routing sanitation", async () 
     ],
   };
   applyReasoningInputPolicy(body, "responses", { provider: "chatgpt-web-codex" });
-  assert.equal(extractChatGptTurnEnvironment(parseRequest(body)).cwd, "/tmp");
+  // The extractor path.resolve()s cwd, which adds a drive letter on Windows (identity on POSIX).
+  assert.equal(extractChatGptTurnEnvironment(parseRequest(body)).cwd, path.resolve("/tmp"));
 });

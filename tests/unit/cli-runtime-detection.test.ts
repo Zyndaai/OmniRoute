@@ -246,6 +246,12 @@ describe("Continue CLI detection", () => {
   it("should not report Continue as installed when the cn binary is absent", async () => {
     const previousPath = process.env.PATH;
     const previousOverride = process.env.CLI_CONTINUE_BIN;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    // Isolate from a real ~/.continue config on the machine (settings fallback).
+    const emptyHome = createTempDir();
+    process.env.HOME = emptyHome;
+    process.env.USERPROFILE = emptyHome;
     process.env.PATH = "";
     delete process.env.CLI_CONTINUE_BIN;
 
@@ -256,6 +262,11 @@ describe("Continue CLI detection", () => {
       assert.equal(result.reason, "not_found");
       assert.equal(result.requiresBinary, true);
     } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      fs.rmSync(emptyHome, { recursive: true, force: true });
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
       if (previousOverride === undefined) delete process.env.CLI_CONTINUE_BIN;

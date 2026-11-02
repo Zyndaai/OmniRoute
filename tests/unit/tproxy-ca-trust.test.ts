@@ -8,11 +8,15 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
   installTproxyCa,
   uninstallTproxyCa,
   TPROXY_CA_CERT_NAME,
 } from "../../src/mitm/tproxy/caTrust.ts";
+
+// The staged path is built with path.join (host separator): "/tmp/<name>" on POSIX.
+const STAGED = path.join("/tmp", TPROXY_CA_CERT_NAME);
 
 function fakeDeps(over: Record<string, unknown> = {}) {
   const calls: Array<{ command: string; args: string[] }> = [];
@@ -33,7 +37,10 @@ function fakeDeps(over: Record<string, unknown> = {}) {
         removed.push(p);
       },
       tmpDir: () => "/tmp",
-      certConfig: () => ({ dir: "/usr/local/share/ca-certificates", cmd: "update-ca-certificates" }),
+      certConfig: () => ({
+        dir: "/usr/local/share/ca-certificates",
+        cmd: "update-ca-certificates",
+      }),
       platform: () => "linux",
       ...over,
     } as never,
@@ -51,10 +58,10 @@ test("installTproxyCa stages the PEM, copies it into the dedicated slot, refresh
   const cmds = f.calls.map((c) => `${c.command} ${c.args.join(" ")}`);
   assert.deepEqual(cmds, [
     "sudo -S mkdir -p /usr/local/share/ca-certificates",
-    `sudo -S cp /tmp/${TPROXY_CA_CERT_NAME} /usr/local/share/ca-certificates/${TPROXY_CA_CERT_NAME}`,
+    `sudo -S cp ${STAGED} /usr/local/share/ca-certificates/${TPROXY_CA_CERT_NAME}`,
     "sudo -S update-ca-certificates",
   ]);
-  assert.deepEqual(f.removed, [`/tmp/${TPROXY_CA_CERT_NAME}`], "staged file cleaned up");
+  assert.deepEqual(f.removed, [STAGED], "staged file cleaned up");
 });
 
 test("installTproxyCa never touches the static MITM cert slot", async () => {
@@ -72,7 +79,7 @@ test("installTproxyCa cleans up the staged file even when a privileged command f
     },
   });
   await assert.rejects(() => installTproxyCa("CA-PEM", "", f.deps), /EPERM/);
-  assert.deepEqual(f.removed, [`/tmp/${TPROXY_CA_CERT_NAME}`], "staged file still cleaned up on failure");
+  assert.deepEqual(f.removed, [STAGED], "staged file still cleaned up on failure");
 });
 
 test("installTproxyCa throws on non-Linux hosts and runs nothing", async () => {

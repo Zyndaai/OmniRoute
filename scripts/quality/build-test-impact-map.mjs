@@ -47,8 +47,8 @@ export function sourceDepsOf(entry, root = ROOT) {
       if (!spec) continue;
       const r = resolveImport(spec, f, root);
       if (!r) continue;
-      const rel = path.relative(root, r);
-      if (SRC_ROOTS.some((s) => rel.startsWith(s + path.sep))) sources.add(rel);
+      const rel = path.relative(root, r).split(path.sep).join("/");
+      if (SRC_ROOTS.some((s) => rel.startsWith(s + "/"))) sources.add(rel);
       stack.push(r);
     }
   }
@@ -75,7 +75,7 @@ export function buildTestImpactMap(root = ROOT) {
   );
   const map = {};
   for (const tf of testFiles) {
-    const relTest = path.relative(root, tf);
+    const relTest = path.relative(root, tf).split(path.sep).join("/");
     for (const src of sourceDepsOf(tf, root)) {
       (map[src] ||= []).push(relTest);
     }

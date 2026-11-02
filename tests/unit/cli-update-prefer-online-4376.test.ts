@@ -14,7 +14,8 @@ test("getLatestVersion passes --prefer-online to bypass the stale npm cache (#43
     capturedArgs = { cmd, args };
     return { stdout: "3.8.31\n" };
   };
-  const latest = await update.getLatestVersion(fakeExec);
+  // Pin the platform: win32 runs `npm.cmd` through a shell (a different invocation shape).
+  const latest = await update.getLatestVersion(fakeExec, "linux");
   assert.equal(latest, "3.8.31");
   assert.ok(capturedArgs, "exec must be invoked");
   assert.equal(capturedArgs.cmd, "npm");

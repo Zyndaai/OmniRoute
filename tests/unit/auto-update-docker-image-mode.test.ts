@@ -182,7 +182,7 @@ test("docker-trigger: a relative trigger path resolves inside DATA_DIR", () => {
     IMAGE_PROBE
   );
   assert.equal(config.mode, "docker-trigger");
-  assert.equal(config.dockerTriggerFile, "/app/data/update/request.json");
+  assert.equal(config.dockerTriggerFile, path.resolve("/app/data", "update/request.json"));
 });
 
 test("docker-trigger: paths outside DATA_DIR are rejected and nothing is written", async () => {

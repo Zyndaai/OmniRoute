@@ -107,8 +107,8 @@ test("an expired lockout is not enforced", async () => {
   assert.equal(result?.connectionId, "noauth");
 });
 
-test("a provider that was never configured still gets the original 401 message", async () => {
-  const res = handleNoCredentials(null, null, "zz-unknown", "m", null, null);
-  assert.equal(res.status, 401);
-  assert.match(await res.text(), /No active credentials for provider: zz-unknown/);
+test("a known provider that was never configured gets 503, never 401", async () => {
+  const res = handleNoCredentials(null, null, "openai", "m", null, null);
+  assert.equal(res.status, 503);
+  assert.match(await res.text(), /No active credentials for provider: openai/);
 });

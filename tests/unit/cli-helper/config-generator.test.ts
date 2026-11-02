@@ -1,6 +1,7 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert";
 import fs, { readFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
 import * as generator from "../../../src/lib/cli-helper/config-generator/index.ts";
@@ -116,7 +117,9 @@ describe("config-generator", () => {
         apiKey: "sk-test",
       });
       assert.strictEqual(result.success, true);
-      assert.ok(result.configPath.includes(".config/kilocode/settings.json"));
+      assert.ok(
+        result.configPath.split(path.sep).join("/").includes(".config/kilocode/settings.json")
+      );
       assert.ok(String(result.content).includes("http://localhost:20128/v1"));
     });
 
@@ -127,7 +130,7 @@ describe("config-generator", () => {
         model: "gpt-5.4-mini",
       });
       assert.strictEqual(result.success, true);
-      assert.ok(result.configPath.endsWith(".hermes/config.yaml"));
+      assert.ok(result.configPath.split(path.sep).join("/").endsWith(".hermes/config.yaml"));
       assert.ok(String(result.content || "").includes("providers:"));
       assert.ok(String(result.content || "").includes("omniroute"));
     });

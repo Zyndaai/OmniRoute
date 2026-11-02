@@ -103,6 +103,17 @@ test("forceEnforceScopes leaves the stdio path (no authInfo) unaffected — env-
   assert.doesNotMatch(resultText(result), /Insufficient MCP scopes/);
 });
 
-test.after(() => {
-  fs.rmSync(process.env.DATA_DIR as string, { recursive: true, force: true });
+test.after(async () => {
+  // Windows cannot delete a data dir whose storage.sqlite is still open: close the MCP audit
+  // handle (its own connection) as well as the shared DB singleton.
+  const { closeAuditDb } = await import("../../open-sse/mcp-server/audit.ts");
+  closeAuditDb();
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
+  fs.rmSync(process.env.DATA_DIR as string, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  });
 });

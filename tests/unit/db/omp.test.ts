@@ -46,6 +46,7 @@ const PROVIDER_ID = "omniroute";
 
 let tmpHome: string;
 let origHome: string | undefined;
+let origUserProfile: string | undefined;
 
 function getOmpDbPath() {
   return path.join(tmpHome, ".omp", "agent", "agent.db");
@@ -73,11 +74,17 @@ function seedOmpDb() {
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omp-db-test-"));
   origHome = process.env.HOME;
+  origUserProfile = process.env.USERPROFILE;
   process.env.HOME = tmpHome;
+  // Windows os.homedir() reads USERPROFILE, not HOME.
+  process.env.USERPROFILE = tmpHome;
 });
 
 afterEach(() => {
-  process.env.HOME = origHome;
+  if (origHome === undefined) delete process.env.HOME;
+  else process.env.HOME = origHome;
+  if (origUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = origUserProfile;
   fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

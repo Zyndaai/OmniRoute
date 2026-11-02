@@ -54,7 +54,12 @@ import {
 } from "../../shared/utils/circuitBreaker";
 import { classify429FromError, type FailureKind } from "../../shared/utils/classify429";
 import { resolveUseUpstream429BreakerHints } from "../../shared/utils/providerHints";
-import { resolveProviderId } from "../../shared/constants/providers";
+import {
+  getProviderByAlias,
+  isAnthropicCompatibleProvider,
+  isOpenAICompatibleProvider,
+  resolveProviderId,
+} from "../../shared/constants/providers";
 import { classifyProviderProbeResult } from "./providerProbeClassification";
 import { markProviderProbeResponse } from "../../shared/utils/providerProbeResult";
 import {
@@ -805,6 +810,26 @@ function asShadowedCompatibleNode(
 // Only the code is overridden so the status/type pairing SDKs rely on is kept.
 const PROVIDER_NOT_CONFIGURED = { code: "provider_not_configured" } as const;
 
+function hasProviderId(provider: unknown): boolean {
+  return typeof provider === "string" && provider.trim().length > 0;
+}
+
+/**
+ * A provider id the router knows: a registry/static provider (id or alias) or a
+ * custom compatible node (its id always carries the openai-/anthropic-compatible
+ * prefix). Anything else is an unrecognised model prefix such as "nosuch/model".
+ */
+function isKnownProviderId(provider: unknown): boolean {
+  if (!hasProviderId(provider)) return false;
+  const id = String(provider).trim();
+  return (
+    getRegistryEntry(id) !== null ||
+    getProviderByAlias(id) !== null ||
+    isOpenAICompatibleProvider(id) ||
+    isAnthropicCompatibleProvider(id)
+  );
+}
+
 export function handleNoCredentials(
   credentials: any,
   excludeConnectionId: string | null,
@@ -907,21 +932,32 @@ export function handleNoCredentials(
 
     // Issue #2: for single-model (non-combo) requests, a 404 leaks a misleading
     // "No active credentials" status to a direct API client (e.g. OpenCode) that
-    // then mis-files it as "resource not found" instead of an auth/credential
+    // then mis-files it as "resource not found" instead of a configuration
     // failure. The 404 is only meaningful as a combo fall-through signal, so
-    // remap it to an explicit error status for single-model traffic: a 401 when
-    // the provider exists but has no usable credentials, else 503 when the
-    // provider itself is unknown/unreachable. Combo routing keeps the 404 so it
-    // can still skip past a disabled-credentials leg.
+    // remap it to an honest status for single-model traffic. 401 is reserved for
+    // a bad/missing caller API key (a server-to-server client treats it as "my
+    // key is bad"), so: an unknown provider prefix is a 404 model_not_found, a
+    // known provider with no usable account is a 503 provider_not_configured, and
+    // an unresolved (empty) provider stays a bare 503. Combo routing keeps the
+    // 404 so it can still skip past a disabled-credentials leg.
     if (!isCombo) {
-      const singleModelStatus =
-        provider && String(provider).trim().length > 0
-          ? HTTP_STATUS.UNAUTHORIZED
-          : HTTP_STATUS.SERVICE_UNAVAILABLE;
+      if (!hasProviderId(provider)) {
+        return errorResponse(
+          HTTP_STATUS.SERVICE_UNAVAILABLE,
+          `No active credentials for provider: ${provider}.${hint}`
+        );
+      }
+      if (!isKnownProviderId(provider)) {
+        return errorResponse(
+          HTTP_STATUS.NOT_FOUND,
+          `Model '${provider}/${model}' could not be resolved: '${provider}' is not a known provider.`,
+          { type: "invalid_request_error", code: "model_not_found" }
+        );
+      }
       return errorResponse(
-        singleModelStatus,
+        HTTP_STATUS.SERVICE_UNAVAILABLE,
         `No active credentials for provider: ${provider}.${hint}`,
-        singleModelStatus === HTTP_STATUS.UNAUTHORIZED ? PROVIDER_NOT_CONFIGURED : undefined
+        PROVIDER_NOT_CONFIGURED
       );
     }
 

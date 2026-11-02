@@ -10,6 +10,9 @@ const root = new URL("../../../", import.meta.url);
 const action = parse(
   readFileSync(new URL(".github/actions/npm-ci-retry/action.yml", root), "utf8")
 );
+const PINNED: string = JSON.parse(
+  readFileSync(new URL("config/ci/toolchain.json", root), "utf8")
+).npm;
 
 test("the exact npm version participates in dependency cache identity", () => {
   const cache = action.runs.steps.find((step: { id?: string }) => step.id === "node-modules");
@@ -27,9 +30,9 @@ test("the exact npm version participates in dependency cache identity", () => {
 });
 
 for (const fixture of [
-  { initial: "11.15.0", installed: "11.15.0", installExit: 0, exit: 0, installs: 0 },
-  { initial: "10.9.8", installed: "11.15.0", installExit: 0, exit: 0, installs: 1 },
-  { initial: "10.9.8", installed: "11.15.0", installExit: 42, exit: 42, installs: 1 },
+  { initial: PINNED, installed: PINNED, installExit: 0, exit: 0, installs: 0 },
+  { initial: "10.9.8", installed: PINNED, installExit: 0, exit: 0, installs: 1 },
+  { initial: "10.9.8", installed: PINNED, installExit: 42, exit: 42, installs: 1 },
   { initial: "10.9.8", installed: "10.9.8", installExit: 0, exit: 1, installs: 1 },
 ]) {
   test(`npm bootstrap ${JSON.stringify(fixture)}`, () => {
@@ -74,9 +77,9 @@ for (const fixture of [
       const calls = readFileSync(join(dir, "calls"), "utf8").trim();
       assert.equal(calls ? calls.split("\n").length : 0, fixture.installs);
       if (fixture.installs)
-        assert.match(calls, /^install --global npm@11\.15\.0 --no-audit --no-fund$/);
+        assert.equal(calls, `install --global npm@${PINNED} --no-audit --no-fund`);
       if (fixture.exit === 0)
-        assert.equal(readFileSync(join(dir, "outputs"), "utf8"), "version=11.15.0\n");
+        assert.equal(readFileSync(join(dir, "outputs"), "utf8"), `version=${PINNED}\n`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

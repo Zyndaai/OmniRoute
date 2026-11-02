@@ -622,7 +622,12 @@ export function measureBoundaryAtRef(root, ref) {
       const tree = path.join(tmp, "tree");
       fs.mkdirSync(tree);
       git(["archive", "--format=tar", `--output=${tarPath}`, sha, "--", ...present]);
-      execFileSync("tar", ["-xf", tarPath, "-C", tree], { stdio: ["ignore", "pipe", "pipe"] });
+      // Relative archive path + cwd instead of absolute paths: GNU tar (Git for Windows) reads
+      // `C:\...` as a remote `host:path` ("Cannot connect to C").
+      execFileSync("tar", ["-xf", path.join("..", "base.tar")], {
+        cwd: tree,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       return { sha, edges: measureBoundary({ root: tree }).edges.openSseToSrc };
     }
     return { sha, edges: 0 };

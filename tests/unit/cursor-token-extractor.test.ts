@@ -13,6 +13,9 @@ import {
   tryIdeAuth,
 } from "@/lib/cursor/tokenExtractor";
 
+// path.join yields backslashes on Windows; compare in POSIX form.
+const toPosix = (p: string) => p.split(path.sep).join("/");
+
 describe("normalizeVscDbValue", () => {
   it("unwraps a JSON-encoded string", () => {
     assert.equal(normalizeVscDbValue('"abc"'), "abc");
@@ -129,14 +132,14 @@ describe("fuzzyExtractCursorTokensFromRows", () => {
 
 describe("cursorDbCandidatePaths", () => {
   it("returns standard + Insiders paths on macOS", () => {
-    const paths = cursorDbCandidatePaths("darwin", { home: "/Users/test" });
+    const paths = cursorDbCandidatePaths("darwin", { home: "/Users/test" }).map(toPosix);
     assert.equal(paths.length, 2);
     assert.ok(paths[0].includes("Cursor/User/globalStorage/state.vscdb"));
     assert.ok(paths[1].includes("Cursor - Insiders/User/globalStorage/state.vscdb"));
   });
 
   it("returns a single path on Linux", () => {
-    const paths = cursorDbCandidatePaths("linux", { home: "/home/test" });
+    const paths = cursorDbCandidatePaths("linux", { home: "/home/test" }).map(toPosix);
     assert.deepEqual(paths, ["/home/test/.config/Cursor/User/globalStorage/state.vscdb"]);
   });
 
@@ -144,7 +147,7 @@ describe("cursorDbCandidatePaths", () => {
     const paths = cursorDbCandidatePaths("win32", {
       home: "C:/Users/test",
       appdata: "C:/Users/test/AppData/Roaming",
-    });
+    }).map(toPosix);
     assert.equal(paths.length, 1);
     assert.ok(paths[0].includes("Cursor/User/globalStorage/state.vscdb"));
   });
@@ -187,7 +190,7 @@ describe("verifyLinuxCursorInstalled (port: 9router#313)", () => {
       home: "/home/test",
     });
     assert.equal(installed, true);
-    assert.equal(probedPath, "/home/test/.local/share/applications/cursor.desktop");
+    assert.equal(toPosix(probedPath), "/home/test/.local/share/applications/cursor.desktop");
   });
 
   it("returns false when neither `which` nor the .desktop file resolve (phantom config)", async () => {

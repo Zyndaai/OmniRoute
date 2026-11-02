@@ -694,6 +694,9 @@ export function translateNonStreamingResponse(
         // cache_read folds into prompt_tokens (it is billed prompt input);
         // cache_creation stays out of prompt_tokens and is exposed via
         // prompt_tokens_details, alongside cached_tokens (OpenAI field name).
+        // This is the pivot shape (also what the glm/zcode executors hand to billing);
+        // the chat-completions CLIENT gets the write folded into prompt_tokens at
+        // nonStreamingClientTranslate via foldCacheWriteIntoPromptTokens.
         const cachedTokens = toFiniteNumber(usage.cache_read_input_tokens, 0);
         const cacheCreationTokens = toFiniteNumber(usage.cache_creation_input_tokens, 0);
         const promptTokens = toFiniteNumber(usage.input_tokens, 0) + cachedTokens;

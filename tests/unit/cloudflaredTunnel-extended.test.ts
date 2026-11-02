@@ -100,6 +100,10 @@ test.afterEach(async () => {
   syncBuiltinESMExports();
   restoreEnv();
 
+  // Windows cannot delete a SQLite file that is still open.
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
+
   for (const dir of tempDirs) {
     await fs.rm(dir as any, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

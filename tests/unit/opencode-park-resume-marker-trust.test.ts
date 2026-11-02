@@ -46,19 +46,24 @@ describe("opencode pool-strain marker trust (#14487)", () => {
     assert.equal(poolStrainMarkerPath(), "/custom/path/marker.json");
   });
 
-  it("rejects a world-writable marker even though it is fresh and well-formed", async () => {
-    const { readPoolStrainMarker } = await import("../../open-sse/executors/opencodeParkResume.ts");
-    const markerPath = path.join(dir, "opencode-pool-strain.json");
-    writeFreshMarker(markerPath, 0o666); // group+other writable: any local user could have planted this
+  it(
+    "rejects a world-writable marker even though it is fresh and well-formed",
+    { skip: process.platform === "win32" && "POSIX file modes are not enforced on Windows" },
+    async () => {
+      const { readPoolStrainMarker } =
+        await import("../../open-sse/executors/opencodeParkResume.ts");
+      const markerPath = path.join(dir, "opencode-pool-strain.json");
+      writeFreshMarker(markerPath, 0o666); // group+other writable: any local user could have planted this
 
-    const result = await readPoolStrainMarker(markerPath);
+      const result = await readPoolStrainMarker(markerPath);
 
-    assert.equal(
-      result.fresh,
-      false,
-      "a world/group-writable pool-strain marker must never be trusted as fresh"
-    );
-  });
+      assert.equal(
+        result.fresh,
+        false,
+        "a world/group-writable pool-strain marker must never be trusted as fresh"
+      );
+    }
+  );
 
   it("rejects a marker reached through a symlink instead of following it", async () => {
     const { readPoolStrainMarker } = await import("../../open-sse/executors/opencodeParkResume.ts");

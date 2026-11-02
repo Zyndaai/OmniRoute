@@ -14,6 +14,7 @@ import {
   addBufferToUsage,
   filterUsageForFormat,
   carryCacheCreationMarker,
+  foldCacheWriteIntoPromptTokens,
   normalizeUsage as normalizeTokenUsage,
   sanitizeUsagePayloadForRequest,
   type UsageLike,
@@ -1228,6 +1229,14 @@ export function createSSEStream(options: StreamOptions = {}) {
     controller.error(markStreamPendingRequestCleared(emptyStreamError));
   };
 
+  // A Chat Completions client behind an Anthropic upstream must see cache WRITES inside
+  // prompt_tokens (OpenAI-SDK billing contract); state.usage keeps them outside for our own
+  // accounting, so the fold happens only on what is sent to the client.
+  const toClientCacheWriteUsage = <T>(clientUsage: T): T =>
+    sourceFormat === FORMATS.OPENAI && targetFormat === FORMATS.CLAUDE
+      ? foldCacheWriteIntoPromptTokens(clientUsage, { writeExcludedFromPrompt: true })
+      : clientUsage;
+
   const emitTranslatedClientItem = (
     controller: TransformStreamDefaultController,
     item: Record<string, unknown>
@@ -1261,6 +1270,9 @@ export function createSSEStream(options: StreamOptions = {}) {
       );
       translateForwardedUsage = true;
     }
+
+    // Client-facing only (state.usage above stays the internal/billing record).
+    if (itemSanitized.usage) itemSanitized.usage = toClientCacheWriteUsage(itemSanitized.usage);
 
     if (
       sourceFormat === FORMATS.CLAUDE &&
@@ -3278,7 +3290,9 @@ export function createSSEStream(options: StreamOptions = {}) {
               const usageOnlyChunk = buildUsageOnlyChunk(
                 (state as unknown as Record<string, unknown>)?.chatId,
                 model,
-                timing.withTps(filterUsageForFormat(state.usage, sourceFormat))
+                timing.withTps(
+                  toClientCacheWriteUsage(filterUsageForFormat(state.usage, sourceFormat))
+                )
               );
               const usageOutput = `data: ${JSON.stringify(usageOnlyChunk)}\n\n`;
               reqLogger?.appendConvertedChunk?.(usageOutput);

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 // zod 4 applies .default() even under .partial(): an update schema built that way hands the
@@ -75,7 +76,7 @@ test("no exported update or patch schema re-applies a creation default", async (
   const offenders: string[] = [];
   let scanned = 0;
   for (const file of roots.flatMap(listTsFiles)) {
-    const mod = (await import(file)) as Record<string, unknown>;
+    const mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
     for (const [name, schema] of Object.entries(mod)) {
       if (!/update|patch/i.test(name) || !(schema instanceof z.ZodObject)) continue;
       scanned++;

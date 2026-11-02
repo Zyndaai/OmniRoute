@@ -135,28 +135,36 @@ async function runAndSignal(
   return { code, signal, events, ms: Date.now() - sentAt };
 }
 
-test("SIGTERM: the wrapper owns exit, so application cleanup finishes before the process exits", async () => {
-  const dir = makeStandaloneDir();
-  try {
-    const r = await runAndSignal(dir, {});
-    assert.ok(
-      !r.events.includes("next-handlers-registered"),
-      "Next's own SIGTERM handler must not be installed (it exits 143 mid-cleanup)"
-    );
-    assert.ok(
-      !r.events.includes("app-handlers-registered"),
-      "the app must register its cleanup with the wrapper, not compete with its own listener"
-    );
-    assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
-    const start = r.events.indexOf("cleanup-start SIGTERM listening=false");
-    const done = r.events.indexOf("cleanup-done");
-    assert.ok(start >= 0, `cleanup must run after the listener stopped accepting: ${r.events}`);
-    assert.ok(done > start, "application cleanup must complete before exit");
-    assert.ok(r.ms < 5_000, `exit must be prompt once cleanup is done (took ${r.ms} ms)`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+// Windows has no POSIX signals: child.kill("SIGTERM"/"SIGINT") terminates the child outright,
+// so handlers (and the cleanup they run) never get a chance to execute.
+const posixSignals = process.platform === "win32" && "POSIX signal semantics";
+
+test(
+  "SIGTERM: the wrapper owns exit, so application cleanup finishes before the process exits",
+  { skip: posixSignals },
+  async () => {
+    const dir = makeStandaloneDir();
+    try {
+      const r = await runAndSignal(dir, {});
+      assert.ok(
+        !r.events.includes("next-handlers-registered"),
+        "Next's own SIGTERM handler must not be installed (it exits 143 mid-cleanup)"
+      );
+      assert.ok(
+        !r.events.includes("app-handlers-registered"),
+        "the app must register its cleanup with the wrapper, not compete with its own listener"
+      );
+      assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
+      const start = r.events.indexOf("cleanup-start SIGTERM listening=false");
+      const done = r.events.indexOf("cleanup-done");
+      assert.ok(start >= 0, `cleanup must run after the listener stopped accepting: ${r.events}`);
+      assert.ok(done > start, "application cleanup must complete before exit");
+      assert.ok(r.ms < 5_000, `exit must be prompt once cleanup is done (took ${r.ms} ms)`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
 test("NEXT_MANUAL_SIG_HANDLE does not leak to child processes after Next read it", async () => {
   const dir = makeStandaloneDir();
@@ -171,59 +179,75 @@ test("NEXT_MANUAL_SIG_HANDLE does not leak to child processes after Next read it
   }
 });
 
-test("an empty NEXT_MANUAL_SIG_HANDLE is treated as unset: the wrapper still owns exit", async () => {
-  const dir = makeStandaloneDir();
-  try {
-    const r = await runAndSignal(dir, { NEXT_MANUAL_SIG_HANDLE: "" });
-    assert.ok(
-      !r.events.includes("next-handlers-registered"),
-      "an empty value is falsy for Next; the wrapper must still set it"
-    );
-    assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
-    assert.ok(r.events.includes("cleanup-done"), `cleanup must finish: ${r.events}`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+test(
+  "an empty NEXT_MANUAL_SIG_HANDLE is treated as unset: the wrapper still owns exit",
+  { skip: posixSignals },
+  async () => {
+    const dir = makeStandaloneDir();
+    try {
+      const r = await runAndSignal(dir, { NEXT_MANUAL_SIG_HANDLE: "" });
+      assert.ok(
+        !r.events.includes("next-handlers-registered"),
+        "an empty value is falsy for Next; the wrapper must still set it"
+      );
+      assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
+      assert.ok(r.events.includes("cleanup-done"), `cleanup must finish: ${r.events}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
-test("duplicate signals (shell + parent forwarding) do not cut cleanup short", async () => {
-  const dir = makeStandaloneDir();
-  try {
-    const r = await runAndSignal(dir, {}, ["SIGINT", "SIGTERM"]);
-    assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
-    assert.ok(r.events.includes("cleanup-done"), `cleanup must finish: ${r.events}`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+test(
+  "duplicate signals (shell + parent forwarding) do not cut cleanup short",
+  { skip: posixSignals },
+  async () => {
+    const dir = makeStandaloneDir();
+    try {
+      const r = await runAndSignal(dir, {}, ["SIGINT", "SIGTERM"]);
+      assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
+      assert.ok(r.events.includes("cleanup-done"), `cleanup must finish: ${r.events}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
-test("SIGTERM before instrumentation registered cleanup still exits promptly", async () => {
-  const dir = makeStandaloneDir();
-  try {
-    const r = await runAndSignal(dir, { FAKE_MODE: "no-instrumentation" });
-    assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
-    assert.ok(r.ms < 3_000, `took ${r.ms} ms`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+test(
+  "SIGTERM before instrumentation registered cleanup still exits promptly",
+  { skip: posixSignals },
+  async () => {
+    const dir = makeStandaloneDir();
+    try {
+      const r = await runAndSignal(dir, { FAKE_MODE: "no-instrumentation" });
+      assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
+      assert.ok(r.ms < 3_000, `took ${r.ms} ms`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
-test("a cleanup that never settles is bounded by the force-exit timer", async () => {
-  const dir = makeStandaloneDir();
-  try {
-    // Force exit = SHUTDOWN_TIMEOUT_MS (the in-flight request drain budget) + 5 s cleanup margin.
-    const r = await runAndSignal(dir, { FAKE_MODE: "hang", SHUTDOWN_TIMEOUT_MS: "100" });
-    assert.ok(
-      r.events.some((e) => e.startsWith("cleanup-start SIGTERM")),
-      `${r.events}`
-    );
-    assert.ok(!r.events.includes("cleanup-done"));
-    assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
-    assert.ok(r.ms >= 4_000 && r.ms < 9_000, `force exit expected at ~5.1 s, took ${r.ms} ms`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+test(
+  "a cleanup that never settles is bounded by the force-exit timer",
+  { skip: posixSignals },
+  async () => {
+    const dir = makeStandaloneDir();
+    try {
+      // Force exit = SHUTDOWN_TIMEOUT_MS (the in-flight request drain budget) + 5 s cleanup margin.
+      const r = await runAndSignal(dir, { FAKE_MODE: "hang", SHUTDOWN_TIMEOUT_MS: "100" });
+      assert.ok(
+        r.events.some((e) => e.startsWith("cleanup-start SIGTERM")),
+        `${r.events}`
+      );
+      assert.ok(!r.events.includes("cleanup-done"));
+      assert.equal(r.code, 0, `expected exit 0, got ${r.code}/${r.signal}: ${r.events.join(", ")}`);
+      assert.ok(r.ms >= 4_000 && r.ms < 9_000, `force exit expected at ~5.1 s, took ${r.ms} ms`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
 const MOVED =
   "Next's start-server.js changed — re-check by hand that NEXT_MANUAL_SIG_HANDLE is still read synchronously in the 'listening' handler before the wrapper clears it";

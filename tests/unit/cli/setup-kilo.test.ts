@@ -60,28 +60,34 @@ test("resolveKiloTarget: explicit --api-key wins", () => {
   );
 });
 
-test("setup-kilo writes CLI and VS Code credential files with private permissions", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "omniroute-kilo-private-"));
-  const authPath = join(directory, "kilo", "auth.json");
-  const vscodePath = join(directory, "settings.json");
-  writeFileSync(vscodePath, JSON.stringify({ "editor.fontSize": 14 }));
+test(
+  "setup-kilo writes CLI and VS Code credential files with private permissions",
+  {
+    skip: process.platform === "win32" && "POSIX 0600 file modes are not enforced on Windows",
+  },
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), "omniroute-kilo-private-"));
+    const authPath = join(directory, "kilo", "auth.json");
+    const vscodePath = join(directory, "settings.json");
+    writeFileSync(vscodePath, JSON.stringify({ "editor.fontSize": 14 }));
 
-  try {
-    assert.equal(
-      await runSetupKiloCommand({
-        authPath,
-        vscodeSettings: vscodePath,
-        remote: "http://127.0.0.1:20128",
-        apiKey: "provider-secret",
-        model: "glm/glm-5.2",
-        yes: true,
-        allowContainerWrite: true,
-      }),
-      0
-    );
-    assert.equal(statSync(authPath).mode & 0o777, 0o600);
-    assert.equal(statSync(vscodePath).mode & 0o777, 0o600);
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
+    try {
+      assert.equal(
+        await runSetupKiloCommand({
+          authPath,
+          vscodeSettings: vscodePath,
+          remote: "http://127.0.0.1:20128",
+          apiKey: "provider-secret",
+          model: "glm/glm-5.2",
+          yes: true,
+          allowContainerWrite: true,
+        }),
+        0
+      );
+      assert.equal(statSync(authPath).mode & 0o777, 0o600);
+      assert.equal(statSync(vscodePath).mode & 0o777, 0o600);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
-});
+);

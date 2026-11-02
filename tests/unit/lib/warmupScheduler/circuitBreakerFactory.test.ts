@@ -53,18 +53,28 @@ test("REDIS_URL unset → SqliteCircuitBreakerStore", async () => {
 function startFlakyRedis(): Promise<{ port: number; close: () => void }> {
   return new Promise((resolve) => {
     const server = net.createServer((socket) => {
+      // One reply per pipelined command, matched on the command name. ioredis sends
+      // CLIENT SETINFO twice before its INFO ready-check, and "setinfo" contains
+      // "info": matching the raw chunk answered several commands with one reply and
+      // left ioredis waiting forever for the rest.
       socket.on("data", (buf) => {
-        const cmd = buf.toString().toLowerCase();
-        if (cmd.includes("hgetall") || cmd.includes("hset") || cmd.includes("hget")) {
-          socket.destroy(); // the outage: connection drops mid-command
-          return;
+        const lines = buf.toString().split("\r\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (!lines[i].startsWith("*")) continue;
+          const command = (lines[i + 2] ?? "").toLowerCase();
+          if (command === "hgetall" || command === "hset" || command === "hget") {
+            socket.destroy(); // the outage: connection drops mid-command
+            return;
+          }
+          if (command === "info") {
+            const body = "redis_version:7.0.0\r\n";
+            socket.write(`$${body.length}\r\n${body}\r\n`);
+          } else if (command === "client") {
+            socket.write("+OK\r\n");
+          } else {
+            socket.write("+PONG\r\n");
+          }
         }
-        if (cmd.includes("info")) {
-          const body = "redis_version:7.0.0\r\n";
-          socket.write(`$${body.length}\r\n${body}\r\n`);
-          return;
-        }
-        socket.write("+PONG\r\n");
       });
       socket.on("error", () => {});
     });

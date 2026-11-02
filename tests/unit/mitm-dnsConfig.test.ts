@@ -36,6 +36,10 @@ const { spawnCalls, resetSpawnCalls } = await import("../_cp_mock_module.mts");
 
 let importCounter = 0;
 
+// On Windows addDNSEntries elevates through execFile("powershell") (real UAC prompt), which
+// this spawn mock cannot intercept, so the "proceeds" tests are POSIX-only.
+const winSkip = process.platform === "win32" && "Windows elevates via execFile, not mocked spawn";
+
 /** Sentinel hostname for removeDNSEntries exec-path tests. */
 const RM_TEST_HOST = "__dns_guard_test__";
 
@@ -127,7 +131,7 @@ test("addDNSEntries: returns early when OMNIROUTE_SKIP_DNS_WRITE=1", async () =>
   }
 });
 
-test("addDNSEntries: proceeds when env var is unset", async () => {
+test("addDNSEntries: proceeds when env var is unset", { skip: winSkip }, async () => {
   resetSpawnCalls();
   const { addDNSEntries } = await importDnsConfig();
   const restore = guardEnv(undefined);
@@ -140,7 +144,7 @@ test("addDNSEntries: proceeds when env var is unset", async () => {
   }
 });
 
-test("addDNSEntries: proceeds when OMNIROUTE_SKIP_DNS_WRITE=0", async () => {
+test("addDNSEntries: proceeds when OMNIROUTE_SKIP_DNS_WRITE=0", { skip: winSkip }, async () => {
   resetSpawnCalls();
   const { addDNSEntries } = await importDnsConfig();
   const restore = guardEnv("0");
@@ -153,7 +157,7 @@ test("addDNSEntries: proceeds when OMNIROUTE_SKIP_DNS_WRITE=0", async () => {
   }
 });
 
-test("addDNSEntries: guard does NOT trigger for value 'true'", async () => {
+test("addDNSEntries: guard does NOT trigger for value 'true'", { skip: winSkip }, async () => {
   resetSpawnCalls();
   const { addDNSEntries } = await importDnsConfig();
   const restore = guardEnv("true");

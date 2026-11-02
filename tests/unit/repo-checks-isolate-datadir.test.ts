@@ -17,7 +17,11 @@ import path from "node:path";
  */
 
 const REPO_ROOT = process.cwd();
-const BUN_BIN = path.join(REPO_ROOT, "node_modules", ".bin", "bun");
+// On Windows `.bin/bun` is a shell shim spawnSync cannot run; use the real executable.
+const BUN_BIN =
+  process.platform === "win32"
+    ? path.join(REPO_ROOT, "node_modules", "bun", "bin", "bun.exe")
+    : path.join(REPO_ROOT, "node_modules", ".bin", "bun");
 
 function checkScriptFiles(): Array<{ name: string; file: string }> {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as {
@@ -283,7 +287,10 @@ function findStaticAppImports(source: string, filePath: string): string[] {
       return;
     }
     if (specifier.startsWith(".")) {
-      const resolved = path.normalize(path.join(path.dirname(filePath), specifier));
+      const resolved = path
+        .normalize(path.join(path.dirname(filePath), specifier))
+        .split(path.sep)
+        .join("/");
       if (
         resolved === "src" ||
         resolved.startsWith("src/") ||

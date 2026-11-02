@@ -283,6 +283,9 @@ export function claudeToOpenAIResponse(chunk, state) {
         // minimum, so a 2-token "hi" can be reported as ~2008 prompt_tokens and
         // inflate downstream billing ~250x. cache_creation is still exposed
         // separately via prompt_tokens_details.cache_creation_tokens below.
+        // This is the pivot/internal shape (state.usage feeds call logs and cost). The
+        // chat-completions CLIENT gets the write folded into prompt_tokens at the stream.ts
+        // boundary (foldCacheWriteIntoPromptTokens), so state.usage stays as is.
         const billableInputTokens =
           inputTokens > 0 || cacheReadTokens > 0 || cacheCreationTokens > 0
             ? inputTokens + cacheReadTokens

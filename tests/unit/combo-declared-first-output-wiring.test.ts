@@ -17,6 +17,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "combo-declared-wiring-secret";
 process.env.FETCH_TIMEOUT_MS = "300";
 
+const core = await import("../../src/lib/db/core.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 
 const noop = () => {};
@@ -100,5 +101,6 @@ test("an explicit global comboDefaults targetTimeoutMs keeps the short wait", as
 });
 
 test.after(() => {
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });

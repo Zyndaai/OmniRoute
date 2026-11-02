@@ -49,6 +49,7 @@ function withTempEnv(fn: (paths: TempEnv) => void) {
     delete process.env[key];
   }
   process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome; // Windows os.homedir() reads USERPROFILE
   process.chdir(tempCwd);
 
   try {

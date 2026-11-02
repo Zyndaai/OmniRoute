@@ -32,25 +32,31 @@ test("resolveSystrayBinName returns *_release name on all platforms (#8609)", ()
   assert.equal(resolveSystrayBinName("linux"), "tray_linux_release");
 });
 
-test("chmodSystrayBinAt sets +x on the bundled tray binary when present", () => {
-  const root = mkdtempSync(join(tmpdir(), "omniroute-systray-bin-"));
-  try {
-    const platform = process.platform === "win32" ? "linux" : process.platform;
-    const binName = resolveSystrayBinName(platform)!;
-    const binDir = join(root, "node_modules", "systray2", "traybin");
-    mkdirSync(binDir, { recursive: true });
-    const binPath = join(binDir, binName);
-    writeFileSync(binPath, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
-    chmodSync(binPath, 0o644); // explicit: not executable
-    const result = chmodSystrayBinAt(root, platform);
-    assert.equal(result.changed, true, "expected chmodSystrayBinAt to chmod the bin");
-    // 0o111 covers the three execute bits — assert at least one is set.
-    const mode = statSync(binPath).mode & 0o777;
-    assert.ok((mode & 0o111) !== 0, `expected exec bits on bin, got mode=${mode.toString(8)}`);
-  } finally {
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test(
+  "chmodSystrayBinAt sets +x on the bundled tray binary when present",
+  {
+    skip: process.platform === "win32" && "POSIX exec bits do not exist on Windows",
+  },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "omniroute-systray-bin-"));
+    try {
+      const platform = process.platform === "win32" ? "linux" : process.platform;
+      const binName = resolveSystrayBinName(platform)!;
+      const binDir = join(root, "node_modules", "systray2", "traybin");
+      mkdirSync(binDir, { recursive: true });
+      const binPath = join(binDir, binName);
+      writeFileSync(binPath, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+      chmodSync(binPath, 0o644); // explicit: not executable
+      const result = chmodSystrayBinAt(root, platform);
+      assert.equal(result.changed, true, "expected chmodSystrayBinAt to chmod the bin");
+      // 0o111 covers the three execute bits — assert at least one is set.
+      const mode = statSync(binPath).mode & 0o777;
+      assert.ok((mode & 0o111) !== 0, `expected exec bits on bin, got mode=${mode.toString(8)}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   }
-});
+);
 
 test("chmodSystrayBinAt is a no-op when the binary doesn't exist", () => {
   const root = mkdtempSync(join(tmpdir(), "omniroute-systray-bin-"));

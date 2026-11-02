@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -59,13 +60,19 @@ test("multiline diagnostics normalize whitespace and nested coordinates", () => 
 });
 
 test("an absolute worktree root is normalized out of file paths and messages", () => {
+  // path.resolve() adds the drive letter on Windows ("/tmp/base" -> "D:\tmp\base"), so build the
+  // absolute roots the way the script does and emit them with forward slashes like tsc does.
+  const baseRoot = path.resolve("/tmp/base");
+  const headRoot = path.resolve("/tmp/head");
+  const baseFwd = baseRoot.split(path.sep).join("/");
+  const headFwd = headRoot.split(path.sep).join("/");
   const base = parseTscDiagnostics(
-    "/tmp/base/src/example.ts(1,1): error TS2307: Cannot find module '/tmp/base/src/missing'.\n",
-    { root: "/tmp/base" }
+    `${baseFwd}/src/example.ts(1,1): error TS2307: Cannot find module '${baseFwd}/src/missing'.\n`,
+    { root: baseRoot }
   );
   const head = parseTscDiagnostics(
-    "/tmp/head/src/example.ts(2,3): error TS2307: Cannot find module '/tmp/head/src/missing'.\n",
-    { root: "/tmp/head" }
+    `${headFwd}/src/example.ts(2,3): error TS2307: Cannot find module '${headFwd}/src/missing'.\n`,
+    { root: headRoot }
   );
 
   assert.deepEqual(diffDiagnosticMultisets(base, head), { added: [], removed: [] });

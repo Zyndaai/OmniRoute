@@ -10765,7 +10765,6 @@
     "backToLogin": "العودة إلى تسجيل الدخول",
     "forgotPassword": "هل نسيت كلمة المرور؟",
     "continueWithOidc": "المتابعة باستخدام OIDC",
-    "defaultPasswordHint": "كلمة المرور الافتراضية: CHANGEME (ما لم يتم تعيين INITIAL_PASSWORD)",
     "Authorization": "إذن",
     "Content-Disposition": "التصرف في المحتوى",
     "waitingForAuthorization": "في انتظار الترخيص...",

@@ -138,10 +138,13 @@ export function resolvePackSource(name, sourceDir, stagingDir, entry = { name })
 function extractTarball(tarball, stagingDir) {
   fs.rmSync(stagingDir, { recursive: true, force: true });
   fs.mkdirSync(stagingDir, { recursive: true });
+  // GNU tar (Git-for-Windows PATHs) reads `C:\...` in `-f` as a remote rsh target
+  // ("Cannot connect to C:"), so pass a bare filename and point cwd at its directory
+  // (same workaround as tarPack in scripts/build/optionalPackStaging.mjs).
   const result = spawnSync(
     process.platform === "win32" ? "tar.exe" : "tar",
-    ["-xzf", tarball, "-C", stagingDir],
-    { stdio: "pipe" }
+    ["-xzf", path.basename(tarball), "-C", stagingDir],
+    { stdio: "pipe", cwd: path.dirname(tarball) }
   );
   if (result.status !== 0) {
     throw new Error(`failed to extract ${path.basename(tarball)} (exit ${result.status})`);

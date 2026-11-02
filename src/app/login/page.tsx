@@ -275,7 +275,6 @@ export default function LoginPage() {
                       required
                       autoFocus
                       error={error || undefined}
-                      hint={t("defaultPasswordHint")}
                     />
 
                     <Button

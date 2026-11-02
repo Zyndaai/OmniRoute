@@ -332,7 +332,8 @@ test("evaluateBoundaryRatchetRelative: ceiling is max(baseline, base); inherited
 const GIT_ENV = {
   ...process.env,
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: os.devNull,
+  // git rejects the `\\.\nul` form of os.devNull on Windows; plain `NUL` works there.
+  GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : os.devNull,
   GIT_AUTHOR_NAME: "fixture",
   GIT_AUTHOR_EMAIL: "fixture@example.invalid",
   GIT_COMMITTER_NAME: "fixture",

@@ -166,15 +166,24 @@ for (const scope of ["dashboard", "api", "open-sse"]) {
   });
 }
 
-test("dashboard rejects a terminated compiler even after baselined diagnostics", (t) => {
-  const project = fixture(t, "dashboard");
-  const before = readFileSync(project.baseline, "utf8");
-  const result = project.run({ QG_TSC_STDOUT: DIAGNOSTIC, QG_TSC_SIGNAL: "SIGTERM" });
-  assert.equal(result.error, undefined);
-  assert.notEqual(result.status, 0, result.stdout + result.stderr);
-  assert.doesNotMatch(result.stdout, /\bOK\b/);
-  assert.equal(readFileSync(project.baseline, "utf8"), before);
-});
+// A signal-terminated child cannot be modelled on Windows: process.kill(pid, "SIGTERM") exits
+// with plain code 1 and no `signal`, which is indistinguishable from a completed tsc run.
+const SIGNAL_SKIP =
+  process.platform === "win32" && "signal termination is not observable on Windows";
+
+test(
+  "dashboard rejects a terminated compiler even after baselined diagnostics",
+  { skip: SIGNAL_SKIP },
+  (t) => {
+    const project = fixture(t, "dashboard");
+    const before = readFileSync(project.baseline, "utf8");
+    const result = project.run({ QG_TSC_STDOUT: DIAGNOSTIC, QG_TSC_SIGNAL: "SIGTERM" });
+    assert.equal(result.error, undefined);
+    assert.notEqual(result.status, 0, result.stdout + result.stderr);
+    assert.doesNotMatch(result.stdout, /\bOK\b/);
+    assert.equal(readFileSync(project.baseline, "utf8"), before);
+  }
+);
 
 test("dashboard rejects global configuration errors before updating a baseline", (t) => {
   const project = fixture(t, "dashboard");
@@ -189,14 +198,18 @@ test("dashboard rejects global configuration errors before updating a baseline",
 });
 
 for (const scope of ["api", "open-sse"]) {
-  test(`${scope} rejects a terminated compiler without rewriting the baseline`, (t) => {
-    const project = fixture(t, scope);
-    const before = readFileSync(project.baseline, "utf8");
-    const result = project.run({ QG_TSC_STDOUT: DIAGNOSTIC, QG_TSC_SIGNAL: "SIGTERM" }, [
-      "--update",
-    ]);
-    assert.equal(result.error, undefined);
-    assert.notEqual(result.status, 0, result.stdout + result.stderr);
-    assert.equal(readFileSync(project.baseline, "utf8"), before);
-  });
+  test(
+    `${scope} rejects a terminated compiler without rewriting the baseline`,
+    { skip: SIGNAL_SKIP },
+    (t) => {
+      const project = fixture(t, scope);
+      const before = readFileSync(project.baseline, "utf8");
+      const result = project.run({ QG_TSC_STDOUT: DIAGNOSTIC, QG_TSC_SIGNAL: "SIGTERM" }, [
+        "--update",
+      ]);
+      assert.equal(result.error, undefined);
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.equal(readFileSync(project.baseline, "utf8"), before);
+    }
+  );
 }

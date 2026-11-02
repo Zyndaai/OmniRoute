@@ -14,6 +14,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cross-evidence-"));
 process.env.API_KEY_SECRET = "cross-evidence-secret";
@@ -21,7 +22,7 @@ process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES = "true";
 
 const decision = await import("../../src/lib/proxyHealth/decision.ts");
 
-const WORKTREE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
+const WORKTREE_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(/[\\/]$/, "");
 
 interface SweepScriptResult {
   status: number;

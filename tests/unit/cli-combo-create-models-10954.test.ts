@@ -40,6 +40,9 @@ async function withComboEnv(fn: (dataDir: string) => Promise<void>) {
   } finally {
     console.log = originalLog;
     globalThis.fetch = ORIGINAL_FETCH;
+    // Windows cannot delete a SQLite file that is still open.
+    const core = await import("../../src/lib/db/core.ts");
+    core.resetDbInstance();
     fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
     if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;

@@ -193,7 +193,7 @@ test("DELETE /api/combos/[id] returns 404 when combo does not exist", async () =
 
 test("combos page source filters isHidden from rendered list", async () => {
   const pageSource = fs.readFileSync(
-    new URL("../../src/app/(dashboard)/dashboard/combos/page.tsx", import.meta.url).pathname,
+    new URL("../../src/app/(dashboard)/dashboard/combos/page.tsx", import.meta.url),
     "utf8"
   );
   assert.ok(

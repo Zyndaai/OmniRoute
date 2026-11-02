@@ -1,5 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert";
+import path from "node:path";
 import * as toolDetector from "../../../src/lib/cli-helper/tool-detector.ts";
 
 // The Hermes tool detector honors a HERMES_HOME env var (#3628) and only falls
@@ -10,8 +11,20 @@ import * as toolDetector from "../../../src/lib/cli-helper/tool-detector.ts";
 // and matches CI regardless of the ambient runtime.
 delete process.env.HERMES_HOME;
 
+// path.join yields backslashes on Windows; compare in POSIX form.
+const toPosix = (p: string) => p.split(path.sep).join("/");
+
 describe("tool-detector", () => {
   before(() => {
+    if (process.platform === "win32") {
+      // The Windows probe resolves binaries via where.exe before running
+      // `--version`; stub it so the mocked exec below is what answers.
+      toolDetector.__setLocateCommandImpl((async (binary: string) => ({
+        installed: true,
+        commandPath: binary,
+      })) as never);
+    }
+
     // Install mock exec implementation for deterministic testing
     // @ts-expect-error - internal test hook
     toolDetector.__setExecFileImpl(async (cmd) => {
@@ -44,7 +57,7 @@ describe("tool-detector", () => {
       assert.strictEqual(result!.name, "OpenCode");
       assert.strictEqual(result!.installed, true);
       assert.strictEqual(result!.version, "1.0.0");
-      assert.ok(result!.configPath.includes(".config/opencode"));
+      assert.ok(toPosix(result!.configPath).includes(".config/opencode"));
       assert.strictEqual(typeof result!.configured, "boolean");
     });
 
@@ -55,7 +68,7 @@ describe("tool-detector", () => {
       assert.strictEqual(result!.name, "Hermes");
       assert.strictEqual(result!.installed, true);
       assert.strictEqual(result!.version, "0.75.3");
-      assert.ok(result!.configPath.includes(".hermes/config.yaml"));
+      assert.ok(toPosix(result!.configPath).includes(".hermes/config.yaml"));
       assert.strictEqual(typeof result!.configured, "boolean");
     });
 
@@ -68,7 +81,7 @@ describe("tool-detector", () => {
       assert.strictEqual(result!.installed, true);
       assert.strictEqual(result!.version, "0.3.1");
       assert.ok(
-        result!.configPath.includes(".openclaw/openclaw.json"),
+        toPosix(result!.configPath).includes(".openclaw/openclaw.json"),
         `expected configPath to include '.openclaw/openclaw.json', got: ${result!.configPath}`
       );
       assert.strictEqual(typeof result!.configured, "boolean");
@@ -79,7 +92,7 @@ describe("tool-detector", () => {
       assert.ok(result !== null);
       assert.strictEqual(result!.id, "kilo");
       assert.strictEqual(result!.name, "Kilo Code");
-      assert.ok(result!.configPath.includes(".local/share/kilo/auth.json"));
+      assert.ok(toPosix(result!.configPath).includes(".local/share/kilo/auth.json"));
     });
   });
 
@@ -107,7 +120,7 @@ describe("tool-detector", () => {
       );
       assert.strictEqual(openclaw!.name, "OpenClaw");
       assert.ok(
-        openclaw!.configPath.includes(".openclaw/openclaw.json"),
+        toPosix(openclaw!.configPath).includes(".openclaw/openclaw.json"),
         `expected configPath to include '.openclaw/openclaw.json', got: ${openclaw!.configPath}`
       );
     });

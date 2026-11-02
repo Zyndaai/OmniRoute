@@ -36,11 +36,13 @@ const { validateChatGptWebCodexProvider } =
 const NOT_A_BROWSER = path.join(TEST_DATA_DIR, "not-a-browser");
 fs.writeFileSync(NOT_A_BROWSER, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
-test.after(() => {
+test.after(async () => {
   for (const k of ENV_KEYS) {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

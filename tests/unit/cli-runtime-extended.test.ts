@@ -315,53 +315,61 @@ test("getCliRuntimeStatus resolves known binaries from npm global prefix discove
   assert.equal(status.commandPath, scriptPath);
 });
 
-test("getCliRuntimeStatus ignores suspicious known-path binaries and symlink escapes", async () => {
-  const prefixDir = createTempDir("omniroute-cli-suspicious-");
-  const binDir = path.join(prefixDir, process.platform === "win32" ? "" : "bin");
-  const scriptName = process.platform === "win32" ? "qodercli.exe" : "qodercli";
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, scriptName), "");
+test(
+  "getCliRuntimeStatus ignores suspicious known-path binaries and symlink escapes",
+  {
+    // On Windows the lookup PATH is prefixed with the npm prefix, so where.exe resolves the
+    // empty binary and the known-path size guard is bypassed by design (#7774).
+    skip: process.platform === "win32" && "Windows PATH lookup resolves the npm prefix binary",
+  },
+  async () => {
+    const prefixDir = createTempDir("omniroute-cli-suspicious-");
+    const binDir = path.join(prefixDir, process.platform === "win32" ? "" : "bin");
+    const scriptName = process.platform === "win32" ? "qodercli.exe" : "qodercli";
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, scriptName), "");
 
-  process.env.npm_config_prefix = prefixDir;
-  process.env.PATH = process.platform === "win32" ? process.env.PATH || "" : "/bin:/usr/bin";
+    process.env.npm_config_prefix = prefixDir;
+    process.env.PATH = process.platform === "win32" ? process.env.PATH || "" : "/bin:/usr/bin";
 
-  const cliRuntime = await importFresh("suspicious-size");
-  const suspiciousStatus = await cliRuntime.getCliRuntimeStatus("qoder");
+    const cliRuntime = await importFresh("suspicious-size");
+    const suspiciousStatus = await cliRuntime.getCliRuntimeStatus("qoder");
 
-  assert.equal(suspiciousStatus.installed, false);
-  assert.equal(suspiciousStatus.reason, "suspicious_size");
+    assert.equal(suspiciousStatus.installed, false);
+    assert.equal(suspiciousStatus.reason, "suspicious_size");
 
-  if (process.platform !== "win32") {
-    const escapePrefix = createTempDir("omniroute-cli-escape-");
-    const escapeBinDir = path.join(escapePrefix, "bin");
-    const outsideDir = createTempDir("omniroute-cli-outside-");
-    const outsideTarget = writeScript(
-      outsideDir,
-      "qodercli",
-      "#!/bin/sh\necho qodercli 9.9.9\n# padding padding padding\n"
-    );
+    if (process.platform !== "win32") {
+      const escapePrefix = createTempDir("omniroute-cli-escape-");
+      const escapeBinDir = path.join(escapePrefix, "bin");
+      const outsideDir = createTempDir("omniroute-cli-outside-");
+      const outsideTarget = writeScript(
+        outsideDir,
+        "qodercli",
+        "#!/bin/sh\necho qodercli 9.9.9\n# padding padding padding\n"
+      );
 
-    fs.mkdirSync(escapeBinDir, { recursive: true });
-    fs.symlinkSync(outsideTarget, path.join(escapeBinDir, "qodercli"));
-    process.env.npm_config_prefix = escapePrefix;
+      fs.mkdirSync(escapeBinDir, { recursive: true });
+      fs.symlinkSync(outsideTarget, path.join(escapeBinDir, "qodercli"));
+      process.env.npm_config_prefix = escapePrefix;
 
-    // #7753: every candidate checkKnownPath() ever receives is constructed by
-    // getKnownToolPaths() from a trusted root (here: npm_config_prefix/bin) — so a
-    // symlink placed exactly at that generated candidate path (the version-manager
-    // shim pattern used by nvm-windows/nvm/asdf/pyenv: trusted shim location,
-    // private per-version store target) is legitimate and must now be ACCEPTED even
-    // though its resolved target lives outside every EXPECTED_PARENT_PATHS entry.
-    // A genuinely unsafe symlink (one whose ORIGINAL location is also untrusted, not
-    // reachable through this known-path candidate generator) is covered separately
-    // by tests/unit/cliRuntime-symlink-escape-7753.test.ts via the exported
-    // checkKnownPath().
-    const escapedRuntime = await importFresh("symlink-escape");
-    const escapedStatus = await escapedRuntime.getCliRuntimeStatus("qoder");
+      // #7753: every candidate checkKnownPath() ever receives is constructed by
+      // getKnownToolPaths() from a trusted root (here: npm_config_prefix/bin) — so a
+      // symlink placed exactly at that generated candidate path (the version-manager
+      // shim pattern used by nvm-windows/nvm/asdf/pyenv: trusted shim location,
+      // private per-version store target) is legitimate and must now be ACCEPTED even
+      // though its resolved target lives outside every EXPECTED_PARENT_PATHS entry.
+      // A genuinely unsafe symlink (one whose ORIGINAL location is also untrusted, not
+      // reachable through this known-path candidate generator) is covered separately
+      // by tests/unit/cliRuntime-symlink-escape-7753.test.ts via the exported
+      // checkKnownPath().
+      const escapedRuntime = await importFresh("symlink-escape");
+      const escapedStatus = await escapedRuntime.getCliRuntimeStatus("qoder");
 
-    assert.equal(escapedStatus.installed, true);
-    assert.equal(escapedStatus.reason, null);
+      assert.equal(escapedStatus.installed, true);
+      assert.equal(escapedStatus.reason, null);
+    }
   }
-});
+);
 
 test("getCliRuntimeStatus tolerates spawn errors during healthcheck and marks the tool as not runnable", async () => {
   const tempDir = createTempDir("omniroute-cli-spawn-error-");

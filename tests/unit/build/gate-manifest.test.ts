@@ -38,7 +38,10 @@ test("manifest resolves the npm entrypoint, preserving its chosen runtime", () =
   const { scripts, manifest } = fixture();
   assert.deepEqual(validateManifest(manifest, scripts), []);
   assert.deepEqual(resolveProfile(manifest, scripts, "scan"), [
-    { name: "check:a", cmd: ["npm", "run", "--silent", "check:a"] },
+    {
+      name: "check:a",
+      cmd: [process.platform === "win32" ? "npm.cmd" : "npm", "run", "--silent", "check:a"],
+    },
   ]);
 });
 

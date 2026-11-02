@@ -87,6 +87,21 @@ function serializeRequestHead(req) {
 }
 
 /**
+ * Newer Node releases (observed on 26) keep parsing the request body after emitting `upgrade`
+ * and hand it to `req` (already decoded) instead of the socket, so `head` is empty and the
+ * replayed request would wait forever for a body that never reaches the socket. Forward those
+ * bytes back into the socket. On releases that leave the raw body in `head` / on the socket,
+ * `req` never emits data and this is a no-op. Chunked bodies are not re-encoded (the parser
+ * already decoded them), so they are left alone.
+ */
+function forwardParsedBody(req, socket) {
+  if (/\bchunked\b/i.test(String(req.headers["transfer-encoding"] || ""))) return;
+  req.on("data", (chunk) => {
+    if (!socket.destroyed) socket.push(chunk);
+  });
+}
+
+/**
  * Serve an h2c upgrade request as plain HTTP/1.1.
  *
  * @param {import("node:http").Server} server
@@ -100,6 +115,7 @@ function handleH2cUpgrade(server, req, socket, head) {
   if (!isCleartextH2cUpgrade(req, socket)) return false;
   const requestHead = serializeRequestHead(req);
   socket.unshift(head && head.length > 0 ? Buffer.concat([requestHead, head]) : requestHead);
+  forwardParsedBody(req, socket);
   server.emit("connection", socket);
   return true;
 }

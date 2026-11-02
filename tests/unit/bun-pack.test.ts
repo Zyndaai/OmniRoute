@@ -52,8 +52,10 @@ function buildTarball(
   }
 
   const tarball = path.join(dir, "omniroute-test.tgz");
-  const tarResult = spawnSync("tar", ["czf", tarball, "-C", stage, "package"], {
+  // Bare filename + cwd: GNU tar on Windows reads `C:\...` in `-f` as a remote host.
+  const tarResult = spawnSync("tar", ["czf", path.basename(tarball), "-C", stage, "package"], {
     encoding: "utf8",
+    cwd: dir,
   });
   assert.equal(tarResult.status, 0, `failed to build fixture tarball: ${tarResult.stderr}`);
   return tarball;

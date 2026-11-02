@@ -230,11 +230,12 @@ const TURN_2 = [
 ];
 
 test.after(() => {
-  try {
-    core.resetDbInstance();
-  } catch {}
+  // clearReasoningCacheAll() writes through the DB, so close the handle after it, not before.
   try {
     clearReasoningCacheAll();
+  } catch {}
+  try {
+    core.resetDbInstance();
   } catch {}
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -142,7 +142,7 @@ test("a non-EPIPE stream error is still fatal: it must be re-raised (#8181)", as
     [
       `process.env.APP_LOG_TO_FILE = "true";`,
       `process.env.APP_LOG_FILE_PATH = ${JSON.stringify(join(childDir, "logs", "application", "app.log"))};`,
-      `const m = await import(${JSON.stringify(interceptor)});`,
+      `const m = await import(${JSON.stringify(pathToFileURL(interceptor).href)});`,
       `m.initConsoleInterceptor();`,
       `process.stderr.emit("error", Object.assign(new Error("disk full"), { code: "ENOSPC" }));`,
       `setTimeout(() => process.exit(0), 300);`, // if the error was absorbed, we exit 0 = regression
@@ -184,7 +184,7 @@ test("the stdio guard is installed even when file logging is disabled (#8181)", 
     childFile,
     [
       `process.env.APP_LOG_TO_FILE = "false";`, // interception off
-      `const m = await import(${JSON.stringify(probe)});`,
+      `const m = await import(${JSON.stringify(pathToFileURL(probe).href)});`,
       `m.initConsoleInterceptor();`,
       `const ok = process.stderr.listenerCount("error") > 0 && process.stdout.listenerCount("error") > 0;`,
       `process.exit(ok ? 0 : 7);`,

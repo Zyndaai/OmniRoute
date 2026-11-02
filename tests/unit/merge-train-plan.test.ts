@@ -88,10 +88,13 @@ test("--plan binds the changelog gate to the requested base inside the detached 
 });
 
 test("--plan shell-quotes a hostile base before the gate command is evaluated", async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), "merge-train-plan-"));
-  const dollarMarker = join(tempDir, "dollar-marker");
-  const backtickMarker = join(tempDir, "backtick-marker");
-  const semicolonMarker = join(tempDir, "semicolon-marker");
+  // Forward slashes: the paths are embedded in a bash command, where a Windows backslash
+  // is an escape character and would be eaten before the quoting under test ever sees it.
+  const tempDir = (await mkdtemp(join(tmpdir(), "merge-train-plan-"))).replace(/\\/g, "/");
+  // Not path.join: on Windows it would turn the slashes back into backslashes.
+  const dollarMarker = `${tempDir}/dollar-marker`;
+  const backtickMarker = `${tempDir}/backtick-marker`;
+  const semicolonMarker = `${tempDir}/semicolon-marker`;
   const base =
     `release/v9.9.9 $(touch ${dollarMarker}) ` +
     `\`touch ${backtickMarker}\` whitespace gap ; touch ${semicolonMarker}`;

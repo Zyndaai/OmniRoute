@@ -13,6 +13,9 @@ import path from "node:path";
 // Keep the original value so we can restore it in teardown.
 const _originalHermesHome = process.env.HERMES_HOME;
 
+// path.join yields backslashes on Windows; compare in POSIX form.
+const toPosix = (p: string) => p.split(path.sep).join("/");
+
 describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
   // ── helper: dynamic import so we always get a fresh module evaluation
   // Note: Node ESM caches modules. We test the exported helper directly.
@@ -29,9 +32,8 @@ describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
   it("falls back to ~/.hermes when HERMES_HOME is not set", async () => {
     delete process.env.HERMES_HOME;
 
-    const { getHermesHome } = await import(
-      "../../../src/lib/cli-helper/config-generator/hermesHome.ts"
-    );
+    const { getHermesHome } =
+      await import("../../../src/lib/cli-helper/config-generator/hermesHome.ts");
 
     const result = getHermesHome();
     assert.strictEqual(result, path.join(os.homedir(), ".hermes"));
@@ -40,9 +42,8 @@ describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
   it("returns HERMES_HOME when the env var is set", async () => {
     process.env.HERMES_HOME = "/custom/hermes";
 
-    const { getHermesHome } = await import(
-      "../../../src/lib/cli-helper/config-generator/hermesHome.ts"
-    );
+    const { getHermesHome } =
+      await import("../../../src/lib/cli-helper/config-generator/hermesHome.ts");
 
     const result = getHermesHome();
     assert.ok(
@@ -54,11 +55,10 @@ describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
   it("hermes-agent CONFIG_PATH uses HERMES_HOME when set", async () => {
     process.env.HERMES_HOME = "/custom/hermes";
 
-    const { getHermesConfigPath } = await import(
-      "../../../src/lib/cli-helper/config-generator/hermesHome.ts"
-    );
+    const { getHermesConfigPath } =
+      await import("../../../src/lib/cli-helper/config-generator/hermesHome.ts");
 
-    const configPath = getHermesConfigPath();
+    const configPath = toPosix(getHermesConfigPath());
     assert.ok(
       configPath.startsWith("/custom/hermes"),
       `Expected config path to start with /custom/hermes, got: ${configPath}`
@@ -75,12 +75,11 @@ describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
     // Force a fresh dynamic import of index.ts to test lazy evaluation.
     // Because Node caches ESM modules by URL, we test the helper which is
     // what index.ts should delegate to.
-    const { getHermesConfigPath } = await import(
-      "../../../src/lib/cli-helper/config-generator/hermesHome.ts"
-    );
+    const { getHermesConfigPath } =
+      await import("../../../src/lib/cli-helper/config-generator/hermesHome.ts");
 
     // The path returned by the generator index must equal what getHermesConfigPath() returns.
-    const expected = getHermesConfigPath();
+    const expected = toPosix(getHermesConfigPath());
     assert.ok(
       expected.startsWith("/custom/hermes"),
       `Expected ${expected} to start with /custom/hermes`
@@ -90,13 +89,11 @@ describe("getHermesHome (#3628 — HERMES_HOME env var)", () => {
   it("getCliConfigPaths('hermes-agent') uses HERMES_HOME (cliRuntime integration)", async () => {
     process.env.HERMES_HOME = "/custom/hermes";
 
-    const { getCliConfigPaths } = await import(
-      "../../../src/shared/services/cliRuntime.ts"
-    );
+    const { getCliConfigPaths } = await import("../../../src/shared/services/cliRuntime.ts");
 
     const paths = getCliConfigPaths("hermes-agent");
     assert.ok(paths !== null, "getCliConfigPaths('hermes-agent') returned null");
-    const configPath = (paths as Record<string, string>)["config"];
+    const configPath = toPosix((paths as Record<string, string>)["config"]);
     assert.ok(
       configPath.startsWith("/custom/hermes"),
       `Expected hermes-agent config path to start with /custom/hermes, got: ${configPath}`

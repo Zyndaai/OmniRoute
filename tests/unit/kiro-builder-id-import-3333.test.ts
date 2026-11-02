@@ -12,6 +12,7 @@ import path from "node:path";
 const { KiroService } = await import("../../src/lib/oauth/services/kiro.ts");
 
 const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 const ORIGINAL_FETCH = globalThis.fetch;
 let tmpHome: string;
 
@@ -30,10 +31,14 @@ function makeFakeSsoCache(home: string, creds: { clientId: string; clientSecret:
 test.beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-kiro-3333-"));
   process.env.HOME = tmpHome;
+  // Windows os.homedir() reads USERPROFILE, not HOME.
+  process.env.USERPROFILE = tmpHome;
 });
 
 test.afterEach(() => {
   process.env.HOME = ORIGINAL_HOME;
+  if (ORIGINAL_USERPROFILE === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = ORIGINAL_USERPROFILE;
   globalThis.fetch = ORIGINAL_FETCH;
   if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

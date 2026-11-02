@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   isMainEntry,
@@ -221,19 +222,32 @@ test("repository contract is in sync (live data)", () => {
 
 // ─── CLI entry guard ────────────────────────────────────────────────────────
 
+// On Windows a POSIX-looking path gains a drive letter ("/home/x" -> "D:\home\x" and
+// "file:///D:/home/x"), so derive the URL from the resolved path there; on POSIX the literal
+// module URL is kept.
+function mainEntryFixture(argv1: string, posixModuleUrl: string) {
+  const resolved = path.resolve(argv1);
+  return {
+    argv1: resolved,
+    moduleUrl: process.platform === "win32" ? pathToFileURL(resolved).href : posixModuleUrl,
+  };
+}
+
 test("isMainEntry: absolute argv[1] matches the module URL (normal CLI invocation)", () => {
-  const moduleUrl =
-    "file:///home/runner/work/OmniRoute/OmniRoute/scripts/check/check-env-doc-sync.mjs";
-  const argv1 = "/home/runner/work/OmniRoute/OmniRoute/scripts/check/check-env-doc-sync.mjs";
+  const { argv1, moduleUrl } = mainEntryFixture(
+    "/home/runner/work/OmniRoute/OmniRoute/scripts/check/check-env-doc-sync.mjs",
+    "file:///home/runner/work/OmniRoute/OmniRoute/scripts/check/check-env-doc-sync.mjs"
+  );
   assert.equal(isMainEntry(argv1, moduleUrl), true);
 });
 
 test("isMainEntry: path with characters that import.meta.url percent-encodes still matches", () => {
   // A checkout path containing a space is the common macOS case; the module
   // URL carries %20 while process.argv[1] carries the raw character.
-  const moduleUrl =
-    "file:///Users/dev/My%20Projects/OmniRoute/scripts/check/check-env-doc-sync.mjs";
-  const argv1 = "/Users/dev/My Projects/OmniRoute/scripts/check/check-env-doc-sync.mjs";
+  const { argv1, moduleUrl } = mainEntryFixture(
+    "/Users/dev/My Projects/OmniRoute/scripts/check/check-env-doc-sync.mjs",
+    "file:///Users/dev/My%20Projects/OmniRoute/scripts/check/check-env-doc-sync.mjs"
+  );
   assert.equal(isMainEntry(argv1, moduleUrl), true);
 });
 

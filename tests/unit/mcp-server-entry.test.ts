@@ -1,8 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("../..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 const { resolveMcpEntry } = await import("../../bin/mcp-server.mjs");
 
@@ -61,7 +62,7 @@ describe("resolveMcpEntry (#MCP — dist/ path resolution)", () => {
     resolveMcpEntry(FAKE_ROOT, existsSyncFn);
     for (const path of checked) {
       assert.ok(
-        path.startsWith(FAKE_ROOT),
+        path.startsWith(join(FAKE_ROOT)),
         `checked path "${path}" should be inside rootDir "${FAKE_ROOT}"`
       );
     }

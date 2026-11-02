@@ -120,7 +120,9 @@ test("crush-settings POST: 400 when model is missing", async () => {
 test("crush-settings POST: writes crush.json with an openai-compat providers.omniroute block", async () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "crush-home-"));
   const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // Windows os.homedir() reads USERPROFILE
 
   try {
     const res = await POST(
@@ -152,6 +154,8 @@ test("crush-settings POST: writes crush.json with an openai-compat providers.omn
     }
   } finally {
     process.env.HOME = origHome;
+    if (origUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = origUserProfile;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -159,7 +163,9 @@ test("crush-settings POST: writes crush.json with an openai-compat providers.omn
 test("crush-settings DELETE: removes only the omniroute provider entry", async () => {
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "crush-home-del-"));
   const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // Windows os.homedir() reads USERPROFILE
 
   try {
     const crushDir = path.join(tmpHome, ".config", "crush");
@@ -197,6 +203,8 @@ test("crush-settings DELETE: removes only the omniroute provider entry", async (
     }
   } finally {
     process.env.HOME = origHome;
+    if (origUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = origUserProfile;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

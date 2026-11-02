@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import {
   DEFAULT_TTFB_ENDPOINTS,
@@ -198,7 +199,7 @@ test("resolveServerPlan: external URL, built tree, or skipped with a reason", ()
   const tree = resolveServerPlan({
     root: "/r",
     url: null,
-    exists: (p: string) => p === "/r/dist/server.js",
+    exists: (p: string) => p === path.join("/r", "dist", "server.js"),
   });
   assert.equal(tree.mode, "tree");
   const none = resolveServerPlan({ root: "/r", url: null, exists: () => false });
@@ -425,7 +426,7 @@ test("runBaseline with a built tree boots the server once and always stops it", 
     root: "/r",
     dataDir: "/iso",
     runner: fakeRunner(seen),
-    exists: (p: string) => p === "/r/dist/server.js",
+    exists: (p: string) => p === path.join("/r", "dist", "server.js"),
     startServer: async () => ({
       baseUrl: "http://127.0.0.1:9",
       bootMs: 1234,

@@ -91,8 +91,11 @@ test("setup-gemini writes a merged private user config for a remote OmniRoute", 
     assert.match(env, /^GEMINI_MODEL="glm\/glm-5\.2"$/m);
 
     const [settingsStat, envStat] = await Promise.all([fs.stat(settingsPath), fs.stat(envPath)]);
-    assert.equal(settingsStat.mode & 0o777, 0o600);
-    assert.equal(envStat.mode & 0o777, 0o600);
+    // POSIX file modes are not enforced on Windows.
+    if (process.platform !== "win32") {
+      assert.equal(settingsStat.mode & 0o777, 0o600);
+      assert.equal(envStat.mode & 0o777, 0o600);
+    }
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

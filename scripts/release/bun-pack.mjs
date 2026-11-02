@@ -38,7 +38,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -90,7 +90,10 @@ function run(bin, args, opts = {}) {
 }
 
 export function verifyTarball(tarball) {
-  const list = run("tar", ["-tzf", tarball]);
+  // Bare filename + cwd: GNU tar (Git-for-Windows PATHs) reads `C:\...` in `-f` as a remote
+  // rsh host ("Cannot connect to C:"). Relative paths still resolve against ROOT as before.
+  const tarballPath = resolve(ROOT, tarball);
+  const list = run("tar", ["-tzf", basename(tarballPath)], { cwd: dirname(tarballPath) });
   if (list.status !== 0) {
     throw new UsageError(`could not read tarball listing (${list.error?.message || "tar failed"})`);
   }

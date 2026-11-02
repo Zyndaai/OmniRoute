@@ -55,7 +55,7 @@ function readWorkflowFiles(): string[] {
 
 test("scheduled runs carry the upstream-only guard on every job", () => {
   const dir = new URL("../../../.github/workflows/", import.meta.url);
-  const files = EXPECTED_SCHEDULED_WORKFLOWS.map((f) => new URL(f, dir).pathname);
+  const files = EXPECTED_SCHEDULED_WORKFLOWS.map((f) => fileURLToPath(new URL(f, dir)));
   assert.ok(readWorkflowFiles().length >= files.length);
   const findings = scheduledGuard(files);
   assert.deepEqual(findings, []);
@@ -117,26 +117,36 @@ test("a workflow without a schedule trigger reports nothing", () => {
   }
 });
 
-test("the scheduled-guard check reports repository-relative paths", () => {
-  const runCheck = runScheduledGuardCheck as (files: string[]) => {
-    file: string;
-    job: string;
-    reason: string;
-  }[];
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-workflows-guard-"));
-  try {
-    const file = path.join(dir, "nightly-demo.yml");
-    fs.writeFileSync(
-      file,
-      "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  demo:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
-    );
-    const findings = runCheck([file]);
-    assert.equal(findings.length, 1);
-    assert.ok(!path.isAbsolute(findings[0].file));
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+// path.relative() cannot express a path on another Windows drive (tmpdir on C:, repo on D:).
+const repoDriveRoot = path.parse(fileURLToPath(import.meta.url)).root;
+const otherDriveSkip =
+  path.parse(os.tmpdir()).root.toLowerCase() !== repoDriveRoot.toLowerCase() &&
+  "tmpdir is on a different drive than the repo; no relative path exists";
+
+test(
+  "the scheduled-guard check reports repository-relative paths",
+  { skip: otherDriveSkip },
+  () => {
+    const runCheck = runScheduledGuardCheck as (files: string[]) => {
+      file: string;
+      job: string;
+      reason: string;
+    }[];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-workflows-guard-"));
+    try {
+      const file = path.join(dir, "nightly-demo.yml");
+      fs.writeFileSync(
+        file,
+        "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  demo:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
+      );
+      const findings = runCheck([file]);
+      assert.equal(findings.length, 1);
+      assert.ok(!path.isAbsolute(findings[0].file));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
-});
+);
 
 function readQualityWorkflow(): string {
   return fs.readFileSync(qualityWorkflowPath, "utf8");

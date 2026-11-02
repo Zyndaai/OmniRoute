@@ -733,11 +733,16 @@ test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secre
       child.stdout?.on("data", (c: Buffer) => output.push(c.toString()));
       child.stderr?.on("data", (c: Buffer) => output.push(c.toString()));
       // OS process environment is inspected via ps, not the parent's inherited environment.
-      const { execFileSync } = process.getBuiltinModule("node:child_process");
-      assert.equal(
-        execFileSync("ps", ["eww", "-p", String(child.pid)], { encoding: "utf8" }).includes(secret),
-        false
-      );
+      // `ps eww` does not exist on Windows, so only the argv check above applies there.
+      if (process.platform !== "win32") {
+        const { execFileSync } = process.getBuiltinModule("node:child_process");
+        assert.equal(
+          execFileSync("ps", ["eww", "-p", String(child.pid)], { encoding: "utf8" }).includes(
+            secret
+          ),
+          false
+        );
+      }
     },
   });
   try {

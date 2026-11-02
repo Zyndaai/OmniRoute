@@ -28,11 +28,13 @@ function clearBuildSignals() {
   for (const key of BUILD_SIGNAL_KEYS) delete process.env[key];
 }
 
-test.after(() => {
+test.after(async () => {
   for (const [key, value] of Object.entries(saved)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

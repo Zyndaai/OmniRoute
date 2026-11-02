@@ -41,13 +41,24 @@ function startCountingRedis(): Promise<{
     const server = net.createServer((socket) => {
       n += 1;
       socket.on("error", () => {});
+      // One reply per pipelined command, matched on the command name. ioredis sends
+      // CLIENT SETINFO twice before its INFO ready-check, and "setinfo" contains
+      // "info": matching the raw chunk answered several commands with one reply and
+      // left ioredis waiting forever for the rest.
       socket.on("data", (buf) => {
-        if (buf.toString().toLowerCase().includes("info")) {
-          const body = "redis_version:7.0.0\r\n";
-          socket.write(`$${body.length}\r\n${body}\r\n`);
-          return;
+        const lines = buf.toString().split("\r\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (!lines[i].startsWith("*")) continue;
+          const command = (lines[i + 2] ?? "").toLowerCase();
+          if (command === "info") {
+            const body = "redis_version:7.0.0\r\n";
+            socket.write(`$${body.length}\r\n${body}\r\n`);
+          } else if (command === "client") {
+            socket.write("+OK\r\n");
+          } else {
+            socket.write("+PONG\r\n");
+          }
         }
-        socket.write("+PONG\r\n");
       });
     });
     server.listen(0, "127.0.0.1", () => {

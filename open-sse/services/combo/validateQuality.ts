@@ -270,7 +270,7 @@ function isSubstantiveError(value: unknown): boolean {
   return value === true;
 }
 
-function isStreamingUpstreamError(parsed: unknown, eventType: string): boolean {
+export function isStreamingUpstreamError(parsed: unknown, eventType: string): boolean {
   if (eventType === "response.failed" || eventType === "error") return true;
   if (!isRecord(parsed)) return false;
   if (isSubstantiveError(parsed.error)) return true;

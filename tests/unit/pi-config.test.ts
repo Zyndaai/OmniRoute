@@ -86,7 +86,7 @@ test("getPiAgentDir defaults to ~/.pi/agent", () => {
 
 test("getPiAgentDir honours an absolute PI_CODING_AGENT_DIR", () => {
   const env: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: "/tmp/pi/agent" };
-  assert.equal(getPiAgentDir(env), "/tmp/pi/agent");
+  assert.equal(getPiAgentDir(env), path.normalize("/tmp/pi/agent"));
 });
 
 test("getPiAgentDir expands a leading ~", () => {
@@ -105,7 +105,7 @@ test("getPiAgentDir ignores a relative override but accepts a normalised travers
   // normalised — this mirrors Pi's own behaviour (it just joins+normalises),
   // so an operator pointing at a sibling directory keeps working.
   const traversalEnv: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: "/tmp/../etc" };
-  assert.equal(getPiAgentDir(traversalEnv), "/etc");
+  assert.equal(getPiAgentDir(traversalEnv), path.normalize("/etc"));
 });
 
 // ── Reading ───────────────────────────────────────────────────────────────────

@@ -33,6 +33,11 @@ async function openAdapter(sqliteFile: string) {
 test(
   "sql.js persist() publishes the database atomically — a reader holding the file " +
     "open never observes a truncated image (rename, not in-place O_TRUNC)",
+  {
+    skip:
+      process.platform === "win32" &&
+      "Windows refuses rename() over a file another descriptor holds open (EPERM)",
+  },
   async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sqljs-atomic-"));
     const sqliteFile = path.join(dataDir, "storage.sqlite");

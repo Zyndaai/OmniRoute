@@ -233,16 +233,25 @@ function withTempPcap<T>(fn: (pcapPath: string, tmpDir: string) => T): T {
   }
 }
 
-test("scripts/sre/tcp-close-analyzer.py exists, is executable, and prints capture instructions", () => {
-  assert.ok(fs.existsSync(SCRIPT), "tcp-close-analyzer.py is missing");
-  assert.ok(fs.statSync(SCRIPT).mode & 0o111, "tcp-close-analyzer.py is not executable (chmod +x)");
+const winNoExecBit = process.platform === "win32" && "Windows has no POSIX exec bit (chmod +x)";
 
-  if (!hasPython3) return;
-  const result = spawnSync("python3", [SCRIPT, "--show-capture-cmd"], { encoding: "utf8" });
-  assert.equal(result.status, 0);
-  assert.match(result.stdout, /nsenter/);
-  assert.match(result.stdout, /podman inspect omniroute-dev/);
-});
+test(
+  "scripts/sre/tcp-close-analyzer.py exists, is executable, and prints capture instructions",
+  { skip: winNoExecBit },
+  () => {
+    assert.ok(fs.existsSync(SCRIPT), "tcp-close-analyzer.py is missing");
+    assert.ok(
+      fs.statSync(SCRIPT).mode & 0o111,
+      "tcp-close-analyzer.py is not executable (chmod +x)"
+    );
+
+    if (!hasPython3) return;
+    const result = spawnSync("python3", [SCRIPT, "--show-capture-cmd"], { encoding: "utf8" });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /nsenter/);
+    assert.match(result.stdout, /podman inspect omniroute-dev/);
+  }
+);
 
 test(
   "analyze: reports the synthetic stream with a server_closed_first verdict",

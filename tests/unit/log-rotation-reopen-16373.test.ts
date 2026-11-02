@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const rotation = await import("../../src/lib/logRotation.ts");
@@ -320,8 +320,8 @@ test("shared logger writes to the current file after rotation and flushes it on 
   const logPath = join(dir, "logs", "app.log");
   const lines = 200;
   const code = `
-    const { logger } = await import(${JSON.stringify(join(repoRoot, "src/shared/utils/logger.ts"))});
-    const { rotateIfNeeded } = await import(${JSON.stringify(join(repoRoot, "src/lib/logRotation.ts"))});
+    const { logger } = await import(${JSON.stringify(pathToFileURL(join(repoRoot, "src/shared/utils/logger.ts")).href)});
+    const { rotateIfNeeded } = await import(${JSON.stringify(pathToFileURL(join(repoRoot, "src/lib/logRotation.ts")).href)});
     const { existsSync, readFileSync, readdirSync } = await import("node:fs");
     const { dirname, join } = await import("node:path");
     const path = ${JSON.stringify(logPath)};

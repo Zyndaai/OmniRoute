@@ -69,7 +69,7 @@ function resolveSpecifier(fromFile: string, specifier: string): string | null {
   if (base.endsWith(".js")) candidates.push(base.replace(/\.js$/, ".ts"));
   for (const candidate of candidates) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return path.relative(REPO_ROOT, candidate);
+      return path.relative(REPO_ROOT, candidate).split(path.sep).join("/");
     }
   }
   return null;
@@ -81,7 +81,10 @@ function isTypeOnlyClause(clause: string): boolean {
   if (!named) return false;
   const outsideBraces = clause.replace(/\{[^}]*\}/, "").trim();
   if (/[A-Za-z_$*]/.test(outsideBraces)) return false;
-  const bindings = named[1].split(",").map((b) => b.trim()).filter(Boolean);
+  const bindings = named[1]
+    .split(",")
+    .map((b) => b.trim())
+    .filter(Boolean);
   return bindings.length > 0 && bindings.every((b) => /^type\s/.test(b));
 }
 
@@ -129,7 +132,7 @@ function walk(dir: string, acc: string[] = []): string[] {
   const absolute = path.join(REPO_ROOT, dir);
   if (!fs.existsSync(absolute)) return acc;
   for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
-    const relative = path.join(dir, entry.name);
+    const relative = `${dir}/${entry.name}`;
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name)) walk(relative, acc);
     } else if (/\.tsx?$/.test(entry.name)) {

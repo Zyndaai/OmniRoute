@@ -28,7 +28,9 @@ function canDeleteBatch(status: string): boolean {
   return TERMINAL.includes(status);
 }
 
-test.after(() => {
+test.after(async () => {
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

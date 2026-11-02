@@ -94,6 +94,8 @@ test.beforeEach(() => {
     // Production DB may not have the plugins table — ignore; fresh DB created below.
   }
   resetHooks();
+  // listPlugins() above reopens the DB; release it again so Windows can delete the dir.
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   cleanupSourceDirs();

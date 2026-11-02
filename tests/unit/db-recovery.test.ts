@@ -5,14 +5,25 @@ import os from "node:os";
 import path from "node:path";
 
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
+const createdDirs: string[] = [];
+
+// The DB singleton resolves DATA_DIR once, so every test shares the first dir's open handle.
+// Windows cannot delete an open storage.sqlite, so dirs are removed after the DB is closed.
+test.after(async () => {
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
+  for (const dir of createdDirs) {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
 
 async function withRecoveryEnv(fn: (dataDir: string) => Promise<void>) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-recovery-"));
+  createdDirs.push(dataDir);
   process.env.DATA_DIR = dataDir;
   try {
     await fn(dataDir);
   } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   }

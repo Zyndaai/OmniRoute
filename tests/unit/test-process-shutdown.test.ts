@@ -38,7 +38,13 @@ test(
   }
 );
 
-test("test server cleanup escalates when SIGTERM is ignored", { timeout: 15_000 }, async () => {
+// Windows has no SIGTERM handlers: kill("SIGTERM") terminates the child unconditionally.
+const posixSignals = {
+  timeout: 15_000,
+  skip: process.platform === "win32" && "POSIX signal semantics (SIGTERM handlers)",
+};
+
+test("test server cleanup escalates when SIGTERM is ignored", posixSignals, async () => {
   const child = spawn(process.execPath, [
     "-e",
     'process.on("SIGTERM", () => {}); process.stdout.write("ready"); setInterval(() => {}, 1000);',
@@ -56,7 +62,7 @@ test("test server cleanup escalates when SIGTERM is ignored", { timeout: 15_000 
   }
 });
 
-test("test server cleanup waits for a graceful SIGTERM exit", { timeout: 15_000 }, async () => {
+test("test server cleanup waits for a graceful SIGTERM exit", posixSignals, async () => {
   const child = spawn(process.execPath, [
     "-e",
     'process.on("SIGTERM", () => process.exit(0)); process.stdout.write("ready"); setInterval(() => {}, 1000);',

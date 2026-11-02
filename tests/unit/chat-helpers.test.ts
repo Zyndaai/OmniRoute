@@ -404,22 +404,52 @@ test("handleNoCredentials reports missing provider credentials and exhausted acc
   assert.match(exhaustedJson.error.message, /Primary account failed/);
 });
 
-test("handleNoCredentials remaps leaked 404 to 401/503 for single-model requests", async () => {
+test("handleNoCredentials remaps leaked 404 to 404/503 for single-model requests", async () => {
   // Issue #2: a direct (non-combo) API client must not receive a misleading 404
-  // "No active credentials" error — remap to an explicit auth/credential status.
+  // "No active credentials" error. 401 is reserved for a bad caller API key, so a
+  // known provider without an account is 503 and an unknown provider is 404.
   const forKnownProvider = handleNoCredentials(
     null,
     null,
-    "byNara",
-    "claude-sonnet-4.6",
+    "zai",
+    "glm-5.3-flash",
     null,
     null,
     undefined,
     /* isCombo */ false
   );
-  assert.equal(forKnownProvider.status, 401);
-  const knownJson = (await forKnownProvider.json()) as { error?: { message?: string } };
-  assert.match(knownJson.error?.message ?? "", /No active credentials for provider: byNara/);
+  assert.equal(forKnownProvider.status, 503);
+  const knownJson = (await forKnownProvider.json()) as ApiErrorJson;
+  assert.equal(knownJson.error?.code, "provider_not_configured");
+  assert.match(knownJson.error?.message ?? "", /No active credentials for provider: zai/);
+
+  const forNoSuchProvider = handleNoCredentials(
+    null,
+    null,
+    "nosuch",
+    "model-xyz",
+    null,
+    null,
+    undefined,
+    /* isCombo */ false
+  );
+  assert.equal(forNoSuchProvider.status, 404);
+  const noSuchJson = (await forNoSuchProvider.json()) as ApiErrorJson;
+  assert.equal(noSuchJson.error?.code, "model_not_found");
+  assert.equal(noSuchJson.error?.type, "invalid_request_error");
+
+  // Custom compatible provider nodes count as known providers.
+  const forCompatibleNode = handleNoCredentials(
+    null,
+    null,
+    "openai-compatible-chat-0000",
+    "m",
+    null,
+    null,
+    undefined,
+    /* isCombo */ false
+  );
+  assert.equal(forCompatibleNode.status, 503);
 
   const forUnknownProvider = handleNoCredentials(
     null,
@@ -453,7 +483,7 @@ test("handleNoCredentials still leaks 404 (combo fall-through) only when combo",
   const single = handleNoCredentials(
     null,
     null,
-    "byNara",
+    "kiro",
     "claude-opus-5",
     null,
     null,
@@ -465,8 +495,8 @@ test("handleNoCredentials still leaks 404 (combo fall-through) only when combo",
 
 test("handleNoCredentials tags a provider with no connected account as provider_not_configured", async () => {
   // A provider that has no connected account is an operator/dashboard problem, not
-  // an invalid OmniRoute API key (single-model 401) nor an unknown model (combo
-  // 404). The status stays the fall-through/auth signal; only the body code changes.
+  // an invalid OmniRoute API key (401) nor an unknown model. Single-model traffic
+  // gets 503; combo keeps the 404 fall-through signal. Both carry the same code.
   const single = handleNoCredentials(
     null,
     null,
@@ -477,10 +507,9 @@ test("handleNoCredentials tags a provider with no connected account as provider_
     [],
     /* isCombo */ false
   );
-  assert.equal(single.status, 401);
+  assert.equal(single.status, 503);
   const singleJson = (await single.json()) as ApiErrorJson;
   assert.equal(singleJson.error?.code, "provider_not_configured");
-  assert.equal(singleJson.error?.type, "authentication_error");
   assert.match(singleJson.error?.message ?? "", /No active credentials for provider: openai/);
 
   const combo = handleNoCredentials(

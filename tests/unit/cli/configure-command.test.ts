@@ -117,7 +117,8 @@ test("configure codex writes a self-contained private TOML profile for the remot
     assert.ok(content.includes(`base_url = "${remote}/v1"`));
     assert.match(content, /env_key\s+= "OMNIROUTE_API_KEY"/);
     assert.doesNotMatch(content, /secret-must-not-be-persisted/);
-    assert.equal(stat.mode & 0o777, 0o600);
+    // POSIX file modes are not enforced on Windows.
+    if (process.platform !== "win32") assert.equal(stat.mode & 0o777, 0o600);
     await assert.rejects(fs.stat(path.join(codexHome, "config.yaml")), /ENOENT/);
   } finally {
     server.close();

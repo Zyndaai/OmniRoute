@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { pathToFileURL } from "node:url";
 
 /**
  * #10428 — a script or test that opens the DB without setting DATA_DIR resolves to the
@@ -306,8 +307,8 @@ test("gate case 13: a normal server run resolves artifacts under the default dir
     scriptFile,
     [
       "import path from 'node:path';",
-      `import { getCallLogsDir } from '${process.cwd()}/src/lib/usage/callLogArtifacts.ts';`,
-      `import { resolveDataDir } from '${process.cwd()}/src/lib/dataPaths.ts';`,
+      `import { getCallLogsDir } from '${pathToFileURL(path.join(process.cwd(), "src/lib/usage/callLogArtifacts.ts")).href}';`,
+      `import { resolveDataDir } from '${pathToFileURL(path.join(process.cwd(), "src/lib/dataPaths.ts")).href}';`,
       "import { createRequire } from 'node:module';",
       "const dir = getCallLogsDir();",
       "const expected = path.join(resolveDataDir(), 'call_logs');",

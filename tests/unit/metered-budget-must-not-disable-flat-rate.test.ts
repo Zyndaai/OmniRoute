@@ -23,6 +23,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-metered-b
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "metered-budget-test-secret";
 
+const core = await import("../../src/lib/db/core.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const policy = await import("../../src/lib/usage/meteredBudgetPolicy.ts");
 const comboPredicates = await import("../../open-sse/services/combo/comboPredicates.ts");
@@ -42,6 +43,7 @@ function spend(usd: number) {
 
 test.after(() => {
   costRules.resetCostData();
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -499,9 +499,16 @@ test("pins tunnel-client 0.0.13 and upgrades previously shipped builds", () => {
   assert.throws(() => tunnelClientInstallAction("9.9.9"), /not a trusted upgrade source/);
 });
 
+// Windows cannot listen on a Unix socket file path; the broker uses a named pipe there.
+function brokerEndpoint(root: string): string {
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\${basename(root)}`
+    : join(root, "runtime", "turn-broker.sock");
+}
+
 test("turn broker holds a tool invocation and rejects wrong or duplicate results", async () => {
   const root = mkdtempSync(join(tmpdir(), "omniroute-cgw-broker-"));
-  const socketPath = join(root, "runtime", "turn-broker.sock");
+  const socketPath = brokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   try {
     const token = await broker.register(
@@ -548,7 +555,7 @@ test("turn broker holds a tool invocation and rejects wrong or duplicate results
 
 test("revoking a turn rejects a pending connector invocation", async () => {
   const root = mkdtempSync(join(tmpdir(), "omniroute-cgw-revoke-"));
-  const socketPath = join(root, "runtime", "turn-broker.sock");
+  const socketPath = brokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   try {
     const token = await broker.register(
@@ -586,7 +593,7 @@ test("revoking a turn rejects a pending connector invocation", async () => {
 
 test("an explicitly bounded turn token expires closed", async () => {
   const root = mkdtempSync(join(tmpdir(), "omniroute-cgw-expiry-"));
-  const socketPath = join(root, "runtime", "turn-broker.sock");
+  const socketPath = brokerEndpoint(root);
   const broker = TurnBroker.forSocket(socketPath);
   try {
     const token = await broker.register(

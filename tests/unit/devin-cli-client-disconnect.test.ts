@@ -18,6 +18,9 @@ const { DevinCliExecutor } = await import("../../open-sse/executors/devin-cli.ts
 const FAKE_ACP = `
 const readline = require("node:readline");
 const send = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+// On Windows the executor spawns through cmd.exe, so SIGTERM only kills the shell and this
+// grandchild survives; exit once the parent's stdin pipe is gone so it stops holding the cwd.
+process.stdin.on("close", () => process.exit(0));
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const m = JSON.parse(line);
   if (m.method === "initialize") send({ jsonrpc: "2.0", id: m.id, result: {} });
@@ -70,6 +73,7 @@ test("a client disconnect mid-stream does not throw from the child's close handl
     process.chdir(prevCwd);
     if (prevBin === undefined) delete process.env.CLI_DEVIN_BIN;
     else process.env.CLI_DEVIN_BIN = prevBin;
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Retries: on Windows the killed child can still hold the directory (its cwd) briefly.
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });

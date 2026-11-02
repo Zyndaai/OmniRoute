@@ -184,8 +184,10 @@ test("installPack accepts tarball payloads (the desktop release asset layout)", 
   // `node_modules` directory (bsdtar is present on macOS/Linux/CI runners).
   const packDir = path.join(sourceDir, `optional-pack-${pack.name}`);
   const tarball = path.join(sourceDir, `optional-pack-${pack.name}.tar.gz`);
-  const tarred = spawnSync("tar", ["-czf", tarball, "-C", packDir, "node_modules"], {
+  // Bare filename + cwd: GNU tar on Windows reads `C:\...` in `-f` as a remote host.
+  const tarred = spawnSync("tar", ["-czf", path.basename(tarball), "-C", packDir, "node_modules"], {
     stdio: "pipe",
+    cwd: path.dirname(tarball),
   });
   assert.equal(tarred.status, 0, "fixture tarball creation must succeed");
   fs.rmSync(packDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // only the tarball remains

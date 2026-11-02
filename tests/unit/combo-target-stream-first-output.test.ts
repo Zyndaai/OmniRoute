@@ -285,6 +285,40 @@ test("an unterminated flood releases the gate instead of buffering forever", asy
   assert.equal(scanner.overflowedWithoutOutput(), true);
 });
 
+test("an upstream error event ends the gate as a verdict, not as a stall", async () => {
+  const scanner = new SseOutputScanner();
+  const failed = JSON.stringify({
+    type: "response.failed",
+    response: { status: "failed", error: { code: "no_capacity", message: "peak capacity" } },
+  });
+  assert.equal(scanner.push(`event: response.failed\ndata: ${failed}\n\n`), true);
+
+  const bare = new SseOutputScanner();
+  assert.equal(bare.push('event: error\ndata: {"message":"boom"}\n\n'), true);
+
+  const ping = new SseOutputScanner();
+  assert.equal(ping.push("event: ping\ndata: {}\n\n"), false, "a ping is still not a verdict");
+});
+
+test("a stream that reports failure up front and stays open is handed back at once", async () => {
+  const failed = JSON.stringify({
+    type: "response.failed",
+    response: { status: "failed", error: { code: "no_capacity", message: "peak capacity" } },
+  });
+  const runner = buildTargetTimeoutRunner({
+    handleSingleModel: async () =>
+      sseResponse(sseBody([`event: response.failed\ndata: ${failed}\n\n`], { stall: true })),
+    comboTargetTimeoutMs: 5000,
+    log: noopLog,
+  });
+
+  const started = Date.now();
+  const res = await runner({}, "failing-open-model");
+  assert.equal(res.status, 200, "returned for the quality check to classify, not as a 504");
+  assert.ok(Date.now() - started < 1000, "must not wait out the 5s target budget");
+  await res.body?.cancel();
+});
+
 test("a non-2xx streaming response keeps its status", async () => {
   const runner = buildTargetTimeoutRunner({
     handleSingleModel: async () => sseResponse(sseBody([], { stall: true }), 429),

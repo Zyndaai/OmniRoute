@@ -32,6 +32,8 @@ import type { EgressSharingSummary } from "../../src/lib/proxyEgress.ts";
 function resetStorage() {
   core.resetDbInstance();
   proxyLogger.clearProxyLogs();
+  // clearProxyLogs() reopens the DB; release it so Windows can delete the data dir.
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

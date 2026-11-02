@@ -16,12 +16,14 @@ import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-obsidian-ssrf-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+const core = await import("../../src/lib/db/core.ts");
 const { createObsidianClient } = await import("../../src/lib/obsidian/api.ts");
 
 const originalFetch = globalThis.fetch;
 
 test.after(() => {
   globalThis.fetch = originalFetch;
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

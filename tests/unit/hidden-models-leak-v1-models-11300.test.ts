@@ -27,6 +27,9 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-11300-hidden-leak-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+// A busy parallel run can push a cold catalog build past the 8s default bound,
+// which answers 503 catalog_build_timeout instead of the catalog under test.
+process.env.CATALOG_BUILD_TIMEOUT_MS = process.env.CATALOG_BUILD_TIMEOUT_MS || "120000";
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");

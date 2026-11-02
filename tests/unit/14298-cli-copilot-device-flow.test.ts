@@ -26,14 +26,17 @@ import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "..");
+const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-14298-"));
 process.env.OMNIROUTE_API_KEY = "***";
 process.env.NODE_ENV = "test";
 
-const { runOAuthStart } = await import(path.join(repoRoot, "bin/cli/commands/oauth.mjs"));
+const { runOAuthStart } = await import(
+  pathToFileURL(path.join(repoRoot, "bin/cli/commands/oauth.mjs")).href
+);
 
 function startFakeServer(handler) {
   const requests = [];

@@ -45,6 +45,7 @@ test("stop does not print 'stopped' when the port-discovery tool (lsof) is missi
     await runStopCommand(
       {},
       {
+        platform: "linux", // exercise the lsof branch regardless of host OS
         execFileAsync: async () => {
           throw enoent;
         },

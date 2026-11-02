@@ -7,6 +7,7 @@ import path from "node:path";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "combo-isolation-"));
 process.env.DATA_DIR = dir;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
+const core = await import("../../src/lib/db/core.ts");
 const { dispatchWithCooldownRetry } =
   await import("../../open-sse/services/combo/comboAttemptLoop.ts");
 const { remainderIsHomogeneous, shouldAbortOnInputBoundFailure } =
@@ -15,7 +16,10 @@ const { hasIdenticalModelErrorStreak } =
   await import("../../open-sse/services/combo/comboPredicates.ts");
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const noop = () => {};
-test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+test.after(() => {
+  core.resetDbInstance();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 async function run(mode: string, hedge = true) {
   const dispatched: number[] = [],
     cancelled: number[] = [];

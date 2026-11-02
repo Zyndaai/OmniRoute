@@ -83,3 +83,9 @@ process.env.ADOBE_FIREFLY_BROWSER_REFRESH ||= "0";
 // DNS-write guard: the suite must NEVER mutate /etc/hosts. Tests that exercise
 // the real MITM path call addDNSEntries(); this env var makes it a no-op.
 process.env.OMNIROUTE_SKIP_DNS_WRITE = "1";
+
+// Catalog-build bound: under a busy parallel run a cold /v1/models catalog build can
+// exceed the 8s production default and answer 503 catalog_build_timeout, failing tests
+// that assert on the catalog itself. ||= so tests of the timeout path (which delete or
+// set CATALOG_BUILD_TIMEOUT_MS themselves) keep their own bound.
+process.env.CATALOG_BUILD_TIMEOUT_MS ||= "120000";

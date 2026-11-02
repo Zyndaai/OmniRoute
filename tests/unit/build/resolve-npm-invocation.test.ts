@@ -8,12 +8,15 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import { resolveNpmInvocation } from "../../../scripts/build/resolveNpmEntry.ts";
 
 const POSIX_PREFIX = "/opt/hostedtoolcache/node/24.18.0/x64";
 const POSIX_NODE = `${POSIX_PREFIX}/bin/node`;
-const POSIX_NPM_CLI = `${POSIX_PREFIX}/lib/node_modules/npm/bin/npm-cli.js`;
+// The resolver builds candidates with path.join, so the expected path uses the host separator
+// (identical to the literal POSIX string on Linux).
+const POSIX_NPM_CLI = path.join(POSIX_PREFIX, "lib/node_modules/npm/bin/npm-cli.js");
 
 const BUN_BINARY = "/home/temp/.bun/bin/bun";
 

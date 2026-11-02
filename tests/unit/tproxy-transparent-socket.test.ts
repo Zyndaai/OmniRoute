@@ -12,6 +12,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 const {
   loadTransparentAddon,
@@ -91,7 +92,9 @@ test("loadTransparentAddon also tries the cwd-relative standalone path", () => {
   );
   assert.equal(addon, null);
   assert.ok(
-    tried.some((p) => p === "/app/src/mitm/tproxy/native/build/Release/transparent.node"),
+    tried.some(
+      (p) => p === path.join("/app", "src/mitm/tproxy/native/build/Release/transparent.node")
+    ),
     `expected a cwd-absolute candidate, got: ${tried.join(", ")}`
   );
 });
@@ -104,7 +107,7 @@ test("loadTransparentAddon loads the addon from the cwd-relative standalone path
   };
   const addon = loadTransparentAddon(
     (p) => {
-      if (p.startsWith("/app/")) return fake; // standalone dest; module-relative misses
+      if (p.startsWith(path.join("/app") + path.sep)) return fake; // standalone dest; module-relative misses
       throw new Error("not here");
     },
     () => "linux",

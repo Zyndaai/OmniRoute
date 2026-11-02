@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
-import path from "node:path";
+// cgroup paths are always POSIX, whatever the host OS.
+import { posix as path } from "node:path";
 import v8 from "node:v8";
 import type { ResourceSignals } from "./resourcePressurePolicy.ts";
 

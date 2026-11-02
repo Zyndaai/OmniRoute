@@ -16,8 +16,14 @@
  * `response.in_progress`, `event: progress` ticks, pings, `message_start`, role-only deltas) are
  * not mistaken for an answer. That matters here: the combo sees the client-facing stream, which
  * already carries those frames.
+ *
+ * An upstream error event (`response.failed`, `event: error`, a substantive `error` envelope)
+ * also ends the wait: the stream has given its verdict, and the quality check downstream
+ * classifies it and fails over. Holding it instead kept the combo waiting the full target
+ * budget on a stream that reported failure up front and then stayed open.
  */
 import { COMBO_PER_MODEL_TIMEOUT_REASON } from "./comboAbortReasons.ts";
+import { isStreamingUpstreamError } from "./validateQuality.ts";
 import { sseChunkCarriesOutput } from "../../utils/sseOutputSignal.ts";
 
 /** Floor for the gate window, so a dispatch that ate the whole budget cannot abandon a live target. */
@@ -59,6 +65,17 @@ function carriesOutput(payload: string): boolean {
   return sseChunkCarriesOutput(`data: ${payload.replace(/\n/g, " ")}\n\n`);
 }
 
+/** True when an assembled event is an upstream failure the quality check will fail over on. */
+function carriesUpstreamError(payload: string, eventType: string): boolean {
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    // Not JSON: only the event name can mark it as a failure.
+  }
+  return isStreamingUpstreamError(parsed, eventType);
+}
+
 /**
  * Incremental SSE reader that reports the first event carrying output.
  *
@@ -70,9 +87,10 @@ function carriesOutput(payload: string): boolean {
 export class SseOutputScanner {
   private pendingLine = "";
   private dataLines: string[] = [];
+  private eventType = "";
   private bufferedChars = 0;
 
-  /** Feed decoded text; true once an event has shown output. */
+  /** Feed decoded text; true once an event has shown output or reported an upstream error. */
   push(text: string): boolean {
     this.pendingLine += text;
     let start = 0;
@@ -119,16 +137,24 @@ export class SseOutputScanner {
   /** Evaluate whatever is left after the body closed without a trailing blank line. */
   flush(): boolean {
     if (this.dataLines.length === 0) return false;
+    return this.endEvent();
+  }
+
+  private endEvent(): boolean {
     const payload = this.dataLines.join("\n");
+    const eventType = this.eventType;
     this.dataLines = [];
-    return payload.length > 0 && carriesOutput(payload);
+    this.eventType = "";
+    return (
+      payload.length > 0 && (carriesOutput(payload) || carriesUpstreamError(payload, eventType))
+    );
   }
 
   private consumeLine(line: string): boolean {
-    if (line === "") {
-      const payload = this.dataLines.join("\n");
-      this.dataLines = [];
-      return payload.length > 0 && carriesOutput(payload);
+    if (line === "") return this.endEvent();
+    if (line.startsWith("event:")) {
+      this.eventType = line.slice(6).trim();
+      return false;
     }
     if (!line.startsWith("data:")) return false;
     const value = line.slice(5);

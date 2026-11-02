@@ -56,7 +56,8 @@ async function sha256File(filePath) {
  */
 export function normalizeSymlinkTarget(rootDir, entryRelPath, rawTarget) {
   if (!path.isAbsolute(rawTarget)) {
-    return { ok: true, value: rawTarget };
+    // Windows' readlink hands back `..\semver\...`; record/compare the posix form everywhere.
+    return { ok: true, value: rawTarget.split(path.sep).join("/") };
   }
   const rootResolved = path.resolve(rootDir);
   const resolvedTarget = path.resolve(rawTarget);

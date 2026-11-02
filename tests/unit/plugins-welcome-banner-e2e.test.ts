@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const FIXTURE_DIR = join(tmpdir(), `omniroute_plugin_test_${Date.now()}`);
 
@@ -370,14 +371,14 @@ test("welcome banner PoC plugin lifecycle", async (t) => {
   });
 
   await t.test("plugin module exports correct interface", async () => {
-    const mod = await import(join(pluginDir, "index.mjs"));
+    const mod = await import(pathToFileURL(join(pluginDir, "index.mjs")).href);
     assert.ok(mod.plugin, "should export plugin object");
     assert.equal(mod.plugin.name, "welcome-banner");
     assert.equal(typeof mod.plugin.onResponse, "function");
   });
 
   await t.test("onResponse injects banner into response", async () => {
-    const mod = await import(join(pluginDir, "index.mjs"));
+    const mod = await import(pathToFileURL(join(pluginDir, "index.mjs")).href);
     const response = {
       choices: [{ message: { role: "assistant", content: "Hello!" } }],
     };
@@ -387,7 +388,7 @@ test("welcome banner PoC plugin lifecycle", async (t) => {
   });
 
   await t.test("onResponse handles streaming delta", async () => {
-    const mod = await import(join(pluginDir, "index.mjs"));
+    const mod = await import(pathToFileURL(join(pluginDir, "index.mjs")).href);
     const response = {
       choices: [{ delta: { content: "stream chunk" } }],
     };
@@ -396,7 +397,7 @@ test("welcome banner PoC plugin lifecycle", async (t) => {
   });
 
   await t.test("onResponse handles null response gracefully", async () => {
-    const mod = await import(join(pluginDir, "index.mjs"));
+    const mod = await import(pathToFileURL(join(pluginDir, "index.mjs")).href);
     const result = await mod.plugin.onResponse({}, null);
     assert.equal(result, null);
   });

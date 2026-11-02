@@ -30,20 +30,21 @@ export const REQUIRED_PACKAGE_FILES_TEST_NEGATIONS: readonly string[] = [
 export const MCP_CLOSURE_SPOT_CHECK_PATH = "src/lib/combos/steps.ts";
 
 function resolveImport(root: string, fromFile: string, spec: string): string | null {
+  // Repo-relative paths are always POSIX ("src/lib/x.ts"), whatever the host OS.
   let base: string;
-  if (spec.startsWith("@/")) base = path.join("src", spec.slice(2));
+  if (spec.startsWith("@/")) base = path.posix.join("src", spec.slice(2));
   else if (spec.startsWith("@omniroute/open-sse/"))
-    base = path.join("open-sse", spec.slice("@omniroute/open-sse/".length));
-  else if (spec === "@omniroute/open-sse") base = path.join("open-sse", "index");
+    base = path.posix.join("open-sse", spec.slice("@omniroute/open-sse/".length));
+  else if (spec === "@omniroute/open-sse") base = path.posix.join("open-sse", "index");
   else if (spec.startsWith("./") || spec.startsWith("../"))
-    base = path.join(path.dirname(fromFile), spec);
+    base = path.posix.join(path.posix.dirname(fromFile), spec);
   else return null; // bare package — not our source
   base = base.replace(/\.(ts|tsx|js|mjs)$/, "");
   const cands = [
     base + ".ts",
     base + ".tsx",
-    path.join(base, "index.ts"),
-    path.join(base, "index.tsx"),
+    path.posix.join(base, "index.ts"),
+    path.posix.join(base, "index.tsx"),
     base + ".js",
     base + ".mjs",
   ];

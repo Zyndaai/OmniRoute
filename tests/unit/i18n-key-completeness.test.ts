@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
   catalogDir,
   findIncompleteLocales,
@@ -67,7 +68,7 @@ test("leaves the source dropped are reported as extra, and a wrong shape counts 
 });
 
 test("catalogDir resolves the dashboard and CLI catalog directories", () => {
-  assert.ok(catalogDir("ui").endsWith("src/i18n/messages"));
-  assert.ok(catalogDir("cli").endsWith("bin/cli/locales"));
+  assert.ok(catalogDir("ui").endsWith(path.join("src", "i18n", "messages")));
+  assert.ok(catalogDir("cli").endsWith(path.join("bin", "cli", "locales")));
   assert.throws(() => catalogDir("nope"), /unknown catalog/);
 });

@@ -481,28 +481,37 @@ describe("modelsDevSync — mapProviderId", () => {
   });
 });
 
-describe("modelsDevSync — fetchModelsDev (live API)", () => {
-  it("fetches data from models.dev API", async () => {
+// Served from MOCK_MODELS_DEV_DATA through a stubbed fetch: a live call made the suite fail
+// whenever the network blipped, and the live catalog's size is not this module's contract.
+describe("modelsDevSync — fetchModelsDev", () => {
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: string[] = [];
+
+  before(() => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return new Response(JSON.stringify(MOCK_MODELS_DEV_DATA), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+  });
+
+  after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("fetches and parses the models.dev catalog", async () => {
     const data = await fetchModelsDev();
-    assert.ok(typeof data === "object", "data should be an object");
-
-    const providerCount = Object.keys(data).length;
-    assert.ok(providerCount >= 100, `should have 100+ providers, got ${providerCount}`);
-
-    let modelCount = 0;
-    for (const provider of Object.values(data)) {
-      const p = provider;
-      if (p.models) {
-        modelCount += Object.keys(p.models).length;
-      }
-    }
-    assert.ok(modelCount >= 4000, `should have 4000+ models, got ${modelCount}`);
+    assert.deepEqual(requestedUrls, ["https://models.dev/api.json"]);
+    assert.deepEqual(Object.keys(data).sort(), Object.keys(MOCK_MODELS_DEV_DATA).sort());
   });
 
   it("returns cached data on second call", async () => {
     const data1 = await fetchModelsDev();
     const data2 = await fetchModelsDev();
     assert.strictEqual(data1, data2, "should return same cached reference");
+    assert.equal(requestedUrls.length, 1, "the cache must not fetch again");
   });
 
   it("has openai provider with gpt-4o model", async () => {

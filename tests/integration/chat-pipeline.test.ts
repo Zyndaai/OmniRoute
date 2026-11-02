@@ -1248,8 +1248,8 @@ test("chat pipeline allows unauthenticated requests through to provider resoluti
   // handleChat does not enforce REQUIRE_API_KEY — that's the authz pipeline's job.
   // Without provider credentials seeded, the request falls through to the "no credentials" path.
   // Upstream port decolua/9router#336: 400 → 404 so combo routing can fall through.
-  // #10797: single-model (non-combo) no-credentials now remaps 404 → 401.
-  assert.equal(response.status, 401);
+  // Single-model (non-combo) no-credentials remaps 404 → 503 (401 is reserved for a bad key).
+  assert.equal(response.status, 503);
   assert.match(json.error.message, /No active credentials for provider/i);
 });
 
@@ -1370,8 +1370,9 @@ test("chat pipeline returns current no-credentials contract when no provider con
 
   const json = (await response.json()) as any;
   // Upstream port decolua/9router#336: 400 → 404 so combo routing can fall through.
-  // #10797: single-model (non-combo) no-credentials now remaps 404 → 401.
-  assert.equal(response.status, 401);
+  // Single-model (non-combo) no-credentials remaps 404 → 503 (401 is reserved for a bad key).
+  assert.equal(response.status, 503);
+  assert.equal(json.error.code, "provider_not_configured");
   assert.match(json.error.message, /No active credentials for provider: openai/);
 });
 

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+const core = await import("../../src/lib/db/core.ts");
 const require = createRequire(import.meta.url);
 const childProcess = require("child_process");
 const originalDataDir = process.env.DATA_DIR;
@@ -115,7 +116,7 @@ test("builtin skill handlers validate required fields and perform real sandboxed
         await builtinSkills.file_write({ path: "notes/demo.txt", content: "hello world" }, context),
         {
           success: true,
-          path: "notes/demo.txt",
+          path: path.join("notes", "demo.txt"),
           bytesWritten: 11,
           context: "key-123",
         }
@@ -123,7 +124,7 @@ test("builtin skill handlers validate required fields and perform real sandboxed
 
       assert.deepEqual(await builtinSkills.file_read({ path: "notes/demo.txt" }, context), {
         success: true,
-        path: "notes/demo.txt",
+        path: path.join("notes", "demo.txt"),
         content: "hello world",
         bytesRead: 11,
         encoding: "utf8",
@@ -195,6 +196,7 @@ test("builtin skill handlers validate required fields and perform real sandboxed
       );
     });
   } finally {
+    core.resetDbInstance();
     removePath(dataDir);
   }
 });

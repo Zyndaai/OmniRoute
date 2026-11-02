@@ -211,12 +211,14 @@ test.describe("environment proxy bypass for listed hosts", () => {
   test.afterEach(() => resetEnv());
 
   test("listed host goes direct; unlisted service name still uses HTTPS_PROXY", () => {
-    process.env.HTTP_PROXY = "http://egress-proxy:7890";
-    process.env.HTTPS_PROXY = "http://egress-proxy:7890";
+    // Delete the lowercase names BEFORE setting the uppercase ones: Windows env vars are
+    // case-insensitive, so deleting http_proxy afterwards would also delete HTTP_PROXY.
     delete process.env.http_proxy;
     delete process.env.https_proxy;
     delete process.env.NO_PROXY;
     delete process.env.no_proxy;
+    process.env.HTTP_PROXY = "http://egress-proxy:7890";
+    process.env.HTTPS_PROXY = "http://egress-proxy:7890";
 
     delete process.env[LOCAL_PROVIDER_NODE_HOSTS_ENV];
     assert.equal(resolveProxyForRequest("http://reranker:8080/v1/rerank").source, "env");

@@ -1156,11 +1156,10 @@ test("vscode tokenized /chat/completions route applies the path token and codex 
   );
   const body = (await response.json()) as any;
 
-  // #10797: zero-active-credentials for a single-model (non-combo) request now
-  // remaps to 401 instead of leaking the combo-fallback 404 to a direct client.
-  // The code is "provider_not_configured" (not the 401 default "invalid_api_key"):
-  // the fix is connecting an account in the dashboard, not a new OmniRoute key.
-  assert.equal(response.status, 401);
+  // Zero-active-credentials for a single-model (non-combo) request remaps to 503
+  // instead of leaking the combo-fallback 404 to a direct client. 401 is reserved
+  // for a bad OmniRoute key; here the fix is connecting an account in the dashboard.
+  assert.equal(response.status, 503);
   assert.equal(body.error?.code, "provider_not_configured");
   assert.equal(body.error?.message, "No active credentials for provider: codex.");
 });
@@ -1190,8 +1189,8 @@ test("vscode tokenized /responses route applies the path token and codex tier re
   );
   const body = (await response.json()) as any;
 
-  // #10797: see chat/completions sibling test above.
-  assert.equal(response.status, 401);
+  // See chat/completions sibling test above.
+  assert.equal(response.status, 503);
   assert.equal(body.error?.code, "provider_not_configured");
   assert.equal(body.error?.message, "No active credentials for provider: codex.");
 });

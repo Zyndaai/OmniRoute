@@ -19,6 +19,8 @@ const { applyRendered } = applyMod;
 const { isCoreBinaryPathAllowed, checkArgsFor, CORE_CHECK_ARGS } = guardMod;
 import type { RunCheck } from "../../src/lib/proxySubscription/coreConfig/apply.ts";
 
+const winSkip = process.platform === "win32" && "POSIX file modes are not enforced on Windows";
+
 function makeDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-core-apply-"));
 }
@@ -120,7 +122,7 @@ test("missing binary refuses without executing", async (t) => {
   assert.equal(fs.readFileSync(adopted, "utf8"), "old\n");
 });
 
-test("non-executable binary refuses without executing", async (t) => {
+test("non-executable binary refuses without executing", { skip: winSkip }, async (t) => {
   const dir = makeDir();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const bin = path.join(dir, "sing-box");
@@ -215,7 +217,7 @@ test("passing check replaces the adopted file and keeps the old content in .prev
   assert.deepEqual(leftovers, []);
 });
 
-test("replacement preserves the adopted file mode", async (t) => {
+test("replacement preserves the adopted file mode", { skip: winSkip }, async (t) => {
   const dir = makeDir();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const bin = writeExecutable(dir, "sing-box", "#!/bin/sh\nexit 0\n");

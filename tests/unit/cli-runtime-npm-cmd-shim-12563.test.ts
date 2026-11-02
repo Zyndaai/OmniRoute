@@ -48,6 +48,10 @@ describe("#12563 — npm .cmd shim is runnable via known paths", () => {
       "@echo off\r\necho 2.1.259 (Claude Code)\r\nREM padding padding padding padding\r\n"
     );
 
+    // Isolate from a real claude install under the machine's home (known paths there win).
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-12563-home-"));
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
     process.env.npm_config_prefix = prefixDir;
     process.env.PATH = "C:\\Windows\\System32";
     process.env.Path = process.env.PATH;
@@ -70,6 +74,7 @@ describe("#12563 — npm .cmd shim is runnable via known paths", () => {
       assert.notEqual(status.reason, "settings_found_binary_unresolved");
     } finally {
       fs.rmSync(prefixDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      fs.rmSync(fakeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

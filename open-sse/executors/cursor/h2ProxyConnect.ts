@@ -241,7 +241,12 @@ export function createProxyTunnelSocket(options: ProxyTunnelOptions): Promise<ne
     // An https:// proxy speaks TLS before CONNECT. Writing CONNECT in cleartext
     // makes it drop the connection and would expose Proxy-Authorization.
     const socket: net.Socket = isTlsProxy
-      ? tls.connect({ host: proxy.hostname, port, servername: proxy.hostname })
+      ? // Node 26 throws when servername is an IP literal (SNI must be a DNS name).
+        tls.connect({
+          host: proxy.hostname,
+          port,
+          ...(net.isIP(proxy.hostname) ? {} : { servername: proxy.hostname }),
+        })
       : net.connect({ host: proxy.hostname, port });
     const readyEvent = isTlsProxy ? "secureConnect" : "connect";
 

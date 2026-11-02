@@ -93,6 +93,7 @@ test(
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-9934-"));
     const originalDataDir = process.env.DATA_DIR;
     process.env.DATA_DIR = dataDir;
+    let core: Awaited<ReturnType<typeof importFresh>> | undefined;
 
     try {
       // Step 1 — mimic `omniroute setup`: the CLI opens the DB, writes the
@@ -127,7 +128,7 @@ test(
       // Step 2 — mimic the first `omniroute serve`: the real server opens the
       // same DB, auto-seeds only the 001 marker and runs migrations. Under a
       // live (non-test) safety gate this must NOT throw.
-      const core = await importFresh("src/lib/db/core.ts");
+      core = await importFresh("src/lib/db/core.ts");
       cleanupGlobalDb();
       resetDbInstance();
 
@@ -168,6 +169,10 @@ test(
         snapshot.close();
       }
     } finally {
+      // Windows cannot delete a SQLite file that is still open.
+      core?.resetDbInstance();
+      cleanupGlobalDb();
+      resetDbInstance();
       if (originalDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = originalDataDir;
       fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

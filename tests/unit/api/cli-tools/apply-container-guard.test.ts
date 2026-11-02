@@ -271,30 +271,36 @@ describe("POST /api/cli-tools/apply — container guard", () => {
     assert.strictEqual((await res.json()).error?.type, "invalid_request_error");
   });
 
-  it("writes the valid OpenCode config on a host", async () => {
-    const res = await withContainerMode("0", () =>
-      POST(
-        applyRequest({
-          toolId: "opencode",
-          baseUrl: catalogBaseUrl,
-          apiKey: "sk-test-guard",
-        })
-      )
-    );
-    assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.headers.get("cache-control"), "no-store");
-    const body = await res.json();
-    assert.strictEqual(body.success, true);
-    assert.strictEqual(body.configPath, OPENCODE_CONFIG);
-    assert.ok(fs.existsSync(OPENCODE_CONFIG), "host write must land");
-    assert.strictEqual(
-      fs.statSync(OPENCODE_CONFIG).mode & 0o777,
-      0o600,
-      "generated CLI config must be private"
-    );
-    const written = fs.readFileSync(OPENCODE_CONFIG, "utf-8");
-    assert.ok(written.includes(catalogBaseUrl));
-  });
+  it(
+    "writes the valid OpenCode config on a host",
+    {
+      skip: process.platform === "win32" && "POSIX file modes (0600) are not enforced on Windows",
+    },
+    async () => {
+      const res = await withContainerMode("0", () =>
+        POST(
+          applyRequest({
+            toolId: "opencode",
+            baseUrl: catalogBaseUrl,
+            apiKey: "sk-test-guard",
+          })
+        )
+      );
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.headers.get("cache-control"), "no-store");
+      const body = await res.json();
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.configPath, OPENCODE_CONFIG);
+      assert.ok(fs.existsSync(OPENCODE_CONFIG), "host write must land");
+      assert.strictEqual(
+        fs.statSync(OPENCODE_CONFIG).mode & 0o777,
+        0o600,
+        "generated CLI config must be private"
+      );
+      const written = fs.readFileSync(OPENCODE_CONFIG, "utf-8");
+      assert.ok(written.includes(catalogBaseUrl));
+    }
+  );
 
   it("refuses a WhyCodes write in container mode with hostSetupCommand setup-whycodes", async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-whycodes-apply-"));

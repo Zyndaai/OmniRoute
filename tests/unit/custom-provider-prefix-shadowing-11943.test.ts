@@ -88,7 +88,7 @@ test("handleChat names the shadowed custom node when the built-in prefix has no 
   const json = (await response.json()) as ErrorBody;
   const message = json.error?.message ?? "";
 
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 503);
   assert.match(message, /No active credentials for provider: openference/);
   assert.match(
     message,
@@ -131,7 +131,7 @@ test("a non-colliding prefix still routes to the custom node and never gets the 
   );
   const json = (await response.json()) as ErrorBody;
 
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 503);
   assert.equal(json.error?.message, "No active credentials for provider: openference.");
 });
 
@@ -161,7 +161,7 @@ test("handleNoCredentials appends the shadowing diagnostic only when a shadowed 
     /* isCombo */ false,
     { id: SHADOWED_NODE_ID, name: SHADOWED_NODE_NAME, prefix: "of" }
   );
-  assert.equal(shadowed.status, 401);
+  assert.equal(shadowed.status, 503);
   const shadowedMessage = ((await shadowed.json()) as ErrorBody).error?.message ?? "";
   assert.match(shadowedMessage, /^No active credentials for provider: openference\./);
   assert.match(shadowedMessage, /"of\/GLM-5.2"/);

@@ -26,7 +26,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { isAlwaysProtectedPath, isLocalOnlyPath } =
   await import("../../src/server/authz/routeGuard.ts");
 
-test.after(() => {
+test.after(async () => {
+  // Windows cannot delete a data dir whose storage.sqlite is still open.
+  const core = await import("../../src/lib/db/core.ts");
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

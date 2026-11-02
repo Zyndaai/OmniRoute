@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,7 +36,7 @@ function runChild(body: string[]): ChildResult {
     [
       `process.env.APP_LOG_TO_FILE = "true";`,
       `process.env.APP_LOG_FILE_PATH = ${JSON.stringify(logFile)};`,
-      `const M = await import(${JSON.stringify(interceptorPath)});`,
+      `const M = await import(${JSON.stringify(pathToFileURL(interceptorPath).href)});`,
       `const LOG_FILE = ${JSON.stringify(logFile)};`,
       ...body,
     ].join("\n")
@@ -147,26 +147,33 @@ test("a log directory removed at runtime is recreated and logging recovers (#818
   );
 });
 
-test("the log-unavailable notice is emitted at most once, to the real stderr", () => {
-  const r = runChild([
-    `const { rmSync, mkdirSync, chmodSync } = await import("node:fs");`,
-    `const { dirname } = await import("node:path");`,
-    `M.initConsoleInterceptor();`,
-    // Make the directory unrecreatable so the retry fails and the notice path is exercised.
-    `const parent = dirname(dirname(LOG_FILE));`,
-    `rmSync(dirname(LOG_FILE), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });`,
-    `chmodSync(parent, 0o500);`,
-    `for (let i = 0; i < 5; i++) console.error("unwritable " + i);`,
-    `chmodSync(parent, 0o700);`,
-    `setTimeout(() => process.exit(0), 200);`,
-  ]);
+test(
+  "the log-unavailable notice is emitted at most once, to the real stderr",
+  {
+    skip:
+      process.platform === "win32" && "chmod 0o500 does not make a directory unwritable on Windows",
+  },
+  () => {
+    const r = runChild([
+      `const { rmSync, mkdirSync, chmodSync } = await import("node:fs");`,
+      `const { dirname } = await import("node:path");`,
+      `M.initConsoleInterceptor();`,
+      // Make the directory unrecreatable so the retry fails and the notice path is exercised.
+      `const parent = dirname(dirname(LOG_FILE));`,
+      `rmSync(dirname(LOG_FILE), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });`,
+      `chmodSync(parent, 0o500);`,
+      `for (let i = 0; i < 5; i++) console.error("unwritable " + i);`,
+      `chmodSync(parent, 0o700);`,
+      `setTimeout(() => process.exit(0), 200);`,
+    ]);
 
-  assert.equal(r.status, 0, `child must exit cleanly: ${r.stderr.slice(0, 400)}`);
-  const notices = r.stderr.split("\n").filter((l) => l.includes("[consoleInterceptor]"));
-  assert.equal(
-    notices.length,
-    1,
-    `the notice must fire exactly once across repeated failures, got ${notices.length} — a ` +
-      "per-call notice would itself become a flood"
-  );
-});
+    assert.equal(r.status, 0, `child must exit cleanly: ${r.stderr.slice(0, 400)}`);
+    const notices = r.stderr.split("\n").filter((l) => l.includes("[consoleInterceptor]"));
+    assert.equal(
+      notices.length,
+      1,
+      `the notice must fire exactly once across repeated failures, got ${notices.length} — a ` +
+        "per-call notice would itself become a flood"
+    );
+  }
+);

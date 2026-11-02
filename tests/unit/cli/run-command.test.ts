@@ -236,7 +236,8 @@ test("dry-run redacts sensitive passthrough flags supplied to the child CLI", as
   assert.equal(raw.includes("sentinel-passthrough-secret"), false);
   assert.equal(raw.includes("sentinel-inline-secret"), false);
   assert.match(raw, /\[redacted\]/);
-  assert.match(raw, /safe value/);
+  // On Windows the .cmd shim args are cmd.exe-escaped (`safe^ value`); drop the carets.
+  assert.match(process.platform === "win32" ? raw.replace(/\^/g, "") : raw, /safe value/);
 });
 
 test("--api-key-env resolves credentials without exposing their value in the plan", async () => {

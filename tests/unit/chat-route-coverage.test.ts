@@ -428,13 +428,13 @@ test("handleChat keeps the combo error when the global fallback throws", async (
   assert.match(json.error.message, /primary combo failed/i);
 });
 
-test("handleChat returns 401 when no provider credentials exist (single-model)", async () => {
+test("handleChat returns 503 provider_not_configured when no provider credentials exist (single-model)", async () => {
   // Upstream port decolua/9router#336 (Ibrahim Ryan): the no-credentials branch
   // of handleNoCredentials originally surfaced 404 NOT_FOUND unconditionally so
   // combo routing could fall through to the next target (open-sse/services/combo.ts,
-  // PR #4316 / issue #4279). #10797 remaps that 404 to 401 for single-model
-  // (non-combo) requests — a direct client should see an auth/credential failure,
-  // not "not found"; combo routing still gets the 404 (see combo-routing-e2e.test.ts).
+  // PR #4316 / issue #4279). Single-model (non-combo) requests remap that 404 to
+  // 503 provider_not_configured — 401 is reserved for a bad caller API key; combo
+  // routing still gets the 404 (see combo-routing-e2e.test.ts).
   const response = await handleChat(
     buildRequest({
       body: {
@@ -446,7 +446,8 @@ test("handleChat returns 401 when no provider credentials exist (single-model)",
   );
   const json = (await response.json()) as any;
 
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 503);
+  assert.equal(json.error.code, "provider_not_configured");
   assert.match(json.error.message, /No active credentials for provider: openai/);
 });
 

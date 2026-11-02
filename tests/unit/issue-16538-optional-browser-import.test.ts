@@ -166,7 +166,7 @@ test("browser worker imports without resolving playwright-core", async () => {
     process.execPath,
     [
       "--import",
-      path.join(root, "node_modules/tsx/dist/esm/index.mjs"),
+      pathToFileURL(path.join(root, "node_modules/tsx/dist/esm/index.mjs")).href,
       "--input-type=module",
       "-e",
       `

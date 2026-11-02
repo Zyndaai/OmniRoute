@@ -119,7 +119,10 @@ test("POST hermes-agent-settings stores the resolved key only in a mode-0600 Her
   const config = fs.readFileSync(configPath, "utf8");
   assert.match(env, new RegExp(`^OMNIROUTE_API_KEY=${created.key}$`, "m"));
   assert.ok(!config.includes(created.key));
-  assert.equal(fs.statSync(envPath).mode & 0o777, 0o600);
+  // POSIX file modes do not exist on Windows (stat reports 0o666).
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(envPath).mode & 0o777, 0o600);
+  }
 });
 
 test("POST hermes-agent-settings refuses apply when neither keyId nor Hermes .env resolves a key", async () => {

@@ -11,7 +11,7 @@ import {
   getPromptCacheReadTokens,
 } from "@/lib/usage/tokenAccounting";
 import { FORMATS } from "../translator/formats.ts";
-import { pickCacheCreationTokens } from "./pickCacheCreationTokens.ts";
+import { pickCacheCreationInPrompt, pickCacheCreationTokens } from "./pickCacheCreationTokens.ts";
 import { sharedSymbol } from "@/shared/utils/processSingleton";
 
 export { pickCacheCreationTokens };
@@ -247,6 +247,50 @@ export function carryCacheCreationMarker<T>(from: unknown, to: T): T {
     };
   }
   return to;
+}
+
+/**
+ * Client-facing Chat Completions shape for prompt-cache WRITES from an Anthropic upstream.
+ *
+ * Anthropic's `input_tokens` excludes both cache reads and cache writes. The Claude→OpenAI
+ * translators already fold the read into `prompt_tokens` but keep the write outside it
+ * (`cache_creation_in_prompt: false`, #2215), so an OpenAI-SDK client that bills on
+ * `prompt_tokens` under-bills a cold prompt by the whole write. This returns a COPY where the
+ * write is part of `prompt_tokens`/`total_tokens` and is named `prompt_tokens_details.
+ * cache_write_tokens` (OpenAI/OpenRouter spelling; `cache_creation_tokens` is kept for the
+ * readers of the pivot shape), with the marker flipped to `true` so every downstream reader
+ * (cost calculator, openai-to-claude, Responses translators) sees an inclusive total and a
+ * second call is a no-op.
+ *
+ * Response SHAPE only: call it on the payload that is about to leave for the client, never on
+ * `state.usage` / `extractUsageFromResponse()` output, which feed call logs, the usage DB and
+ * cost. `writeExcludedFromPrompt` asserts the exclusion when the marker was lost by a rebuild
+ * (`filterUsageForFormat` keeps only the top-level write count); an explicit `true` marker
+ * always wins and an unmarked usage is left alone unless the caller asserts the exclusion.
+ */
+export function foldCacheWriteIntoPromptTokens<T>(
+  usage: T,
+  options: { writeExcludedFromPrompt?: boolean } = {}
+): T {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return usage;
+  const source = usage as UsageLike;
+  const write = tokenNumber(pickCacheCreationTokens(source));
+  if (write <= 0) return usage;
+  const marker = pickCacheCreationInPrompt(source);
+  if (marker === true || (marker === undefined && !options.writeExcludedFromPrompt)) return usage;
+
+  const promptTokens = tokenNumber(source.prompt_tokens) + write;
+  return {
+    ...source,
+    prompt_tokens: promptTokens,
+    total_tokens: promptTokens + tokenNumber(source.completion_tokens),
+    prompt_tokens_details: {
+      ...source.prompt_tokens_details,
+      cache_creation_tokens: write,
+      cache_write_tokens: write,
+      cache_creation_in_prompt: true,
+    },
+  } as T;
 }
 
 /**

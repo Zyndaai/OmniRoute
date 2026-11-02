@@ -9,16 +9,19 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import { resolveBundledNpmEntry } from "../../../scripts/build/resolveNpmEntry.ts";
 
 const POSIX_PREFIX = "/opt/hostedtoolcache/node/24.18.0/x64";
 const POSIX_NODE = `${POSIX_PREFIX}/bin/node`;
-const POSIX_NPM_CLI = `${POSIX_PREFIX}/lib/node_modules/npm/bin/npm-cli.js`;
+// The resolver builds candidates with path.join, so expectations use the host separator too
+// (identical to the literal POSIX string on Linux).
+const POSIX_NPM_CLI = path.join(POSIX_PREFIX, "lib/node_modules/npm/bin/npm-cli.js");
 
 const WIN_STYLE_DIR = "/fake/nodejs"; // Windows layout shape (npm beside the binary)
 const WIN_STYLE_NODE = `${WIN_STYLE_DIR}/node.exe`;
-const WIN_STYLE_NPM_CLI = `${WIN_STYLE_DIR}/node_modules/npm/bin/npm-cli.js`;
+const WIN_STYLE_NPM_CLI = path.join(WIN_STYLE_DIR, "node_modules/npm/bin/npm-cli.js");
 
 test("POSIX layout: finds npm-cli.js under <prefix>/lib/node_modules (hosted runner shape)", () => {
   const resolved = resolveBundledNpmEntry("npm-cli.js", {
@@ -40,7 +43,7 @@ test("Windows layout: still finds npm-cli.js beside the node binary", () => {
 
 test("npm_execpath (set by `npm run`) wins and resolves npx-cli.js as its sibling", () => {
   const npmExecPath = `${POSIX_PREFIX}/lib/node_modules/npm/bin/npm-cli.js`;
-  const npxSibling = `${POSIX_PREFIX}/lib/node_modules/npm/bin/npx-cli.js`;
+  const npxSibling = path.join(POSIX_PREFIX, "lib/node_modules/npm/bin/npx-cli.js");
   const resolved = resolveBundledNpmEntry("npx-cli.js", {
     execPath: POSIX_NODE,
     npmExecPath,

@@ -49,11 +49,15 @@ const hostDeps = {
   env: {} as NodeJS.ProcessEnv,
 };
 
-test("container + bind-mounted CLI_CONFIG_HOME outside home is honoured", async () => {
-  const cliRuntime = await importFresh("container-mounted");
-  process.env.CLI_CONFIG_HOME = "/host-home";
-  assert.equal(cliRuntime.getCliConfigHome(containerDeps), "/host-home");
-});
+test(
+  "container + bind-mounted CLI_CONFIG_HOME outside home is honoured",
+  { skip: process.platform === "win32" && "container mount paths are POSIX-only" },
+  async () => {
+    const cliRuntime = await importFresh("container-mounted");
+    process.env.CLI_CONFIG_HOME = "/host-home";
+    assert.equal(cliRuntime.getCliConfigHome(containerDeps), "/host-home");
+  }
+);
 
 test("container + unmounted CLI_CONFIG_HOME outside home still falls back", async () => {
   const cliRuntime = await importFresh("container-unmounted");

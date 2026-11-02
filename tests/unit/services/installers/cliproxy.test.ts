@@ -68,8 +68,9 @@ describe("resolveSpawnArgs", () => {
     const expectedConfigPath = path.join(configDir, "config.yaml");
 
     // Verify path construction logic
-    assert.equal(expectedCommand, "/fake/bin/cliproxyapi");
-    assert.equal(expectedConfigPath, "/fake/services/cliproxy/config.yaml");
+    const posix = (p: string) => p.split(path.sep).join("/");
+    assert.equal(posix(expectedCommand), "/fake/bin/cliproxyapi");
+    assert.equal(posix(expectedConfigPath), "/fake/services/cliproxy/config.yaml");
     assert.ok(port > 0 && port < 65536);
   });
 

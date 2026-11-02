@@ -305,7 +305,7 @@ test("dynamic import specifiers: literals are followed, variables and npm packag
   // npm packages leave the repo graph: they are extracted here but resolve to null.
   assert.equal(resolveSpecifier("open-sse/services/model.ts", "zod"), null);
   assert.equal(
-    resolveSpecifier("open-sse/services/model.ts", "@/lib/db/readCache"),
+    resolveSpecifier("open-sse/services/model.ts", "@/lib/db/readCache")?.split(path.sep).join("/"),
     "src/lib/db/readCache.ts"
   );
 });

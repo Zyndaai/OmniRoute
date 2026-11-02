@@ -19,8 +19,10 @@ test("MCP server bundle imports successfully on Node 24", () => {
   const outFile = join(outDir, "server.js");
 
   try {
+    // Windows ships `npx.cmd`, which can only be spawned through a shell.
+    const isWin = process.platform === "win32";
     execFileSync(
-      "npx",
+      isWin ? "npx.cmd" : "npx",
       [
         "esbuild",
         "open-sse/mcp-server/server.ts",
@@ -30,7 +32,7 @@ test("MCP server bundle imports successfully on Node 24", () => {
         "--format=esm",
         `--outfile=${outFile}`,
       ],
-      { cwd: repoRoot, stdio: "pipe" }
+      { cwd: repoRoot, stdio: "pipe", shell: isWin }
     );
 
     const bundled = readFileSync(outFile, "utf8");
