@@ -5,6 +5,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // This fork blocks keyless providers by default (src/lib/db/settings.ts); the upstream
+    // suites assume they start enabled, like tests/_setup/isolateDataDir.ts does for node:test.
+    env: { OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT: "enabled" },
     pool: "threads",
     // MCP suites initialize isolated SQLite databases; Vitest 5 at 20 workers
     // makes native migration/close operations contend and flakes audit tests.

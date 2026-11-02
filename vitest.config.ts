@@ -9,6 +9,9 @@ export default defineConfig({
     // 2026-10-28: 8 UI tests "timed out in 5000ms" that pass in ~1 s locally).
     testTimeout: 20000,
     globals: true,
+    // This fork blocks keyless providers by default (src/lib/db/settings.ts); the upstream
+    // suites assume they start enabled, like tests/_setup/isolateDataDir.ts does for node:test.
+    env: { OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT: "enabled" },
     setupFiles: ["./tests/_setup/vitestUiPolyfills.ts"],
     pool: "threads",
     maxWorkers: 20,

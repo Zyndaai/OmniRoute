@@ -22,7 +22,7 @@ afterEach(() => {
 
 describe("Header on the kit shell", () => {
   it(
-    "renders the sidebar trigger, page title, product switcher and actions",
+    "renders the sidebar trigger, page title and actions, without the Keak product switcher",
     { timeout: 20_000 },
     () => {
       const open = vi.fn();
@@ -37,7 +37,7 @@ describe("Header on the kit shell", () => {
       expect(header.getAttribute("role")).toBeNull();
       expect(screen.getByRole("button", { name: "Collapse sidebar" })).not.toBeNull();
       expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Providers/);
-      expect(screen.getByRole("navigation", { name: "Keak products" })).not.toBeNull();
+      expect(screen.queryByRole("navigation", { name: "Keak products" })).toBeNull();
       const quickNav = screen.getAllByRole("button", { name: "Open quick navigation" });
       expect(quickNav).toHaveLength(2); // desktop outline + mobile icon (jsdom ignores md:hidden)
       fireEvent.click(quickNav[0]);

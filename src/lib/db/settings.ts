@@ -23,6 +23,26 @@ import { decodeUserinfo } from "@/shared/utils/decodeUserinfo";
 import { type JsonRecord, toRecord } from "./settings/shared";
 import { resolveNoAuthSharedProviderProxy } from "./settings/noAuthProxyFallback";
 import { PROXY_BULK_IMPORT_LIMIT_DEFAULT } from "@/shared/constants/proxyBulkImport";
+import { NOAUTH_PROVIDERS } from "@/shared/constants/providers/noauth";
+
+/** Every keyless (no-auth) provider id. */
+export const NOAUTH_PROVIDER_IDS: readonly string[] = Object.values(NOAUTH_PROVIDERS).map(
+  (provider) => provider.id
+);
+
+/**
+ * Keyless (no-auth) providers start blocked: on an aggregator their public endpoints
+ * flood /v1/models with models nobody connected, and a request (or an auto/* combo)
+ * could reach a third-party service. Operators re-enable individual ones from
+ * Providers → No-auth. Only applies while `blockedProviders` was never saved.
+ * OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT=enabled restores upstream's all-enabled default
+ * (the unit-test setup sets it, so upstream's tests keep their premise).
+ */
+export function defaultBlockedProviders(): string[] {
+  return process.env.OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT?.trim().toLowerCase() === "enabled"
+    ? []
+    : [...NOAUTH_PROVIDER_IDS];
+}
 
 /**
  * Settings values stored encrypted at rest (AES-256-GCM via ./encryption).
@@ -216,6 +236,7 @@ export async function getSettings() {
     entraGraphClientSecret: "",
     mcpEnabled: false,
     a2aEnabled: false,
+    blockedProviders: defaultBlockedProviders(),
     hiddenSidebarItems: [],
     hiddenSidebarGroupLabels: [],
     sidebarSectionOrder: [],

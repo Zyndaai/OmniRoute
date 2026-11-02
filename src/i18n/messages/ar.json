@@ -1683,7 +1683,6 @@
     "quickNavigationTitle": "التنقل السريع (⌘K / Ctrl+K)",
     "openQuickNavigation": "فتح التنقل السريع",
     "openMenu": "فتح القائمة",
-    "products": "منتجات Keak",
     "switchToLightMode": "التبديل إلى الوضع الفاتح",
     "switchToDarkMode": "التبديل إلى الوضع الداكن",
     "language": "اللغة",
@@ -14838,20 +14837,6 @@
     "running": "جارٍ التشغيل...",
     "testFailed": "فشل الاختبار"
   },
-  "kimiSponsorBanner": {
-    "foundingFriendTitle": "Kimi (Moonshot AI) هو صديق المصدر المفتوح المؤسس لـ OmniRoute",
-    "description": "المستخدمون الجدد يحصلون على 15% رصيد API إضافي عند أول شحن. استخدم Kimi K3 في OmniRoute عبر واجهة Kimi API الرسمية.",
-    "cta": "احصل على مفتاح Kimi API",
-    "partnerLinkNote": "رابط شريك",
-    "dismissAriaLabel": "تجاهل"
-  },
-  "vscodeCopilotBanner": {
-    "title": "OmniRoute يعمل الآن داخل VS Code Copilot Chat",
-    "description": "ثبّت امتداد OmniCopilot المجاني وستظهر جميع نماذج OmniRoute مباشرة في منتقي النماذج في Copilot Chat الذي تستخدمه بالفعل.",
-    "cta": "احصل على الامتداد",
-    "secondaryNote": "متوفر أيضًا على Open VSX (Cursor، Windsurf، VSCodium…)",
-    "dismissAriaLabel": "تجاهل"
-  },
   "featureFlagExposeFunctionalGatewayMirrorsDescription": "قم بالإعلان عن معرفات المرايا '<gateway-alias>'/'<model>' على /v1/models للنماذج التي ليس لديها مالك قانوني لديه بيانات اعتماد نشطة ولكن بوابة تمرير مع بيانات اعتماد نشطة توجهها. تحذير: يضيف إدخالات الكتالوج لجميع العملاء عند تمكينه عالميًا.",
   "radarPage": {
     "title": "كتالوج الرادار",
@@ -15684,13 +15669,6 @@
     "toolsMismatch": "المزود لا يدعم استدعاء الأداة",
     "structuredOutputMismatch": "المزود لا يدعم الإخراج المنظم",
     "contextWindowMismatch": "تجاوز الطلب نافذة سياق المزود"
-  },
-  "cheaperInferenceSponsorBanner": {
-    "title": "Cheaper Inference صديق مفتوح المصدر لـ OmniRoute",
-    "description": "بوابة مرتبة حسب التكلفة تعيد بيع عشرات النماذج الرائدة من خلال نقطة نهاية واحدة متوافقة مع OpenAI — وتوجّه كل طلب إلى أرخص مزود مؤهل، من دون تجاوز السعر المُعلن مطلقًا.",
-    "cta": "الحصول على مفتاح API",
-    "partnerLinkNote": "رابط الشريك",
-    "dismissAriaLabel": "إغلاق"
   },
   "featureFlagOmnirouteDisableThinkingLevelVariantsDescription": "تعطيل إنشاء متغيرات مستوى التفكير (مثل -low و-medium و-high) في كتالوج /v1/models.",
   "connectionTest": {

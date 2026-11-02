@@ -57,6 +57,10 @@ jobs:
         with:
           context: .
           target: runner-base
+          # Private-repo runners have 2 CPUs / 8 GB RAM (public: 4 / 16). The Dockerfile default of
+          # 2 page-data workers peaked at 6.6 GB locally; 1 worker peaks at ~4.3 GB.
+          build-args: |
+            OMNIROUTE_BUILD_WORKERS=1
           push: true
           tags: |
             ${{ steps.repo.outputs.image }}:latest

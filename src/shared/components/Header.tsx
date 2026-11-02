@@ -2,7 +2,6 @@
 
 import { useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ProductSwitcher } from "@omniroute/ui-kit/keak-brand";
 import { SidebarTrigger, useSidebar } from "@omniroute/ui-kit/sidebar";
 
 const subscribePlatform = () => () => {};
@@ -59,7 +58,6 @@ import {
   type SidebarItemDefinition,
   type HideableSidebarItemId,
 } from "@/shared/constants/sidebarVisibility";
-import { KEAK_ACTIVE_PRODUCT, KEAK_PRODUCT_LINKS } from "@/shared/constants/keakProducts";
 import Button from "./Button";
 import Icon from "./Icon";
 
@@ -278,12 +276,6 @@ export default function Header({ onOpenCommandPalette }: HeaderProps) {
         )}
       </div>
       <div className="ms-auto flex items-center gap-2">
-        <ProductSwitcher
-          items={KEAK_PRODUCT_LINKS}
-          activeProduct={KEAK_ACTIVE_PRODUCT}
-          className="hidden md:block"
-          aria-label={t("products")}
-        />
         {onOpenCommandPalette && (
           <Button
             variant="outline"

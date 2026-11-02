@@ -84,6 +84,11 @@ process.env.ADOBE_FIREFLY_BROWSER_REFRESH ||= "0";
 // the real MITM path call addDNSEntries(); this env var makes it a no-op.
 process.env.OMNIROUTE_SKIP_DNS_WRITE = "1";
 
+// Keyless providers: this fork blocks them by default (src/lib/db/settings.ts
+// defaultBlockedProviders). The upstream tests assume a fresh install has them enabled,
+// so keep that premise here; tests of the blocked default unset it themselves.
+process.env.OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT ||= "enabled";
+
 // Catalog-build bound: under a busy parallel run a cold /v1/models catalog build can
 // exceed the 8s production default and answer 503 catalog_build_timeout, failing tests
 // that assert on the catalog itself. ||= so tests of the timeout path (which delete or
