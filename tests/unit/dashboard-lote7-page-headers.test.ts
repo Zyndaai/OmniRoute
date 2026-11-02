@@ -39,8 +39,8 @@ test("the six lote-7 pages render a kit PageHeader with their sidebar title", ()
   }
 });
 
-test("the sidebar title keys exist in en, pt-BR and vi", () => {
-  for (const locale of ["en", "pt-BR", "vi"]) {
+test("the sidebar title keys exist in en and ar", () => {
+  for (const locale of ["en", "ar"]) {
     const sidebar = JSON.parse(
       fs.readFileSync(path.join(ROOT, `src/i18n/messages/${locale}.json`), "utf8")
     ).sidebar;

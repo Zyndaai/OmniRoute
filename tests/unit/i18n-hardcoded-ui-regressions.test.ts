@@ -41,7 +41,7 @@ const residualKeys = [
 ];
 
 test("hardcoded UI residual keys exist in required catalogs", () => {
-  for (const locale of ["en", "fr", "vi", "pt-BR"]) {
+  for (const locale of ["en", "ar"]) {
     const messages = readMessages(locale);
     for (const key of residualKeys) {
       assert.equal(typeof getMessage(messages, key), "string", `${locale}.${key} must exist`);
@@ -49,8 +49,8 @@ test("hardcoded UI residual keys exist in required catalogs", () => {
   }
 });
 
-test("French and Vietnamese residual translations are complete", () => {
-  for (const locale of ["fr", "vi"]) {
+test("Arabic residual translations are complete", () => {
+  for (const locale of ["ar"]) {
     const messages = readMessages(locale);
     for (const key of residualKeys) {
       const value = getMessage(messages, key) as string;

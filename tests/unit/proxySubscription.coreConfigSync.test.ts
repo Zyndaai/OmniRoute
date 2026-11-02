@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 
 test("empty path writes nothing and never calls the renderer", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-core-empty-"));

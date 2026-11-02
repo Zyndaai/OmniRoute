@@ -4,6 +4,7 @@ import fs, { readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path, { join } from "node:path";
 import { IntlMessageFormat } from "intl-messageformat";
+import i18nConfig from "../../config/i18n.json" with { type: "json" };
 
 // Early selector skips (no control URL / unmapped set-aside key) bump an
 // in-memory counter while leaving the trigger result unchanged. The selector
@@ -293,7 +294,11 @@ function labelsOf(file: string) {
 }
 
 test("early-skip labels exist in every locale, compile as ICU and are translated", () => {
-  assert.ok(localeFiles.length >= 40, `expected the full locale set, got ${localeFiles.length}`);
+  assert.equal(
+    localeFiles.length,
+    i18nConfig.locales.length,
+    `expected one catalog per configured locale, got ${localeFiles.length}`
+  );
   const en = labelsOf("en.json");
   const failures: string[] = [];
   for (const file of localeFiles) {

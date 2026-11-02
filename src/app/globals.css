@@ -55,8 +55,6 @@
    `data-theme="dark"` (set by themeStore next to the `.dark` class), so light and dark share
    this single block. Values are never hex here — see tests/unit/design-kit-bridge.test.ts. */
 :root {
-  --desktop-safe-top: 0px;
-  --desktop-safe-bottom: 0px;
   color-scheme: light;
 
   /* Brand accent (lime) — the only accent; presets were retired (spec D4). */
@@ -262,11 +260,6 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-body.electron-macos {
-  --desktop-safe-top: 30px;
-  --desktop-safe-bottom: 8px;
 }
 
 /* iOS standalone PWA safe-area — keeps dashboard below the status bar */

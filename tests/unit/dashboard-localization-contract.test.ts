@@ -76,12 +76,12 @@ test("budget management does not expose deferred English-only states", () => {
 
 test("feature-flag descriptions are localized without changing flag values", () => {
   const card = readSource("src/app/(dashboard)/dashboard/settings/components/FeatureFlagCard.tsx");
-  const messages = JSON.parse(readSource("src/i18n/messages/vi.json"));
+  const messages = JSON.parse(readSource("src/i18n/messages/ar.json"));
   assert.match(card, /enumValues\.\$\{val\}/);
-  assert.ok(messages.featureFlags.definitions.REQUIRE_API_KEY.description.includes("khóa API"));
+  assert.ok(messages.featureFlags.definitions.REQUIRE_API_KEY.description.includes("مفتاح API"));
   assert.ok(
     messages.featureFlags.definitions.OMNIROUTE_AUTO_SYNC_CLAUDE_PROFILES.description.includes(
-      "Claude Code"
+      "Claude"
     )
   );
 });
@@ -112,17 +112,6 @@ test("no-auth provider controls contain no raw English headings", () => {
   assert.equal(sources.includes(">No authentication required<"), false);
   assert.equal(sources.includes(">Configure proxy<"), false);
   assert.equal(sources.includes(">Remove account<"), false);
-});
-
-test("Vietnamese navigation preserves engine and product names", () => {
-  const messages = JSON.parse(readSource("src/i18n/messages/vi.json"));
-  assert.equal(messages.sidebar.contextLite, "Lite");
-  assert.equal(messages.sidebar.contextAggressive, "Aggressive");
-  assert.equal(messages.sidebar.contextHeadroom, "Headroom");
-  assert.equal(messages.sidebar.contextSessionDedup, "Session Dedup");
-  assert.equal(messages.sidebar.compressionStudio, "Compression Studio");
-  assert.equal(messages.sidebar.cliCode, "CLI Code");
-  assert.equal(messages.sidebar.trafficInspector, "Traffic Inspector");
 });
 
 test("CLI cards use packaged brand icons whenever an asset exists", () => {

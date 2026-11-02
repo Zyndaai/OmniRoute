@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
 import ProviderLimits from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits";
 
 vi.unmock("next-intl");
@@ -115,7 +115,7 @@ function fixture(failCooldowns = false, malformed = false) {
   return requests;
 }
 function mount(locale: string) {
-  const m = locale === "en" ? en : zh;
+  const m = locale === "en" ? en : ar;
   render(
     <NextIntlClientProvider
       locale={locale}
@@ -143,7 +143,7 @@ it("renders the real page when browser storage is disabled", async () => {
   await waitFor(() => expect(document.querySelectorAll("[data-availability]")).toHaveLength(5));
   expect(document.querySelector("[data-drag-handle]")).toBeTruthy();
 });
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "top counters, filter, blocks and full/compact layouts share one availability projection (%s)",
   async (locale) => {
     const requests = fixture();
@@ -158,7 +158,9 @@ it.each(["en", "zh-CN"])(
       ["all", "ok", "cd5", "cdw", "act", "paused", "empty"].map((kind) => stat(kind).textContent);
     await waitFor(() => expect(stat("ok").querySelector(".text-2xl")).toHaveTextContent("2"));
     await waitFor(() =>
-      expect(stat("ok")).toHaveTextContent(locale === "en" ? "Includes 1" : "含 1")
+      expect(stat("ok")).toHaveTextContent(
+        locale === "en" ? "Includes 1" : "حسابًا واحدًا مقيّدًا جزئيًا"
+      )
     );
     expect(stat("cdw").querySelector(".text-2xl")).toHaveTextContent("1");
     const before = counters();

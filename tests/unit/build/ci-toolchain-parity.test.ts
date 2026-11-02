@@ -10,20 +10,6 @@ const root = new URL("../../../", import.meta.url);
 const action = parse(
   readFileSync(new URL(".github/actions/npm-ci-retry/action.yml", root), "utf8")
 );
-const acceptance = parse(
-  readFileSync(new URL(".github/workflows/release-acceptance.yml", root), "utf8")
-);
-
-test("release acceptance uses the repository's supported development runtime and installer", () => {
-  const steps = acceptance.jobs.acceptance.steps;
-  const setup = steps.find((step: { uses?: string }) =>
-    step.uses?.startsWith("actions/setup-node@")
-  );
-  assert.equal(setup.with["node-version-file"], ".node-version");
-  assert.ok(
-    steps.some((step: { uses?: string }) => step.uses === "./.github/actions/npm-ci-retry")
-  );
-});
 
 test("the exact npm version participates in dependency cache identity", () => {
   const cache = action.runs.steps.find((step: { id?: string }) => step.id === "node-modules");

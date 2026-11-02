@@ -188,22 +188,9 @@ type Workflow = {
   >;
 };
 
-const directRootInstalls = [
-  ["build", "build"],
-  ["electron-release", "web-build"],
-  ["electron-release", "build"],
-  ["mutation-redundancy", "stryker-nobail"],
-  ["nightly-llm-security", "promptfoo-guard"],
-  ["nightly-llm-security", "garak"],
-  ["nightly-mutation", "stryker"],
-  ["nightly-property", "property-random-seed"],
-  ["nightly-resilience", "heap"],
-  ["nightly-resilience", "chaos"],
-  ["nightly-resilience", "k6-soak"],
-  ["nightly-resilience", "a11y"],
-  ["nightly-schemathesis", "schemathesis"],
-  ["radar-export", "publish-export"],
-] as const;
+// The other upstream root installs (electron-release, nightly-*, mutation-redundancy,
+// radar-export) were removed from this self-hosted copy along with their workflows.
+const directRootInstalls = [["build", "build"]] as const;
 
 function installEnvironment(workflow: Workflow, jobName: string, step: InstallStep) {
   const job = workflow.jobs[jobName];

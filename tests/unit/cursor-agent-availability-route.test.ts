@@ -22,7 +22,7 @@
  * src/server/authz/policies/management.ts transitively touches the real DB
  * singleton at import time.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

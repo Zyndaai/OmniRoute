@@ -9,9 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..", "..");
 const require = createRequire(import.meta.url);
 const en = require("../../bin/cli/locales/en.json");
-const ptBR = require("../../bin/cli/locales/pt-BR.json");
-const zhCN = require("../../bin/cli/locales/zh-CN.json");
-const zhTW = require("../../bin/cli/locales/zh-TW.json");
+const ar = require("../../bin/cli/locales/ar.json");
 
 function flattenKeys(obj: Record<string, unknown>, prefix = ""): Set<string> {
   const keys = new Set<string>();
@@ -67,31 +65,26 @@ test("en.json contém todas as chaves usadas via t() nos comandos", () => {
   assert.deepEqual(missing, [], `Chaves faltando em en.json: ${missing.join(", ")}`);
 });
 
-test("pt-BR.json tem todas as seções top-level de en.json", () => {
+test("ar.json tem todas as seções top-level de en.json", () => {
   const enTop = Object.keys(en as object);
-  const ptTop = new Set(Object.keys(ptBR as object));
-  const missing = enTop.filter((k) => !ptTop.has(k));
-  assert.deepEqual(missing, [], `Seções top-level faltando em pt-BR.json: ${missing.join(", ")}`);
+  const arTop = new Set(Object.keys(ar as object));
+  const missing = enTop.filter((k) => !arTop.has(k));
+  assert.deepEqual(missing, [], `Seções top-level faltando em ar.json: ${missing.join(", ")}`);
 });
 
-for (const [name, cat] of [
-  ["zh-CN", zhCN],
-  ["zh-TW", zhTW],
-] as const) {
-  test(name + ".json tem paridade total de chaves com en.json", () => {
-    const catKeys = flattenKeys(cat as Record<string, unknown>);
-    const missing = [...enKeys].filter((k) => !catKeys.has(k));
-    assert.deepEqual(missing, [], name + ".json chaves faltando: " + missing.join(", "));
-  });
-}
+test("ar.json tem paridade total de chaves com en.json", () => {
+  const catKeys = flattenKeys(ar as Record<string, unknown>);
+  const missing = [...enKeys].filter((k) => !catKeys.has(k));
+  assert.deepEqual(missing, [], "ar.json chaves faltando: " + missing.join(", "));
+});
 
 test("i18n.mjs detecta locale por OMNIROUTE_LANG", async () => {
   const { resetForTests, detectLocale } = await import("../../bin/cli/i18n.mjs");
   const orig = process.env.OMNIROUTE_LANG;
-  process.env.OMNIROUTE_LANG = "pt-BR";
+  process.env.OMNIROUTE_LANG = "ar";
   resetForTests();
   const locale = detectLocale();
-  assert.equal(locale, "pt-BR");
+  assert.equal(locale, "ar");
   if (orig === undefined) delete process.env.OMNIROUTE_LANG;
   else process.env.OMNIROUTE_LANG = orig;
   resetForTests();
@@ -109,36 +102,12 @@ test("i18n.mjs usa fallback en quando locale não existe", async () => {
   resetForTests();
 });
 
-test("i18n.mjs resolve alias do config: OMNIROUTE_LANG=uk → uk-UA, fil_PH.UTF-8 → phi, in → id", async () => {
-  const { resetForTests, detectLocale } = await import("../../bin/cli/i18n.mjs");
-  const orig = process.env.OMNIROUTE_LANG;
-  process.env.OMNIROUTE_LANG = "uk";
-  resetForTests();
-  assert.equal(detectLocale(), "uk-UA");
-  process.env.OMNIROUTE_LANG = "fil_PH.UTF-8";
-  resetForTests();
-  assert.equal(detectLocale(), "phi");
-  process.env.OMNIROUTE_LANG = "uk_UA.UTF-8";
-  resetForTests();
-  assert.equal(detectLocale(), "uk-UA");
-  // `in` (retired duplicate Indonesian locale) must keep resolving to `id`, otherwise a
-  // saved OMNIROUTE_LANG=in silently falls back to English.
-  process.env.OMNIROUTE_LANG = "in";
-  resetForTests();
-  assert.equal(detectLocale(), "id");
-  if (orig === undefined) delete process.env.OMNIROUTE_LANG;
-  else process.env.OMNIROUTE_LANG = orig;
-  resetForTests();
-});
-
-test("i18n.mjs resolve base→regional e aliases: zh → zh-CN, zh-hant/zh_HK → zh-TW, UK → uk-UA", async () => {
+test("i18n.mjs resolve base e variantes POSIX: ar_SA.UTF-8 → ar, ar-EG → ar", async () => {
   const { resetForTests, detectLocale } = await import("../../bin/cli/i18n.mjs");
   const orig = process.env.OMNIROUTE_LANG;
   const cases: Array<[string, string]> = [
-    ["zh", "zh-CN"], // bare base language → first regional catalog declared in config/i18n.json
-    ["zh-hant", "zh-TW"], // alias family declared on zh-TW
-    ["zh_HK.UTF-8", "zh-TW"], // POSIX form of the zh-hk alias (charset stripped, _ → -)
-    ["UK", "uk-UA"], // upper-case input canonicalized through the alias map
+    ["ar_SA.UTF-8", "ar"], // POSIX form (charset stripped, _ → -), base language catalog
+    ["ar-EG", "ar"], // regional tag falls back to the base language catalog
   ];
   for (const [input, expected] of cases) {
     process.env.OMNIROUTE_LANG = input;
@@ -168,27 +137,11 @@ test("t() retorna a chave quando não existe no catálogo", async () => {
   resetForTests();
 });
 
-test("t() usa pt-BR quando disponível", async () => {
+test("t() usa ar quando disponível", async () => {
   const { resetForTests, t, setLocale } = await import("../../bin/cli/i18n.mjs");
   resetForTests();
-  setLocale("pt-BR");
+  setLocale("ar");
   const result = t("health.noServer");
-  assert.ok(result.includes("omniroute serve"), `Esperava mensagem pt-BR, obteve: ${result}`);
-  resetForTests();
-});
-
-test("maltese catalog interpolates the saved path", async () => {
-  const { resetForTests, t, setLocale } = await import("../../bin/cli/i18n.mjs");
-  resetForTests();
-  setLocale("mt");
-  const outPath = ["", "tmp", "out.json"].join("/");
-  const logsPath = ["", "tmp", "logs.json"].join("/");
-  const packsDir = ["", "tmp", "packs"].join("/");
-  assert.equal(t("test.saved", { path: outPath }), `Rizultati ħliefa fi ${outPath}`);
-  assert.equal(t("logs.exported", { path: logsPath }), `Logs issejvjati fi ${logsPath}`);
-  assert.equal(
-    t("packs.installed", { name: "demo", dir: packsDir }),
-    `pack "demo" installat u verifikat fi ${packsDir}`
-  );
+  assert.ok(result.includes("omniroute serve"), `Esperava mensagem ar, obteve: ${result}`);
   resetForTests();
 });

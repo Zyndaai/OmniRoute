@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 import QuotaLayoutPicker, {
   useQuotaLayout,
@@ -73,7 +73,7 @@ function project(c: HealthConnection, d = data) {
   });
 }
 function wrapper(ui: React.ReactNode, locale = "en") {
-  const m = locale === "en" ? en : zh;
+  const m = locale === "en" ? en : ar;
   return (
     <NextIntlClientProvider
       locale={locale}
@@ -175,7 +175,7 @@ it.each([1, 2, 40, 200])(
     expect(screen.queryByText("details")).toBeNull();
   }
 );
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "keeps all existing card actions reachable through account selection (%s)",
   (locale) => {
     const actions = {
@@ -215,10 +215,10 @@ it.each(["en", "zh-CN"])(
     expect(actions.onShowQuota).toHaveBeenCalledWith(scope, { name: "weekly" });
   }
 );
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "distinguishes paused from unknown and shows degraded observations (%s)",
   (locale) => {
-    const m = locale === "en" ? en : zh,
+    const m = locale === "en" ? en : ar,
       paused = { ...connection, isActive: false },
       unknown = { ...connection, id: "unknown" };
     localized(
@@ -251,7 +251,7 @@ it("invalidates open details and preview when filters remove the account", () =>
   view.rerender(wrapper(<QuotaHealthOverview {...props()} />));
   expect(screen.queryByText("details")).toBeNull();
 });
-it.each(["en", "zh-CN"])("localizes exact recovery duration and window labels (%s)", (locale) => {
+it.each(["en", "ar"])("localizes exact recovery duration and window labels (%s)", (locale) => {
   const d = {
     ...data,
     quotas: [
@@ -268,10 +268,10 @@ it.each(["en", "zh-CN"])("localizes exact recovery duration and window labels (%
   );
   fireEvent.mouseEnter(units()[0]);
   const tip = screen.getByRole("tooltip"),
-    m = locale === "en" ? en : zh;
+    m = locale === "en" ? en : ar;
   expect(tip).toHaveTextContent(m.usage.healthQuotaExhausted);
   expect(tip).toHaveTextContent(m.usage.weekly);
-  expect(tip).toHaveTextContent(locale === "en" ? "2 hours, 13 minutes" : "2小时13分钟");
+  expect(tip).toHaveTextContent(locale === "en" ? "2 hours, 13 minutes" : "ساعتان و13 دقيقة");
   expect(tip).not.toHaveTextContent("2099-01-01T");
 });
 it("clamps the portal card inside a 390px viewport using measured geometry", () => {
@@ -302,9 +302,12 @@ function LayoutHarness() {
   return <QuotaLayoutPicker value={layoutMode} onChange={selectLayout} />;
 }
 it("defaults to localized overview and persists explicit legacy layouts across remounts", () => {
-  const view = localized(<LayoutHarness />, "zh-CN");
-  expect(screen.getByRole("button", { name: "健康总览" })).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(screen.getByRole("button", { name: "完整" }));
+  const view = localized(<LayoutHarness />, "ar");
+  expect(screen.getByRole("button", { name: ar.usage.healthOverview })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  fireEvent.click(screen.getByRole("button", { name: ar.usage.layoutFull }));
   expect(localStorage.getItem("omniroute:limits:layoutMode")).toBe("full");
   view.unmount();
   const second = localized(<LayoutHarness />);
@@ -328,8 +331,8 @@ it("still switches layouts when localStorage is unavailable", () => {
 it.each([
   { compact: false, locale: "en" },
   { compact: true, locale: "en" },
-  { compact: false, locale: "zh-CN" },
-  { compact: true, locale: "zh-CN" },
+  { compact: false, locale: "ar" },
+  { compact: true, locale: "ar" },
 ])(
   "full/compact follows saved provider order without handles ($locale, compact=$compact)",
   ({ compact, locale }) => {

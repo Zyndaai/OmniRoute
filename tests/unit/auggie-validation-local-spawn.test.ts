@@ -3,7 +3,7 @@
 // `allowLocalSpawn: false` for non-loopback callers, and the dispatcher forwards it to every
 // specialty validator — but the Auggie validator took no options and always spawned the
 // binary. A remote caller must never make the host start a process (Hard Rules #15/#17).
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,10 +23,13 @@ process.env.AUGGIE_BIN = FAKE_AUGGIE;
 const { validateAuggieProvider } =
   await import("../../src/lib/providers/validation/specialtyInline.ts");
 const { validateProviderApiKey } = await import("../../src/lib/providers/validation.ts");
+const core = await import("../../src/lib/db/core.ts");
 
 test.after(() => {
   if (savedBin === undefined) delete process.env.AUGGIE_BIN;
   else process.env.AUGGIE_BIN = savedBin;
+  // Close the SQLite handle first: Windows cannot delete an open database file.
+  core.resetDbInstance();
   fs.rmSync(TEST_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

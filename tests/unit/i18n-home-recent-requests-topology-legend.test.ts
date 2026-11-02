@@ -4,6 +4,8 @@ import { test } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import i18nConfig from "../../config/i18n.json" with { type: "json" };
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const MESSAGES_DIR = path.join(repoRoot, "src", "i18n", "messages");
 const PLACEHOLDER_PREFIX = "__MISSING__:";
@@ -46,35 +48,16 @@ const TOPOLOGY_LEGEND_KEYS = [
 const HOME_WIDGET_KEYS = [...RECENT_REQUESTS_KEYS, ...TOPOLOGY_LEGEND_KEYS];
 
 // Locales that must carry a real translation, never an English copy nor a placeholder.
-const TRANSLATED_LOCALES = ["es", "pt", "pt-BR", "fr", "de", "it", "vi"];
+const TRANSLATED_LOCALES = ["ar"];
 // Genuine cognates: the correct translation happens to spell exactly like the English value.
-const COGNATES = new Set([
-  "es.home.topologyLegendError",
-  // "Model" is the correct Croatian and Slovenian word; there is nothing to translate.
-  "hr.home.recentRequestsModel",
-  "sl.home.recentRequestsModel",
-  // PR-4 retranslated every verbatim-English leaf and these came back unchanged: "Model" is
-  // also the word in Azerbaijani, Czech, Danish, Indonesian, Malay, Dutch, Polish, Romanian,
-  // Slovak, Turkish and Uzbek; "Recent" is Dutch; "Error" is the Filipino loanword.
-  "az.home.recentRequestsModel",
-  // "Model" is also the Bosnian word (same cognate as hr/sr) — added with the locale in #14187.
-  "bs.home.recentRequestsModel",
-  "cs.home.recentRequestsModel",
-  "da.home.recentRequestsModel",
-  "id.home.recentRequestsModel",
-  "ms.home.recentRequestsModel",
-  "nl.home.recentRequestsModel",
-  "nl.home.topologyLegendRecent",
-  "phi.home.topologyLegendError",
-  "pl.home.recentRequestsModel",
-  "ro.home.recentRequestsModel",
-  "sk.home.recentRequestsModel",
-  "tr.home.recentRequestsModel",
-  "uz.home.recentRequestsModel",
-]);
+const COGNATES = new Set<string>([]);
 
 test("home widget keys exist as non-empty strings in every locale catalog", () => {
-  assert.ok(allLocales.length >= 42, `expected the 42 locale catalogs, found ${allLocales.length}`);
+  assert.deepEqual(
+    [...allLocales].sort(),
+    i18nConfig.locales.map((locale) => locale.code).sort(),
+    "message catalogs must match the locales configured in config/i18n.json"
+  );
   for (const locale of allLocales) {
     const messages = readMessages(locale);
     for (const key of HOME_WIDGET_KEYS) {

@@ -45,19 +45,7 @@ const scheduledGuard = findScheduledJobsWithoutGuard as (
 // scheduled-run guard — every scheduled workflow runs only in the upstream repo
 // ─────────────────────────────────────────────────────────────────────────────
 
-const EXPECTED_SCHEDULED_WORKFLOWS = [
-  "docker-publish.yml",
-  "nightly-compat.yml",
-  "nightly-llm-security.yml",
-  "nightly-mutation.yml",
-  "nightly-property.yml",
-  "nightly-release-green.yml",
-  "nightly-resilience.yml",
-  "nightly-schemathesis.yml",
-  "radar-export.yml",
-  "scorecard.yml",
-  "test-quarantine.yml",
-];
+const EXPECTED_SCHEDULED_WORKFLOWS = ["test-quarantine.yml"];
 
 function readWorkflowFiles(): string[] {
   return collectWorkflowFiles(
@@ -488,7 +476,7 @@ test("quality admission covers both bases and delegates required build/package c
       "utf8"
     )
   );
-  for (const job of ["build", "package-artifact", "electron-package-smoke"]) {
+  for (const job of ["build", "package-artifact"]) {
     assert.equal(policy.profiles.ci.jobs[job].disposition, "required", job);
     assert.match(ci, new RegExp("\\n  " + job + ":\\n"), "CI implements " + job);
   }

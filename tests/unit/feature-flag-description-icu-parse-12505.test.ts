@@ -31,7 +31,14 @@ function flatten(node: unknown, prefix: string, out: Map<string, string>): void 
 }
 
 test("every featureFlags.definitions message compiles as ICU in every locale", () => {
-  assert.ok(localeFiles.length >= 40, `expected the full locale set, got ${localeFiles.length}`);
+  const configuredLocales = JSON.parse(
+    readFileSync(join(import.meta.dirname, "../../config/i18n.json"), "utf8")
+  ).locales as unknown[];
+  assert.equal(
+    localeFiles.length,
+    configuredLocales.length,
+    `expected one message file per configured locale, got ${localeFiles.length}`
+  );
 
   const failures: string[] = [];
   for (const file of localeFiles) {

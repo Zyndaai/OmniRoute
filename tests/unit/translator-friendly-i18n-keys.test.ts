@@ -2,7 +2,7 @@
  * Unit tests for i18n key additions in the translator namespace (F1).
  *
  * Verifies that all ~51 new keys added by F1 are present in both en.json
- * and pt-BR.json, and that pt-BR translations are not identical to English
+ * and ar.json, and that ar translations are not identical to English
  * for the keys that should obviously differ.
  *
  * Also includes a non-regression check that old keys still exist.
@@ -16,16 +16,18 @@ import { resolve } from "node:path";
 
 const ROOT = resolve(process.cwd());
 
-const en = JSON.parse(
-  readFileSync(resolve(ROOT, "src/i18n/messages/en.json"), "utf-8")
-) as Record<string, unknown>;
+const en = JSON.parse(readFileSync(resolve(ROOT, "src/i18n/messages/en.json"), "utf-8")) as Record<
+  string,
+  unknown
+>;
 
-const ptBR = JSON.parse(
-  readFileSync(resolve(ROOT, "src/i18n/messages/pt-BR.json"), "utf-8")
-) as Record<string, unknown>;
+const ar = JSON.parse(readFileSync(resolve(ROOT, "src/i18n/messages/ar.json"), "utf-8")) as Record<
+  string,
+  unknown
+>;
 
 const enTranslator = (en["translator"] ?? {}) as Record<string, unknown>;
-const ptBRTranslator = (ptBR["translator"] ?? {}) as Record<string, unknown>;
+const arTranslator = (ar["translator"] ?? {}) as Record<string, unknown>;
 
 // ─── New keys added by F1 ─────────────────────────────────────────────────────
 
@@ -108,15 +110,15 @@ const NEW_KEYS = [
 
 // ─── Keys that should obviously differ from English (spot check) ──────────────
 
-const OBVIOUSLY_TRANSLATED_IN_PT = [
-  "simpleAppUsesLabel",    // "My app uses" vs "Minha app usa"
-  "simpleSendToLabel",     // "Send to" vs "Enviar para"
-  "simpleModePreview",     // "Preview translation only" vs "Só ver tradução"
-  "simpleModeSend",        // "Send and see response" vs "Enviar e ver resposta"
-  "conceptDiagramAppLabel", // "Your app" vs "Sua app"
-  "conceptHowItWorksToggle", // "How it works" vs "Como funciona"
-  "monitorOpenTranslateButton", // "Go to Translate" vs "Ir para Translate"
-  "simpleStartWithExamplePlaceholder", // "Select a ready-made example" vs "Selecione um exemplo pronto"
+const OBVIOUSLY_TRANSLATED_IN_AR = [
+  "simpleAppUsesLabel", // "My app uses"
+  "simpleSendToLabel", // "Send to"
+  "simpleModePreview", // "Preview translation only"
+  "simpleModeSend", // "Send and see response"
+  "conceptDiagramAppLabel", // "Your app"
+  "conceptHowItWorksToggle", // "How it works"
+  "monitorOpenTranslateButton", // "Go to Translate"
+  "simpleStartWithExamplePlaceholder", // "Select a ready-made example"
 ];
 
 // ─── Old keys that must still exist (non-regression) ─────────────────────────
@@ -141,38 +143,35 @@ const OLD_KEYS_MUST_SURVIVE = [
 describe("F1 new keys — present in en.json", () => {
   for (const key of NEW_KEYS) {
     it(`en.translator.${key} exists`, () => {
-      assert.ok(
-        key in enTranslator,
-        `Missing key "translator.${key}" in en.json`
-      );
+      assert.ok(key in enTranslator, `Missing key "translator.${key}" in en.json`);
       const val = enTranslator[key];
       assert.ok(typeof val === "string" && val.length > 0, `Key "translator.${key}" is empty`);
     });
   }
 });
 
-describe("F1 new keys — present in pt-BR.json", () => {
+describe("F1 new keys — present in ar.json", () => {
   for (const key of NEW_KEYS) {
-    it(`pt-BR.translator.${key} exists`, () => {
+    it(`ar.translator.${key} exists`, () => {
+      assert.ok(key in arTranslator, `Missing key "translator.${key}" in ar.json`);
+      const val = arTranslator[key];
       assert.ok(
-        key in ptBRTranslator,
-        `Missing key "translator.${key}" in pt-BR.json`
+        typeof val === "string" && val.length > 0,
+        `Key "translator.${key}" is empty in ar`
       );
-      const val = ptBRTranslator[key];
-      assert.ok(typeof val === "string" && val.length > 0, `Key "translator.${key}" is empty in pt-BR`);
     });
   }
 });
 
-describe("PT-BR translations differ from English for obviously translated keys", () => {
-  for (const key of OBVIOUSLY_TRANSLATED_IN_PT) {
-    it(`translator.${key} is different between en and pt-BR`, () => {
+describe("AR translations differ from English for obviously translated keys", () => {
+  for (const key of OBVIOUSLY_TRANSLATED_IN_AR) {
+    it(`translator.${key} is different between en and ar`, () => {
       const enVal = enTranslator[key];
-      const ptVal = ptBRTranslator[key];
+      const arVal = arTranslator[key];
       assert.notEqual(
         enVal,
-        ptVal,
-        `Key "translator.${key}" has identical en and pt-BR values: "${enVal}"`
+        arVal,
+        `Key "translator.${key}" has identical en and ar values: "${enVal}"`
       );
     });
   }
@@ -189,12 +188,12 @@ describe("Non-regression — old keys still exist in en.json", () => {
   }
 });
 
-describe("Non-regression — old keys still exist in pt-BR.json", () => {
+describe("Non-regression — old keys still exist in ar.json", () => {
   for (const key of OLD_KEYS_MUST_SURVIVE) {
-    it(`pt-BR.translator.${key} still exists`, () => {
+    it(`ar.translator.${key} still exists`, () => {
       assert.ok(
-        key in ptBRTranslator,
-        `Old key "translator.${key}" was removed from pt-BR.json (regression!)`
+        key in arTranslator,
+        `Old key "translator.${key}" was removed from ar.json (regression!)`
       );
     });
   }
@@ -210,12 +209,12 @@ describe("F1 total new keys count", () => {
     );
   });
 
-  it(`all ${NEW_KEYS.length} new keys exist in pt-BR.json`, () => {
-    const missingKeys = NEW_KEYS.filter((k) => !(k in ptBRTranslator));
+  it(`all ${NEW_KEYS.length} new keys exist in ar.json`, () => {
+    const missingKeys = NEW_KEYS.filter((k) => !(k in arTranslator));
     assert.equal(
       missingKeys.length,
       0,
-      `Missing ${missingKeys.length} keys in pt-BR.json: ${missingKeys.join(", ")}`
+      `Missing ${missingKeys.length} keys in ar.json: ${missingKeys.join(", ")}`
     );
   });
 });

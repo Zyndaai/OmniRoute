@@ -4,11 +4,11 @@ import { readFileSync } from "node:fs";
 import { IntlMessageFormat } from "intl-messageformat";
 
 const cases = [
-  ["bs", "combos.playgroundEmptyHint", "strong"],
-  ["bs", "oauthModal.gheDescription", "code"],
-  ["bs", "pricingModal.ratesDescription", "strong"],
-  ["bs", "traeAuthModal.authorizeImportant", "strong"],
-  ["yo", "oauthModal.googleLoopbackWhatHappens", "code"],
+  ["ar", "combos.playgroundEmptyHint", "strong"],
+  ["ar", "oauthModal.gheDescription", "code"],
+  ["ar", "pricingModal.ratesDescription", "strong"],
+  ["ar", "traeAuthModal.authorizeImportant", "strong"],
+  ["ar", "oauthModal.googleLoopbackWhatHappens", "code"],
 ];
 
 for (const [locale, key, expectedTag] of cases) {

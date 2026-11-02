@@ -4,7 +4,7 @@
 // a retry. The script now serialises itself on a lock in the common git dir (flock, with a
 // mkdir fallback) and rolls the branch back when the worktree never came to exist.
 // Every fixture is a throwaway repository; the real repo is never touched.
-import { after, test } from "node:test";
+import { after, test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {

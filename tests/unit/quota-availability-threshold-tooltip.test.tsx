@@ -3,16 +3,16 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
 import HealthAccountTooltip from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/HealthAccountTooltip";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 
 vi.unmock("next-intl");
 afterEach(cleanup);
-for (const locale of ["en", "zh-CN"]) {
+for (const locale of ["en", "ar"]) {
   it(`${locale} tooltip shows the server's positive-quota cutoff and blocking window`, () => {
     const now = Date.now();
-    const messages = locale === "en" ? en : zh;
+    const messages = locale === "en" ? en : ar;
     const account = buildHealthAccount(
       { id: "synthetic-threshold", provider: "kimi-coding", isActive: true },
       { quotas: [{ name: "code_5h", remainingPercentage: 1 }] },
@@ -58,7 +58,8 @@ for (const locale of ["en", "zh-CN"]) {
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip.textContent).toContain(messages.usage.quotaCutoffsColumnHelp);
     expect(tooltip.textContent).toContain(messages.usage.healthFiveHour);
-    expect(tooltip.textContent).toContain("1% ≤ 2%");
+    // Arabic number formatting wraps "%" in bidi marks; strip them before comparing.
+    expect(tooltip.textContent!.replace(/[‎‏]/g, "")).toContain("1% ≤ 2%");
     expect(tooltip.textContent).not.toContain(messages.usage.healthQuotaExhausted);
     expect(tooltip.textContent).not.toContain("NaN");
   });

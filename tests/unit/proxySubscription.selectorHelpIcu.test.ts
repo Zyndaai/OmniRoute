@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { IntlMessageFormat } from "intl-messageformat";
+import i18nConfig from "../../config/i18n.json" with { type: "json" };
 
 const messagesDir = join(import.meta.dirname, "../../src/i18n/messages");
 
@@ -16,7 +17,11 @@ const messagesDir = join(import.meta.dirname, "../../src/i18n/messages");
 const localeFiles = readdirSync(messagesDir).filter((f) => f.endsWith(".json"));
 
 test("selectorHelp compiles as ICU and renders a literal <name> in every locale", () => {
-  assert.ok(localeFiles.length >= 40, `expected the full locale set, got ${localeFiles.length}`);
+  assert.equal(
+    localeFiles.length,
+    i18nConfig.locales.length,
+    `expected one catalog per configured locale, got ${localeFiles.length}`
+  );
 
   const failures: string[] = [];
   for (const file of localeFiles) {

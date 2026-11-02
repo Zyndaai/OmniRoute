@@ -8,7 +8,7 @@
  * or touched — CI never needs the real Augment CLI installed.
  */
 
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

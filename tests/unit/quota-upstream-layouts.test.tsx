@@ -8,7 +8,7 @@ vi.unmock("next-intl");
 vi.mock("@/shared/components/ConnectionTestButton", () => ({ default: () => null }));
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
 import QuotaCardGrid from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCardGrid";
 import { buildHealthAccount } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 
@@ -54,10 +54,10 @@ afterEach(() => {
   localStorage.clear();
 });
 
-for (const locale of ["en", "zh-CN"]) {
+for (const locale of ["en", "ar"]) {
   for (const layout of ["overview", "full", "compact"]) {
     it(`preserves per-account row visibility, speed, and quota thresholds in ${layout} (${locale})`, () => {
-      const messages = locale === "en" ? en : zh;
+      const messages = locale === "en" ? en : ar;
       const onHideQuota = vi.fn(),
         onShowQuota = vi.fn();
       const { container } = render(

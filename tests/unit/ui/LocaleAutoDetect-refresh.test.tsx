@@ -76,26 +76,21 @@ describe("LocaleAutoDetect refresh gating", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  // Alias wiring guard: the component must hand `LOCALE_ALIASES` to
-  // `detectBrowserLocale`. `fil` (Filipino) is the discriminating input — no
-  // locale code starts with `fil`, so with the real config it resolves to `phi`
-  // ONLY through the declared alias; a forgotten third argument yields null and
-  // no cookie is written.
-  it("persists the aliased locale for a Filipino browser (fil → phi)", async () => {
+  // Only en and ar ship: a regional Arabic tag resolves to `ar`, and a browser
+  // language with no configured locale writes no cookie and does not refresh.
+  it("persists ar for a regional Arabic browser (ar-EG)", async () => {
     document.documentElement.lang = "en";
-    Object.defineProperty(navigator, "languages", { value: ["fil"], configurable: true });
+    Object.defineProperty(navigator, "languages", { value: ["ar-EG"], configurable: true });
     await mount();
-    expect(document.cookie).toContain("NEXT_LOCALE=phi");
+    expect(document.cookie).toContain("NEXT_LOCALE=ar");
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  // Script-tagged Traditional Chinese must not fall through to zh-CN (Simplified,
-  // the first zh-* locale in config order): `zh-hant` is a declared alias of zh-TW.
-  it("persists zh-TW for a zh-Hant-TW browser, not zh-CN", async () => {
+  it("leaves an unsupported browser language alone", async () => {
     document.documentElement.lang = "en";
-    Object.defineProperty(navigator, "languages", { value: ["zh-Hant-TW"], configurable: true });
+    Object.defineProperty(navigator, "languages", { value: ["fil"], configurable: true });
     await mount();
-    expect(document.cookie).toContain("NEXT_LOCALE=zh-TW");
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(document.cookie).not.toContain("NEXT_LOCALE=");
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

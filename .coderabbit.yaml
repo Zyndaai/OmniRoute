@@ -95,7 +95,7 @@ reviews:
       - name: "Tests for production code"
         mode: warning
         instructions: >-
-          If production code under src/, open-sse/, electron/ or bin/ changes, the PR must add or
+          If production code under src/, open-sse/ or bin/ changes, the PR must add or
           update tests (AGENTS.md Hard Rules #8 and #18).
       - name: "No AI attribution"
         mode: warning

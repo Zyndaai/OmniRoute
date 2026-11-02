@@ -1,5 +1,5 @@
 // #8406: devin-cli ACP wire-format protocol fixes
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

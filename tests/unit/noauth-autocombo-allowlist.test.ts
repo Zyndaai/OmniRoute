@@ -29,7 +29,7 @@
  * here. Adding `toolCalling: "emulated"` to another NOAUTH_PROVIDERS entry WILL
  * change the pool and must update ALLOWED_NOAUTH_PROVIDERS below.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

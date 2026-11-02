@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
+import i18nConfig from "../../config/i18n.json" with { type: "json" };
+
 import {
   analyze,
   classifyKey,
@@ -103,7 +105,7 @@ test("retired theme-preset keys and playground.closeExportModal are gone from al
     "playground.closeExportModal",
   ];
   const files = fs.readdirSync(MESSAGES_DIR).filter((f) => f.endsWith(".json"));
-  assert.ok(files.length >= 67);
+  assert.equal(files.length, i18nConfig.locales.length);
   for (const file of files) {
     const data = JSON.parse(fs.readFileSync(path.join(MESSAGES_DIR, file), "utf8"));
     const keys = new Set(flattenKeys(data));

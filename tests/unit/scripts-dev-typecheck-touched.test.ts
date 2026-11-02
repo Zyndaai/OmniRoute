@@ -4,7 +4,7 @@
 // import), classify tsc diagnostics into "in a touched file" versus "elsewhere", always
 // delete the temp tsconfig, and keep the full log under the main checkout's _artifacts/.
 // `tsc` itself is replaced by a stub through TSC_BIN so the test is fast and hermetic.
-import { after, test } from "node:test";
+import { after, test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

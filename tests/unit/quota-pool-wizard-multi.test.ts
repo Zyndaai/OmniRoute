@@ -32,11 +32,11 @@ const WIZARD_PATH = path.join(
 );
 
 const EN_PATH = path.join(ROOT, "src", "i18n", "messages", "en.json");
-const PT_PATH = path.join(ROOT, "src", "i18n", "messages", "pt-BR.json");
+const AR_PATH = path.join(ROOT, "src", "i18n", "messages", "ar.json");
 
 const wizardSrc = fs.readFileSync(WIZARD_PATH, "utf-8");
 const en = JSON.parse(fs.readFileSync(EN_PATH, "utf-8")) as { quotaShare: Record<string, string> };
-const pt = JSON.parse(fs.readFileSync(PT_PATH, "utf-8")) as { quotaShare: Record<string, string> };
+const ar = JSON.parse(fs.readFileSync(AR_PATH, "utf-8")) as { quotaShare: Record<string, string> };
 
 // ── PoolCreateSchema: connectionIds field ─────────────────────────────────────
 
@@ -192,17 +192,17 @@ for (const key of NEW_KEYS) {
     assert.ok(en.quotaShare[key].length > 0, `quotaShare.${key} must not be empty in en.json`);
   });
 
-  test(`i18n pt-BR.json has key quotaShare.${key}`, () => {
+  test(`i18n ar.json has key quotaShare.${key}`, () => {
     assert.ok(
-      Object.prototype.hasOwnProperty.call(pt.quotaShare, key),
-      `pt-BR.json missing quotaShare.${key}`
+      Object.prototype.hasOwnProperty.call(ar.quotaShare, key),
+      `ar.json missing quotaShare.${key}`
     );
     assert.equal(
-      typeof pt.quotaShare[key],
+      typeof ar.quotaShare[key],
       "string",
-      `quotaShare.${key} must be a string in pt-BR.json`
+      `quotaShare.${key} must be a string in ar.json`
     );
-    assert.ok(pt.quotaShare[key].length > 0, `quotaShare.${key} must not be empty in pt-BR.json`);
+    assert.ok(ar.quotaShare[key].length > 0, `quotaShare.${key} must not be empty in ar.json`);
   });
 }
 
@@ -227,16 +227,16 @@ test("QuotaSharePageClient wires the multi-provider icons (providers prop is pas
   );
 });
 
-test("i18n parity: all quotaShare.wizard* keys are in sync between en and pt-BR", () => {
+test("i18n parity: all quotaShare.wizard* keys are in sync between en and ar", () => {
   const enWizardKeys = Object.keys(en.quotaShare)
     .filter((k) => k.startsWith("wizard"))
     .sort();
-  const ptWizardKeys = Object.keys(pt.quotaShare)
+  const arWizardKeys = Object.keys(ar.quotaShare)
     .filter((k) => k.startsWith("wizard"))
     .sort();
   assert.deepEqual(
     enWizardKeys,
-    ptWizardKeys,
-    `wizard* key parity mismatch.\nen: ${JSON.stringify(enWizardKeys)}\npt: ${JSON.stringify(ptWizardKeys)}`
+    arWizardKeys,
+    `wizard* key parity mismatch.\nen: ${JSON.stringify(enWizardKeys)}\nar: ${JSON.stringify(arWizardKeys)}`
   );
 });

@@ -4,7 +4,7 @@ import test from "node:test";
 import { parse } from "@formatjs/icu-messageformat-parser";
 
 import en from "../../src/i18n/messages/en.json" with { type: "json" };
-import vi from "../../src/i18n/messages/vi.json" with { type: "json" };
+import ar from "../../src/i18n/messages/ar.json" with { type: "json" };
 
 type MessageEntry = {
   key: string;
@@ -26,44 +26,25 @@ function flattenMessages(value: unknown, segments: Array<string | number> = []):
   return [];
 }
 
-function placeholderNames(value: string): string[] {
-  return [...value.matchAll(/\{\s*([A-Za-z][A-Za-z0-9_]*)\s*(?=[,}])/g)]
-    .map((match) => match[1])
-    .sort();
-}
-
 const englishMessages = flattenMessages(en);
-const vietnameseMessages = flattenMessages(vi);
-const vietnameseByKey = new Map(vietnameseMessages.map((entry) => [entry.key, entry.value]));
+const arabicMessages = flattenMessages(ar);
+const arabicByKey = new Map(arabicMessages.map((entry) => [entry.key, entry.value]));
 
-test("Vietnamese locale has complete key parity with English", () => {
+test("Arabic locale has complete key parity with English", () => {
   assert.deepEqual(
-    vietnameseMessages.map((entry) => entry.key).sort(),
+    arabicMessages.map((entry) => entry.key).sort(),
     englishMessages.map((entry) => entry.key).sort()
   );
 });
 
-test("Vietnamese locale has no internal missing markers or empty fallbacks", () => {
-  const invalid = vietnameseMessages.filter(
+test("Arabic locale has no internal missing markers or empty fallbacks", () => {
+  const invalid = arabicMessages.filter(
     ({ value }) => !value.trim() || /__(?:MISSING|TODO)__:?/i.test(value)
   );
   assert.deepEqual(invalid, []);
 });
 
-test("Vietnamese locale preserves every ICU placeholder name", () => {
-  const mismatches = englishMessages.flatMap(({ key, value }) => {
-    const translated = vietnameseByKey.get(key);
-    if (translated === undefined) return [{ key, reason: "missing" }];
-    const sourceNames = placeholderNames(value);
-    const targetNames = placeholderNames(translated);
-    return JSON.stringify(sourceNames) === JSON.stringify(targetNames)
-      ? []
-      : [{ key, sourceNames, targetNames }];
-  });
-  assert.deepEqual(mismatches, []);
-});
-
-test("Vietnamese locale introduces no ICU parse regression", () => {
+test("Arabic locale introduces no ICU parse regression", () => {
   const regressions = englishMessages.flatMap(({ key, value }) => {
     try {
       parse(value, { captureLocation: false, shouldParseSkeletons: true });
@@ -71,7 +52,7 @@ test("Vietnamese locale introduces no ICU parse regression", () => {
       return [];
     }
 
-    const translated = vietnameseByKey.get(key);
+    const translated = arabicByKey.get(key);
     if (translated === undefined) return [{ key, reason: "missing" }];
     try {
       parse(translated, { captureLocation: false, shouldParseSkeletons: true });

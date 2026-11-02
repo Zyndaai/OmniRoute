@@ -30,7 +30,7 @@ const WIZARD_PATH = join(
 );
 
 const EN_PATH = join(ROOT, "src/i18n/messages/en.json");
-const PT_PATH = join(ROOT, "src/i18n/messages/pt-BR.json");
+const AR_PATH = join(ROOT, "src/i18n/messages/ar.json");
 
 const pageSrc = readFileSync(PAGE_CLIENT_PATH, "utf8");
 const wizardSrc = readFileSync(WIZARD_PATH, "utf8");
@@ -254,31 +254,27 @@ test("i18n: all group keys present in en.json quotaShare namespace", () => {
   }
 });
 
-test("i18n: all group keys present in pt-BR.json quotaShare namespace", () => {
-  const pt = JSON.parse(readFileSync(PT_PATH, "utf8")) as Record<string, Record<string, string>>;
+test("i18n: all group keys present in ar.json quotaShare namespace", () => {
+  const ar = JSON.parse(readFileSync(AR_PATH, "utf8")) as Record<string, Record<string, string>>;
   for (const k of GROUP_KEYS) {
-    assert.equal(typeof pt["quotaShare"]?.[k], "string", `pt-BR.json missing quotaShare.${k}`);
+    assert.equal(typeof ar["quotaShare"]?.[k], "string", `ar.json missing quotaShare.${k}`);
   }
 });
 
-test("i18n: parity — en and pt-BR have exactly the same group keys", () => {
+test("i18n: parity — en and ar have exactly the same group keys", () => {
   const en = JSON.parse(readFileSync(EN_PATH, "utf8")) as Record<string, Record<string, string>>;
-  const pt = JSON.parse(readFileSync(PT_PATH, "utf8")) as Record<string, Record<string, string>>;
+  const ar = JSON.parse(readFileSync(AR_PATH, "utf8")) as Record<string, Record<string, string>>;
   for (const k of GROUP_KEYS) {
     assert.ok(k in (en["quotaShare"] ?? {}), `en.json missing quotaShare.${k}`);
-    assert.ok(k in (pt["quotaShare"] ?? {}), `pt-BR.json missing quotaShare.${k}`);
+    assert.ok(k in (ar["quotaShare"] ?? {}), `ar.json missing quotaShare.${k}`);
   }
 });
 
-test("i18n: no group keys are present in en but missing from pt-BR (full parity)", () => {
+test("i18n: no group keys are present in en but missing from ar (full parity)", () => {
   const en = JSON.parse(readFileSync(EN_PATH, "utf8")) as Record<string, Record<string, string>>;
-  const pt = JSON.parse(readFileSync(PT_PATH, "utf8")) as Record<string, Record<string, string>>;
+  const ar = JSON.parse(readFileSync(AR_PATH, "utf8")) as Record<string, Record<string, string>>;
   const enKeys = new Set(Object.keys(en["quotaShare"] ?? {}));
-  const ptKeys = new Set(Object.keys(pt["quotaShare"] ?? {}));
-  const missingInPt = GROUP_KEYS.filter((k) => enKeys.has(k) && !ptKeys.has(k));
-  assert.deepEqual(
-    missingInPt,
-    [],
-    `pt-BR.json missing quotaShare keys: ${missingInPt.join(", ")}`
-  );
+  const arKeys = new Set(Object.keys(ar["quotaShare"] ?? {}));
+  const missingInAr = GROUP_KEYS.filter((k) => enKeys.has(k) && !arKeys.has(k));
+  assert.deepEqual(missingInAr, [], `ar.json missing quotaShare keys: ${missingInAr.join(", ")}`);
 });

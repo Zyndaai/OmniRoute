@@ -7,7 +7,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { parse } from "@formatjs/icu-messageformat-parser";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
+import i18nConfig from "../../config/i18n.json";
 import HealthAccountTooltip from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/HealthAccountTooltip";
 import { buildHealthAccount } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 import { parseQuotaData } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/quotaParsing";
@@ -23,10 +24,10 @@ const cases = [
     key: "healthFilteringBypass",
   },
 ] as const;
-for (const locale of ["en", "zh-CN"])
+for (const locale of ["en", "ar"])
   for (const row of cases)
     it(`${locale} tooltip explains ${row.key} while retaining the exhausted meter`, () => {
-      const messages = locale === "en" ? en : zh;
+      const messages = locale === "en" ? en : ar;
       const raw = {
         quotas: {
           weekly: {
@@ -86,10 +87,10 @@ for (const locale of ["en", "zh-CN"])
       expect(screen.getAllByText(messages.usage.healthAvailable)).toHaveLength(2);
     });
 for (const row of cases) {
-  it(`all 67 catalogs translate ${row.key} with the same empty ICU argument set`, () => {
+  it(`all catalogs translate ${row.key} with the same empty ICU argument set`, () => {
     const directory = path.resolve("src/i18n/messages");
     const files = fs.readdirSync(directory).filter((file) => file.endsWith(".json"));
-    expect(files.length).toBe(67);
+    expect(files.length).toBe(i18nConfig.locales.length);
     for (const file of files) {
       const usage = JSON.parse(fs.readFileSync(path.join(directory, file), "utf8")).usage;
       expect(typeof usage[row.key], `${file}:${row.key}`).toBe("string");

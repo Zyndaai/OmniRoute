@@ -45,7 +45,7 @@ test("globals.css loads the vendored kit CSS right after Tailwind, and the kit s
 });
 
 test("the OmniRoute color tokens are aliases of kit tokens (no hex left in :root / .dark)", () => {
-  const root = block(":root {\n  --desktop-safe-top");
+  const root = block(":root {\n  color-scheme: light");
   const dark = block(".dark {");
   for (const [name, target] of [
     ["--color-bg", "var(--ci-color-background)"],
@@ -337,7 +337,7 @@ test("bg-alt, muted and surface-secondary have @theme entries so their utilities
   // Before P4 these three had a :root value but no @theme entry: `bg-bg-alt` (41 uses),
   // `bg-muted/50` and `bg-surface-secondary/30` generated no CSS at all.
   const theme = block("@theme inline {");
-  const root = block(":root {\n  --desktop-safe-top");
+  const root = block(":root {\n  color-scheme: light");
   for (const [name, kit] of [
     ["--color-bg-alt", "var(--ci-color-surface-subtle)"],
     ["--color-muted", "var(--ci-color-surface-muted)"],
@@ -366,7 +366,7 @@ test("text-primary resolves to a readable primary ink; lime stays on bg/border/r
   assert.match(theme, /--text-color-accent:\s*var\(--color-primary-ink\);/);
   assert.match(theme, /--color-accent:\s*var\(--color-accent\);/, "bg-accent stays lime");
 
-  const root = block(":root {\n  --desktop-safe-top");
+  const root = block(":root {\n  color-scheme: light");
   const darkRoot = block(':root[data-theme="dark"] {');
   const inkOf = (scope: string, theme: string) => {
     const m = /--color-primary-ink:\s*var\((--ci-[\w-]+)\);/.exec(scope);

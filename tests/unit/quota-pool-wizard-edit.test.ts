@@ -26,11 +26,11 @@ const WIZARD_PATH = path.join(
 );
 
 const EN_JSON_PATH = path.join(ROOT, "src", "i18n", "messages", "en.json");
-const PT_BR_JSON_PATH = path.join(ROOT, "src", "i18n", "messages", "pt-BR.json");
+const AR_JSON_PATH = path.join(ROOT, "src", "i18n", "messages", "ar.json");
 
 const wizardSrc = fs.readFileSync(WIZARD_PATH, "utf-8");
 const enJson = JSON.parse(fs.readFileSync(EN_JSON_PATH, "utf-8")) as Record<string, unknown>;
-const ptBrJson = JSON.parse(fs.readFileSync(PT_BR_JSON_PATH, "utf-8")) as Record<string, unknown>;
+const arJson = JSON.parse(fs.readFileSync(AR_JSON_PATH, "utf-8")) as Record<string, unknown>;
 
 // ── PoolWizardProps: editPool field ───────────────────────────────────────────
 
@@ -144,24 +144,24 @@ test("en.json quotaShare namespace: contains saveChanges key", () => {
   assert.equal(typeof quotaShare["saveChanges"], "string", "saveChanges must be a string");
 });
 
-// ── i18n parity: pt-BR.json ──────────────────────────────────────────────────
+// ── i18n parity: ar.json ──────────────────────────────────────────────────
 
-test("pt-BR.json quotaShare namespace: contains editPoolTitle key", () => {
-  const quotaShare = ptBrJson["quotaShare"] as Record<string, unknown> | undefined;
-  assert.ok(quotaShare, "Expected quotaShare namespace in pt-BR.json");
+test("ar.json quotaShare namespace: contains editPoolTitle key", () => {
+  const quotaShare = arJson["quotaShare"] as Record<string, unknown> | undefined;
+  assert.ok(quotaShare, "Expected quotaShare namespace in ar.json");
   assert.ok(
     "editPoolTitle" in quotaShare,
-    "Expected editPoolTitle key in pt-BR.json quotaShare namespace"
+    "Expected editPoolTitle key in ar.json quotaShare namespace"
   );
   assert.equal(typeof quotaShare["editPoolTitle"], "string", "editPoolTitle must be a string");
 });
 
-test("pt-BR.json quotaShare namespace: contains saveChanges key", () => {
-  const quotaShare = ptBrJson["quotaShare"] as Record<string, unknown> | undefined;
-  assert.ok(quotaShare, "Expected quotaShare namespace in pt-BR.json");
+test("ar.json quotaShare namespace: contains saveChanges key", () => {
+  const quotaShare = arJson["quotaShare"] as Record<string, unknown> | undefined;
+  assert.ok(quotaShare, "Expected quotaShare namespace in ar.json");
   assert.ok(
     "saveChanges" in quotaShare,
-    "Expected saveChanges key in pt-BR.json quotaShare namespace"
+    "Expected saveChanges key in ar.json quotaShare namespace"
   );
   assert.equal(typeof quotaShare["saveChanges"], "string", "saveChanges must be a string");
 });

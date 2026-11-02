@@ -6,7 +6,7 @@ import path from "node:path";
 
 const require = createRequire(import.meta.url);
 const en = require("../../src/i18n/messages/en.json");
-const zhCn = require("../../src/i18n/messages/zh-CN.json");
+const ar = require("../../src/i18n/messages/ar.json");
 const { SIDEBAR_SECTIONS, getSectionItems } =
   await import("../../src/shared/constants/sidebarVisibility.ts");
 
@@ -233,10 +233,10 @@ const resilienceTabPortugueseFragments = [
   "Tempo máximo de espera",
 ];
 
-test("settings translations include LKGP and maintenance keys in English and Simplified Chinese", () => {
+test("settings translations include LKGP and maintenance keys in English and Arabic", () => {
   for (const key of requiredSettingsKeys) {
     assert.equal(typeof en.settings?.[key], "string", `en.settings.${key} should exist`);
-    assert.equal(typeof zhCn.settings?.[key], "string", `zh-CN.settings.${key} should exist`);
+    assert.equal(typeof ar.settings?.[key], "string", `ar.settings.${key} should exist`);
   }
 });
 

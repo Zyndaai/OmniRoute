@@ -5,7 +5,7 @@ import path from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
 import en from "../../../src/i18n/messages/en.json";
-import ptBr from "../../../src/i18n/messages/pt-BR.json";
+import ar from "../../../src/i18n/messages/ar.json";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "catalog-ui-13562-"));
 process.env.DATA_DIR = dataDir;
@@ -46,11 +46,7 @@ let stored = { hideAutoCombos: false, hideNoThinkVariants: false, exposeCombosOn
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const mount = (locale = "en") =>
   render(
-    <NextIntlClientProvider
-      locale={locale}
-      timeZone="UTC"
-      messages={locale === "pt-BR" ? ptBr : en}
-    >
+    <NextIntlClientProvider locale={locale} timeZone="UTC" messages={locale === "ar" ? ar : en}>
       <SettingsRoutingPage />
     </NextIntlClientProvider>
   );
@@ -156,10 +152,10 @@ test("both switches stay disabled while a save is pending", async () => {
 });
 
 test("catalog labels and the visibility-only explanation use the selected locale", async () => {
-  mount("pt-BR");
-  const auto = await screen.findByRole("switch", { name: `${ptBr.common.hide} auto/*` }, SETTLED);
+  mount("ar");
+  const auto = await screen.findByRole("switch", { name: `${ar.common.hide} auto/*` }, SETTLED);
   await waitFor(() => expect(auto).toHaveProperty("disabled", false), SETTLED);
-  expect(screen.getByRole("switch", { name: `${ptBr.common.hide} no-think/*` })).toBeTruthy();
-  expect(screen.getByText(ptBr.settings.catalogVisibilityHint)).toBeTruthy();
+  expect(screen.getByRole("switch", { name: `${ar.common.hide} no-think/*` })).toBeTruthy();
+  expect(screen.getByText(ar.settings.catalogVisibilityHint)).toBeTruthy();
   expect(screen.queryByText(en.settings.catalogVisibilityHint)).toBeNull();
 });

@@ -1,7 +1,6 @@
 # Headless Linux VPS deployment
 
-This bundle runs the published OmniRoute server image on a Linux VPS without
-the Electron desktop shell. It keeps the dashboard on loopback by default,
+This bundle runs the published OmniRoute server image on a Linux VPS. It keeps the dashboard on loopback by default,
 does not publish Redis, persists application data, and adds conservative
 resource and log limits.
 

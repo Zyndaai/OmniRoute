@@ -4,7 +4,7 @@
 // non-loopback callers and the dispatcher forwards it, but the Qoder validator ignored it,
 // so a remote caller made the host start the CLI. Non-PAT keys validate over HTTP and are
 // not affected.
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,12 +23,15 @@ process.env.CLI_QODER_BIN = FAKE_QODER;
 const { validateQoderProvider } =
   await import("../../src/lib/providers/validation/specialtyInline.ts");
 const { validateProviderApiKey } = await import("../../src/lib/providers/validation.ts");
+const core = await import("../../src/lib/db/core.ts");
 
 const PAT = "pt-test-personal-access-token";
 
 test.after(() => {
   if (savedBin === undefined) delete process.env.CLI_QODER_BIN;
   else process.env.CLI_QODER_BIN = savedBin;
+  // Close the SQLite handle first: Windows cannot delete an open database file.
+  core.resetDbInstance();
   fs.rmSync(TEST_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

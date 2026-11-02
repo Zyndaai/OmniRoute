@@ -171,8 +171,7 @@ If you upload a custom favicon via `Dashboard → Settings`, the PWA icon on des
 
 ## Limitations
 
-- **No push notifications** — The service worker does not implement the Push API. Notifications are handled by the Electron app instead.
-- **No background sync** — Offline actions are not queued for replay. The PWA is primarily a dashboard viewer.
+- **No push notifications** — The service worker does not implement the Push API.- **No background sync** — Offline actions are not queued for replay. The PWA is primarily a dashboard viewer.
 - **iOS restrictions** — Safari on iOS does not support all PWA features (e.g., install prompts are manual, and background service workers are limited).
 - **Cache size** — The service worker caches static assets only. Large response payloads from `/api/` routes are never cached.
 - **Custom icons on mobile** — Changing the favicon in settings does not update the home screen icon on mobile (this requires regenerating the PWA icons).

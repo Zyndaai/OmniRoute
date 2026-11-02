@@ -223,7 +223,7 @@ test("--advisory downgrades a check to a warning without hiding it", () => {
 // ── develop bump (pure, applied to the real files of this checkout) ───────
 
 test("bumpManifest changes only the top-level version of the real package.json files", () => {
-  for (const file of ["package.json", "open-sse/package.json", "electron/package.json"]) {
+  for (const file of ["package.json", "open-sse/package.json"]) {
     const before = fs.readFileSync(path.join(repoRoot, file), "utf8");
     const after = bumpManifest(before, "4.0.0");
     assert.equal(JSON.parse(after).version, "4.0.0", file);
@@ -287,7 +287,6 @@ test("the plan orders the cut and only ever pushes to the selected remote", () =
   assert.deepEqual(plan.bumpFiles, [
     "package.json",
     "open-sse/package.json",
-    "electron/package.json",
     "package-lock.json",
     "docs/openapi.yaml",
   ]);
@@ -465,41 +464,6 @@ test("runCut in dry-run renders the whole sequence and exits 1 on a failed block
   assert.match(out, /✗ tag/);
   assert.equal(io.calls.length, 0, "dry-run never runs git mutations");
   assert.equal(typeof renderReport, "function");
-});
-
-test("runCut is READY only when every dormant workflow exists at the source", async () => {
-  const real = (file: string) =>
-    fs.readFileSync(path.join(repoRoot, ".github/workflows", file), "utf8");
-  const run = async (readWorkflow: (file: string) => string | null) => {
-    const lines: string[] = [];
-    const io = {
-      ...fakeIo(),
-      gatherFacts: async () => goodFacts(),
-      readWorkflow,
-      loadDistTagResolver: async () => ({ source: "dist-tag.mjs", resolveDistTag }),
-    };
-    const code = await runCut(parseCutArgs([]), io, (l: string) => lines.push(l));
-    return { code, out: lines.join("\n") };
-  };
-  const ready = await run(real);
-  assert.equal(ready.code, 0, ready.out);
-  assert.match(ready.out, /RESULT: READY/);
-  const missing = await run((file) => (file === "nightly-v4-build.yml" ? null : real(file)));
-  assert.equal(missing.code, 1);
-  assert.match(missing.out, /nightly-v4-build\.yml: MISSING at the cut source/);
-});
-
-test("the real dormant workflows on this base activate as RELEASE_STRATEGY.md promises", () => {
-  const read = (file: string) =>
-    fs.readFileSync(path.join(repoRoot, ".github/workflows", file), "utf8");
-  const fp = analyzeDormantWorkflow("forward-port.yml", read("forward-port.yml"));
-  assert.ok(fp.triggers.includes("push → stable/v3"));
-  assert.ok(fp.forkCaveats.length > 0, "forward-port is pinned to the canonical repository");
-  const stable = analyzeDormantWorkflow("validate-stable-pr.yml", read("validate-stable-pr.yml"));
-  assert.ok(stable.triggers.includes("pull_request → stable/v3"));
-  const nightly = analyzeDormantWorkflow("nightly-v4-build.yml", read("nightly-v4-build.yml"));
-  assert.ok(nightly.activates.some((l) => /develop exists/.test(l)));
-  assert.ok(nightly.stillGated.some((l) => /vars\.NIGHTLY_PUBLISH/.test(l)));
 });
 
 test("CLI usage errors exit 2 without touching anything", () => {

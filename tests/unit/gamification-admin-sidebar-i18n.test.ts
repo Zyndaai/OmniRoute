@@ -88,7 +88,7 @@ test("anomalies page loading and empty states are polite status regions", () => 
 test("new anomalies and sidebar keys are propagated to every configured locale", () => {
   const config = readJson("config/i18n.json") as { locales: Array<{ code: string }> };
   const codes = ["en", ...config.locales.map((locale) => locale.code)];
-  assert.ok(codes.length > 40, "expected the full locale roster");
+  assert.ok(codes.includes("ar"), "expected the configured locale roster to include ar");
 
   for (const code of codes) {
     const messages = readJson(`src/i18n/messages/${code}.json`);
@@ -99,13 +99,13 @@ test("new anomalies and sidebar keys are propagated to every configured locale",
     }
   }
 
-  // Vietnamese is kept fully translated (see i18n-vi-completeness.test.ts).
-  const vi = readJson("src/i18n/messages/vi.json");
+  // Arabic is kept fully translated.
+  const ar = readJson("src/i18n/messages/ar.json");
   for (const key of NEW_KEYS) {
     assert.doesNotMatch(
-      getMessage(vi, key) as string,
+      getMessage(ar, key) as string,
       /^__MISSING__:/,
-      `vi.${key} must be translated`
+      `ar.${key} must be translated`
     );
   }
 });

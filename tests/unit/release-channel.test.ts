@@ -10,7 +10,7 @@
  * - The route change is additive: `channel` keeps meaning the deployment mode
  *   the dashboard updater reads; the new fields are `releaseChannel` + `channels`.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import deMessages from "../../../src/i18n/messages/de.json";
+import arMessages from "../../../src/i18n/messages/ar.json";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -122,7 +122,7 @@ describe("FreePoolTab source toggles", () => {
     ] as const;
 
     for (const key of requiredKeys) {
-      expect(deMessages.settings[key], `missing settings.${key}`).toBeTruthy();
+      expect(arMessages.settings[key], `missing settings.${key}`).toBeTruthy();
     }
   });
 

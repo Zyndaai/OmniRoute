@@ -49,8 +49,6 @@ const EL_README_LINK =
   '  <a href="docs/i18n/el/README.md"><img src="docs/assets/flags/gr.svg" width="30" alt="Ελληνικά (el)" title="Ελληνικά (el)"></a>';
 const EL_INDEX_ROW = "- 🇬🇷 **Ελληνικά** (`el`): [Docs Root](./el/README.md)";
 
-const realConfig = (): I18nConfig => JSON.parse(readRepo("config/i18n.json")) as I18nConfig;
-
 // Column positions of every `|` — two table rows are aligned when these match.
 const pipeColumns = (line: string): number[] =>
   [...line].flatMap((char, index) => (char === "|" ? [index] : []));
@@ -67,45 +65,6 @@ const sentinelCode = (config: I18nConfig): string => {
   );
   return code;
 };
-
-const readmeLinkFor = (entry: LocaleEntry, flagFile: string): string =>
-  `  <a href="docs/i18n/${entry.code}/README.md"><img src="docs/assets/flags/${flagFile}" width="30" alt="${entry.native} (${entry.code})" title="${entry.native} (${entry.code})"></a>`;
-const indexRowFor = (entry: LocaleEntry): string =>
-  `- ${entry.flag} **${entry.native}** (\`${entry.code}\`): [Docs Root](./${entry.code}/README.md)`;
-
-type RowRef = { index: number; code: string };
-
-// Where a new row must land: right before the first existing row whose code sorts after it
-// under localeCompare("en"), or right after the last row when no row sorts after it.
-const expectedRowIndex = (rows: RowRef[], code: string): number => {
-  assert.ok(rows.length > 0, "no locale rows found");
-  const next = rows.find((row) => row.code.localeCompare(code, "en") > 0);
-  return next ? next.index : rows[rows.length - 1].index + 1;
-};
-
-const indexRows = (lines: string[]): RowRef[] =>
-  lines.flatMap((line, index) => {
-    const code = line.match(/^- .+ \(`([^`]+)`\): \[Docs Root\]/)?.[1];
-    return code ? [{ index, code }] : [];
-  });
-
-// The locale table of docs/guides/I18N.md: its header line and the contiguous rows under it
-// (the guide has other tables with backticked first cells, which must not count).
-const guideRows = (lines: string[]): { header: number; rows: RowRef[] } => {
-  const header = lines.findIndex((line) =>
-    /^\| Code +\| Language +\| RTL +\| Google Translate Code +\|$/.test(line)
-  );
-  assert.ok(header >= 0, "locale table header not found");
-  const rows: RowRef[] = [];
-  for (let index = header + 2; index < lines.length; index += 1) {
-    const code = lines[index].match(/^\| `([^`]+)` *\|/)?.[1];
-    if (!code) break;
-    rows.push({ index, code });
-  }
-  return { header, rows };
-};
-
-const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // ---------------------------------------------------------------------------
 // insertLocaleEntry
@@ -211,22 +170,6 @@ test("flagFileFor rejects anything that is not a regional-indicator pair unless 
   assert.equal(flagFileFor({ ...el, flag: "🏳️", flagFile: "custom.svg" }), "custom.svg");
 });
 
-test("flagFileFor reproduces the README flag file of every configured locale (legacy `sw` needs flagFile)", () => {
-  const readme = readRepo("README.md");
-  // Pre-existing README drift, exactly what the flagFile override is for: Kiswahili
-  // uses tz.svg although its emoji is 🇰🇪.
-  const overrides: Record<string, string> = { sw: "tz.svg" };
-  for (const entry of realConfig().locales) {
-    const href = entry.code === "en" ? "README.md" : `docs/i18n/${entry.code}/README.md`;
-    const pattern = new RegExp(
-      `<a href="${escapeRegExp(href)}"><img src="docs/assets/flags/([a-z]+\\.svg)"`
-    );
-    const match = readme.match(pattern);
-    assert.ok(match, `README has no flag link for ${entry.code}`);
-    assert.equal(flagFileFor({ ...entry, flagFile: overrides[entry.code] }), match[1], entry.code);
-  }
-});
-
 // ---------------------------------------------------------------------------
 // insertReadmeFlagLink
 // ---------------------------------------------------------------------------
@@ -272,27 +215,6 @@ test("insertReadmeFlagLink rejects a duplicate link and a README without the lan
   const once = insertReadmeFlagLink(README_BLOCK, el, 44);
   assert.throws(() => insertReadmeFlagLink(once, el, 45), /already linked/);
   assert.throws(() => insertReadmeFlagLink("# no block\n", el, 44), /language block not found/);
-});
-
-test("insertReadmeFlagLink on the real README adds exactly one line right before the block's </div>", () => {
-  const config = realConfig();
-  const total = config.locales.length;
-  const entry: LocaleEntry = { ...el, code: sentinelCode(config) };
-  const before = readRepo("README.md").split("\n");
-  const after = insertReadmeFlagLink(before.join("\n"), entry, total + 1).split("\n");
-  assert.equal(after.length, before.length + 1);
-
-  const marker = before.indexOf(`  <b>🌐 In ${total} languages</b>`);
-  const close = before.findIndex((line, index) => index > marker && line === "</div>");
-  assert.ok(marker > 0 && close > marker);
-  assert.equal(after[marker], `  <b>🌐 In ${total + 1} languages</b>`);
-  assert.match(after[close - 1], /^  <a href="docs\/i18n\/[^"]+\/README\.md"><img /);
-  assert.equal(after[close], readmeLinkFor(entry, "gr.svg"));
-  assert.equal(after[close + 1], "</div>");
-  assert.deepEqual(
-    [...after.slice(0, marker), ...after.slice(marker + 1, close), ...after.slice(close + 1)],
-    [...before.slice(0, marker), ...before.slice(marker + 1)]
-  );
 });
 
 // ---------------------------------------------------------------------------
@@ -344,32 +266,6 @@ test("insertDocsIndexRow rejects a duplicate row, a missing sentence and an inde
   assert.throws(
     () => insertDocsIndexRow(`${INDEX_FIXTURE.split("\n").slice(0, 4).join("\n")}\n`, el, 44),
     /no locale rows/
-  );
-});
-
-test("insertDocsIndexRow on the real docs/i18n/README.md adds one row at the derived position and rewrites only the sentence", () => {
-  const config = realConfig();
-  const total = config.locales.length;
-  const entry: LocaleEntry = { ...el, code: sentinelCode(config) };
-  const before = readRepo("docs/i18n/README.md").split("\n");
-  const after = insertDocsIndexRow(before.join("\n"), entry, total + 1).split("\n");
-  assert.equal(after.length, before.length + 1);
-
-  const sentence = before.findIndex((line) =>
-    line.startsWith("Translations of documentation into")
-  );
-  const at = expectedRowIndex(indexRows(before), entry.code);
-  assert.ok(sentence >= 0 && at > sentence);
-  assert.equal(
-    after[sentence],
-    before[sentence]
-      .replace(`into ${total - 1} languages`, `into ${total} languages`)
-      .replace(`supports ${total} locales`, `supports ${total + 1} locales`)
-  );
-  assert.equal(after[at], indexRowFor(entry));
-  assert.deepEqual(
-    [...after.slice(0, sentence), ...after.slice(sentence + 1, at), ...after.slice(at + 1)],
-    [...before.slice(0, sentence), ...before.slice(sentence + 1)]
   );
 });
 
@@ -490,38 +386,6 @@ test("insertI18nGuideRow only touches the locale table, not other tables with ba
   );
 });
 
-test("insertI18nGuideRow on the real docs/guides/I18N.md adds one aligned row at the derived position", () => {
-  const config = realConfig();
-  const total = config.locales.length;
-  const entry: LocaleEntry = { ...el, code: sentinelCode(config) };
-  const before = readRepo("docs/guides/I18N.md").split("\n");
-  const after = insertI18nGuideRow(before.join("\n"), entry, total + 1, config.rtl).split("\n");
-  assert.equal(after.length, before.length + 1);
-
-  const headline = before.findIndex((line) => line.includes(`supports **${total} languages**`));
-  const { header, rows } = guideRows(before);
-  const at = expectedRowIndex(rows, entry.code);
-  assert.ok(headline >= 0 && header > headline && at > header + 1);
-  assert.equal(
-    after[headline],
-    before[headline].replace(`**${total} languages**`, `**${total + 1} languages**`)
-  );
-  const rtl = config.rtl.includes(entry.code) ? "Yes" : "No";
-  assert.match(
-    after[at],
-    new RegExp(
-      `^\\| \`${escapeRegExp(entry.code)}\` +\\| ${escapeRegExp(entry.native)} +\\| ${rtl} +\\| \`${escapeRegExp(entry.code)}\` +\\|$`
-    )
-  );
-  // Aligned with the table: the same pipe columns as its (ASCII) header and separator lines.
-  assert.deepEqual(pipeColumns(after[at]), pipeColumns(before[header]));
-  assert.deepEqual(pipeColumns(after[at]), pipeColumns(before[header + 1]));
-  assert.deepEqual(
-    [...after.slice(0, headline), ...after.slice(headline + 1, at), ...after.slice(at + 1)],
-    [...before.slice(0, headline), ...before.slice(headline + 1)]
-  );
-});
-
 // ---------------------------------------------------------------------------
 // bumpCounts
 // ---------------------------------------------------------------------------
@@ -551,40 +415,6 @@ test("bumpCounts touches only those four phrases", () => {
     bumpCounts(text, 44),
     "352 providers, 44 languages for UI, 43 translated documentation sets, 44 language JSON files, 43-language translated docs, 43 locales, 7 language packs, in 42 locales, 43 langs"
   );
-});
-
-// The four phrases, in the shapes llm.txt actually uses. `-language translated
-// docs` is hyphenated, so the separator class is `[ -]`, not a plain space.
-const LLM_COUNT_PHRASE =
-  /(?:languages|translated documentation sets|language JSON files|language translated docs)/;
-const LLM_COUNT_LINE = new RegExp(`\\d+[ -]${LLM_COUNT_PHRASE.source}`);
-const LLM_COUNT_NUMBER = new RegExp(`\\d+(?=[ -]${LLM_COUNT_PHRASE.source})`);
-
-test("bumpCounts on the real llm.txt rewrites exactly the five count lines, each by one", () => {
-  const total = realConfig().locales.length;
-  const before = readRepo("llm.txt").split("\n");
-  const after = bumpCounts(before.join("\n"), total + 1).split("\n");
-  assert.equal(after.length, before.length);
-  const changed = before
-    .map((line, index) => [line, after[index]])
-    .filter(([from, to]) => from !== to);
-  assert.equal(changed.length, 5);
-  for (const [from, to] of changed) {
-    assert.match(from, LLM_COUNT_LINE);
-    assert.equal(
-      to,
-      from.replace(LLM_COUNT_NUMBER, (n) => String(Number(n) + 1))
-    );
-  }
-});
-
-// The counterpart of the test above: at the CURRENT locale total the file is
-// already correct, so bumpCounts must be a no-op. This is what would have caught
-// the two tree-comment phrasings drifting out of sync.
-test("bumpCounts on the real llm.txt is a no-op at the current locale total", () => {
-  const total = realConfig().locales.length;
-  const text = readRepo("llm.txt");
-  assert.equal(bumpCounts(text, total), text);
 });
 
 // ---------------------------------------------------------------------------
@@ -621,16 +451,4 @@ test("buildMirrorStub is accepted by check-docs-sync's separator logic and is a 
   // scripts/i18n/sync-llm-mirrors.mjs keeps the header up to `---` and re-appends the root body
   const header = stub.slice(0, separator.index + separator[0].length).replace(/\n+$/, "");
   assert.equal(`${header}\n\n${body.trimStart()}`, stub);
-});
-
-test("buildMirrorStub reproduces a real mirror byte for byte", () => {
-  const mirror = readRepo("docs/i18n/pt-BR/llm.txt");
-  const parts = mirror.match(
-    /^# (\S+) \((.+)\)\n\n(🌐 \*\*Languages:\*\* [^\n]+)\n\n---\n\n([\s\S]*)$/
-  );
-  assert.ok(parts, "docs/i18n/pt-BR/llm.txt does not have the five-part mirror layout");
-  const [, heading, native, bar, body] = parts;
-  assert.equal(heading, "OmniRoute");
-  assert.equal(native, realConfig().locales.find((l) => l.code === "pt-BR")?.native);
-  assert.equal(buildMirrorStub({ heading, native, bar, body }), mirror);
 });

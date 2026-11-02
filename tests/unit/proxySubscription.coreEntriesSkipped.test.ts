@@ -217,7 +217,10 @@ test("clean generation stays silent", async (t) => {
 test("rendered message shows the fixed phrase with the raw counts beside it", () => {
   const dir = new URL("../../src/i18n/messages/", import.meta.url);
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  assert.ok(files.length >= 60, `expected the full locale set, got ${files.length}`);
+  const configured = JSON.parse(
+    fs.readFileSync(new URL("../../config/i18n.json", import.meta.url), "utf8")
+  ).locales;
+  assert.equal(files.length, configured.length, "one message file per configured locale");
   const failures: string[] = [];
   for (const file of files) {
     const parsed = JSON.parse(

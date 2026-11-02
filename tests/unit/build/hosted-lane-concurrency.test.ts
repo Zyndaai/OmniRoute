@@ -27,8 +27,6 @@ function load(file: string): Workflow {
 // Every push-triggered hosted workflow that can fire on release/* pushes must collapse to
 // one run per ref. Add a file here when a new one is introduced.
 const REF_SCOPED: Array<{ file: string; groupPrefix: string }> = [
-  { file: "lock-released-branch.yml", groupPrefix: "lock-released-" },
-  { file: "scorecard.yml", groupPrefix: "scorecard-" },
   { file: "api-route-typecheck.yml", groupPrefix: "${{ github.workflow }}-" },
   { file: "semgrep.yml", groupPrefix: "${{ github.workflow }}-" },
 ];
@@ -46,9 +44,3 @@ for (const { file, groupPrefix } of REF_SCOPED) {
     assert.equal(wf.concurrency!["cancel-in-progress"], true, `${file}: newer runs must supersede`);
   });
 }
-
-test("lock-released-branch.yml keeps both triggers that the Hard Rule #18 guard depends on", () => {
-  const on = load("lock-released-branch.yml").on as Record<string, unknown>;
-  assert.ok(on.release, "release:published still applies the lock");
-  assert.ok(on.push, "push to release/v* still runs the post-release push guard");
-});

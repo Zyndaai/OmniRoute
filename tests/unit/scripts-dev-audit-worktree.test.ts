@@ -4,7 +4,7 @@
 // counts that went up, new test-masking allowlist keys, leftover tsconfig.*tmp*.json, and
 // whether the PR head on GitHub matches the local HEAD. Everything runs against a throwaway
 // repository with its own bare `origin`; `gh` is replaced through GH_BIN.
-import { after, test } from "node:test";
+import { after, test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

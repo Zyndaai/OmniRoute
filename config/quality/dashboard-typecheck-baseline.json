@@ -163,9 +163,6 @@
   "src/shared/components/analytics/rechartsDonuts.tsx": {
     "TS2739": 3
   },
-  "src/shared/hooks/useElectron.ts": {
-    "TS2339": 23
-  },
   "src/shared/schemas/cliCatalog.ts": {
     "TS2554": 3
   },

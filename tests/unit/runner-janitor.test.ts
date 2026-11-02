@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

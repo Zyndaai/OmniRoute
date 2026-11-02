@@ -87,19 +87,19 @@ test("t() falls back to en for unknown locale", () => {
   assert.ok(result.length > 0 && result !== "common.success", `fallback failed: ${result}`);
 });
 
-test("t() supports pt-BR locale", () => {
+test("t() supports ar locale", () => {
   resetForTests();
-  setLocale("pt-BR");
+  setLocale("ar");
   const en = (() => {
     resetForTests();
     setLocale("en");
     return t("common.serverOffline");
   })();
   resetForTests();
-  setLocale("pt-BR");
-  const ptBR = t("common.serverOffline");
-  assert.notEqual(en, ptBR, "pt-BR should differ from en");
-  assert.ok(ptBR.length > 0 && ptBR !== "common.serverOffline");
+  setLocale("ar");
+  const ar = t("common.serverOffline");
+  assert.notEqual(en, ar, "ar should differ from en");
+  assert.ok(ar.length > 0 && ar !== "common.serverOffline");
 });
 
 test("t() does not expose __proto__ traversal", () => {

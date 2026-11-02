@@ -10,14 +10,15 @@ import { renderToString } from "react-dom/server";
 import { hydrateRoot } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
+import i18nConfig from "../../config/i18n.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 
 vi.unmock("next-intl");
 const key = "omniroute:limits:healthLegendHidden";
 const now = new Date("2099-01-01T00:00:00Z");
 function overview(locale = "en") {
-  const messages = locale === "en" ? en : zh;
+  const messages = locale === "en" ? en : ar;
   return (
     <NextIntlClientProvider
       locale={locale}
@@ -170,10 +171,10 @@ it("uses height and opacity transitions with a reduced-motion override", () => {
   expect(container).toHaveClass("grid-rows-[0fr]", "opacity-0");
   expect(container.firstElementChild).toHaveClass("min-h-0", "overflow-hidden");
 });
-it("renders the Chinese toggle text", () => {
-  mount("zh-CN");
-  fireEvent.click(screen.getByRole("button", { name: "隐藏图例" }));
-  expect(screen.getByRole("button", { name: "显示图例" })).toBeTruthy();
+it("renders the Arabic toggle text", () => {
+  mount("ar");
+  fireEvent.click(screen.getByRole("button", { name: ar.usage.healthLegendHide }));
+  expect(screen.getByRole("button", { name: ar.usage.healthLegendShow })).toBeTruthy();
 });
 it("synchronizes relevant storage events without reacting to unrelated keys", () => {
   mount();
@@ -193,7 +194,7 @@ it("synchronizes relevant storage events without reacting to unrelated keys", ()
 it("all catalogs translate both toggle labels without ICU parameters", () => {
   const directory = path.resolve("src/i18n/messages");
   const files = fs.readdirSync(directory).filter((file) => file.endsWith(".json"));
-  expect(files).toHaveLength(67);
+  expect(files).toHaveLength(i18nConfig.locales.length);
   for (const file of files) {
     const usage = JSON.parse(fs.readFileSync(path.join(directory, file), "utf8")).usage;
     for (const name of ["healthLegendHide", "healthLegendShow"] as const) {
@@ -203,9 +204,6 @@ it("all catalogs translate both toggle labels without ICU parameters", () => {
       if (file !== "en.json") expect(usage[name]).not.toBe(en.usage[name]);
     }
   }
-  const traditional = JSON.parse(fs.readFileSync(path.join(directory, "zh-TW.json"), "utf8"));
-  expect(traditional.usage.healthLegendHide).toBe("隱藏圖例");
-  expect(traditional.usage.healthLegendShow).toBe("顯示圖例");
 });
 it("keeps SSR and the hydration snapshot visible before applying the stored preference", async () => {
   localStorage.setItem(key, "1");

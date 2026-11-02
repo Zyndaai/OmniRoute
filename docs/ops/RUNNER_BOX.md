@@ -109,8 +109,7 @@ a time, only when idle**, with the idle check and the restart in the same comman
   slot was oversubscribed several times over and own-origin PR Builds waited for hours.
   `release-green` and `main-green` now target `omni-release` (`omniroute-113-6` only) with
   `OMNIROUTE_USE_TURBOPACK=0`, and a started run is no longer cancelled by a newer push (the
-  pending slot still collapses the storm). `tests/unit/build/runner-capacity-routing.test.ts`
-  pins the routing, the webpack switch and that nothing on `omni-release` builds with Turbopack.
+  pending slot still collapses the storm).
 - **Light pool: `omni-light`.** `omniroute-113` and `omniroute-113-2` run the nightlies that need
   a backend-only `next build` (~5–6 GB; webpack) and `quality.yml` `lint-guard`. `omniroute-113`
   had `MemoryHigh=4G` until 2026-10-18 — the promptfoo build reclaimed its way through 54 minutes

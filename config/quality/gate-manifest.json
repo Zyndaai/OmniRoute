@@ -700,12 +700,12 @@
     },
     {
       "name": "typecheck:core",
-      "command": "tsc --pretty false -p tsconfig.typecheck-core.json",
+      "command": "npm exec --yes --package=typescript@7.0.2 -- tsc --pretty false -p tsconfig.typecheck-core.json",
       "disposition": "separately-invoked"
     },
     {
       "name": "typecheck:noimplicit:core",
-      "command": "tsc --pretty false -p tsconfig.typecheck-noimplicit-core.json",
+      "command": "npm exec --yes --package=typescript@7.0.2 -- tsc --pretty false -p tsconfig.typecheck-noimplicit-core.json",
       "disposition": "separately-invoked"
     },
     {

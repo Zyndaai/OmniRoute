@@ -20,7 +20,7 @@
  * run directly (same `resolveSudoSpawn` seam tested in
  * `mitm-systemCommands-no-sudo.test.ts`). No `child_process` mocking.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

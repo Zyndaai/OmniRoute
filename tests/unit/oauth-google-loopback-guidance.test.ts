@@ -119,7 +119,7 @@ test("the stale googleOAuthWarning key is GONE from every locale", () => {
   );
 });
 
-test("en + pt-BR carry real copy for every new googleLoopback key; the rest are pending", () => {
+test("en + ar carry real copy for every new googleLoopback key", () => {
   const panels = readSrc("shared/components/OAuthModalPanels.tsx");
   const used = [
     ...new Set(
@@ -133,7 +133,7 @@ test("en + pt-BR carry real copy for every new googleLoopback key; the rest are 
     for (const key of used) {
       const v = cat[key];
       assert.equal(typeof v, "string", `${locale}.json is missing oauthModal.${key}`);
-      if (locale === "en" || locale === "pt-BR") {
+      if (locale === "en" || locale === "ar") {
         assert.doesNotMatch(
           v,
           /^__MISSING__:/,
@@ -145,7 +145,7 @@ test("en + pt-BR carry real copy for every new googleLoopback key; the rest are 
 });
 
 test("the hand-written copy never tells the operator to copy a callback URL", () => {
-  for (const locale of ["en", "pt-BR"]) {
+  for (const locale of ["en", "ar"]) {
     const cat = readCatalog(locale).oauthModal ?? {};
     const blob = Object.entries(cat)
       .filter(([k]) => k.startsWith("googleLoopback"))
@@ -153,7 +153,7 @@ test("the hand-written copy never tells the operator to copy a callback URL", ()
       .join(" ");
     assert.doesNotMatch(
       blob,
-      /copie o URL completo|copy the full URL|copy that full URL/i,
+      /copy the full URL|copy that full URL/i,
       `${locale} still instructs copying a callback URL that never arrives`
     );
   }

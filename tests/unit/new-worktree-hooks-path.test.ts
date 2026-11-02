@@ -2,7 +2,7 @@
 // absolute core.hooksPath as-is and resolves a relative one against the worktree root, so
 // the check tests that same path: an absolute core.hooksPath joined onto the worktree dir
 // names a file that never exists, which would reject a worktree whose pre-commit is active.
-import { after, test } from "node:test";
+import { after, test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";

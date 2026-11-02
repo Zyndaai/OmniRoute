@@ -43,12 +43,7 @@ function omniBuildJobs(): Array<{ id: string; runsOn: string }> {
 test("every omni-build job is opt-in through USE_VPS_BUILD_RUNNER", () => {
   const jobs = omniBuildJobs();
   // Guard against a vacuous pass: these are the heavy jobs known on 2026-10-16.
-  for (const id of [
-    "ci.yml:build",
-    "docker-publish.yml:build",
-    "npm-publish.yml:publish",
-    "nightly-v4-build.yml:build",
-  ]) {
+  for (const id of ["ci.yml:build"]) {
     assert.ok(
       jobs.some((j) => j.id === id),
       `${id} should still target omni-build`
@@ -63,16 +58,4 @@ test("every omni-build job keeps a hosted fallback", () => {
     .filter((j) => !/\|\|\s*'ubuntu-[\w.-]+'/.test(j.runsOn))
     .map((j) => j.id);
   assert.deepEqual(noFallback, []);
-});
-
-test("docker-publish preflight and offline alert follow the same switch", () => {
-  const wf = load(
-    fs.readFileSync(path.join(workflowDir, "docker-publish.yml"), "utf8")
-  ) as Workflow;
-  assert.match(
-    String(wf.jobs?.["runner-preflight"]?.if),
-    GATE,
-    "preflight only when the slot is in use"
-  );
-  assert.match(String(wf.jobs?.["runner-alert"]?.if), GATE, "no outage issue for a parked pool");
 });

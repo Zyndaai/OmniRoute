@@ -24,7 +24,7 @@
  * and that the binary starts on node:26-trixie-slim. Only a real
  * `docker build --target runner-cli` + `qodercli --version` can disprove those.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

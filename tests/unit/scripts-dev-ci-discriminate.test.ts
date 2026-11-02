@@ -5,7 +5,7 @@
 // in the base-red issue) or unknown. `gh` is replaced by a stub through GH_BIN so the test
 // never reaches GitHub; the stub records every call so the test can also prove the script is
 // read-only and retries HTTP 5xx exactly up to three times.
-import { after, test } from "node:test";
+import { after, test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

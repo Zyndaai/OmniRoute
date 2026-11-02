@@ -5,7 +5,7 @@
  * see that file's header comment for why the true/false cases can't share a
  * process).
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

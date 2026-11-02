@@ -1,7 +1,7 @@
 // #6142 — devin cloud-agent provider validator + static model catalog wiring.
 // Regression guard for the "not supported" fallback devin used to always hit on the
 // generic Providers config page (parity with the existing jules cloud-agent wiring).
-import { test } from "node:test";
+import { test } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

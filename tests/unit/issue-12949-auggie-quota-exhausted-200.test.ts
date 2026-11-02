@@ -2,7 +2,7 @@
 // warning to stdout and exits 0 (a clean exit). The executor used to treat any clean
 // exit as a successful completion and wrap that text as a normal 200 assistant reply,
 // so combo/fallback routing never failed over to the next configured model.
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

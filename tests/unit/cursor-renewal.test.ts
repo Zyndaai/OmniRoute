@@ -20,7 +20,7 @@
  *     controlled via real fixture files, exactly as in
  *     tests/unit/cursor-token-extractor.test.ts.
  */
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

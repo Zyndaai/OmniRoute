@@ -1,6 +1,14 @@
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, chmodSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  chmodSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { npmInstallRuntime } from "../../bin/cli/runtime/nativeDeps.mjs";
@@ -78,11 +86,7 @@ test("#14355: an existing runtime package.json without allowScripts is retrofitt
     const runtimePkgPath = join(runtimeDir, "package.json");
     writeFileSync(
       runtimePkgPath,
-      JSON.stringify(
-        { name: "omniroute-runtime", version: "1.0.0", private: true },
-        null,
-        2
-      )
+      JSON.stringify({ name: "omniroute-runtime", version: "1.0.0", private: true }, null, 2)
     );
 
     npmInstallRuntime(["better-sqlite3@12.10.1"], { silent: true });

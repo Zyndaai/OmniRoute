@@ -107,7 +107,10 @@ test("every locale interpolates the limit rather than hardcoding 100", () => {
   // would tell the operator the wrong number in their own language.
   const dir = path.join(REPO_ROOT, "src/i18n/messages");
   const locales = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-  assert.ok(locales.length > 50, `expected the full locale set, saw ${locales.length}`);
+  const configured = JSON.parse(
+    fs.readFileSync(path.join(REPO_ROOT, "config/i18n.json"), "utf8")
+  ).locales;
+  assert.equal(locales.length, configured.length, "one message file per configured locale");
 
   const offenders: string[] = [];
   for (const file of locales) {

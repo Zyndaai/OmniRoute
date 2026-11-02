@@ -23,7 +23,7 @@
  * state `src/lib/gracefulShutdown.ts` owns and `drainAwareFailureStatus()` reads —
  * instead of sending real signals.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -48,6 +48,7 @@ const { encodeChatGptWebCodexSecrets } =
 const { DevinCliAgenticExecutor } = await import("../../open-sse/executors/devin-cli-agentic.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { normalizeStreamFailurePayload } = await import("../../open-sse/utils/streamErrorFormat.ts");
+const core = await import("../../src/lib/db/core.ts");
 
 /** The exact shape gracefulShutdown.ts writes and open-sse/utils/drainStatus.ts reads. */
 function setDraining(shuttingDown: boolean) {
@@ -58,6 +59,8 @@ test.beforeEach(() => setDraining(false));
 
 test.after(() => {
   delete globalThis.__omnirouteShutdown;
+  // Close the SQLite handle first: Windows cannot delete an open database file.
+  core.resetDbInstance();
   fs.rmSync(isolatedRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

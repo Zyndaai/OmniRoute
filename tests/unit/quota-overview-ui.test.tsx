@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import en from "../../src/i18n/messages/en.json";
-import zh from "../../src/i18n/messages/zh-CN.json";
+import ar from "../../src/i18n/messages/ar.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 vi.unmock("next-intl");
@@ -60,7 +60,7 @@ const accounts = Object.fromEntries(
   ])
 );
 function mount(locale: string, cs = connections, projected = accounts) {
-  const m = locale === "en" ? en : zh;
+  const m = locale === "en" ? en : ar;
   return render(
     <NextIntlClientProvider
       locale={locale}
@@ -87,10 +87,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
 });
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "renders approved capsules, unique count and isolated subpool tooltip (%s)",
   (locale) => {
-    const m = locale === "en" ? en : zh;
+    const m = locale === "en" ? en : ar;
     mount(locale);
     const handle = document.querySelector<HTMLButtonElement>("[data-drag-handle]")!;
     const instructions = document.getElementById(handle.getAttribute("aria-describedby")!);
@@ -117,7 +117,10 @@ it.each(["en", "zh-CN"])(
     const tip = screen.getByRole("tooltip");
     expect(tip).toHaveTextContent("a2@example.test");
     expect(tip.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
-    expect(tip.querySelector("[data-other-pool]")).toHaveTextContent("72%");
+    // Arabic number formatting wraps "%" in bidi marks; strip them before comparing.
+    expect(tip.querySelector("[data-other-pool]")!.textContent!.replace(/[‎‏]/g, "")).toContain(
+      "72%"
+    );
     expect(tip.parentElement).toBe(document.body);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("tooltip")).toBeNull();
@@ -171,7 +174,7 @@ async function drag() {
   fireEvent.keyDown(document, { key: " ", code: "Space" });
   await waitFor(() => expect(handle).not.toHaveAttribute("aria-pressed", "true"));
 }
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "keyboard moves whole provider including subpools, persists and resets (%s)",
   async (locale) => {
     geometry();
@@ -192,7 +195,7 @@ it.each(["en", "zh-CN"])(
     mount(locale);
     expect(rows()).toEqual(after);
     const reset = screen.getByRole("button", {
-      name: locale === "en" ? en.usage.healthResetOrder : zh.usage.healthResetOrder,
+      name: locale === "en" ? en.usage.healthResetOrder : ar.usage.healthResetOrder,
     });
     expect(reset.querySelector('[data-icon="restart_alt"]')).not.toBeNull();
     fireEvent.click(reset);
@@ -212,71 +215,68 @@ it("storage disabled still allows keyboard sorting", async () => {
   await drag();
   expect(document.querySelector("[data-provider]")).toHaveAttribute("data-provider", "codex");
 });
-it.each(["en", "zh-CN"])(
-  "sorts AGY pools independently and counts unique accounts (%s)",
-  (locale) => {
-    const cs = ["a", "b"].map((id) => ({ ...connections[2], id, email: `${id}@example.test` }));
-    const projected = Object.fromEntries(
-      cs.map((c, i) => [
-        c.id,
-        buildHealthAccount(
-          c,
-          {
-            quotas: [
-              {
-                name: "gemini_session",
-                quotaGroupId: "gemini",
-                remainingPercentage: i ? 0 : 80,
-                resetAt: "2099-01-01T01:00:00Z",
-              },
-              {
-                name: "claude_gpt_weekly",
-                quotaGroupId: "claude_gpt",
-                remainingPercentage: i ? 80 : 0,
-                resetAt: "2099-01-03T00:00:00Z",
-              },
-            ],
-          },
-          {},
-          now,
-          {
-            availability: availability(c.id, decision(), [
-              scope(
-                "gemini",
-                ["gemini_session"],
-                i
-                  ? decision(false, [blocker("gemini_session", "2099-01-01T01:00:00Z", "fiveHour")])
-                  : decision()
-              ),
-              scope(
-                "claude_gpt",
-                ["claude_gpt_weekly"],
-                i
-                  ? decision()
-                  : decision(false, [blocker("claude_gpt_weekly", "2099-01-03T00:00:00Z")])
-              ),
-            ]),
-            availabilityObservedAt: now,
-          }
-        ),
-      ])
+it.each(["en", "ar"])("sorts AGY pools independently and counts unique accounts (%s)", (locale) => {
+  const cs = ["a", "b"].map((id) => ({ ...connections[2], id, email: `${id}@example.test` }));
+  const projected = Object.fromEntries(
+    cs.map((c, i) => [
+      c.id,
+      buildHealthAccount(
+        c,
+        {
+          quotas: [
+            {
+              name: "gemini_session",
+              quotaGroupId: "gemini",
+              remainingPercentage: i ? 0 : 80,
+              resetAt: "2099-01-01T01:00:00Z",
+            },
+            {
+              name: "claude_gpt_weekly",
+              quotaGroupId: "claude_gpt",
+              remainingPercentage: i ? 80 : 0,
+              resetAt: "2099-01-03T00:00:00Z",
+            },
+          ],
+        },
+        {},
+        now,
+        {
+          availability: availability(c.id, decision(), [
+            scope(
+              "gemini",
+              ["gemini_session"],
+              i
+                ? decision(false, [blocker("gemini_session", "2099-01-01T01:00:00Z", "fiveHour")])
+                : decision()
+            ),
+            scope(
+              "claude_gpt",
+              ["claude_gpt_weekly"],
+              i
+                ? decision()
+                : decision(false, [blocker("claude_gpt_weekly", "2099-01-03T00:00:00Z")])
+            ),
+          ]),
+          availabilityObservedAt: now,
+        }
+      ),
+    ])
+  );
+  mount(locale, cs, projected);
+  const ids = (pool: string) =>
+    Array.from(document.querySelectorAll(`[data-subpool="${pool}"] [data-account]`)).map((el) =>
+      el.getAttribute("data-account")
     );
-    mount(locale, cs, projected);
-    const ids = (pool: string) =>
-      Array.from(document.querySelectorAll(`[data-subpool="${pool}"] [data-account]`)).map((el) =>
-        el.getAttribute("data-account")
-      );
-    expect(ids("gemini")).toEqual(["a", "b"]);
-    expect(ids("claude_gpt")).toEqual(["b", "a"]);
-    expect(screen.getByRole("heading", { level: 3 }).parentElement).toHaveTextContent(
-      locale === "en" ? "2 accounts" : "2 个账户"
-    );
-    expect(document.querySelector("[data-banner]")).toHaveTextContent(
-      locale === "en" ? "All 2 accounts available" : "全部 2 个号可用"
-    );
-  }
-);
-it.each(["en", "zh-CN"])(
+  expect(ids("gemini")).toEqual(["a", "b"]);
+  expect(ids("claude_gpt")).toEqual(["b", "a"]);
+  expect(screen.getByRole("heading", { level: 3 }).parentElement).toHaveTextContent(
+    locale === "en" ? "2 accounts" : "الحسابات: 2 حسابات"
+  );
+  expect(document.querySelector("[data-banner]")).toHaveTextContent(
+    locale === "en" ? "All 2 accounts available" : "كلا الحسابين متاحان (العدد: 2)"
+  );
+});
+it.each(["en", "ar"])(
   "green capsules precede partial and cooldowns; banner and hover explain the wait (%s)",
   (locale) => {
     const cs = ["weekly", "session", "high", "low", "partial"].map((id) => ({
@@ -342,15 +342,16 @@ it.each(["en", "zh-CN"])(
     const cooling = document.querySelector('[data-account="session"]')!;
     expect(cooling.querySelector("[data-fill]")).toHaveStyle({ height: "80%" });
     expect(document.querySelector("[data-banner]")).toHaveTextContent(
-      locale === "en" ? "2 accounts temporarily unavailable" : "2 个号暂时不能用"
+      locale === "en" ? "2 accounts temporarily unavailable" : "حسابان غير متاحين مؤقتًا (العدد: 2)"
     );
     fireEvent.focus(cooling);
-    expect(screen.getByRole("tooltip")).toHaveTextContent(
-      locale === "en" ? "Waited 80%" : "已等 80%"
+    // Arabic number formatting wraps "%" in bidi marks; strip them before comparing.
+    expect(screen.getByRole("tooltip").textContent!.replace(/[‎‏]/g, "")).toContain(
+      locale === "en" ? "Waited 80%" : "انقضى من الانتظار 80%"
     );
   }
 );
-it.each(["en", "zh-CN"])(
+it.each(["en", "ar"])(
   "drag live region announces provider and destination (%s)",
   async (locale) => {
     geometry();
@@ -359,7 +360,7 @@ it.each(["en", "zh-CN"])(
     const label = row.querySelector("h3")!.textContent!;
     const handle = row.querySelector<HTMLButtonElement>("[data-drag-handle]")!;
     const expected = (position: number) =>
-      locale === "en" ? `${label}, position ${position} of 3` : `${label}, 第 ${position} / 3 位`;
+      locale === "en" ? `${label}, position ${position} of 3` : `${label}, الموضع ${position} من 3`;
     handle.focus();
     fireEvent.keyDown(handle, { key: " ", code: "Space" });
     await waitFor(() =>

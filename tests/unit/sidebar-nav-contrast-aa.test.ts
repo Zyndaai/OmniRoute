@@ -72,7 +72,7 @@ const kitSidebarBg = kitRuleVar(".ci-sidebar", "background");
 
 function themeTokens(theme: "light" | "dark"): Record<string, string> {
   const light = [
-    cssBlock(globals, ":root {\n  --desktop-safe-top"),
+    cssBlock(globals, ":root {\n  color-scheme: light"),
     cssBlock(kitTokens, ":root,\n.ci-theme {"),
   ];
   const scopes =

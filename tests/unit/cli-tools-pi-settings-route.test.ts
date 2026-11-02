@@ -14,7 +14,7 @@
  * resetDbInstance() runs in test.after (AGENTS.md → "Database Handles in Tests").
  */
 
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import fsp from "node:fs/promises";

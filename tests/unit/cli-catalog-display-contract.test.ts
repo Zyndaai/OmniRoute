@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import test from "node:test";
 
 import en from "../../src/i18n/messages/en.json" with { type: "json" };
-import vi from "../../src/i18n/messages/vi.json" with { type: "json" };
+import ar from "../../src/i18n/messages/ar.json" with { type: "json" };
 import { CLI_TOOLS } from "../../src/shared/constants/cliTools";
 
 test("every CLI catalog image points to a bundled public asset", () => {
@@ -17,19 +17,19 @@ test("every CLI catalog image points to a bundled public asset", () => {
   assert.deepEqual(missing, []);
 });
 
-test("every visible CLI catalog entry has English and Vietnamese descriptions", () => {
+test("every visible CLI catalog entry has English and Arabic descriptions", () => {
   const visibleToolIds = Object.values(CLI_TOOLS)
     .filter((tool) => tool.baseUrlSupport !== "none")
     .map((tool) => tool.id);
   const englishDescriptions = en.cliTools.toolDescriptions as Record<string, string>;
-  const vietnameseDescriptions = vi.cliTools.toolDescriptions as Record<string, string>;
+  const arabicDescriptions = ar.cliTools.toolDescriptions as Record<string, string>;
 
   assert.deepEqual(
     visibleToolIds.filter((id) => !englishDescriptions[id]?.trim()),
     []
   );
   assert.deepEqual(
-    visibleToolIds.filter((id) => !vietnameseDescriptions[id]?.trim()),
+    visibleToolIds.filter((id) => !arabicDescriptions[id]?.trim()),
     []
   );
 });

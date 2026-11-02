@@ -19,7 +19,7 @@
  * by a fake binary here too, so no test in this file ever risks invoking a
  * real cursor-agent process.
  */
-import test from "node:test";
+import test from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

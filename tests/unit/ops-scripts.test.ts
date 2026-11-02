@@ -23,7 +23,7 @@
  * non-interactive TTY guard blocks an unattended destructive restore.
  */
 
-import { describe, it } from "node:test";
+import { describe, it } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
