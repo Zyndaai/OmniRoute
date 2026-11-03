@@ -1,3 +1,9 @@
+---
+title: "Hardened Deployment & Least-Privilege Client Key"
+version: 3.8.53
+lastUpdated: 2026-11-03
+---
+
 # Hardened Deployment & Least-Privilege Client Key
 
 Operator runbook for pointing a client app (a server-to-server caller using Vercel-style
