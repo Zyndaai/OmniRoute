@@ -1,12 +1,9 @@
 name: Build and Push Docker Image
 
+# Manual only: a build starts when a maintainer clicks "Run workflow" in the Actions tab. The
+# omniport.ink server deploys every new :latest automatically, so nothing reaches it without that
+# deliberate click. Builds from any branch other than main are refused below.
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   workflow_dispatch:
 
 concurrency:
@@ -21,6 +18,8 @@ permissions:
 jobs:
   typecheck:
     name: Type check
+    # :latest is what the server deploys, so only main may produce it.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

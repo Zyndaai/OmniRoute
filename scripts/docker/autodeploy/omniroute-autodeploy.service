@@ -1,0 +1,10 @@
+[Unit]
+Description=Deploy a new OmniRoute image from ghcr.io
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/omniroute-autodeploy
+TimeoutStartSec=15min

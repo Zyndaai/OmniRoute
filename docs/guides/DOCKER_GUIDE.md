@@ -27,9 +27,10 @@ lastUpdated: 2026-10-16
 ## The image
 
 There is one image: `ghcr.io/zyndaai/omniroute`, built from the `runner-base` stage of the
-`Dockerfile` by `.github/workflows/docker-build-push.yml` on every push to `main` (except pushes
-that only touch `*.md` or `docs/`). Each build is tagged `:latest` and `:<commit sha>`. The
-package is private, so a host needs `docker login ghcr.io` with a token that has `read:packages`.
+`Dockerfile` by `.github/workflows/docker-build-push.yml`. The workflow never runs on a push: a
+maintainer starts it from the Actions tab ("Run workflow"), and it refuses any branch but `main`.
+Each build is tagged `:latest` and `:<commit sha>`. The package is public, so a host pulls it
+without logging in.
 
 The `Dockerfile` has three stages: `base` (Node 26 on Debian trixie), `builder` (installs
 dependencies and runs `npm run build`) and `runner-base` (the Next.js standalone output, no
@@ -331,12 +332,25 @@ Endpoint tunnel panels (Cloudflare, Tailscale, ngrok) can be shown or hidden fro
 The image sets `OMNIROUTE_NO_UPDATE_NOTIFIER=1`, so the dashboard never offers upstream's npm
 releases as updates and never shows upstream's news feed. Updating the hosted instance is a deploy:
 
-1. Push to `main`; `.github/workflows/docker-build-push.yml` builds and pushes
-   `ghcr.io/zyndaai/omniroute:<sha>` and `:latest`.
-2. On the VPS, set `OMNIROUTE_TAG` in `/opt/omniroute/.env` to that commit sha, then
-   `docker compose pull && docker compose up -d` in `/opt/omniroute`.
-3. To roll back, set `OMNIROUTE_TAG` to the previous sha and run the same two commands. Back up
-   the data volume before a risky change.
+1. Push to `main`, then start "Build and Push Docker Image" from the Actions tab. It builds and
+   pushes `ghcr.io/zyndaai/omniroute:<sha>` and `:latest`.
+2. The VPS deploys the new `:latest` by itself within about 5 minutes:
+   `scripts/docker/autodeploy/omniroute-autodeploy` runs from a systemd timer, and when the
+   `:latest` digest changes it pulls the image, stops the container, archives the data volume,
+   starts the new image and waits for it to report healthy. If it does not, the script restores
+   the archive and the previous `OMNIROUTE_TAG`, starts the old image again and skips that
+   digest from then on. It logs to `journalctl -u omniroute-autodeploy`.
+3. To hold deploys, `touch /opt/omniroute/AUTODEPLOY_PAUSED`; delete the file to resume. To deploy
+   by hand instead, set `OMNIROUTE_TAG` in `/opt/omniroute/.env` and run
+   `docker compose pull && docker compose up -d` in `/opt/omniroute`, after backing up the volume.
+
+Install the auto-deploy on a host (as root):
+
+```bash
+install -m 750 scripts/docker/autodeploy/omniroute-autodeploy /usr/local/sbin/
+install -m 644 scripts/docker/autodeploy/omniroute-autodeploy.{service,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now omniroute-autodeploy.timer
+```
 
 ## Availability: default SQLite is single-replica
 

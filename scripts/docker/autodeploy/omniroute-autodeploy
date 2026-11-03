@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# omniroute-autodeploy — deploy a new ghcr.io/zyndaai/omniroute:latest on a single-VPS host
+# (docker-compose.vps.yml in /opt/omniroute). Run by omniroute-autodeploy.timer every 5 minutes,
+# as root. The image is only rebuilt when a maintainer starts the build workflow by hand.
+#
+# Each new image may run one-way DB migrations, so a deploy is:
+#   pull new image -> stop -> tar the data volume -> start new image -> wait for healthy
+#   -> on failure: restore the volume tarball + previous tag, start the old image again,
+#      and remember the bad digest so it is not retried every 5 minutes.
+#
+# Usage:  omniroute-autodeploy            check and deploy if :latest changed
+#         omniroute-autodeploy --dry-run  only report running vs remote digest
+#         omniroute-autodeploy --force    redeploy even if the digest is unchanged
+# Pause:  touch /opt/omniroute/AUTODEPLOY_PAUSED   (remove the file to resume)
+# Logs:   journalctl -u omniroute-autodeploy
+set -euo pipefail
+
+REPO=ghcr.io/zyndaai/omniroute
+APP_DIR=/opt/omniroute
+CONTAINER=omniroute
+VOLUME_DIR=/var/lib/docker/volumes/omniroute-data/_data
+BACKUP_DIR=/root/omniroute-migration/auto
+STATE_DIR=/var/lib/omniroute-autodeploy
+PAUSE_FILE=$APP_DIR/AUTODEPLOY_PAUSED
+KEEP_BACKUPS=5
+HEALTH_TIMEOUT=240
+
+MODE=${1:-}
+log() { echo "$(date -u +%H:%M:%S) $*"; }
+
+mkdir -p "$BACKUP_DIR" "$STATE_DIR"
+chmod 700 "$BACKUP_DIR" "$STATE_DIR"
+exec 9>"$STATE_DIR/lock"
+flock -n 9 || { log "another deploy is running, skipping"; exit 0; }
+
+if [[ -e $PAUSE_FILE && $MODE != --dry-run ]]; then
+  log "paused ($PAUSE_FILE exists), skipping"
+  exit 0
+fi
+
+remote=$(docker buildx imagetools inspect "$REPO:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')
+[[ $remote == sha256:* ]] || { log "could not read $REPO:latest digest: $remote"; exit 1; }
+running=$(docker inspect "$CONTAINER" --format '{{.Image}}' 2>/dev/null || echo none)
+
+if [[ $MODE == --dry-run ]]; then
+  log "running=$running remote=$remote $([[ $running == "$remote" ]] && echo up-to-date || echo UPDATE-AVAILABLE)"
+  exit 0
+fi
+if [[ $running == "$remote" && $MODE != --force ]]; then
+  exit 0
+fi
+if [[ $MODE != --force ]] && grep -qx "$remote" "$STATE_DIR/bad-digests" 2>/dev/null; then
+  log "skipping $remote: it failed its health check before (remove it from $STATE_DIR/bad-digests to retry)"
+  exit 0
+fi
+
+cd "$APP_DIR"
+prev_tag=$(grep -E '^OMNIROUTE_TAG=' .env | cut -d= -f2-)
+new_tag="latest@$remote"
+log "deploying $remote (running: $running, tag: $prev_tag)"
+
+set_tag() { sed -i "s|^OMNIROUTE_TAG=.*|OMNIROUTE_TAG=$1|" .env; }
+wait_healthy() {
+  local s=""
+  for _ in $(seq 1 $((HEALTH_TIMEOUT / 3))); do
+    s=$(docker inspect "$CONTAINER" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)
+    [[ $s == healthy ]] && return 0
+    [[ $s == unhealthy ]] && break
+    sleep 3
+  done
+  log "health: $s"
+  return 1
+}
+
+docker pull -q "$REPO@$remote" >/dev/null
+log "pulled"
+
+backup="$BACKUP_DIR/omniroute-data.$(date -u +%Y%m%dT%H%M%SZ).tgz"
+docker stop -t 30 "$CONTAINER" >/dev/null
+tar -C "$VOLUME_DIR" -czf "$backup" .
+chmod 600 "$backup"
+log "stopped, volume backup $(du -h "$backup" | cut -f1) -> $backup"
+
+set_tag "$new_tag"
+docker compose up -d --quiet-pull >/dev/null 2>&1
+if wait_healthy; then
+  log "healthy on $remote, deploy done"
+  # Keep the newest backups and the previous image (for a manual rollback); drop older ones.
+  ls -1t "$BACKUP_DIR"/omniroute-data.*.tgz | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+  prev_image=$running
+  docker image ls --no-trunc --format '{{.ID}}' "$REPO" | sort -u | while read -r id; do
+    [[ $id == "$remote" || $id == "$prev_image" ]] || docker rmi -f "$id" >/dev/null 2>&1 || true
+  done
+  exit 0
+fi
+
+log "NEW IMAGE FAILED its health check, rolling back to $prev_tag"
+docker compose logs --no-color --tail 40 "$CONTAINER" 2>&1 | sed 's/^/  | /' || true
+echo "$remote" >> "$STATE_DIR/bad-digests"
+docker stop -t 30 "$CONTAINER" >/dev/null 2>&1 || true
+find "$VOLUME_DIR" -mindepth 1 -delete
+tar -C "$VOLUME_DIR" -xzpf "$backup"
+set_tag "$prev_tag"
+docker compose up -d >/dev/null 2>&1
+if wait_healthy; then
+  log "rolled back: running $prev_tag again with the pre-deploy data"
+else
+  log "ROLLBACK ALSO UNHEALTHY: check 'docker compose -f $APP_DIR/docker-compose.yml logs'"
+fi
+exit 1

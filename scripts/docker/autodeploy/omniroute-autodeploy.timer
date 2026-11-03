@@ -1,0 +1,11 @@
+[Unit]
+Description=Check ghcr.io for a new OmniRoute image every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
