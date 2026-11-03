@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl";
 import { Card, Button, Input, EmptyState, Skeleton } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 
 // Chain position colours are data series (1st, 2nd, … provider), so they come from the
 // kit chart palette and cycle through its five steps. The palette is tuned for fills, not
@@ -52,6 +53,7 @@ export default function FallbackChainsEditor() {
   const [newProviders, setNewProviders] = useState("");
   const [saving, setSaving] = useState(false);
   const notify = useNotificationStore();
+  const [confirm, confirmDialog] = useConfirmDialog();
   const t = useTranslations("settings");
   const tc = useTranslations("common");
 
@@ -116,7 +118,7 @@ export default function FallbackChainsEditor() {
   };
 
   const handleDelete = async (model) => {
-    if (!confirm(t("deleteChainConfirm", { model }))) return;
+    if (!(await confirm(t("deleteChainConfirm", { model })))) return;
     try {
       const res = await fetch("/api/fallback/chains", {
         method: "DELETE",
@@ -163,6 +165,7 @@ export default function FallbackChainsEditor() {
         </Button>
       }
     >
+      {confirmDialog}
       {/* Create Form */}
       {showCreate && (
         <div className="p-4 rounded-lg border border-border bg-bg-subtle mb-4">

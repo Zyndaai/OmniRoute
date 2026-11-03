@@ -52,14 +52,6 @@ beforeEach(() => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
-  // These tests exercise selection bookkeeping, not the confirm-above-threshold
-  // UX (see modelSelectModalHelpers.ts::shouldConfirmSelectAll) — stub confirm
-  // to always accept so assertions don't depend on how many models the fixture
-  // catalog happens to expose.
-  vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true)
-  );
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -84,6 +76,26 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
 });
+
+// The above-threshold confirm is an in-app dialog (the translation mock renders keys as text).
+function findDialogButton(label: string): HTMLButtonElement | undefined {
+  return Array.from(document.body.querySelectorAll<HTMLButtonElement>("button")).find(
+    (b) => b.textContent === label
+  );
+}
+
+// Clicks Select all and accepts the confirm dialog when the catalog is large enough to show one.
+async function selectAll(toggle: HTMLButtonElement) {
+  await act(async () => {
+    toggle.click();
+  });
+  const accept = findDialogButton("confirmAction");
+  if (accept) {
+    await act(async () => {
+      accept.click();
+    });
+  }
+}
 
 describe("ModelSelectModal — Select all / Unselect all visible models", () => {
   it("does not render the toggle without batch callbacks", async () => {
@@ -120,9 +132,7 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
     ) as HTMLButtonElement;
     expect(toggle).not.toBeNull();
 
-    await act(async () => {
-      toggle.click();
-    });
+    await selectAll(toggle);
 
     expect(onSelectMany).toHaveBeenCalledTimes(1);
     expect(onDeselectMany).not.toHaveBeenCalled();
@@ -142,9 +152,7 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
     const probeToggle = probe.container.querySelector(
       '[data-testid="model-select-toggle-all-visible"]'
     ) as HTMLButtonElement;
-    await act(async () => {
-      probeToggle.click();
-    });
+    await selectAll(probeToggle);
     const allValues = (probeSelect.mock.calls[0][0] as Array<{ value: string }>).map(
       (m) => m.value
     );
@@ -183,9 +191,7 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
     const probeToggle = probe.container.querySelector(
       '[data-testid="model-select-toggle-all-visible"]'
     ) as HTMLButtonElement;
-    await act(async () => {
-      probeToggle.click();
-    });
+    await selectAll(probeToggle);
     const allValues = (probeSelect.mock.calls[0][0] as Array<{ value: string }>).map(
       (m) => m.value
     );
@@ -201,9 +207,7 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
     const toggle = container.querySelector(
       '[data-testid="model-select-toggle-all-visible"]'
     ) as HTMLButtonElement;
-    await act(async () => {
-      toggle.click();
-    });
+    await selectAll(toggle);
 
     const selected = onSelectMany.mock.calls[0][0] as Array<{ value: string }>;
     expect(selected.some((m) => m.value === alreadyAdded[0])).toBe(false);
@@ -211,9 +215,6 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
   });
 
   it("asks for confirmation before Select all above the threshold, and honors decline", async () => {
-    const confirmSpy = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirmSpy);
-
     const onSelectMany = vi.fn();
     // openai (20 models) + anthropic (10 models) = 30 candidates, comfortably
     // above SELECT_ALL_CONFIRM_THRESHOLD (20) — see modelSelectModalHelpers.ts.
@@ -232,7 +233,11 @@ describe("ModelSelectModal — Select all / Unselect all visible models", () => 
       toggle.click();
     });
 
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    const decline = findDialogButton("cancel");
+    expect(decline, "expected the in-app confirm dialog").toBeDefined();
+    await act(async () => {
+      decline!.click();
+    });
     // Declining the confirmation must abort the batch add entirely.
     expect(onSelectMany).not.toHaveBeenCalled();
   });

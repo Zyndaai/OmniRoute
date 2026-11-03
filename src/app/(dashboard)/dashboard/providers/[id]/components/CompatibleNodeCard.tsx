@@ -6,6 +6,7 @@ import Icon from "@/shared/components/Icon";
 import { useRouter } from "next/navigation";
 import { Card, Button } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { getApiLabel, getApiPath } from "../providerPageHelpers";
 import type { ProviderMessageTranslator } from "../providerPageHelpers";
 
@@ -43,9 +44,11 @@ export default function CompatibleNodeCard({
   t,
 }: CompatibleNodeCardProps) {
   const router = useRouter();
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   return (
     <Card>
+      {confirmDialog}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           {providerNode.iconUrl && (
@@ -90,7 +93,7 @@ export default function CompatibleNodeCard({
             icon="delete"
             onClick={async () => {
               if (
-                !confirm(
+                !(await confirm(
                   t("deleteCompatibleNodeConfirm", {
                     type: isCcCompatible
                       ? t("ccCompatibleLabel")
@@ -98,7 +101,7 @@ export default function CompatibleNodeCard({
                         ? t("anthropic")
                         : t("openai"),
                   })
-                )
+                ))
               )
                 return;
               try {

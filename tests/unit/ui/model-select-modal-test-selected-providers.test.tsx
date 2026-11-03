@@ -69,10 +69,6 @@ beforeEach(() => {
   notifyError.mockReset();
   notifyInfo.mockReset();
   vi.stubGlobal(
-    "confirm",
-    vi.fn(() => true)
-  );
-  vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/provider-nodes") {
@@ -247,6 +243,15 @@ describe("ModelSelectModal — Test Selected Providers", () => {
     await act(async () => {
       selectWorking!.click();
     });
+    // Above the threshold the batch add asks first, in an in-app dialog (keys render as text).
+    const accept = Array.from(document.body.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent === "confirmAction"
+    );
+    if (accept) {
+      await act(async () => {
+        accept.click();
+      });
+    }
     expect(onSelectMany).toHaveBeenCalledTimes(1);
     expect(added.length).toBeGreaterThan(0);
 

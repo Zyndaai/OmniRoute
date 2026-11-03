@@ -7,9 +7,9 @@
  *  2. Render batch completed with outputFileId → shows Download Output link with download attr
  *  3. Render batch failed + errorFileId + requestCountsFailed > 0 → shows Download Errors + Retry
  *  4. Render batch failed (no errorFileId, no failures) → Cancel does NOT appear
- *  5. Click Cancel → window.confirm → cancel hook called → onClose called
+ *  5. Click Cancel → in-app confirm → cancel hook called → onClose called
  *  5b. Cancel confirm dismissed → cancel NOT called
- *  6. Click Retry → window.confirm → retry hook called → onClose if newBatchId returned
+ *  6. Click Retry → in-app confirm → retry hook called → onClose if newBatchId returned
  *  6b. Retry returns null → onClose NOT called
  *  7. actionError set → role="alert" shown in DOM
  *  8. Sanitization: error displayed via i18n key — never raw paths or stack traces
@@ -147,6 +147,23 @@ function renderModal(
   return { el: dialog };
 }
 
+// The in-app confirm dialog is a second dialog portaled to <body>.
+function confirmDialogText(): string {
+  const dialogs = document.body.querySelectorAll('[role="dialog"]');
+  return dialogs[dialogs.length - 1]?.textContent ?? "";
+}
+
+async function answerConfirmDialog(buttonText: "confirmAction" | "cancel") {
+  const button = Array.from(document.body.querySelectorAll("button")).find(
+    (b) => b.textContent === buttonText
+  );
+  expect(button).toBeTruthy();
+  await act(async () => {
+    button!.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -251,7 +268,6 @@ describe("BatchDetailModal — action footer (F7)", () => {
   it("calls cancel hook then onClose after user confirms cancel", async () => {
     const onClose = vi.fn();
     mockCancel.mockResolvedValueOnce(undefined);
-    vi.spyOn(window, "confirm").mockReturnValueOnce(true);
 
     const { el } = renderModal({ status: "in_progress" }, onClose);
 
@@ -263,15 +279,14 @@ describe("BatchDetailModal — action footer (F7)", () => {
       await Promise.resolve();
     });
 
-    expect(window.confirm).toHaveBeenCalled();
+    expect(confirmDialogText()).toContain("batchDetailCancelConfirm");
+    await answerConfirmDialog("confirmAction");
     expect(mockCancel).toHaveBeenCalledWith("batch_abc123");
     expect(onClose).toHaveBeenCalled();
   });
 
   // 5b. Cancel confirm dismissed → cancel NOT called
   it("does not call cancel when user dismisses the confirm dialog", async () => {
-    vi.spyOn(window, "confirm").mockReturnValueOnce(false);
-
     const { el } = renderModal({ status: "in_progress" });
 
     const cancelBtn = Array.from(el.querySelectorAll("button")).find((b) =>
@@ -282,6 +297,7 @@ describe("BatchDetailModal — action footer (F7)", () => {
       await Promise.resolve();
     });
 
+    await answerConfirmDialog("cancel");
     expect(mockCancel).not.toHaveBeenCalled();
   });
 
@@ -289,7 +305,6 @@ describe("BatchDetailModal — action footer (F7)", () => {
   it("calls retry hook then onClose when retry returns a newBatchId", async () => {
     const onClose = vi.fn();
     mockRetry.mockResolvedValueOnce({ newBatchId: "batch_new_xyz" });
-    vi.spyOn(window, "confirm").mockReturnValueOnce(true);
 
     const { el } = renderModal(
       { status: "failed", errorFileId: "file_error_1", requestCountsFailed: 3 },
@@ -304,7 +319,8 @@ describe("BatchDetailModal — action footer (F7)", () => {
       await Promise.resolve();
     });
 
-    expect(window.confirm).toHaveBeenCalled();
+    expect(confirmDialogText()).toContain("batchDetailActionRetry");
+    await answerConfirmDialog("confirmAction");
     expect(mockRetry).toHaveBeenCalledWith({
       id: "batch_abc123",
       inputFileId: "file_input_1",
@@ -318,7 +334,6 @@ describe("BatchDetailModal — action footer (F7)", () => {
   it("does not call onClose when retry returns null", async () => {
     const onClose = vi.fn();
     mockRetry.mockResolvedValueOnce(null);
-    vi.spyOn(window, "confirm").mockReturnValueOnce(true);
 
     const { el } = renderModal(
       { status: "failed", errorFileId: "file_error_1", requestCountsFailed: 2 },
@@ -333,6 +348,7 @@ describe("BatchDetailModal — action footer (F7)", () => {
       await Promise.resolve();
     });
 
+    await answerConfirmDialog("confirmAction");
     expect(mockRetry).toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

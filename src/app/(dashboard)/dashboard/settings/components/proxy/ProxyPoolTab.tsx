@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { useNotificationStore } from "@/store/notificationStore";
 import ProxyRegistryManager from "../ProxyRegistryManager";
 import VercelRelayModal from "./VercelRelayModal";
 import DenoRelayModal from "./DenoRelayModal";
@@ -9,6 +10,7 @@ import type { ProxyItem } from "../proxyRegistryTypes";
 
 export default function ProxyPoolTab() {
   const t = useTranslations("settings");
+  const notifySuccess = useNotificationStore((s) => s.success);
   const [vercelModalOpen, setVercelModalOpen] = useState(false);
   const [denoModalOpen, setDenoModalOpen] = useState(false);
   const [cloudflareModalOpen, setCloudflareModalOpen] = useState(false);
@@ -18,11 +20,11 @@ export default function ProxyPoolTab() {
   const showCloudflareRelay = process.env.NEXT_PUBLIC_CLOUDFLARE_RELAY_ENABLED !== "false";
 
   const handleVercelDeployed = (_poolProxyId: string, relayUrl: string) => {
-    alert(`${t("vercelRelaySuccess")}: ${relayUrl}`);
+    notifySuccess(`${t("vercelRelaySuccess")}: ${relayUrl}`);
   };
 
   const handleCloudflareDeployed = (_poolProxyId: string, relayUrl: string) => {
-    alert(`${t("cloudflareRelaySuccess")}: ${relayUrl}`);
+    notifySuccess(`${t("cloudflareRelaySuccess")}: ${relayUrl}`);
   };
   const handleRedeployRelay = (proxy: ProxyItem) => {
     if (proxy.type === "vercel") setVercelModalOpen(true);

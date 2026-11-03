@@ -9,6 +9,7 @@ import Card from "@/shared/components/Card";
 import EmptyState from "@/shared/components/EmptyState";
 import Input from "@/shared/components/Input";
 import { SkillsConceptCard } from "@/shared/components/SkillsConceptCard";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { cn } from "@/shared/utils/cn";
 import { matchesSearch } from "@/shared/utils/turkishText";
 import { CoverageBar } from "./components/CoverageBar";
@@ -58,6 +59,7 @@ function CoverageBarSkeleton(): JSX.Element {
 export function AgentSkillsPageClient(): JSX.Element {
   const t = useTranslations("agentSkills");
   const tSidebar = useTranslations("sidebar");
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   // State
   const [catalog, setCatalog] = useState<AgentSkill[]>([]);
@@ -149,7 +151,7 @@ export function AgentSkillsPageClient(): JSX.Element {
 
   // ── Generate missing skills ───────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
-    const confirmed = window.confirm(t("regenerateConfirm"));
+    const confirmed = await confirm({ message: t("regenerateConfirm"), variant: "primary" });
     if (!confirmed) return;
     setGeneratingSkills(true);
     try {
@@ -171,7 +173,7 @@ export function AgentSkillsPageClient(): JSX.Element {
     } finally {
       setGeneratingSkills(false);
     }
-  }, [t]);
+  }, [t, confirm]);
 
   // ── Filtering + search ────────────────────────────────────────────────────
   const localizedCatalog = useMemo(
@@ -210,6 +212,7 @@ export function AgentSkillsPageClient(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-4">
+      {confirmDialog}
       {/* Page title (lote 7 pendência 12): the shell title hides when a PageHeader is present. */}
       <PageHeader
         compact

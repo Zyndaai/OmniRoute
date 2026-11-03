@@ -5,6 +5,7 @@ import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card, Button, EmptyState } from "@/shared/components";
 import Badge from "@/shared/components/Badge";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useTranslations } from "next-intl";
 
 interface PluginInfo {
@@ -20,6 +21,7 @@ interface PluginInfo {
 export default function PluginsPage() {
   const { addNotification } = useNotificationStore();
   const t = useTranslations("plugins");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -79,7 +81,7 @@ export default function PluginsPage() {
   };
 
   const handleUninstall = async (name: string) => {
-    if (!confirm(t("uninstallConfirm", { name }))) return;
+    if (!(await confirm(t("uninstallConfirm", { name })))) return;
     try {
       const res = await fetch(`/api/plugins/${name}`, { method: "DELETE" });
       if (res.ok) {
@@ -101,6 +103,7 @@ export default function PluginsPage() {
 
   return (
     <div className="space-y-6 p-6">
+      {confirmDialog}
       <PageHeader
         compact
         title={t("title")}

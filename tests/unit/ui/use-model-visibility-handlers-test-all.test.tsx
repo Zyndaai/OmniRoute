@@ -38,6 +38,7 @@ const baseParams = {
   fetchProviderModelMeta: async () => {},
   fetchAliases: async () => {},
   notify,
+  confirm: async () => true,
   t,
   selectedConnection: { id: "conn-1", provider: "glm" },
   providerNode: { id: "glm" },

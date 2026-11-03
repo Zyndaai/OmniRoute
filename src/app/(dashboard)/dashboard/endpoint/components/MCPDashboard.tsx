@@ -13,6 +13,7 @@ import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useTranslations } from "next-intl";
 
 type McpTransport = "stdio" | "sse" | "streamable-http";
@@ -192,6 +193,7 @@ function formatPercent(value: number | null | undefined) {
 
 export default function McpDashboardPage() {
   const t = useTranslations("mcpDashboard");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<McpStatusResponse | null>(null);
   const [tools, setTools] = useState<McpTool[]>([]);
@@ -297,9 +299,10 @@ export default function McpDashboardPage() {
     const nextState = selectedCombo.isActive === false;
     const confirmLabel = nextState ? t("activate") : t("deactivate");
     if (
-      !globalThis.confirm(
-        t("confirmSwitchCombo", { action: confirmLabel, combo: selectedCombo.name })
-      )
+      !(await confirm({
+        message: t("confirmSwitchCombo", { action: confirmLabel, combo: selectedCombo.name }),
+        variant: nextState ? "primary" : "danger",
+      }))
     )
       return;
 
@@ -333,7 +336,13 @@ export default function McpDashboardPage() {
       conservative: t("profileConservative"),
     };
     const profileLabel = profileLabelById[selectedProfile];
-    if (!globalThis.confirm(t("confirmApplyProfile", { profile: profileLabel }))) return;
+    if (
+      !(await confirm({
+        message: t("confirmApplyProfile", { profile: profileLabel }),
+        variant: "primary",
+      }))
+    )
+      return;
 
     setActionBusy("resilience");
     setActionMessage("");
@@ -358,7 +367,7 @@ export default function McpDashboardPage() {
   };
 
   const handleResetCircuitBreakers = async () => {
-    if (!globalThis.confirm(t("confirmResetBreakers"))) return;
+    if (!(await confirm(t("confirmResetBreakers")))) return;
 
     setActionBusy("reset");
     setActionMessage("");
@@ -395,6 +404,7 @@ export default function McpDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard label={t("processStatus")} value={status?.online ? t("online") : t("offline")} />
         <StatCard label={t("pid")} value={status?.heartbeat?.pid ?? "—"} />

@@ -17,6 +17,7 @@ import ProviderIcon from "@/shared/components/ProviderIcon";
 import InfoTooltip from "@/shared/components/InfoTooltip";
 import { compareTr, matchesSearch } from "@/shared/utils/turkishText";
 import { extractApiErrorMessage } from "@/shared/http/apiErrorMessage";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { FilterSelect, HeroStat, SyncMini } from "./PricingTabHelpers";
 
 type CoverageFilter = "all" | "lt50" | "gte50lt100" | "full";
@@ -133,6 +134,7 @@ export default function PricingTab() {
     message: string;
   } | null>(null);
   const t = useTranslations("settings");
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   const showStatus = useCallback((tone: "success" | "error" | "info", message: string) => {
     setStatusMessage({ tone, message });
@@ -403,7 +405,8 @@ export default function PricingTab() {
 
   const resetProvider = useCallback(
     async (providerAlias: string, pricingKey?: string) => {
-      if (!confirm(t("resetPricingConfirm", { provider: providerAlias.toUpperCase() }))) return;
+      if (!(await confirm(t("resetPricingConfirm", { provider: providerAlias.toUpperCase() }))))
+        return;
 
       try {
         const writeKey = pricingKey || providerAlias;
@@ -433,7 +436,7 @@ export default function PricingTab() {
         );
       }
     },
-    [loadData, showStatus, t]
+    [confirm, loadData, showStatus, t]
   );
 
   const triggerSync = useCallback(async () => {
@@ -469,7 +472,7 @@ export default function PricingTab() {
   }, [loadData, showStatus, t]);
 
   const clearSyncedPricing = useCallback(async () => {
-    if (!confirm(t("clearSyncedPricingConfirm"))) return;
+    if (!(await confirm(t("clearSyncedPricingConfirm")))) return;
 
     setSyncing(true);
     try {
@@ -491,7 +494,7 @@ export default function PricingTab() {
     } finally {
       setSyncing(false);
     }
-  }, [loadData, showStatus, t]);
+  }, [confirm, loadData, showStatus, t]);
 
   if (loading) {
     return (
@@ -506,6 +509,7 @@ export default function PricingTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      {confirmDialog}
       {/* Hero — combined header (stats + sync + how-it-works tooltip) */}
       <Card className="p-5">
         <div className="flex items-start justify-between gap-3 mb-4">

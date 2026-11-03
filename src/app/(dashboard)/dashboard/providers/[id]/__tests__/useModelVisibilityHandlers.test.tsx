@@ -22,6 +22,8 @@ const notify = {
   info: vi.fn(),
 };
 
+const confirm = vi.fn(() => Promise.resolve(true));
+
 const baseProps = {
   providerId: "anthropic-compatible-cc-test",
   modelAliases: {},
@@ -30,6 +32,7 @@ const baseProps = {
   fetchProviderModelMeta: vi.fn().mockResolvedValue(undefined),
   fetchAliases: vi.fn().mockResolvedValue(undefined),
   notify,
+  confirm,
   t,
   selectedConnection: { id: "conn-1", provider: "anthropic-compatible-cc-test" },
   providerNode: { id: "anthropic-compatible-cc-test" },
@@ -144,10 +147,7 @@ describe("useModelVisibilityHandlers", () => {
   });
 
   it("clears models for both storage alias and canonical providerId when they differ", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true)
-    );
+    confirm.mockResolvedValue(true);
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValue({
       ok: true,
@@ -179,6 +179,7 @@ describe("useModelVisibilityHandlers", () => {
       await latestResult!.handleClearAllModels();
     });
 
+    expect(confirm).toHaveBeenCalledWith("clearAllModelsConfirm");
     expect(fetchMock).toHaveBeenCalledWith("/api/provider-models?provider=ag&all=true", {
       method: "DELETE",
     });

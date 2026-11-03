@@ -6,6 +6,7 @@ import Icon from "@/shared/components/Icon";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import Modal from "@/shared/components/Modal";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useBatchActions } from "./components/useBatchActions";
 import { batchStatusTone } from "./components/batchStatusTone";
 
@@ -157,6 +158,7 @@ export default function BatchDetailModal({
   onActionDone,
 }: BatchDetailModalProps) {
   const t = useTranslations("common");
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   // ── Action hook (F7) ─────────────────────────────────────────────────────────
   const {
@@ -188,303 +190,310 @@ export default function BatchDetailModal({
   const errorFile = batch.errorFileId ? files.find((f) => f.id === batch.errorFileId) : null;
 
   return (
-    <Modal
-      isOpen
-      onClose={onClose}
-      size="full"
-      className="sm:max-w-2xl"
-      title={
-        <span className="flex items-center gap-3">
-          <Icon name="pending_actions" size={20} className="text-text-muted" />
-          {t("batchDetailsTitle")}
-        </span>
-      }
-      bodyClassName="p-6 space-y-6 max-h-[calc(90vh-180px)] overflow-y-auto"
-      footer={
-        canCancel || canRetry || batch.outputFileId || batch.errorFileId ? (
-          <div className="flex w-full flex-wrap gap-2">
-            {/* Download output */}
-            {batch.outputFileId && (
-              <a
-                href={downloadHrefOutput(batch.outputFileId) ?? "#"}
-                download={`batch-${batch.id}-output.jsonl`}
-                className={buttonVariants({ variant: "outline", size: "sm", className: "gap-2" })}
-              >
-                <Icon name="download" size={16} />
-                {t("batchActionDownloadOutput")}
-              </a>
-            )}
+    <>
+      {confirmDialog}
+      <Modal
+        isOpen
+        onClose={onClose}
+        size="full"
+        className="sm:max-w-2xl"
+        title={
+          <span className="flex items-center gap-3">
+            <Icon name="pending_actions" size={20} className="text-text-muted" />
+            {t("batchDetailsTitle")}
+          </span>
+        }
+        bodyClassName="p-6 space-y-6 max-h-[calc(90vh-180px)] overflow-y-auto"
+        footer={
+          canCancel || canRetry || batch.outputFileId || batch.errorFileId ? (
+            <div className="flex w-full flex-wrap gap-2">
+              {/* Download output */}
+              {batch.outputFileId && (
+                <a
+                  href={downloadHrefOutput(batch.outputFileId) ?? "#"}
+                  download={`batch-${batch.id}-output.jsonl`}
+                  className={buttonVariants({ variant: "outline", size: "sm", className: "gap-2" })}
+                >
+                  <Icon name="download" size={16} />
+                  {t("batchActionDownloadOutput")}
+                </a>
+              )}
 
-            {/* Download errors */}
-            {batch.errorFileId && (
-              <a
-                href={downloadHrefErrors(batch.errorFileId) ?? "#"}
-                download={`batch-${batch.id}-errors.jsonl`}
-                className={buttonVariants({
-                  variant: "outline",
-                  size: "sm",
-                  className: "gap-2 border-error/25 text-error hover:text-error",
-                })}
-              >
-                <Icon name="error_outline" size={16} />
-                {t("batchActionDownloadErrors")}
-              </a>
-            )}
+              {/* Download errors */}
+              {batch.errorFileId && (
+                <a
+                  href={downloadHrefErrors(batch.errorFileId) ?? "#"}
+                  download={`batch-${batch.id}-errors.jsonl`}
+                  className={buttonVariants({
+                    variant: "outline",
+                    size: "sm",
+                    className: "gap-2 border-error/25 text-error hover:text-error",
+                  })}
+                >
+                  <Icon name="error_outline" size={16} />
+                  {t("batchActionDownloadErrors")}
+                </a>
+              )}
 
-            {/* Retry failed */}
-            {canRetry && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={async () => {
-                  if (
-                    window.confirm(
-                      t("batchDetailActionRetry") +
-                        ` (${batch.requestCountsFailed} ${t("batchActionRetry")})?`
-                    )
-                  ) {
-                    const result = await retry({
-                      id: batch.id,
-                      inputFileId: batch.inputFileId,
-                      errorFileId: batch.errorFileId,
-                      endpoint: batch.endpoint,
-                    });
-                    if (result?.newBatchId) onClose();
-                  }
-                }}
-                disabled={retrying}
-                className="gap-2"
-              >
-                <Icon name={retrying ? "hourglass_empty" : "refresh"} size={16} />
-                {retrying ? t("batchDetailRetrying") : t("batchDetailActionRetry")}
-              </Button>
-            )}
+              {/* Retry failed */}
+              {canRetry && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        message:
+                          t("batchDetailActionRetry") +
+                          ` (${batch.requestCountsFailed} ${t("batchActionRetry")})?`,
+                        variant: "primary",
+                      })
+                    ) {
+                      const result = await retry({
+                        id: batch.id,
+                        inputFileId: batch.inputFileId,
+                        errorFileId: batch.errorFileId,
+                        endpoint: batch.endpoint,
+                      });
+                      if (result?.newBatchId) onClose();
+                    }
+                  }}
+                  disabled={retrying}
+                  className="gap-2"
+                >
+                  <Icon name={retrying ? "hourglass_empty" : "refresh"} size={16} />
+                  {retrying ? t("batchDetailRetrying") : t("batchDetailActionRetry")}
+                </Button>
+              )}
 
-            {/* Cancel */}
-            {canCancel && (
-              <Button
-                variant="warning"
-                size="sm"
-                onClick={async () => {
-                  if (window.confirm(t("batchDetailCancelConfirm"))) {
-                    await cancel(batch.id);
-                    onClose();
-                  }
-                }}
-                disabled={cancelling}
-                className="ml-auto gap-2"
-              >
-                <Icon name={cancelling ? "hourglass_empty" : "close"} size={16} />
-                {cancelling ? t("batchDetailCancelling") : t("batchDetailActionCancel")}
-              </Button>
-            )}
+              {/* Cancel */}
+              {canCancel && (
+                <Button
+                  variant="warning"
+                  size="sm"
+                  onClick={async () => {
+                    if (await confirm(t("batchDetailCancelConfirm"))) {
+                      await cancel(batch.id);
+                      onClose();
+                    }
+                  }}
+                  disabled={cancelling}
+                  className="ml-auto gap-2"
+                >
+                  <Icon name={cancelling ? "hourglass_empty" : "close"} size={16} />
+                  {cancelling ? t("batchDetailCancelling") : t("batchDetailActionCancel")}
+                </Button>
+              )}
 
-            {/* Action error — uses i18n key set by hook (D14: never raw err.message/stack) */}
-            {actionError && (
-              <div role="alert" className="basis-full mt-1 text-xs text-error">
-                {/* actionError is an i18n key from the hook (e.g. "batchActionCancel").
+              {/* Action error — uses i18n key set by hook (D14: never raw err.message/stack) */}
+              {actionError && (
+                <div role="alert" className="basis-full mt-1 text-xs text-error">
+                  {/* actionError is an i18n key from the hook (e.g. "batchActionCancel").
                     Cast is needed because next-intl types its arg as a specific union;
                     the hook guarantees this is always a valid message key. */}
-                {t(actionError as Parameters<typeof t>[0])}
-              </div>
-            )}
-          </div>
-        ) : undefined
-      }
-    >
-      <div className="-mt-2 flex items-center gap-2">
-        <p className="text-xs text-text-muted font-mono">{batch.id}</p>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => {
-            navigator.clipboard.writeText(batch.id);
-          }}
-          className="size-6 text-text-muted hover:text-text-main"
-          title={t("batchDetailCopyId")}
-          aria-label={t("batchDetailCopyId")}
-        >
-          <Icon name="content_copy" size={12} />
-        </Button>
-      </div>
-
-      {/* Status + meta */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] uppercase tracking-wider font-medium text-text-muted">
-            {t("status")}
-          </span>
-          <StatusBadge batch={batch} t={t} />
+                  {t(actionError as Parameters<typeof t>[0])}
+                </div>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="-mt-2 flex items-center gap-2">
+          <p className="text-xs text-text-muted font-mono">{batch.id}</p>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              navigator.clipboard.writeText(batch.id);
+            }}
+            className="size-6 text-text-muted hover:text-text-main"
+            title={t("batchDetailCopyId")}
+            aria-label={t("batchDetailCopyId")}
+          >
+            <Icon name="content_copy" size={12} />
+          </Button>
         </div>
-        <Field label={t("batchDetailEndpoint")} value={batch.endpoint} />
-        {batch.model && <Field label={t("batchDetailModel")} value={batch.model} />}
-        <Field label={t("batchDetailWindow")} value={batch.completionWindow} />
-        <Field
-          label={t("batchDetailCreated")}
-          value={<span title={formatTs(batch.createdAt)}>{relativeTime(batch.createdAt, t)}</span>}
-        />
-      </div>
 
-      {/* Progress */}
-      {total > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-text-muted uppercase tracking-wider font-medium">
-              {t("batchProgress")}
+        {/* Status + meta */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] uppercase tracking-wider font-medium text-text-muted">
+              {t("status")}
             </span>
-            <span className="text-text-muted">
-              {completed} / {total} ({pct}%)
-            </span>
+            <StatusBadge batch={batch} t={t} />
           </div>
-          <div className="h-2 rounded-full bg-bg-alt overflow-hidden flex">
-            <div className="h-full bg-success transition-all" style={{ width: `${donePct}%` }} />
-            <div className="h-full bg-error transition-all" style={{ width: `${failedPct}%` }} />
+          <Field label={t("batchDetailEndpoint")} value={batch.endpoint} />
+          {batch.model && <Field label={t("batchDetailModel")} value={batch.model} />}
+          <Field label={t("batchDetailWindow")} value={batch.completionWindow} />
+          <Field
+            label={t("batchDetailCreated")}
+            value={
+              <span title={formatTs(batch.createdAt)}>{relativeTime(batch.createdAt, t)}</span>
+            }
+          />
+        </div>
+
+        {/* Progress */}
+        {total > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-text-muted uppercase tracking-wider font-medium">
+                {t("batchProgress")}
+              </span>
+              <span className="text-text-muted">
+                {completed} / {total} ({pct}%)
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-bg-alt overflow-hidden flex">
+              <div className="h-full bg-success transition-all" style={{ width: `${donePct}%` }} />
+              <div className="h-full bg-error transition-all" style={{ width: `${failedPct}%` }} />
+            </div>
+            <div className="flex gap-4 text-xs text-text-muted">
+              <span>{t("batchCompletedCount", { count: completed })}</span>
+              {failed > 0 && <span>{t("batchFailedCount", { count: failed })}</span>}
+              <span>{t("batchPendingCount", { count: total - completed - failed })}</span>
+            </div>
           </div>
-          <div className="flex gap-4 text-xs text-text-muted">
-            <span>{t("batchCompletedCount", { count: completed })}</span>
-            {failed > 0 && <span>{t("batchFailedCount", { count: failed })}</span>}
-            <span>{t("batchPendingCount", { count: total - completed - failed })}</span>
+        )}
+
+        {/* Timestamps */}
+        <div>
+          <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
+            {t("batchTimeline")}
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            {[
+              { label: t("batchDetailCreated"), ts: batch.createdAt },
+              { label: t("batchTimelineInProgress"), ts: batch.inProgressAt },
+              { label: t("batchTimelineFinalizing"), ts: batch.finalizingAt },
+              { label: t("batchTimelineCompleted"), ts: batch.completedAt },
+              { label: t("batchTimelineFailed"), ts: batch.failedAt },
+              { label: t("batchTimelineExpires"), ts: batch.expiresAt },
+              { label: t("batchTimelineExpired"), ts: batch.expiredAt },
+              { label: t("batchTimelineCancelling"), ts: batch.cancellingAt },
+              { label: t("batchTimelineCancelled"), ts: batch.cancelledAt },
+            ]
+              .filter((t) => t.ts)
+              .map(({ label, ts }) => (
+                <div key={label} className="flex flex-col gap-0.5">
+                  <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                    {label}
+                  </span>
+                  <span className="text-xs font-mono text-text-main">{formatTs(ts)}</span>
+                </div>
+              ))}
           </div>
         </div>
-      )}
 
-      {/* Timestamps */}
-      <div>
-        <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
-          {t("batchTimeline")}
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-          {[
-            { label: t("batchDetailCreated"), ts: batch.createdAt },
-            { label: t("batchTimelineInProgress"), ts: batch.inProgressAt },
-            { label: t("batchTimelineFinalizing"), ts: batch.finalizingAt },
-            { label: t("batchTimelineCompleted"), ts: batch.completedAt },
-            { label: t("batchTimelineFailed"), ts: batch.failedAt },
-            { label: t("batchTimelineExpires"), ts: batch.expiresAt },
-            { label: t("batchTimelineExpired"), ts: batch.expiredAt },
-            { label: t("batchTimelineCancelling"), ts: batch.cancellingAt },
-            { label: t("batchTimelineCancelled"), ts: batch.cancelledAt },
-          ]
-            .filter((t) => t.ts)
-            .map(({ label, ts }) => (
-              <div key={label} className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wider text-text-muted">
-                  {label}
-                </span>
-                <span className="text-xs font-mono text-text-main">{formatTs(ts)}</span>
-              </div>
-            ))}
-        </div>
-      </div>
-
-      {/* Files */}
-      <div>
-        <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
-          Files
-        </h3>
-        <div className="space-y-2">
-          {[
-            {
-              role: t("filesListUsedByRoleInput"),
-              fileId: batch.inputFileId,
-              record: inputFile,
-            },
-            {
-              role: t("filesListUsedByRoleOutput"),
-              fileId: batch.outputFileId,
-              record: outputFile,
-            },
-            {
-              role: t("filesListUsedByRoleError"),
-              fileId: batch.errorFileId,
-              record: errorFile,
-            },
-          ]
-            .filter((f) => f.fileId)
-            .map(({ role, fileId, record }) => (
-              <div
-                key={role}
-                className="flex items-center justify-between px-3 py-2 rounded-lg bg-bg-alt border border-border"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Icon
-                    name="insert_drive_file"
-                    size={16}
-                    className="text-text-muted flex-shrink-0"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-text-muted">{role}</p>
-                    <p className="text-xs font-mono text-text-main truncate">
-                      {record?.filename ?? fileId}
-                    </p>
+        {/* Files */}
+        <div>
+          <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
+            Files
+          </h3>
+          <div className="space-y-2">
+            {[
+              {
+                role: t("filesListUsedByRoleInput"),
+                fileId: batch.inputFileId,
+                record: inputFile,
+              },
+              {
+                role: t("filesListUsedByRoleOutput"),
+                fileId: batch.outputFileId,
+                record: outputFile,
+              },
+              {
+                role: t("filesListUsedByRoleError"),
+                fileId: batch.errorFileId,
+                record: errorFile,
+              },
+            ]
+              .filter((f) => f.fileId)
+              .map(({ role, fileId, record }) => (
+                <div
+                  key={role}
+                  className="flex items-center justify-between px-3 py-2 rounded-lg bg-bg-alt border border-border"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon
+                      name="insert_drive_file"
+                      size={16}
+                      className="text-text-muted flex-shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-text-muted">{role}</p>
+                      <p className="text-xs font-mono text-text-main truncate">
+                        {record?.filename ?? fileId}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+                    {record && (
+                      <span className="text-xs text-text-muted">
+                        {(record.bytes / 1024).toFixed(1)} KB
+                      </span>
+                    )}
+                    <a
+                      href={`/api/v1/files/${fileId}/content`}
+                      download={record?.filename || fileId}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface border border-border text-text-muted hover:text-text-main transition-colors"
+                    >
+                      <Icon name="download" size={13} />
+                      {t("filesListDownload")}
+                    </a>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0 ml-4">
-                  {record && (
-                    <span className="text-xs text-text-muted">
-                      {(record.bytes / 1024).toFixed(1)} KB
-                    </span>
-                  )}
-                  <a
-                    href={`/api/v1/files/${fileId}/content`}
-                    download={record?.filename || fileId}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface border border-border text-text-muted hover:text-text-main transition-colors"
-                  >
-                    <Icon name="download" size={13} />
-                    {t("filesListDownload")}
-                  </a>
-                </div>
-              </div>
-            ))}
-        </div>
-      </div>
-
-      {/* Usage */}
-      {batch.usage && (
-        <div>
-          <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
-            {t("batchTokenUsage")}
-          </h3>
-          <pre className="p-3 rounded-lg bg-bg-alt border border-border text-xs font-mono text-text-main overflow-x-auto">
-            {JSON.stringify(batch.usage, null, 2)}
-          </pre>
-        </div>
-      )}
-
-      {/* Errors */}
-      {batch.errors && (
-        <div>
-          <h3 className="text-[11px] uppercase tracking-wider font-medium text-error mb-3">
-            {t("errors")}
-          </h3>
-          <pre className="p-3 rounded-lg bg-error/10 border border-error/20 text-xs font-mono text-error overflow-x-auto">
-            {JSON.stringify(batch.errors, null, 2)}
-          </pre>
-        </div>
-      )}
-
-      {/* Metadata */}
-      {batch.metadata && Object.keys(batch.metadata).length > 0 && (
-        <div>
-          <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
-            {t("batchMetadata")}
-          </h3>
-          <div className="space-y-1">
-            {Object.entries(batch.metadata).map(([k, v]) => (
-              <div
-                key={k}
-                className="flex items-center gap-2 text-xs font-mono px-3 py-1.5 rounded bg-bg-alt border border-border"
-              >
-                <span className="text-text-muted">{k}</span>
-                <span className="text-text-muted">=</span>
-                <span className="text-text-main">{String(v)}</span>
-              </div>
-            ))}
+              ))}
           </div>
         </div>
-      )}
-    </Modal>
+
+        {/* Usage */}
+        {batch.usage && (
+          <div>
+            <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
+              {t("batchTokenUsage")}
+            </h3>
+            <pre className="p-3 rounded-lg bg-bg-alt border border-border text-xs font-mono text-text-main overflow-x-auto">
+              {JSON.stringify(batch.usage, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {/* Errors */}
+        {batch.errors && (
+          <div>
+            <h3 className="text-[11px] uppercase tracking-wider font-medium text-error mb-3">
+              {t("errors")}
+            </h3>
+            <pre className="p-3 rounded-lg bg-error/10 border border-error/20 text-xs font-mono text-error overflow-x-auto">
+              {JSON.stringify(batch.errors, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {/* Metadata */}
+        {batch.metadata && Object.keys(batch.metadata).length > 0 && (
+          <div>
+            <h3 className="text-[11px] uppercase tracking-wider font-medium text-text-muted mb-3">
+              {t("batchMetadata")}
+            </h3>
+            <div className="space-y-1">
+              {Object.entries(batch.metadata).map(([k, v]) => (
+                <div
+                  key={k}
+                  className="flex items-center gap-2 text-xs font-mono px-3 py-1.5 rounded bg-bg-alt border border-border"
+                >
+                  <span className="text-text-muted">{k}</span>
+                  <span className="text-text-muted">=</span>
+                  <span className="text-text-main">{String(v)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }

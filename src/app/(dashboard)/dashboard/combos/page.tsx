@@ -55,6 +55,7 @@ import { collectRemovableFailedStepIds, type ComboTestResultLike } from "./remov
 import { useRemoveFailedComboModels } from "./useRemoveFailedComboModels";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { ROUTING_STRATEGIES } from "@/shared/constants/routingStrategies";
 import {
   COMBO_BUILDER_AUTO_CONNECTION,
@@ -880,6 +881,7 @@ function CombosPageContent() {
   const [testingCombo, setTestingCombo] = useState(null);
   const { copied, copy } = useCopyToClipboard();
   const notify = useNotificationStore();
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [proxyTargetCombo, setProxyTargetCombo] = useState(null);
   const [proxyConfig, setProxyConfig] = useState(null);
   const { comboProxyAssignedIds, fetchComboProxyAssignments } = useComboProxyAssignments();
@@ -1044,7 +1046,7 @@ function CombosPageContent() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm(t("deleteConfirm"))) return;
+    if (!(await confirm(t("deleteConfirm")))) return;
     try {
       const res = await fetch(`/api/combos/${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -1117,6 +1119,7 @@ function CombosPageContent() {
         setTestingCombo(null);
       },
       notify,
+      confirm,
       t,
     });
 
@@ -1266,6 +1269,7 @@ function CombosPageContent() {
 
   return (
     <div className="flex flex-col gap-6">
+      {confirmDialog}
       <PageHeader
         compact
         title={t("title")}

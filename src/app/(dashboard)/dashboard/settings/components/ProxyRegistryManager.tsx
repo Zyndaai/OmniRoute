@@ -29,6 +29,7 @@ import {
   Textarea,
 } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useProxyBatchOperations } from "./useProxyBatchOperations";
 import { ProxyStatusBadge } from "./ProxyStatusBadge";
 import { ProxyHealthCell } from "./ProxyHealthCell";
@@ -71,6 +72,7 @@ export default function ProxyRegistryManager({
 }: ProxyRegistryManagerProps = {}) {
   const t = useTranslations("proxyRegistry");
   const settingsT = useTranslations("settings");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [items, setItems] = useState<ProxyItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -354,7 +356,7 @@ export default function ProxyRegistryManager({
       const payload = await res.json().catch(() => ({}));
       const inUse = res.status === 409;
       if (inUse) {
-        const ok = window.confirm(t("errorForceDeleteConfirm"));
+        const ok = await confirm(t("errorForceDeleteConfirm"));
         if (!ok) return;
 
         const forceRes = await fetch(`/api/settings/proxies?id=${encodeURIComponent(id)}&force=1`, {
@@ -632,6 +634,7 @@ export default function ProxyRegistryManager({
 
   return (
     <>
+      {confirmDialog}
       <Card className="p-6">
         <div className="mb-4 flex flex-col gap-3">
           <div className="w-full min-w-0">

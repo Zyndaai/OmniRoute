@@ -51,6 +51,7 @@ import { useAuthFileHandlers } from "./hooks/useAuthFileHandlers";
 import { useModelImportHandlers } from "./hooks/useModelImportHandlers";
 import { useApiKeySave } from "./hooks/useApiKeySave";
 import { useModelVisibilityHandlers } from "./hooks/useModelVisibilityHandlers";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useModelCompatState } from "./hooks/useModelCompatState";
 import { useModelComboUsage } from "./hooks/useModelComboUsage";
 import { useConnectionGate } from "./hooks/useConnectionGate";
@@ -211,6 +212,7 @@ export default function ProviderDetailPageClient() {
   const t = useTranslations("providers");
   const emailsVisible = useEmailPrivacyStore((s) => s.emailsVisible);
   const notify = useNotificationStore();
+  const [confirm, confirmDialog] = useConfirmDialog();
   // Per-account usage/limits strip — cached snapshot from the server's
   // providerLimitsCache, with per-connection on-demand live refresh.
   const {
@@ -551,6 +553,7 @@ export default function ProviderDetailPageClient() {
     fetchProviderModelMeta,
     fetchAliases,
     notify,
+    confirm,
     t,
     selectedConnection,
     providerNode,
@@ -578,6 +581,7 @@ export default function ProviderDetailPageClient() {
 
   return (
     <div className="flex flex-col gap-8">
+      {confirmDialog}
       <ProviderPageHeader
         providerId={providerId}
         providerInfo={{ ...providerInfo, website: providerHeaderWebsite }}

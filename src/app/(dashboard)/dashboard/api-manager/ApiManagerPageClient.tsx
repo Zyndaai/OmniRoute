@@ -21,6 +21,7 @@ import { CardSkeleton } from "@/shared/components/Loading";
 import Modal from "@/shared/components/Modal";
 import Toggle from "@/shared/components/Toggle";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useLocale, useTranslations } from "next-intl";
 import { matchesSearch } from "@/shared/utils/turkishText";
 import ApiKeyFilterBar from "./components/ApiKeyFilterBar";
@@ -132,6 +133,7 @@ export default function ApiManagerPageClient() {
   const t = useTranslations("apiManager");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const [confirm, confirmDialog] = useConfirmDialog();
   const newKeyNameInputId = useId();
   const createKeyFormRef = useRef<HTMLDivElement | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -479,7 +481,7 @@ export default function ApiManagerPageClient() {
       return;
     }
 
-    if (!confirm(t("deleteConfirm"))) return;
+    if (!(await confirm(t("deleteConfirm")))) return;
 
     setIsSubmitting(true);
     clearPageError();
@@ -510,7 +512,7 @@ export default function ApiManagerPageClient() {
 
   const handleRegenerateKey = async (id: string) => {
     if (!id) return;
-    if (!confirm(t("regenerateConfirm"))) return;
+    if (!(await confirm(t("regenerateConfirm")))) return;
 
     setIsSubmitting(true);
     clearPageError();
@@ -604,6 +606,7 @@ export default function ApiManagerPageClient() {
 
   return (
     <div className="flex flex-col gap-8">
+      {confirmDialog}
       {/* Error Banner */}
       {pageError && (
         <Alert

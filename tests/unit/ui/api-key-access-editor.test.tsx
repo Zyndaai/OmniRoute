@@ -324,25 +324,44 @@ describe("ApiKeyAccessEditorClient", () => {
   });
 
   it("asks for confirmation before following an in-app link while dirty", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     await renderLoaded();
 
     const backLink = screen.getByRole("link", { name: /api key management/i });
-    const swallowNavigation = (event: Event) => event.preventDefault();
+    const navigations: Event[] = [];
+    const swallowNavigation = (event: Event) => {
+      navigations.push(event);
+      event.preventDefault();
+    };
 
     backLink.addEventListener("click", swallowNavigation);
     fireEvent.click(backLink);
-    expect(confirmSpy).not.toHaveBeenCalled();
-    backLink.removeEventListener("click", swallowNavigation);
+    expect(screen.queryByText(messages.apiManager.unsavedChangesWarning)).toBeNull();
+    expect(navigations).toHaveLength(1);
+    navigations.length = 0;
 
     await makeDirty();
     const notCancelled = fireEvent.click(backLink);
-    expect(confirmSpy).toHaveBeenCalledWith(messages.apiManager.unsavedChangesWarning);
     expect(notCancelled).toBe(false);
+    expect(await screen.findByText(messages.apiManager.unsavedChangesWarning)).toBeDefined();
+    expect(navigations).toHaveLength(0);
+
+    // Cancel keeps the user on the page.
+    fireEvent.click(screen.getByRole("button", { name: messages.common.cancel }));
+    await waitFor(() => {
+      expect(screen.queryByText(messages.apiManager.unsavedChangesWarning)).toBeNull();
+    });
+    expect(navigations).toHaveLength(0);
+
+    // Confirm replays the click on the link once.
+    fireEvent.click(backLink);
+    await screen.findByText(messages.apiManager.unsavedChangesWarning);
+    fireEvent.click(screen.getByRole("button", { name: messages.common.confirmAction }));
+    await waitFor(() => {
+      expect(navigations).toHaveLength(1);
+    });
   });
 
   it("does not intercept modified clicks, middle clicks or links opening a new tab", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     await renderLoaded();
     await makeDirty();
 
@@ -364,16 +383,15 @@ describe("ApiKeyAccessEditorClient", () => {
     fireEvent.click(backLink, { button: 1 });
     fireEvent.click(newTabLink);
 
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(messages.apiManager.unsavedChangesWarning)).toBeNull();
 
     // The guard is still armed: a plain click on the same link asks once.
     fireEvent.click(backLink);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(messages.apiManager.unsavedChangesWarning)).toBeDefined();
     newTabLink.remove();
   });
 
   it("does not prompt for same-page hash links", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     await renderLoaded();
     await makeDirty();
 
@@ -392,10 +410,10 @@ describe("ApiKeyAccessEditorClient", () => {
     otherPageHashLink.addEventListener("click", swallowNavigation);
 
     fireEvent.click(hashLink);
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(messages.apiManager.unsavedChangesWarning)).toBeNull();
 
     fireEvent.click(otherPageHashLink);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(messages.apiManager.unsavedChangesWarning)).toBeDefined();
 
     hashLink.remove();
     otherPageHashLink.remove();

@@ -343,6 +343,52 @@ Ensure that any unit tests that trigger database migrations or establish SQLite 
 
 Dashboard at the operator's chosen URL/port (default `http://localhost:20128`). Credentials are operator-specific: the **initial admin password** is read from `INITIAL_PASSWORD` on first install (defaults to `CHANGEME` in `.env.example`; rotate immediately after first login); for **local VPS / shared dev environments**, ask the operator — credentials live in their personal vault, NOT in this repo. Any credential observed in a previous version of this file was a non-production demo value; treat it as compromised and do not reuse it.
 
+---
+
+## Managing a hosted instance (HTTP API and MCP)
+
+Agents change a running deployment's configuration through its HTTP API (or MCP) with a
+management-scoped API key, never through the database or the server's files.
+
+**Credentials.** The instance URL and key live in `.env.operator` at the repo root
+(`OMNIROUTE_OPERATOR_URL`, `OMNIROUTE_OPERATOR_KEY`; template `.env.operator.example`). The file
+is gitignored and the server never loads it. Load it into the shell and use the variable; never
+print, log, echo or commit the key, and never write it into a committed MCP-client config:
+
+```bash
+set -a; . ./.env.operator; set +a
+curl -s -H "Authorization: Bearer $OMNIROUTE_OPERATOR_KEY" "$OMNIROUTE_OPERATOR_URL/api/settings"
+```
+
+**No key yet, or 401/403 on a management route.** Do not assume the operator has a key. Ask them
+to create one in the dashboard (API Keys, scope `manage`) and to run
+`pwsh scripts/ops/set-operator-key.ps1` in their own terminal: it reads the key without echo and
+writes `.env.operator`. Never ask for the key in chat.
+
+**Workflow for every change.**
+
+1. Read the current state first (`GET`).
+2. Propose the exact call (method, path, body) and wait for the operator's go-ahead.
+3. Apply it, then read the state back to confirm.
+
+**What the key reaches.**
+
+- **HTTP API, manage scope:** combos (`/api/combos`), API keys and their model access
+  (`/api/keys`), provider connections (`/api/providers`), most settings (`PATCH /api/settings`, e.g.
+  `blockedProviders`, `mcpEnabled`), resilience, pricing, usage and costs.
+- **Logs and audit:** `/api/usage/request-logs`, `/api/usage/call-logs`, `/api/logs/console` (last
+  hour), `/api/compliance/audit-log`, `/api/mcp/audit`.
+- **Dashboard session only (a key gets 403 by design):** database backup export/import, settings
+  export/import, and security settings (require-login, password, CORS origins, OIDC/SSO,
+  brute-force protection). The operator does these in the browser.
+- **Server environment only (set on the host at deploy):** `STORAGE_ENCRYPTION_KEY`,
+  `OMNIROUTE_MCP_ENFORCE_SCOPES`. Provider account logins (OAuth) also need the operator's browser.
+
+**MCP.** Streamable HTTP at `$OMNIROUTE_OPERATOR_URL/api/mcp/stream` with the same bearer key. It
+answers `503 "MCP server is disabled"` until the `mcpEnabled` setting is on; turning it on is a
+settings change like any other (propose, then apply). While `OMNIROUTE_MCP_ENFORCE_SCOPES` is off,
+the key reaches every MCP tool, plugin installs included, so prefer the HTTP API for writes.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

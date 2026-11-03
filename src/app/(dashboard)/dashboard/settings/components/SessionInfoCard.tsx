@@ -10,6 +10,7 @@
 import { useState, useEffect } from "react";
 import { Card, Button, Skeleton } from "@/shared/components";
 import { useTranslations } from "next-intl";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 
 interface SessionInfo {
   authenticated: boolean;
@@ -23,6 +24,7 @@ export default function SessionInfoCard() {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const t = useTranslations("settings");
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   useEffect(() => {
     let cancelled = false;
@@ -84,8 +86,8 @@ export default function SessionInfoCard() {
     }
   };
 
-  const handleClearStorage = () => {
-    if (confirm(t("clearLocalDataConfirm"))) {
+  const handleClearStorage = async () => {
+    if (await confirm(t("clearLocalDataConfirm"))) {
       localStorage.clear();
       sessionStorage.clear();
       window.location.reload();
@@ -102,6 +104,7 @@ export default function SessionInfoCard() {
 
   return (
     <Card title={t("session")} icon="person">
+      {confirmDialog}
       <div className="flex flex-col gap-3" role="list" aria-label={t("sessionDetailsAria")}>
         <div className="flex justify-between items-center text-sm" role="listitem">
           <span className="text-text-muted">{t("status")}</span>

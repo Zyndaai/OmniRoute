@@ -13,6 +13,7 @@ import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import { CardSkeleton } from "@/shared/components/Loading";
 import { useNotificationStore } from "@/store/notificationStore";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { getProviderDisplayName } from "@/lib/display/names";
 import { compareTr, matchesSearch } from "@/shared/utils/turkishText";
 import { extractApiErrorMessage } from "@/shared/http/apiErrorMessage";
@@ -78,9 +79,10 @@ function useAccessFormContext({
 
   // Form management hook initialized with non-null apiKey
   const form = useApiKeyAccessForm(apiKey, t);
+  const [confirm, confirmDialog] = useConfirmDialog();
 
   const handleTabKeyDown = useAccessTabKeyboard(switchTab, tabListRef);
-  useAccessNavigationGuard(form.isDirty, t);
+  useAccessNavigationGuard(form.isDirty, t, confirm);
   const { permissionModels, filteredModelsByProvider } = useAccessModelGroups(
     allModels,
     searchModel,
@@ -112,6 +114,7 @@ function useAccessFormContext({
     setSearchModel,
     allCombos,
     allConnections,
+    confirmDialog,
   };
 }
 function useAccessTabKeyboard(
@@ -166,7 +169,11 @@ function isLeavingAccessPage(e: MouseEvent): boolean {
   if (anchor.hash && anchor.pathname === pathname && anchor.search === search) return false;
   return true;
 }
-function useAccessNavigationGuard(isDirty: boolean, t: ReturnType<typeof useTranslations>) {
+function useAccessNavigationGuard(
+  isDirty: boolean,
+  t: ReturnType<typeof useTranslations>,
+  confirm: ReturnType<typeof useConfirmDialog>[0]
+) {
   // Dirty navigation guard (browser close / reload)
   useEffect(() => {
     if (!isDirty) return;
@@ -179,18 +186,29 @@ function useAccessNavigationGuard(isDirty: boolean, t: ReturnType<typeof useTran
   }, [isDirty]);
 
   // Dirty navigation guard (in-app link clicks)
+  // The in-app dialog is async, so the click is always stopped first and replayed on the
+  // anchor once the user confirms; `replaying` lets that replayed click through the guard.
   useEffect(() => {
     if (!isDirty) return;
+    let replaying = false;
     const handleDocumentClick = (e: MouseEvent) => {
-      if (!isLeavingAccessPage(e)) return;
-      if (!window.confirm(t("unsavedChangesWarning"))) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      if (replaying || !isLeavingAccessPage(e)) return;
+      const anchor = (e.target as Element).closest("a");
+      e.preventDefault();
+      e.stopPropagation();
+      void confirm(t("unsavedChangesWarning")).then((confirmed) => {
+        if (!confirmed || !anchor) return;
+        replaying = true;
+        try {
+          anchor.click();
+        } finally {
+          replaying = false;
+        }
+      });
     };
     document.addEventListener("click", handleDocumentClick, true);
     return () => document.removeEventListener("click", handleDocumentClick, true);
-  }, [isDirty, t]);
+  }, [isDirty, t, confirm]);
 }
 function useAccessModelGroups(
   allModels: Model[],
@@ -573,6 +591,7 @@ function ApiKeyAccessEditorForm(props: ApiKeyAccessEditorFormProps) {
   const context = useAccessFormContext(props);
   return (
     <div className="flex flex-col gap-6">
+      {context.confirmDialog}
       <AccessHeader context={context} />
       <Tabs
         variant="underline"

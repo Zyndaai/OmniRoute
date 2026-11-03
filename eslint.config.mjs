@@ -71,6 +71,9 @@ const eslintConfig = [
       "react-hooks/exhaustive-deps": "error",
       "@next/next/no-img-element": "error",
       "import/no-anonymous-default-export": "error",
+      // window.alert/confirm/prompt are suppressed in embedded browsers (the action then
+      // silently does nothing). Use useConfirmDialog / usePromptDialog or a toast instead.
+      "no-alert": "error",
     },
   },
   // FASE-02: Security rules (strict everywhere)

@@ -21,6 +21,7 @@ import Card from "@/shared/components/Card";
 import Checkbox from "@/shared/components/Checkbox";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import CompressionHub from "./CompressionHub";
 
 type PipelineStep = { engine: string; intensity?: string };
@@ -56,6 +57,7 @@ function NamedCombosManager() {
   const t = useTranslations("contextCombos");
   const tSettings = useTranslations("settings");
   const tCommon = useTranslations("common");
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [combos, setCombos] = useState<CompressionCombo[]>([]);
   const [routingCombos, setRoutingCombos] = useState<RoutingCombo[]>([]);
   const [languagePacks, setLanguagePacks] = useState<LanguagePack[]>([]);
@@ -202,7 +204,7 @@ function NamedCombosManager() {
   };
 
   const deleteCombo = async (combo: CompressionCombo) => {
-    if (!confirm(t("deleteNamedConfirm", { name: combo.name }))) return;
+    if (!(await confirm(t("deleteNamedConfirm", { name: combo.name })))) return;
     const res = await fetch(`/api/context/combos/${combo.id}`, { method: "DELETE" });
     if (res.ok) refresh();
   };
@@ -259,6 +261,7 @@ function NamedCombosManager() {
 
   return (
     <div className="flex flex-col gap-4">
+      {confirmDialog}
       <SectionHeader title={t("namedCombos")} description={t("namedCombosDescription")} />
 
       {/* #12063: the master "Prompt Compression" switch (Settings page) is a hard kill that

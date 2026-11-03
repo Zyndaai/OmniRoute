@@ -91,10 +91,6 @@ vi.mock(
 
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
-vi.stubGlobal(
-  "confirm",
-  vi.fn(() => true)
-);
 
 const { default: QuotaSharePageClient } =
   await import("../../../src/app/(dashboard)/dashboard/costs/quota-share/QuotaSharePageClient");
@@ -114,8 +110,8 @@ async function renderComponent() {
   });
 }
 
-/** Clicks the delete button of the first pool card. */
-async function clickDelete() {
+/** Clicks the delete button of the first pool card, then answers the in-app confirm dialog. */
+async function clickDelete(answer: "confirmAction" | "cancel" = "confirmAction") {
   const btn = [...document.querySelectorAll("button")].find(
     // KEA-7886: icons are Lucide <svg class="oi-icon" data-icon="…"> via <Icon>.
     (b) => b.querySelector('svg.oi-icon[data-icon="delete"]') !== null
@@ -123,6 +119,14 @@ async function clickDelete() {
   if (!btn) throw new Error("delete button not rendered");
   await act(async () => {
     btn.click();
+  });
+  // The dialog is portaled to <body>; its buttons are labelled with the (mocked) i18n key.
+  const answerBtn = [...document.body.querySelectorAll("button")].find(
+    (b) => b.textContent === answer
+  );
+  if (!answerBtn) throw new Error(`confirm dialog button "${answer}" not rendered`);
+  await act(async () => {
+    answerBtn.click();
   });
   // let the awaited fetch + state update flush
   await act(async () => {
@@ -139,7 +143,6 @@ describe("quota-share — deleting a pool", { timeout: 15000 }, () => {
       error: null,
       mutate: mockMutate,
     });
-    (globalThis.confirm as ReturnType<typeof vi.fn>).mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -190,10 +193,8 @@ describe("quota-share — deleting a pool", { timeout: 15000 }, () => {
   });
 
   it("does not call the API at all when the confirmation is dismissed", async () => {
-    (globalThis.confirm as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
     await renderComponent();
-    await clickDelete();
+    await clickDelete("cancel");
 
     // O componente busca dados auxiliares na montagem, então o que importa é
     // que NENHUMA chamada de DELETE tenha saído — não que fetch nunca rodou.

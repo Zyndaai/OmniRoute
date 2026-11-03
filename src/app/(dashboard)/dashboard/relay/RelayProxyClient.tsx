@@ -10,6 +10,7 @@ import EmptyState from "@/shared/components/EmptyState";
 import Input from "@/shared/components/Input";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useDisplayBaseUrl } from "@/shared/hooks";
+import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 
 interface RelayToken {
   id: string;
@@ -28,6 +29,7 @@ interface RelayToken {
 export default function RelayProxyClient() {
   const t = useTranslations("relay");
   const displayBaseUrl = useDisplayBaseUrl();
+  const [confirm, confirmDialog] = useConfirmDialog();
   const [tokens, setTokens] = useState<RelayToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -96,7 +98,7 @@ export default function RelayProxyClient() {
   };
 
   const deleteToken = async (id: string) => {
-    if (!confirm(t("deleteConfirm"))) return;
+    if (!(await confirm(t("deleteConfirm")))) return;
     try {
       await fetch(`/api/relay/tokens/${id}`, { method: "DELETE" });
       addNotification({ type: "success", message: t("deleted") });
@@ -108,6 +110,7 @@ export default function RelayProxyClient() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <PageHeader
         compact
         title={t("title")}

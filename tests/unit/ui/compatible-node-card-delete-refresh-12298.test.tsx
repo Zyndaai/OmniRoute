@@ -20,6 +20,10 @@ vi.mock("@/shared/components", async () => ({
   Card: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+}));
+
 vi.mock("@/shared/components/ProviderIcon", () => ({
   default: () => null,
 }));
@@ -39,10 +43,6 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
     ).IS_REACT_ACT_ENVIRONMENT = true;
     router.push.mockClear();
     router.refresh.mockClear();
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true)
-    );
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -55,7 +55,8 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
     vi.unstubAllGlobals();
   });
 
-  async function clickDelete() {
+  // The confirm is an in-app dialog (the translation mock renders keys as text).
+  async function clickDelete(answer: "confirmAction" | "cancel" = "confirmAction") {
     await act(async () => {
       root.render(
         <CompatibleNodeCard
@@ -79,6 +80,15 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
 
     await act(async () => {
       deleteButton?.click();
+    });
+
+    const answerButton = Array.from(document.body.querySelectorAll("button")).find(
+      (button) => button.textContent === answer
+    );
+    expect(answerButton, "expected the in-app confirm dialog").toBeDefined();
+
+    await act(async () => {
+      answerButton?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -102,13 +112,9 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
   });
 
   it("does not navigate or refresh when the user cancels the confirm dialog", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false)
-    );
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true } as Response));
 
-    await clickDelete();
+    await clickDelete("cancel");
 
     expect(fetch).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();

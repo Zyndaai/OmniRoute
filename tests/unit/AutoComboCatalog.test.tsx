@@ -100,6 +100,18 @@ async function expand(container: HTMLElement) {
   });
 }
 
+// The in-app confirm dialog is portaled to <body>, outside the render container.
+async function confirmInAppDialog() {
+  const button = [...document.body.querySelectorAll("button")].find(
+    (b) => b.textContent === "confirmAction"
+  );
+  expect(button).toBeTruthy();
+  await act(async () => {
+    button?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 describe("AutoComboCatalog", { timeout: 60_000 }, () => {
   const realFetch = globalThis.fetch;
 
@@ -294,9 +306,6 @@ describe("AutoComboCatalog", { timeout: 60_000 }, () => {
 
   it("duplicates non-template auto combos with the auto strategy", async () => {
     const onComboCreated = vi.fn();
-    const confirmSpy = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirmSpy);
-    vi.stubGlobal("alert", vi.fn());
 
     const container = makeContainer();
     const root = createRoot(container);
@@ -312,6 +321,8 @@ describe("AutoComboCatalog", { timeout: 60_000 }, () => {
     await act(async () => {
       copyButton?.click();
     });
+    expect(document.body.textContent ?? "").toContain("duplicateAutoComboConfirm");
+    await confirmInAppDialog();
 
     const duplicateCall = vi
       .mocked(globalThis.fetch)
@@ -323,12 +334,6 @@ describe("AutoComboCatalog", { timeout: 60_000 }, () => {
   });
 
   it("duplicates curated templates with their authored strategy", async () => {
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true)
-    );
-    vi.stubGlobal("alert", vi.fn());
-
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -344,6 +349,7 @@ describe("AutoComboCatalog", { timeout: 60_000 }, () => {
     await act(async () => {
       copyButton?.click();
     });
+    await confirmInAppDialog();
 
     const duplicateCall = vi
       .mocked(globalThis.fetch)

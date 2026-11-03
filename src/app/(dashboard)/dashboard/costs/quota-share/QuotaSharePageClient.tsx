@@ -11,6 +11,8 @@ import { Skeleton } from "@/shared/components/Loading";
 import Select from "@/shared/components/Select";
 import Icon from "@/shared/components/Icon";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
+import { useNotificationStore } from "@/store/notificationStore";
+import { useConfirmDialog, usePromptDialog } from "@/shared/hooks/useConfirmDialog";
 import { maskEmailLikeValue } from "@/shared/utils/maskEmail";
 import type { QuotaDimension } from "@/lib/quota/dimensions";
 import type { QuotaPool } from "@/lib/db/quotaPools";
@@ -128,6 +130,9 @@ function PoolCardWithUsage({
 
 export default function QuotaSharePageClient() {
   const t = useTranslations("quotaShare");
+  const [confirm, confirmDialog] = useConfirmDialog();
+  const [prompt, promptDialog] = usePromptDialog();
+  const notifyError = useNotificationStore((s) => s.error);
   const { pools: fetchedPools, loading, mutate } = usePools();
   // /api/quota/pools returns the DB shape (connectionIds, groupId); usePools types it as the
   // narrower zod QuotaPool.
@@ -247,10 +252,10 @@ export default function QuotaSharePageClient() {
   }, [newGroupInput, fetchGroups]);
 
   const handleRenameGroup = useCallback(async () => {
-    const name = prompt(
-      t("groupNamePrompt"),
-      groups.find((g) => g.id === selectedGroupId)?.name ?? ""
-    );
+    const name = await prompt({
+      message: t("groupNamePrompt"),
+      defaultValue: groups.find((g) => g.id === selectedGroupId)?.name ?? "",
+    });
     if (!name?.trim()) return;
     setRenaming(true);
     try {
@@ -266,13 +271,13 @@ export default function QuotaSharePageClient() {
       // fail open
     }
     setRenaming(false);
-  }, [selectedGroupId, groups, fetchGroups, t]);
+  }, [selectedGroupId, groups, fetchGroups, prompt, t]);
 
   // Delete the selected group. The API blocks deletion while the group still has
   // pools (HTTP 409) and protects the seed "group-demo"; surface both to the user.
   const handleDeleteGroup = useCallback(async () => {
     if (selectedGroupId === "all" || selectedGroupId === "group-demo") return;
-    if (!confirm(t("deleteGroupConfirm"))) return;
+    if (!(await confirm(t("deleteGroupConfirm")))) return;
     try {
       const res = await fetch(`/api/quota/groups/${selectedGroupId}`, { method: "DELETE" });
       if (res.ok) {
@@ -280,12 +285,12 @@ export default function QuotaSharePageClient() {
         await fetchGroups();
         await mutate();
       } else if (res.status === 409) {
-        alert(t("deleteGroupHasPools"));
+        notifyError(t("deleteGroupHasPools"));
       }
     } catch {
       // fail open
     }
-  }, [selectedGroupId, fetchGroups, mutate, t]);
+  }, [selectedGroupId, fetchGroups, mutate, confirm, notifyError, t]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
@@ -390,7 +395,7 @@ export default function QuotaSharePageClient() {
    */
   const handleRemovePool = useCallback(
     async (id: string) => {
-      if (!confirm(t("removeConfirm"))) return;
+      if (!(await confirm(t("removeConfirm")))) return;
       setRemoveError(null);
       try {
         const res = await fetch(`/api/quota/pools/${id}`, { method: "DELETE" });
@@ -409,13 +414,15 @@ export default function QuotaSharePageClient() {
       }
       await mutate();
     },
-    [mutate, t]
+    [mutate, confirm, t]
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col gap-4">
+      {confirmDialog}
+      {promptDialog}
       {/* Falha ao remover: dispensável, mas nunca silenciosa. */}
       {removeError && (
         <Alert
