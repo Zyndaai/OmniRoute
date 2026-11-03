@@ -19,7 +19,7 @@ async function guardEnabled(): Promise<NextResponse | null> {
       { status: 503 }
     );
   }
-  const transport = (settings.mcpTransport as string) || "stdio";
+  const transport = settings.mcpTransport as string;
   if (transport !== "sse") {
     return NextResponse.json(
       { error: `MCP transport is set to "${transport}", not "sse". Change it from Settings.` },

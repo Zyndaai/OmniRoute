@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
   const settings = await getCachedSettings();
   const mcpEnabled = !!settings.mcpEnabled;
-  const mcpTransport = (settings.mcpTransport as string) || "stdio";
+  const mcpTransport = settings.mcpTransport as string;
 
   if (!mcpEnabled) {
     return NextResponse.json(

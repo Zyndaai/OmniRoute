@@ -154,7 +154,7 @@ export default function McpPage() {
   const [mcpStatus, setMcpStatus] = useState<ServiceStatus>({ online: false, loading: true });
   const [mcpEnabled, setMcpEnabled] = useState(false);
   const [mcpToggling, setMcpToggling] = useState(false);
-  const [mcpTransport, setMcpTransport] = useState<McpTransport>("stdio");
+  const [mcpTransport, setMcpTransport] = useState<McpTransport>("streamable-http");
   const [transportSaving, setTransportSaving] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
 
@@ -180,7 +180,7 @@ export default function McpPage() {
         if (res.ok) {
           const data = await res.json();
           setMcpEnabled(!!data.mcpEnabled);
-          setMcpTransport((data.mcpTransport as McpTransport) || "stdio");
+          setMcpTransport(data.mcpTransport as McpTransport);
         }
       } catch {
         // defaults stay

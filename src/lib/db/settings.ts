@@ -234,7 +234,10 @@ export async function getSettings() {
     entraDefaultKeyGroupId: null, // null = users matching no mapping are denied
     entraGraphFallbackEnabled: false,
     entraGraphClientSecret: "",
-    mcpEnabled: false,
+    // MCP is on by default over Streamable HTTP, the transport remote clients use
+    // (/api/mcp/stream). Every MCP route still requires a management credential.
+    mcpEnabled: true,
+    mcpTransport: "streamable-http",
     a2aEnabled: false,
     blockedProviders: defaultBlockedProviders(),
     hiddenSidebarItems: [],

@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     ]);
 
     const mcpEnabled = !!settings.mcpEnabled;
-    const mcpTransport = (settings.mcpTransport as string) || "stdio";
+    const mcpTransport = settings.mcpTransport as string;
 
     // Check HTTP transport active-session state separately from endpoint readiness.
     const httpStatus = getMcpHttpStatus();

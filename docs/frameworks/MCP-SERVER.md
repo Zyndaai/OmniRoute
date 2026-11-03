@@ -25,9 +25,11 @@ Or via the open-sse transport:
 omniroute --dev  # MCP auto-starts on /mcp endpoint
 ```
 
-The HTTP transports (`sse` / `streamable-http`, served in-process by the dashboard server) are
-off by default and were previously toggleable only from the `/dashboard/mcp` page. As of v3.8.51
-the CLI has parity:
+The HTTP transports (`sse` / `streamable-http`) are served in-process by the dashboard server.
+In this copy MCP is **on by default with `streamable-http`** (`mcpEnabled: true`,
+`mcpTransport: "streamable-http"` in `getSettings()`), so a remote client works without a settings
+change; every MCP route still requires a management credential. A saved setting overrides the
+default. It can be toggled from the `/dashboard/mcp` page or the CLI:
 
 ```bash
 omniroute mcp status                                  # enabled/online, transport, tool count

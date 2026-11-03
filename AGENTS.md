@@ -384,9 +384,11 @@ writes `.env.operator`. Never ask for the key in chat.
 - **Server environment only (set on the host at deploy):** `STORAGE_ENCRYPTION_KEY`,
   `OMNIROUTE_MCP_ENFORCE_SCOPES`. Provider account logins (OAuth) also need the operator's browser.
 
-**MCP.** Streamable HTTP at `$OMNIROUTE_OPERATOR_URL/api/mcp/stream` with the same bearer key. It
-answers `503 "MCP server is disabled"` until the `mcpEnabled` setting is on; turning it on is a
-settings change like any other (propose, then apply). While `OMNIROUTE_MCP_ENFORCE_SCOPES` is off,
+**MCP.** Streamable HTTP at `$OMNIROUTE_OPERATOR_URL/api/mcp/stream` with the same bearer key.
+It is on by default (`mcpEnabled: true`, `mcpTransport: "streamable-http"`), but a saved setting
+wins: `503 "MCP server is disabled"` means `mcpEnabled` was saved as false, and a 400 naming
+another transport means `mcpTransport` was changed. Fixing either is a settings change like any
+other (propose, then apply). While `OMNIROUTE_MCP_ENFORCE_SCOPES` is off,
 the key reaches every MCP tool, plugin installs included, so prefer the HTTP API for writes.
 
 <!-- BEGIN:nextjs-agent-rules -->
