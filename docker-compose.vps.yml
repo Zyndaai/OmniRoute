@@ -1,0 +1,50 @@
+# OmniRoute on a single VPS behind Caddy — a generic production example (replace your-domain.example).
+# Caddy on the host proxies https://your-domain.example -> 127.0.0.1:20128. No Redis: a single
+# instance keeps rate limits in memory and quotas / session affinity in SQLite.
+#
+# Deploy: copy this file OVER /opt/omniroute/docker-compose.yml (one compose file on the server, so a
+# plain `docker compose up` can never run a stale one). Then, from /opt/omniroute, after
+# `sudo docker login ghcr.io` with a classic PAT scoped to read:packages only:
+#   1. set OMNIROUTE_TAG=<commit sha> in /opt/omniroute/.env  (image built by docker-build-push.yml)
+#   2. sudo docker compose pull
+#   3. sudo docker compose up -d
+# Rollback: set OMNIROUTE_TAG back and repeat 2-3. A newer image runs one-way DB migrations, so
+# going back past one needs the volume backup taken (container stopped) before the switch.
+#
+# /opt/omniroute/.env holds: JWT_SECRET, INITIAL_PASSWORD, API_KEY_SECRET, STORAGE_ENCRYPTION_KEY,
+# STORAGE_ENCRYPTION_KEY_VERSION, MACHINE_ID_SALT, OMNIROUTE_WS_BRIDGE_SECRET (secrets — never
+# change STORAGE_ENCRYPTION_KEY or stored credentials become unreadable) and PORT=20128,
+# NODE_ENV=production, HOSTNAME=0.0.0.0, DATA_DIR=/app/data, APP_LOG_TO_FILE=true,
+# AUTH_COOKIE_SECURE=true, REQUIRE_API_KEY=true, BASE_URL=http://127.0.0.1:20128,
+# NEXT_PUBLIC_BASE_URL=https://your-domain.example, OMNIROUTE_PUBLIC_BASE_URL=https://your-domain.example,
+# LIVE_WS_PUBLIC_URL=wss://your-domain.example/live-ws, LIVE_WS_ALLOWED_ORIGINS=https://your-domain.example,
+# plus OMNIROUTE_TAG and OMNIROUTE_NO_UPDATE_NOTIFIER=1 (no banner advertising upstream releases).
+
+# Same project as the live stack whatever this file is called, so `up` replaces the running
+# container instead of starting a second one that fights for port 20128.
+name: omniroute
+
+services:
+  omniroute:
+    image: ghcr.io/zyndaai/omniroute:${OMNIROUTE_TAG:?set OMNIROUTE_TAG in .env to the commit sha to deploy}
+    container_name: omniroute
+    restart: always
+    env_file: .env
+    ports:
+      # Loopback only: Docker-published ports bypass UFW, so binding here is what keeps 20128 private.
+      - "127.0.0.1:20128:20128"
+    volumes:
+      - omniroute-data:/app/data
+    # Docker's default json-file log grows without bound.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    # Healthcheck comes from the image (node healthcheck.mjs, 30s interval).
+
+volumes:
+  # Created by the original hand-run container; must stay external, or compose makes a new,
+  # empty `omniroute_omniroute-data` volume and the app starts with a blank database.
+  omniroute-data:
+    external: true

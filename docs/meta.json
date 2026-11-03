@@ -1,0 +1,14 @@
+{
+  "pages": [
+    "getting-started",
+    "guides",
+    "architecture",
+    "reference",
+    "frameworks",
+    "routing",
+    "security",
+    "compression",
+    "providers",
+    "ops"
+  ]
+}

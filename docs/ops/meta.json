@@ -1,0 +1,15 @@
+{
+  "title": "Operations",
+  "pages": [
+    "BUILD_WARNINGS",
+    "HOMOLOGATION",
+    "VM_DEPLOYMENT_GUIDE",
+    "TUNNELS_GUIDE",
+    "PROXY_GUIDE",
+    "DATABASE_GUIDE",
+    "SQLITE_RUNTIME",
+    "REDIS_PRODUCTION_CONFIG",
+    "MONITORING_GUIDE",
+    "HARD_RULES_DETAIL"
+  ]
+}

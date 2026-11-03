@@ -1,0 +1,30 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    ".build",
+    "open-sse",
+    "dist",
+    "coverage",
+    ".source",
+    ".tmp",
+    ".claude",
+    ".worktrees",
+    "@omniroute",
+    "_tasks",
+    "_ideia",
+    "_mono_repo",
+    "_references",
+    ".opencode",
+    ".scratch",
+    ".agents",
+    ".slim",
+    "packages/browser-pool",
+    "tests",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ]
+}
