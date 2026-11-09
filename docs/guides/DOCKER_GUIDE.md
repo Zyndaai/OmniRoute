@@ -18,6 +18,7 @@ lastUpdated: 2026-10-16
 - [Docker Compose with Caddy (HTTPS)](#docker-compose-with-caddy-https-auto-tls)
 - [Cloudflare Quick Tunnel](#cloudflare-quick-tunnel)
 - [Updating the deployed image](#updating-the-deployed-image)
+- [Prometheus metrics exporter](#prometheus-metrics-exporter)
 - [Availability: default SQLite is single-replica](#availability-default-sqlite-is-single-replica)
 - [Gemini regional errors inside Docker](#gemini-regional-errors-inside-docker)
 - [Important Notes](#important-notes)
@@ -350,6 +351,44 @@ Install the auto-deploy on a host (as root):
 install -m 750 scripts/docker/autodeploy/omniroute-autodeploy /usr/local/sbin/
 install -m 644 scripts/docker/autodeploy/omniroute-autodeploy.{service,timer} /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now omniroute-autodeploy.timer
+```
+
+## Prometheus metrics exporter
+
+OmniRoute has no Prometheus endpoint of its own. `scripts/ops/metrics-exporter.mjs` (no
+dependencies) reads `GET /api/usage/provider-limits`, `/api/provider-metrics` and `/api/providers`
+and serves them on `:9464/metrics`:
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `omniroute_quota_used_ratio` | connection, provider, plan, scope (account/model), window, period (weekly/session/other) | share of a quota window used, 0 to 1; absent for an unlimited window |
+| `omniroute_quota_reset_seconds` | same | seconds until the window resets |
+| `omniroute_quota_limit_reached` | connection, provider | 1 when the connection reports its limit reached (only when reported) |
+| `omniroute_quota_last_sync_timestamp_seconds` | connection, provider | when OmniRoute last synced that connection's quota |
+| `omniroute_provider_requests_total`, `omniroute_provider_successes_total` | provider | all-time counters from the call log; use `rate()` |
+| `omniroute_exporter_source_up` | endpoint | 1 when the route was readable on the last scrape |
+
+- **Credential:** a `read`-scope access token (`oma_...`, created at `POST /api/cli/tokens`). It can
+  GET these routes and is refused on every write. Mount it as a file
+  (`OMNIROUTE_METRICS_TOKEN_FILE`); keep it out of Prometheus and Grafana config.
+- **Safe to scrape every minute:** the quota GET reads OmniRoute's cache, which it syncs on its own
+  timer. Never point anything at `POST /api/usage/provider-limits`, which forces a live quota call on
+  every subscription login.
+- **No names in labels:** connection names are often account emails, so series carry the
+  connection and provider ids only. Connections whose name matches `EXPORTER_EXCLUDE` (default
+  `stressmock`) are dropped, with their provider's counters.
+- **Network:** run it on the OmniRoute network so it reaches `http://omniroute:20128` (set
+  `OMNIROUTE_URL` otherwise). A peer on that network still needs the token; it gets 401 without it.
+
+Run it from the stock Node image, no build needed:
+
+```bash
+docker run -d --name omniroute-metrics-exporter --restart unless-stopped \
+  --network omniroute_default \
+  -v /opt/omni-monitoring/exporter/metrics-exporter.mjs:/app/exporter.mjs:ro \
+  -v /opt/omni-monitoring/secrets/omniroute-metrics-token:/run/secrets/token:ro \
+  -e OMNIROUTE_METRICS_TOKEN_FILE=/run/secrets/token \
+  node:26-alpine node /app/exporter.mjs
 ```
 
 ## Availability: default SQLite is single-replica
