@@ -146,6 +146,28 @@ test("openai -> gemini: non-Flash-Lite models keep thinkingBudget 0 (#6813/#6943
   }
 });
 
+// Flash-Lite does not think unless asked. A request with no thinking knob used to get
+// the injected default budget, so every call could think; it now keeps only the
+// includeThoughts marker (#4170), even under a small max_tokens.
+for (const model of [...FLASH_LITE_MODELS, "antigravity/gemini-3.5-flash-lite"]) {
+  test(`openai -> gemini: ${model} with no thinking knob gets no budget`, () => {
+    for (const extra of [{}, { max_tokens: 1000 }]) {
+      assert.deepEqual(
+        openai(model, extra).generationConfig.thinkingConfig,
+        { includeThoughts: true },
+        JSON.stringify(extra)
+      );
+    }
+  });
+}
+
+test("openai -> gemini: other models still get the default budget with no knob", () => {
+  assert.equal(
+    typeof openai("gemini-2.5-flash", {}).generationConfig.thinkingConfig?.thinkingBudget,
+    "number"
+  );
+});
+
 test("claude -> gemini: non-Flash-Lite models keep thinkingBudget 0 (#6813)", () => {
   assert.deepEqual(
     claude("gemini-2.5-pro", { thinking: { type: "enabled", budget_tokens: 0 } }).generationConfig

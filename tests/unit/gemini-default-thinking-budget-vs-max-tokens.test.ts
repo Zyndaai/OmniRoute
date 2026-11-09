@@ -65,13 +65,9 @@ test("explicit reasoning_effort budget is not rewritten", () => {
 });
 
 test("the shrunk budget does not go below a tier's documented minimum", () => {
-  // 2.5 Pro cannot turn thinking off and documents 128 as its minimum budget;
-  // 2.5 Flash-Lite documents 512. Halving would send 100 and 500 respectively.
+  // 2.5 Pro cannot turn thinking off and documents 128 as its minimum budget.
+  // Halving would send 100. (Flash-Lite gets no default budget at all.)
   assert.equal(build({ max_tokens: 200 }, "gemini-2.5-pro").thinkingConfig?.thinkingBudget, 128);
-  assert.equal(
-    build({ max_tokens: 1000 }, "gemini-2.5-flash-lite").thinkingConfig?.thinkingBudget,
-    512
-  );
   // Above the minimum, halving still applies.
   assert.equal(build({ max_tokens: 1000 }, "gemini-2.5-pro").thinkingConfig?.thinkingBudget, 500);
 });
