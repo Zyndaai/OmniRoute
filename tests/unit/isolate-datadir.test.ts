@@ -6,8 +6,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { sweepStaleTestDataDirs } from "../_setup/isolateDataDir.ts";
 
 function dataDirFromChild(envDataDir: string | undefined): string {
   const result = spawnSync(
@@ -99,4 +101,81 @@ test("isolateDataDir resolves the default plugin dir under the per-process DATA_
 test("isolateDataDir respects an explicitly set OMNIROUTE_PLUGINS_DIR", () => {
   const explicit = "/tmp/omniroute-explicit-plugins-fixture";
   assert.equal(pluginDirFromChild(explicit).pluginDir, explicit);
+});
+
+const OPEN_DB_PREFIX = "OPEN_DB_PROBE ";
+
+// A child that opens the real SQLite DB in its isolated DATA_DIR and exits without closing
+// it, as most test files do. On Windows the open handle makes the exit hook's rmSync fail.
+function dataDirWithOpenDbFromChild(): string {
+  const script = [
+    'const { getDbInstance } = await import("./src/lib/db/core.ts");',
+    "getDbInstance();",
+    `console.log(${JSON.stringify(OPEN_DB_PREFIX)} + process.env.DATA_DIR);`,
+  ].join("\n");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--import",
+      "./tests/_setup/isolateDataDir.ts",
+      "--input-type=module",
+      "-e",
+      script,
+    ],
+    { encoding: "utf8", cwd: process.cwd(), env: { ...process.env, DATA_DIR: "" } }
+  );
+  assert.equal(result.status, 0, `open-db probe exited ${result.status}: ${result.stderr}`);
+  const line = result.stdout.split("\n").find((l) => l.startsWith(OPEN_DB_PREFIX));
+  assert.ok(line, `open-db probe printed no result line; stdout: ${result.stdout}`);
+  return line.slice(OPEN_DB_PREFIX.length).trim();
+}
+
+test("isolateDataDir leaves no DATA_DIR behind once the next test process starts", () => {
+  // Windows leaked one of these per test file (7,236 dirs, 39 GB in three days) because the
+  // exit hook cannot remove a DB that is still open. POSIX removes it at exit already.
+  const leaked = dataDirWithOpenDbFromChild();
+  dataDirFromChild(undefined);
+  assert.equal(fs.existsSync(leaked), false, `expected ${leaked} to be swept`);
+});
+
+test("sweepStaleTestDataDirs removes only dirs whose owner is gone", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sweep-fixture-"));
+  try {
+    const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+    const now = Date.now();
+    const twoHoursAgo = new Date(now - 2 * 60 * 60 * 1000);
+    const dirs = {
+      deadOwner: `omniroute-test-${deadPid}-AbC123`,
+      liveOwner: `omniroute-test-${process.pid}-AbC123`,
+      oldUntagged: "omniroute-test-OldOne",
+      freshUntagged: "omniroute-test-NewOne",
+      otherPrefix: "omniroute-test-adversarial-pii-AbC123",
+      unrelated: "something-else",
+    };
+    for (const name of Object.values(dirs)) {
+      fs.mkdirSync(path.join(root, name));
+      fs.writeFileSync(path.join(root, name, "storage.sqlite"), "");
+    }
+    for (const name of [dirs.deadOwner, dirs.oldUntagged, dirs.otherPrefix, dirs.unrelated]) {
+      fs.utimesSync(path.join(root, name), twoHoursAgo, twoHoursAgo);
+    }
+
+    sweepStaleTestDataDirs(root, now);
+
+    const left = new Set(fs.readdirSync(root));
+    assert.equal(left.has(dirs.deadOwner), false, "a dead owner's dir is removed");
+    assert.equal(
+      left.has(dirs.oldUntagged),
+      false,
+      "an untagged dir older than an hour is removed"
+    );
+    assert.ok(left.has(dirs.liveOwner), "a live owner's dir is kept");
+    assert.ok(left.has(dirs.freshUntagged), "a fresh untagged dir may belong to a live run");
+    assert.ok(left.has(dirs.otherPrefix), "other test prefixes are left to their own cleanup");
+    assert.ok(left.has(dirs.unrelated), "unrelated temp dirs are never touched");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

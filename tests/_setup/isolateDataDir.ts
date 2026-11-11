@@ -41,16 +41,60 @@ if (process.env.NODE_TEST_CONTEXT?.startsWith("child")) {
   )._handle?.setBlocking?.(true);
 }
 
+// Leftover sweep. The exit hook below cannot remove the DATA_DIR on Windows: the test's
+// SQLite DB is still open at exit and Windows refuses to delete an open file. Nothing ever
+// cleans %TEMP%, so a full unit run left ~7,000 dirs (~39 GB) behind. Each process therefore
+// removes the leftovers of finished ones before minting its own. The owner's PID is in the
+// dir name, so a dir is only removed once its process is gone (a reused PID just delays it).
+// Untagged dirs from before this change, or from createTempDataDir's default prefix, are
+// removed by age instead. Other `omniroute-test-<name>-` prefixes are never touched.
+const OWNED_DIR = /^omniroute-test-(\d+)-[A-Za-z0-9]{6}$/;
+const UNTAGGED_DIR = /^omniroute-test-[A-Za-z0-9]{6}$/;
+const UNTAGGED_MAX_AGE_MS = 60 * 60 * 1000;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export function sweepStaleTestDataDirs(root: string, now = Date.now()): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    try {
+      const owner = OWNED_DIR.exec(name);
+      const stale = owner
+        ? Number(owner[1]) !== process.pid && !isProcessAlive(Number(owner[1]))
+        : UNTAGGED_DIR.test(name) &&
+          now - fs.statSync(path.join(root, name)).mtimeMs > UNTAGGED_MAX_AGE_MS;
+      if (stale) fs.rmSync(path.join(root, name), { recursive: true, force: true });
+    } catch {
+      // Another process swept it first, or a file is still locked; the next sweep retries.
+    }
+  }
+}
+
 if (!process.env.DATA_DIR) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-test-"));
+  sweepStaleTestDataDirs(os.tmpdir());
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `omniroute-test-${process.pid}-`));
   process.env.DATA_DIR = dir;
 
-  // Best-effort cleanup so a long suite run does not leak hundreds of temp DBs.
+  // Removes the dir at exit on POSIX. On Windows this fails while the DB is open; the next
+  // process's sweep (above) removes it instead.
   process.on("exit", () => {
     try {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {
-      // ignore — the OS reaps its temp dir eventually.
+      // ignore — left for the next sweep.
     }
   });
 }
