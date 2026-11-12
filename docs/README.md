@@ -180,6 +180,7 @@ Deployment, proxies, tunnels, database, monitoring.
 - [SQLITE_RUNTIME.md](ops/SQLITE_RUNTIME.md) — SQLite driver resolution chain.
 - [REDIS_PRODUCTION_CONFIG.md](ops/REDIS_PRODUCTION_CONFIG.md) — Redis production configuration.
 - [MONITORING_GUIDE.md](ops/MONITORING_GUIDE.md) — monitoring & observability.
+- [LOAD_TESTING.md](ops/LOAD_TESTING.md) — load-testing and CPU-profiling the hosted instance, and what it carries.
 - [VM_DEPLOYMENT_GUIDE.md](ops/VM_DEPLOYMENT_GUIDE.md) — generic VM deployment.
 - [PROXY_GUIDE.md](ops/PROXY_GUIDE.md) — upstream proxy configuration.
 - [TUNNELS_GUIDE.md](ops/TUNNELS_GUIDE.md) — Cloudflare tunnel and friends.

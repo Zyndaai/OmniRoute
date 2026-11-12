@@ -344,6 +344,10 @@ releases as updates and never shows upstream's news feed. Updating the hosted in
 3. To hold deploys, `touch /opt/omniroute/AUTODEPLOY_PAUSED`; delete the file to resume. To deploy
    by hand instead, set `OMNIROUTE_TAG` in `/opt/omniroute/.env` and run
    `docker compose pull && docker compose up -d` in `/opt/omniroute`, after backing up the volume.
+4. The auto-deploy rewrites only `OMNIROUTE_TAG`, so any other setting in `/opt/omniroute/.env`
+   survives deploys. The hosted instance sets `OMNIROUTE_DISABLE_CONVERSATION_TRACKING=1` there
+   (since 2026-11-12): tracking fed only the dashboard's conversation view and cost ~5% of CPU
+   under load.
 
 Install the auto-deploy on a host (as root):
 
@@ -443,6 +447,15 @@ spec:
 External Postgres / multi-writer HA is **not** a documented stock path. If you need HA, keep a single replica or run a topology the project has tested and documented separately. The Postgres/MySQL work lives in [#8075](https://github.com/diegosouzapw/OmniRoute/issues/8075). Until that ships, the only supported way to multiply **large** `/v1/responses` capacity is N independent processes (next section), not `replicas > 1` on one volume.
 
 ## Scale-out: N independent processes
+
+One process uses one core: on the hosted 6-vCPU VPS it saturated at about 20–25 streaming
+requests a second while the host sat at 23% CPU ([load test](../ops/LOAD_TESTING.md)). More
+throughput means more processes as below, not a bigger server. Node's cluster mode and
+`reusePort` are not a shortcut: they start N copies on one data folder, each running the boot
+jobs (token refresh with single-use refresh tokens, quota sync, cleanup) and keeping its own
+rate limits and pins. Split the provider accounts between processes, and have the load balancer
+pin by conversation (`x-session-affinity`) rather than by API key when one client key carries
+all the traffic.
 
 ### Codex token rotation ownership
 
