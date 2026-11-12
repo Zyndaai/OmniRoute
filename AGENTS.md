@@ -20,7 +20,7 @@ npm run check                  # lint + test combined
 ```
 
 This is a private self-hosted copy of OmniRoute: the only CI is `.github/workflows/docker-build-push.yml`
-(builds the image on push to `main`). Upstream's CI, quality-gate scripts, ratchets, git hooks,
+(builds the image only when started by hand). Upstream's CI, quality-gate scripts, ratchets, git hooks,
 release tooling and Dependabot were removed, so nothing runs lint, tests or typecheck for you.
 
 Running tests: see [Testing](#testing) below (run the most focused test for changed code first).
@@ -39,7 +39,7 @@ Running tests: see [Testing](#testing) below (run the most focused test for chan
 - Services — `open-sse/services/` (combo routing, rate limits, caching, etc)
 - Database — `src/lib/db/` (SQLite domain modules, 219 migrations)
 - Domain/Policy — `src/domain/` (policy engine, cost rules, fallback logic)
-- MCP Server — `open-sse/mcp-server/` (110 tools: 45 canonical + memory/skill/GitHub/pool/gamification/plugin/Notion/Obsidian/local-corpus/RTK modules; 3 transports: stdio / SSE / Streamable HTTP; 33 scopes)
+- MCP Server — `open-sse/mcp-server/` (102 tools: 45 canonical + memory/skill/GitHub/pool/plugin/Notion/Obsidian/local-corpus/RTK modules; 3 transports: stdio / SSE / Streamable HTTP; 31 scopes)
 - A2A Server — `src/lib/a2a/` (JSON-RPC 2.0 agent protocol)
 - Skills — `src/lib/skills/` (extensible skill framework); Memory — `src/lib/memory/` (persistent conversational memory)
 
@@ -251,8 +251,11 @@ This is a private self-hosted copy of OmniRoute (`Zyndaai/OmniRoute`); nothing h
 - **Commit only when the operator says "commit"**, and then commit the whole working tree.
 - **Push only when the operator says "push"** in that turn. Never pull, rebase or merge from the
   remote to make a push succeed; if a push is rejected, stop and tell the operator.
-- **A push to `main` builds the image**: `.github/workflows/docker-build-push.yml` publishes
-  `ghcr.io/zyndaai/omniroute:latest` and `:<sha>` (skipped when only `*.md` or `docs/` change).
+- **A push builds nothing.** The image is built only when someone runs
+  `.github/workflows/docker-build-push.yml` from the Actions tab (it refuses any branch but `main`); it
+  publishes `ghcr.io/zyndaai/omniroute:latest` and `:<sha>`. The omniport.ink server deploys every new
+  `:latest` within about 5 minutes, so starting that workflow is a production release: only on the
+  operator's explicit go.
 - **Never `git stash`** (Hard Rule #22a) and never add AI attribution (Hard Rule #16).
 
 **Commit format** (Conventional Commits): `feat(db): add circuit breaker` — scopes: `db`, `sse`, `oauth`, `dashboard`, `api`, `cli`, `docker`, `ci`, `mcp`, `a2a`, `memory`, `skills`

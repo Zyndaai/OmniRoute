@@ -595,10 +595,8 @@ never synthesizes one.
 `syncRadarIntel()` applies the same server-side Bearer, 30-second timeout, 10 MiB streamed cap,
 exact-byte Ed25519 verification, strict schema, `live` body/header requirement, version floor, and
 last-good-cache preservation as offers. After a verified live snapshot is persisted, the client
-derives `radar:<sha256(supporter key)>`, stores only that one-way identity, and emits the dedicated
-`radar_supporter` recognition event. Its `radar-supporter` badge is idempotent and awards zero XP;
-it never updates leaderboards or reuses `token_share`. `/dashboard/radar/intel` renders the badge
-only from verified local cache metadata.
+derives `radar:<sha256(supporter key)>` and stores only that one-way identity.
+`/dashboard/radar/intel` renders the supporter badge only from verified local cache metadata.
 
 The CLI exposes `omniroute radar status` and `omniroute radar sync`. Both communicate only with the
 local OmniRoute API. `status` performs a read-only `GET /api/radar/status`; `sync` sends one

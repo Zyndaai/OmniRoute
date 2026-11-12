@@ -792,66 +792,7 @@
     "learnedFromHeaders": "مستنتج من الترويسات",
     "totalRequests": "إجمالي الطلبات",
     "cloudUnstableNote": "قد يكون اتصال Claude Code OAuth عبر السحابة غير مستقر حاليًا.",
-    "gamificationAdmin": "مشرف التحفيزات",
-    "monitorAnomaliesAndHealth": "مراقبة الحالات الشاذة وصحة النظام",
-    "flaggedAnomalies": "الحالات الشاذة التي تم وضع علامة عليها",
-    "noAnomaliesDetected": "لم يتم اكتشاف أي حالات شاذة",
     "apiKey": "مفتاح واجهة برمجة التطبيقات",
-    "xpLastHour": "XP (ساعة واحدة)",
-    "zScore": "Z-النتيجة",
-    "suspicious": "مشبوه",
-    "tokensCommunityServers": "خوادم المجتمع",
-    "tokensServerNamePlaceholder": "اسم الخادم",
-    "tokensApiKeyPlaceholder": "مفتاح واجهة برمجة التطبيقات",
-    "tokensTokenBalance": "رصيد الرمز المميز",
-    "tokensSendTokens": "إرسال الرموز",
-    "tokensRecipientApiKeyId": "معرف مفتاح واجهة برمجة التطبيقات للمستلم",
-    "tokensRecipientApiKeyIdPlaceholder": "أدخل معرف مفتاح API للمستلم",
-    "tokensReasonOptional": "السبب (اختياري)",
-    "tokensReasonPlaceholder": "على سبيل المثال مكافأة، جائزة",
-    "tokensTransactionHistory": "تاريخ المعاملات",
-    "tokensNoTransactionsYet": "لا توجد معاملات حتى الآن",
-    "tokensInviteCodes": "رموز الدعوة",
-    "tokensMaxUses": "الاستخدامات القصوى",
-    "tokensRedeemCode": "استرداد الرمز",
-    "tokensRedeemCodePlaceholder": "أدخل رمز الدعوة",
-    "tokensYourActiveInvites": "دعواتك النشطة",
-    "tokensTransferSuccess": "تم التحويل بنجاح ({idempotencyKey})",
-    "tokensTransferFailed": "فشل التحويل",
-    "tokensCreateInviteFailed": "فشل إنشاء الدعوة",
-    "tokensRevokeInviteFailed": "فشل إلغاء الدعوة",
-    "tokensRedeemSuccess": "تم استرداد الدعوة. الخادم: {server}",
-    "tokensRedeemFailed": "فشل استرداد الدعوة",
-    "tokensConnectServerFailed": "فشل الاتصال بالخادم",
-    "tokensDisconnectServerFailed": "فشل قطع الاتصال بالخادم",
-    "tokensAmount": "المبلغ",
-    "tokensSending": "جاري الإرسال...",
-    "tokensFrom": "من",
-    "tokensTo": "إلى",
-    "tokensReason": "السبب",
-    "tokensDate": "التاريخ",
-    "tokensSent": "تم الإرسال",
-    "tokensReceived": "تم الاستلام",
-    "tokensCreatingInvite": "جاري الإنشاء...",
-    "tokensCreateInvite": "إنشاء دعوة",
-    "tokensInviteCreated": "تم إنشاء رمز الدعوة",
-    "tokensRedeeming": "جاري الاسترداد...",
-    "tokensRedeem": "استرداد",
-    "tokensInviteUses": "{used}/{max} استخدام",
-    "tokensRevoked": "ملغى",
-    "tokensRevoke": "إلغاء",
-    "tokensConnecting": "جاري الاتصال...",
-    "tokensConnectServer": "اتصال بالخادم",
-    "tokensNoServersConnected": "لا توجد خوادم متصلة. اتصل بخادم مجتمعي لمشاركة لوحات الصدارة.",
-    "tokensServerStatus": {
-      "connected": "متصل",
-      "disconnected": "غير متصل",
-      "pending": "قيد الانتظار",
-      "syncing": "جاري المزامنة",
-      "error": "خطأ"
-    },
-    "tokensLastSync": "آخر مزامنة: {date}",
-    "tokensDisconnect": "قطع الاتصال",
     "tierCoverageTitle": "تغطية الطبقة",
     "tierCoverageSubtitle": "تم تكوين الموفرين لكل طبقة احتياطية",
     "batchDetailCopyId": "نسخ معرف",
@@ -861,18 +802,13 @@
     "batchDetailWindow": "نافذة",
     "batchDetailCreated": "تم إنشاؤها",
     "providerTopologyEmpty": "لا يوجد مقدمي خدمات متصلين حتى الآن",
-    "badgeToastUnlocked": "تم فتح شارة جديدة!",
     "batchListSearchPlaceholder": "البحث حسب المعرف ونقطة النهاية والطراز...",
     "batchListDeleteAllCompletedTitle": "حذف كافة الدفعات المكتملة",
     "batchListBatchesTable": "دفعات",
     "changelogViewerLoading": "جارٍ تحميل سجل التغيير من GitHub...",
     "profile": "الملف الشخصي",
-    "profileLoading": "جارٍ تحميل الملف الشخصي...",
-    "profileHowToEarn": "كيف تكسب",
     "bootstrapBannerDismiss": "استبعاد",
     "batchListDeleteBatchTitle": "حذف الدفعة وملفاتها",
-    "leaderboardYourRank": "رتبتك",
-    "leaderboardLoading": "جارٍ تحميل لوحة الصدارة...",
     "batchFileDetailCopyId": "نسخ معرف",
     "batchFileDetailClose": "إغلاق",
     "batchFileDetailFailedToLoad": "فشل في تحميل محتويات الملف",
@@ -1288,7 +1224,6 @@
     "agenticFeaturesSection": "ميزات الوكلاء",
     "otherFeaturesSection": "ميزات أخرى",
     "compressionContextGroup": "ضغط السياق",
-    "gamificationGroup": "التلعيب",
     "toolsGroup": "الأدوات",
     "integrationsGroup": "التكاملات",
     "proxyGroup": "مجموعة بروكسيات",
@@ -1310,14 +1245,6 @@
     "proxySubtitle": "إعدادات بروكسي HTTP",
     "mitmProxySubtitle": "اعتراض MITM",
     "oneProxySubtitle": "بوابة بروكسي عامة",
-    "leaderboard": "لوحة المتصدرين",
-    "profile": "الملف الشخصي",
-    "tokens": "الرموز",
-    "gamificationAdmin": "إدارة التلعيب",
-    "leaderboardSubtitle": "التصنيفات والإنجازات",
-    "profileSubtitle": "الحساب والتفضيلات",
-    "tokensSubtitle": "استخدام الرموز والميزانيات",
-    "gamificationAdminSubtitle": "مراقبة الحالات الشاذة ومكافحة الغش",
     "usageSubtitle": "إحصاءات حركة المرور والاستخدام",
     "analyticsComboHealthSubtitle": "موثوقية أهداف المجموعة",
     "analyticsUtilizationSubtitle": "استخدام المزود",
@@ -1866,10 +1793,7 @@
     "radar": "الرادار",
     "setup": "الإعداد",
     "freeTiers": "الفئات المجانية",
-    "gamification": "التلعيب",
-    "leaderboard": "لوحة الصدارة",
     "limits": "الحدود",
-    "profile": "الملف الشخصي",
     "plugins": "المكونات الإضافية",
     "providerStats": "إحصائيات المزود",
     "new": "جديد",
@@ -1878,7 +1802,6 @@
     "searchTools": "أدوات البحث",
     "security": "الأمان",
     "sidebar": "الشريط الجانبي",
-    "tokens": "الرموز",
     "tools": "الأدوات",
     "agentBridge": "جسر الوكيل",
     "trafficInspector": "مفتش حركة المرور",
@@ -8362,7 +8285,6 @@
     "retentionConversationTurnNodes": "عُقد أدوار المحادثة (بالأيام)",
     "retentionUsageHistory": "تاريخ الاستخدام (بالأيام)",
     "retentionMemoryEntries": "إدخالات الذاكرة (أيام)",
-    "retentionXpAuditLog": "سجل تدقيق XP (أيام)",
     "saveRetentionSettings": "حفظ إعدادات الاحتفاظ",
     "storageAutoVacuumMode": "وضع التنظيف التلقائي",
     "storageScheduledVacuum": "تنظيف مجدول",
@@ -13410,7 +13332,7 @@
       },
       "omni-mcp": {
         "name": "خادم MCP",
-        "description": "الاتصال بخادم OmniRoute MCP (110 أداة، 3 وسائط نقل: SSE/stdio/HTTP). يغطي التوجيه، والتخزين المؤقت، والضغط، والذاكرة، والمهارات، والمزودين، وأدوات التدقيق عبر 33 نطاق صلاحية."
+        "description": "الاتصال بخادم OmniRoute MCP (102 أداة، 3 وسائط نقل: SSE/stdio/HTTP). يغطي التوجيه، والتخزين المؤقت، والضغط، والذاكرة، والمهارات، والمزودين، وأدوات التدقيق عبر 31 نطاق صلاحية."
       },
       "omni-agents-a2a": {
         "name": "الوكلاء وبروتوكول A2A",
@@ -13712,182 +13634,6 @@
     "freeTierPauseProvider": "تم الإيقاف مؤقتًا (429)، وسيعود في {time}",
     "freeTierPauseNote": "إيقاف مؤقت داخل العملية على هذه النسخة",
     "proxyType": "نوع الوكيل"
-  },
-  "gamification": {
-    "leaderboardScopes": {
-      "allTime": "كل الأوقات",
-      "weekly": "أسبوعي",
-      "monthly": "شهري",
-      "tokensShared": "الرموز المشاركة"
-    },
-    "leaderboardLoadFailed": "فشل تحميل لوحة المتصدرين (HTTP {status})",
-    "scope": "النطاق",
-    "tokensShared": "رموز مشاركة",
-    "points": "نقاط",
-    "rank": "الترتيب",
-    "name": "الاسم",
-    "score": "النتيجة",
-    "leaderboardEmpty": "لا توجد مدخلات بعد لهذا النطاق. ابدأ باستخدام OmniRoute للظهور في لوحة المتصدرين!",
-    "profileLoadFailed": "فشل تحميل بيانات الملف الشخصي",
-    "levelTitles": {
-      "beginner": "مبتدئ",
-      "explorer": "مستكشف",
-      "expert": "خبير",
-      "master": "محترف",
-      "legend": "أسطورة"
-    },
-    "tiers": {
-      "bronze": "برونزي",
-      "silver": "فضي",
-      "gold": "ذهبي",
-      "platinum": "بلاتيني",
-      "diamond": "ماسي"
-    },
-    "tierLabel": "الفئة: {tier}",
-    "dayStreak": "سلسلة متتالية لمدة {count} يوم",
-    "levelProgress": "المستوى {current} → {next}",
-    "totalXpEarned": "{count} إجمالي نقاط الخبرة المكتسبة",
-    "maintainStreak": "استمر في استخدام OmniRoute يومياً للحفاظ على سلسلتك المتتالية!",
-    "badgesTitle": "الشارات ({earned}/{total})",
-    "noBadges": "لا توجد شارات متاحة بعد.",
-    "hiddenBadge": "إنجاز مخفي",
-    "earnedDate": "تم الحصول عليه في {date}",
-    "earnedOn": "تم الحصول عليه في {date}",
-    "category": "الفئة",
-    "rarities": {
-      "common": "شائع",
-      "uncommon": "غير شائع",
-      "rare": "نادر",
-      "epic": "ملحمي",
-      "legendary": "أسطوري"
-    },
-    "categories": {
-      "usage": "الاستخدام",
-      "sharing": "المشاركة",
-      "contribution": "المساهمة",
-      "streak": "السلسلة المتتالية",
-      "rare": "إنجازات نادرة"
-    },
-    "badges": {
-      "radar-supporter": {
-        "name": "داعم Radar",
-        "description": "تم التحقق من موجز داعم مباشر لـ OmniRoute Radar",
-        "criteria": "تحقّق من موجز داعم مباشر وموقّع لـ Radar."
-      },
-      "first-token": {
-        "name": "الرمز الأول",
-        "description": "أجريت أول طلب API لك",
-        "criteria": "أكمل أول طلب API لك عبر OmniRoute."
-      },
-      "token-consumer": {
-        "name": "مستهلك الرموز",
-        "description": "أجريت 1,000 طلب API",
-        "criteria": "أكمل 1,000 طلب API عبر OmniRoute."
-      },
-      "token-machine": {
-        "name": "آلة الرموز",
-        "description": "أجريت 10,000 طلب API",
-        "criteria": "أكمل 10,000 طلب API عبر OmniRoute."
-      },
-      "token-whale": {
-        "name": "حوت الرموز",
-        "description": "أجريت 100,000 طلب API",
-        "criteria": "أكمل 100,000 طلب API عبر OmniRoute."
-      },
-      "generous": {
-        "name": "سخي",
-        "description": "شاركت 1,000 رمز مع الآخرين",
-        "criteria": "شارك ما مجموعه 1,000 رمز مع مستخدمين آخرين."
-      },
-      "philanthropist": {
-        "name": "فاعل خير",
-        "description": "شاركت 10,000 رمز مع الآخرين",
-        "criteria": "شارك ما مجموعه 10,000 رمز مع مستخدمين آخرين."
-      },
-      "token-santa": {
-        "name": "سانتا الرموز",
-        "description": "شاركت 100,000 رمز مع الآخرين",
-        "criteria": "شارك ما مجموعه 100,000 رمز مع مستخدمين آخرين."
-      },
-      "community-hero": {
-        "name": "بطل المجتمع",
-        "description": "شاركت 1,000,000 رمز مع الآخرين",
-        "criteria": "شارك ما مجموعه 1,000,000 رمز مع مستخدمين آخرين."
-      },
-      "explorer": {
-        "name": "مستكشف",
-        "description": "استخدمت 5 مزودين مختلفين",
-        "criteria": "استخدم 5 مزودين مختلفين للذكاء الاصطناعي على الأقل."
-      },
-      "polyglot": {
-        "name": "متعدد اللغات",
-        "description": "استخدمت 10 نماذج مختلفة",
-        "criteria": "استخدم 10 نماذج ذكاء اصطناعي مختلفة على الأقل."
-      },
-      "architect": {
-        "name": "معماري",
-        "description": "أنشأت 3 مسارات مجمعة",
-        "criteria": "أنشئ 3 مسارات مجمعة."
-      },
-      "speedster": {
-        "name": "فائق السرعة",
-        "description": "حافظت على متوسط زمن استجابة أقل من 500 مللي ثانية لـ 100 طلب",
-        "criteria": "حافظ على متوسط زمن استجابة أقل من 500 مللي ثانية عبر 100 طلب."
-      },
-      "resilient": {
-        "name": "صامد",
-        "description": "حافظت على وقت تشغيل بنسبة 100% لمدة 7 أيام",
-        "criteria": "حافظ على وقت تشغيل بنسبة 100% لمدة 7 أيام متتالية."
-      },
-      "daily-user": {
-        "name": "مستخدم يومي",
-        "description": "نشط لمدة 3 أيام متتالية",
-        "criteria": "استخدم OmniRoute لمدة 3 أيام متتالية."
-      },
-      "weekly-warrior": {
-        "name": "محارب أسبوعي",
-        "description": "نشط لمدة 7 أيام متتالية",
-        "criteria": "استخدم OmniRoute لمدة 7 أيام متتالية."
-      },
-      "monthly-master": {
-        "name": "خبير شهري",
-        "description": "نشط لمدة 30 يوماً متتالياً",
-        "criteria": "استخدم OmniRoute لمدة 30 يوماً متتالياً."
-      },
-      "unstoppable": {
-        "name": "لا يُقهر",
-        "description": "نشط لمدة 365 يوماً متتالياً",
-        "criteria": "استخدم OmniRoute لمدة 365 يوماً متتالياً."
-      },
-      "early-adopter": {
-        "name": "متبنٍ مبكر",
-        "description": "انضممت خلال الشهر الأول من التلعيب",
-        "criteria": "انضم خلال الشهر الأول بعد إطلاق التلعيب."
-      },
-      "bug-hunter": {
-        "name": "صائد الأخطاء",
-        "description": "تم الإبلاغ عن 5 مشكلات",
-        "criteria": "أبلغ عن 5 مشكلات صالحة."
-      },
-      "contributor": {
-        "name": "مساهم",
-        "description": "تم دمج طلب سحب واحد",
-        "criteria": "دمج طلب سحب واحد في OmniRoute."
-      },
-      "community-leader": {
-        "name": "قائد المجتمع",
-        "description": "الوصول إلى المراكز الـ 10 الأولى في أي لوحة صدارة",
-        "criteria": "صل إلى المراكز الـ 10 الأولى في أي لوحة صدارة."
-      },
-      "secret-badge": {
-        "name": "???",
-        "description": "إنجاز مخفي في انتظارك...",
-        "criteria": "أكمل الإنجاز المخفي للكشف عن هذه الشارة."
-      }
-    },
-    "leaderboardTitle": "لوحة المتصدرين",
-    "leaderboardDescription": "التصنيفات والإنجازات عبر مفاتيح API الخاصة بك",
-    "badgeLocked": "مقفل"
   },
   "featureFlags": {
     "title": "علامات الميزات",

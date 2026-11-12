@@ -1,7 +1,7 @@
 /**
  * Issue #6848 — Auto-cleanup for telemetry tables that grow without bound.
  *
- * domain_cost_history, compression_cache_stats, xp_audit_log, and
+ * domain_cost_history, compression_cache_stats and
  * compression_run_telemetry had no retention cleanup, causing unbounded
  * DB growth and OOM crashes on relays with heavy traffic.
  *
@@ -34,7 +34,6 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const {
   cleanupDomainCostHistory,
   cleanupCompressionCacheStats,
-  cleanupXpAuditLog,
   cleanupCompressionRunTelemetry,
 } = await import("../../src/lib/db/cleanup.ts");
 
@@ -77,7 +76,6 @@ test.beforeEach(() => {
   for (const table of [
     "domain_cost_history",
     "compression_cache_stats",
-    "xp_audit_log",
     "compression_run_telemetry",
   ]) {
     db.exec(`DELETE FROM ${table}`);
@@ -134,28 +132,6 @@ test("#6848 cleanupCompressionCacheStats: deletes rows older than retention wind
   assert.strictEqual(remaining.cnt, 1);
 });
 
-test("#6848 cleanupXpAuditLog: deletes rows older than retention window", async () => {
-  const db = getDbInstance()!;
-  const oldDate = new Date(Date.now() - 40 * DAY_MS).toISOString();
-  const recentDate = new Date(Date.now() - 5 * DAY_MS).toISOString();
-  const insert = db.prepare(
-    "INSERT INTO xp_audit_log (api_key_id, action, xp_earned, created_at) VALUES (?, ?, ?, ?)"
-  );
-
-  insert.run("key1", "login", 10, oldDate);
-  insert.run("key1", "login", 10, oldDate);
-  insert.run("key1", "login", 10, oldDate);
-  insert.run("key1", "login", 10, recentDate);
-
-  const result = await cleanupXpAuditLog();
-
-  assert.strictEqual(result.deleted, 3);
-  assert.strictEqual(result.errors, 0);
-
-  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM xp_audit_log").get() as { cnt: number };
-  assert.strictEqual(remaining.cnt, 1);
-});
-
 test("#6848 cleanupCompressionRunTelemetry: deletes rows older than retention window", async () => {
   ensureTelemetryTable();
   const db = getDbInstance()!;
@@ -205,7 +181,7 @@ test("#6848 cleanupCompressionRunTelemetry: contains table lookup failures", asy
   assert.deepStrictEqual(result, { deleted: 0, errors: 1 });
 });
 
-test("#6848 no rows deleted when all data is within retention window (calls all 4 real functions)", async () => {
+test("#6848 no rows deleted when all data is within retention window (calls all 3 real functions)", async () => {
   ensureTelemetryTable();
   const db = getDbInstance()!;
   const nowMilliseconds = Date.now();
@@ -220,21 +196,16 @@ test("#6848 no rows deleted when all data is within retention window (calls all 
     "INSERT INTO compression_cache_stats (provider, compression_mode, created_at) VALUES (?, ?, ?)"
   ).run("p", "auto", recentISO);
   db.prepare(
-    "INSERT INTO xp_audit_log (api_key_id, action, xp_earned, created_at) VALUES (?, ?, ?, ?)"
-  ).run("k", "a", 5, recentISO);
-  db.prepare(
     "INSERT INTO compression_run_telemetry (timestamp, tokens_before, tokens_after) VALUES (?, ?, ?)"
   ).run(nowMilliseconds - DAY_MS, 100, 50);
 
   const r1 = await cleanupDomainCostHistory();
   const r2 = await cleanupCompressionCacheStats();
-  const r3 = await cleanupXpAuditLog();
-  const r4 = await cleanupCompressionRunTelemetry();
+  const r3 = await cleanupCompressionRunTelemetry();
 
   assert.strictEqual(r1.deleted, 0);
   assert.strictEqual(r2.deleted, 0);
   assert.strictEqual(r3.deleted, 0);
-  assert.strictEqual(r4.deleted, 0);
 });
 
 test("#6848 DEFAULT_DATABASE_SETTINGS has new retention keys", async () => {
@@ -243,11 +214,9 @@ test("#6848 DEFAULT_DATABASE_SETTINGS has new retention keys", async () => {
 
   assert.ok(typeof defaults.domainCostHistory === "number");
   assert.ok(typeof defaults.compressionCacheStats === "number");
-  assert.ok(typeof defaults.xpAuditLog === "number");
   assert.ok(typeof defaults.compressionRunTelemetry === "number");
 
   assert.strictEqual(defaults.domainCostHistory, 30);
   assert.strictEqual(defaults.compressionCacheStats, 30);
-  assert.strictEqual(defaults.xpAuditLog, 30);
   assert.strictEqual(defaults.compressionRunTelemetry, 30);
 });

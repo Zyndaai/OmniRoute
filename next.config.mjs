@@ -611,11 +611,6 @@ const nextConfig = {
       },
       { source: "/docs/cloud-agent", destination: "/docs/frameworks/cloud-agent", permanent: true },
       { source: "/docs/evals", destination: "/docs/frameworks/evals", permanent: true },
-      {
-        source: "/docs/gamification",
-        destination: "/docs/frameworks/gamification",
-        permanent: true,
-      },
       { source: "/docs/mcp-server", destination: "/docs/frameworks/mcp-server", permanent: true },
       { source: "/docs/memory", destination: "/docs/frameworks/memory", permanent: true },
       { source: "/docs/opencode", destination: "/docs/frameworks/opencode", permanent: true },

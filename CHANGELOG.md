@@ -17,6 +17,13 @@ upstream: <https://github.com/cheaper-inference/OmniRoute/blob/release/v3.8.53/C
 
 - UI and CLI localization trimmed to English and Arabic; translated docs (`docs/i18n/`) removed.
 - Upstream-only release, publish, nightly and translation workflows removed.
+- Gamification removed: XP, badges, streaks, leaderboards, token sharing, invites, federation,
+  its dashboard pages, `/api/gamification/*`, the 8 MCP tools and the per-request XP event. A
+  10 RPS CPU profile put it at ~1.7% of CPU, and nothing here used it. Migrations 060 and 176
+  stay (forward-only), so the tables are left in place, unused; the `xpAuditLog` retention
+  setting went with it.
+- perf(registry): `getGlobalModel()` memoizes by model id (bounded, cleared on registry
+  changes) instead of scanning every provider list several times per request.
 
 ## [3.8.53] — 2026-10-31
 

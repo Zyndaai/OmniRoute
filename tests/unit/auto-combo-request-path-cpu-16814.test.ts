@@ -12,7 +12,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-auto-cpu-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
-const { PROVIDER_MODELS } = await import("../../open-sse/config/providerModels.ts");
+const { PROVIDER_MODELS, getProviderModel } =
+  await import("../../open-sse/config/providerModels.ts");
 const { getTaskFitness, invalidateFitnessCache } =
   await import("../../open-sse/services/autoCombo/taskFitness.ts");
 const { resolveScoresAs } = await import("../../open-sse/services/autoCombo/scoresAs.ts");
@@ -75,6 +76,44 @@ test("#16814: resolveScoresAs does not rescan the whole provider registry for an
     (Object as { values: unknown }).values = realValues;
   }
   assert.equal(scans, 0, `50 repeat resolveScoresAs(${id}) scanned PROVIDER_MODELS ${scans} times`);
+});
+
+function countRegistryScans(fnUnderTest: () => void): number {
+  let scans = 0;
+  const realValues = Object.values;
+  (Object as { values: unknown }).values = (o: unknown) => {
+    if (o === PROVIDER_MODELS) scans++;
+    return realValues(o as object);
+  };
+  try {
+    fnUnderTest();
+  } finally {
+    (Object as { values: unknown }).values = realValues;
+  }
+  return scans;
+}
+
+test("getProviderModel's cross-provider fallback does not rescan the registry for a repeated id", () => {
+  // An unknown provider forces the global lookup.
+  const [{ id }] = sampleModelIds(1);
+  assert.equal(getProviderModel("no-such-provider", id)?.id, id);
+  const scans = countRegistryScans(() => {
+    for (let i = 0; i < 50; i++) getProviderModel("no-such-provider", id);
+  });
+  assert.equal(scans, 0, `50 repeat lookups of ${id} scanned PROVIDER_MODELS ${scans} times`);
+});
+
+test("getProviderModel sees a provider added after the id was looked up", () => {
+  const provider = "memo-invalidation-test";
+  const modelId = "memo-invalidation-only-model";
+  assert.equal(getProviderModel("no-such-provider", modelId), undefined);
+  PROVIDER_MODELS[provider] = [{ id: modelId, name: "Memo Invalidation" }];
+  try {
+    assert.equal(getProviderModel("no-such-provider", modelId)?.name, "Memo Invalidation");
+  } finally {
+    delete PROVIDER_MODELS[provider];
+  }
+  assert.equal(getProviderModel("no-such-provider", modelId), undefined);
 });
 
 test("#16814: computeAdvertisedLimits does not issue per-candidate DB statements on the request path", () => {

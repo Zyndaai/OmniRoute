@@ -107,7 +107,7 @@ curl -s -w "\n%{http_code}\n" http://localhost:20128/dashboard
   `/api/*` management routes keep their normal authorization tiers, so the `omniroute` CLI
   (and remote mode) keep working. It is not a security boundary — keep using
   `REQUIRE_API_KEY` and a loopback bind (`OMNIROUTE_SERVER_HOST`) where appropriate.
-- **Route-loaded features still load on demand.** MCP, A2A, evals, gamification, webhooks and
+- **Route-loaded features still load on demand.** MCP, A2A, evals, webhooks and
   cloud agents have no boot-time init; they start lazily when their routes are called, in both
   modes.
 - **Memory stays on.** Memory is cross-cutting to the request pipeline (`/v1` injects and

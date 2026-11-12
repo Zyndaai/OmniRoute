@@ -42,16 +42,10 @@ export interface IntelSyncDeps {
   getSettings?: () => RadarSettingsSnapshot;
   getCache?: () => RadarIntelCacheEntry | null;
   setCache?: (entry: RadarIntelCacheEntry) => void;
-  recognizeSupporter?: (identity: string) => Promise<void>;
 }
 
 function supporterIdentity(key: string): string {
   return `radar:${crypto.createHash("sha256").update(key, "utf8").digest("hex")}`;
-}
-
-async function recognizeVerifiedSupporter(identity: string): Promise<void> {
-  const { emitGamificationEvent } = await import("@/lib/gamification/events");
-  await emitGamificationEvent({ apiKeyId: identity, action: "radar_supporter" });
 }
 
 export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyncStatus> {
@@ -62,7 +56,6 @@ export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyn
     getSettings: getSettingsFn,
     getCache: getCacheFn,
     setCache: setCacheFn,
-    recognizeSupporter = recognizeVerifiedSupporter,
   } = deps;
 
   try {
@@ -109,21 +102,17 @@ export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyn
       return { status: "stale" };
     }
 
-    const identity = supporterIdentity(settings.supporterKey);
     const cacheEntry: RadarIntelCacheEntry = {
       version: feed.version,
       tier: "live",
       payload: rawBytes.toString("utf8"),
       signature,
-      supporterIdentity: identity,
+      supporterIdentity: supporterIdentity(settings.supporterKey),
       fetchedAt: now().toISOString(),
     };
     if (setCacheFn) setCacheFn(cacheEntry);
     else (await import("@/lib/db/radar")).setRadarIntelCache(cacheEntry);
 
-    // Recognition is local and best-effort. It runs only after the signed live
-    // bytes have been accepted and persisted, and never changes sync success.
-    await recognizeSupporter(identity).catch(() => undefined);
     return { status: "updated", version: feed.version };
   } catch (error: unknown) {
     const reason = (sanitizeErrorMessage(error) || "Radar Intel sync failed").replace(
