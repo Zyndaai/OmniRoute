@@ -482,8 +482,9 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
 
   // ── Claude Sonnet 5.5 ───────────────────────────────────────────
   "claude-sonnet-5-5": {
-    // Same shape as Sonnet 5, but it rejects thinking.type:"disabled"
-    // (use between_tools) and forced tool_choice (any/tool).
+    // Same shape as Sonnet 5, but it rejects forced tool_choice (any/tool).
+    // It accepts thinking.type:"disabled" and then does not think (measured
+    // through Anthropic's API 2026-11-16); stripping it made every call think.
     maxOutputTokens: 128000,
     contextWindow: 1000000,
     defaultThinkingBudget: 32000,
@@ -492,7 +493,6 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsTools: true,
     supportsVision: true,
     adaptiveThinkingOnly: true,
-    rejectsThinkingDisabled: true,
     rejectsForcedToolChoice: true,
     aliases: BEDROCK_CLAUDE_ALIASES("claude-sonnet-5-5"),
   },

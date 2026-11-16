@@ -13,6 +13,12 @@ upstream: <https://github.com/cheaper-inference/OmniRoute/blob/release/v3.8.53/C
   `x-session-affinity` pins a session. Runbook: `docs/ops/HARDENED_DEPLOYMENT.md`.
 - **ci:** build the `runner-base` Docker image and push it to GHCR on `main`.
 
+### 🐛 Bug Fixes
+
+- **fix(claude):** Claude Sonnet 5.5 keeps a client's `thinking: {type: "disabled"}`. The spec
+  marked it as rejected and stripped it, so Sonnet fell back to adaptive thinking and every
+  no-thinking call billed 200–350 reasoning tokens; Anthropic's API accepts it and does not think.
+
 ### 📝 Maintenance
 
 - UI and CLI localization trimmed to English and Arabic; translated docs (`docs/i18n/`) removed.
