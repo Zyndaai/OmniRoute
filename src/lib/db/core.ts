@@ -8,9 +8,13 @@
 
 import { isNextBuildPhase } from "../buildPhase";
 import { resolveWritableDataDir } from "../dataPaths";
-import { getPostgresMigrationHead, runPostgresMigrations } from "./backends/postgres/migrationRunner";
+import {
+  getPostgresMigrationHead,
+  runPostgresMigrations,
+} from "./backends/postgres/migrationRunner";
 import { getDbBackend, initDbBackend, resetDbBackendForTests } from "./backends/selection";
 import { invalidateDbCache } from "./readCache";
+import { resetAllDbModuleState } from "./stateReset";
 
 // Re-exported so existing call sites that pull these helpers off the core module keep working.
 export { toSnakeCase, toCamelCase, objToSnake, rowToCamel, cleanNulls } from "./caseMapping";
@@ -42,7 +46,8 @@ export function ensureDbInitialized(): Promise<void> {
     const { applied, head } = await runPostgresMigrations(backend, {
       logger: { info: (m) => console.log(m) },
     });
-    if (applied.length > 0) console.log(`[DB] Applied ${applied.length} migration(s); head ${head}`);
+    if (applied.length > 0)
+      console.log(`[DB] Applied ${applied.length} migration(s); head ${head}`);
     await ensureLogPartitions();
   })().catch((error) => {
     initPromise = null;
@@ -83,8 +88,12 @@ export async function shutdownDbInstance(): Promise<boolean> {
   return true;
 }
 
-/** Test helper: drop the process backend and read caches so the next call reconnects. */
+/**
+ * Test helper: drop the process backend, the read caches and the module caches registered with
+ * `registerDbStateResetter` (as the SQLite-era reset did), so the next call reconnects.
+ */
 export async function resetDbInstance(): Promise<void> {
   await shutdownDbInstance();
   invalidateDbCache();
+  resetAllDbModuleState();
 }

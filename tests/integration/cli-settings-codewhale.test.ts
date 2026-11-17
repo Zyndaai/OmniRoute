@@ -14,6 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const ORIG_USERPROFILE = process.env.USERPROFILE;
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-codewhale-settings-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret-codewhale";
@@ -96,6 +97,7 @@ test("codewhale-settings POST: writes primary ~/.codewhale/config.toml for a fre
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "codewhale-home-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const res = await POST(
@@ -130,6 +132,7 @@ test("codewhale-settings POST: writes primary ~/.codewhale/config.toml for a fre
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -140,6 +143,7 @@ test("codewhale-settings POST: syncs an existing legacy ~/.deepseek/config.toml"
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "codewhale-home-legacy-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     // Simulate an existing DeepSeek TUI install (pre-CodeWhale upgrade).
@@ -177,6 +181,7 @@ test("codewhale-settings POST: syncs an existing legacy ~/.deepseek/config.toml"
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -187,6 +192,7 @@ test("codewhale-settings GET: falls back to legacy ~/.deepseek/config.toml when 
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "codewhale-home-getlegacy-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const legacyDir = path.join(tmpHome, ".deepseek");
@@ -205,6 +211,7 @@ test("codewhale-settings GET: falls back to legacy ~/.deepseek/config.toml when 
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -215,6 +222,7 @@ test("codewhale-settings DELETE: removes primary and legacy config files", async
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "codewhale-home-del-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const primaryDir = path.join(tmpHome, ".codewhale");
@@ -242,6 +250,7 @@ test("codewhale-settings DELETE: removes primary and legacy config files", async
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

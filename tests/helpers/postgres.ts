@@ -8,6 +8,7 @@ import { runPostgresMigrations } from "../../src/lib/db/backends/postgres/migrat
 import type { DbBackend } from "../../src/lib/db/backends/types.ts";
 import { PG_TYPE_PARSERS } from "../../src/lib/db/backends/postgres/typeParsers.ts";
 import { invalidateDbCache } from "../../src/lib/db/readCache.ts";
+import { resetAllDbModuleState } from "../../src/lib/db/stateReset.ts";
 
 /** The process backend; requires the run to use tests/_setup/isolatePostgres.ts. */
 export function getTestBackend(): DbBackend {
@@ -65,6 +66,9 @@ export async function resetTestDb(): Promise<void> {
   await truncateAll(backend);
   for (const sql of migrationSeeds()) await backend.execute(sql);
   invalidateDbCache();
+  // Module caches registered with registerDbStateResetter (API keys, reasoning rules, the
+  // health-matrix stats snapshot) would otherwise leak from one test into the next.
+  resetAllDbModuleState();
   // Loaded lazily: most tests never touch models.dev capabilities.
   const { resetSyncedCapabilitiesCache } = await import("../../src/lib/modelsDevSync.ts");
   resetSyncedCapabilitiesCache();

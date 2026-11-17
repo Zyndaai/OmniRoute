@@ -53,8 +53,8 @@ async function isIpBlocked(res: Response): Promise<boolean> {
 }
 
 test("#6131 blacklisted remote IP is blocked with 403 before the route policy", async () => {
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   const res = await pipeline.runAuthzPipeline(req(BLOCKED), { enforce: true });
   assert.equal(res.status, 403);
@@ -62,8 +62,8 @@ test("#6131 blacklisted remote IP is blocked with 403 before the route policy", 
 });
 
 test("#6131 a clean remote IP passes the IP filter (reaches the normal auth outcome)", async () => {
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   const res = await pipeline.runAuthzPipeline(req(CLEAN), { enforce: true });
   // The IP filter must let it through to the normal route/auth outcome, whatever
@@ -72,8 +72,8 @@ test("#6131 a clean remote IP passes the IP filter (reaches the normal auth outc
 });
 
 test("#6131 disabled filter never blocks (even a listed IP)", async () => {
-  ipFilter.configureIPFilter({ enabled: false, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: false, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   const res = await pipeline.runAuthzPipeline(req(BLOCKED), { enforce: true });
   assert.equal(await isIpBlocked(res), false, "disabled filter must not block");
@@ -81,8 +81,8 @@ test("#6131 disabled filter never blocks (even a listed IP)", async () => {
 
 test("#6131 loopback is exempt — operator can't lock themselves out locally", async () => {
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = "stamp-tok";
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   // A trusted stamped loopback peer IP downgrades the request to "loopback".
   const res = await pipeline.runAuthzPipeline(

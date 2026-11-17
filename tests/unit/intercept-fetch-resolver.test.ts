@@ -32,33 +32,33 @@ describe("db/interceptionRules — resolveInterceptFetch precedence (#7339)", ()
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it("returns undefined when no provider/model rule exists", () => {
-    assert.equal(resolveInterceptFetch("anthropic", "claude-opus-4"), undefined);
+  it("returns undefined when no provider/model rule exists", async () => {
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-opus-4"), undefined);
   });
 
-  it("returns the provider-level interceptFetch value when only a provider rule is set", () => {
-    setInterceptionRules("anthropic", { interceptFetch: true });
-    assert.equal(resolveInterceptFetch("anthropic", "claude-opus-4"), true);
-    assert.equal(resolveInterceptFetch("anthropic", "claude-haiku-4"), true);
+  it("returns the provider-level interceptFetch value when only a provider rule is set", async () => {
+    await setInterceptionRules("anthropic", { interceptFetch: true });
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-opus-4"), true);
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-haiku-4"), true);
   });
 
-  it("model-level interceptFetch wins over the provider-level rule when both are set", () => {
-    setInterceptionRules("anthropic", {
+  it("model-level interceptFetch wins over the provider-level rule when both are set", async () => {
+    await setInterceptionRules("anthropic", {
       interceptFetch: false,
       models: { "claude-opus-4": { interceptFetch: true } },
     });
-    assert.equal(resolveInterceptFetch("anthropic", "claude-opus-4"), true);
-    assert.equal(resolveInterceptFetch("anthropic", "claude-haiku-4"), false);
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-opus-4"), true);
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-haiku-4"), false);
   });
 
-  it("does not read interceptSearch when resolving interceptFetch (fields stay independent)", () => {
-    setInterceptionRules("anthropic", { interceptSearch: true, interceptFetch: false });
-    assert.equal(resolveInterceptFetch("anthropic", "claude-opus-4"), false);
+  it("does not read interceptSearch when resolving interceptFetch (fields stay independent)", async () => {
+    await setInterceptionRules("anthropic", { interceptSearch: true, interceptFetch: false });
+    assert.equal(await resolveInterceptFetch("anthropic", "claude-opus-4"), false);
   });
 
-  it("returns undefined for an empty/missing provider", () => {
-    assert.equal(resolveInterceptFetch("", "claude-opus-4"), undefined);
-    assert.equal(resolveInterceptFetch(null, "claude-opus-4"), undefined);
-    assert.equal(resolveInterceptFetch(undefined, "claude-opus-4"), undefined);
+  it("returns undefined for an empty/missing provider", async () => {
+    assert.equal(await resolveInterceptFetch("", "claude-opus-4"), undefined);
+    assert.equal(await resolveInterceptFetch(null, "claude-opus-4"), undefined);
+    assert.equal(await resolveInterceptFetch(undefined, "claude-opus-4"), undefined);
   });
 });

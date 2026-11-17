@@ -16,6 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const ORIG_USERPROFILE = process.env.USERPROFILE;
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-grok-build-settings-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret-grok-build";
@@ -107,6 +108,7 @@ test("grok-build-settings POST: writes [model.omniroute] section and preserves e
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "grok-build-home-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     // Pre-seed a config.toml with an unrelated user model + a non-default value,
@@ -166,6 +168,7 @@ test("grok-build-settings POST: writes [model.omniroute] section and preserves e
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -176,6 +179,7 @@ test("grok-build-settings DELETE: removes our section, preserves the rest, resto
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "grok-build-home-del-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const grokDir = path.join(tmpHome, ".grok");
@@ -222,6 +226,7 @@ test("grok-build-settings DELETE: removes our section, preserves the rest, resto
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -230,6 +235,7 @@ test("grok-build-settings DELETE: no-op success when no config file exists", asy
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "grok-build-home-noconfig-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const res = await DELETE(
@@ -240,6 +246,7 @@ test("grok-build-settings DELETE: no-op success when no config file exists", asy
     assert.equal(body.success, true);
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

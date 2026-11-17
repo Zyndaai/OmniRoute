@@ -27,6 +27,13 @@ async function reset() {
   await resetTestDb();
 }
 
+// free_proxies.pool_proxy_id is a foreign key to proxy_registry: link a real registry row.
+async function createPoolProxy(host: string): Promise<string> {
+  const proxiesDb = await import("../../src/lib/db/proxies.ts");
+  const created = await proxiesDb.upsertProxy({ name: host, type: "http", host, port: 3128 });
+  return created.proxy!.id;
+}
+
 function makeReq(): Request {
   return new Request("http://localhost/test", { method: "POST" });
 }
@@ -78,7 +85,8 @@ test("add-to-pool returns alreadyInPool:true when proxy is already in pool", asy
     anonymity: null,
     lastValidated: null,
   });
-  await freeProxiesDb.markFreeProxyInPool(id, "existing-pool-id");
+  const poolId = await createPoolProxy("pool-existing.test");
+  await freeProxiesDb.markFreeProxyInPool(id, poolId);
 
   const res = await addToPoolRoute.POST(makeReq(), {
     params: Promise.resolve({ id }),
@@ -86,7 +94,7 @@ test("add-to-pool returns alreadyInPool:true when proxy is already in pool", asy
   const body = await res.json();
   assert.ok(body.success);
   assert.ok(body.alreadyInPool);
-  assert.equal(body.poolProxyId, "existing-pool-id");
+  assert.equal(body.poolProxyId, poolId);
 });
 
 test("add-to-pool returns success:false when connectivity test fails (unreachable proxy)", async () => {
@@ -163,8 +171,8 @@ test("bulk-add-to-pool: alreadyInPool proxies counted as succeeded", async () =>
     anonymity: null,
     lastValidated: null,
   });
-  await freeProxiesDb.markFreeProxyInPool(id1, "pool-1");
-  await freeProxiesDb.markFreeProxyInPool(id2, "pool-2");
+  await freeProxiesDb.markFreeProxyInPool(id1, await createPoolProxy("pool-1.test"));
+  await freeProxiesDb.markFreeProxyInPool(id2, await createPoolProxy("pool-2.test"));
 
   const res = await bulkAddRoute.POST(makeBulkReq([id1, id2]));
   const body = await res.json();
@@ -209,8 +217,8 @@ test("bulk-add-to-pool: response shape with mix of already-in-pool and connectiv
     anonymity: null,
     lastValidated: null,
   });
-  await freeProxiesDb.markFreeProxyInPool(p1, "pool-aaa");
-  await freeProxiesDb.markFreeProxyInPool(p2, "pool-bbb");
+  await freeProxiesDb.markFreeProxyInPool(p1, await createPoolProxy("pool-aaa.test"));
+  await freeProxiesDb.markFreeProxyInPool(p2, await createPoolProxy("pool-bbb.test"));
 
   // 3 unreachable proxies (fail connectivity)
   const failProxies = await Promise.all(

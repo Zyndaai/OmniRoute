@@ -24,9 +24,9 @@ test.after(async () => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("Intel migration provides a byte-preserving single-row cache", () => {
-  assert.equal(radar.getRadarIntelCache(), null);
-  radar.setRadarIntelCache({
+test("Intel migration provides a byte-preserving single-row cache", async () => {
+  assert.equal(await radar.getRadarIntelCache(), null);
+  await radar.setRadarIntelCache({
     version: "2026.08.09.1",
     tier: "live",
     payload: '{"exact":true}\n',
@@ -34,7 +34,7 @@ test("Intel migration provides a byte-preserving single-row cache", () => {
     supporterIdentity: `radar:${"a".repeat(64)}`,
     fetchedAt: "2026-08-09T12:05:00.000Z",
   });
-  assert.deepEqual(radar.getRadarIntelCache(), {
+  assert.deepEqual(await radar.getRadarIntelCache(), {
     version: "2026.08.09.1",
     tier: "live",
     payload: '{"exact":true}\n',
@@ -44,21 +44,26 @@ test("Intel migration provides a byte-preserving single-row cache", () => {
   });
 });
 
-test("changing supporter key invalidates catalog, referrals, offers, and Intel atomically", () => {
-  radar.setRadarCache({ version: "2026.08.09.1", tier: "live", payload: "{}", signature: "a" });
-  radar.setRadarReferralsCache({
+test("changing supporter key invalidates catalog, referrals, offers, and Intel atomically", async () => {
+  await radar.setRadarCache({
+    version: "2026.08.09.1",
+    tier: "live",
+    payload: "{}",
+    signature: "a",
+  });
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-09T12:00:00.000Z",
     tier: "live",
     payload: "{}",
     signature: "b",
   });
-  radar.setRadarOffersCache({
+  await radar.setRadarOffersCache({
     version: "2026.08.09.1",
     tier: "live",
     payload: "{}",
     signature: "c",
   });
-  radar.setRadarIntelCache({
+  await radar.setRadarIntelCache({
     version: "2026.08.09.1",
     tier: "live",
     payload: "{}",
@@ -66,10 +71,10 @@ test("changing supporter key invalidates catalog, referrals, offers, and Intel a
     supporterIdentity: `radar:${"a".repeat(64)}`,
   });
 
-  radar.setRadarKey(`omr_${"b".repeat(40)}`);
+  await radar.setRadarKey(`omr_${"b".repeat(40)}`);
 
-  assert.equal(radar.getRadarCache(), null);
-  assert.equal(radar.getRadarReferralsCache(), null);
-  assert.equal(radar.getRadarOffersCache(), null);
-  assert.equal(radar.getRadarIntelCache(), null);
+  assert.equal(await radar.getRadarCache(), null);
+  assert.equal(await radar.getRadarReferralsCache(), null);
+  assert.equal(await radar.getRadarOffersCache(), null);
+  assert.equal(await radar.getRadarIntelCache(), null);
 });

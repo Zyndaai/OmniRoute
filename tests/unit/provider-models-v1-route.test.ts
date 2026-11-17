@@ -100,11 +100,11 @@ test("GET /v1/providers/:provider/models accepts openai-compatible-responses con
 });
 
 test("GET /v1/providers/:provider/models returns synced embedded service models", async () => {
-  serviceModelsDb.saveServiceModels("cliproxyapi", [
+  await serviceModelsDb.saveServiceModels("cliproxyapi", [
     { id: "cli/gpt-5", name: "GPT-5 via CLIProxyAPI" },
     { id: "old-model" },
   ]);
-  serviceModelsDb.saveServiceModels("cliproxyapi", [
+  await serviceModelsDb.saveServiceModels("cliproxyapi", [
     { id: "cli/gpt-5", name: "GPT-5 via CLIProxyAPI" },
   ]);
 
@@ -128,7 +128,7 @@ test("#13829: compatible provider IDs return synced models owned by their public
 
   await providerNodesDb.createProviderNode({
     id: providerId,
-    type: "openai-compatible-chat",
+    type: "openai-compatible",
     name: "Hetzner",
     prefix,
     apiType: "chat",

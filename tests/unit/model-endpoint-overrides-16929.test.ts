@@ -9,6 +9,7 @@ process.env.DATA_DIR = folder;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
@@ -22,8 +23,21 @@ test.after(async () => {
   fs.rmSync(folder, { recursive: true, force: true });
 });
 
+// connection_model_sync has a foreign key to provider_connections: sync needs a real parent row.
+async function makeConnection(name: string): Promise<string> {
+  const connection = await providersDb.createProviderConnection({
+    provider: "deepseek",
+    authType: "apikey",
+    name,
+    apiKey: "sk-test",
+    isActive: true,
+  });
+  return String((connection as { id: string }).id);
+}
+
 test("#16929: a virtual endpoint override resets without deleting discovered model", async () => {
-  await models.replaceSyncedAvailableModelsForConnection("deepseek", "connection-1", [
+  const connection1 = await makeConnection("deepseek-1");
+  await models.replaceSyncedAvailableModelsForConnection("deepseek", connection1, [
     {
       id: "model-stt",
       name: "Speech",
@@ -47,7 +61,7 @@ test("#16929: a virtual endpoint override resets without deleting discovered mod
   assert.equal(observed?.name, "Speech");
   assert.equal(observed?.apiFormat, "audio-transcriptions");
   assert.deepEqual(observed?.supportedEndpoints, ["chat"]);
-  await models.replaceSyncedAvailableModelsForConnection("deepseek", "connection-1", [
+  await models.replaceSyncedAvailableModelsForConnection("deepseek", connection1, [
     {
       id: "model-stt",
       name: "New upstream name",
@@ -64,7 +78,8 @@ test("#16929: a virtual endpoint override resets without deleting discovered mod
 });
 
 test("#16929: reset only endpoints and preserves unrelated operator settings", async () => {
-  await models.replaceSyncedAvailableModelsForConnection("deepseek", "connection-2", [
+  const connection2 = await makeConnection("deepseek-2");
+  await models.replaceSyncedAvailableModelsForConnection("deepseek", connection2, [
     {
       id: "model-rerank",
       name: "Rerank",

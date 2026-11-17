@@ -16,18 +16,18 @@ const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 describe("compression DB module", () => {
   beforeEach(async () => {
-    core.resetDbInstance();
+    await core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
     await resetTestDb();
   });
 
-  afterEach(() => {
-    core.resetDbInstance();
+  afterEach(async () => {
+    await core.resetDbInstance();
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     if (ORIGINAL_DATA_DIR === undefined) {
       delete process.env.DATA_DIR;
@@ -44,7 +44,10 @@ describe("compression DB module", () => {
     assert.equal(config.cacheMinutes, 5);
     assert.equal(config.preserveSystemPrompt, true);
     assert.ok(config.cavemanConfig);
-    assert.equal(config.cavemanConfig.enabled, true);
+    // Fresh installs take their defaults from the code constants (DEFAULT_CAVEMAN_CONFIG): the
+    // PostgreSQL init seeds only the rows the app needs (0001_init.sql section 6), not SQLite
+    // migration 035's `enabled: true` row. Existing installs keep their stored value via transfer.
+    assert.equal(config.cavemanConfig.enabled, false);
     assert.deepEqual(config.cavemanConfig.compressRoles, ["user"]);
     assert.equal(config.cavemanConfig.minMessageLength, 50);
   });

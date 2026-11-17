@@ -12,7 +12,7 @@ const fallbackPolicy = await import("../../src/domain/fallbackPolicy.ts");
 const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  fallbackPolicy.resetAllFallbacks();
+  await fallbackPolicy.resetAllFallbacks();
   core.resetDbInstance();
   await resetTestDb();
 
@@ -39,51 +39,51 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  fallbackPolicy.resetAllFallbacks();
+  await fallbackPolicy.resetAllFallbacks();
   await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("registerFallback sorts by priority and defaults missing flags to enabled", () => {
-  fallbackPolicy.registerFallback("gpt-4o-mini", [
+test("registerFallback sorts by priority and defaults missing flags to enabled", async () => {
+  await fallbackPolicy.registerFallback("gpt-4o-mini", [
     { provider: "azure", priority: 20 },
     { provider: "openai" },
     { provider: "github", priority: 10, enabled: false },
   ]);
 
-  assert.deepEqual(fallbackPolicy.resolveFallbackChain("gpt-4o-mini"), [
+  assert.deepEqual(await fallbackPolicy.resolveFallbackChain("gpt-4o-mini"), [
     { provider: "openai", priority: 0, enabled: true },
     { provider: "azure", priority: 20, enabled: true },
   ]);
-  assert.equal(fallbackPolicy.hasFallback("gpt-4o-mini"), true);
+  assert.equal(await fallbackPolicy.hasFallback("gpt-4o-mini"), true);
 });
 
-test("resolveFallbackChain and getNextFallback respect exclusions and disabled providers", () => {
-  fallbackPolicy.registerFallback("claude-sonnet", [
+test("resolveFallbackChain and getNextFallback respect exclusions and disabled providers", async () => {
+  await fallbackPolicy.registerFallback("claude-sonnet", [
     { provider: "anthropic", priority: 1, enabled: false },
     { provider: "vertex", priority: 2, enabled: true },
     { provider: "bedrock", priority: 3, enabled: true },
   ]);
 
-  assert.deepEqual(fallbackPolicy.resolveFallbackChain("claude-sonnet", ["vertex"]), [
+  assert.deepEqual(await fallbackPolicy.resolveFallbackChain("claude-sonnet", ["vertex"]), [
     { provider: "bedrock", priority: 3, enabled: true },
   ]);
-  assert.equal(fallbackPolicy.getNextFallback("claude-sonnet"), "vertex");
-  assert.equal(fallbackPolicy.getNextFallback("claude-sonnet", ["vertex", "bedrock"]), null);
+  assert.equal(await fallbackPolicy.getNextFallback("claude-sonnet"), "vertex");
+  assert.equal(await fallbackPolicy.getNextFallback("claude-sonnet", ["vertex", "bedrock"]), null);
 });
 
-test("removeFallback and resetAllFallbacks clear registered chains", () => {
-  fallbackPolicy.registerFallback("model-a", [{ provider: "provider-a", priority: 1 }]);
-  fallbackPolicy.registerFallback("model-b", [{ provider: "provider-b", priority: 1 }]);
+test("removeFallback and resetAllFallbacks clear registered chains", async () => {
+  await fallbackPolicy.registerFallback("model-a", [{ provider: "provider-a", priority: 1 }]);
+  await fallbackPolicy.registerFallback("model-b", [{ provider: "provider-b", priority: 1 }]);
 
-  assert.deepEqual(Object.keys(fallbackPolicy.getAllFallbackChains()).sort(), [
+  assert.deepEqual(Object.keys(await fallbackPolicy.getAllFallbackChains()).sort(), [
     "model-a",
     "model-b",
   ]);
-  assert.equal(fallbackPolicy.removeFallback("model-a"), true);
-  assert.equal(fallbackPolicy.removeFallback("model-a"), false);
-  assert.equal(fallbackPolicy.hasFallback("model-a"), false);
+  assert.equal(await fallbackPolicy.removeFallback("model-a"), true);
+  assert.equal(await fallbackPolicy.removeFallback("model-a"), false);
+  assert.equal(await fallbackPolicy.hasFallback("model-a"), false);
 
-  fallbackPolicy.resetAllFallbacks();
-  assert.deepEqual(fallbackPolicy.getAllFallbackChains(), {});
+  await fallbackPolicy.resetAllFallbacks();
+  assert.deepEqual(await fallbackPolicy.getAllFallbackChains(), {});
 });

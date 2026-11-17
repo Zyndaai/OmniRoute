@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const ORIG_USERPROFILE = process.env.USERPROFILE;
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-jcode-settings-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret-jcode";
@@ -89,6 +90,7 @@ test("jcode-settings POST: writes [providers.omniroute] into config.toml", async
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "jcode-home-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const res = await POST(
@@ -118,6 +120,7 @@ test("jcode-settings POST: writes [providers.omniroute] into config.toml", async
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
@@ -128,6 +131,7 @@ test("jcode-settings DELETE: removes only the OmniRoute-managed block", async ()
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "jcode-home-del-"));
   const origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 
   try {
     const jcodeDir = path.join(tmpHome, ".jcode");
@@ -162,6 +166,7 @@ test("jcode-settings DELETE: removes only the OmniRoute-managed block", async ()
     }
   } finally {
     process.env.HOME = origHome;
+    process.env.USERPROFILE = ORIG_USERPROFILE;
     fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

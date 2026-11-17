@@ -391,7 +391,7 @@ test("status replaces a generated compatible-provider id with a non-sensitive la
     providerSpecificData: {},
   });
   const managed = await seedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER_A,
     apiKeyId: managed.id,
     provider: providerId,
@@ -426,7 +426,7 @@ test("status reads the new binding after transition and never returns the old la
     200
   );
 
-  const transitioned = leaseDb.transitionExclusiveConnectionLease({
+  const transitioned = await leaseDb.transitionExclusiveConnectionLease({
     leaseOwnerId: OWNER_A,
     generation: 1,
     apiKeyId: managed.id,
@@ -471,17 +471,19 @@ test("status exposes no connection metadata for released, expired, invalidated, 
         200
       );
     } else if (inactiveState === "expired") {
-      leaseDb.reconcileExpiredExclusiveConnectionLeases(
+      await leaseDb.reconcileExpiredExclusiveConnectionLeases(
         new Date(Date.now() + 180_000).toISOString()
       );
     } else {
       assert.equal(
-        leaseDb.invalidateExclusiveConnectionLease({
-          leaseOwnerId: OWNER_A,
-          generation: 1,
-          apiKeyId: managed.id,
-          reason: "AUTHORIZATION_CHANGED",
-        }).kind,
+        (
+          await leaseDb.invalidateExclusiveConnectionLease({
+            leaseOwnerId: OWNER_A,
+            generation: 1,
+            apiKeyId: managed.id,
+            reason: "AUTHORIZATION_CHANGED",
+          })
+        ).kind,
         "INVALIDATED"
       );
     }
@@ -551,7 +553,7 @@ test("same-owner acquire through a second managed key is rejected without rebind
   );
   assert.equal(transitioned.status, 409);
 
-  const active = (
+  const active = await (
     await import("../../src/lib/db/exclusiveConnectionLeases.ts")
   ).getActiveExclusiveConnectionLease(OWNER_A);
   assert.equal(active?.connectionId, first.id);

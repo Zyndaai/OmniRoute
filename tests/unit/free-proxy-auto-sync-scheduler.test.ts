@@ -32,6 +32,15 @@ const ENV_KEYS = [
 ] as const;
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 
+// The startup timer is armed after an async DB read (Postgres round trip), so poll for it
+// instead of yielding a single macrotask. setImmediate is not mocked by mock.timers here.
+async function waitForStartupTimer(timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!globalThis.__freeProxyAutoSyncStartupTimer && Date.now() < deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 function restoreEnv() {
   for (const key of ENV_KEYS) {
     const val = savedEnv[key];
@@ -100,7 +109,7 @@ test("enabled with an enabled provider — startup timer is scheduled", async ()
 
   scheduler.initFreeProxyAutoSync();
   // The startup timer is armed after an async initial-delay DB read resolves.
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForStartupTimer();
 
   assert.ok(globalThis.__freeProxyAutoSyncStartupTimer, "expected a startup timer to be armed");
 });
@@ -203,7 +212,7 @@ test("initial delay: a recent lastSyncAt shortens the first tick below a full in
   try {
     scheduler.initFreeProxyAutoSync();
     // Let the async initial-delay computation (a DB read) resolve and arm the timer.
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForStartupTimer();
 
     // Advancing by less than (intervalMs - elapsedMs) must not fire yet.
     mock.timers.tick(intervalMs - elapsedMs - 5_000);

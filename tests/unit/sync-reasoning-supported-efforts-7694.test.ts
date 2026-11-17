@@ -300,7 +300,10 @@ async function seedEffortSuffixNode() {
     chatPath: "/v1/chat/completions",
     modelsPath: "/v1/models",
   });
-  await modelsDb.replaceSyncedAvailableModelsForConnection(EFFORT_CONN_ID, EFFORT_CONN_ID, [
+  // connection_model_sync has a foreign key to provider_connections: the synced catalog
+  // needs a real connection row (the node itself is not one).
+  const connection = await seedProviderConnection(EFFORT_CONN_ID);
+  await modelsDb.replaceSyncedAvailableModelsForConnection(EFFORT_CONN_ID, connection.id, [
     {
       id: EFFORT_BASE_MODEL,
       name: "Reasoning Model 7694",

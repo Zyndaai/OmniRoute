@@ -470,9 +470,6 @@ test("modelSyncScheduler skips empty cycles and tolerates failing sync requests"
     assert.equal(await emptyScheduler.getLastModelSyncTime(), null);
     emptyScheduler.stopModelSyncScheduler();
 
-    timers.timeouts.length = 0;
-    timers.intervals.length = 0;
-
     await providersDb.createProviderConnection({
       provider: "gemini",
       authType: "apikey",
@@ -480,6 +477,12 @@ test("modelSyncScheduler skips empty cycles and tolerates failing sync requests"
       apiKey: "sk-auto-failure",
       providerSpecificData: { autoSync: true },
     });
+
+    // Reset the captured timers only after the async DB write: the database driver also
+    // arms timers while the stubs are installed, and they would otherwise land in
+    // timers.timeouts[0] instead of the scheduler's startup timer.
+    timers.timeouts.length = 0;
+    timers.intervals.length = 0;
 
     const failingScheduler = await loadScheduler("failing-cycle");
     failingScheduler.startModelSyncScheduler("http://127.0.0.1:5555", 10_000);
@@ -561,6 +564,12 @@ test("runSyncCycle keeps in-flight catalog fetches at or below the cycle concurr
     assert.equal(scheduler.MODEL_SYNC_CYCLE_CONCURRENCY, cycleCap);
     scheduler.startModelSyncScheduler("http://127.0.0.1:7777", 1000);
     const cycle = timers.timeouts[0].fn();
+    // The cycle first reads connections from PostgreSQL (real socket I/O), so wait until the
+    // fetch cap is reached instead of flushing a fixed number of event-loop turns.
+    const deadline = Date.now() + 10_000;
+    while (inFlight < cycleCap && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     await flushMicrotasks();
 
     assert.equal(peak, cycleCap);

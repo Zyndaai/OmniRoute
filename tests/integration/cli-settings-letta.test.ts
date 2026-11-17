@@ -28,6 +28,7 @@ const { resetTestDb } = await import("../helpers/postgres.ts");
 
 let tmpHome: string;
 let origHome: string | undefined;
+let origUserProfile: string | undefined;
 
 function getAuthPath() {
   return path.join(tmpHome, ".letta", "lc-local-backend", "providers", "auth.json");
@@ -55,10 +56,14 @@ test.beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "letta-settings-home-"));
   origHome = process.env.HOME;
   process.env.HOME = tmpHome;
+  origUserProfile = process.env.USERPROFILE;
+  process.env.USERPROFILE = tmpHome; // os.homedir() reads USERPROFILE on Windows
 });
 
 test.afterEach(() => {
   process.env.HOME = origHome;
+  if (origUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = origUserProfile;
   fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -102,10 +102,10 @@ test.after(async () => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#14869 gpt-6-astra is not treated as a max_tokens model", () => {
-  assert.equal(supportsMaxTokens({ provider: "openai", model: "gpt-6-astra" }), false);
-  assert.equal(supportsMaxTokens({ provider: "openai", model: "gpt-5.5" }), false);
-  assert.equal(supportsMaxTokens({ provider: "openai", model: "gpt-4o" }), true);
+test("#14869 gpt-6-astra is not treated as a max_tokens model", async () => {
+  assert.equal(await supportsMaxTokens({ provider: "openai", model: "gpt-6-astra" }), false);
+  assert.equal(await supportsMaxTokens({ provider: "openai", model: "gpt-5.5" }), false);
+  assert.equal(await supportsMaxTokens({ provider: "openai", model: "gpt-4o" }), true);
 });
 
 test("#14869 a custom gpt-6 model leaves no max_tokens on the openai body", async () => {

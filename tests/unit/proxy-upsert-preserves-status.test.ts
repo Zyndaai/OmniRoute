@@ -31,6 +31,29 @@ test.after(async () => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
+// proxy_registry.subscription_id is a foreign key: create the subscription rows first.
+async function createSubscription(id: string) {
+  const { db } = await import("../../src/lib/db/pg.ts");
+  const { insertSubscriptionRow } =
+    await import("../../src/lib/proxySubscription/subscriptionRows.ts");
+  await insertSubscriptionRow(db(), {
+    id,
+    name: id,
+    url: `https://example.test/${id}`,
+    mirrorUrls: null,
+    enabled: false,
+    mode: "global",
+    ruleProviders: null,
+    localCoreEndpoint: null,
+    updateIntervalMinutes: 60,
+    controlUrl: null,
+    coreConfigPath: null,
+    gapSeconds: 60,
+    now: new Date().toISOString(),
+    controlSecretEnc: null,
+  });
+}
+
 const tuple = { type: "http", host: "10.2.0.1", port: 8080, username: "u" };
 
 async function seed(status?: string) {
@@ -103,6 +126,8 @@ test("claimOwnership false leaves a manual row completely untouched", async () =
 });
 
 test("claimOwnership false leaves another subscription's row untouched", async () => {
+  await createSubscription("sub-a");
+  await createSubscription("sub-b");
   const created = await proxiesDb.upsertProxy({
     name: "owned by a",
     ...tuple,
@@ -122,6 +147,7 @@ test("claimOwnership false leaves another subscription's row untouched", async (
 });
 
 test("claimOwnership false still updates a row the same subscription owns", async () => {
+  await createSubscription("sub-a");
   const created = await proxiesDb.upsertProxy({
     name: "old name",
     ...tuple,

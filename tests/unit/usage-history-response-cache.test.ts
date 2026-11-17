@@ -42,12 +42,14 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-async function seedRow(model: string, timestamp: string) {
+// Rows must stay inside the usage-history retention window (analytics ignores older raw rows),
+// so the timestamp is relative to now; `minutesAgo` keeps each row's natural key distinct.
+async function seedRow(model: string, minutesAgo: number) {
   await usageHistory.saveRequestUsage({
     provider: "openai",
     model,
     tokens: { input: 100, output: 50 },
-    timestamp,
+    timestamp: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
   });
 }
 
@@ -72,7 +74,7 @@ test.after(async () => {
 
 test("two close calls share one computation", async () => {
   setEnv("60000", "0");
-  await seedRow("gpt-4o-mini", "2026-01-02T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 20);
 
   const first = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(first.status, 200);
@@ -81,7 +83,7 @@ test("two close calls share one computation", async () => {
   assert.equal(first.headers.get("cache-control"), "private, no-store");
   const firstBody = (await first.json()) as { totalRequests: number };
 
-  await seedRow("gpt-4o-mini", "2026-01-03T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 19);
 
   const second = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(second.headers.get("x-analytics-cache"), "hit");
@@ -113,7 +115,7 @@ test("concurrent calls share one computation and both answer", async () => {
   assert.deepEqual(await first.json(), { n: 1 });
   assert.deepEqual(await second.json(), { n: 1 });
 
-  await seedRow("gpt-4o-mini", "2026-02-02T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 18);
   cache.clearAnalyticsResponseCache();
   const [routeFirst, routeSecond] = await Promise.all([
     historyRoute.GET(new Request(HISTORY_URL)),
@@ -128,13 +130,13 @@ test("concurrent calls share one computation and both answer", async () => {
 
 test("disabled cache computes on every call like today", async () => {
   setEnv("0", "0");
-  await seedRow("gpt-4o-mini", "2026-03-02T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 17);
 
   const first = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(first.headers.get("x-analytics-cache"), null);
   const firstBody = (await first.json()) as { totalRequests: number };
 
-  await seedRow("gpt-4o-mini", "2026-03-03T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 16);
 
   const second = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(second.headers.get("x-analytics-cache"), null);
@@ -146,7 +148,7 @@ test("unauthenticated call is refused before any cache read", async () => {
   await requireAuth();
   setEnv("60000", "0");
   const adminKey = await apiKeysDb.createApiKey("history-admin", "machine-history", ["manage"]);
-  await seedRow("gpt-4o-mini", "2026-04-02T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 15);
 
   const filled = await historyRoute.GET(authedRequest(adminKey.key));
   assert.equal(filled.status, 200);
@@ -154,7 +156,7 @@ test("unauthenticated call is refused before any cache read", async () => {
   const filledText = await filled.text();
   const filledBody = JSON.parse(filledText) as { totalRequests: number };
 
-  await seedRow("gpt-4o-mini", "2026-04-03T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 14);
 
   const refused = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(refused.status, 401);
@@ -172,7 +174,7 @@ test("unauthenticated call is refused before any cache read", async () => {
 
 test("in-flight requests stay fresh on a cache hit", async () => {
   setEnv("60000", "0");
-  await seedRow("gpt-4o-mini", "2026-05-02T00:00:00.000Z");
+  await seedRow("gpt-4o-mini", 13);
 
   const first = await historyRoute.GET(new Request(HISTORY_URL));
   assert.equal(first.headers.get("x-analytics-cache"), "miss");

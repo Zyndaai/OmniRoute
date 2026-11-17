@@ -543,6 +543,11 @@ test("combo test route aborts in-flight probes when the client disconnects", asy
     const watchdog = new Promise<never>((_resolve, reject) => {
       realSetTimeout(() => reject(new Error("abort did not propagate within 5s")), 5000);
     });
+    // Postgres-backed lookups precede the probe fetch; wait for it instead of a fixed 10ms.
+    const pollUntil = Date.now() + 5000;
+    while (fetchCalls === 0 && Date.now() < pollUntil) {
+      await new Promise((resolve) => realSetTimeout(resolve, 10));
+    }
     await new Promise((resolve) => realSetTimeout(resolve, 10));
     assert.equal(fetchCalls, 1);
     assert.equal(maxInFlight, 1);
@@ -654,7 +659,12 @@ test("combo test deadline covers stream consumption and rejects timed-out partia
     );
   };
   const pending = route.POST(makeRequest());
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  // Postgres-backed route lookups take real I/O round trips before the upstream fetch starts;
+  // setImmediate is not mocked, so poll with it until the fetch has been dispatched.
+  const pollUntil = Date.now() + 10_000;
+  while (!signal && Date.now() < pollUntil) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
   assert.ok(signal);
   t.mock.timers.tick(route.COMBO_TEST_TIMEOUT_MS - 1);
   assert.equal(signal.aborted, false);
