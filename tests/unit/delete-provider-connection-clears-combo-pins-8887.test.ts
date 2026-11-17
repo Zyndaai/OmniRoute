@@ -11,11 +11,13 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type JsonRecord = Record<string, unknown>;
 
 async function resetStorage(): Promise<void> {
   core.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -81,8 +83,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
 
   fs.rmSync(TEST_DATA_DIR, {
     recursive: true,

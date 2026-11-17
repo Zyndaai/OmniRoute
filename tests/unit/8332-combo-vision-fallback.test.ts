@@ -30,6 +30,7 @@ const { resetAllComboMetrics } = await import("../../open-sse/services/comboMetr
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
 const { resetAll: resetAllSemaphores } =
   await import("../../open-sse/services/rateLimitSemaphore.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function createLog() {
   return {
@@ -87,6 +88,7 @@ test.beforeEach(async () => {
   await resetAllCircuitBreakers();
   resetAllSemaphores();
   await clearModelsDevCapabilities();
+  await resetTestDb();
 });
 
 test.after(async () => {

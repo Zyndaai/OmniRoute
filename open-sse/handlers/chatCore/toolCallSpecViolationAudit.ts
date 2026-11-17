@@ -26,7 +26,9 @@ export function maybeLogToolCallSpecViolation(input: {
 }): void {
   const violation = findToolCallSpecViolation(input.responseBody);
   if (!violation) return;
-  logAuditEvent({
+  // Hot path: never block the response on the audit write, but never let it become an
+  // unhandled rejection either.
+  void logAuditEvent({
     action: "provider.spec_violation",
     actor: "system",
     target:
@@ -43,5 +45,5 @@ export function maybeLogToolCallSpecViolation(input: {
       httpStatus: input.httpStatus,
       violation: input.redactViolationDetail ? "duplicate tool_calls entry" : violation,
     },
-  });
+  }).catch(() => {});
 }

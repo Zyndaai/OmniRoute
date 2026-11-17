@@ -13,6 +13,7 @@ if (!process.env.API_KEY_SECRET) {
 
 const core = await import("../../src/lib/db/core.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const syncModelsRoute = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
 const { buildModelSyncInternalHeaders } =
   await import("../../src/shared/services/modelSyncScheduler.ts");
@@ -30,17 +31,18 @@ const originalFetch = globalThis.fetch;
  * refusal must say WHY, and the tool must publish WHY per provider.
  */
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
   syncModelsRoute.__resetLoopbackReadinessForTests?.();
   core.resetDbInstance();
+  await resetTestDb();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   mkdirSync(dataDir, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

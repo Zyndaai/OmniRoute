@@ -38,6 +38,8 @@ process.env.INITIAL_PASSWORD = "test-bootstrap-password-for-radar-api-tests";
 const core = await import("../../src/lib/db/core.ts");
 const radarDb = await import("../../src/lib/db/radar.ts");
 const featureFlags = await import("../../src/shared/utils/featureFlags.ts");
+const { clearAllFeatureFlagOverrides } = await import("../../src/lib/db/featureFlags.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // We need to test the route handlers. Since Next.js route handlers are just
 // exported functions, we can import and call them directly with mock Request
@@ -81,15 +83,9 @@ function mockPostRequest(
 }
 
 // Helper to reset DB state
-function resetStorage() {
-  core.resetDbInstance();
-  try {
-    if (fs.existsSync(TEST_DATA_DIR)) {
-      fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    }
-  } catch {
-    // ignore
-  }
+async function resetStorage() {
+  await resetTestDb();
+  await clearAllFeatureFlagOverrides();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
@@ -98,7 +94,7 @@ function resetStorage() {
 // ---------------------------------------------------------------------------
 
 test("GET /api/radar/catalog: flag off => 404", async () => {
-  resetStorage();
+  await resetStorage();
   // Ensure flag is off (default)
   delete process.env.RADAR_ENABLED;
 
@@ -118,7 +114,7 @@ test("GET /api/radar/catalog: flag off => 404", async () => {
 });
 
 test("POST /api/radar/sync: flag off => 404", async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.RADAR_ENABLED;
 
   const { POST } = await import("../../src/app/api/radar/sync/route.ts");
@@ -131,7 +127,7 @@ test("POST /api/radar/sync: flag off => 404", async () => {
 });
 
 test("POST /api/radar/settings: flag off => 404", async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.RADAR_ENABLED;
 
   const { POST } = await import("../../src/app/api/radar/settings/route.ts");
@@ -146,7 +142,7 @@ test("POST /api/radar/settings: flag off => 404", async () => {
 });
 
 test("GET /api/radar/settings: flag off => 404", async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.RADAR_ENABLED;
 
   const { GET } = await import("../../src/app/api/radar/settings/route.ts");
@@ -170,7 +166,7 @@ test("GET /api/radar/settings: flag off => 404", async () => {
 // ---------------------------------------------------------------------------
 
 test("GET /api/radar/catalog: flag on, no auth => 401", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { GET } = await import("../../src/app/api/radar/catalog/route.ts");
@@ -183,7 +179,7 @@ test("GET /api/radar/catalog: flag on, no auth => 401", async () => {
 });
 
 test("POST /api/radar/sync: flag on, no auth => 401", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { POST } = await import("../../src/app/api/radar/sync/route.ts");
@@ -195,7 +191,7 @@ test("POST /api/radar/sync: flag on, no auth => 401", async () => {
 });
 
 test("POST /api/radar/settings: flag on, no auth => 401", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { POST } = await import("../../src/app/api/radar/settings/route.ts");
@@ -209,7 +205,7 @@ test("POST /api/radar/settings: flag on, no auth => 401", async () => {
 });
 
 test("GET /api/radar/settings: flag on, no auth => 401", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { GET } = await import("../../src/app/api/radar/settings/route.ts");
@@ -226,7 +222,7 @@ test("GET /api/radar/settings: flag on, no auth => 401", async () => {
 // ---------------------------------------------------------------------------
 
 test("GET /api/radar/catalog: flag on, authenticated, empty cache => baseline entries, meta null", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   // Fresh import to pick up the flag
@@ -241,7 +237,7 @@ test("GET /api/radar/catalog: flag on, authenticated, empty cache => baseline en
 });
 
 test("POST /api/radar/settings: flag on, authenticated, set opt-in => success, no key in response", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -271,7 +267,7 @@ test("POST /api/radar/settings: flag on, authenticated, set opt-in => success, n
 });
 
 test("POST /api/radar/settings: authenticated, invalid body => 400", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -289,7 +285,7 @@ test("POST /api/radar/settings: authenticated, invalid body => 400", async () =>
 });
 
 test("POST /api/radar/settings: authenticated, empty body => 400", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -303,7 +299,7 @@ test("POST /api/radar/settings: authenticated, empty body => 400", async () => {
 });
 
 test("POST /api/radar/settings: authenticated, null key clears it", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -329,7 +325,7 @@ test("POST /api/radar/settings: authenticated, null key clears it", async () => 
 });
 
 test("POST /api/radar/sync: flag on, authenticated, not opted in => status opt_out", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
   // Don't set opt-in
 
@@ -344,7 +340,7 @@ test("POST /api/radar/sync: flag on, authenticated, not opted in => status opt_o
 });
 
 test("POST /api/radar/sync: authenticated, invalid body => 400", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const syncRoute = await import("../../src/app/api/radar/sync/route.ts");
@@ -365,7 +361,7 @@ test("POST /api/radar/sync: authenticated, invalid body => 400", async () => {
 // ---------------------------------------------------------------------------
 
 test("GET /api/radar/settings: flag on, authenticated, default state => optIn false, no key", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { GET } = await import("../../src/app/api/radar/settings/route.ts");
@@ -384,7 +380,7 @@ test("GET /api/radar/settings: flag on, authenticated, default state => optIn fa
 });
 
 test("GET /api/radar/settings: flag on, authenticated, after opt-in + key => reflects persisted state, never raw key", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -419,7 +415,7 @@ test("GET /api/radar/settings: flag on, authenticated, after opt-in + key => ref
 // ---------------------------------------------------------------------------
 
 test("POST /api/radar/settings: opt-in+key submitted together => both persist, POST response masked, GET reflects both, raw key never in either body", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const settingsRoute = await import("../../src/app/api/radar/settings/route.ts");
@@ -461,7 +457,7 @@ test("POST /api/radar/settings: opt-in+key submitted together => both persist, P
 });
 
 test("GET /api/radar/settings: F4/T7 claim/plans links honor env overrides (fork-friendly)", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
   process.env.RADAR_CONTRIBUTOR_CLAIM_URL = "https://fork.example.com/auth/github";
   process.env.RADAR_SUPPORTER_PLANS_URL = "https://fork.example.com/plans";
@@ -487,7 +483,7 @@ test("GET /api/radar/settings: F4/T7 claim/plans links honor env overrides (fork
 // ---------------------------------------------------------------------------
 
 test("all radar routes: 404 error responses (flag off) do NOT leak stack traces", async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.RADAR_ENABLED;
 
   const routes = [
@@ -518,7 +514,7 @@ test("all radar routes: 404 error responses (flag off) do NOT leak stack traces"
 });
 
 test("all radar routes: 401 error responses (flag on, no auth) do NOT leak stack traces", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const routes = [
@@ -557,8 +553,8 @@ test("all radar routes: 401 error responses (flag on, no auth) do NOT leak stack
 // Cleanup
 // ---------------------------------------------------------------------------
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   delete process.env.RADAR_ENABLED;
   delete process.env.JWT_SECRET;
   delete process.env.INITIAL_PASSWORD;

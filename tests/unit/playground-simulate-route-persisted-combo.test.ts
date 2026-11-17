@@ -11,11 +11,12 @@ const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { POST } = await import("../../src/app/api/playground/simulate-route/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 let persistedComboId: string;
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await providersDb.createProviderConnection({
@@ -40,8 +41,8 @@ test.beforeEach(async () => {
   persistedComboId = combo.id;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

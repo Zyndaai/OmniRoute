@@ -42,6 +42,7 @@ const { handleChat } = await import("../../src/sse/handlers/chat.ts");
 const { initTranslators } = await import("../../open-sse/translator/index.ts");
 const { clearInflight } = await import("../../open-sse/services/requestDedup.ts");
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -52,7 +53,7 @@ async function flushBackgroundWork() {
 
 async function resetStorage() {
   clearInflight();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   resetAllCircuitBreakers();
@@ -199,7 +200,7 @@ test.afterEach(async () => {
 test.after(async () => {
   await flushBackgroundWork();
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

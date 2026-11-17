@@ -35,6 +35,7 @@ const { createStreamingErrorResult } =
   await import("../../open-sse/handlers/chatCore/streamErrorResult.ts");
 const { shouldTripProviderBreakerForResult } =
   await import("../../src/sse/handlers/chatPredicates.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const LOCAL_ERROR_MESSAGE = "OmniRoute repaired a local limiter queue";
 
@@ -91,22 +92,22 @@ const settings = {
   },
 };
 
-test.afterEach(() => {
+test.afterEach(async () => {
   accountFallback.clearAllModelLockouts();
   accountFallback.clearProviderFailure("openai");
   providerCooldown.clearCooldownState();
   rateLimitSemaphore.resetAll();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   accountFallback.clearAllModelLockouts();
   accountFallback.clearProviderFailure("openai");
   providerCooldown.clearCooldownState();
   rateLimitSemaphore.resetAll();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

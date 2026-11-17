@@ -93,9 +93,14 @@ test("flag on: the window policy honours a passed bounded park deadline", () => 
 });
 
 test("flag on: a fresh persisted exhausted snapshot still blocks after cache hydration", async () => {
+  // quota_snapshots.connection_id is a foreign key: the snapshot needs a real connection row.
+  const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
+  const hydratedId = (
+    await createProviderConnection({ provider: "codex", apiKey: "test-key", isActive: true })
+  ).id;
   await snapshots.saveQuotaSnapshot({
     provider: "codex",
-    connection_id: "hydrated",
+    connection_id: hydratedId,
     window_key: "session",
     remaining_percentage: 0,
     is_exhausted: 1,
@@ -103,8 +108,11 @@ test("flag on: a fresh persisted exhausted snapshot still blocks after cache hyd
     window_duration_ms: null,
     raw_data: null,
   });
+  // Fresh boot: empty cache, then the boot hydration step (src/instrumentation-node.ts).
+  quota.__clearForTests();
+  await quota.ensureQuotaCacheHydrated();
   withFlag(true, () => {
-    assert.equal(quota.getQuotaWindowStatus("hydrated", "session")?.reachedThreshold, true);
+    assert.equal(quota.getQuotaWindowStatus(hydratedId, "session")?.reachedThreshold, true);
   });
 });
 

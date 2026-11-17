@@ -16,6 +16,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { REGISTRY } = await import("@omniroute/open-sse/config/providerRegistry");
 
 const LIVE_MODEL = "google/gemma-4-31b-it";
@@ -27,7 +28,7 @@ function getStaticModel(provider: string) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(path.join(TEST_DATA_DIR, "logs/application"), { recursive: true });
   catalog.__resetCatalogBuilderRunsForTest();
@@ -56,8 +57,8 @@ async function getCatalogIds(): Promise<Set<string>> {
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

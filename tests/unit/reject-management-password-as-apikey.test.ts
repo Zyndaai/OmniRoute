@@ -18,6 +18,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const mgmt = await import("../../src/lib/auth/managementPassword.ts");
@@ -29,14 +30,15 @@ async function storeDashboardPassword(plaintext: string) {
   await settingsDb.updateSettings({ password: await mgmt.hashManagementPassword(plaintext) });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

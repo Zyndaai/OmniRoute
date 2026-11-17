@@ -21,13 +21,14 @@ const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const matrix = await import("../../src/lib/monitoring/providerHealthMatrix.ts");
 const route = await import("../../src/app/api/providers/health-matrix/route.ts");
 const accountFallback = await import("@omniroute/open-sse/services/accountFallback");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "matrix-test-provider";
 const ALIAS_PROVIDER = "nous";
 const CANONICAL_ALIAS_PROVIDER = "nous-research";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   for (const lockout of accountFallback.getAllModelLockouts()) {
@@ -56,6 +57,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
 
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;

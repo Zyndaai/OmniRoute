@@ -12,9 +12,11 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { migrateCodexConnectionDefaultsFromLegacySettings } =
   await import("../../src/lib/providers/codexConnectionDefaults.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

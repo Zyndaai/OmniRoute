@@ -25,6 +25,7 @@ const core = await import("../../src/lib/db/core.ts");
 const { authenticateA2ARequest } = await import("../../src/lib/a2a/authenticate.ts");
 const { isLocalOnlyPath } = await import("../../src/server/authz/routeGuard.ts");
 const cors = await import("../../src/server/cors/origins.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ENV_KEYS = [
   "REQUIRE_API_KEY",
@@ -38,17 +39,19 @@ const ENV_KEYS = [
 const ORIGINAL: Record<string, string | undefined> = {};
 for (const k of ENV_KEYS) ORIGINAL[k] = process.env[k];
 
-function resetStorage() {
+async function resetStorage() {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   for (const k of ENV_KEYS) delete process.env[k];
+  await resetTestDb();
 }
 
 test.beforeEach(() => resetStorage());
 
-test.after(() => {
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const k of ENV_KEYS) {
     if (ORIGINAL[k] === undefined) delete process.env[k];

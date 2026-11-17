@@ -33,6 +33,7 @@ const rulesDb = await import("../../src/lib/db/reasoningRoutingRules.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
 const route = await import("../../src/app/api/internal/codex-responses-ws/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 rateLimiter.setRateLimiterTestMode(true);
 
@@ -66,7 +67,7 @@ function getFsErrorCode(error: unknown): string | undefined {
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
   costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -94,7 +95,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   apiKeysDb.resetApiKeyState();
   costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

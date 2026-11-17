@@ -37,6 +37,7 @@ const { MCP_CONNECT_SCOPE } = await import("../../src/shared/constants/managemen
 const { getMachineTokenSync } = await import("../../src/lib/machineToken.ts");
 const { validateMcpRequestOrigin, isMcpOriginGuardedPath, buildMcpInvalidOriginBody } =
   await import("../../src/server/origin/mcpOrigin.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const MANAGED_ENV = [
   "JWT_SECRET",
@@ -54,7 +55,7 @@ const ORIGINAL_ENV = Object.fromEntries(MANAGED_ENV.map((name) => [name, process
 const MCP_TRANSPORT_PATHS = ["/api/mcp/stream", "/api/mcp/sse"] as const;
 const BASE = "http://localhost:20128";
 
-function resetEnvironment() {
+async function resetEnvironment() {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -65,10 +66,11 @@ function resetEnvironment() {
   process.env.REQUIRE_API_KEY = "true";
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = randomUUID();
   globalThis.__omnirouteShutdown = { init: false, shuttingDown: false, activeRequests: 0 };
+  await resetTestDb();
 }
 
-test.beforeEach(() => {
-  resetEnvironment();
+test.beforeEach(async () => {
+  await resetEnvironment();
 });
 
 test.after(() => {

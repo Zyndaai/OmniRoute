@@ -10,6 +10,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -29,10 +30,11 @@ const ORIGINAL_PEER_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 const TEST_PEER_STAMP_TOKEN = "api-auth-test-peer-stamp-token";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   delete process.env.JWT_SECRET;
   delete process.env.INITIAL_PASSWORD;
   delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
@@ -71,8 +73,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 

@@ -18,7 +18,8 @@ const auth = await import("../../src/sse/services/auth.ts");
 const skip = await import("../../open-sse/services/opencodeFreeTierSkip.ts");
 
 async function reset() {
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   skip.clearOpencodeFreeTierSkips();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -28,6 +29,7 @@ async function reset() {
 test.beforeEach(reset);
 test.after(async () => {
   await reset();
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

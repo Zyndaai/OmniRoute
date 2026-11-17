@@ -10,16 +10,20 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-beforeEach(resetStorage);
+beforeEach(async () => {
+  await resetStorage();
+});
 after(async () => {
   await cleanupTempDataDir(TEST_DATA_DIR);
 });

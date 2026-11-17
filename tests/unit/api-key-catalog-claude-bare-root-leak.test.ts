@@ -38,12 +38,14 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const { isCatalogModelAllowedForKey } =
   await import("../../src/app/api/v1/models/catalogKeyFilter.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -51,8 +53,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

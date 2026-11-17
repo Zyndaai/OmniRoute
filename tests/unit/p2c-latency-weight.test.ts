@@ -25,7 +25,8 @@ const schemas = await import("../../src/shared/validation/schemas/settings.ts");
 const chatHelpers = await import("../../src/sse/handlers/chatHelpers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

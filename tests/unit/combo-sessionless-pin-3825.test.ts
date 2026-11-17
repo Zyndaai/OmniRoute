@@ -20,6 +20,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { clearSessions } = await import("../../open-sse/services/sessionManager.ts");
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function createLog() {
   const entries: any[] = [];
@@ -69,6 +70,7 @@ async function cleanupTestDataDir() {
 test.beforeEach(async () => {
   clearSessions();
   await cleanupTestDataDir();
+  await resetTestDb();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 

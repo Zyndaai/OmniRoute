@@ -100,12 +100,12 @@ async function maybeLiftCodexCooldownOnHeadroom(
     // actually parked on this connection+scope; the common case is clean.
     if (!(await hasCodexScopeCooldown(snapshot.connection_id, scope))) return;
 
-    const scopeWindows = (await getLatestQuotaSnapshotsForConnection(snapshot.connection_id)).filter(
-      (s: SnapshotShape) => {
-        const key = s.windowKey ?? s.window_key;
-        return scope === "spark" ? isCodexSparkQuotaKey(key) : !isCodexSparkQuotaKey(key);
-      }
-    );
+    const scopeWindows = (
+      await getLatestQuotaSnapshotsForConnection(snapshot.connection_id)
+    ).filter((s: SnapshotShape) => {
+      const key = s.windowKey ?? s.window_key;
+      return scope === "spark" ? isCodexSparkQuotaKey(key) : !isCodexSparkQuotaKey(key);
+    });
     // Every window in the scope must be healthy: one exhausted window still
     // justifies the cooldown even when a sibling reports full headroom.
     if (scopeWindows.length > 0 && scopeWindows.every(snapshotHasHeadroom)) {
@@ -187,6 +187,21 @@ export async function getLatestQuotaSnapshotsForConnection(
       WHERE connection_id = $1
       ORDER BY window_key, created_at DESC, id DESC`,
     [connectionId]
+  );
+  return rows.map(toSnapshotRow);
+}
+
+/**
+ * Latest row per (connection, window_key) across every connection: the boot-time
+ * hydration of the in-memory quota cache (`ensureQuotaCacheHydrated`). Same per-window
+ * "latest" semantics as `getLatestQuotaSnapshotsForConnection`.
+ */
+export async function getLatestQuotaSnapshotsForAllConnections(): Promise<QuotaSnapshotRow[]> {
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT DISTINCT ON (connection_id, window_key) *
+       FROM quota_snapshots
+      ORDER BY connection_id, window_key, created_at DESC, id DESC`,
+    []
   );
   return rows.map(toSnapshotRow);
 }

@@ -32,29 +32,31 @@ const syncTokenByIdRoute = await import("../../src/app/api/sync/tokens/[id]/rout
 const syncBundleRoute = await import("../../src/app/api/sync/bundle/route.ts");
 const { AUTHZ_HEADER_AUTH_KIND, AUTHZ_HEADER_AUTH_LABEL } =
   await import("../../src/server/authz/headers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type IssueBody = { token?: string; syncToken?: { id: string; issuedBy: string | null } };
 
 const TOKENS_URL = "http://localhost/api/sync/tokens";
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   // setupComplete: with INITIAL_PASSWORD set, an unfinished setup forces requireLogin back on.
   await settingsDb.updateSettings({ setupComplete: true, requireLogin: false });
   assert.equal((await settingsDb.getSettings()).requireLogin, false, "open mode must stick");
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;

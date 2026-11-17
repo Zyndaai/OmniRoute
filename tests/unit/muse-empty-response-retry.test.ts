@@ -22,13 +22,14 @@ const { handleChat } = await import("../../src/sse/handlers/chat.ts");
 const { initTranslators } = await import("../../open-sse/translator/index.ts");
 const { clearInflight } = await import("../../open-sse/services/requestDedup.ts");
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
 
 async function resetStorage() {
   clearInflight();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   resetAllCircuitBreakers();
@@ -108,7 +109,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   globalThis.fetch = originalFetch;
   clearInflight();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

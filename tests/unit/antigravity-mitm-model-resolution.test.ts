@@ -8,15 +8,17 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-antigravi
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const { AntigravityExecutor } = await import("../../open-sse/executors/antigravity.ts");
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

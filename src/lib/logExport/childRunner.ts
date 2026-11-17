@@ -110,6 +110,13 @@ interface ReplyContext {
 function buildExportChildEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { DATA_DIR, NODE_ENV: process.env.NODE_ENV ?? "production" };
   if (process.env.ELECTRON_RUN_AS_NODE) env.ELECTRON_RUN_AS_NODE = process.env.ELECTRON_RUN_AS_NODE;
+  // The exporter reads the PostgreSQL backend from these two variables; forward only when set.
+  if (process.env.OMNIROUTE_POSTGRES_URL) {
+    env.OMNIROUTE_POSTGRES_URL = process.env.OMNIROUTE_POSTGRES_URL;
+  }
+  if (process.env.OMNIROUTE_PG_POOL_MAX) {
+    env.OMNIROUTE_PG_POOL_MAX = process.env.OMNIROUTE_PG_POOL_MAX;
+  }
   // Legacy disk filenames depend on local time. Explicit TZ is the only extra path input.
   if (process.env.TZ) env.TZ = process.env.TZ;
   // Preserve outbound routing/TLS trust without copying unrelated server secrets.

@@ -24,12 +24,13 @@ const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
 const core = await import("../../../src/lib/db/core.ts");
 const { enforceClientApiRouteAuth } =
   await import("../../../src/shared/utils/clientApiRouteAuth.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_REQUIRE_API_KEY = process.env.REQUIRE_API_KEY;
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -37,12 +38,12 @@ function resetStorage() {
   process.env.REQUIRE_API_KEY = "true";
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_REQUIRE_API_KEY === undefined) delete process.env.REQUIRE_API_KEY;
   else process.env.REQUIRE_API_KEY = ORIGINAL_REQUIRE_API_KEY;

@@ -21,6 +21,7 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const createRoute = await import("../../src/app/api/combos/route.ts");
 const comboRoute = await import("../../src/app/api/combos/[id]/route.ts");
 const collision = await import("../../src/lib/combos/modelNameCollision.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // A model id that really is registered by multiple providers (verified via
 // PROVIDER_MODELS at write time — see open-sse/config/providers/*).
@@ -34,7 +35,7 @@ interface ComboResponseBody {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -59,8 +60,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

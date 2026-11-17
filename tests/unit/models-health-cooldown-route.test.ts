@@ -22,6 +22,7 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { lockModel, lockExactModel, clearModelLock, clearAllModelLockouts } =
   await import("../../open-sse/services/accountFallback.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const GLM_ALIAS = "glm";
 const GLM_MODEL_A = "glm-5.3";
@@ -30,7 +31,7 @@ const GLM_MODEL_B = "glm-5.3-flash";
 async function resetStorage() {
   clearAllModelLockouts();
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -83,7 +84,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   clearAllModelLockouts();
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

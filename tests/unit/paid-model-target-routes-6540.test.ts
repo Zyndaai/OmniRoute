@@ -27,7 +27,8 @@ const FREE_TARGET = "openrouter/auto";
 const UNKNOWN_TARGET = "my-combo-alias";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

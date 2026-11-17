@@ -17,6 +17,7 @@ const route = await import("../../src/app/api/usage/route-explain/[id]/route.ts"
 const { normalizeComboStep } = await import("../../src/lib/combos/steps.ts");
 const { clearAllModelLockouts } = await import("../../open-sse/services/accountFallback.ts");
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type RouteExplainabilityResponse =
   import("../../src/lib/usage/routeExplain.ts").RouteExplainabilityResponse;
@@ -27,14 +28,15 @@ async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

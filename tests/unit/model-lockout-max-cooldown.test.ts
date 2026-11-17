@@ -15,6 +15,7 @@ const auth = await import("../../src/sse/services/auth.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { recordModelLockoutFailure, getModelLockoutInfo, clearAllModelLockouts } =
   await import("../../open-sse/services/accountFallback.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function createLog() {
   return {
@@ -47,6 +48,7 @@ async function seedConnection(provider: string, overrides: any = {}): Promise<an
 }
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -60,7 +62,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   clearAllModelLockouts();
   try {
-    core.resetDbInstance();
+    await core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {}
 });

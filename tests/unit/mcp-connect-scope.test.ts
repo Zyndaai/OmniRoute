@@ -26,21 +26,23 @@ const { MCP_CONNECT_SCOPE, hasMcpConnectOrManageScope } =
 const { resolveMcpCallerAuthInfo } = await import("../../open-sse/mcp-server/httpAuthContext.ts");
 const { resolveCallerScopeContext, evaluateToolScopes } =
   await import("../../open-sse/mcp-server/scopeEnforcement.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ORIGINAL_JWT = process.env.JWT_SECRET;
 const ORIGINAL_INITIAL = process.env.INITIAL_PASSWORD;
 
-function reset() {
+async function reset() {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.JWT_SECRET;
   delete process.env.INITIAL_PASSWORD;
+  await resetTestDb();
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
 });
 
 test.after(() => {

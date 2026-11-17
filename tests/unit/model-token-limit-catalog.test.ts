@@ -14,11 +14,13 @@ const models = await import("../../src/lib/db/models.ts");
 const providers = await import("../../src/lib/db/providers.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
 const overrideRoute = await import("../../src/app/api/model-capability-overrides/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const TARGET = "openai/gpt-5.6";
 const LIMITS = { context: 372000, input: 353400, output: 128000 };
 
 test.beforeEach(async () => {
+  await resetTestDb();
   await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

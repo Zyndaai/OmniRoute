@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), "omniroute-chatgpt-web-management-retirement-")
@@ -27,7 +28,7 @@ const originalFetch = globalThis.fetch;
 let networkCalls = 0;
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   networkCalls = 0;
@@ -55,9 +56,9 @@ test.before(() => {
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

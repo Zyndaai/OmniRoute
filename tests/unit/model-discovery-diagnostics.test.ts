@@ -12,6 +12,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
 const syncModelsRoute = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
 const scheduler = await import("../../src/shared/services/modelSyncScheduler.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -30,6 +31,7 @@ type ModelsBody = {
 async function resetStorage() {
   globalThis.fetch = originalFetch;
   syncModelsRoute.__resetLoopbackReadinessForTests();
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -44,9 +46,9 @@ async function callRoute(connectionId: string, search = "") {
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -22,19 +22,20 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "auto-4235-test-secre
 const core = await import("../../src/lib/db/core.ts");
 const advertisedAuto = await import("../../src/app/api/v1/models/autoCatalogIds.ts");
 const builtinCatalog = await import("../../open-sse/services/autoCombo/builtinCatalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -16,11 +16,13 @@ const callbackRoute =
 const statusRoute = await import("../../src/app/api/providers/command-code/auth/status/route.ts");
 const applyRoute = await import("../../src/app/api/providers/command-code/auth/apply/route.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
+async function resetDb() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 function jsonRequest(url: string, body: unknown, headers: HeadersInit = {}) {
@@ -31,13 +33,13 @@ function jsonRequest(url: string, body: unknown, headers: HeadersInit = {}) {
   });
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   delete process.env.OMNIROUTE_PUBLIC_BASE_URL;
   delete process.env.OMNIROUTE_BASE_URL;
   delete process.env.BASE_URL;
   delete process.env.NEXT_PUBLIC_BASE_URL;
   delete process.env.COMMAND_CODE_CALLBACK_PORT;
-  resetDb();
+  await resetDb();
 });
 
 test.after(() => {
@@ -177,7 +179,7 @@ test("Command Code auth assist allows only configured CLI callback port range", 
     "http://localhost:5962/callback"
   );
 
-  resetDb();
+  await resetDb();
   process.env.COMMAND_CODE_CALLBACK_PORT = "20128";
   const invalidPortResponse = await startRoute.POST(
     new Request("http://localhost:20128/api/providers/command-code/auth/start", {
@@ -191,7 +193,7 @@ test("Command Code auth assist allows only configured CLI callback port range", 
     "http://localhost:5959/callback"
   );
 
-  resetDb();
+  await resetDb();
   process.env.COMMAND_CODE_CALLBACK_PORT = "5962abc";
   const partialPortResponse = await startRoute.POST(
     new Request("http://localhost:20128/api/providers/command-code/auth/start", {

@@ -15,7 +15,8 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
-const route = await import("../../src/app/api/v1/video-bridge/drilldown/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
+const route =await import("../../src/app/api/v1/video-bridge/drilldown/route.ts");
 const { VideoDrilldownLifecycle } = await import(
   "../../src/lib/guardrails/videoBridgeDrilldownLifecycle.ts"
 );
@@ -23,15 +24,15 @@ const { VideoDrilldownCache } = await import("../../src/lib/guardrails/videoBrid
 const { isLocalOnlyPath } = await import("../../src/server/authz/routeGuard.ts");
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

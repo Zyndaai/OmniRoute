@@ -16,6 +16,7 @@ process.env.DATA_DIR = dataDirectory;
 const core = await import("../../src/lib/db/core.ts");
 const settings = await import("../../src/lib/db/settings.ts");
 const route = await import("../../src/app/api/modality-bridge/video/runtime/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function withLocality(request: Request, locality: "loopback" | "lan"): Promise<Request> {
   const headers = new Headers(request.headers);
@@ -24,6 +25,7 @@ async function withLocality(request: Request, locality: "loopback" | "lan"): Pro
 }
 
 test.beforeEach(async () => {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(dataDirectory, { force: true, recursive: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(dataDirectory, { recursive: true });
@@ -31,8 +33,8 @@ test.beforeEach(async () => {
   await settings.updateSettings({ requireLogin: true, password: "" });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDirectory, { force: true, recursive: true, maxRetries: 5, retryDelay: 100 });
   if (originalDataDirectory === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDirectory;

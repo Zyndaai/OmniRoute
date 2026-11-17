@@ -10,11 +10,13 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const searchRoute = await import("../../src/app/api/v1/search/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function seedConnection(
@@ -40,8 +42,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

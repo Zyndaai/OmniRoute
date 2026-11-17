@@ -54,8 +54,18 @@ export interface UpsertA2ATaskInput {
   completedAt: string | null;
 }
 
-const HISTORY_COLUMNS =
-  "id, state, skill_id, input::text AS input_json, output::text AS output_json, api_key_id, created_at, updated_at, completed_at";
+/**
+ * jsonb -> legacy JSON text. Non-JSON input was stored as a jsonb string scalar
+ * (see jsonTextParam); `#>> '{}'` unwraps it back to the raw text, so readers
+ * that JSON.parse the column fail and take their malformed-input fallback, as
+ * they did before the Postgres move. Objects and arrays are returned as JSON text.
+ */
+const jsonAsText = (column: string) =>
+  `CASE WHEN jsonb_typeof(${column}) = 'string' THEN ${column} #>> '{}' ELSE ${column}::text END`;
+
+const HISTORY_COLUMNS = `id, state, skill_id, ${jsonAsText("input")} AS input_json, ${jsonAsText(
+  "output"
+)} AS output_json, api_key_id, created_at, updated_at, completed_at`;
 
 /** Builds the shared WHERE clause (+ params) for filter/owner conditions used by list/count. */
 function buildHistoryWhere(f: Pick<A2AHistoryFilter, "from" | "to" | "skill" | "state" | "owner">) {
@@ -120,7 +130,7 @@ export async function appendA2ATaskEvent(
 /** List a task's events in insertion order (oldest first). */
 export async function listA2ATaskEvents(taskId: string): Promise<A2ATaskHistoryEventRow[]> {
   return db().query<A2ATaskHistoryEventRow>(
-    `SELECT event_type, data::text AS data_json, created_at
+    `SELECT event_type, ${jsonAsText("data")} AS data_json, created_at
        FROM a2a_task_events
       WHERE task_id = $1
       ORDER BY id ASC`,

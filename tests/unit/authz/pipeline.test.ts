@@ -16,6 +16,7 @@ const settingsDb = await import("../../../src/lib/db/settings.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
 const csrf = await import("../../../src/server/authz/csrf.ts");
 const dashboardCsrfConstants = await import("../../../src/shared/constants/dashboardCsrf.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_JWT = process.env.JWT_SECRET;
 const ORIGINAL_INITIAL = process.env.INITIAL_PASSWORD;
@@ -27,8 +28,8 @@ const ORIGINAL_NEXT_PUBLIC_APP_URL = process.env.NEXT_PUBLIC_APP_URL;
 const ORIGINAL_OMNIROUTE_TRUST_PROXY = process.env.OMNIROUTE_TRUST_PROXY;
 const ORIGINAL_OMNIROUTE_PEER_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 
-function resetEnvironment() {
-  core.resetDbInstance();
+async function resetEnvironment() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -61,12 +62,12 @@ function request(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, init);
 }
 
-test.beforeEach(() => {
-  resetEnvironment();
+test.beforeEach(async () => {
+  await resetEnvironment();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_JWT === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = ORIGINAL_JWT;

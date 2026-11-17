@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-openroute
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
 const embeddingRegistry = await import("../../open-sse/config/embeddingRegistry.ts");
@@ -21,7 +22,9 @@ type ModelsResponseBody = { source: string; models: DiscoveredModel[] };
 
 async function resetStorage() {
   globalThis.fetch = originalFetch;
-  await core.resetDbInstance();
+  // Postgres keeps its rows across resetDbInstance(): empty the tables, or the
+  // previous test's connection (same provider + key) and synced models leak in.
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

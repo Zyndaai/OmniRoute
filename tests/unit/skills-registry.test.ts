@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-skills-re
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { GLOBAL_SKILL_OWNER_ID, skillRegistry } = await import("../../src/lib/skills/registry.ts");
 
 function resetRegistryState() {
@@ -20,7 +21,8 @@ function resetRegistryState() {
 
 async function resetStorage() {
   resetRegistryState();
-  coreDb.resetDbInstance();
+  await resetTestDb();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -29,9 +31,9 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   resetRegistryState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

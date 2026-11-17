@@ -9,6 +9,7 @@ process.env.DATA_DIR = dataDir;
 process.env.APP_LOG_TO_FILE = "false";
 const core = await import("../../src/lib/db/core.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { GET } = await import("../../src/app/api/providers/[id]/models/route.ts");
 const originalFetch = globalThis.fetch;
 
@@ -43,16 +44,17 @@ async function listModels(id: string, refresh = true) {
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
   core.resetDbInstance();
+  await resetTestDb();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   mkdirSync(dataDir, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -191,18 +191,20 @@ export async function reorderProviderConnections(providerId: string) {
 /**
  * Renumbers a provider's connections 1..n in their current (priority, updated_at)
  * order, in one statement so a concurrent writer cannot interleave. Only rows
- * whose priority changes are touched.
+ * whose priority changes are touched. `updated_at` is stamped from the app clock like
+ * every other connection write: mixing in the database clock (`now()`) made the
+ * updated_at tie-break depend on clock skew between the two hosts.
  */
 export async function reorderConnections(executor: DbExecutor, providerId: string): Promise<void> {
   await executor.execute(
     `UPDATE provider_connections AS pc
-        SET priority = ranked.rank, updated_at = now()
+        SET priority = ranked.rank, updated_at = $2::timestamptz
        FROM (
          SELECT id, ROW_NUMBER() OVER (ORDER BY priority ASC, updated_at DESC, id ASC)::integer AS rank
            FROM provider_connections
           WHERE provider = $1
        ) AS ranked
       WHERE pc.id = ranked.id AND pc.priority IS DISTINCT FROM ranked.rank`,
-    [providerId]
+    [providerId, new Date().toISOString()]
   );
 }

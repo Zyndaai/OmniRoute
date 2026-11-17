@@ -29,6 +29,7 @@ const resolver = await import("../../src/sse/services/clientApiKeyResolver.ts");
 const { clientApiPolicy } = await import("../../src/server/authz/policies/clientApi.ts");
 const { enforceClientApiRouteAuth } = await import("../../src/shared/utils/clientApiRouteAuth.ts");
 const { enforceApiKeyPolicy } = await import("../../src/shared/utils/apiKeyPolicy.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ORIGINAL_ENV = {
   OMNIROUTE_API_KEY: process.env.OMNIROUTE_API_KEY,
@@ -45,8 +46,8 @@ function restoreEnv(name: keyof typeof ORIGINAL_ENV) {
   else process.env[name] = value;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -55,8 +56,8 @@ test.beforeEach(() => {
   process.env.REQUIRE_API_KEY = "true";
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreEnv("OMNIROUTE_API_KEY");
   restoreEnv("ROUTER_API_KEY");

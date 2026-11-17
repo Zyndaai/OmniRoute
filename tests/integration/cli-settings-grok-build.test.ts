@@ -29,6 +29,7 @@ process.env.OMNIROUTE_ALLOW_CONTAINER_CONFIG_WRITE = "1";
 
 // Import DB reset helpers (must be before route import)
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -39,7 +40,8 @@ const { GET, POST, DELETE } =
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

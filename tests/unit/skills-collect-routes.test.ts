@@ -34,6 +34,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "skills-collect-route
 // Import DB first (order matters — sets DATA_DIR before localDb loads)
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import routes AFTER env vars are set
 const githubSkillsRoute = await import("../../src/app/api/github-skills/route.ts");
@@ -52,9 +53,9 @@ test.before(() => {
     })) as typeof fetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -62,7 +63,8 @@ test.after(() => {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

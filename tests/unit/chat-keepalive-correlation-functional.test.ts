@@ -35,6 +35,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const chatRoute = await import("../../src/app/api/v1/chat/completions/route.ts");
 const { takeEarlyKeepaliveBytes } =
   await import("../../open-sse/utils/earlyKeepaliveByteBuffer.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -48,7 +49,7 @@ async function flushBackgroundWork() {
 
 test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(dataDir, { recursive: true });
   await core.ensureDbInitialized();
@@ -70,7 +71,7 @@ test.afterEach(async () => {
 test.after(async () => {
   await flushBackgroundWork();
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

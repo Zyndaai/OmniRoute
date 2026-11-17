@@ -147,7 +147,10 @@ function toNumberOrNull(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+    if (Number.isFinite(parsed)) return parsed;
+    // Postgres rows carry timestamps as ISO strings (db/pg.ts ts()).
+    const date = Date.parse(value);
+    return Number.isFinite(date) ? date : null;
   }
   return null;
 }

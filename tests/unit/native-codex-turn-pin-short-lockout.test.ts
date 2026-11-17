@@ -23,6 +23,7 @@ const { clearCooldownState } = await import("../../open-sse/services/providerCoo
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function settingsWithCooldownWait(enabled: boolean) {
   return {
@@ -59,9 +60,7 @@ test.after(async () => {
 beforeEach(async () => {
   // Each scenario models a single-account pool. Keep prior scenarios' healthy
   // accounts from becoming legitimate siblings in dynamic turn-pin expansion.
-  for (const connection of await providersDb.getProviderConnections({})) {
-    await providersDb.deleteProviderConnection(connection.id);
-  }
+  await resetTestDb();
   clearAllModelLockouts();
   clearCooldownState();
   resetAllCircuitBreakers();

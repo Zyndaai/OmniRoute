@@ -21,9 +21,11 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

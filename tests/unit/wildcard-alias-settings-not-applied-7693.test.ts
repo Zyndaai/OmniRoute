@@ -12,15 +12,16 @@ process.env.API_KEY_SECRET = "test-wildcard-alias-7693-secret";
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_API_KEY_SECRET === undefined) {
     delete process.env.API_KEY_SECRET;

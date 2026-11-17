@@ -52,11 +52,12 @@ const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFa
 const devinStatus = await import("../../src/lib/providers/devinAgenticAuthStatus.ts");
 const noAuthReadiness = await import("../../open-sse/services/autoCombo/noAuthReadiness.ts");
 const readinessBoot = await import("../../src/lib/providers/noAuthAutoRoutingReadiness.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 // What registerNodejs() does at server boot: register the app-layer Devin probe.
 readinessBoot.registerNoAuthAutoRoutingReadiness();
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -73,6 +74,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   devinStatus.clearDevinAgenticAuthStatusCache();

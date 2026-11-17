@@ -28,6 +28,7 @@ const costRules = await import("../../src/domain/costRules.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
 const route = await import("../../src/app/api/internal/codex-responses-ws/route.ts");
 const codexWsLease = await import("../../src/sse/services/codexWsLease.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 rateLimiter.setRateLimiterTestMode(true);
 
@@ -43,6 +44,7 @@ async function resetStorage() {
   apiKeysDb.resetApiKeyState();
   costRules.resetCostData();
   coreDb.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

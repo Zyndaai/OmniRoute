@@ -13,12 +13,14 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "t08-test-secret-key"
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../..");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -29,7 +31,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

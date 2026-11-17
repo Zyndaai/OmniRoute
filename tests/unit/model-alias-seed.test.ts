@@ -12,8 +12,10 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const sseModelService = await import("../../src/sse/services/model.ts");
 const { DEFAULT_MODEL_ALIAS_SEED, seedDefaultModelAliases } =
   await import("../../src/lib/modelAliasSeed.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -24,7 +26,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

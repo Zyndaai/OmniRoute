@@ -4,13 +4,14 @@ import assert from "node:assert/strict";
 const providersDb = await import("../../src/lib/db/providers.ts");
 const rateLimitManager = await import("../../open-sse/services/rateLimitManager.ts");
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test.afterEach(async () => {
   await rateLimitManager.__resetRateLimitManagerForTests();
   try {
-    core.resetDbInstance();
+    await resetTestDb();
   } catch {
-    // ignore — no instance open
+    // ignore — no DB instance open
   }
 });
 

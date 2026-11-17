@@ -114,7 +114,7 @@ export type AttemptLoopDeps = {
     /** Test seam, unused on the routing path; see staleLkgpClear.ts. */
     clearLKGP?: ((comboName: string, modelKey: string) => Promise<void>) | undefined,
     failed?: { provider?: string | null; connectionId?: string | null } | null
-  ) => void;
+  ) => Promise<void>;
   /**
    * Closed-over setup values from handleComboChatInner. Optional so Task 2
    * gate tests keep compiling; attempt uses defaults when absent.

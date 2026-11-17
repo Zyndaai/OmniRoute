@@ -21,6 +21,7 @@ const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const route = await import("../../src/app/api/logs/export/route.ts");
 const logExport = await import("../../src/shared/utils/logExport.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const { LOG_EXPORT_HEADERS, LOG_EXPORT_MAX_ROWS, readLogExportTruncation, buildLogExportUrl } =
   logExport;
@@ -29,6 +30,7 @@ async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 function hoursAgo(hours: number): string {

@@ -14,6 +14,7 @@ const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const providersDb = await import("../../../src/lib/db/providers.ts");
 const autopilot = await import("../../../src/lib/monitoring/providerHealthAutopilot.ts");
@@ -28,7 +29,8 @@ const quotaMonitor = await import("@omniroute/open-sse/services/quotaMonitor.ts"
 const PROVIDER = "autopilot-test-provider";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

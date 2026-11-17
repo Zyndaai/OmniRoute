@@ -57,8 +57,8 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -196,8 +196,9 @@ test("usage API persists per-account Fable rows without changing account-wide ro
       percent
     );
     assert.equal(
-      parseQuotaData("claude", getProviderLimitsCache(id)).find((row) => row.name === fableKey)
-        ?.used,
+      parseQuotaData("claude", await getProviderLimitsCache(id)).find(
+        (row) => row.name === fableKey
+      )?.used,
       percent
     );
     assert.deepEqual(Object.keys(getQuotaCache(id)?.quotas ?? {}).sort(), [
@@ -207,8 +208,9 @@ test("usage API persists per-account Fable rows without changing account-wide ro
     assert.deepEqual(Object.keys(getQuotaCache(id)?.modelQuotas ?? {}), [fableKey]);
   }
   assert.equal(
-    parseQuotaData("claude", getProviderLimitsCache(ids[0])).find((row) => row.name === fableKey)
-      ?.used,
+    parseQuotaData("claude", await getProviderLimitsCache(ids[0])).find(
+      (row) => row.name === fableKey
+    )?.used,
     100
   );
 

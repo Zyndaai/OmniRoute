@@ -25,9 +25,31 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_SKIP_SYSTEM_TRUST = "1";
 process.env.OMNIROUTE_REASONING_EFFORT_PROBE_PROVIDERS = "";
 
-const socketGuard = mock.method(Socket.prototype, "connect", () => {
-  throw new Error("Unexpected network access in CLIProxyAPI recovery regression");
-});
+// The executor reads its base URL from the settings table, so the Postgres pool must still be
+// able to open its connections; everything else is refused. (A refused pool connection is not
+// just an error: it leaks a pool slot, and the next settings read waits forever.)
+const originalSocketConnect = Socket.prototype.connect;
+const postgresUrl = process.env.OMNIROUTE_POSTGRES_URL
+  ? new URL(process.env.OMNIROUTE_POSTGRES_URL)
+  : null;
+function isPostgresTarget(args: unknown[]): boolean {
+  if (!postgresUrl) return false;
+  const first = args[0];
+  const port = Number(
+    typeof first === "object" && first !== null ? (first as { port?: unknown }).port : first
+  );
+  return port === Number(postgresUrl.port || 5432);
+}
+const socketGuard = mock.method(
+  Socket.prototype,
+  "connect",
+  function (this: Socket, ...args: unknown[]) {
+    if (isPostgresTarget(args)) {
+      return (originalSocketConnect as (...a: unknown[]) => Socket).apply(this, args);
+    }
+    throw new Error("Unexpected network access in CLIProxyAPI recovery regression");
+  }
+);
 const originalDispatcher = getGlobalDispatcher();
 const mockAgent = new MockAgent();
 mockAgent.disableNetConnect();
@@ -299,7 +321,7 @@ for (const anthropic of [false, true]) {
 
   for (const recovered of [false, true]) {
     test(`#14629 CPA preserves namespace descriptors and downstream identity (${anthropic ? "messages" : "chat"}, recovery=${recovered})`, async () => {
-      const body = translateRequest(
+      const body = (await translateRequest(
         "openai-responses",
         anthropic ? "claude" : "openai",
         model,
@@ -319,7 +341,7 @@ for (const anthropic of [false, true]) {
         null,
         null,
         null
-      ) as Record<string, unknown>;
+      )) as Record<string, unknown>;
       const descriptor = Object.getOwnPropertyDescriptor(body, "_namespaceToolIdentityMap");
       assert.ok(
         descriptor?.value instanceof Map,

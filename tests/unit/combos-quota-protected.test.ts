@@ -10,11 +10,13 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const comboRoute = await import("../../src/app/api/combos/[id]/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 function makePutRequest(id: string, body: Record<string, unknown>) {

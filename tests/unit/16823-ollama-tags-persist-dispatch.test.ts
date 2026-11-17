@@ -12,6 +12,7 @@ const { getActiveSyncedCatalog } = await import("../../src/lib/db/models/activeS
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const { getModelInfoCore } = await import("../../open-sse/services/model.ts");
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // IDs from the anonymous https://ollama.com/api/tags response on 2026-10-20.
 // Keep the fixture offline: no provider credential or upstream inference is needed.
@@ -45,6 +46,7 @@ let connectionId: string;
 
 test.beforeEach(async () => {
   await harness.resetStorage();
+  await resetTestDb();
   const connection = await seedConnection("ollama-cloud");
   connectionId = connection.id;
   const config = PROVIDER_MODELS_CONFIG["ollama-cloud"];

@@ -158,8 +158,8 @@ test("document returned inside a tool_result is lifted into a following user fil
   assert.deepEqual(file.file, { file_data: PDF_DATA_URI });
 });
 
-test("Claude → Antigravity keeps the PDF as Gemini inlineData", () => {
-  const body = translateRequest(
+test("Claude → Antigravity keeps the PDF as Gemini inlineData", async () => {
+  const body = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.ANTIGRAVITY,
     "gemini-3-pro",

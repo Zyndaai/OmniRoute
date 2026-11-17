@@ -27,6 +27,7 @@ const { setTlsClientForTest } = await import("../../open-sse/utils/proxyFetch.ts
 const { resolveChatCoreTargetFormat } =
   await import("../../open-sse/handlers/chatCore/targetFormat.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type ApiErrorJson = {
   error?: {
@@ -40,7 +41,7 @@ type ApiErrorJson = {
 
 async function resetStorage() {
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

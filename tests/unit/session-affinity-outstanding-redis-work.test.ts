@@ -21,6 +21,9 @@ const now = 1_000_000;
 const ttl = 60_000;
 const identity = "a".repeat(64);
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+// A settled late reply runs an async cleanup (PostgreSQL round trips) that no promise exposes,
+// so wait a short real interval for it to land before asserting on local state.
+const settle = (ms = 60) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 class StalledRedis implements AffinityRedisClient {
   calls = 0;
@@ -57,8 +60,8 @@ function readLocal(key: string) {
 
 // Open the SQLite fallback (connection + migrations) before any timed batch: otherwise the
 // first batch's fallback writes pay that one-off cost inside the deadline window below.
-test.before(() => {
-  readLocal("synthetic-warmup");
+test.before(async () => {
+  await readLocal("synthetic-warmup");
 });
 test.beforeEach((t) => {
   t.mock.method(console, "warn", () => {});
@@ -88,36 +91,47 @@ for (const outcome of ["resolve", "reject"] as const) {
         await Promise.all(keys.map((key) => write(store, key)));
         // Allow scheduler overhead while still detecting a caller waiting on a stalled reply.
         assert.ok(performance.now() - started < timeout + 500);
-        for (const key of keys) assert.equal(readLocal(key)?.connectionId, "synthetic-connection");
+        for (const key of keys) {
+          assert.equal((await readLocal(key))?.connectionId, "synthetic-connection");
+        }
         sizes.push(client.pending.length);
       }
       assert.deepEqual(sizes, [cap, cap, cap, cap]);
       assert.equal(acquisitions, cap, "saturation bypasses even client acquisition");
       assert.equal(client.calls, cap, "caller deadlines must not release admission slots");
 
-      let bypassFinished = false;
-      const bypass = write(store, `synthetic-${outcome}-immediate`).then(() => {
-        bypassFinished = true;
-      });
-      await flush();
-      assert.equal(bypassFinished, true, "a full store falls back without another deadline wait");
-      await bypass;
+      // The local fallback is async I/O, so "no deadline wait" is asserted as finishing well
+      // inside the deadline rather than within one event-loop turn.
+      const bypassStarted = performance.now();
+      await write(store, `synthetic-${outcome}-immediate`);
+      assert.ok(
+        performance.now() - bypassStarted < timeout,
+        "a full store falls back without another deadline wait"
+      );
       const unchanged = `synthetic-${outcome}-0-0`;
       const newer = `synthetic-${outcome}-0-1`;
       const bypassed = `synthetic-${outcome}-0-9`;
-      const oldBytes = local.getSerialized(newer, "codex");
-      local.upsert(newer, "codex", "synthetic-connection", now + 1, ttl, identity);
-      const newBytes = local.getSerialized(newer, "codex");
+      const oldBytes = await local.getSerialized(newer, "codex");
+      await local.upsert(newer, "codex", "synthetic-connection", now + 1, ttl, identity);
+      const newBytes = await local.getSerialized(newer, "codex");
       assert.notEqual(
         newBytes,
         oldBytes,
         "same account and connection but different serialized value"
       );
       client.settle(outcome);
-      await flush();
-      assert.equal(readLocal(unchanged), null, "late settlement removes the exact timeout write");
-      assert.equal(local.getSerialized(newer, "codex"), newBytes, "newer exact bytes survive");
-      assert.ok(readLocal(bypassed), "an operation never sent to Redis has no late cleanup");
+      await settle();
+      assert.equal(
+        await readLocal(unchanged),
+        null,
+        "late settlement removes the exact timeout write"
+      );
+      assert.equal(
+        await local.getSerialized(newer, "codex"),
+        newBytes,
+        "newer exact bytes survive"
+      );
+      assert.ok(await readLocal(bypassed), "an operation never sent to Redis has no late cleanup");
 
       const recovered = Array.from(
         { length: cap },
@@ -136,7 +150,7 @@ for (const outcome of ["resolve", "reject"] as const) {
       const healthy = `synthetic-${outcome}-healthy`;
       await write(store, healthy);
       assert.equal(
-        readLocal(healthy),
+        await readLocal(healthy),
         null,
         "healthy Redis resumes without installing a local pin"
       );
@@ -224,7 +238,7 @@ test("outstanding admission is per store and includes stalled client acquisition
     client.holding = false;
     await write(store, "synthetic-acquisition-recovered");
     assert.equal(client.calls, 2);
-    assert.equal(readLocal("synthetic-acquisition-recovered"), null);
+    assert.equal(await readLocal("synthetic-acquisition-recovered"), null);
   } finally {
     release(client);
     client.settle("resolve");

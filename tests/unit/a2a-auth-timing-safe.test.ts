@@ -14,6 +14,7 @@ delete process.env.OMNIROUTE_API_KEY;
 
 const core = await import("../../src/lib/db/core.ts");
 const a2aRoute = await import("../../src/app/a2a/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const API_KEY = "test-secret";
 
@@ -32,15 +33,16 @@ function makeJsonRpcRequest(token?: string): NextRequest {
   }) as unknown as NextRequest;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   process.env.OMNIROUTE_API_KEY = API_KEY;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;

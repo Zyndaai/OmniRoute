@@ -13,12 +13,14 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const resetCredits = await import("../../src/lib/usage/codexResetCredits.ts");
 const codexAccount = await import("../../open-sse/services/codexAccount/index.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 type QuotaUsageRecord = Record<string, { used?: unknown } | undefined>;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

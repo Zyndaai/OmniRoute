@@ -14,6 +14,7 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const originalFetch = globalThis.fetch;
 const core = await import("../../src/lib/db/core.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const modelSyncUrls: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -56,8 +57,9 @@ async function createConnection(options: CreateOptions = {}): Promise<Response> 
   return response;
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   modelSyncUrls.length = 0;

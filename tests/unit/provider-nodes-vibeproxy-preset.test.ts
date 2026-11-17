@@ -16,6 +16,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.ts");
 const { OPENAI_COMPATIBLE_PREFIX } = await import("../../src/shared/constants/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 interface ProviderNodeErrorBody {
   error: { message: string; details?: { field: string; message: string }[] };
@@ -36,6 +37,7 @@ async function resetStorage() {
   delete process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS;
   delete process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS;
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

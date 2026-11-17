@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-reasoning-api-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const rulesDb = await import("../../src/lib/db/reasoningRoutingRules.ts");
 const collectionRoute = await import("../../src/app/api/settings/reasoning-routing-rules/route.ts");
@@ -40,6 +41,7 @@ async function resetStorage() {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   rulesDb.invalidateReasoningRoutingRuleCache();
+  await resetTestDb();
 }
 
 function request(pathname: string, method = "GET", body?: unknown) {

@@ -15,11 +15,13 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   globalThis.fetch = originalFetch;
+  await resetTestDb();
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -43,9 +45,9 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

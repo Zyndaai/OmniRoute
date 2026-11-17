@@ -18,21 +18,25 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { getMcpAccessibilityConfig, setMcpAccessibilityConfig } =
   await import("../../../src/lib/db/compression.ts");
 const route = await import("../../../src/app/api/settings/compression/mcp-accessibility/route.ts");
 
-function resetDir() {
-  core.resetDbInstance();
+async function resetDir() {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 describe("mcpAccessibility config reachability", () => {
   beforeEach(resetDir);
-  afterEach(() => core.resetDbInstance());
-  after(() => {
-    core.resetDbInstance();
+  afterEach(async () => {
+    await core.resetDbInstance();
+  });
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -78,7 +82,7 @@ describe("mcpAccessibility config reachability", () => {
     assert.equal(putBody.minLengthToProcess, 500);
 
     // Survives a fresh read from a new DB handle (not just the write-path return value).
-    core.resetDbInstance();
+    await core.resetDbInstance();
     const getRes = await route.GET(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       new Request("http://localhost/api/settings/compression/mcp-accessibility") as any

@@ -9,6 +9,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-conductor
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const settings = await import("../../src/lib/db/settings.ts");
 const tasksRoute = await import("../../src/app/api/a2a/tasks/route.ts");
 
@@ -41,8 +42,9 @@ const VALID_BODY = {
   },
 };
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.CONDUCTOR_HUB_URL;
@@ -50,7 +52,7 @@ test.beforeEach(() => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.CONDUCTOR_HUB_URL;
   delete process.env.OMNIROUTE_API_KEY;

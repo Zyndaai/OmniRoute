@@ -10,6 +10,7 @@ process.env.API_KEY_SECRET = "0123456789abcdef0123456789abcdef";
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const accessRoute = await import("../../src/app/api/keys/[id]/access/route.ts");
@@ -25,16 +26,17 @@ const MACHINE_ID = "0123456789abcdef";
 
 async function resetStorage(): Promise<void> {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
+test.after(async () => {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

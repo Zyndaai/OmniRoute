@@ -22,7 +22,11 @@ import { resolveProxyForConnection } from "@/lib/db/settings";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
 import { safePercentage } from "@/shared/utils/formatting";
 import { isQuotaWindowBoundedParkEnabled } from "@/shared/utils/featureFlags";
-import { saveQuotaSnapshot, getLatestQuotaSnapshotsForConnection } from "@/lib/db/quotaSnapshots";
+import {
+  saveQuotaSnapshot,
+  getLatestQuotaSnapshotsForConnection,
+  getLatestQuotaSnapshotsForAllConnections,
+} from "@/lib/db/quotaSnapshots";
 import { runQuotaSnapshotCleanup } from "./quotaSnapshotCleanup";
 import { recordProviderQuotaResetEventIfChanged } from "@/lib/db/quotaResetEvents";
 import {
@@ -54,6 +58,7 @@ import {
 import type { ClaudeQuotaMetadata } from "@omniroute/open-sse/services/usage/quota.ts";
 import { getRequestQuotaCacheState as getState } from "./quotaCacheReadView";
 import {
+  getQuotaCacheState,
   EXHAUSTED_MAX_PARK_MS,
   type QuotaCacheEntry,
   type QuotaInfo,
@@ -314,6 +319,8 @@ function isWindowParkReleased(entry: QuotaCacheEntry, now: number): boolean {
 
 export function __clearForTests() {
   getState().cache.clear();
+  // A cleared cache is a cold one again: let the next ensureQuotaCacheHydrated reload.
+  globalThis.__omnirouteQuotaCacheHydration = undefined;
 }
 
 function resolveAntigravityQuotaWindowsForModel(
@@ -863,12 +870,60 @@ export function getQuotaCache(connectionId: string): QuotaCacheEntry | null {
   return getState().cache.get(connectionId) || null;
 }
 
-const inflightSnapshotHydrations = new Map<string, Promise<QuotaCacheEntry | null>>();
+// Keyed by the cache Map so a private read view (availability summary) never shares an
+// in-flight load with the shared cache: each load lands in the cache it was started for.
+const inflightSnapshotHydrations = new WeakMap<
+  object,
+  Map<string, Promise<QuotaCacheEntry | null>>
+>();
+
+declare global {
+  var __omnirouteQuotaCacheHydration: Promise<void> | undefined;
+}
+
+/**
+ * Loads every stored quota snapshot into the shared in-memory cache, once per process
+ * (one shared promise on `globalThis`, so split Next chunks agree). The synchronous
+ * checks (`isAccountQuotaExhausted`, `isQuotaExhaustedForRequest`, ...) answer from memory
+ * and would report an exhausted account as available on a cold cache, so boot awaits this
+ * before the server reports ready and credential selection awaits it too (an already
+ * resolved promise afterwards: no per-request DB cost). A failure is logged and re-arms
+ * the promise so the next caller retries; it never rejects.
+ */
+export function ensureQuotaCacheHydrated(): Promise<void> {
+  const existing = globalThis.__omnirouteQuotaCacheHydration;
+  if (existing) return existing;
+  const pending = (async () => {
+    try {
+      const snapshots = await getLatestQuotaSnapshotsForAllConnections();
+      const byConnection = new Map<string, typeof snapshots>();
+      for (const snapshot of snapshots) {
+        const raw = snapshot as unknown as { connectionId?: string; connection_id?: string };
+        const id = raw.connectionId ?? raw.connection_id;
+        if (!id) continue;
+        const list = byConnection.get(id);
+        if (list) list.push(snapshot);
+        else byConnection.set(id, [snapshot]);
+      }
+      const { cache } = getQuotaCacheState();
+      for (const [id, rows] of byConnection) {
+        // A live observation that landed during the query wins over stored rows.
+        if (!cache.has(id)) entryFromSnapshots(id, rows, cache);
+      }
+    } catch (error) {
+      globalThis.__omnirouteQuotaCacheHydration = undefined;
+      console.warn("[QuotaCache] Snapshot hydration failed (will retry):", error);
+    }
+  })();
+  globalThis.__omnirouteQuotaCacheHydration = pending;
+  return pending;
+}
 
 /**
  * Synchronous cache read for the routing hot path. On a miss it starts one background
  * hydration from the stored snapshots (deduplicated), so a later call sees the entry;
- * callers that must see the stored state first await `hydrateQuotaCacheFromSnapshots`.
+ * callers that must see the stored state first await `ensureQuotaCacheHydrated` (shared
+ * cache) or `hydrateQuotaCacheFromSnapshots` (one connection).
  */
 function peekQuotaCacheEntry(connectionId: string): QuotaCacheEntry | null {
   const cached = getState().cache.get(connectionId);
@@ -884,12 +939,18 @@ export function hydrateQuotaCacheFromSnapshots(
   const { cache } = getState();
   const cached = cache.get(connectionId);
   if (cached) return Promise.resolve(cached);
-  const inflight = inflightSnapshotHydrations.get(connectionId);
+  let inflightByConnection = inflightSnapshotHydrations.get(cache);
+  if (!inflightByConnection) {
+    inflightByConnection = new Map();
+    inflightSnapshotHydrations.set(cache, inflightByConnection);
+  }
+  const inflight = inflightByConnection.get(connectionId);
   if (inflight) return inflight;
+  const map = inflightByConnection;
   const pending = loadQuotaCacheFromSnapshots(connectionId).finally(() => {
-    inflightSnapshotHydrations.delete(connectionId);
+    map.delete(connectionId);
   });
-  inflightSnapshotHydrations.set(connectionId, pending);
+  map.set(connectionId, pending);
   return pending;
 }
 
@@ -905,6 +966,15 @@ async function loadQuotaCacheFromSnapshots(connectionId: string): Promise<QuotaC
   // A live observation may have landed while the query ran; it wins over stored rows.
   const existing = cache.get(connectionId);
   if (existing) return existing;
+  return entryFromSnapshots(connectionId, snapshots, cache);
+}
+
+/** Build a cache entry from one connection's latest-per-window snapshot rows and store it. */
+function entryFromSnapshots(
+  connectionId: string,
+  snapshots: Awaited<ReturnType<typeof getLatestQuotaSnapshotsForConnection>>,
+  cache: Map<string, QuotaCacheEntry>
+): QuotaCacheEntry | null {
   if (!snapshots.length) return null;
 
   const quotas: Record<string, QuotaInfo> = {};

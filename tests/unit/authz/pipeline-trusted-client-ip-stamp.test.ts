@@ -20,6 +20,7 @@ process.env.JWT_SECRET = "test-secret-trusted-client-ip";
 const core = await import("../../../src/lib/db/core.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
 const authzHeaders = await import("../../../src/server/authz/headers.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 // The wire name is pinned on purpose: route handlers and the pipeline must agree on it.
 const TRUSTED_CLIENT_IP = "x-omniroute-trusted-client-ip";
@@ -34,8 +35,8 @@ function restoreEnv(name: string, value: string | undefined) {
   else process.env[name] = value;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreEnv("DATA_DIR", ORIGINAL_DATA_DIR);
   restoreEnv("OMNIROUTE_PEER_STAMP_TOKEN", ORIGINAL_STAMP_TOKEN);
@@ -43,8 +44,8 @@ test.after(() => {
   restoreEnv("REQUIRE_API_KEY", ORIGINAL_REQUIRE_API_KEY);
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = "stamp-tok";

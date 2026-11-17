@@ -21,6 +21,7 @@ const { CODEX_NATIVE_UNPREFIXED_MODELS, getModelInfoCore } =
 const { getProviderModels } = await import("../../open-sse/config/providerModels.ts");
 const { getPricingForModel } = await import("../../src/shared/constants/pricing.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const MODEL = "gpt-6.1-sol";
 const EFFORTS = ["ultra", "max", "xhigh", "high", "medium", "low"];
@@ -45,8 +46,9 @@ async function seedConnection(provider: "codex" | "openai") {
   });
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

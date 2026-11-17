@@ -19,9 +19,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { updateComboSchema } = await import("../../src/shared/validation/schemas.ts");
 const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   }
@@ -33,7 +34,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

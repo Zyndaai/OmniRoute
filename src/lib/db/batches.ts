@@ -384,9 +384,10 @@ export async function listBatches(
 
 export async function countBatches(apiKeyId?: string): Promise<number> {
   const row = apiKeyId
-    ? await db().queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM batches WHERE api_key_id = $1`, [
-        apiKeyId,
-      ])
+    ? await db().queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM batches WHERE api_key_id = $1`,
+        [apiKeyId]
+      )
     : await db().queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM batches`);
   return row ? Number(row.c) : 0;
 }
@@ -561,14 +562,20 @@ async function deleteBatchesMatching(
       for (const fid of fileIds) {
         // #13681: a file referenced by a batch outside this chunk must survive this chunk.
         if (await isFileReferencedByOtherBatch(fid, ids, tx)) continue;
+        // Postgres aborts the whole transaction after any error (25P02), so the
+        // step that may fail runs inside a savepoint and is rolled back alone.
+        await tx.execute("SAVEPOINT sweep_file");
         try {
           // Key mode: only the key's OWN files (SEC-C). Instance mode keeps the
           // unconditional soft delete.
           const removed = allTenants
             ? await deleteFile(fid, tx)
             : await deleteFileOwnedBy(fid, apiKeyId as string, tx);
+          await tx.execute("RELEASE SAVEPOINT sweep_file");
           if (removed) deletedFiles++;
         } catch (err) {
+          await tx.execute("ROLLBACK TO SAVEPOINT sweep_file");
+          await tx.execute("RELEASE SAVEPOINT sweep_file");
           log.warn("deleteCompletedBatches: file soft-delete failed", {
             fid,
             err: err instanceof Error ? err.message : String(err),

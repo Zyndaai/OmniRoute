@@ -20,6 +20,7 @@ const deletionPath = path.join(repoRoot, "src/lib/db/providers/deletion.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const models = await import("../../src/lib/db/models.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const TEST_PROVIDER = "__test_provider_13067__";
 const OTHER_PROVIDER = "__other_provider_13067__";
@@ -33,6 +34,7 @@ function extractFunctionBody(source: string, name: string): string {
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -56,7 +58,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

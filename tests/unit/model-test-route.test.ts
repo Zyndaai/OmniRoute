@@ -17,10 +17,12 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const route = await import("../../src/app/api/models/test/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   delete process.env.INITIAL_PASSWORD;
   delete process.env.REQUIRE_API_KEY;

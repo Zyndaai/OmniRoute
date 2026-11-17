@@ -9,12 +9,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "codex-cooldown-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const codexAccount = await import("../../open-sse/services/codexAccount/index.ts");
 const codexFailover = await import("../../open-sse/handlers/chatCore/codexFailover.ts");
 
 async function resetStorage(): Promise<void> {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

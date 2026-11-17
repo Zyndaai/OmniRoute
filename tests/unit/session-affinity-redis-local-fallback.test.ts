@@ -79,8 +79,10 @@ class FakeRedis {
 function storeFor(redis: FakeRedis) {
   return new RedisSessionAffinityStore(async () => redis, local, SESSION_AFFINITY_REDIS_TIMEOUT_MS);
 }
-function seedLocal(key: string, _provider: string, value: SessionAccountAffinityRecord) {
-  local.upsert(
+// The local store is async (PostgreSQL): every seed write must finish before the store under
+// test runs, or the seed can land after (and survive) the clear being asserted.
+async function seedLocal(key: string, _provider: string, value: SessionAccountAffinityRecord) {
+  await local.upsert(
     key,
     "codex",
     value.connectionId,
@@ -88,7 +90,13 @@ function seedLocal(key: string, _provider: string, value: SessionAccountAffinity
     ttl + 100,
     value.accountIdentity
   );
-  local.touch(key, "codex", Date.parse(value.lastUsedAt), ttl);
+  await local.touch(key, "codex", Date.parse(value.lastUsedAt), ttl);
+}
+async function until(condition: () => boolean, ms = 2_000) {
+  const deadline = Date.now() + ms;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
 }
 function shadow(key: string) {
   return local.get(key, "codex", ttl, now + 10);
@@ -151,7 +159,7 @@ test("successful upsert removes local fallback; Redis preserves shared history; 
   await store.upsert(key, "codex", "caller", now + 1, ttl, "b".repeat(64));
   assert.equal(await shadow(key), null);
   assert.equal(JSON.parse(redis.value!).createdAt, record("shared-winner").createdAt);
-  seedLocal(key, "codex", record("outage-local"));
+  await seedLocal(key, "codex", record("outage-local"));
   await store.delete(key, "codex");
   assert.equal(redis.value, null);
   assert.equal(await shadow(key), null);
@@ -161,11 +169,11 @@ test("successful touch removes local fallback; a shared miss leaves an outage de
   const key = "successful-touch";
   const redis = new FakeRedis();
   const store = storeFor(redis);
-  seedLocal(key, "codex", record("outage-local"));
+  await seedLocal(key, "codex", record("outage-local"));
   await store.touch(key, "codex", now + 1, ttl);
   assert.equal(await shadow(key), null);
   assert.equal(JSON.parse(redis.value!).lastUsedAt, new Date(now + 1).toISOString());
-  seedLocal(key, "codex", record("outage-local"));
+  await seedLocal(key, "codex", record("outage-local"));
   redis.value = null;
   await store.touch(key, "codex", now + 2, ttl);
   assert.equal(await shadow(key), null);
@@ -199,7 +207,8 @@ for (const operation of ["upsert", "touch", "delete"] as const) {
       if (failure === "timeout") {
         assert.ok(redis.release, "EVAL was sent before the deadline");
         redis.release();
-        await new Promise((resolve) => setImmediate(resolve));
+        // The released late reply runs an async compare-delete; give it time to (not) act.
+        await new Promise((resolve) => setTimeout(resolve, 40));
         assert.deepEqual(await shadow(key), newer);
       }
     });
@@ -220,7 +229,9 @@ for (const operation of ["upsert", "touch", "delete"] as const) {
           ? store.touch(key, "codex", now + 1, ttl)
           : store.delete(key, "codex");
     try {
-      await new Promise((resolve) => setImmediate(resolve));
+      // The store awaits the local clear before it sends the second command, so the held
+      // second EVAL (release is set) proves the clear already finished.
+      await until(() => redis.release !== undefined);
       assert.ok(redis.release);
       assert.equal(await shadow(key), null, "the initial Redis read already cleared local state");
     } finally {

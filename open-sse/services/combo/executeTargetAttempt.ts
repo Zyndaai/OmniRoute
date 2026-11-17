@@ -412,7 +412,7 @@ export async function executeTargetAttempt(
         deps.releaseStickyPinOnFailure(deps.sticky.messageHash, effectiveConnectionId);
         // #919: a quality-rejected 200 leaves the same stale LKGP pin as a
         // classic failure — clear it so the next request re-resolves.
-        deps.clearStaleLKGP(
+        await deps.clearStaleLKGP(
           deps.combo.name,
           target.executionKey,
           deps.combo.id,
@@ -934,7 +934,7 @@ export async function executeTargetAttempt(
       state.exhaustedConnections.has(`${provider}:${targetWithConnection.connectionId}`) ||
       (provider && state.exhaustedProviders.has(provider))
     ) {
-      deps.clearStaleLKGP(
+      await deps.clearStaleLKGP(
         deps.combo.name,
         target.executionKey,
         deps.combo.id,
@@ -986,7 +986,7 @@ export async function executeTargetAttempt(
       // Terminal stop ("stopping combo"): no later target is tried, so this is not
       // a fallback even when the failing target is not the first one.
       deps.log.warn("COMBO", `Model ${modelStr} failed with body-specific error, stopping combo`);
-      deps.clearStaleLKGP(
+      await deps.clearStaleLKGP(
         deps.combo.name,
         target.executionKey,
         deps.combo.id,
@@ -1208,7 +1208,7 @@ export async function executeTargetAttempt(
     // *next* separate request. Circuit breaker / model lockout deliberately
     // don't react to request-scoped failure classes (see scopedFailure below),
     // so nothing else clears this stale pin.
-    deps.clearStaleLKGP(
+    await deps.clearStaleLKGP(
       deps.combo.name,
       target.executionKey,
       deps.combo.id,

@@ -32,18 +32,20 @@ const { comboNameSchema } = await import("../../src/shared/validation/schemas/co
 const { getComboModelString } = await import("../../src/lib/combos/steps.ts");
 const { resolveCanonicalEndpointPath, resolveEndpointCategory } =
   await import("../../src/shared/constants/endpointCategories.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // The approved catalog IDs (Vercel-style, slash-containing).
 const APPROVED_COMBOS = ["anthropic/claude-haiku-5.5", "zai/glm-5.3-flash", "alibaba/qwen3.8-flash"];
 
-function resetStorage() {
+async function resetStorage() {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.beforeEach(() => resetStorage());
+test.beforeEach(async () => resetStorage());
 
 test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -13,6 +13,7 @@ const core = await import("../../src/lib/db/core.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { CodexExecutor } = await import("../../open-sse/executors/codex.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -139,6 +140,7 @@ function buildResponsesNdjson(text = "Brasilia") {
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

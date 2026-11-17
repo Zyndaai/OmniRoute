@@ -20,9 +20,11 @@ const { upsertVersionManagerTool, getVersionManagerTool } =
 
 // Import route under test.
 const { POST } = await import("../../../../src/app/api/services/9router/provider-expose/route.ts");
+const { resetTestDb } = await import("../../../helpers/postgres.ts");
 
-function resetDb() {
+async function resetDb() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -35,8 +37,8 @@ function makeRequest(body: unknown): Request {
   });
 }
 
-beforeEach(() => {
-  resetDb();
+beforeEach(async () => {
+  await resetDb();
 });
 
 describe("POST /api/services/9router/provider-expose", () => {

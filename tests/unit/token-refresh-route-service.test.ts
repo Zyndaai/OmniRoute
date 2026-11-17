@@ -15,6 +15,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const tokenRefresh = await import("../../src/sse/services/tokenRefresh.ts");
 const { PROVIDERS, OAUTH_ENDPOINTS } = await import("../../open-sse/config/constants.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -24,7 +25,8 @@ function jsonResponse(body, status = 200) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -154,6 +156,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   delete PROVIDERS["custom-oauth-local-608"];
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

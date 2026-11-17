@@ -272,7 +272,8 @@ async function resetStorage() {
   clearCache();
   clearIdempotency();
   clearInflight();
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

@@ -17,6 +17,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const modelAliasResolver = await import("../../src/lib/modelAliasResolver.ts");
 const leaseDb = await import("../../src/lib/db/exclusiveConnectionLeases.ts");
 const route = await import("../../src/app/api/v1/session-leases/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const OWNER_A = "vlo_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const OWNER_B = "vlo_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -66,7 +67,8 @@ async function seedKey(
 }
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -81,9 +83,9 @@ test.before(() => {
   };
 });
 test.beforeEach(resetStorage);
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

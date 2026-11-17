@@ -25,6 +25,7 @@ const { resetAll: resetAccountSemaphores } =
 const { handleChatCore, clearUpstreamProxyConfigCache } =
   await import("../../open-sse/handlers/chatCore.ts");
 const { resetPayloadRulesConfigForTests } = await import("../../open-sse/services/payloadRules.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -115,6 +116,7 @@ async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.afterEach(async () => {
@@ -123,8 +125,8 @@ test.afterEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -40,6 +40,7 @@ process.env.JWT_SECRET = TEST_MANAGEMENT_JWT_SECRET;
 // ---------------------------------------------------------------------------
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import route AFTER env is configured
 const route = await import("../../src/app/api/search/providers/route.ts");
@@ -101,7 +102,7 @@ async function seedRateLimitedConnection(provider: string) {
 
 /** Reset DB state between tests. */
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -112,6 +113,7 @@ async function resetStorage() {
 
 test.beforeEach(async () => {
   await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {

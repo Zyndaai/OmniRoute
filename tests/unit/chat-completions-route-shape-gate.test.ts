@@ -35,6 +35,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const chatRoute = await import("../../src/app/api/v1/chat/completions/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -44,7 +45,7 @@ async function flushBackgroundWork() {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -62,7 +63,7 @@ test.afterEach(async () => {
 test.after(async () => {
   await flushBackgroundWork();
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

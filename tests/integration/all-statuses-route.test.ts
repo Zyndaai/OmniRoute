@@ -20,6 +20,7 @@ process.env.API_KEY_SECRET = "test-all-statuses-secret";
 
 // Import DB modules after setting DATA_DIR
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -38,7 +39,8 @@ const TOOL_COUNT = Object.keys(CLI_TOOLS).length;
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

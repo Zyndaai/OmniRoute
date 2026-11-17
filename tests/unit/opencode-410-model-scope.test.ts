@@ -10,6 +10,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "opencode-410-model-scope-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 const fallback = await import("../../open-sse/services/accountFallback.ts");
@@ -57,6 +58,7 @@ const GONE_BODY = "Model mimo-v2.5-free has been deprecated. Use mimo-v2.6-flash
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -78,7 +80,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

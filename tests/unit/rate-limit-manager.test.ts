@@ -15,6 +15,7 @@ const rateLimitManager = await import("../../open-sse/services/rateLimitManager.
 const rateLimitErrors = await import("../../open-sse/services/rateLimitManager/errors.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
 const Bottleneck = (await import("bottleneck")).default;
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // These integration-style tests exercise real Bottleneck timer/event behavior.
 function wait(ms) {
@@ -90,7 +91,7 @@ async function flushBackgroundWork() {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -107,7 +108,7 @@ test.afterEach(async () => {
 test.after(async () => {
   await rateLimitManager.__resetRateLimitManagerForTests();
   await flushBackgroundWork();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

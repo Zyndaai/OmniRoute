@@ -18,11 +18,13 @@ process.env.NODE_ENV = "test";
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../../helpers/postgres.ts");
 
 async function resetDb() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {

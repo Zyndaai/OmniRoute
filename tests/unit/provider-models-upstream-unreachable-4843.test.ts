@@ -10,12 +10,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
-function resetStorage() {
+async function resetStorage() {
   globalThis.fetch = originalFetch;
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -51,8 +53,8 @@ function assertNoLeak(raw: string) {
   assert.doesNotMatch(raw, /203\.0\.113\.7/, "response must not carry the raw socket cause");
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
 test.after(() => {

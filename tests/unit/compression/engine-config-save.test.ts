@@ -27,14 +27,16 @@ const {
   forgetSentEdits,
   withoutEmptyText,
 } = await import("../../../src/shared/components/compression/engineConfigSave.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 type Settings = Record<string, unknown>;
 type Engine = typeof aggressiveEngine;
 
-beforeEach(() => {
+beforeEach(async () => {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 });
 
 after(() => {

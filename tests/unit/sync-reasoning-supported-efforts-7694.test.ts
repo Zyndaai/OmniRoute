@@ -23,6 +23,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const { normalizeDiscoveredModels, detectSupportedThinkingEfforts } =
   await import("../../src/lib/providerModels/modelDiscovery.ts");
@@ -36,7 +37,8 @@ const { applyDefaultReasoningEffort } =
   await import("../../open-sse/services/defaultReasoningEffort.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -46,8 +48,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

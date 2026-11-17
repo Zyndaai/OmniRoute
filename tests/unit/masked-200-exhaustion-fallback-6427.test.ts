@@ -33,6 +33,7 @@ const { resetAll: resetAllSemaphores } =
   await import("../../open-sse/services/rateLimitSemaphore.ts");
 const { _resetAllDecks } = await import("../../src/shared/utils/shuffleDeck.ts");
 const { clearSessions } = await import("../../open-sse/services/sessionManager.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function createLog() {
   const entries: unknown[] = [];
@@ -75,6 +76,7 @@ test.beforeEach(async () => {
   clearSessions();
   await cleanupTestDataDir();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   await settingsDb.resetAllPricing();
   await settingsDb.clearAllLKGP();
 });

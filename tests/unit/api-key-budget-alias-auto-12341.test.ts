@@ -12,23 +12,25 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const usageLimits = await import("../../src/lib/usage/apiKeyUsageLimits.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const NOW = Date.parse("2026-06-19T20:00:00.000Z");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   usageHistory.clearPendingRequests();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

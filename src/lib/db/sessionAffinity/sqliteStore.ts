@@ -11,6 +11,23 @@ const ACCOUNT_IDENTITY_PATTERN = /^[a-f0-9]{64}$/;
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
+// Writes to one session run in call order inside this process: with a pooled PostgreSQL
+// connection two concurrent statements on the same row can otherwise commit in either order,
+// so an earlier selection could overwrite a later one. The SQL guard in upsert (an older
+// last_used_at never replaces a newer live row) keeps the same ordering across processes.
+const writeChains = new Map<string, Promise<unknown>>();
+
+function serializeWrite<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = writeChains.get(key) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.catch(() => undefined);
+  writeChains.set(key, tail);
+  void tail.then(() => {
+    if (writeChains.get(key) === tail) writeChains.delete(key);
+  });
+  return run;
+}
+
 type AffinityRow = {
   connection_id: string;
   account_identity: string | null;
@@ -88,10 +105,13 @@ async function readRow(sessionKey: string, provider: string): Promise<AffinityRo
 }
 
 async function deleteAffinity(sessionKey: string, provider: string): Promise<void> {
-  await db().execute("DELETE FROM session_affinities WHERE provider = $1 AND session_hash = $2", [
-    provider,
-    sessionHash(sessionKey, provider),
-  ]);
+  const hash = sessionHash(sessionKey, provider);
+  await serializeWrite(`${provider}:${hash}`, () =>
+    db().execute("DELETE FROM session_affinities WHERE provider = $1 AND session_hash = $2", [
+      provider,
+      hash,
+    ])
+  );
 }
 
 /** Redis-only fallback provenance: the stored record as the JSON text `persist` wrote. */
@@ -167,25 +187,30 @@ export async function upsertSessionAccountAffinity(
   if (!sessionKey || !provider || !connectionId || normalizedTtlMs <= 0) return;
 
   const timestamp = isoFromMs(now);
-  await db().execute(
-    `INSERT INTO session_affinities
-       (provider, session_hash, connection_id, account_identity, created_at, last_used_at, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $5, $6)
-     ON CONFLICT (provider, session_hash) DO UPDATE SET
-       connection_id = EXCLUDED.connection_id,
-       account_identity = EXCLUDED.account_identity,
-       created_at = CASE WHEN session_affinities.expires_at > $5
-                         THEN session_affinities.created_at ELSE EXCLUDED.created_at END,
-       last_used_at = EXCLUDED.last_used_at,
-       expires_at = EXCLUDED.expires_at`,
-    [
-      provider,
-      sessionHash(sessionKey, provider),
-      connectionId,
-      accountIdentity && ACCOUNT_IDENTITY_PATTERN.test(accountIdentity) ? accountIdentity : null,
-      timestamp,
-      isoFromMs(now + normalizedTtlMs),
-    ]
+  const hash = sessionHash(sessionKey, provider);
+  await serializeWrite(`${provider}:${hash}`, () =>
+    db().execute(
+      `INSERT INTO session_affinities
+         (provider, session_hash, connection_id, account_identity, created_at, last_used_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $5, $6)
+       ON CONFLICT (provider, session_hash) DO UPDATE SET
+         connection_id = EXCLUDED.connection_id,
+         account_identity = EXCLUDED.account_identity,
+         created_at = CASE WHEN session_affinities.expires_at > $5
+                           THEN session_affinities.created_at ELSE EXCLUDED.created_at END,
+         last_used_at = EXCLUDED.last_used_at,
+         expires_at = EXCLUDED.expires_at
+       WHERE session_affinities.expires_at <= $5
+          OR session_affinities.last_used_at <= EXCLUDED.last_used_at`,
+      [
+        provider,
+        hash,
+        connectionId,
+        accountIdentity && ACCOUNT_IDENTITY_PATTERN.test(accountIdentity) ? accountIdentity : null,
+        timestamp,
+        isoFromMs(now + normalizedTtlMs),
+      ]
+    )
   );
 }
 
@@ -227,10 +252,13 @@ export async function touchSessionAccountAffinity(
   const normalizedTtlMs = normalizePositiveTtl(ttlMs);
   if (!sessionKey || !provider || normalizedTtlMs <= 0) return;
 
-  await db().execute(
-    `UPDATE session_affinities SET last_used_at = $3, expires_at = $4
-      WHERE provider = $1 AND session_hash = $2 AND expires_at > $3`,
-    [provider, sessionHash(sessionKey, provider), isoFromMs(now), isoFromMs(now + normalizedTtlMs)]
+  const hash = sessionHash(sessionKey, provider);
+  await serializeWrite(`${provider}:${hash}`, () =>
+    db().execute(
+      `UPDATE session_affinities SET last_used_at = $3, expires_at = $4
+        WHERE provider = $1 AND session_hash = $2 AND expires_at > $3`,
+      [provider, hash, isoFromMs(now), isoFromMs(now + normalizedTtlMs)]
+    )
   );
 }
 
@@ -264,13 +292,16 @@ export async function evictSessionAccountAffinityForConnection(
 ): Promise<boolean> {
   if (!sessionKey || !provider || !connectionId) return false;
 
-  const { changes } = await db().execute(
-    `DELETE FROM session_affinities
-      WHERE provider = $1 AND session_hash = $2
-        AND CASE WHEN account_identity IS NOT NULL AND $4::text IS NOT NULL
-                 THEN account_identity = $4::text
-                 ELSE connection_id = $3 END`,
-    [provider, sessionHash(sessionKey, provider), connectionId, accountIdentity || null]
+  const hash = sessionHash(sessionKey, provider);
+  const { changes } = await serializeWrite(`${provider}:${hash}`, () =>
+    db().execute(
+      `DELETE FROM session_affinities
+        WHERE provider = $1 AND session_hash = $2
+          AND CASE WHEN account_identity IS NOT NULL AND $4::text IS NOT NULL
+                   THEN account_identity = $4::text
+                   ELSE connection_id = $3 END`,
+      [provider, hash, connectionId, accountIdentity || null]
+    )
   );
   return changes > 0;
 }

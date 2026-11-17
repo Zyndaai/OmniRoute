@@ -14,6 +14,7 @@ process.env.API_KEY_SECRET = "test-api-key-secret-deepseek-tui";
 process.env.JWT_SECRET = "test-jwt-secret-deepseek-tui";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 
@@ -22,7 +23,8 @@ const { GET, POST, DELETE } =
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

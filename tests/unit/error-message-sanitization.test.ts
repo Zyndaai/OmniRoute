@@ -25,6 +25,7 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const mappingsRoute = await import("../../src/app/api/model-combo-mappings/route.ts");
 const mappingsIdRoute = await import("../../src/app/api/model-combo-mappings/[id]/route.ts");
 const syncTokens = await import("../../src/lib/sync/tokens.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 const read = (relPath: string) => fs.readFileSync(path.join(repoRoot, relPath), "utf8");
@@ -40,6 +41,7 @@ function makeRequest(url: string, options: { method?: string; body?: unknown } =
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -48,8 +50,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_PLUGINS_DIR === undefined) delete process.env.OMNIROUTE_PLUGINS_DIR;

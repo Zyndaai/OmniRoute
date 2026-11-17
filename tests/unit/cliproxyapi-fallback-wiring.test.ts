@@ -24,6 +24,7 @@ process.env.DATA_DIR = testDataDir;
 // Dynamic imports AFTER DATA_DIR is set so core.ts picks up the temp path.
 const coreDb = await import("../../src/lib/db/core.ts");
 const upstreamProxyDb = await import("../../src/lib/db/upstreamProxy.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ─── Executor imports (clearCliproxyapiUrlCache + resolveCliproxyapiBaseUrl) ──
 
@@ -48,15 +49,15 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-afterEach(() => {
-  // Reset DB singleton so each test starts from a clean schema state.
-  coreDb.resetDbInstance();
+afterEach(async () => {
+  // Truncate every table so each test starts from a clean, seeded state.
+  await resetTestDb();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(testDataDir, { recursive: true });
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   if (fs.existsSync(testDataDir)) {
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

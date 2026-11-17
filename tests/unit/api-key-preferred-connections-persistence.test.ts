@@ -10,17 +10,19 @@ process.env.API_KEY_SECRET = "test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(reset);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

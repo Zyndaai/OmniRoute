@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
         ? null
         : await readCachedHistory(trendHours, historyMinComputeMs);
 
-    const cacheStats = getCacheStats();
+    const cacheStats = await getCacheStats();
     // Promise.all allows concurrent execution; if one rejects, others still resolve,
     // which is safe for this read-only stats endpoint.
     const [idempotencyStats, promptCacheMetrics, trend, settings] = await Promise.all([

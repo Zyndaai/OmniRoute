@@ -20,6 +20,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../../src/lib/db/core.ts");
 const route = await import("../../../../src/app/api/settings/compression/route.ts");
+const { resetTestDb } = await import("../../../helpers/postgres.ts");
 
 describe("Compression Settings API Schema Validation", () => {
   const compressionModeValues = [
@@ -136,8 +137,9 @@ function makeRequest(method: string, body?: unknown): Request {
 }
 
 describe("settings/compression route — engines, activeComboId, cavemanOutputMode", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     core.resetDbInstance();
+    await resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   });

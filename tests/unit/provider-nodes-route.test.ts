@@ -13,6 +13,7 @@ const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.
 const providerNodesIdRoute = await import("../../src/app/api/provider-nodes/[id]/route.ts");
 const { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CLAUDE_CODE_COMPATIBLE_PREFIX } =
   await import("../../src/shared/constants/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalAllowPrivateProviderUrls = process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS;
 const originalAllowLocalProviderUrls = process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS;
@@ -30,6 +31,7 @@ async function resetStorage() {
     process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS = originalAllowLocalProviderUrls;
   }
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

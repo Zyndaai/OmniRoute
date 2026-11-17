@@ -27,6 +27,7 @@ process.env.QUOTA_STORE_REDIS_URL = "redis://secret-host:9999/0";
 const core = await import("../../src/lib/db/core.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const { resetQuotaStoreSingleton } = await import("../../src/lib/quota/QuotaStore.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import all routes
 const poolsRoute = await import("../../src/app/api/quota/pools/route.ts");
@@ -37,11 +38,12 @@ const planIdRoute = await import("../../src/app/api/quota/plans/[connectionId]/r
 const previewRoute = await import("../../src/app/api/quota/preview/route.ts");
 const settingsRoute = await import("../../src/app/api/settings/quota-store/route.ts");
 
-function resetDb() {
+async function resetDb() {
   core.resetDbInstance();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 // Helper to assert no stack trace / path leak in a response body text
@@ -77,13 +79,13 @@ async function assertNoStackTraceAndNoSecretUrl(res: Response, label: string) {
   assertNoSecretUrlText(text, label);
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   resetQuotaStoreSingleton();
   delete process.env.QUOTA_STORE_REDIS_URL;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

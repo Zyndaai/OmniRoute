@@ -31,6 +31,7 @@ const coreDb = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 rateLimiter.setRateLimiterTestMode(true);
 
@@ -41,6 +42,7 @@ rateLimiter.setRateLimiterTestMode(true);
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
   await coreDb.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

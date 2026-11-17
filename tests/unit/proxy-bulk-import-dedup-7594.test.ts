@@ -15,9 +15,11 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

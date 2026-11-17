@@ -32,14 +32,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const authError = await requireManagementAuth(request, { alwaysRequireAuth: true });
   if (authError) return authError;
   const { id } = await params;
-  const token = getRelayToken(id);
+  const token = await getRelayToken(id);
   if (!token) return NextResponse.json({ error: "Token not found" }, { status: 404 });
 
   // Get usage stats
   const now = Math.floor(Date.now() / 1000);
-  const lastHour = getRelayUsage(id, now - 3600);
-  const lastDay = getRelayUsage(id, now - 86400);
-  const logs = getRelayLogs(id, 20);
+  const lastHour = await getRelayUsage(id, now - 3600);
+  const lastDay = await getRelayUsage(id, now - 86400);
+  const logs = await getRelayLogs(id, 20);
 
   return NextResponse.json({
     ...token,
@@ -65,12 +65,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const body = validation.data;
 
   if (body.enabled !== undefined) {
-    const token = toggleRelayToken(id, body.enabled);
+    const token = await toggleRelayToken(id, body.enabled);
     if (!token) return NextResponse.json({ error: "Token not found" }, { status: 404 });
     return NextResponse.json(token);
   }
 
-  const token = updateRelayToken(id, {
+  const token = await updateRelayToken(id, {
     name: body.name,
     description: body.description,
     comboId: body.comboId,
@@ -89,6 +89,6 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const authError = await requireManagementAuth(request, { alwaysRequireAuth: true });
   if (authError) return authError;
   const { id } = await params;
-  deleteRelayToken(id);
+  await deleteRelayToken(id);
   return NextResponse.json({ success: true });
 }

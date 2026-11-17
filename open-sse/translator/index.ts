@@ -354,7 +354,7 @@ const OPENAI_INCOMPATIBLE_ECHO_FIELDS = [
  *
  * Keys are built exactly as the translators build them (model-family scoped namespace + tool call
  * id), and the ids are collected from the three shapes a tool call arrives in: Claude `tool_use`
- * blocks, OpenAI `tool_calls[]` and Responses `function_call` items.
+ * blocks, OpenAI `tool_calls[]` and Responses `function_call` / `custom_tool_call` items.
  */
 export async function prefetchThoughtSignatures(
   targetFormat: string,
@@ -363,7 +363,9 @@ export async function prefetchThoughtSignatures(
   signatureNamespace: string | null | undefined
 ): Promise<Map<unknown, string | null> | undefined> {
   if (targetFormat !== FORMATS.GEMINI && targetFormat !== FORMATS.ANTIGRAVITY) return undefined;
-  if (signatureNamespace == null || !body || typeof body !== "object") return undefined;
+  // A null/undefined namespace is valid: the translators then key by the bare tool call id
+  // (`buildGeminiThoughtSignatureKey` returns the id), exactly as the stream writer stored it.
+  if (!body || typeof body !== "object") return undefined;
   const record = body as Record<string, unknown>;
   const ids = new Set<string>();
   const addId = (value: unknown) => {
@@ -382,7 +384,9 @@ export async function prefetchThoughtSignatures(
   }
   for (const item of Array.isArray(record.input) ? record.input : []) {
     const entry = item as Record<string, unknown> | null;
-    if (entry?.type === "function_call") addId(entry.call_id ?? entry.id);
+    if (entry?.type === "function_call" || entry?.type === "custom_tool_call") {
+      addId(entry.call_id ?? entry.id);
+    }
   }
   if (ids.size === 0) return undefined;
 
@@ -715,7 +719,9 @@ export async function translateRequest(
             hasThoughtSignatures
               ? {
                   ...(credentials && typeof credentials === "object" ? credentials : {}),
-                  ...(hasThoughtSignatures ? { _thoughtSignatures: options.thoughtSignatures } : {}),
+                  ...(hasThoughtSignatures
+                    ? { _thoughtSignatures: options.thoughtSignatures }
+                    : {}),
                   ...(hasNs
                     ? {
                         _signatureNamespace: scopeGeminiThoughtSignatureNamespace(

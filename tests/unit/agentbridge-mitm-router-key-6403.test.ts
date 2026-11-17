@@ -27,23 +27,26 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-secret-for-agentbridge-6403";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { createApiKey } = await import("../../src/lib/db/apiKeys.ts");
 const { resolveRouterApiKey } =
   await import("../../src/app/api/tools/agent-bridge/server/route.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
   delete process.env.ROUTER_API_KEY;
 });
 
 test.after(async () => {
   delete process.env.ROUTER_API_KEY;
+  await core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
 });
 

@@ -12,9 +12,10 @@ const TEST_PROVIDER = "__test_provider_9232__";
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR))
@@ -28,13 +29,14 @@ async function resetStorage() {
     }
   }
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

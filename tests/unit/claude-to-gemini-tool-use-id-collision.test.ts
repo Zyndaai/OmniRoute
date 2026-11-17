@@ -14,13 +14,18 @@ import assert from "node:assert/strict";
 
 const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
+const { prefetchThoughtSignatures, translateRequest } =
+  await import("../../open-sse/translator/index.ts");
 const {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
   clearGeminiThoughtSignatures,
   setGeminiThoughtSignatureMode,
 } = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+
+const MODEL = "gemini-3.5-flash";
 
 type Part = {
   text?: string;
@@ -30,14 +35,21 @@ type Part = {
 };
 type TranslatedBody = { contents: Array<{ role: string; parts: Part[] }> };
 
-test.beforeEach(() => {
-  clearGeminiThoughtSignatures();
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatures();
 });
 
-test.after(() => {
-  clearGeminiThoughtSignatures();
+test.after(async () => {
+  await clearGeminiThoughtSignatures();
   resetDbInstance();
 });
+
+// The stream writer stores signatures under the model-family-scoped namespace, so the
+// fixtures do the same; the request side reads them back through the same scoping.
+async function storeSignature(ns: string, toolCallId: string, signature: string) {
+  const scoped = scopeGeminiThoughtSignatureNamespace(ns, MODEL);
+  await storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(scoped, toolCallId), signature);
+}
 
 function turnsFor(calls: Array<{ id: string; name: string; result: string; sig?: string }>) {
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: "start" }];
@@ -62,10 +74,22 @@ function turnsFor(calls: Array<{ id: string; name: string; result: string; sig?:
   return { messages };
 }
 
-function translate(body: Record<string, unknown>, ns: string): TranslatedBody {
-  return claudeToGeminiRequest("gemini-3.5-flash", body, false, {
+async function translate(body: Record<string, unknown>, ns: string): Promise<TranslatedBody> {
+  // Same read-ahead chatCore performs before translating a request to Gemini.
+  const thoughtSignatures = await prefetchThoughtSignatures("gemini", MODEL, body, ns);
+  return (await translateRequest("claude", "gemini", MODEL, body, false, null, null, null, {
+    signatureNamespace: ns,
+    thoughtSignatures,
+  })) as TranslatedBody;
+}
+
+// Direct translator call, for the orphan case only: translateRequest strips orphaned
+// tool_result blocks before a Gemini target (open-sse/translator/index.ts), so the
+// context-text fallback is reachable only by calling the request translator itself.
+async function translateDirect(body: Record<string, unknown>, ns: string): Promise<TranslatedBody> {
+  return (await claudeToGeminiRequest(MODEL, body, false, {
     _signatureNamespace: ns,
-  }) as TranslatedBody;
+  })) as TranslatedBody;
 }
 
 function allParts(result: TranslatedBody): Part[] {
@@ -84,11 +108,11 @@ function responseNames(result: TranslatedBody): string[] {
     .map((p) => p.functionResponse!.name);
 }
 
-test("a tool_use id reused across turns pairs each functionResponse with its own functionCall", () => {
+test("a tool_use id reused across turns pairs each functionResponse with its own functionCall", async () => {
   const ns = "conn-4397-reuse";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "toolu_same"), "SIG_4397");
+  await storeSignature(ns, "toolu_same", "SIG_4397");
 
-  const result = translate(
+  const result = await translate(
     turnsFor([
       { id: "toolu_same", name: "edit", result: "edited" },
       { id: "toolu_same", name: "bash", result: "ran" },
@@ -103,12 +127,12 @@ test("a tool_use id reused across turns pairs each functionResponse with its own
   assert.equal(responses[1].functionResponse!.response.result, "ran");
 });
 
-test("distinct tool_use ids keep their own names (guard)", () => {
+test("distinct tool_use ids keep their own names (guard)", async () => {
   const ns = "conn-4397-distinct";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "toolu_a"), "SIG_A");
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "toolu_b"), "SIG_B");
+  await storeSignature(ns, "toolu_a", "SIG_A");
+  await storeSignature(ns, "toolu_b", "SIG_B");
 
-  const result = translate(
+  const result = await translate(
     turnsFor([
       { id: "toolu_a", name: "edit", result: "edited" },
       { id: "toolu_b", name: "bash", result: "ran" },
@@ -120,11 +144,11 @@ test("distinct tool_use ids keep their own names (guard)", () => {
   assert.deepEqual(responseNames(result), ["edit", "bash"]);
 });
 
-test("three reuses of the same id are paired in arrival order", () => {
+test("three reuses of the same id are paired in arrival order", async () => {
   const ns = "conn-4397-triple";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "toolu_same"), "SIG_4397");
+  await storeSignature(ns, "toolu_same", "SIG_4397");
 
-  const result = translate(
+  const result = await translate(
     turnsFor([
       { id: "toolu_same", name: "edit", result: "r1" },
       { id: "toolu_same", name: "bash", result: "r2" },
@@ -137,8 +161,8 @@ test("three reuses of the same id are paired in arrival order", () => {
   assert.deepEqual(responseNames(result), ["edit", "bash", "read"]);
 });
 
-test("signature-less history: context text names the tool of its own occurrence", () => {
-  const result = translate(
+test("signature-less history: context text names the tool of its own occurrence", async () => {
+  const result = await translate(
     turnsFor([
       { id: "toolu_same", name: "edit", result: "edited" },
       { id: "toolu_same", name: "bash", result: "ran" },
@@ -159,13 +183,13 @@ test("signature-less history: context text names the tool of its own occurrence"
   assert.equal(responseNames(result).length, 0);
 });
 
-test("per-occurrence client signatures stay on their own call, and native/text is decided per occurrence", () => {
+test("per-occurrence client signatures stay on their own call, and native/text is decided per occurrence", async () => {
   // bypass mode honours a valid client-supplied thoughtSignature on each tool_use block.
   setGeminiThoughtSignatureMode("bypass");
   const sigEdit = `R${Buffer.from([0x12, 0x01, 0x41]).toString("base64")}`;
   const sigBash = `R${Buffer.from([0x12, 0x01, 0x42]).toString("base64")}`;
 
-  const signedBoth = translate(
+  const signedBoth = await translate(
     turnsFor([
       { id: "toolu_same", name: "edit", result: "edited", sig: sigEdit },
       { id: "toolu_same", name: "bash", result: "ran", sig: sigBash },
@@ -184,7 +208,7 @@ test("per-occurrence client signatures stay on their own call, and native/text i
 
   // Earlier occurrence unsigned, later one signed: the earlier pair must stay context
   // text — a native functionResponse there would answer a functionCall that was never sent.
-  const mixed = translate(
+  const mixed = await translate(
     turnsFor([
       { id: "toolu_same", name: "edit", result: "edited" },
       { id: "toolu_same", name: "bash", result: "ran", sig: sigBash },
@@ -202,8 +226,8 @@ test("per-occurrence client signatures stay on their own call, and native/text i
   assert.ok(mixedContext[0].includes('source="edit"'), mixedContext[0]);
 });
 
-test("a tool_result whose tool_use is absent still falls back to context text", () => {
-  const result = translate(
+test("a tool_result whose tool_use is absent still falls back to context text", async () => {
+  const result = await translateDirect(
     {
       messages: [
         { role: "user", content: "start" },

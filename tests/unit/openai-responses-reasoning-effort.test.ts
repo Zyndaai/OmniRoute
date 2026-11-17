@@ -62,7 +62,7 @@ test("Responses -> Chat preserves reasoning.effort via the helper wrapper", () =
   assert.equal(out.reasoning, undefined);
 });
 
-test("Responses -> Kiro preserves literal Max for GPT-5.6 models", () => {
+test("Responses -> Kiro preserves literal Max for GPT-5.6 models", async () => {
   for (const model of ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]) {
     const converted = asRecord(
       convertResponsesApiFormat(
@@ -78,7 +78,7 @@ test("Responses -> Kiro preserves literal Max for GPT-5.6 models", () => {
 
     assert.equal(converted.reasoning_effort, "max");
 
-    const payload = buildKiroPayload(model, converted, false, null);
+    const payload = await buildKiroPayload(model, converted, false, null);
     assert.equal(payload.additionalModelRequestFields?.reasoning?.effort, "max");
     assert.equal(payload.additionalModelRequestFields?.output_config, undefined);
     assert.equal(payload.additionalModelRequestFields?.thinking, undefined);

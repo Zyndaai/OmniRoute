@@ -14,6 +14,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../../../src/lib/db/core.ts");
 const settingsDb = await import("../../../../src/lib/db/settings.ts");
 const importRoute = await import("../../../../src/app/api/context/rtk/import/route.ts");
+const { resetTestDb } = await import("../../../helpers/postgres.ts");
 
 const SAMPLE = `schema_version = 1
 [filters.route-test]
@@ -29,6 +30,7 @@ expected = "kept"
 
 async function reset() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.INITIAL_PASSWORD;

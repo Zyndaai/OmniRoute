@@ -27,6 +27,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.REQUIRE_API_KEY = "false";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import route handlers
 const {
@@ -83,11 +84,12 @@ async function resolveParams(id: string): Promise<{ params: Promise<{ id: string
 
 test.beforeEach(async () => {
   // Reset DB between tests for isolation
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

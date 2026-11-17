@@ -11,22 +11,24 @@ process.env.DATA_DIR = tmpDir;
 const core = await import("../../src/lib/db/core.ts");
 const { setInterceptionRules, resolveInterceptFetch } =
   await import("../../src/lib/db/interceptionRules.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // #7339 — resolveInterceptFetch, a structural twin of resolveInterceptSearch
 // (tests/unit/interception-rules.test.ts), covering Phase 3 of #3384.
 describe("db/interceptionRules — resolveInterceptFetch precedence (#7339)", () => {
-  function resetDb() {
-    core.resetDbInstance();
+  async function resetDb() {
+    await core.resetDbInstance();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(tmpDir, { recursive: true });
+    await resetTestDb();
   }
 
-  beforeEach(() => {
-    resetDb();
+  beforeEach(async () => {
+    await resetDb();
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 

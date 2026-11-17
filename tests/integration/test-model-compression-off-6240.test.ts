@@ -29,6 +29,7 @@ const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuit
 const { OUTPUT_STYLE_MARKER } =
   await import("../../open-sse/services/compression/outputStyles/apply.ts");
 const { waitForCallLogSaves, closeCallLogSaves } = await import("../../src/lib/usage/callLogs.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -39,9 +40,10 @@ async function resetStorage() {
   await new Promise((resolve) => setTimeout(resolve, 20));
   // The previous test's call log is saved in the background; it must land before the reset.
   assert.ok(await waitForCallLogSaves(30_000), "the previous test's call-log saves should finish");
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {

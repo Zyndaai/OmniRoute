@@ -56,6 +56,7 @@ import {
   getCachedClaudeQuotaScopeDecision as readClaudeScope,
   getQuotaCache,
   getQuotaWindowStatus,
+  ensureQuotaCacheHydrated,
   hydrateCodexQuotaCacheForRequest,
   isQuotaExhaustedForRequest,
   getClaudeQuotaPreflightResetAt,
@@ -868,6 +869,10 @@ export async function getProviderCredentials(
     log.warn("AUTH", "Retired provider rejected before credential selection");
     return null;
   }
+
+  // The synchronous quota checks below answer from memory: never let them see a cold cache.
+  // Resolved after the first call (and at boot), so this costs no DB read per request.
+  await ensureQuotaCacheHydrated();
 
   const selectionLock = options._leaseRetryWithLockHeld
     ? null
@@ -2419,7 +2424,7 @@ export async function markAccountUnavailable(
       isStreamContentStall(errorText) &&
       !resolveResilienceSettings(await getCachedSettings()).streamStallCooldown.enabled
     ) {
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: "server_error",
         lastError: `Stream stalled on ${model ?? "request"} (no account cooldown)`,
         lastErrorAt: new Date().toISOString(),
@@ -2737,7 +2742,7 @@ export async function markAccountUnavailable(
         effectiveProviderProfile,
         { exactCooldownMs: ruleCooldownMs, maxCooldownMs: mlSettings.maxCooldownMs }
       );
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: "model_capacity",
         lastError: `Model ${model} model_capacity`,
         lastErrorAt: new Date().toISOString(),
@@ -2778,7 +2783,7 @@ export async function markAccountUnavailable(
         options.streamOutputEmitted === true &&
         !postOutputFailureReachesLockout(provider, connectionId, model);
       if (isRequestScopedServerFailure(status, errorText, exemptAfterOutput)) {
-        updateProviderConnection(connectionId, {
+        await updateProviderConnection(connectionId, {
           lastErrorType: reason,
           lastError: `Model ${model} ${reason}`,
           lastErrorAt: new Date().toISOString(),
@@ -2836,7 +2841,7 @@ export async function markAccountUnavailable(
         }
       );
       // Update last error for observability (without changing terminal status)
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: reason,
         lastError: `Model ${model} ${reason}`,
         lastErrorAt: new Date().toISOString(),
@@ -2920,7 +2925,7 @@ export async function markAccountUnavailable(
         effectiveProviderProfile,
         { maxCooldownMs: mlSettings.maxCooldownMs }
       );
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: "forbidden",
         lastError: `Mode ${model} forbidden for this Grok account`,
         lastErrorAt: new Date().toISOString(),
@@ -3037,7 +3042,7 @@ export async function markAccountUnavailable(
           maxCooldownMs: mlSettings.maxCooldownMs,
         }
       );
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: lockoutReason,
         lastError:
           status === 402
@@ -3073,7 +3078,7 @@ export async function markAccountUnavailable(
         effectiveProviderProfile,
         { maxCooldownMs: mlSettings.maxCooldownMs }
       );
-      updateProviderConnection(connectionId, {
+      await updateProviderConnection(connectionId, {
         lastErrorType: "not_found",
         lastError: `Model ${model} not_found`,
         lastErrorAt: new Date().toISOString(),

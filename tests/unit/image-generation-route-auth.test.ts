@@ -25,6 +25,7 @@ const { createPlaygroundImageStreamResponse } =
 const providerImageRoute =
   await import("../../src/app/api/v1/providers/[provider]/images/generations/route.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -44,9 +45,10 @@ async function withLongJobs<T>(on: boolean, fn: () => Promise<T>): Promise<T> {
 async function resetStorage() {
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -121,10 +123,10 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

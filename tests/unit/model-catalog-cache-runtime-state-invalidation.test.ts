@@ -29,6 +29,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function request() {
   return new Request("http://localhost/v1/models");
@@ -83,12 +84,13 @@ async function assertCatalogStillWarm() {
   );
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
+  await resetTestDb();
   catalogCache.__resetCatalogBuilderRunsForTest();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -124,9 +126,11 @@ test("a cooldown write refreshes list, raw, and by-ID connection caches", async 
   );
   const byIdRow = await readCache.getCachedProviderConnectionById(connectionId);
 
-  assert.equal(Number(listRow.rateLimitedUntil), rateLimitedUntil);
-  assert.equal(Number(rawRow.rateLimitedUntil), rateLimitedUntil);
-  assert.equal(Number(byIdRow?.rateLimitedUntil), rateLimitedUntil);
+  // PostgreSQL timestamps come back as ISO strings.
+  const toMs = (value: unknown) => new Date(value as string | number).getTime();
+  assert.equal(toMs(listRow.rateLimitedUntil), rateLimitedUntil);
+  assert.equal(toMs(rawRow.rateLimitedUntil), rateLimitedUntil);
+  assert.equal(toMs(byIdRow?.rateLimitedUntil), rateLimitedUntil);
   await assertCatalogStillWarm();
 });
 

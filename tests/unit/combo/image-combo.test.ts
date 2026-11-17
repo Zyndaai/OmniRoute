@@ -22,6 +22,7 @@ process.env.JWT_SECRET = "test-jwt-secret-for-image-combo-tests";
 fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
 const core = await import("@/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { createCombo } = await import("@/lib/db/combos");
 const { createProviderConnection } = await import("@/lib/db/providers");
 const { executeImageCombo } = await import("@omniroute/open-sse/services/imageCombo");
@@ -63,6 +64,7 @@ async function cleanupTestDataDir() {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       core.resetDbInstance();
+      await resetTestDb();
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       return;
     } catch (error: unknown) {

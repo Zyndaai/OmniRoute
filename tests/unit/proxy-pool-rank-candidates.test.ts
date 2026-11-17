@@ -18,23 +18,24 @@ const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const rotation = await import("../../src/lib/db/proxies/rotation.ts");
 const memory = await import("../../open-sse/utils/proxyRefusalMemory.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
+async function resetStorage() {
   memory.__resetProxyRefusalMemoryForTesting();
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_SKIP_RECENTLY_FAILED;
   memory.__resetProxyRefusalMemoryForTesting();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

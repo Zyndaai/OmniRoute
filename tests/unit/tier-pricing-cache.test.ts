@@ -59,6 +59,7 @@ test("sync tier serves a stored price on a fresh process without a prior write",
   const worker = `
     process.env.DATA_DIR = ${JSON.stringify(TEST_DATA_DIR)};
     const tr = await import(${JSON.stringify(resolverUrl)});
+    await tr.ensureTierPricingLoaded(); // the boot step (src/instrumentation-node.ts)
     const r = tr.classifyTier("openai", "gpt-9-coldstart");
     if (r.tier !== "free") {
       console.error("COLD_START_TIER=" + r.tier);

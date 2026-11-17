@@ -11,9 +11,10 @@ process.env.REQUIRE_API_KEY = "false";
 
 const core = await import("../../src/lib/db/core.ts");
 const route = await import("../../src/app/api/providers/[id]/cc-alias/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(tmpDir, { recursive: true });
 }
@@ -35,12 +36,12 @@ function getRequest(): Request {
 }
 
 describe("PUT/GET /api/providers/[id]/cc-alias", () => {
-  beforeEach(() => {
-    resetDb();
+  beforeEach(async () => {
+    await resetDb();
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     delete process.env.REQUIRE_API_KEY;
   });

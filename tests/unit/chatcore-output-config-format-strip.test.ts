@@ -11,6 +11,7 @@ const core = await import("../../src/lib/db/core.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 const { stripOutputConfigFormatForCompat, FIRST_PARTY_ANTHROPIC_PROVIDERS } =
   await import("../../open-sse/handlers/chatCore/outputConfigFormatStrip.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type Body = Record<string, unknown>;
 
@@ -27,14 +28,14 @@ async function flushAsyncSideEffects() {
 test.afterEach(async () => {
   globalThis.fetch = originalFetch;
   await flushAsyncSideEffects();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

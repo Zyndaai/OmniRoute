@@ -17,6 +17,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "ag-project-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const {
   clearAntigravityProjectPersistenceInFlight,
@@ -27,9 +28,10 @@ const {
 } = await import("../../open-sse/services/antigravityProjectPersistence.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {

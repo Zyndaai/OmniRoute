@@ -17,6 +17,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const route = await import("../../src/app/api/oauth/[provider]/[action]/route.ts");
 const { shouldMarkRefreshCapableExpired } = await import("../../src/lib/tokenHealthCheckExpiry.ts");
 
@@ -59,19 +60,18 @@ async function claudeRows() {
   return providersDb.getProviderConnections({ provider: "claude" });
 }
 
-test.before(async () => {
+// Set per case: resetTestDb() truncates every table, including the settings row.
+test.beforeEach(async () => {
   await settingsDb.updateSettings({ requireLogin: false });
 });
 
 test.afterEach(async () => {
   globalThis.fetch = originalFetch;
-  for (const row of await claudeRows()) {
-    await providersDb.deleteProviderConnection(row.id);
-  }
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

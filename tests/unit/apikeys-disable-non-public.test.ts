@@ -10,9 +10,10 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "disable-non-public-t
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
 
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -39,7 +40,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

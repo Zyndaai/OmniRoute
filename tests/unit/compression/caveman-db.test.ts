@@ -12,12 +12,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../../src/lib/db/core.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../../src/lib/db/compression.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 describe("compression DB module", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+    await resetTestDb();
   });
 
   afterEach(() => {

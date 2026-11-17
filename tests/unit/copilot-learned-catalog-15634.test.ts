@@ -9,6 +9,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-copilot-catalog
 process.env.DATA_DIR = dataDir;
 process.env.API_KEY_SECRET = "copilot-catalog-synthetic-secret";
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providers = await import("../../src/lib/db/providers.ts");
 const models = await import("../../src/lib/db/models.ts");
 const settings = await import("../../src/lib/db/settings.ts");
@@ -85,7 +86,7 @@ async function chat(model: string) {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
   locks.clearAllModelLockouts();
@@ -172,9 +173,9 @@ test.afterEach(async () => {
   assert.equal(await callLogs.waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
   globalThis.fetch = originalFetch;
 });
-test.after(() => {
+test.after(async () => {
   locks.clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

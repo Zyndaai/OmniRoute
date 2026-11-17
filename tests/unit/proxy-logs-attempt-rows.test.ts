@@ -11,7 +11,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-attempt-rows-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { getTestBackend } = await import("../helpers/postgres.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const proxyLogsDb = await import("../../src/lib/db/proxyLogs.ts");
@@ -52,6 +52,7 @@ function logArgs(proxyInfo: unknown, status: number, correlationId: string | nul
 
 test.beforeEach(async () => {
   await proxyLogger.clearProxyLogs();
+  await resetTestDb();
 });
 
 test.after(async () => {

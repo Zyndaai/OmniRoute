@@ -24,8 +24,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const manager = await import("../../src/mitm/manager.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -51,7 +53,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

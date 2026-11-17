@@ -28,6 +28,7 @@ const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 const { resetPayloadRulesConfigForTests } = await import("../../open-sse/services/payloadRules.ts");
 const { CLAUDE_CODE_COMPATIBLE_REDACT_THINKING_BETA, CONTEXT_1M_BETA_HEADER } =
   await import("../../open-sse/services/claudeCodeCompatible.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -70,6 +71,7 @@ async function resetStorage() {
   // waitFor(getLatestCallLog()) (#12780).
   await waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS);
   core.resetDbInstance();
+  await resetTestDb();
   // A full reset must also drop the settings read-cache. Otherwise the cached
   // value (e.g. call_log_pipeline_enabled=true seeded earlier) survives the DB
   // wipe and silently masks the fact that the fresh DB has the default. In CI

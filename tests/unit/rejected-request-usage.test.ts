@@ -22,20 +22,22 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-rejected-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const { recordRejectedRequestUsage, summarizeComboAttemptedModels, resolveRejectedComboProvider } =
   await import("../../src/sse/handlers/rejectedRequestUsage.ts");
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

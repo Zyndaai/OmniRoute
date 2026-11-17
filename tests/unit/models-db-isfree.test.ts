@@ -16,15 +16,16 @@ type CustomRow = { id: string; isFree?: boolean };
 describe("custom isFree tri-state (DB)", () => {
   let dir: string;
   let prevDataDir: string | undefined;
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "omni-isfree-"));
     prevDataDir = process.env.DATA_DIR;
     process.env.DATA_DIR = dir;
-    // force DB to re-create in this DATA_DIR
-    resetDbInstance();
+    // fresh database for each case: truncates every table and restores the seed rows
+    const { resetTestDb } = await import("../helpers/postgres.ts");
+    await resetTestDb();
   });
-  afterEach(() => {
-    resetDbInstance();
+  afterEach(async () => {
+    await resetDbInstance();
     if (prevDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = prevDataDir;
     try {

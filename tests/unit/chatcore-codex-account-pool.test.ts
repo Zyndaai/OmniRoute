@@ -12,6 +12,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -61,7 +62,7 @@ function buildResponsesResponse(text = "ok") {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -135,6 +136,7 @@ test.after(async () => {
   globalThis.fetch = originalFetch;
   await waitForAsyncSideEffects();
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

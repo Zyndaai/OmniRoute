@@ -147,9 +147,19 @@ for (const mutation of ["touch", "upsert"] as const) {
         ? s.touch(key, "codex", redis.now + 1, 60_000)
         : s.upsert(key, "codex", "failed-A", redis.now + 1, 60_000);
     await redis.applied.promise;
+    // A stale outage-era shadow for the failing account: eviction must remove it.
+    await local.upsert(key, "codex", "failed-A", redis.now, 60_000);
     const eviction = s.evict(key, "codex", "failed-A");
-    // evict's synchronous SQLite pre-clear occurs while the earlier EVAL reply is pending.
-    assert.equal(local.get(key, "codex", 60_000, redis.now + 2), null);
+    // evict's local pre-clear (async PostgreSQL) runs while the earlier EVAL reply is pending.
+    // Poll: the reply stays held until release.resolve() below, so a null here is the
+    // pre-clear's doing, not the earlier mutation's reply.
+    let preCleared = (await local.get(key, "codex", 60_000, redis.now + 2)) === null;
+    for (let i = 0; !preCleared && i < 200; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      preCleared = (await local.get(key, "codex", 60_000, redis.now + 2)) === null;
+    }
+    assert.equal(preCleared, true, "eviction clears the local shadow before the held reply lands");
+    assert.equal(redis.outstandingReply, true, "the earlier EVAL reply is still pending");
     await Promise.resolve();
     await Promise.resolve();
     redis.release.resolve();

@@ -20,6 +20,7 @@ process.env.INITIAL_PASSWORD = "test-initial-password";
 // tests declared before the first top-level await in the module. The fixture
 // above also has to run first so DATA_DIR is isolated before the DB loads.
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const runtime = await import("../../../src/lib/config/runtimeSettings.ts");
 const route = await import("../../../src/app/api/settings/cli-versions/route.ts");
@@ -29,6 +30,7 @@ const claude = await import("../../../src/shared/constants/claudeCodeClient.ts")
 const ROUTE_URL = "http://localhost/api/settings/cli-versions";
 
 test.beforeEach(async () => {
+  await resetTestDb();
   await fixture.resetStorage();
   cliVersions.setCliVersionOverrides({});
   // Hermetic: a developer shell exporting these would otherwise change what
@@ -37,8 +39,8 @@ test.beforeEach(async () => {
   delete process.env.CODEX_CLIENT_VERSION;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fixture.cleanup();
 });
 

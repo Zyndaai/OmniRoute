@@ -18,6 +18,7 @@ const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const { recordQuotaParkedSkip, recordGateRejection, quotaParkedSkipStatus } =
   await import("../../src/sse/handlers/quotaParkedSkipUsage.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const PARKED = {
   allRateLimited: true,
@@ -53,16 +54,16 @@ async function waitForLogs(provider: string, expectAtLeast: number): Promise<Log
   return rows;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
 });
 
-test.after(() => {
+test.after(async () => {
   usageHistory.clearPendingRequests();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

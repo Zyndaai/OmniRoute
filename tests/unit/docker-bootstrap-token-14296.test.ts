@@ -24,12 +24,14 @@ const apiAuth = await import("../../src/shared/utils/apiAuth.ts");
 const { PEER_IP_HEADER, VIA_PROXY_HEADER, BOOTSTRAP_TOKEN_HEADER } =
   await import("../../src/server/authz/headers.ts");
 const bootstrapToken = await import("../../src/lib/auth/bootstrapToken.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const TEST_PEER_STAMP_TOKEN = "docker-token-test-peer-stamp-token";
 const DOCKER_GATEWAY_PEER = "172.17.0.1";
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.INITIAL_PASSWORD;
@@ -74,8 +76,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.DATA_DIR;
   delete process.env.API_KEY_SECRET;

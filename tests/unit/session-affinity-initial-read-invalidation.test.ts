@@ -33,13 +33,15 @@ for (const op of ["upsert", "touch", "delete"] as const) {
   test(`R1: ${op} clears local on the initial read before the next command`, async () => {
     for (const raw of [record, null, ""] as const) {
       const key = `initial-${op}-${raw === record ? "record" : raw === null ? "missing" : "empty"}`;
-      local.upsert(key, provider, "stale-A", now, ttl, "a".repeat(64));
+      await local.upsert(key, provider, "stale-A", now, ttl, "a".repeat(64));
       let cleared = false;
       let rowAtSecondCommand: string | null | undefined;
       const fallback = {
         ...local,
-        delete(sessionKey: string, storeProvider: string) {
-          local.delete(sessionKey, storeProvider);
+        // The clear is awaited by the store before it sends the next command, so `cleared`
+        // flips only once the row is really gone.
+        async delete(sessionKey: string, storeProvider: string) {
+          await local.delete(sessionKey, storeProvider);
           cleared = true;
         },
       };
@@ -53,7 +55,7 @@ for (const op of ["upsert", "touch", "delete"] as const) {
         },
         async eval(_script: string, _n: number, _key: string, expected?: string) {
           if (expected === undefined) return raw === "" ? [] : [raw, raw === null ? -2 : ttl];
-          rowAtSecondCommand = local.getSerialized(key, provider);
+          rowAtSecondCommand = await local.getSerialized(key, provider);
           throw new Error("synthetic second-command failure");
         },
       };

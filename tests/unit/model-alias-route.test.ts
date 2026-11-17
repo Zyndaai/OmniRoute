@@ -17,9 +17,11 @@ const localDb = { updateSettings };
 const route = await import("../../src/app/api/models/alias/route.ts");
 const catalogRoute = await import("../../src/app/api/models/catalog/route.ts");
 const v1Catalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

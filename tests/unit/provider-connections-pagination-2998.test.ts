@@ -14,9 +14,10 @@ process.env.INITIAL_PASSWORD = "admin-secret";
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -32,8 +33,8 @@ async function createConnection(provider: string, name: string) {
 
 test.beforeEach(resetDb);
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

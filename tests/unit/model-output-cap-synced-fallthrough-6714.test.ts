@@ -37,6 +37,7 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
 const { PROVIDER_MODELS } = await import("../../open-sse/config/providerModels.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Pick a real registry model that has a known, positive maxOutputTokens so the
 // test proves the fallthrough resolves an ACTUAL registry cap, not a fixture.
@@ -77,6 +78,7 @@ function buildCapability(overrides: Record<string, unknown> = {}) {
 }
 
 async function resetStorage() {
+  await resetTestDb();
   await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

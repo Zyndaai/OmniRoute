@@ -13,6 +13,7 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const serviceModelsDb = await import("../../src/lib/db/serviceModels.ts");
 const providerModelsRoute =
   await import("../../src/app/api/v1/providers/[provider]/models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 interface SeedConnectionOverrides {
   authType?: string;
@@ -36,6 +37,7 @@ type ProviderModelsResponse = {
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

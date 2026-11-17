@@ -35,6 +35,7 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type CatalogResponse = {
   data?: Array<{ id: string; visibility?: string }>;
@@ -42,6 +43,7 @@ type CatalogResponse = {
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

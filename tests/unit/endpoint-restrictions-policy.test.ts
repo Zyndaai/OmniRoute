@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { getTestBackend } from "../helpers/postgres.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ep-policy-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -27,6 +27,7 @@ async function resetStorage() {
   apiKeysDb.resetApiKeyState();
   await costRules.resetCostData();
   await coreDb.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

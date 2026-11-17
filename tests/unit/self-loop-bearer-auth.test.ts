@@ -24,6 +24,7 @@ const { resolveSelfLoopBearer, peekGeneratedSelfLoopSecret } =
 const { clientApiPolicy } = await import("../../src/server/authz/policies/clientApi.ts");
 const { callVisionModel } = await import("../../src/lib/guardrails/visionBridgeHelpers.ts");
 const { isSyntheticApiKeyId } = await import("../../src/shared/constants/apiKeyIdentities.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ENV_KEYS = [
   "OMNIROUTE_API_KEY",
@@ -35,19 +36,20 @@ const ENV_KEYS = [
 ] as const;
 const savedEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
-function resetStorage() {
+async function resetStorage() {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   for (const key of ENV_KEYS) delete process.env[key];
   process.env.REQUIRE_API_KEY = "true";
+  await resetTestDb();
 }
 
 test.beforeEach(() => resetStorage());
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of savedEnv) {
     if (value === undefined) delete process.env[key];

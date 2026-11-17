@@ -9,13 +9,12 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET ||= "sse-auth-codex-pool-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 function futureIso(ms = 60_000) {
@@ -38,8 +37,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

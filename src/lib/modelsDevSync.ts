@@ -22,7 +22,7 @@
  */
 
 import { db, type DbExecutor } from "./db/pg";
-import { jsonToText } from "./db/pgJsonText";
+import { jsonTextParam, jsonToText } from "./db/pgJsonText";
 import { clearPricingSource, readPricingSource, replacePricingSource } from "./db/modelPricing";
 import { invalidateDbCache, getModelCatalogCacheVersion } from "./db/readCache";
 import { preserveStoredModalitySets } from "./db/models/capabilityModalities";
@@ -489,8 +489,9 @@ async function insertCapabilityRows(
       chunk.map((r) => r.cap.attachment),
       chunk.map((r) => r.cap.structured_output),
       chunk.map((r) => r.cap.temperature),
-      chunk.map((r) => r.cap.modalities_input),
-      chunk.map((r) => r.cap.modalities_output),
+      // Validated in JS: a malformed value must not abort the whole `::jsonb` batch.
+      chunk.map((r) => jsonTextParam(r.cap.modalities_input)),
+      chunk.map((r) => jsonTextParam(r.cap.modalities_output)),
       chunk.map((r) => r.cap.knowledge_cutoff),
       chunk.map((r) => r.cap.release_date),
       chunk.map((r) => r.cap.last_updated),

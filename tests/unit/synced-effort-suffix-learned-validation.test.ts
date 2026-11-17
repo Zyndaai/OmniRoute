@@ -22,9 +22,11 @@ const modelDiscovery = await import("../../src/lib/providerModels/modelDiscovery
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const { recordLearnedReasoningEffort, __test_resetLearnedReasoningEffortCaps } =
   await import("@omniroute/open-sse/services/learnedReasoningEffortCaps.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -70,7 +72,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -36,7 +36,8 @@ const GLOBAL_CATALOG_URL = "https://openrouter.ai/api/v1/models";
 
 async function resetStorage() {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

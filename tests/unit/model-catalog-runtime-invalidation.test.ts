@@ -21,12 +21,11 @@ const readCache = await import("../../src/lib/db/readCache.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -75,7 +74,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -146,18 +145,18 @@ test("catalog-affecting connection changes still rebuild the published catalog",
   );
 });
 
-test("#9199 capability data writes advance the model-catalog generation", () => {
-  const expectGenerationAdvance = (label: string, mutate: () => void) => {
+test("#9199 capability data writes advance the model-catalog generation", async () => {
+  const expectGenerationAdvance = async (label: string, mutate: () => Promise<void>) => {
     const before = readCache.getModelCatalogCacheVersion();
-    mutate();
+    await mutate();
     assert.ok(
       readCache.getModelCatalogCacheVersion() > before,
       `${label} must hard-invalidate the published model catalog`
     );
   };
-  const expectGenerationUnchanged = (label: string, mutate: () => void) => {
+  const expectGenerationUnchanged = async (label: string, mutate: () => Promise<void>) => {
     const before = readCache.getModelCatalogCacheVersion();
-    mutate();
+    await mutate();
     assert.equal(
       readCache.getModelCatalogCacheVersion(),
       before,
@@ -165,21 +164,25 @@ test("#9199 capability data writes advance the model-catalog generation", () => 
     );
   };
 
-  expectGenerationAdvance("setModelCapabilityOverride", () => {
+  await expectGenerationAdvance("setModelCapabilityOverride", async () => {
     assert.equal(
-      capabilityOverrides.setModelCapabilityOverride("openai/gpt-5.4-mini", "max_token", 64000),
+      await capabilityOverrides.setModelCapabilityOverride(
+        "openai/gpt-5.4-mini",
+        "max_token",
+        64000
+      ),
       true
     );
   });
-  expectGenerationAdvance("removeModelCapabilityOverride", () => {
+  await expectGenerationAdvance("removeModelCapabilityOverride", async () => {
     assert.equal(
-      capabilityOverrides.removeModelCapabilityOverride("openai/gpt-5.4-mini", "max_token"),
+      await capabilityOverrides.removeModelCapabilityOverride("openai/gpt-5.4-mini", "max_token"),
       true
     );
   });
-  expectGenerationAdvance("set reasoning_efforts override", () => {
+  await expectGenerationAdvance("set reasoning_efforts override", async () => {
     assert.equal(
-      capabilityOverrides.setModelCapabilityOverride(
+      await capabilityOverrides.setModelCapabilityOverride(
         "openai/gpt-5.4-mini",
         "reasoning_efforts",
         "low,max,ultra"
@@ -187,24 +190,33 @@ test("#9199 capability data writes advance the model-catalog generation", () => 
       true
     );
   });
-  expectGenerationAdvance("remove reasoning_efforts override", () => {
+  await expectGenerationAdvance("remove reasoning_efforts override", async () => {
     assert.equal(
-      capabilityOverrides.removeModelCapabilityOverride("openai/gpt-5.4-mini", "reasoning_efforts"),
+      await capabilityOverrides.removeModelCapabilityOverride(
+        "openai/gpt-5.4-mini",
+        "reasoning_efforts"
+      ),
       true
     );
   });
-  expectGenerationAdvance("setModelContextOverride", () => {
-    assert.equal(contextOverrides.setModelContextOverride("openai", "gpt-5.4-mini", 400000), true);
+  await expectGenerationAdvance("setModelContextOverride", async () => {
+    assert.equal(
+      await contextOverrides.setModelContextOverride("openai", "gpt-5.4-mini", 400000),
+      true
+    );
   });
-  expectGenerationAdvance("removeModelContextOverride", () => {
-    assert.equal(contextOverrides.removeModelContextOverride("openai", "gpt-5.4-mini"), true);
+  await expectGenerationAdvance("removeModelContextOverride", async () => {
+    assert.equal(
+      await contextOverrides.removeModelContextOverride("openai", "gpt-5.4-mini"),
+      true
+    );
   });
 
-  expectGenerationUnchanged("empty saveModelsDevCapabilities", () => {
-    modelsDevSync.saveModelsDevCapabilities({});
+  await expectGenerationUnchanged("empty saveModelsDevCapabilities", async () => {
+    await modelsDevSync.saveModelsDevCapabilities({});
   });
-  expectGenerationAdvance("saveModelsDevCapabilities", () => {
-    modelsDevSync.saveModelsDevCapabilities({
+  await expectGenerationAdvance("saveModelsDevCapabilities", async () => {
+    await modelsDevSync.saveModelsDevCapabilities({
       openai: {
         "gpt-5.4-mini": {
           tool_call: true,
@@ -228,11 +240,11 @@ test("#9199 capability data writes advance the model-catalog generation", () => 
       },
     });
   });
-  expectGenerationAdvance("clearModelsDevCapabilities", () => {
-    modelsDevSync.clearModelsDevCapabilities();
+  await expectGenerationAdvance("clearModelsDevCapabilities", async () => {
+    await modelsDevSync.clearModelsDevCapabilities();
   });
-  expectGenerationUnchanged("empty clearModelsDevCapabilities", () => {
-    modelsDevSync.clearModelsDevCapabilities();
+  await expectGenerationUnchanged("empty clearModelsDevCapabilities", async () => {
+    await modelsDevSync.clearModelsDevCapabilities();
   });
 });
 
@@ -250,7 +262,7 @@ test("#9199 a capability mutation during preparation detaches the obsolete gener
     "the mutation must occur while capability preparation is active"
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride("openai/gpt-5.4-mini", "max_token", 64000),
+    await capabilityOverrides.setModelCapabilityOverride("openai/gpt-5.4-mini", "max_token", 64000),
     true
   );
 

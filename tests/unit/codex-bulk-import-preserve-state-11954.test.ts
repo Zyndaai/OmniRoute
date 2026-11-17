@@ -32,9 +32,11 @@ const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const route = await import("../../src/app/api/oauth/codex/import/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await settingsDb.updateSettings({ requireLogin: false });

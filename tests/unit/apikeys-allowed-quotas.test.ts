@@ -10,9 +10,11 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "allowed-quotas-test-
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
 
   for (let attempt = 0; attempt < 10; attempt++) {

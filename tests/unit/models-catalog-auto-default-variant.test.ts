@@ -27,6 +27,7 @@ const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const autoIds = await import("../../src/app/api/v1/models/autoCatalogIds.ts");
 const builtinCatalog = await import("../../open-sse/services/autoCombo/builtinCatalog.ts");
 const autoPrefix = await import("../../open-sse/services/autoCombo/autoPrefix.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type CatalogEntry = {
   id: string;
@@ -37,6 +38,7 @@ type CatalogEntry = {
 };
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -77,8 +79,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

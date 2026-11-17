@@ -19,13 +19,15 @@ const { getAllActiveSyncedModels } = await import("../../src/lib/db/models/activ
 const { getSearchProvider } = await import("../../open-sse/config/searchRegistry.ts");
 const modelSyncRoute = await import("../../src/app/api/providers/[id]/sync-models/route.ts");
 const scheduler = await import("../../src/shared/services/modelSyncScheduler.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const SEARCH_PROVIDER = "brave-search";
 
-function resetStorage() {
+async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function seedSearchProviderCatalog() {
@@ -53,12 +55,12 @@ async function seedSearchProviderCatalog() {
   return connection.id;
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

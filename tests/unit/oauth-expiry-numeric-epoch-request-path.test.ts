@@ -28,6 +28,7 @@ const tokenRefresh = await import("../../src/sse/services/tokenRefresh.ts");
 const openSseTokenRefresh = await import("../../open-sse/services/tokenRefresh.ts");
 const { BaseExecutor } = await import("../../open-sse/executors/base.ts");
 const { OAUTH_ENDPOINTS } = await import("../../open-sse/config/constants.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 class TestExecutor extends BaseExecutor {
   constructor() {
@@ -44,6 +45,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 async function resetStorage() {
   await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

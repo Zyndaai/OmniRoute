@@ -20,6 +20,7 @@ import { OpencodeExecutor } from "../../open-sse/executors/opencode.ts";
 import type { ProviderCredentials } from "../../open-sse/executors/base.ts";
 import { resolveProxyForRequest } from "../../open-sse/utils/proxyFetch.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 import {
   attemptFor,
   noteFreeTierOutcome,
@@ -131,9 +132,10 @@ beforeEach(() => {
   _setShapeClockForTests(() => Date.now());
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   _setShapeClockForTests(() => Date.now());
+  await resetTestDb();
 });
 
 const titleBody = (prompt = TITLE_PROMPT, model = MODEL): Body => ({

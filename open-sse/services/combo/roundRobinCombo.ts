@@ -249,7 +249,11 @@ export async function handleRoundRobinCombo({
     if (coolingDown) return coolingDown;
   }
   const tagFilteredTargets = await applyRequestTagRouting(orderedTargets, body, log);
-  const evalRankedTargets = await orderTargetsByEvalScores(tagFilteredTargets, config.evalRouting, log);
+  const evalRankedTargets = await orderTargetsByEvalScores(
+    tagFilteredTargets,
+    config.evalRouting,
+    log
+  );
   // Align with the main/auto paths: combo config OR top-level settings (#8488 / #8494).
   const rrCompatFailOpen =
     (config as { compatFilterFailOpen?: unknown }).compatFilterFailOpen === true ||
@@ -604,7 +608,7 @@ export async function handleRoundRobinCombo({
         );
         if (persistedSkip) {
           log.info("COMBO-RR", persistedSkip);
-          void clearStaleLKGP(
+          await clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,
@@ -630,7 +634,7 @@ export async function handleRoundRobinCombo({
             "COMBO-RR",
             `Skipping ${modelStr} — no credentials available or model excluded`
           );
-          void clearStaleLKGP(
+          await clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,
@@ -654,7 +658,7 @@ export async function handleRoundRobinCombo({
         )
       ) {
         log.info("COMBO-RR", `Skipping ${modelStr} — provider ${provider} in global cooldown`);
-        void clearStaleLKGP(
+        await clearStaleLKGP(
           combo.name,
           target.executionKey,
           combo.id,
@@ -675,7 +679,7 @@ export async function handleRoundRobinCombo({
       );
       if (exhaustedSkip) {
         log.info("COMBO-RR", exhaustedSkip);
-        void clearStaleLKGP(
+        await clearStaleLKGP(
           combo.name,
           target.executionKey,
           combo.id,
@@ -1198,7 +1202,7 @@ export async function handleRoundRobinCombo({
             exhaustedConnections.has(`${provider}:${targetWithConnection.connectionId}`) ||
             (provider && exhaustedProviders.has(provider))
           ) {
-            void clearStaleLKGP(
+            await clearStaleLKGP(
               combo.name,
               target.executionKey,
               combo.id,
@@ -1259,7 +1263,7 @@ export async function handleRoundRobinCombo({
           // LKGP (#919) mirror of handleComboChat's failure-path clear above — see
           // that comment for why this must happen (nothing else clears a pin left
           // by a request-scoped failure class like a stream-readiness timeout).
-          void clearStaleLKGP(
+          await clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,

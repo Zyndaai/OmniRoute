@@ -26,6 +26,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 interface CatalogRow {
   id: string;
@@ -36,7 +37,7 @@ interface CatalogRow {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -45,8 +46,8 @@ test.afterEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

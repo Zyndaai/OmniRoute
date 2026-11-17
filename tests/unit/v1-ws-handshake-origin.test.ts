@@ -29,6 +29,7 @@ const coreDb = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const wsRoute = await import("../../src/app/api/v1/ws/route.ts");
 const { createOmnirouteWsBridge } = await import("../../scripts/dev/v1-ws-bridge.mjs");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const LOOPBACK_STAMP = `${process.env.OMNIROUTE_PEER_STAMP_TOKEN}|127.0.0.1`;
 const LOCAL_HOST = "127.0.0.1:20128";
@@ -38,18 +39,19 @@ function setEnv(values: Partial<Record<(typeof ENV_KEYS)[number], string>>) {
   Object.assign(process.env, values);
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   setEnv({});
 });
 
-test.after(() => {
+test.after(async () => {
   setEnv({});
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

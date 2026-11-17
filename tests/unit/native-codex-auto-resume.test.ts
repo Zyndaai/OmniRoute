@@ -27,6 +27,7 @@ const { getCircuitBreaker, resetAllCircuitBreakers } =
 const { resolveResilienceSettings } = await import("../../src/lib/resilience/settings.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const testSettings = {
   resilienceSettings: {
@@ -74,9 +75,7 @@ beforeEach(async () => {
   // Each scenario owns its accounts. Since #15481 dynamic turn-pin targets expand
   // over the active pool, so fixtures left behind by earlier scenarios would
   // otherwise become legitimate healthy siblings.
-  for (const connection of await providersDb.getProviderConnections({})) {
-    await providersDb.deleteProviderConnection(connection.id);
-  }
+  await resetTestDb();
   clearAllModelLockouts();
   clearCooldownState();
   resetAllCircuitBreakers();

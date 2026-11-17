@@ -22,6 +22,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const imageEditRoute = await import("../../src/app/api/v1/images/edits/route.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 interface ErrorResponseBody {
   error: { message: string; code?: string };
@@ -39,6 +40,7 @@ async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -64,10 +66,10 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

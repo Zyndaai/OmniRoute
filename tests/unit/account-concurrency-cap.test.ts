@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateProviderConnectionSchema } = await import("../../src/shared/validation/schemas.ts");
 
 type Connection = Awaited<ReturnType<typeof providersDb.createProviderConnection>>;
@@ -30,9 +31,10 @@ function getConnectionId(connection: NonNullable<Connection>): string {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function createConnection(maxConcurrent: number | null): Promise<Connection> {
@@ -49,8 +51,8 @@ beforeEach(async () => {
   await resetStorage();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

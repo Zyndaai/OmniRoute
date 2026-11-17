@@ -9,14 +9,16 @@ process.env.DATA_DIR = folder;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(folder, { recursive: true, force: true });
   fs.mkdirSync(folder, { recursive: true });
 });
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(folder, { recursive: true, force: true });
 });
 

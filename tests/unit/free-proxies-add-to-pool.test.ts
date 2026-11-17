@@ -18,11 +18,13 @@ const addToPoolRoute =
   await import("../../src/app/api/settings/free-proxies/[id]/add-to-pool/route.ts");
 const bulkAddRoute =
   await import("../../src/app/api/settings/free-proxies/bulk-add-to-pool/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function reset() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 function makeReq(): Request {
@@ -43,8 +45,8 @@ test.beforeEach(async () => {
   bulkAddRoute._resetQuickTesterForTests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;

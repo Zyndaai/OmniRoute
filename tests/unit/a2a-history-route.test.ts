@@ -27,22 +27,21 @@ const ORIGINAL_REQUIRE_API_KEY = process.env.REQUIRE_API_KEY;
 process.env.REQUIRE_API_KEY = "true";
 
 const core = await import("../../src/lib/db/core.ts");
-const { getTestBackend } = await import("../helpers/postgres.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const a2aTasksDb = await import("../../src/lib/db/a2aTasks.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { resolveA2AOwner } = await import("../../src/lib/a2a/authenticate.ts");
 const historyRoute = await import("../../src/app/api/a2a/tasks/history/route.ts");
 const detailRoute = await import("../../src/app/api/a2a/tasks/[id]/route.ts");
 
-// One shared, valid key for tests that only need "some authenticated caller" — reused across
-// cases (the a2a_tasks/a2a_task_events tables are wiped between tests, api_keys is not).
-const sharedKey = await apiKeysDb.createApiKey("a2a-history-route-test", "machine-history", []);
-const AUTH_HEADERS = { authorization: `Bearer ${sharedKey.key}` };
+// A valid key for tests that only need "some authenticated caller". resetTestDb() truncates
+// api_keys too, so the key is minted again before each case and AUTH_HEADERS follows it.
+let AUTH_HEADERS: Record<string, string> = {};
 
 test.beforeEach(async () => {
-  const db = getTestBackend();
-  await db.execute("DELETE FROM a2a_task_events");
-  await db.execute("DELETE FROM a2a_tasks");
+  await resetTestDb();
+  const sharedKey = await apiKeysDb.createApiKey("a2a-history-route-test", "machine-history", []);
+  AUTH_HEADERS = { authorization: `Bearer ${sharedKey.key}` };
 });
 
 test.after(async () => {

@@ -70,8 +70,8 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -86,7 +86,7 @@ test("reset-credit operations reject leased connections and missing tokens befor
     });
     const id = String(connection.id);
     if (leased) {
-      const lease = acquireExclusiveConnectionLease({
+      const lease = await acquireExclusiveConnectionLease({
         leaseOwnerId: `vlo_${"c".repeat(43)}`,
         apiKeyId: "reset-credit-test-key",
         provider: "claude",
@@ -145,7 +145,7 @@ test("dashboard quota refresh shows reset credits without opening the credits mo
     includeResetCredits: true,
   });
   assert.equal(refreshed.usage.bankedResetCredits, 3);
-  assert.equal(getProviderLimitsCache(connection.id as string)?.bankedResetCredits, 3);
+  assert.equal((await getProviderLimitsCache(connection.id as string))?.bankedResetCredits, 3);
   assert.equal(count(`GET ${RESET_CREDIT_LIST_URL}`), 1);
 });
 
@@ -173,7 +173,7 @@ test("listing seeds the dashboard count and a redeem invalidates it", async () =
 
   const afterList = await fetchAndPersistProviderLimits(id, "manual");
   assert.equal(afterList.usage.bankedResetCredits, 3);
-  assert.equal(getProviderLimitsCache(id)?.bankedResetCredits, 3);
+  assert.equal((await getProviderLimitsCache(id))?.bankedResetCredits, 3);
   assert.equal(count(`GET ${RESET_CREDIT_LIST_URL}`), 1, "the refresh read the memo only");
 
   const redeemed = await consumeClaudeResetCredit(id, "idem-1", "grant:grant-a");
@@ -198,12 +198,12 @@ test("a redeem whose follow-up refresh is throttled does not bring back the old 
   mockUpstream();
   await listClaudeResetCredits(id);
   await fetchAndPersistProviderLimits(id, "manual");
-  assert.equal(getProviderLimitsCache(id)?.bankedResetCredits, 3);
+  assert.equal((await getProviderLimitsCache(id))?.bankedResetCredits, 3);
 
   // The usage refresh after the redeem gets a 429, so the stale cached entry is served.
   mockUpstream({ usageStatus: 429 });
   const redeemed = await consumeClaudeResetCredit(id, "idem-2", "grant:grant-a");
   assert.equal(redeemed.usage._stale, true);
   assert.equal("bankedResetCredits" in redeemed.usage, false, "no pre-redeem count");
-  assert.equal(getProviderLimitsCache(id)?.bankedResetCredits, undefined);
+  assert.equal((await getProviderLimitsCache(id))?.bankedResetCredits, undefined);
 });

@@ -26,6 +26,7 @@ const core = await import("../../src/lib/db/core.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const keyQuotaDb = await import("../../src/lib/db/keyQuota.ts");
 const keyQuota = await import("../../src/domain/keyQuota.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // api_key_quota_limits references api_keys, so the key row is created before the tests run.
 let KEY = "";
@@ -63,13 +64,13 @@ function monthStartMs(nowMs = Date.now()) {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
 }
 
-test.before(async () => {
+test.beforeEach(async () => {
+  // resetTestDb truncates api_keys too, so the key the quota rows reference is
+  // created fresh for every case.
+  await resetTestDb();
   const apiKeys = await import("../../src/lib/db/apiKeys.ts");
   const created = await apiKeys.createApiKey("quota-unpriced", "machine-quota-unpriced");
   KEY = created.id;
-});
-
-test.beforeEach(async () => {
   await keyQuotaDb.clearKeyQuotaLimits(KEY);
   await costRules.resetCostData();
 });

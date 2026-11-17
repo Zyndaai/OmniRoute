@@ -8,6 +8,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const require = createRequire(import.meta.url);
 const childProcess = require("child_process");
 const originalDataDir = process.env.DATA_DIR;
@@ -196,7 +197,8 @@ test("builtin skill handlers validate required fields and perform real sandboxed
       );
     });
   } finally {
-    core.resetDbInstance();
+    await resetTestDb();
+    await core.resetDbInstance();
     removePath(dataDir);
   }
 });

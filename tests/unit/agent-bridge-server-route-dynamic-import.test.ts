@@ -16,15 +16,19 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const serverRoute = await import("../../src/app/api/tools/agent-bridge/server/route.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.beforeEach(() => resetDb());
+test.beforeEach(async () => {
+  await resetDb();
+});
 test.after(() => {
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

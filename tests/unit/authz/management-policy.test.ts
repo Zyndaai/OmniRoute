@@ -18,12 +18,13 @@ const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const modelSync = await import("../../../src/shared/services/modelSyncScheduler.ts");
 const internalServiceAuth = await import("../../../src/lib/api/internalServiceAuth.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_JWT = process.env.JWT_SECRET;
 const ORIGINAL_INITIAL = process.env.INITIAL_PASSWORD;
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -31,11 +32,12 @@ function reset() {
   delete process.env.INITIAL_PASSWORD;
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
 });
 
 test.after(async () => {
+  await core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
   if (ORIGINAL_JWT === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = ORIGINAL_JWT;

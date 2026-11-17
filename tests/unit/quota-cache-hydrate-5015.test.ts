@@ -23,6 +23,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { resetTestDb } = await import("../helpers/postgres.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 
 test.after(async () => {
   await resetTestDb();
@@ -30,7 +31,14 @@ test.after(async () => {
 });
 
 test("#5015 isAccountQuotaExhausted hydrates exhausted state from a persisted snapshot", async () => {
-  const connectionId = "conn-hydrate-5015";
+  // quota_snapshots.connection_id is a foreign key: the snapshot needs a real connection row.
+  const connectionId = (
+    await providersDb.createProviderConnection({
+      provider: "openai",
+      apiKey: "test-key",
+      isActive: true,
+    })
+  ).id;
   // Persist an exhausted snapshot with no reset time (so it does not auto-advance)
   // and a fresh created_at (so it does not expire via EXHAUSTED_TTL).
   await quotaSnapshotsDb.saveQuotaSnapshot({
@@ -44,8 +52,10 @@ test("#5015 isAccountQuotaExhausted hydrates exhausted state from a persisted sn
     raw_data: JSON.stringify({ source: "test" }),
   });
 
-  // The in-memory cache is empty for this connection (simulating a fresh boot).
-  // The getter must hydrate from the persisted snapshot and report exhaustion.
+  // Simulate a fresh boot: an empty in-memory cache, then the boot hydration step
+  // (src/instrumentation-node.ts). The sync getter must then report the persisted exhaustion.
+  quotaCache.__clearForTests();
+  await quotaCache.ensureQuotaCacheHydrated();
   assert.equal(
     quotaCache.isAccountQuotaExhausted(connectionId),
     true,
@@ -62,7 +72,9 @@ test("#5015 a connection with no snapshot is not reported exhausted", () => {
 });
 
 test("mixed persisted Z.AI quota windows keep chat requests eligible", async () => {
-  const connectionId = "conn-zai-mixed-windows";
+  const connectionId = (
+    await providersDb.createProviderConnection({ provider: "zai", apiKey: "test-key", isActive: true })
+  ).id;
 
   await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "zai",
@@ -84,6 +96,8 @@ test("mixed persisted Z.AI quota windows keep chat requests eligible", async () 
     window_duration_ms: null,
     raw_data: null,
   });
+  quotaCache.__clearForTests();
+  await quotaCache.ensureQuotaCacheHydrated();
 
   assert.equal(
     quotaCache.isQuotaExhaustedForRequest(connectionId, "zai", "glm-5.2"),

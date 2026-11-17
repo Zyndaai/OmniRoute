@@ -21,6 +21,7 @@ const providerNodesDb = await import("../../src/lib/db/providers/nodes.ts");
 const serviceModelsDb = await import("../../src/lib/db/serviceModels.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
 const routeModule = await import("../../src/app/api/v1/providers/[provider]/models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function makeRequest(provider: string) {
   return new Request(`http://localhost/api/v1/providers/${encodeURIComponent(provider)}/models`);
@@ -32,8 +33,9 @@ async function callGET(provider: string) {
   });
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   catalog.__resetCatalogBuilderRunsForTest();

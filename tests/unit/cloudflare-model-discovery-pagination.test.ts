@@ -13,6 +13,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cf-models
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
 const { nextCloudflareModelsPageUrl, parseCloudflareModelsSearch } =
@@ -25,6 +26,7 @@ type CfRow = { id: string; name: string; description?: string; task?: { name: st
 async function resetStorage() {
   globalThis.fetch = originalFetch;
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

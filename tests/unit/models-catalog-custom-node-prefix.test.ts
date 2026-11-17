@@ -13,6 +13,7 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const modelsRoute = await import("../../src/app/api/v1/models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const NODE_ID = "openai-compatible-chat-550e8400-e29b-41d4-a716-446655440000";
 const PREFIX = "infrex";
@@ -23,7 +24,7 @@ const EXPECTED_IDS = [
 ];
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   modelsCatalog.__resetCatalogBuilderRunsForTest();
@@ -91,8 +92,8 @@ test.beforeEach(async () => {
   await seedCustomNode();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

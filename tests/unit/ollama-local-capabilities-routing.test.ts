@@ -11,6 +11,7 @@ process.env.API_KEY_SECRET = "ollama-capabilities-test-secret";
 process.env.REQUIRE_API_KEY = "false";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
@@ -20,9 +21,10 @@ const { createEmbeddingResponse } = await import("../../src/lib/embeddings/servi
 
 const originalFetch = globalThis.fetch;
 
-function resetStorage() {
+async function resetStorage() {
   globalThis.fetch = originalFetch;
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -42,9 +44,9 @@ async function seedOllamaConnection(baseUrl = "http://127.0.0.1:11434/v1", prior
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

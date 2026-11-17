@@ -2,11 +2,12 @@
  * A 403 or 451 carrying `insufficient_quota` on one tool shape is replayed once
  * in the other shape; only when both shapes fail does the credits verdict stand.
  */
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { OpencodeExecutor } from "../../open-sse/executors/opencode.ts";
 import type { ProviderCredentials } from "../../open-sse/executors/base.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 import {
   classifyProviderError,
   PROVIDER_ERROR_TYPES,
@@ -77,9 +78,13 @@ beforeEach(() => {
   _setShapeClockForTests(() => Date.now());
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   _setShapeClockForTests(() => Date.now());
+  await resetTestDb();
+});
+
+after(() => {
   resetDbInstance();
 });
 

@@ -36,9 +36,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../../src/lib/db/core.ts");
 const providersDb = await import("../../../src/lib/db/providers.ts");
 const builtinCatalog = await import("../../../open-sse/services/autoCombo/builtinCatalog.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -49,6 +50,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;

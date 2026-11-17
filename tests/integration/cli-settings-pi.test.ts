@@ -18,10 +18,12 @@ const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 
 const { GET, POST, DELETE } = await import("../../src/app/api/cli-tools/pi-settings/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

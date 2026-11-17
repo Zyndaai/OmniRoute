@@ -122,7 +122,7 @@ async function authorizeLoginSettingsWrite(
     }
     if (verdict.response.status === 403) {
       const actor = await deriveSettingsAuditActor(request);
-      emitSettingsFailureAudit(request, actor, "OPERATOR_REQUIRED", []);
+      await emitSettingsFailureAudit(request, actor, "OPERATOR_REQUIRED", []);
     }
     return { response: verdict.response };
   }
@@ -157,7 +157,7 @@ async function rejectPasswordChangeWithoutReauth(
       : "PASSWORD_MISMATCH";
   if (!reason) return null;
 
-  emitSettingsFailureAudit(request, "dashboard", reason, ["password"]);
+  await emitSettingsFailureAudit(request, "dashboard", reason, ["password"]);
   return createErrorResponse({
     status: 403,
     message:

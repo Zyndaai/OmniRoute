@@ -14,6 +14,7 @@ process.env.API_KEY_SECRET = "test-api-key-secret-jcode";
 process.env.JWT_SECRET = "test-jwt-secret-jcode";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 
@@ -21,7 +22,8 @@ const { GET, POST, DELETE } = await import("../../src/app/api/cli-tools/jcode-se
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

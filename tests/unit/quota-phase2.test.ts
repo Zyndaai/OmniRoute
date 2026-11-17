@@ -15,10 +15,10 @@ const { getActiveQuotaResetItems, resetExpiredQuotaWindows } =
   await import("../../src/lib/quota/quotaResetTimers");
 const { recordProviderQuotaUsage, getProviderQuota } =
   await import("../../src/lib/quota/providerQuotaState");
-const { getTestBackend } = await import("../helpers/postgres.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  await coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

@@ -17,9 +17,11 @@ const core = await import("../../../src/lib/db/core.ts");
 const proxiesDb = await import("../../../src/lib/db/proxies.ts");
 const repairRelayRoute =
   await import("../../../src/app/api/settings/proxies/[id]/repair-relay/route.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

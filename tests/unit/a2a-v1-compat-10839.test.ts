@@ -13,6 +13,7 @@ const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const a2aRoute = await import("../../src/app/a2a/route.ts");
 const agentCardRoute = await import("../../src/app/.well-known/agent-card.json/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 /**
  * The agent-card routes derive their base URL from `request.nextUrl.origin`
@@ -36,14 +37,15 @@ function makeJsonRpcRequest(body: unknown): NextRequest {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   await settingsDb.updateSettings({ a2aEnabled: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

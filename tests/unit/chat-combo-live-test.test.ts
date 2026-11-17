@@ -15,6 +15,7 @@ const { generateSignature, invalidateBySignature, setCachedResponse, outputContr
   await import("../../src/lib/semanticCache.ts");
 const { getCircuitBreaker, resetAllCircuitBreakers, STATE } =
   await import("../../src/shared/utils/circuitBreaker.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -24,7 +25,7 @@ async function flushBackgroundWork() {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   resetAllCircuitBreakers();
@@ -133,7 +134,7 @@ test.after(async () => {
   await flushBackgroundWork();
   globalThis.fetch = originalFetch;
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

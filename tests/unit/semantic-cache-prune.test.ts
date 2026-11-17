@@ -8,7 +8,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-cache-prune-"));
 process.env.DATA_DIR = dataDir;
 const core = await import("../../src/lib/db/core.ts");
 const { pruneSemanticCache } = await import("../../src/lib/db/semanticCache.ts");
-const { getTestBackend } = await import("../helpers/postgres.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const now = new Date("2030-01-02T00:00:00.000Z");
 const expired = "2030-01-01T00:00:00.000Z";
 const future = "2030-01-03T00:00:00.000Z";
@@ -34,7 +34,7 @@ async function seed(count: number, expiresAt = expired) {
 }
 
 test.beforeEach(async () => {
-  await getTestBackend().execute("DELETE FROM semantic_cache");
+  await resetTestDb();
 });
 test.after(async () => {
   await core.resetDbInstance();

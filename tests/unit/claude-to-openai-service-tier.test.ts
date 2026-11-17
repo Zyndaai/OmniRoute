@@ -19,8 +19,8 @@ const claudeBody = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-function toOpenAI(provider: string | null, extra: Record<string, unknown>) {
-  return translateRequest(
+async function toOpenAI(provider: string | null, extra: Record<string, unknown>) {
+  return (await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "gpt-5.5",
@@ -28,11 +28,11 @@ function toOpenAI(provider: string | null, extra: Record<string, unknown>) {
     true,
     null,
     provider
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
 }
 
-test("Claude → Responses → Codex executor keeps a client priority tier", () => {
-  const translated = translateRequest(
+test("Claude → Responses → Codex executor keeps a client priority tier", async () => {
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",
@@ -48,25 +48,28 @@ test("Claude → Responses → Codex executor keeps a client priority tier", () 
   assert.equal(body.service_tier, "priority");
 });
 
-test("Claude → OpenAI keeps an explicit valid tier for OpenAI-family targets", () => {
-  assert.equal(toOpenAI("codex", { service_tier: "flex" }).service_tier, "flex");
-  assert.equal(toOpenAI("openai", { service_tier: "priority" }).service_tier, "priority");
-  assert.equal(toOpenAI("azure-openai", { service_tier: "auto" }).service_tier, "auto");
+test("Claude → OpenAI keeps an explicit valid tier for OpenAI-family targets", async () => {
+  assert.equal((await toOpenAI("codex", { service_tier: "flex" })).service_tier, "flex");
+  assert.equal((await toOpenAI("openai", { service_tier: "priority" })).service_tier, "priority");
+  assert.equal((await toOpenAI("azure-openai", { service_tier: "auto" })).service_tier, "auto");
 });
 
-test("Claude → OpenAI maps Anthropic standard_only to default and fast to priority", () => {
-  assert.equal(toOpenAI("openai", { service_tier: "standard_only" }).service_tier, "default");
-  assert.equal(toOpenAI("codex", { service_tier: "fast" }).service_tier, "priority");
-  assert.equal(toOpenAI("codex", { service_tier: " Priority " }).service_tier, "priority");
+test("Claude → OpenAI maps Anthropic standard_only to default and fast to priority", async () => {
+  assert.equal(
+    (await toOpenAI("openai", { service_tier: "standard_only" })).service_tier,
+    "default"
+  );
+  assert.equal((await toOpenAI("codex", { service_tier: "fast" })).service_tier, "priority");
+  assert.equal((await toOpenAI("codex", { service_tier: " Priority " })).service_tier, "priority");
 });
 
-test("Claude → OpenAI drops an unknown tier", () => {
-  const out = toOpenAI("codex", { service_tier: "bogus" });
+test("Claude → OpenAI drops an unknown tier", async () => {
+  const out = await toOpenAI("codex", { service_tier: "bogus" });
   assert.equal(Object.hasOwn(out, "service_tier"), false);
 });
 
-test("Claude → OpenAI injects no tier when the client sent none", () => {
-  const out = translateRequest(
+test("Claude → OpenAI injects no tier when the client sent none", async () => {
+  const out = (await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",
@@ -74,22 +77,25 @@ test("Claude → OpenAI injects no tier when the client sent none", () => {
     true,
     null,
     "codex"
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
   assert.equal(Object.hasOwn(out, "service_tier"), false);
-  assert.equal(Object.hasOwn(toOpenAI("openai", {}), "service_tier"), false);
+  assert.equal(Object.hasOwn(await toOpenAI("openai", {}), "service_tier"), false);
 });
 
-test("Claude → OpenAI does not forward service_tier to non-OpenAI-family targets", () => {
+test("Claude → OpenAI does not forward service_tier to non-OpenAI-family targets", async () => {
   // Strict OpenAI-compatible gateways reject unknown top-level fields.
   assert.equal(
-    Object.hasOwn(toOpenAI("deepseek", { service_tier: "priority" }), "service_tier"),
+    Object.hasOwn(await toOpenAI("deepseek", { service_tier: "priority" }), "service_tier"),
     false
   );
-  assert.equal(Object.hasOwn(toOpenAI(null, { service_tier: "priority" }), "service_tier"), false);
+  assert.equal(
+    Object.hasOwn(await toOpenAI(null, { service_tier: "priority" }), "service_tier"),
+    false
+  );
 });
 
-test("a Codex API-key service mode still wins over the client tier", () => {
-  const translated = translateRequest(
+test("a Codex API-key service mode still wins over the client tier", async () => {
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",

@@ -19,7 +19,10 @@ const { RESERVED_PROVIDER_PREFIXES, isReservedProviderPrefix } =
 const { createProviderNodeSchema, updateProviderNodeSchema } =
   await import("../../src/shared/validation/schemas.ts");
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
 async function resetStorage(): Promise<void> {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -46,8 +49,8 @@ function assertRetiredError(error: unknown): boolean {
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

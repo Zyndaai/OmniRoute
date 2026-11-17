@@ -15,6 +15,7 @@ import { NextRequest } from "next/server";
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("@/lib/db/settings");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { GET } = await import("../../src/app/api/settings/favicon/route.ts");
 
 const originalFetch = globalThis.fetch;
@@ -44,7 +45,8 @@ function tinyPngDataUrl(): string {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
@@ -55,8 +57,8 @@ test.afterEach(() => {
   else process.env.OMNIROUTE_BASE_PATH = originalBasePath;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;

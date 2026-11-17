@@ -21,6 +21,7 @@ fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 const core = await import("@/lib/db/core.ts");
 const { createCombo } = await import("@/lib/db/combos");
 const { executeVideoCombo } = await import("@omniroute/open-sse/services/videoCombo");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 type LogEntry = { level: string; tag: unknown; msg: unknown };
 
@@ -72,6 +73,7 @@ async function cleanupTestDataDir() {
 test.beforeEach(async () => {
   await cleanupTestDataDir();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 });
 
 test.after(async () => {

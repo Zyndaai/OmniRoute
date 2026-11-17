@@ -3,10 +3,10 @@
  * cooldown or unavailability (#11911 #919), scoped to the pin that names the
  * failed target when the caller knows it (#12235).
  *
- * Non-blocking by design: the fallback loop never waits on these SQLite writes. A
- * failed clear is not silent — it logs a warning carrying the combo and the
- * execution key. The returned promise never rejects: routing callers ignore it,
- * tests await it.
+ * Callers await this: the next routing decision (and the next request, possibly on
+ * another process) reads the pin, so the clear must have landed before the combo
+ * returns. A failed clear is not silent — it logs a warning carrying the combo and
+ * the execution key. The returned promise never rejects.
  *
  * @internal — re-exported by combo.ts as `clearStaleLKGP`.
  */

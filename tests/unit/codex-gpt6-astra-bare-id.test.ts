@@ -20,6 +20,7 @@ const { CODEX_NATIVE_UNPREFIXED_MODELS, getModelInfoCore } =
   await import("../../open-sse/services/model.ts");
 const { getProviderModels } = await import("../../open-sse/config/providerModels.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // The base id and its effort tiers, as registered for the codex provider.
 const ASTRA_IDS = getProviderModels("codex")
@@ -41,8 +42,9 @@ async function seedConnection(provider: "codex" | "openai") {
   });
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

@@ -28,6 +28,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosAutoRoute = await import("../../src/app/api/combos/auto/route.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Families with no matching models in any seeded registry — the materialized
 // pool is empty, so these ids must be filtered from every listing.
@@ -55,6 +56,7 @@ async function resetStorage() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   await settingsDb.updateSettings({ requireLogin: false });
 }
 

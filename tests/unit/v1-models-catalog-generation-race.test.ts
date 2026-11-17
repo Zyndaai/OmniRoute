@@ -31,6 +31,7 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const HEADER_SOURCES = { corsHeaders: {}, diagnosticHeaders: {} };
 
@@ -60,16 +61,17 @@ function deferredBuilder(body: string) {
   };
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   catalogCache.__resetCatalogBuilderRunsForTest();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

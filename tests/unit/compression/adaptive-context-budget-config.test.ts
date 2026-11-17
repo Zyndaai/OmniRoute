@@ -25,11 +25,13 @@ const { compressionSettingsUpdateSchema } =
   await import("../../../src/shared/validation/compressionConfigSchemas.ts");
 const { DEFAULT_CONTEXT_BUDGET } =
   await import("../../../open-sse/services/compression/adaptiveCompression/types.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
-beforeEach(() => {
+beforeEach(async () => {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 });
 
 afterEach(() => {

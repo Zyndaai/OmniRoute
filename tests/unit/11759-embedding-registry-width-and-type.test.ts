@@ -41,6 +41,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const embeddingRegistry = await import("../../open-sse/config/embeddingRegistry.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 /** Both are real registry entries, so the expected widths come from the registry itself. */
 const OPENROUTER_MODEL = "qwen/qwen3-embedding-8b";
@@ -61,9 +62,10 @@ function registryWidth(providerId: string, modelId: string): number {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -100,7 +102,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

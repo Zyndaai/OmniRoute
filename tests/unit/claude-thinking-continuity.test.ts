@@ -142,11 +142,11 @@ function chatHistory(toolUseId = "toolu_01ABC"): Block[] {
   ];
 }
 
-function translateChatTurn(
+async function translateChatTurn(
   messages: Block[],
   { model = MODEL, provider = "claude", reasoningEffort = "high" as string | null } = {}
 ) {
-  return openaiToClaudeRequest(
+  return await openaiToClaudeRequest(
     model,
     {
       messages,
@@ -178,10 +178,10 @@ test.beforeEach(() => {
   store.clearClaudeThinkingStore();
 });
 
-test("Chat client: signed thinking from the Claude stream is restored before the owning tool_use", () => {
+test("Chat client: signed thinking from the Claude stream is restored before the owning tool_use", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const turn = assistantTurn(translateChatTurn(chatHistory()));
+  const turn = assistantTurn(await translateChatTurn(chatHistory()));
   assert.deepEqual(stripCacheControl(turn.content[0]), {
     type: "thinking",
     thinking: THINKING_TEXT,
@@ -199,10 +199,10 @@ test("Chat client: signed thinking from the Claude stream is restored before the
   );
 });
 
-test("Chat client: interleaved thinking + redacted_thinking keep their exact order", () => {
+test("Chat client: interleaved thinking + redacted_thinking keep their exact order", async () => {
   streamClaudeToChat(claudeToolTurnEvents({ withRedacted: true }));
 
-  const turn = assistantTurn(translateChatTurn(chatHistory()));
+  const turn = assistantTurn(await translateChatTurn(chatHistory()));
   assert.deepEqual(turn.content.slice(0, 2).map(stripCacheControl), [
     { type: "thinking", thinking: THINKING_TEXT, signature: SIGNATURE },
     { type: "redacted_thinking", data: "REDACTED_OPAQUE_DATA" },
@@ -217,7 +217,7 @@ test("the stream output itself is unchanged (no signature leaks to the client)",
   assert.equal(serialized.includes("signature"), false);
 });
 
-test("Responses client: end-to-end claude→responses stream then responses→claude request restores the block", () => {
+test("Responses client: end-to-end claude→responses stream then responses→claude request restores the block", async () => {
   const state: Record<string, unknown> = {
     ...(initState(FORMATS.OPENAI_RESPONSES) as Record<string, unknown>),
     provider: "claude",
@@ -228,7 +228,7 @@ test("Responses client: end-to-end claude→responses stream then responses→cl
   }
   translateResponse(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, null, state);
 
-  const body = translateRequest(
+  const body = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     MODEL,
@@ -270,10 +270,10 @@ test("Responses client: end-to-end claude→responses stream then responses→cl
   assert.equal(toolUse?.id, "toolu_02RESP");
 });
 
-test("different model: nothing is restored (falls back to the #5312 placeholder)", () => {
+test("different model: nothing is restored (falls back to the #5312 placeholder)", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const turn = assistantTurn(translateChatTurn(chatHistory(), { model: "claude-opus-4-5" }));
+  const turn = assistantTurn(await translateChatTurn(chatHistory(), { model: "claude-opus-4-5" }));
   assert.equal(
     turn.content.some((block) => block.type === "thinking"),
     false
@@ -284,19 +284,19 @@ test("different model: nothing is restored (falls back to the #5312 placeholder)
   });
 });
 
-test("dated response model vs undated request alias still binds to the same model", () => {
+test("dated response model vs undated request alias still binds to the same model", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const turn = assistantTurn(translateChatTurn(chatHistory(), { model: "claude-sonnet-4-5" }));
+  const turn = assistantTurn(await translateChatTurn(chatHistory(), { model: "claude-sonnet-4-5" }));
   assert.equal(turn.content[0].type, "thinking");
   assert.equal(turn.content[0].signature, SIGNATURE);
 });
 
-test("different provider: nothing is restored", () => {
+test("different provider: nothing is restored", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
   const turn = assistantTurn(
-    translateChatTurn(chatHistory(), { provider: "anthropic-compatible-other" })
+    await translateChatTurn(chatHistory(), { provider: "anthropic-compatible-other" })
   );
   assert.equal(
     turn.content.some((block) => block.type === "thinking"),
@@ -304,31 +304,31 @@ test("different provider: nothing is restored", () => {
   );
 });
 
-test("unknown / tampered tool_call id restores nothing", () => {
+test("unknown / tampered tool_call id restores nothing", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const turn = assistantTurn(translateChatTurn(chatHistory("toolu_TAMPERED")));
+  const turn = assistantTurn(await translateChatTurn(chatHistory("toolu_TAMPERED")));
   assert.equal(
     turn.content.some((block) => block.type === "thinking"),
     false
   );
 });
 
-test("thinking disabled for the outbound request: nothing is restored", () => {
+test("thinking disabled for the outbound request: nothing is restored", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const turn = assistantTurn(translateChatTurn(chatHistory(), { reasoningEffort: null }));
+  const turn = assistantTurn(await translateChatTurn(chatHistory(), { reasoningEffort: null }));
   assert.equal(
     turn.content.some((block) => block.type === "thinking" || block.type === "redacted_thinking"),
     false
   );
 });
 
-test("assistant turn without tool_calls restores nothing", () => {
+test("assistant turn without tool_calls restores nothing", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
   const turn = assistantTurn(
-    translateChatTurn([
+    await translateChatTurn([
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello", reasoning_content: THINKING_TEXT },
       { role: "user", content: "again" },
@@ -354,7 +354,7 @@ test("oversized thinking is never stored", () => {
   assert.equal(store.getClaudeThinkingStoreSizeForTests(), 0);
 });
 
-test("a client-supplied signed thinking block wins over the stored one (no duplication)", () => {
+test("a client-supplied signed thinking block wins over the stored one (no duplication)", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
   const messages = chatHistory();
@@ -363,7 +363,7 @@ test("a client-supplied signed thinking block wins over the stored one (no dupli
     content: [{ type: "thinking", thinking: "client copy", signature: "CLIENT_SIG" }],
     tool_calls: (messages[1] as { tool_calls: unknown }).tool_calls,
   };
-  const turn = assistantTurn(translateChatTurn(messages));
+  const turn = assistantTurn(await translateChatTurn(messages));
   const thinkingBlocks = turn.content.filter((block) => block.type === "thinking");
   assert.equal(thinkingBlocks.length, 1);
   assert.equal(thinkingBlocks[0].signature, "CLIENT_SIG");
@@ -388,9 +388,9 @@ test("expired entries are not restored", () => {
   }
 });
 
-test("signature recovery downgrades a server-restored block in the active cycle and forgets it", () => {
+test("signature recovery downgrades a server-restored block in the active cycle and forgets it", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
-  const body = translateChatTurn(chatHistory());
+  const body = await translateChatTurn(chatHistory());
   assert.equal(assistantTurn(body).content[0].type, "thinking");
 
   const recovered = stripHistoricalThinkingForSignatureRecovery(body) as {
@@ -454,7 +454,7 @@ function nonStreamInput(overrides: Record<string, unknown> = {}) {
   };
 }
 
-test("non-streaming Claude response: signed thinking is stored and restored next turn", () => {
+test("non-streaming Claude response: signed thinking is stored and restored next turn", async () => {
   const { response } = translateNonStreamingClientResponse(nonStreamInput());
   assert.equal(
     JSON.stringify(response).includes(SIGNATURE),
@@ -462,7 +462,7 @@ test("non-streaming Claude response: signed thinking is stored and restored next
     "the client response never carries the signature"
   );
 
-  const turn = assistantTurn(translateChatTurn(chatHistory("toolu_03NS")));
+  const turn = assistantTurn(await translateChatTurn(chatHistory("toolu_03NS")));
   assert.deepEqual(stripCacheControl(turn.content[0]), {
     type: "thinking",
     thinking: THINKING_TEXT,
@@ -475,10 +475,10 @@ test("non-streaming video-transcript-sensitive response is never retained", () =
   assert.equal(store.getClaudeThinkingStoreSizeForTests(), 0);
 });
 
-test("video-transcript-sensitive request never replays stored thinking", () => {
+test("video-transcript-sensitive request never replays stored thinking", async () => {
   streamClaudeToChat(claudeToolTurnEvents());
 
-  const body = translateRequest(
+  const body = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     MODEL,

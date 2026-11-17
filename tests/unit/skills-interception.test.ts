@@ -15,6 +15,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_PLUGINS_DIR = TEST_PLUGINS_DIR;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
 const { skillExecutor } = await import("../../src/lib/skills/executor.ts");
 const { builtinSkills } = await import("../../src/lib/skills/builtins.ts");
@@ -32,7 +33,8 @@ function resetRuntime() {
 
 async function resetStorage() {
   resetRuntime();
-  coreDb.resetDbInstance();
+  await resetTestDb();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -76,9 +78,9 @@ test.beforeEach(async () => {
   await registerRuntimeSkills();
 });
 
-test.after(() => {
+test.after(async () => {
   resetRuntime();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_PLUGINS_DIR === undefined) delete process.env.OMNIROUTE_PLUGINS_DIR;

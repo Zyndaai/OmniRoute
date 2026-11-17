@@ -14,6 +14,7 @@ process.env.JWT_SECRET = "test-jwt-secret-for-oidc-callback";
 
 // @ts-ignore - intentional for test harness timing (see note at top)
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 // @ts-ignore - intentional for test harness timing
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
@@ -33,6 +34,7 @@ let capturedCookies: Record<string, CapturedCookie> = {};
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   capturedCookies = {};
@@ -60,8 +62,8 @@ test.afterEach(() => {
   callbackRoute.oidcCallbackInternals.getCookieStore = originalGetCookieStore;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.JWT_SECRET;
 });

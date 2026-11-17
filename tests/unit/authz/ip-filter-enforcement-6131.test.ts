@@ -17,18 +17,19 @@ process.env.JWT_SECRET = "test-secret-6131";
 const core = await import("../../../src/lib/db/core.ts");
 const ipFilter = await import("../../../open-sse/services/ipFilter.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_STAMP_TOKEN === undefined) delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   else process.env.OMNIROUTE_PEER_STAMP_TOKEN = ORIGINAL_STAMP_TOKEN;
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   ipFilter.resetIPFilter();

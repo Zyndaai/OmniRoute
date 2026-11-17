@@ -163,10 +163,13 @@ test("quota pools and quota-group renames signal model-catalog invalidation as e
     name: "Quota Pool",
     groupId: "group-demo",
   });
-  assert.equal(catalogVersion(), version + 1);
+  // createPool awaits the managed quota-combo sync, and each combo write bumps the catalog too,
+  // so the exact count is not stable; what matters is that it moved before the call returned.
+  assert.ok(catalogVersion() >= version + 1);
 
+  version = catalogVersion();
   const group = await quotaGroups.createGroup("Quota Group");
-  assert.equal(catalogVersion(), version + 1, "creating quota groups does not invalidate catalog");
+  assert.equal(catalogVersion(), version, "creating quota groups does not invalidate catalog");
 
   version = catalogVersion();
   const renamed = await quotaGroups.renameGroup(group.id, "Renamed Quota Group");
@@ -175,12 +178,12 @@ test("quota pools and quota-group renames signal model-catalog invalidation as e
 
   version = catalogVersion();
   assert.notEqual(await quotaPools.updatePool(pool.id, { name: "Quota Pool Updated" }), null);
-  assert.equal(catalogVersion(), version + 1);
+  assert.ok(catalogVersion() >= version + 1);
 
   version = catalogVersion();
   // deletePool became async in #8906 (managed-combo cleanup on pool deletion).
   assert.equal(await quotaPools.deletePool(pool.id), true);
-  assert.equal(catalogVersion(), version + 1);
+  assert.ok(catalogVersion() >= version + 1);
 });
 
 test("deletePool clears primed key metadata after allowed_quotas rewrite", async () => {

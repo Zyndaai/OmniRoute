@@ -237,7 +237,7 @@ test("Gemini -> Claude stream: stores thoughtSignature from a standalone part pr
 
   assert.equal(result[1].content_block.id, "toolu_sig_1");
   assert.equal(state.pendingThoughtSignature, null);
-  assert.equal(getGeminiThoughtSignature("conn-claude-1:toolu_sig_1"), "sig-claude-1");
+  assert.equal(await getGeminiThoughtSignature("conn-claude-1:toolu_sig_1"), "sig-claude-1");
 });
 
 test("Gemini -> Claude stream: response wrapper is supported and promptFeedback-only chunk is ignored", () => {

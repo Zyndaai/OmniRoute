@@ -12,12 +12,14 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "explicit-inactive-w2
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { maybeReactivateAfterExplicitProbe, resetExplicitProbeMapForTests } = await import(
   "../../src/sse/services/explicitInactiveProbe.ts"
 );
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -46,7 +48,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -18,21 +18,23 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const syncBundle = await import("../../src/lib/sync/bundle.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {

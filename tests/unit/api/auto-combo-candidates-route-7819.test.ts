@@ -12,6 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-7819-rout
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const routeModule =
   await import("../../../src/app/api/v1/auto-combo/[channel]/candidates/route.ts");
 
@@ -25,8 +26,9 @@ async function callGET(channel: string) {
   return routeModule.GET(makeRequest(channel), { params: Promise.resolve({ channel }) });
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
 });
 
 test.after(() => {

@@ -39,6 +39,9 @@ function record(connection = "shared-B", identity = identityB): SessionAccountAf
   };
 }
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+// A released late reply triggers an async cleanup (PostgreSQL round trips) that no promise
+// exposes, so wait a short real interval for it to land before asserting on local state.
+const settle = (ms = 40) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 class FakeRedis {
   raw: string | null = null;
@@ -93,12 +96,97 @@ class FakeRedis {
   }
 }
 
-function setup(timeout = 10, client = new FakeRedis()) {
+// The deadline wraps the awaited PostgreSQL clears inside each operation, so it must be well above
+// a database round trip or healthy replies would be reported as timeouts.
+function setup(timeout = 100, client = new FakeRedis()) {
   const store = new RedisSessionAffinityStore(async () => client, local, timeout);
   return { client, store };
 }
 function readLocal(key: string) {
   return local.get(key, provider, ttl, now + 10);
+}
+
+/**
+ * In-memory twin of the PostgreSQL local store (same guards as sqliteStore.ts), used by the
+ * seeded model test only. That test needs a 1 ms Redis deadline to make hundreds of timeout
+ * schedules cheap, and with real database round trips inside the deadline every healthy
+ * operation would time out. Its calls resolve on microtasks, so a 1 ms timer cannot fire first.
+ */
+function createMemoryLocal() {
+  const rows = new Map<string, SessionAccountAffinityRecord>();
+  const id = (key: string, p: string) => `${p}:${key}`;
+  const valid = (identity?: string) => (identity && /^[a-f0-9]{64}$/.test(identity) ? identity : null);
+  const serialize = (row: SessionAccountAffinityRecord) =>
+    JSON.stringify({
+      connectionId: row.connectionId,
+      ...(row.accountIdentity ? { accountIdentity: row.accountIdentity } : {}),
+      createdAt: row.createdAt,
+      lastUsedAt: row.lastUsedAt,
+      expiresAt: row.expiresAt,
+    });
+  return {
+    async get(key: string, p: string, ttlMs = 0, at = Date.now()) {
+      if (!key || !p || !(ttlMs > 0)) return null;
+      const row = rows.get(id(key, p));
+      if (!row) return null;
+      if (Date.parse(row.expiresAt) <= at) {
+        rows.delete(id(key, p));
+        return null;
+      }
+      return { ...row };
+    },
+    async upsert(
+      key: string,
+      p: string,
+      connectionId: string,
+      at = Date.now(),
+      ttlMs = 0,
+      accountIdentity?: string
+    ) {
+      if (!key || !p || !connectionId || !(ttlMs > 0)) return;
+      const existing = rows.get(id(key, p));
+      const stamp = new Date(at).toISOString();
+      const live = existing && Date.parse(existing.expiresAt) > at;
+      if (existing && live && Date.parse(existing.lastUsedAt) > at) return;
+      const identity = valid(accountIdentity);
+      rows.set(id(key, p), {
+        connectionId,
+        ...(identity ? { accountIdentity: identity } : {}),
+        createdAt: live ? existing.createdAt : stamp,
+        lastUsedAt: stamp,
+        expiresAt: new Date(at + ttlMs).toISOString(),
+      });
+    },
+    async touch(key: string, p: string, at = Date.now(), ttlMs = 0) {
+      const row = rows.get(id(key, p));
+      if (!key || !p || !(ttlMs > 0) || !row || Date.parse(row.expiresAt) <= at) return;
+      row.lastUsedAt = new Date(at).toISOString();
+      row.expiresAt = new Date(at + ttlMs).toISOString();
+    },
+    async delete(key: string, p: string) {
+      rows.delete(id(key, p));
+    },
+    async deleteIfValue(key: string, p: string, serialized: string) {
+      const row = rows.get(id(key, p));
+      if (!row || serialize(row) !== serialized) return false;
+      rows.delete(id(key, p));
+      return true;
+    },
+    async getSerialized(key: string, p: string) {
+      const row = rows.get(id(key, p));
+      return row ? serialize(row) : null;
+    },
+    async evict(key: string, p: string, connectionId: string, accountIdentity?: string) {
+      const row = rows.get(id(key, p));
+      if (!key || !p || !connectionId || !row) return false;
+      const matches =
+        row.accountIdentity && accountIdentity
+          ? row.accountIdentity === accountIdentity
+          : row.connectionId === connectionId;
+      if (matches) rows.delete(id(key, p));
+      return matches;
+    },
+  };
 }
 
 test.beforeEach((t) => {
@@ -217,15 +305,19 @@ for (const operation of ["upsert", "touch"] as const) {
     await client.applied.promise;
     await pending;
     if (operation === "touch") {
-      assert.equal(readLocal(key), null, "the initial read cleared the row before touch timed out");
+      assert.equal(
+        await readLocal(key),
+        null,
+        "the initial read cleared the row before touch timed out"
+      );
     } else {
-      assert.equal(readLocal(key)?.lastUsedAt, new Date(now + 1).toISOString());
+      assert.equal((await readLocal(key))?.lastUsedAt, new Date(now + 1).toISOString());
     }
     client.fail = true;
     await store.upsert(key, provider, "outage-A", now + 3, ttl, identityA, null);
-    const newer = readLocal(key);
+    const newer = await readLocal(key);
     client.release.resolve();
-    await flush();
+    await settle();
     assert.deepEqual(await store.get(key, provider, ttl, now + 4), newer);
   });
 }
@@ -235,9 +327,9 @@ test("confirmed upsert/touch/delete never write local pins; healthy reads ignore
   const key = "control";
   client.fail = false;
   await store.upsert(key, provider, "healthy-A", now, ttl, identityA, null);
-  assert.equal(readLocal(key), null);
+  assert.equal(await readLocal(key), null);
   await store.touch(key, provider, now + 1, ttl);
-  assert.equal(readLocal(key), null);
+  assert.equal(await readLocal(key), null);
   client.fail = true;
   await store.upsert(key, provider, "outage-A", now + 2, ttl, identityA, null);
   client.fail = false;
@@ -372,38 +464,40 @@ test("1000 seeded schedules preserve authoritative invalidation and exact late-w
       redis.onImmediateReply = () => {
         authoritativeStep = step;
       };
+      // Shadows the PostgreSQL store for this schedule: see createMemoryLocal.
+      const local = createMemoryLocal();
       const fallback = {
         ...local,
-        upsert(...args: Parameters<typeof local.upsert>) {
-          const result = local.upsert(...args);
-          const value = local.getSerialized(key, provider);
+        async upsert(...args: Parameters<typeof local.upsert>) {
+          const result = await local.upsert(...args);
+          const value = await local.getSerialized(key, provider);
           if (value) {
             localWriteStep = step;
-            localWriteId = local.get(key, provider, ttl, now + 100)?.connectionId;
+            localWriteId = (await local.get(key, provider, ttl, now + 100))?.connectionId;
             redis.noteFallback();
           }
           return result;
         },
-        touch(...args: Parameters<typeof local.touch>) {
-          const result = local.touch(...args);
-          const value = local.getSerialized(key, provider);
+        async touch(...args: Parameters<typeof local.touch>) {
+          const result = await local.touch(...args);
+          const value = await local.getSerialized(key, provider);
           if (value) {
             localWriteStep = step;
-            localWriteId = local.get(key, provider, ttl, now + 100)?.connectionId;
+            localWriteId = (await local.get(key, provider, ttl, now + 100))?.connectionId;
             redis.noteFallback();
           }
           return result;
         },
-        delete(...args: Parameters<typeof local.delete>) {
-          const result = local.delete(...args);
+        async delete(...args: Parameters<typeof local.delete>) {
+          const result = await local.delete(...args);
           localWriteStep = -1;
           localWriteId = undefined;
           return result;
         },
-        deleteIfValue(...args: Parameters<typeof local.deleteIfValue>) {
-          const before = local.getSerialized(key, provider);
+        async deleteIfValue(...args: Parameters<typeof local.deleteIfValue>) {
+          const before = await local.getSerialized(key, provider);
           const late = redis.currentLate;
-          const result = local.deleteIfValue(...args);
+          const result = await local.deleteIfValue(...args);
           if (before === args[2] && result) {
             assert.ok(
               !late || late.fallbackStep === undefined || localWriteStep <= late.fallbackStep,
@@ -414,8 +508,8 @@ test("1000 seeded schedules preserve authoritative invalidation and exact late-w
           }
           return result;
         },
-        evict(...args: Parameters<typeof local.evict>) {
-          const result = local.evict(...args);
+        async evict(...args: Parameters<typeof local.evict>) {
+          const result = await local.evict(...args);
           if (result) {
             evictedAt.set(args[3] ?? args[2], step);
             localWriteStep = -1;
@@ -451,7 +545,7 @@ test("1000 seeded schedules preserve authoritative invalidation and exact late-w
           redis.release(random(state, redis.pending.length));
           await flush();
         }
-        const current = local.get(key, provider, ttl, now + 100);
+        const current = await local.get(key, provider, ttl, now + 100);
         if (current) {
           assert.ok(
             localWriteStep >= authoritativeStep,
@@ -468,7 +562,7 @@ test("1000 seeded schedules preserve authoritative invalidation and exact late-w
       }
       redis.releaseAll();
       await flush();
-      const current = local.get(key, provider, ttl, now + 100);
+      const current = await local.get(key, provider, ttl, now + 100);
       if (current) {
         assert.ok(
           localWriteStep >= authoritativeStep,
@@ -479,7 +573,7 @@ test("1000 seeded schedules preserve authoritative invalidation and exact late-w
           `schedule ${seed}/${schedule}: CAS loser local row`
         );
       }
-      local.delete(key, provider);
+      await local.delete(key, provider);
     }
   }
   t.diagnostic(JSON.stringify({ schedules: scheduleCount, seeds: ["0x16472009", "0x9e3779b9"] }));

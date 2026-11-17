@@ -14,6 +14,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const clearPendingRequests = usageHistory.clearPendingRequests;
 
@@ -23,6 +24,7 @@ async function resetStorage() {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   clearPendingRequests();
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {

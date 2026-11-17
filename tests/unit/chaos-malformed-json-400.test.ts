@@ -29,9 +29,10 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const chaosConfig = await import("../../src/lib/chaos/chaosConfig.ts");
 const runRoute = await import("../../src/app/api/chaos/run/route.ts");
 const skillsChaosRoute = await import("../../src/app/api/skills/collect/chaos/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   chaosConfig.invalidateChaosConfigCache();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -72,8 +73,8 @@ test.afterEach(() => {
   mock.restoreAll();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;

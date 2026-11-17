@@ -9,6 +9,7 @@ const dataDir = mkdtempSync(join(tmpdir(), "omni-discovery-producers-"));
 process.env.DATA_DIR = dataDir;
 process.env.APP_LOG_TO_FILE = "false";
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 /**
  * The reason module is imported dynamically and a missing module is not fatal
  * for the file: every case then fails on its own assertion, and the failing
@@ -88,16 +89,17 @@ async function bodyOf(response: Response | null) {
   return (await response.json()) as Record<string, unknown>;
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
   core.resetDbInstance();
+  await resetTestDb();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   mkdirSync(dataDir, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

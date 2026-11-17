@@ -14,6 +14,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/lib/api/requireManagementAuth.ts");
 const authHeaders = await import("../../src/server/authz/headers.ts");
 const route = await import("../../src/app/api/usage/glm-reset-card/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 const originalConsoleError = console.error;
@@ -41,9 +42,10 @@ function managementRequest(pathname: string, init: RequestInit = {}) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
@@ -54,7 +56,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   globalThis.fetch = originalFetch;
   console.error = originalConsoleError;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

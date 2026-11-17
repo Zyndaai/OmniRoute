@@ -171,7 +171,7 @@ async function rejectMachineSecurityPolicyWrite(
     forbiddenMessage: SECURITY_POLICY_FORBIDDEN_MESSAGE,
   });
   if (verdict.ok === false) {
-    emitSettingsFailureAudit(request, actor, "OPERATOR_REQUIRED", attemptedKeys);
+    await emitSettingsFailureAudit(request, actor, "OPERATOR_REQUIRED", attemptedKeys);
     return verdict.response;
   }
   return null;
@@ -379,7 +379,7 @@ export async function PATCH(request: Request) {
   } catch {
     // Malformed JSON — surface a zod-style failure path so the rejection
     // is auditable like every other 400.
-    emitSettingsFailureAudit(request, actor, "INVALID_JSON", []);
+    await emitSettingsFailureAudit(request, actor, "INVALID_JSON", []);
     return NextResponse.json(
       { error: { code: "INVALID_JSON", message: "Request body is not valid JSON" } },
       { status: 400 }
@@ -387,7 +387,7 @@ export async function PATCH(request: Request) {
   }
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
     // Valid JSON that is not an object (`null`, a string, a number): nothing to read keys from.
-    emitSettingsFailureAudit(request, actor, "INVALID_BODY", []);
+    await emitSettingsFailureAudit(request, actor, "INVALID_BODY", []);
     return NextResponse.json(
       { error: { code: "INVALID_BODY", message: "Request body must be a JSON object" } },
       { status: 400 }
@@ -406,7 +406,7 @@ export async function PATCH(request: Request) {
       const isBypassPrefixRejection = (validation.error.details || []).some(
         (d) => typeof d.message === "string" && d.message.includes("BYPASS_PREFIX_NOT_ALLOWED")
       );
-      emitSettingsFailureAudit(
+      await emitSettingsFailureAudit(
         request,
         actor,
         isBypassPrefixRejection ? "BYPASS_PREFIX_NOT_ALLOWED" : "VALIDATION_FAILED",
@@ -433,13 +433,13 @@ export async function PATCH(request: Request) {
 
     const oidcPolicyError = await validateOidcPolicyPatch(body);
     if (oidcPolicyError) {
-      emitSettingsFailureAudit(request, actor, oidcPolicyError.code, attemptedKeys);
+      await emitSettingsFailureAudit(request, actor, oidcPolicyError.code, attemptedKeys);
       return NextResponse.json({ error: oidcPolicyError }, { status: 400 });
     }
 
     const entraPolicyError = await validateEntraSsoPatch(body);
     if (entraPolicyError) {
-      emitSettingsFailureAudit(request, actor, entraPolicyError.code, attemptedKeys);
+      await emitSettingsFailureAudit(request, actor, entraPolicyError.code, attemptedKeys);
       return NextResponse.json({ error: entraPolicyError }, { status: 400 });
     }
 
@@ -471,7 +471,7 @@ export async function PATCH(request: Request) {
         (passwordState.settings.requireLogin === false || Boolean(body.newPassword));
       if (!isColdBoot) {
         if (!body.currentPassword) {
-          emitSettingsFailureAudit(request, actor, "PASSWORD_REQUIRED", attemptedKeys);
+          await emitSettingsFailureAudit(request, actor, "PASSWORD_REQUIRED", attemptedKeys);
           return NextResponse.json(
             {
               error: {
@@ -485,7 +485,7 @@ export async function PATCH(request: Request) {
         }
         const isValid = await verifyManagementPassword(body.currentPassword, storedPasswordHash);
         if (!isValid) {
-          emitSettingsFailureAudit(request, actor, "PASSWORD_MISMATCH", attemptedKeys);
+          await emitSettingsFailureAudit(request, actor, "PASSWORD_MISMATCH", attemptedKeys);
           return NextResponse.json(
             {
               error: {
@@ -508,7 +508,12 @@ export async function PATCH(request: Request) {
       const currentSettings = await getSettings();
       if ((currentSettings as Record<string, unknown>)?.hidePaidModels === true) {
         if (isPaidModelTarget(body.webSearchRouteModel) === "paid") {
-          emitSettingsFailureAudit(request, actor, "PAID_MODEL_TARGET_BLOCKED", attemptedKeys);
+          await emitSettingsFailureAudit(
+            request,
+            actor,
+            "PAID_MODEL_TARGET_BLOCKED",
+            attemptedKeys
+          );
           return NextResponse.json(
             {
               error: {
@@ -548,7 +553,7 @@ export async function PATCH(request: Request) {
       settings = await updateSettings(body, { expectedRevision });
     } catch (error) {
       if (error instanceof SettingsRevisionConflictError) {
-        emitSettingsFailureAudit(request, actor, "SETTINGS_REVISION_CONFLICT", attemptedKeys);
+        await emitSettingsFailureAudit(request, actor, "SETTINGS_REVISION_CONFLICT", attemptedKeys);
         return NextResponse.json(
           {
             error: {
@@ -569,7 +574,7 @@ export async function PATCH(request: Request) {
     if (cpaUrl && typeof cpaUrl === "string") {
       const urlValidation = validateProxyUrl(cpaUrl);
       if (urlValidation.valid === false) {
-        emitSettingsFailureAudit(request, actor, "CLIPROXY_URL_INVALID", attemptedKeys);
+        await emitSettingsFailureAudit(request, actor, "CLIPROXY_URL_INVALID", attemptedKeys);
         return NextResponse.json(
           { error: `Invalid CLIProxyAPI URL: ${urlValidation.error}` },
           { status: 400 }

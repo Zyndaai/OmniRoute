@@ -39,6 +39,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const aliasesDb = await import("../../src/lib/db/models/aliases.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type CatalogRow = { id: string; parent: string | null; root: string | null };
 type PrefixMode = "alias" | "canonical" | "dual";
@@ -63,9 +64,10 @@ const CONTROL_ALIAS_ID = "cc/claude-sonnet-4-6";
 const CONTROL_CANONICAL_ID = "claude/claude-sonnet-4-6";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -145,7 +147,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

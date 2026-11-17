@@ -608,7 +608,7 @@ export async function registerNodejs(): Promise<void> {
   const [
     { initGracefulShutdown },
     { initApiBridgeServer },
-    { startBackgroundRefresh },
+    { startBackgroundRefresh, ensureQuotaCacheHydrated },
     { ensureCloudSyncInitialized },
     { startProviderLimitsSyncScheduler },
     { getSettings },
@@ -635,6 +635,13 @@ export async function registerNodejs(): Promise<void> {
     import("@/lib/auth/managementPassword"),
     import("@/lib/skills/executor"),
     import("@/lib/skills/builtins"),
+  ]);
+
+  // Routing reads quota exhaustion and tier prices synchronously from memory: load the
+  // stored snapshots/prices before the server reports ready so no request sees a cold cache.
+  await Promise.all([
+    ensureQuotaCacheHydrated(),
+    import("@omniroute/open-sse/services/tierResolver").then((m) => m.ensureTierPricingLoaded()),
   ]);
 
   // Proxy health scheduler (auto-removes dead proxies on interval)

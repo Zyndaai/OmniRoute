@@ -33,6 +33,25 @@ export function clearFeatureFlagOverrideCache(key?: string): void {
   else overrideCache.delete(key);
 }
 
+// The synchronous resolvers (src/shared/utils/featureFlags.ts) serve their own snapshot of
+// the override table. It registers here so every committed write reloads it before the
+// writer returns, and the writing process reads its own change immediately.
+type WriteListener = () => Promise<void>;
+let writeListener: WriteListener | null = null;
+
+export function registerFeatureFlagWriteListener(listener: WriteListener): void {
+  writeListener = listener;
+}
+
+async function afterOverrideWrite(key?: string): Promise<void> {
+  clearFeatureFlagOverrideCache(key);
+  // The resolver module registers its listener when it loads. A writer that runs before
+  // anything has read a flag loads it here (dynamic, so there is no import cycle), otherwise
+  // its first synchronous read would miss this write.
+  if (!writeListener) await import("@/shared/utils/featureFlags");
+  if (writeListener) await writeListener();
+}
+
 const CATALOG_RELEVANT_FEATURE_FLAGS = new Set([
   "MODEL_CATALOG_INCLUDE_NAMES",
   "MODELS_CATALOG_PREFIX_MODE",
@@ -87,7 +106,7 @@ export async function setFeatureFlagOverride(key: string, value: string): Promis
     );
   }
   await setConfigText(NAMESPACE, key, value);
-  clearFeatureFlagOverrideCache(key);
+  await afterOverrideWrite(key);
   if (CATALOG_RELEVANT_FEATURE_FLAGS.has(key)) {
     finishModelCatalogWriteWithoutBackup();
   }
@@ -99,7 +118,7 @@ export async function setFeatureFlagOverride(key: string, value: string): Promis
  */
 export async function removeFeatureFlagOverride(key: string): Promise<void> {
   await deleteConfigValue(NAMESPACE, key);
-  clearFeatureFlagOverrideCache(key);
+  await afterOverrideWrite(key);
   if (CATALOG_RELEVANT_FEATURE_FLAGS.has(key)) {
     finishModelCatalogWriteWithoutBackup();
   }
@@ -114,7 +133,7 @@ export async function clearAllFeatureFlagOverrides(): Promise<void> {
     [NAMESPACE, Array.from(CATALOG_RELEVANT_FEATURE_FLAGS)]
   );
   await deleteConfigNamespace(NAMESPACE);
-  clearFeatureFlagOverrideCache();
+  await afterOverrideWrite();
   if (relevant) {
     finishModelCatalogWriteWithoutBackup();
   }

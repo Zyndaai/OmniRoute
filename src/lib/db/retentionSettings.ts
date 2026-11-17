@@ -41,11 +41,14 @@ export async function getRetentionSettings(): Promise<RetentionSettings> {
  * The dashboard-saved call-log retention without defaults applied, or null when the
  * operator never saved one.
  */
-export async function getPersistedRetentionDays(name: keyof RetentionSettings): Promise<number | null> {
+export async function getPersistedRetentionDays(
+  name: keyof RetentionSettings
+): Promise<number | null> {
   const row = await db().queryOne<{ value: unknown }>(
     `SELECT value FROM config_entries
       WHERE namespace = 'databaseSettings' AND key = $1`,
     [`${RETENTION_KEY_PREFIX}${String(name)}`]
   );
-  return isPositiveNumber(row?.value) ? row.value : null;
+  // 0 is out of contract for a persisted call-log window; callers fall back to the default.
+  return isPositiveNumber(row?.value) && row.value > 0 ? row.value : null;
 }

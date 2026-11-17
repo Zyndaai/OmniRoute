@@ -50,7 +50,7 @@ const DEFAULT_ROWS = LOG_EXPORT_DEFAULT_ROWS;
  * `estimatedCount` is known before iteration; the authoritative `count` is
  * appended after the rows, including when hydration fails partway through.
  */
-function buildLogExportStream({
+async function buildLogExportStream({
   rows,
   header,
   logType,
@@ -60,43 +60,80 @@ function buildLogExportStream({
   header: Record<string, unknown>;
   logType: string;
   hours: number;
-}): ReadableStream<Uint8Array> {
+}): Promise<ReadableStream<Uint8Array>> {
   const encoder = new TextEncoder();
-  return new ReadableStream({
-    async start(controller) {
-      // header ends with `}`, we strip it to append `,"logs":[...]}`
-      controller.enqueue(encoder.encode(JSON.stringify(header).slice(0, -1) + ',"logs":['));
-      let index = 0;
-      let streamError: unknown = null;
-      try {
-        for await (const row of rows) {
-          if (index > 0) controller.enqueue(encoder.encode(","));
-          controller.enqueue(encoder.encode(JSON.stringify(row)));
-          index++;
+  const iterator: Iterator<unknown> | AsyncIterator<unknown> =
+    Symbol.asyncIterator in rows
+      ? (rows as AsyncIterable<unknown>)[Symbol.asyncIterator]()
+      : (rows as Iterable<unknown>)[Symbol.iterator]();
+  // Prime the first row before the response is returned: the row source reads its id list
+  // and hydrates the first row now, so the snapshot of the matching rows is taken at request
+  // time. Later rows are pulled one at a time as the consumer reads (bounded memory, and a
+  // slow client applies backpressure to the DB reads). A failure here is kept and reported
+  // in-stream like any later one (#13999).
+  let primed: IteratorResult<unknown> | null = null;
+  let primeError: unknown = null;
+  try {
+    primed = await iterator.next();
+  } catch (err) {
+    primeError = err;
+  }
+  let index = 0;
+  let finished = false;
+  return new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        // header ends with `}`, we strip it to append `,"logs":[...]}`
+        controller.enqueue(encoder.encode(JSON.stringify(header).slice(0, -1) + ',"logs":['));
+      },
+      async pull(controller) {
+        if (finished) return;
+        let streamError: unknown = null;
+        try {
+          if (primeError) throw primeError;
+          let result: IteratorResult<unknown>;
+          if (primed) {
+            result = primed;
+            primed = null;
+          } else {
+            result = await iterator.next();
+          }
+          if (!result.done) {
+            controller.enqueue(
+              encoder.encode((index > 0 ? "," : "") + JSON.stringify(result.value))
+            );
+            index++;
+            return;
+          }
+        } catch (err) {
+          // #13999: the row source (a DB cursor/generator) can throw partway through
+          // iteration, after headers and some rows have already gone out over the wire.
+          // Erroring the Web ReadableStream is not enough: once it is bridged onto a real
+          // Node HTTP response (as any Node-based adapter does), a source error does not
+          // end or destroy the destination response — the client's fetch() never resolves
+          // and never rejects, and it hangs forever (proven by
+          // tests/unit/repro-13999-mid-stream-error.test.ts). Instead of erroring the
+          // stream, close the JSON document out cleanly with a trailing `error`/`emitted`
+          // marker so the HTTP response always completes, and log the failure server-side.
+          streamError = err;
+          log.error(
+            { err, emitted: index, type: logType, hours },
+            "logs export stream failed mid-iteration"
+          );
         }
-      } catch (err) {
-        // #13999: the row source (a DB cursor/generator) can throw partway through
-        // iteration, after headers and some rows have already gone out over the wire.
-        // Letting the exception propagate out of an async `start()` auto-errors the
-        // underlying Web ReadableStream, but once that stream is bridged onto a real
-        // Node HTTP response (as any Node-based adapter does), a source error does not
-        // end or destroy the destination response — the client's fetch() never resolves
-        // and never rejects, and it hangs forever (proven by
-        // tests/unit/repro-13999-mid-stream-error.test.ts). Instead of erroring the
-        // stream, close the JSON document out cleanly with a trailing `error`/`emitted`
-        // marker so the HTTP response always completes, and log the failure server-side.
-        streamError = err;
-        log.error(
-          { err, emitted: index, type: logType, hours },
-          "logs export stream failed mid-iteration"
-        );
-      }
-      controller.enqueue(encoder.encode("]"));
-      if (streamError) controller.enqueue(encoder.encode(errorTail(index, streamError)));
-      controller.enqueue(encoder.encode(`,"count":${index}}\n`));
-      controller.close();
+        finished = true;
+        controller.enqueue(encoder.encode("]"));
+        if (streamError) controller.enqueue(encoder.encode(errorTail(index, streamError)));
+        controller.enqueue(encoder.encode(`,"count":${index}}\n`));
+        controller.close();
+      },
+      async cancel() {
+        finished = true;
+        await iterator.return?.();
+      },
     },
-  });
+    { highWaterMark: 0 }
+  );
 }
 
 /**
@@ -150,7 +187,7 @@ export async function GET(request: Request) {
     const count = Math.min(totalAvailable, limit);
     const filename = `omniroute-${tableName}-${hours}h-${new Date().toISOString().slice(0, 10)}.json`;
 
-    const stream = buildLogExportStream({
+    const stream = await buildLogExportStream({
       rows,
       header: {
         estimatedCount: count,

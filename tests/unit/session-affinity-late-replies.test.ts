@@ -27,6 +27,9 @@ function gate() {
   return { promise, resolve };
 }
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+// A released late reply triggers an async cleanup (PostgreSQL round trips) that no promise
+// exposes, so wait a short real interval for it to land before asserting on local state.
+const settle = (ms = 40) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 function record(id: string, identity = identityA): SessionAccountAffinityRecord {
   return {
     connectionId: id,
@@ -103,8 +106,9 @@ function setup(timeout = 100, fallback = local) {
   );
   return { server, clients, stores };
 }
-function seed(key: string, id = "old-A", identity = identityA) {
-  local.upsert(key, provider, id, now, ttl, identity);
+// The local store is async (PostgreSQL): seeding and reading must be awaited.
+async function seed(key: string, id = "old-A", identity = identityA) {
+  await local.upsert(key, provider, id, now, ttl, identity);
 }
 function readLocal(key: string) {
   return local.get(key, provider, ttl, now + 10);
@@ -125,7 +129,7 @@ for (const outcome of ["rejected", "accepted", "error"] as const) {
       clients: [a],
       stores: [s],
     } = setup();
-    seed(key);
+    await seed(key);
     const observed = await s.get(key, provider, ttl, now);
     assert.equal(observed?.connectionId, "old-A");
     if (outcome === "rejected")
@@ -138,13 +142,13 @@ for (const outcome of ["rejected", "accepted", "error"] as const) {
     await a.applied.promise;
     await pending;
     assert.equal(
-      readLocal(key)?.connectionId,
+      (await readLocal(key))?.connectionId,
       "losing-candidate",
       "timeout still performs the existing local fallback"
     );
     if (outcome === "rejected") assert.equal(JSON.parse(server.raw!).connectionId, "winner-B");
     a.release.resolve();
-    await flush();
+    await settle();
     a.fail = true;
     assert.equal(
       await s.get(key, provider, ttl, now + 10),
@@ -169,9 +173,10 @@ for (const newer of ["different-id", "identity-conflict"] as const) {
     const id = newer === "different-id" ? "outage-B" : "candidate";
     await other.upsert(key, provider, id, now + 2, ttl, identityB);
     a.release.resolve();
-    await flush();
-    assert.equal(readLocal(key)?.connectionId, id);
-    assert.equal(readLocal(key)?.accountIdentity, identityB);
+    await settle();
+    const stored = await readLocal(key);
+    assert.equal(stored?.connectionId, id);
+    assert.equal(stored?.accountIdentity, identityB);
   });
 }
 
@@ -181,15 +186,19 @@ test("late touch cannot refresh the local row cleared by the initial Redis read"
     clients: [a],
     stores: [s],
   } = setup();
-  seed(key, "outage-B", identityB);
+  await seed(key, "outage-B", identityB);
   a.hold = true;
   const pending = s.touch(key, provider, now + 1, ttl);
   await a.applied.promise;
   await pending;
-  assert.equal(readLocal(key), null, "the authoritative initial read already cleared outage-B");
+  assert.equal(
+    await readLocal(key),
+    null,
+    "the authoritative initial read already cleared outage-B"
+  );
   a.release.resolve();
-  await flush();
-  assert.equal(readLocal(key), null);
+  await settle();
+  assert.equal(await readLocal(key), null);
 });
 
 for (const operation of ["delete", "evict"] as const) {
@@ -200,7 +209,7 @@ for (const operation of ["delete", "evict"] as const) {
       clients: [a, b],
       stores: [s, other],
     } = setup();
-    seed(key);
+    await seed(key);
     a.hold = true;
     const pending =
       operation === "delete" ? s.delete(key, provider) : s.evict(key, provider, "old-A", identityA);
@@ -237,7 +246,11 @@ for (const operation of ["delete", "evict"] as const) {
       ttl,
       operation === "delete" ? identityB : identityA
     );
-    assert.equal(readLocal(key)?.connectionId, newer, "a later outage fallback may pin again");
+    assert.equal(
+      (await readLocal(key))?.connectionId,
+      newer,
+      "a later outage fallback may pin again"
+    );
   });
 }
 
@@ -248,7 +261,7 @@ for (const operation of ["upsert", "touch"] as const) {
       clients: [a],
       stores: [s, other],
     } = setup();
-    seed(key);
+    await seed(key);
     a.hold = true;
     const pending =
       operation === "upsert"
@@ -258,7 +271,7 @@ for (const operation of ["upsert", "touch"] as const) {
     assert.equal(await other.evict(key, provider, "old-A", identityA), true);
     a.release.resolve();
     await pending;
-    assert.equal(readLocal(key), null);
+    assert.equal(await readLocal(key), null);
   });
 }
 
@@ -274,7 +287,7 @@ test("rejected candidate is not installed locally; shared winner remains routabl
   };
   const result = await s.upsert(key, provider, "loser", now + 1, ttl, identityA);
   assert.equal(result && result.connectionId, "winner-B");
-  assert.equal(readLocal(key), null);
+  assert.equal(await readLocal(key), null);
 });
 
 test("500 seeded schedules: local pins have outage provenance and no subsequent matching eviction", async (t) => {
@@ -291,19 +304,19 @@ test("500 seeded schedules: local pins have outage provenance and no subsequent 
     let sequence = 0;
     let lastWrite: { id: string; identity?: string; at: number } | undefined;
     const evictions: Array<{ id: string; identity?: string; at: number }> = [];
-    const capture = () => {
-      const pin = readLocal(key);
+    const capture = async () => {
+      const pin = await readLocal(key);
       if (pin) lastWrite = { id: pin.connectionId, identity: pin.accountIdentity, at: ++sequence };
     };
     const fallback = {
       ...local,
-      upsert(...args: Parameters<typeof local.upsert>) {
-        local.upsert(...args);
-        capture();
+      async upsert(...args: Parameters<typeof local.upsert>) {
+        await local.upsert(...args);
+        await capture();
       },
-      touch(...args: Parameters<typeof local.touch>) {
-        local.touch(...args);
-        capture();
+      async touch(...args: Parameters<typeof local.touch>) {
+        await local.touch(...args);
+        await capture();
       },
       evict(...args: Parameters<typeof local.evict>) {
         evictions.push({ id: args[2], identity: args[3], at: ++sequence });
@@ -352,8 +365,8 @@ test("500 seeded schedules: local pins have outage provenance and no subsequent 
     }
     await Promise.all(pending);
     clients.forEach((client) => client.release.resolve());
-    await flush();
-    const pin = readLocal(key);
+    await settle();
+    const pin = await readLocal(key);
     if (pin) {
       assert.ok(lastWrite, `schedule ${schedule}: shared success installed local state`);
       assert.equal(pin.connectionId, lastWrite.id, `schedule ${schedule}: local writer provenance`);

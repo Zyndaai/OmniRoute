@@ -23,10 +23,12 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const modelAliasResolver = await import("../../src/lib/modelAliasResolver.ts");
 const { POST } = await import("../../src/app/api/v1/messages/count_tokens/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type CountTokensResponse = { input_tokens: number; source: string; provider?: string };
 
 async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   apiKeysDb.clearApiKeyCaches();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -85,7 +87,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

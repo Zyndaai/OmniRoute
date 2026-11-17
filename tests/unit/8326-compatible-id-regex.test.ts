@@ -32,6 +32,7 @@ const routeModule = await import("../../src/app/api/v1/providers/[provider]/mode
 const { isCompatibleProviderConnectionId } =
   await import("../../src/shared/utils/compatibleProviderId.ts");
 const { getProviderDisplayName } = await import("../../src/lib/display/names.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function makeRequest(provider: string) {
   return new Request(`http://localhost/api/v1/providers/${encodeURIComponent(provider)}/models`);
@@ -43,12 +44,13 @@ async function callGET(provider: string) {
   });
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

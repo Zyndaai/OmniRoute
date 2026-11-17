@@ -31,6 +31,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-combo-cooldown-wait-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { clearAllModelLockouts } = await import("../../open-sse/services/accountFallback.ts");
 
@@ -94,6 +95,7 @@ function comboOf(strategy: string) {
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

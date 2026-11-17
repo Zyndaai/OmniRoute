@@ -7,7 +7,7 @@ import path from "node:path";
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gemini-custom-roundtrip-"));
 process.env.DATA_DIR = dataDir;
 await import("../../open-sse/translator/bootstrap.ts");
-const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { translateRequest, prefetchThoughtSignatures } =await import("../../open-sse/translator/index.ts");
 const { extractRequestToolIdentityMap, resolveResponseToolNameMap } =
   await import("../../open-sse/handlers/chatCore/requestToolIdentity.ts");
 const { collectResponsesCustomToolNames } =
@@ -47,7 +47,10 @@ function request(input: unknown[] = []) {
   };
 }
 async function pivot(body: Record<string, unknown>) {
-  return await translateRequest(
+  // Same read-ahead chatCore performs: the Gemini translators are synchronous, so persisted
+  // signatures are resolved first and passed in as `thoughtSignatures`.
+  const thoughtSignatures = await prefetchThoughtSignatures("gemini", "gemini-test", body, null);
+  return (await translateRequest(
     "openai-responses",
     "gemini",
     "gemini-test",
@@ -55,8 +58,9 @@ async function pivot(body: Record<string, unknown>) {
     true,
     null,
     null,
-    null
-  ) as Record<string, unknown>;
+    null,
+    { thoughtSignatures }
+  )) as Record<string, unknown>;
 }
 function wireNames(body: Record<string, unknown>) {
   return (

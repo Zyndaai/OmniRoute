@@ -3,11 +3,12 @@
  * own tools is retried once with the observed names appended; the retry
  * answer is served when it passes, otherwise the original refusal stands.
  */
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { OpencodeExecutor } from "../../open-sse/executors/opencode.ts";
 import type { ProviderCredentials } from "../../open-sse/executors/base.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 import {
   classifyProviderError,
   PROVIDER_ERROR_TYPES,
@@ -118,12 +119,16 @@ beforeEach(() => {
   recordAcceptedToolNames("opencode-zen", MODEL, undefined, ["edit", "write"]);
 });
 
-afterEach(() => {
+after(() => {
+  resetDbInstance();
+});
+
+afterEach(async () => {
   delete process.env.OPENCODE_FREE_TIER_PLACEHOLDER_TOOLS;
   globalThis.fetch = originalFetch;
   _setShapeClockForTests(() => Date.now());
   _resetToolObservationForTests();
-  resetDbInstance();
+  await resetTestDb();
 });
 
 for (const status of [403, 451]) {

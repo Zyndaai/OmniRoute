@@ -6,6 +6,10 @@ import { v4 as uuidv4 } from "uuid";
 
 import { isCommonChatGptWebRetiredProviderId } from "@/shared/constants/chatgptWebRetirement";
 import { db, ts, type DbExecutor } from "./pg";
+import {
+  applyRetiredProviderTombstone,
+  assertRetiredProviderIdentityPreserved,
+} from "./providers/retiredProviders";
 import { jsonValueParam, stripNul } from "./pgJsonText";
 import { rowToCamel, cleanNulls } from "./caseMapping";
 import { encryptConnectionFields, decryptConnectionFields } from "./encryption";
@@ -862,7 +866,8 @@ function objectOrNull(value: unknown): JsonRecord | null {
 }
 
 /** Inserts the row and returns the stored priority (an unset one becomes the provider's max + 1). */
-async function _insertConnectionRow(tx: DbExecutor, conn: JsonRecord): Promise<number> {
+async function _insertConnectionRow(tx: DbExecutor, input: JsonRecord): Promise<number> {
+  const conn = applyRetiredProviderTombstone(input);
   const columns = connectionColumnValues(conn);
   const names = ["id", "created_at", "updated_at", "priority", ...columns.map(([name]) => name)];
   const now = ts(conn.updatedAt as string) ?? new Date().toISOString();
@@ -886,7 +891,8 @@ async function _insertConnectionRow(tx: DbExecutor, conn: JsonRecord): Promise<n
   return row?.priority ?? 0;
 }
 
-async function _updateConnectionRow(tx: DbExecutor, id: string, data: JsonRecord) {
+async function _updateConnectionRow(tx: DbExecutor, id: string, input: JsonRecord) {
+  const data = applyRetiredProviderTombstone(input);
   const columns = connectionColumnValues(data);
   const now = ts(data.updatedAt as string) ?? new Date().toISOString();
   const assignments = ["priority", "updated_at", ...columns.map(([name]) => name)].map(
@@ -993,6 +999,7 @@ export async function updateProviderConnection(
     );
     if (!existing) return null;
     const built = buildUpdatedConnection(existing, data, opts);
+    assertRetiredProviderIdentityPreserved(existing.provider, built.provider);
     await reconcileCodexUsageHistory(tx, { connectionId: id, existing, merged: built });
     await _updateConnectionRow(tx, id, encryptConnectionFields({ ...built }));
     return { merged: built, existing };

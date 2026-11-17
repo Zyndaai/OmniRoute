@@ -16,16 +16,18 @@ const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const { REGISTRY } = await import("../../open-sse/config/providerRegistry.ts");
 const { sanitizeReasoningEffortForProvider } = await import("../../open-sse/executors/base.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

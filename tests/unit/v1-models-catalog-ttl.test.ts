@@ -35,20 +35,22 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 /** Comfortably past the old 1500 ms TTL, and a realistic client poll gap. */
 const GAP_MS = 10_000;
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

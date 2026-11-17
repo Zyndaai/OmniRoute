@@ -15,7 +15,7 @@ import { attachConnectionSpeedStats } from "@/lib/usage/connectionSpeedStats";
 export async function GET() {
   try {
     return NextResponse.json({
-      caches: attachConnectionSpeedStats(await getSanitizedCachedProviderLimitsMap()),
+      caches: await attachConnectionSpeedStats(await getSanitizedCachedProviderLimitsMap()),
       intervalMinutes: getProviderLimitsSyncIntervalMinutes(),
       lastAutoSyncAt: await getLastProviderLimitsAutoSyncTime(),
     });
@@ -32,7 +32,7 @@ export async function GET() {
 export async function POST() {
   try {
     const result = await syncAllProviderLimits({ source: "manual" });
-    const caches = attachConnectionSpeedStats(await getSanitizedCachedProviderLimitsMap());
+    const caches = await attachConnectionSpeedStats(await getSanitizedCachedProviderLimitsMap());
     return NextResponse.json({
       ...result,
       caches,

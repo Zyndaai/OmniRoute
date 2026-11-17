@@ -13,6 +13,7 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const grokReset = await import("../../src/lib/usage/grokResetCredits.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 const LIST_URL = "https://grok.com/prod_mc_billing.ConsumerUiSvc/GetRemainingResets";
@@ -95,9 +96,10 @@ function usageJsonResponse(): Response {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function createGrokConnection(overrides: Record<string, unknown> = {}) {
@@ -119,7 +121,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

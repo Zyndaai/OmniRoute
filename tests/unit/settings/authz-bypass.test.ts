@@ -32,17 +32,19 @@ const runtime = await import("../../../src/lib/config/runtimeSettings.ts");
 const routeGuard = await import("../../../src/server/authz/routeGuard.ts");
 const settingsRoute = await import("../../../src/app/api/settings/route.ts");
 const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 test.beforeEach(async () => {
   await fixture.resetStorage();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   // Force the route guard to start each test from cold-boot default
   // (enabled=true, prefixes=["/api/mcp/"]).
   runtime.resetRuntimeSettingsStateForTests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fixture.cleanup();
   if (ORIGINAL_INITIAL_PASSWORD === undefined) delete process.env.INITIAL_PASSWORD;
   else process.env.INITIAL_PASSWORD = ORIGINAL_INITIAL_PASSWORD;

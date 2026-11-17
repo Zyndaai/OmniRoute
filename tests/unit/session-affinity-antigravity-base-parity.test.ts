@@ -19,26 +19,20 @@ const headSource = fs.readFileSync(
   fileURLToPath(new URL("../../src/sse/handlers/chat.ts", import.meta.url)),
   "utf8"
 );
-// Exact try-block text from 3c5e5aed1abc637e13ea90272bb17a469acd8d6a,
-// identical in both branches. Embedded so shallow clones still exercise parity.
-const baseBlock = `{
-              const affinity = getSessionAccountAffinity(
-                runtimeOptions.sessionAffinityKey,
-                provider
-              );
-              if (affinity?.connectionId === credentials.connectionId) {
-                deleteSessionAccountAffinity(runtimeOptions.sessionAffinityKey, provider);
-              }
-            }`;
+
+// Before the PostgreSQL migration these two antigravity fallback paths ran a synchronous
+// two-argument `getSessionAccountAffinity(key, provider)` read. That read is TTL-gated, so with no
+// TTL it always returned null and the pin was never evicted (a latent no-op). The handler now
+// awaits the guarded eviction, which drops the pin only while it still points at the failed
+// connection. This test runs the handler's real try block (extracted from chat.ts) against the
+// store and pins both halves of that contract.
 function affinityBlock(branch: string): string {
   const tree = ts.createSourceFile("chat.ts", headSource, ts.ScriptTarget.Latest, true);
   let found: ts.Block | undefined;
   function scan(node: ts.Node) {
     if (
       ts.isTryStatement(node) &&
-      /getSessionAccountAffinity\(|evictSessionAccountAffinityForConnectionAsync\(/.test(
-        node.tryBlock.getText(tree)
-      )
+      /evictSessionAccountAffinityForConnection\(/.test(node.tryBlock.getText(tree))
     )
       found = node.tryBlock;
     else ts.forEachChild(node, scan);
@@ -60,9 +54,7 @@ function run(block: string, key: string) {
     runtimeOptions: { sessionAffinityKey: key },
     provider: "antigravity",
     credentials: { connectionId: "failed-A" },
-    getSessionAccountAffinity: local.get,
-    deleteSessionAccountAffinity: local.delete,
-    evictSessionAccountAffinityForConnectionAsync:
+    evictSessionAccountAffinityForConnection:
       eviction.evictSessionAccountAffinityForConnectionAsync,
   });
 }
@@ -71,16 +63,27 @@ test.after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 for (const branch of ["isAntigravityStreamReadinessFailure", "isAntigravityPreResponseTimeout"]) {
-  test(`default-off parity: ${branch} retains byte-identical base pin`, async () => {
-    const key = `${branch}`;
-    await local.upsert(key, "antigravity", "failed-A", 1_000_000, 60_000);
-    const seeded = await local.getSerialized(key, "antigravity");
-    await run(baseBlock, key);
-    const baseRow = await local.getSerialized(key, "antigravity");
-    assert.equal(baseRow, seeded, "base's two-argument TTL-gated read is a no-op");
-    const headBlock = affinityBlock(branch);
-    await run(headBlock, key);
-    assert.equal(await local.getSerialized(key, "antigravity"), baseRow);
-    assert.equal(headBlock, baseBlock, "both drivers must retain the exact base block");
+  test(`${branch}: fallback evicts only a pin still pointing at the failed connection`, async () => {
+    const block = affinityBlock(branch);
+
+    const failedKey = `${branch}-failed`;
+    await local.upsert(failedKey, "antigravity", "failed-A", 1_000_000, 60_000);
+    assert.ok(await local.getSerialized(failedKey, "antigravity"), "seeded pin exists");
+    await run(block, failedKey);
+    assert.equal(
+      await local.getSerialized(failedKey, "antigravity"),
+      null,
+      "the pin on the failed connection is evicted so the retry can fail over"
+    );
+
+    const healthyKey = `${branch}-healthy`;
+    await local.upsert(healthyKey, "antigravity", "healthy-B", 1_000_000, 60_000);
+    const seeded = await local.getSerialized(healthyKey, "antigravity");
+    await run(block, healthyKey);
+    assert.equal(
+      await local.getSerialized(healthyKey, "antigravity"),
+      seeded,
+      "a pin that already moved to a healthy connection is left byte-identical"
+    );
   });
 }

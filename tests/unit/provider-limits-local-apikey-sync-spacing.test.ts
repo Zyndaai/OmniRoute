@@ -22,12 +22,13 @@ process.env.API_KEY_SECRET = "test-apikey-spacing-sync-secret";
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerLimits = await import("../../src/lib/usage/providerLimits.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.PROVIDER_LIMITS_SYNC_SPACING_MS;
@@ -35,6 +36,7 @@ test.beforeEach(() => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
+  await core.resetDbInstance();
   delete process.env.PROVIDER_LIMITS_SYNC_SPACING_MS;
   await cleanupTempDataDir(TEST_DATA_DIR);
 });

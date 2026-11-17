@@ -8,6 +8,7 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-reasoning-c
 process.env.DATA_DIR = testDataDir;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { testSingleConnection } = await import("../../src/app/api/providers/[id]/test/route.ts");
 const { getReasoningControlEndpointFingerprint, resolveReasoningControl } =
@@ -18,6 +19,7 @@ const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   fs.mkdirSync(testDataDir, { recursive: true });
 }
@@ -42,8 +44,8 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 

@@ -10,6 +10,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const { assignProxyToScope, createProxy } = await import("@/lib/db/proxies");
@@ -25,7 +26,8 @@ const MACHINE_ID = "1234567890abcdef";
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
   delete process.env.ENABLE_SOCKS5_PROXY;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

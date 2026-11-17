@@ -12,6 +12,7 @@ import { resolveProxyForRequest } from "../../open-sse/utils/proxyFetch.ts";
 import { RESPONSES_FIRST_BYTE_TIMEOUT_CODE } from "../../open-sse/utils/firstByteWatchdog.ts";
 import { DEFAULT_STREAM_READINESS_TIMEOUT_MS } from "../../src/shared/utils/runtimeTimeouts.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // Hardened stall guard: the first-byte window is bounded by
 // the stream readiness timeout (capMs), one rotation per request, Responses
@@ -50,12 +51,12 @@ describe("resolveResponsesStallWindowMs with a readiness bound", () => {
     delete process.env[FLAG];
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (priorTimeout === undefined) delete process.env[TIMEOUT_ENV];
     else process.env[TIMEOUT_ENV] = priorTimeout;
     if (priorFlag === undefined) delete process.env[FLAG];
     else process.env[FLAG] = priorFlag;
-    resetDbInstance();
+    await resetTestDb();
   });
 
   after(() => {
@@ -141,12 +142,12 @@ describe("setupStallGuard wiring", () => {
     delete process.env[FLAG];
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (priorTimeout === undefined) delete process.env[TIMEOUT_ENV];
     else process.env[TIMEOUT_ENV] = priorTimeout;
     if (priorFlag === undefined) delete process.env[FLAG];
     else process.env[FLAG] = priorFlag;
-    resetDbInstance();
+    await resetTestDb();
   });
 
   after(() => {

@@ -6,7 +6,7 @@ import {
 } from "@/sse/services/quotaPreflightPolicy";
 import {
   getQuotaCache,
-  getQuotaSnapshotFetchedAt,
+  hydrateQuotaCacheFromSnapshots,
   getQuotaWindowStatus,
   isQuotaExhaustedForRequest,
   hydrateCodexQuotaCacheForRequest,
@@ -120,7 +120,8 @@ async function readCachedUsage(
   persistedUsage: Usage | undefined,
   requestedModel: string | null
 ): Promise<Usage & { cached?: ReturnType<typeof getQuotaCache> }> {
-  getQuotaSnapshotFetchedAt(id);
+  // Runs inside the read view: the stored snapshot lands in the private cache, never the shared one.
+  await hydrateQuotaCacheFromSnapshots(id).catch(() => null);
   seedReadView(id, provider, persistedUsage || {});
   await hydrateCodexQuotaCacheForRequest(connection, requestedModel);
   const cached = getQuotaCache(id);
@@ -357,8 +358,8 @@ export async function buildConnectionQuotaAvailability(
   policy: QuotaPreflightPolicy
 ): Promise<ConnectionQuotaAvailability> {
   const connection = toProviderConnection(input);
-  const cachedUsage = withQuotaCacheReadView(() => {
-    getQuotaSnapshotFetchedAt(connection.id);
+  const cachedUsage = await withQuotaCacheReadView(async () => {
+    await hydrateQuotaCacheFromSnapshots(connection.id).catch(() => null);
     const cached = getQuotaCache(connection.id);
     return (
       usage ||

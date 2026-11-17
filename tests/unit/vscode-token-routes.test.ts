@@ -33,9 +33,10 @@ const vscodeChatCompletionsRoute =
   await import("../../src/app/api/v1/vscode/[token]/chat/completions/route.ts");
 const vscodeResponsesRoute = await import("../../src/app/api/v1/vscode/[token]/responses/route.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -59,7 +60,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

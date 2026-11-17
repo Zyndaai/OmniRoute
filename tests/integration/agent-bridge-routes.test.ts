@@ -26,6 +26,7 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Import db core first to allow reset
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import routes under test
 const stateRoute = await import("../../src/app/api/tools/agent-bridge/state/route.ts");
@@ -37,17 +38,19 @@ const detectRoute =
 const upstreamCaRoute = await import("../../src/app/api/tools/agent-bridge/upstream-ca/route.ts");
 const routeGuard = await import("../../src/server/authz/routeGuard.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
-test.after(() => {
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {

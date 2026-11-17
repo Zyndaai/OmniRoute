@@ -15,9 +15,11 @@ const embeddingsRoute = await import("../../src/app/api/v1/embeddings/route.ts")
 const videoRoute = await import("../../src/app/api/v1/videos/generations/route.ts");
 const musicRoute = await import("../../src/app/api/v1/music/generations/route.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   // These routes all derive from the shared unified catalog (getUnifiedModelsResponse),
@@ -55,8 +57,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

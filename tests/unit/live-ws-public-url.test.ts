@@ -17,16 +17,18 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const wsRoute = await import("../../src/app/api/v1/ws/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.NEXT_PUBLIC_LIVE_WS_PUBLIC_URL;
   await localDb.updateSettings({
     wsAuth: false,

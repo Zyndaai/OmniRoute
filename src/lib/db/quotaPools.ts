@@ -21,9 +21,8 @@ import {
 } from "./readCache";
 // Phase B2: auto-mint/prune quotaShared-* combos when pool allocations change.
 // Imported lazily (dynamic import in the hook) to avoid circular-dependency
-// risk between db/ and quota/ modules. Sync hooks are fire-and-forget; deletion
-// awaits its guarded cleanup while metadata is available. Combo failures never
-// break pool CRUD.
+// risk between db/ and quota/ modules. Both the sync hooks and deletion await their
+// guarded work (these are admin writes). Combo failures never break pool CRUD.
 const quotaComboMaintenance = new Map<string, Promise<unknown>>();
 const deletingPools = new Set<string>();
 
@@ -384,8 +383,10 @@ export async function createPool(input: PoolCreate): Promise<QuotaPool> {
   });
   invalidateApiKeyPolicyCache();
 
-  // Phase B2: fire-and-forget combo sync; failures are logged but never thrown.
-  void serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
+  // Phase B2: combo sync. Awaited (admin write path) so the managed combos exist, and every
+  // catalog bump they cause has landed, before the caller continues; failures are logged but
+  // never thrown.
+  await serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
 
   invalidateModelCatalogCache();
 
@@ -491,8 +492,8 @@ export async function updatePool(id: string, input: PoolUpdate): Promise<QuotaPo
   if (!result) return null;
   invalidateApiKeyPolicyCache();
 
-  // Phase B2: fire-and-forget combo sync; failures are logged but never thrown.
-  void serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
+  // Phase B2: combo sync, awaited like createPool; failures are logged but never thrown.
+  await serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
 
   invalidateModelCatalogCache();
 
@@ -625,9 +626,9 @@ export async function upsertAllocations(
   });
   invalidateApiKeyPolicyCache();
 
-  // Phase B2: fire-and-forget combo sync for the target pool only; failures are
+  // Phase B2: combo sync for the target pool only, awaited (admin write path); failures are
   // logged but never thrown. Sibling pools' combos are synced on their own lifecycle.
-  void serializeQuotaComboMaintenance(poolId, () => syncQuotaCombosGuarded(poolId));
+  await serializeQuotaComboMaintenance(poolId, () => syncQuotaCombosGuarded(poolId));
 }
 
 /**

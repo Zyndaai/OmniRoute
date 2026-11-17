@@ -140,15 +140,16 @@ for (const driver of ["sqlite", "redis"] as const) {
           : {}),
       });
       assert.equal(evicted, true, "must exercise the prefetch-to-selection window");
-      // Base SQLite reads at planning time, sees the miss, and picks LRU B.
-      // Redis lease planning remains synchronous and intentionally uses snapshot A.
-      assert.equal(selected?.connectionId, driver === "redis" && leasePath ? a : b);
-      assert.equal(readsAtEviction, driver === "redis" ? 1 : 0);
-      if (driver === "sqlite")
-        assert.equal(get.mock.callCount(), 0, "no store prefetch/read yield");
-      if (driver === "redis" && leasePath) assert.equal(get.mock.callCount(), 1);
-      if (driver === "redis" && !leasePath) {
-        // Two selection reads, then the existing CAS-upsert observation read.
+      // Every store is async, so getProviderCredentials prefetches the pin once for every
+      // driver (#5903 needs it, and planning is synchronous). Both drivers behave alike:
+      // - lease planning is synchronous and intentionally uses the prefetched snapshot A
+      //   (the accepted window: an eviction landing after the prefetch is not seen);
+      // - the non-lease selector re-reads the store, sees the miss and picks LRU B.
+      assert.equal(selected?.connectionId, leasePath ? a : b);
+      assert.equal(readsAtEviction, 1, "the pin was prefetched before the eviction window");
+      if (leasePath) assert.equal(get.mock.callCount(), 1, "lease planning reuses the prefetch");
+      else {
+        // The prefetch, then the selector's own read (which sees the eviction).
         assert.equal(get.mock.callCount(), 2);
       }
       if (key) {

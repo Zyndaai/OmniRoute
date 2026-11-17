@@ -17,15 +17,17 @@ async function createSettingsApiHarness() {
   const core = await import("../../src/lib/db/core.ts");
   const { getSettings, updateSettings } = await import("../../src/lib/db/settings.ts");
   const settingsRoute = await import("../../src/app/api/settings/route.ts");
+  const { resetTestDb } = await import("../helpers/postgres.ts");
 
   async function resetStorage() {
-    core.resetDbInstance();
+    await core.resetDbInstance();
+    await resetTestDb();
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(testDataDir, { recursive: true });
   }
 
-  function cleanup() {
-    core.resetDbInstance();
+  async function cleanup() {
+    await core.resetDbInstance();
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
@@ -54,8 +56,8 @@ afterEach(async () => {
   await harness.resetStorage();
 });
 
-after(() => {
-  harness.cleanup();
+after(async () => {
+  await harness.cleanup();
 });
 
 describe("Settings API - persisted preferences", () => {

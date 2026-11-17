@@ -28,9 +28,11 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providerModelsRoute = await import("../../src/app/api/provider-models/route.ts");
 const catalogVision = await import("../../src/app/api/v1/models/catalogVision.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

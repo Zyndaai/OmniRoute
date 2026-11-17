@@ -20,16 +20,18 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { createKeySchema } = await import("../../src/shared/validation/schemas/keys.ts");
 const listRoute = await import("../../src/app/api/keys/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const FUTURE = new Date(Date.now() + 60 * 60_000).toISOString();
 const PAST = new Date(Date.now() - 60_000).toISOString();
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function enableManagementAuth() {
@@ -45,7 +47,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   await resetStorage();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  core.resetDbInstance();
+  await core.resetDbInstance();
 });
 
 test("createKeySchema accepts expiresAt with update-path semantics", () => {

@@ -11,6 +11,7 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { getModelInfoCore } = await import("../../open-sse/services/model.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type TestProvider = "anthropic" | "codex" | "openai";
 
@@ -44,8 +45,9 @@ async function seedSyncedModel(provider: TestProvider, modelId: string, isActive
   return connection;
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });

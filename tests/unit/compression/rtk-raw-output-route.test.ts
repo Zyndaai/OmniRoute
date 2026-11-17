@@ -13,6 +13,7 @@ const originalJwtSecret = process.env.JWT_SECRET;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const route = await import("../../../src/app/api/context/rtk/raw-output/[id]/route.ts");
 const rawOutput = await import("../../../open-sse/services/compression/engines/rtk/rawOutput.ts");
@@ -22,7 +23,8 @@ type ErrorResponseBody = {
 };
 
 async function resetAuthRequiredStorage(): Promise<void> {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await settingsDb.updateSettings({
@@ -37,12 +39,12 @@ test.beforeEach(async () => {
   await resetAuthRequiredStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = originalJwtSecret;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

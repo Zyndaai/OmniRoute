@@ -26,9 +26,11 @@ const settingsDb = await import("../../../src/lib/db/settings.ts");
 const runtime = await import("../../../src/lib/config/runtimeSettings.ts");
 const inventoryRoute = await import("../../../src/app/api/settings/authz-inventory/route.ts");
 const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 test.beforeEach(async () => {
   await fixture.resetStorage();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   runtime.resetRuntimeSettingsStateForTests();
 });

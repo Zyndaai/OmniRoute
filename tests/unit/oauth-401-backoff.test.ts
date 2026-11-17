@@ -19,6 +19,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { COOLDOWN_MS } = await import("../../open-sse/config/constants.ts");
 
 const MODEL = "gpt-6-sol-high";
@@ -27,6 +28,7 @@ const UPSTREAM_401 =
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -67,8 +69,8 @@ const cooldownLeftMs = async (connId: string) => {
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

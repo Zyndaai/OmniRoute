@@ -5,6 +5,12 @@ export interface FeatureFlagDefinition {
   descriptionI18nKey: string;
   category: "security" | "network" | "policies" | "runtime" | "cli" | "health";
   defaultValue: string;
+  /**
+   * Enforcement flags only: the value the synchronous resolvers return while the override
+   * store is unreadable, instead of the environment variable or `defaultValue`. It is the
+   * value that keeps the protection on, so an outage can never relax it.
+   */
+  failClosedValue?: string;
   type: "boolean" | "enum";
   enumValues?: string[];
   requiresRestart: boolean;
@@ -20,6 +26,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlagRequireApiKeyDescription",
     category: "security",
     defaultValue: "false",
+    failClosedValue: "true",
     type: "boolean",
     requiresRestart: false,
     warningLevel: "caution",
@@ -31,6 +38,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlagInputSanitizerEnabledDescription",
     category: "security",
     defaultValue: "true",
+    failClosedValue: "true",
     type: "boolean",
     requiresRestart: false,
     warningLevel: "info",
@@ -102,6 +110,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlagAllowApiKeyRevealDescription",
     category: "security",
     defaultValue: "false",
+    failClosedValue: "false",
     type: "boolean",
     requiresRestart: false,
     warningLevel: "danger",
@@ -488,6 +497,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlags.definitions.UNPRICED_USAGE_BUDGET_POLICY.description",
     category: "policies",
     defaultValue: "fail_closed",
+    failClosedValue: "fail_closed",
     type: "enum",
     enumValues: ["fail_closed", "count_as_zero"],
     requiresRestart: false,
@@ -524,6 +534,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlagDisableContextWindowChecksDescription",
     category: "policies",
     defaultValue: "false",
+    failClosedValue: "false",
     type: "boolean",
     requiresRestart: false,
     warningLevel: "danger",
@@ -548,6 +559,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     descriptionI18nKey: "featureFlagUsageLimitIgnoreUnpricedDescription",
     category: "policies",
     defaultValue: "false",
+    failClosedValue: "false",
     type: "boolean",
     requiresRestart: false,
     warningLevel: "caution",

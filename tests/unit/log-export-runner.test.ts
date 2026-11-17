@@ -415,7 +415,9 @@ test("runDestinationExport_PendingArtifact_DoesNotSkipLaterBodies", async () => 
   await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until, has_request_body)
      VALUES ('pending-middle', $1, 'pending', $2, true)`,
-    [new Date().toISOString(), new Date(Date.now() + 60_000).toISOString()]
+    // Older than the export read lag (EXPORT_READ_LAG_MS, 60s): a row inside that window
+    // is held back regardless of its detail state, which is not what this test covers.
+    [new Date(Date.now() - 5 * 60_000).toISOString(), new Date(Date.now() + 60_000).toISOString()]
   );
   await insertCallLogWithBodies("ready-after", { requestBody: { text: "third" } });
   const destination = await createBigQueryDestination({ includeBodies: true, batchSize: 10 });
@@ -464,7 +466,13 @@ test("runDestinationExport_ExpiredPending_UnblocksBodiesWithoutTimestampHeuristi
   await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until, has_request_body)
      VALUES ($1, $2, 'pending', $3, true)`,
-    ["expired", "2099-01-01T00:00:00.000Z", new Date(Date.now() - 1).toISOString()]
+    // The timestamp is past the export read lag (EXPORT_READ_LAG_MS); only the expired
+    // pending deadline may decide whether this row blocks later bodies.
+    [
+      "expired",
+      new Date(Date.now() - 5 * 60_000).toISOString(),
+      new Date(Date.now() - 1).toISOString(),
+    ]
   );
   await insertCallLogWithBodies("after-expired", { requestBody: { text: "retained" } });
   const destination = await createBigQueryDestination({ includeBodies: true, batchSize: 10 });
@@ -548,7 +556,7 @@ test("runDestinationExport_PendingFirst_LeavesCursorUntilPublished", async () =>
   await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until)
      VALUES ('first-pending', $1, 'pending', $2)`,
-    [new Date().toISOString(), new Date(Date.now() + 60_000).toISOString()]
+    [new Date(Date.now() - 5 * 60_000).toISOString(), new Date(Date.now() + 60_000).toISOString()]
   );
   await insertCallLogWithBodies("later-ready", { requestBody: { text: "later" } });
   const destination = await createBigQueryDestination({ includeBodies: true });

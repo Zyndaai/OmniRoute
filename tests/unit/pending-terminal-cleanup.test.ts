@@ -360,7 +360,12 @@ for (const rawConnectionId of [null, undefined]) {
       };
       // Same read-ahead chatCore performs: the Gemini translators are synchronous, so the
       // persisted signatures are resolved first and passed in as `thoughtSignatures`.
-      const thoughtSignatures = await prefetchThoughtSignatures("gemini", model, followupBody, CONN);
+      const thoughtSignatures = await prefetchThoughtSignatures(
+        "gemini",
+        model,
+        followupBody,
+        rawConnectionId
+      );
       const followup = (await translateRequest(
         "openai",
         "gemini",

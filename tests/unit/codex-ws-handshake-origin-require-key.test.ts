@@ -37,6 +37,7 @@ const coreDb = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const sessionToken = await import("../../src/shared/utils/dashboardSessionToken.ts");
 const route = await import("../../src/app/api/internal/codex-responses-ws/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const LOOPBACK_STAMP = `${process.env.OMNIROUTE_PEER_STAMP_TOKEN}|127.0.0.1`;
 const LOCAL_HOST = "127.0.0.1:20128";
@@ -83,9 +84,10 @@ function setEnv(values: Partial<Record<(typeof ENV_KEYS)[number], string>>) {
   Object.assign(process.env, values);
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   apiKeysDb.resetApiKeyState();
   coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   setEnv({});

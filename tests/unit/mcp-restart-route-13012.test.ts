@@ -16,6 +16,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const { POST } = await import("../../src/app/api/mcp/restart/route.ts");
 const { shutdownMcpHttp } = await import("../../open-sse/mcp-server/httpTransport.ts");
 const { isLocalOnlyPath } = await import("../../src/server/authz/routeGuard.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Hard Rule #15: /api/mcp/ must stay LOCAL_ONLY so loopback enforcement runs
 // unconditionally before any auth check — a leaked JWT over a tunnel must not
@@ -24,14 +25,15 @@ test("issue #13012: POST /api/mcp/restart is classified LOCAL_ONLY", () => {
   assert.equal(isLocalOnlyPath("/api/mcp/restart"), true);
 });
 
-function reset() {
+async function reset() {
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
-  reset();
+  await reset();
   // No JWT_SECRET / requireLogin=false ⇒ auth-disabled deployment (pre-existing
   // open-door contract also exercised by tests/unit/mcp-route-scope-carveout.test.ts).
   await settingsDb.updateSettings({ requireLogin: false });

@@ -15,6 +15,7 @@ fs.mkdirSync(TEST_PLUGINS_DIR, { recursive: true });
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_PLUGINS_DIR = TEST_PLUGINS_DIR;
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const auth = await import("../../src/sse/services/auth.ts");
@@ -329,7 +330,8 @@ async function resetStorage() {
   setBackgroundDegradationConfig(originalBackgroundConfig);
   resetBackgroundStats();
   globalThis.setTimeout = originalSetTimeout;
-  await core.resetDbInstance();
+  // PostgreSQL rows outlive the pool, so empty the tables (the SQLite file used to be deleted).
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

@@ -25,6 +25,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "retired-model-410-te
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const { checkFallbackError, isModelPermanentlyUnavailable, clearAllModelLockouts } =
   await import("../../open-sse/services/accountFallback.ts");
@@ -44,9 +45,10 @@ const RETIRED_WITHOUT_MODEL_WORD_410 =
 const RETIRED_MODEL = "glm-5.1";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function seedConnection(provider: string, name: string) {
@@ -67,7 +69,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

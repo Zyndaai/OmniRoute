@@ -22,6 +22,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "vision-key-scope-sec
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { VisionBridgeGuardrail } = await import("../../src/lib/guardrails/visionBridge.ts");
 const { callVisionModel } = await import("../../src/lib/guardrails/visionBridgeHelpers.ts");
 const { clearSelectionCache } = await import("../../src/lib/guardrails/visionBridgeRouter.ts");
@@ -39,7 +40,7 @@ const SETTINGS = {
 type DescribeCall = { imageUrl: string; config: Record<string, unknown> };
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.clearApiKeyCaches();
   clearSelectionCache();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -103,7 +104,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

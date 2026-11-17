@@ -13,15 +13,17 @@ process.env.INITIAL_PASSWORD = "admin-secret";
 const core = await import("../../src/lib/db/core.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
+async function resetDb() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
 test.after(() => {

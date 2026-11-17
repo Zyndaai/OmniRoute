@@ -32,6 +32,7 @@ const { markEmptyTurnExecution } = await import("../../open-sse/utils/emptyTurnP
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { handleChat } = await import("../../src/sse/handlers/chat.ts");
 const { initTranslators } = await import("../../open-sse/translator/index.ts");
@@ -410,6 +411,7 @@ function setFlag(enabled: boolean) {
 async function resetStorage() {
   clearInflight();
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   initTranslators();
@@ -480,7 +482,7 @@ test.afterEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -24,8 +24,10 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const advertisedAuto = await import("../../src/app/api/v1/models/autoCatalogIds.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
+async function resetStorage() {
+  await resetTestDb();
   core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -46,12 +48,12 @@ async function seedProviders() {
   }
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

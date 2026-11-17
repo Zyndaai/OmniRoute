@@ -12,6 +12,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { getConnectionRoutingTags, matchesRoutingTags, resolveRequestRoutingTags } =
   await import("../../src/domain/tagRouter.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function createLog() {
   return {
@@ -35,7 +36,8 @@ function okResponse(content: string) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -57,6 +59,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

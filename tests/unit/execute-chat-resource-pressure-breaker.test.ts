@@ -13,6 +13,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-pressure-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { executeChatWithBreaker } = await import("../../src/sse/handlers/chatHelpers.ts");
 const { getCircuitBreaker, resetAllCircuitBreakers, STATE } =
   await import("../../src/shared/utils/circuitBreaker.ts");
@@ -24,7 +25,8 @@ const MiB = 1024 ** 2;
 
 async function resetStorage() {
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   // Restore a non-shedding resource pressure runtime between tests.

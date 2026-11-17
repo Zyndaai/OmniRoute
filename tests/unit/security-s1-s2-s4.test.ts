@@ -204,6 +204,8 @@ describe("S1 — login rate-limit key uses anti-spoofed peer IP", () => {
     // Reset DB and set up settings
     const core = await import("../../src/lib/db/core.ts");
     core.resetDbInstance();
+    const { resetTestDb } = await import("../helpers/postgres.ts");
+    await resetTestDb();
     settingsDb = await import("../../src/lib/db/settings.ts");
     await settingsDb.updateSettings({ bruteForceProtection: true });
 

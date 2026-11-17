@@ -11,6 +11,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "v1beta-models-test-s
 const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const v1betaModelsRoute = await import("../../src/app/api/v1beta/models/route.ts");
 
 async function addActiveConnection(provider: string) {
@@ -23,7 +24,7 @@ async function addActiveConnection(provider: string) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -33,7 +34,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -29,6 +29,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "combo-test-route-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const runtimePorts = await import("../../src/lib/runtime/ports.ts");
@@ -38,6 +39,7 @@ const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

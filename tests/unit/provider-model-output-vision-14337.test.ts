@@ -155,7 +155,16 @@ test("provider union catalog exposes positive synced vision without promoting fa
     isActive: true,
     providerSpecificData: { autoFetchModels: false },
   });
-  await models.replaceSyncedAvailableModelsForConnection("openai", "other-synthetic-connection", [
+  // connection_model_sync has a foreign key to provider_connections: a sync for an
+  // id that is not a real connection is dropped, so the sibling must exist.
+  const sibling = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "synthetic-sibling",
+    apiKey: "synthetic-sibling-only",
+    isActive: true,
+  });
+  await models.replaceSyncedAvailableModelsForConnection("openai", sibling.id, [
     { id: "vision-14337", name: "Vision", supportsVision: true },
     { id: "text-14337", name: "Text", supportsVision: false },
     { id: "unknown-14337", name: "Unknown" },

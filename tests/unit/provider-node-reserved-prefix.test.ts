@@ -38,9 +38,11 @@ const { buildReservedPrefixes, getProviderPrefixIndex } =
 const providerNodesDb = await import("../../src/lib/db/providers/nodes.ts");
 const { isCommonChatGptWebRetiredProviderId } =
   await import("../../src/shared/constants/chatgptWebRetirement.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

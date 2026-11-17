@@ -21,21 +21,23 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../../src/lib/db/compression.ts");
 
-beforeEach(() => {
-  core.resetDbInstance();
+beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-afterEach(() => {
-  core.resetDbInstance();
+afterEach(async () => {
+  await core.resetDbInstance();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;

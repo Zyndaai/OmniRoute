@@ -1,4 +1,4 @@
-import { getFeatureFlagOverrides } from "@/lib/db/featureFlags";
+import { getFeatureFlagOverrides, registerFeatureFlagWriteListener } from "@/lib/db/featureFlags";
 import {
   FEATURE_FLAG_DEFINITIONS,
   type FeatureFlagDefinition,
@@ -11,31 +11,69 @@ import { registerFeatureFlagResolver } from "@/shared/utils/featureFlagResolverB
 // staleness window the per-key database cache used to have). Until the first load finishes,
 // reads fall back to the environment variable and the definition default;
 // `ensureFeatureFlagSnapshot()` lets startup and request entry points wait for that load.
+//
+// The snapshot also records whether the last read of the store worked. While it did not
+// ("unreadable"), enforcement flags (a definition with `failClosedValue`) resolve to that safe
+// value instead of the environment variable or default, because "no override" and "store
+// unreadable" are different states and the second must never relax a protection.
 const SNAPSHOT_TTL_MS = 1000;
 let overrideSnapshot: Record<string, string> | null = null;
 let snapshotLoadedAt = 0;
+let snapshotUnreadable = false;
 let snapshotRefresh: Promise<void> | null = null;
+// Each load is numbered when it starts; only a load newer than the last applied one may
+// change the snapshot, so a slow load that read the table before a write cannot overwrite
+// the post-write state when it finishes later.
+let loadSeq = 0;
+let appliedSeq = 0;
 
-/** Reload the override snapshot from the database. Failures keep the previous snapshot. */
+/** True while the most recent read of the override store failed. */
+export function isFeatureFlagStoreUnreadable(): boolean {
+  return snapshotUnreadable;
+}
+
+function loadSnapshot(): Promise<void> {
+  const seq = ++loadSeq;
+  return getFeatureFlagOverrides().then(
+    (overrides) => {
+      if (seq <= appliedSeq) return;
+      appliedSeq = seq;
+      overrideSnapshot = overrides;
+      snapshotLoadedAt = Date.now();
+      snapshotUnreadable = false;
+    },
+    (error) => {
+      if (seq <= appliedSeq) return;
+      appliedSeq = seq;
+      snapshotUnreadable = true;
+      console.error(
+        "[featureFlags] Failed to load feature flag overrides:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  );
+}
+
+/**
+ * Reload the override snapshot from the database (concurrent callers share one load). A
+ * failure keeps the previous snapshot for non-enforcement flags and marks the store unreadable
+ * until a later read succeeds.
+ */
 export function refreshFeatureFlagSnapshot(): Promise<void> {
   if (!snapshotRefresh) {
-    snapshotRefresh = getFeatureFlagOverrides()
-      .then((overrides) => {
-        overrideSnapshot = overrides;
-        snapshotLoadedAt = Date.now();
-      })
-      .catch((error) => {
-        console.error(
-          "[featureFlags] Failed to load feature flag overrides:",
-          error instanceof Error ? error.message : error
-        );
-      })
-      .finally(() => {
-        snapshotRefresh = null;
-      });
+    snapshotRefresh = loadSnapshot().finally(() => {
+      snapshotRefresh = null;
+    });
   }
   return snapshotRefresh;
 }
+
+// Read-after-write: the writers in db/featureFlags.ts call this once their change has
+// committed, so this process sees it on the very next synchronous read. It starts its own
+// load instead of waiting for one already in flight: that one may have read the table before
+// the commit, and it may never settle if its connection was torn down (a write must not hang
+// on it). The sequence check above keeps the newer result.
+registerFeatureFlagWriteListener(() => loadSnapshot());
 
 /** Resolves once the override snapshot has been loaded at least once. */
 export async function ensureFeatureFlagSnapshot(): Promise<void> {
@@ -55,16 +93,20 @@ export function peekFeatureFlagOverride(key: string): string | undefined {
 
 /**
  * Resolve the effective value of a feature flag.
- * Priority: DB override > process.env > definition.defaultValue
+ * Priority: DB override > process.env > definition.defaultValue. While the override store is
+ * unreadable, an enforcement flag resolves to its `failClosedValue` instead.
  */
 export function resolveFeatureFlag(key: string): string {
   const dbOverride = peekFeatureFlagOverride(key);
+  const definition = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === key);
+  if (definition?.failClosedValue !== undefined && snapshotUnreadable) {
+    return definition.failClosedValue;
+  }
   if (dbOverride !== undefined) return dbOverride;
 
   const envValue = process.env[key];
   if (envValue !== undefined && envValue !== "") return envValue;
 
-  const definition = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === key);
   return definition?.defaultValue ?? "false";
 }
 
@@ -95,9 +137,16 @@ export async function resolveAllFeatureFlags(): Promise<
   }>
 > {
   // Read fresh (the dashboard shows this right after a toggle) and refresh the snapshot with it.
-  const overrides = await getFeatureFlagOverrides();
+  let overrides: Record<string, string>;
+  try {
+    overrides = await getFeatureFlagOverrides();
+  } catch (error) {
+    snapshotUnreadable = true;
+    throw error;
+  }
   overrideSnapshot = overrides;
   snapshotLoadedAt = Date.now();
+  snapshotUnreadable = false;
   return FEATURE_FLAG_DEFINITIONS.map((definition) => {
     if (definition.key === "UNPRICED_USAGE_BUDGET_POLICY") {
       return { key: definition.key, ...resolveUnpricedUsageBudgetPolicy(), definition };
@@ -174,8 +223,12 @@ let lastResolvedMcpScopeEnforcement: boolean | undefined;
  */
 export function isMcpScopeEnforcementEnabled(): boolean {
   try {
-    lastResolvedMcpScopeEnforcement = isFeatureFlagEnabled("OMNIROUTE_MCP_ENFORCE_SCOPES");
-    return lastResolvedMcpScopeEnforcement;
+    const resolved = isFeatureFlagEnabled("OMNIROUTE_MCP_ENFORCE_SCOPES");
+    if (snapshotUnreadable) {
+      return lastResolvedMcpScopeEnforcement ?? process.env.OMNIROUTE_MCP_ENFORCE_SCOPES === "true";
+    }
+    lastResolvedMcpScopeEnforcement = resolved;
+    return resolved;
   } catch (error) {
     console.error(
       "[featureFlags] Failed to resolve OMNIROUTE_MCP_ENFORCE_SCOPES, keeping the last known value:",
@@ -208,6 +261,15 @@ export function resolveUnpricedUsageBudgetPolicy(): {
 } {
   const key = "UNPRICED_USAGE_BUDGET_POLICY";
   const dbPolicy = peekFeatureFlagOverride(key);
+  if (snapshotUnreadable) {
+    // Neither the stale snapshot nor env may relax a budget cap while the store is unreadable.
+    return {
+      effectiveValue: "fail_closed",
+      source: "default",
+      configuredSource: "default",
+      sourceKey: key,
+    };
+  }
   const explicitPolicy = dbPolicy ?? (process.env[key] || undefined);
   if (explicitPolicy !== undefined) {
     const source = dbPolicy !== undefined ? "db" : "env";

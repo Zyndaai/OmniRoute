@@ -474,7 +474,9 @@ export function persistAttemptLogs(args: PersistAttemptLogsArgs, ctx: PersistAtt
 
   const providerWarnings = extractProviderWarnings(providerResponse, clientResponse, responseBody);
   if (providerWarnings.length > 0) {
-    logAuditEvent({
+    // Hot path: fire-and-forget, but a failed audit write must not become an unhandled
+    // rejection.
+    void logAuditEvent({
       action: "provider.warning",
       actor: "system",
       target: [provider, finalConnectionId].filter(Boolean).join(":") || provider || model,
@@ -490,7 +492,7 @@ export function persistAttemptLogs(args: PersistAttemptLogsArgs, ctx: PersistAtt
           ? providerWarnings.map(() => "[omitted: video transcript]")
           : providerWarnings,
       },
-    });
+    }).catch(() => {});
   }
 
   // Detect against the live response, but omit provider-supplied tool names

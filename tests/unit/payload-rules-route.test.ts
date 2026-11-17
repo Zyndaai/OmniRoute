@@ -18,7 +18,8 @@ const route = await import("../../src/app/api/settings/payload-rules/route.ts");
 const payloadRulesService = await import("../../open-sse/services/payloadRules.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  const { resetTestDb } = await import("../helpers/postgres.ts");
+  await resetTestDb();
   payloadRulesService.resetPayloadRulesConfigForTests();
   delete process.env.INITIAL_PASSWORD;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -36,6 +37,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {

@@ -44,16 +44,16 @@ export async function deriveSettingsAuditActor(request: Request): Promise<string
   return "anonymous";
 }
 
-/** Emit a settings.update_failed row. Never throws — audit must not break flow. */
-export function emitSettingsFailureAudit(
+/** Emit a settings.update_failed row. Never throws — audit must not break flow. Callers must await it. */
+export async function emitSettingsFailureAudit(
   request: Request,
   actor: string,
   reason: string,
   attemptedKeys: string[]
-) {
+): Promise<void> {
   try {
     const { ipAddress, requestId } = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "settings.update_failed",
       actor,
       target: "settings",

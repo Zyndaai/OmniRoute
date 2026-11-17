@@ -35,6 +35,7 @@ const localDb = {
 };
 const credentialsRoute = await import("../../src/app/api/cloud/credentials/update/route.ts");
 const aliasRoute = await import("../../src/app/api/cloud/models/alias/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   delete process.env.OMNIROUTE_API_KEY;
@@ -42,7 +43,7 @@ async function resetStorage() {
   process.env.INITIAL_PASSWORD = "bootstrap-password";
   process.env.JWT_SECRET = "cloud-write-auth-jwt";
   process.env.API_KEY_SECRET = "cloud-write-auth-api-key-secret";
-  core.resetDbInstance();
+  await resetTestDb();
   localDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -145,7 +146,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   localDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

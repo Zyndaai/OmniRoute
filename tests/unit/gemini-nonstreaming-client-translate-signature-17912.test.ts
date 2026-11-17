@@ -85,14 +85,12 @@ async function followUp(toolCall: ToolCall, namespace: string | null) {
     null,
     "gemini",
     null,
-    namespace
-      ? {
-          signatureNamespace: namespace,
-          // The async caller prefetches the persisted signatures (see chatCore); translators
-          // read only that snapshot.
-          thoughtSignatures: await prefetchThoughtSignatures(FORMATS.GEMINI, MODEL, body, namespace),
-        }
-      : undefined
+    {
+      ...(namespace ? { signatureNamespace: namespace } : {}),
+      // The async caller prefetches the persisted signatures (see chatCore), with or without a
+      // namespace; translators read only that snapshot.
+      thoughtSignatures: await prefetchThoughtSignatures(FORMATS.GEMINI, MODEL, body, namespace),
+    }
   )) as Translated;
   return translated.contents
     .flatMap((c: Content) => c.parts ?? [])

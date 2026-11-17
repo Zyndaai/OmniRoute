@@ -15,6 +15,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const historyRoute = await import("../../src/app/api/usage/history/route.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const HISTORY_URL = "http://localhost/api/usage/history";
 
@@ -53,18 +54,19 @@ async function seedRow(model: string, timestamp: string) {
 test.beforeEach(async () => {
   cache.clearAnalyticsResponseCache();
   usageHistory.clearPendingRequests();
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   setEnv(undefined, undefined);
   await settingsDb.updateSettings({ requireLogin: false });
   delete process.env.INITIAL_PASSWORD;
 });
 
-test.after(() => {
+test.after(async () => {
   setEnv(undefined, undefined);
   delete process.env.INITIAL_PASSWORD;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -23,11 +23,13 @@ const { saveServiceModels, getServiceModels } =
 
 // Import the route handler under test (after env is set).
 const { GET } = await import("../../../../src/app/api/services/9router/models/route.ts");
+const { resetTestDb } = await import("../../../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
-function resetDb() {
+async function resetDb() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -44,8 +46,8 @@ function makeFetch(status: number, body: unknown): typeof fetch {
     });
 }
 
-beforeEach(() => {
-  resetDb();
+beforeEach(async () => {
+  await resetDb();
   globalThis.fetch = originalFetch;
 });
 

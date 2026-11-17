@@ -28,13 +28,14 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const chaosConfig = await import("../../src/lib/chaos/chaosConfig.ts");
 const chaosExecutor = await import("../../src/lib/chaos/chaosExecutor.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const configRoute = await import("../../src/app/api/chaos/config/route.ts");
 const runRoute = await import("../../src/app/api/chaos/run/route.ts");
 const skillsChaosRoute = await import("../../src/app/api/skills/collect/chaos/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   // The DB is about to be wiped out from under it — drop the in-memory chaos
   // config cache too, or getChaosConfig() keeps serving a stale value (e.g. a
@@ -76,8 +77,8 @@ test.afterEach(() => {
   mock.restoreAll();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 

@@ -11,6 +11,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-llamacpp-secret
 process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { handleChat } = await import("../../src/sse/handlers/chat.ts");
 const { initTranslators } = await import("../../open-sse/translator/index.ts");
@@ -78,16 +79,17 @@ test.beforeEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = 0;
   clearInflight();
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   await initTranslators();
 });
 
-test.afterEach(() => {
+test.afterEach(async () => {
   globalThis.fetch = originalFetch;
   BaseExecutor.RETRY_CONFIG.delayMs = originalRetryDelayMs;
   clearInflight();
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });

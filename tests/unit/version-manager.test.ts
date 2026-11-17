@@ -19,6 +19,7 @@ const versionManagerDb = await import("../../src/lib/db/versionManager.ts");
 const processManager = await import("../../src/lib/versionManager/processManager.ts");
 const versionManager = await import("../../src/lib/versionManager/index.ts");
 const healthMonitor = await import("../../src/lib/versionManager/healthMonitor.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 const originalSpawn = childProcess.spawn;
@@ -30,7 +31,7 @@ const originalClearInterval = globalThis.clearInterval;
 
 async function resetStorage() {
   healthMonitor.stopMonitoring("cliproxyapi");
-  coreDb.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

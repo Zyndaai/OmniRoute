@@ -33,6 +33,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "agentskills-routes-t
 // Import DB first (order matters — sets DATA_DIR before localDb loads)
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import routes AFTER env vars are set
 const listRoute = await import("../../src/app/api/agent-skills/route.ts");
@@ -44,10 +45,11 @@ const generateRoute = await import("../../src/app/api/agent-skills/generate/rout
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   delete process.env.INITIAL_PASSWORD;
 }
 
@@ -73,8 +75,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 

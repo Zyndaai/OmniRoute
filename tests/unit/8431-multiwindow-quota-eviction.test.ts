@@ -132,6 +132,9 @@ test("#8431 a single-window provider is still correctly reported exhausted", asy
     window_duration_ms: null,
     raw_data: null,
   });
+  // Fresh boot: empty cache, then the boot hydration step (src/instrumentation-node.ts).
+  quotaCache.__clearForTests();
+  await quotaCache.ensureQuotaCacheHydrated();
 
   assert.equal(
     quotaCache.isQuotaExhaustedForRequest(connectionId, provider, "gpt-5"),

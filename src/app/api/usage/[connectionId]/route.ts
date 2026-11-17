@@ -25,7 +25,7 @@ export async function GET(
       allowRotatingRefresh: true,
       includeResetCredits: true,
     });
-    return Response.json(withConnectionSpeedStats(connectionId, usage));
+    return Response.json(await withConnectionSpeedStats(connectionId, usage));
   } catch (error) {
     const status =
       typeof (error as { status?: unknown })?.status === "number"

@@ -20,6 +20,7 @@ process.env.FREE_PROXY_AUTO_SYNC_ENABLED = "false";
 const core = await import("../../src/lib/db/core.ts");
 const freeProxiesDb = await import("../../src/lib/db/freeProxies.ts");
 const scheduler = await import("../../src/lib/freeProxyProviders/scheduler.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ENV_KEYS = [
   "FREE_PROXY_AUTO_SYNC_ENABLED",
@@ -39,24 +40,25 @@ function restoreEnv() {
   }
 }
 
-function reset() {
+async function reset() {
   scheduler.stopFreeProxyAutoSync();
   scheduler._setSyncCycleRunnerForTests(null);
   restoreEnv();
   process.env.FREE_PROXY_AUTO_SYNC_ENABLED = "false";
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
 });
 
-test.after(() => {
+test.after(async () => {
   scheduler.stopFreeProxyAutoSync();
   scheduler._setSyncCycleRunnerForTests(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreEnv();
 });

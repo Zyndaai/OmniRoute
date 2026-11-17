@@ -11,6 +11,7 @@ const tailscaleTunnel = await import("../../src/lib/tailscaleTunnel.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const dbCore = await import("../../src/lib/db/core.ts");
 const mitmManager = await import("../../src/mitm/manager.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalEnv = {
   tailscaleBin: process.env.TAILSCALE_BIN,
@@ -81,7 +82,8 @@ test.beforeEach(async () => {
   const fakeBinaryPath = await createFakeTailscaleBinary();
   resetTailscaleTestEnv(fakeBinaryPath);
   mitmManager.clearCachedPassword();
-  dbCore.resetDbInstance();
+  await dbCore.resetDbInstance();
+  await resetTestDb();
   await fs.rm(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   await fs.mkdir(TEST_DATA_DIR, { recursive: true });
   const recreatedBinaryPath = await createFakeTailscaleBinary();
@@ -89,7 +91,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  dbCore.resetDbInstance();
+  await dbCore.resetDbInstance();
   mitmManager.clearCachedPassword();
   if (originalEnv.tailscaleBin === undefined) delete process.env.TAILSCALE_BIN;
   else process.env.TAILSCALE_BIN = originalEnv.tailscaleBin;

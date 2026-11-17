@@ -20,6 +20,7 @@ process.env.JWT_SECRET = "test-secret-ipfilter-forwarded";
 const core = await import("../../../src/lib/db/core.ts");
 const ipFilter = await import("../../../open-sse/services/ipFilter.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 const ORIGINAL_TRUSTED_PROXIES = process.env.OMNIROUTE_TRUSTED_PROXIES;
@@ -29,16 +30,16 @@ function restoreEnv(name: string, value: string | undefined) {
   else process.env[name] = value;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreEnv("DATA_DIR", ORIGINAL_DATA_DIR);
   restoreEnv("OMNIROUTE_PEER_STAMP_TOKEN", ORIGINAL_STAMP_TOKEN);
   restoreEnv("OMNIROUTE_TRUSTED_PROXIES", ORIGINAL_TRUSTED_PROXIES);
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   ipFilter.resetIPFilter();
@@ -65,18 +66,20 @@ async function blockedByIpFilter(request: NextRequest): Promise<boolean> {
   return typeof body.error === "string" && /blacklist|not in whitelist|banned/i.test(body.error);
 }
 
-function blacklist(...ips: string[]) {
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  for (const ip of ips) ipFilter.addToBlacklist(ip);
+// The ipFilter mutators persist to the DB and are async: each must finish before the
+// request under test runs, or the check reads a half-written config.
+async function blacklist(...ips: string[]) {
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  for (const ip of ips) await ipFilter.addToBlacklist(ip);
 }
 
-function whitelist(...ips: string[]) {
-  ipFilter.configureIPFilter({ enabled: true, mode: "whitelist" });
-  for (const ip of ips) ipFilter.addToWhitelist(ip);
+async function whitelist(...ips: string[]) {
+  await ipFilter.configureIPFilter({ enabled: true, mode: "whitelist" });
+  for (const ip of ips) await ipFilter.addToWhitelist(ip);
 }
 
 test("a direct client cannot dodge the blacklist with a forged forwarding header", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   for (const forged of [
     { "x-forwarded-for": ALLOWED },
@@ -92,7 +95,7 @@ test("a direct client cannot dodge the blacklist with a forged forwarding header
 });
 
 test("a direct client cannot pass the whitelist with a forged forwarding header", async () => {
-  whitelist(ALLOWED);
+  await whitelist(ALLOWED);
 
   assert.equal(
     await blockedByIpFilter(stampedRequest(BLOCKED, { "x-forwarded-for": ALLOWED })),
@@ -101,7 +104,7 @@ test("a direct client cannot pass the whitelist with a forged forwarding header"
 });
 
 test("a loopback proxy is still trusted to report the client address", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   assert.equal(
     await blockedByIpFilter(stampedRequest("127.0.0.1", { "x-forwarded-for": BLOCKED })),
@@ -114,7 +117,7 @@ test("a loopback proxy is still trusted to report the client address", async () 
 });
 
 test("a proxy on a private network is still trusted to report the client address", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   for (const proxy of ["10.1.2.3", "172.18.0.2", "192.168.1.5", "100.64.0.9"]) {
     assert.equal(
@@ -125,7 +128,7 @@ test("a proxy on a private network is still trusted to report the client address
   }
 
   ipFilter.resetIPFilter();
-  whitelist(ALLOWED);
+  await whitelist(ALLOWED);
   assert.equal(
     await blockedByIpFilter(stampedRequest("10.1.2.3", { "x-forwarded-for": ALLOWED })),
     false
@@ -133,7 +136,7 @@ test("a proxy on a private network is still trusted to report the client address
 });
 
 test("a Cloudflare edge is trusted to report the client address", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   assert.equal(
     await blockedByIpFilter(stampedRequest("172.71.150.1", { "cf-connecting-ip": BLOCKED })),
@@ -146,7 +149,7 @@ test("a Cloudflare edge is trusted to report the client address", async () => {
 });
 
 test("behind a proxy that appends to X-Forwarded-For, an address the client put first is ignored", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   // nginx: proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for
   assert.equal(
@@ -164,7 +167,7 @@ test("behind a proxy that appends to X-Forwarded-For, an address the client put 
 });
 
 test("a forged CF-Connecting-IP behind a proxy that is not Cloudflare is ignored", async () => {
-  blacklist(BLOCKED);
+  await blacklist(BLOCKED);
 
   assert.equal(
     await blockedByIpFilter(
@@ -174,7 +177,7 @@ test("a forged CF-Connecting-IP behind a proxy that is not Cloudflare is ignored
   );
 
   ipFilter.resetIPFilter();
-  whitelist(ALLOWED);
+  await whitelist(ALLOWED);
   assert.equal(
     await blockedByIpFilter(
       stampedRequest("127.0.0.1", { "x-forwarded-for": BLOCKED, "cf-connecting-ip": ALLOWED })
@@ -184,7 +187,7 @@ test("a forged CF-Connecting-IP behind a proxy that is not Cloudflare is ignored
 });
 
 test("a private-network client whose forwarding header holds no address is judged as itself", async () => {
-  blacklist("192.168.1.50");
+  await blacklist("192.168.1.50");
 
   for (const junk of [{ "x-forwarded-for": "x" }, { "x-real-ip": "unknown" }]) {
     assert.equal(
@@ -197,7 +200,7 @@ test("a private-network client whose forwarding header holds no address is judge
 
 test("a proxy on any other public address is judged as itself until the operator names it", async () => {
   const proxy = "198.51.100.7";
-  whitelist(ALLOWED);
+  await whitelist(ALLOWED);
   const viaProxy = () => stampedRequest(proxy, { "x-forwarded-for": ALLOWED });
 
   assert.equal(await blockedByIpFilter(viaProxy()), true);

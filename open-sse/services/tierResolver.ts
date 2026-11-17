@@ -14,6 +14,7 @@ const tierPricingSnapshot = new Map<string, DbPrice>();
 let snapshotPinned = false;
 let snapshotWarmed = false;
 let snapshotLoad: Promise<void> | null = null;
+let snapshotFailed = false;
 let snapshotDirty = false;
 
 function snapshotKey(provider: string, model: string): string {
@@ -83,10 +84,23 @@ async function loadTierPricingSnapshot(): Promise<void> {
     tierPricingSnapshot.clear();
     for (const [k, v] of next) tierPricingSnapshot.set(k, v);
     tierCache.clear();
+    snapshotFailed = false;
   } catch {
-    // Fail-open: the previous snapshot stays authoritative.
+    // Fail-open: the previous snapshot stays authoritative; ensureTierPricingLoaded retries.
+    snapshotFailed = true;
   }
   snapshotWarmed = true;
+}
+
+/**
+ * Resolves once the stored prices are in the snapshot `classifyTier` reads. Await it at boot
+ * and on async entry points so a cold process never classifies from the fallback table while
+ * a stored price exists. Already resolved after a successful load (no DB read per call); a
+ * failed load is retried by the next caller.
+ */
+export function ensureTierPricingLoaded(): Promise<void> {
+  if (snapshotPinned || (snapshotWarmed && !snapshotFailed)) return Promise.resolve();
+  return refreshTierPricingSnapshot();
 }
 
 function lookupSnapshot(provider: string, model: string): DbPrice | null {
@@ -368,5 +382,6 @@ export async function classifyTierAsync(provider: string, model: string): Promis
     // fall through to sync
   }
   tierAsyncFallbackTotal++;
+  await ensureTierPricingLoaded();
   return classifyTier(provider, model);
 }

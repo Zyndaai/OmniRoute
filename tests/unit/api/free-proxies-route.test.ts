@@ -14,11 +14,13 @@ const core = await import("../../../src/lib/db/core.ts");
 const freeProxiesDb = await import("../../../src/lib/db/freeProxies.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
 const listRoute = await import("../../../src/app/api/settings/free-proxies/route.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

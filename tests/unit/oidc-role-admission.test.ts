@@ -11,6 +11,7 @@ process.env.JWT_SECRET = "test-jwt-secret-for-oidc-role";
 
 const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const callback = await import("../../src/app/api/auth/oidc/callback/route.ts");
 const originalStore = callback.oidcCallbackInternals.getCookieStore;
 const originalFetch = globalThis.fetch;
@@ -21,6 +22,7 @@ const jwk = { ...(await exportJWK(publicKey)), kid: "role-test" };
 
 test.beforeEach(async () => {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   cookies = { oidc_state: "state", oidc_nonce: "nonce" };
@@ -33,10 +35,10 @@ test.beforeEach(async () => {
   });
 });
 
-test.after(() => {
+test.after(async () => {
   callback.oidcCallbackInternals.getCookieStore = originalStore;
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   delete process.env.JWT_SECRET;
 });

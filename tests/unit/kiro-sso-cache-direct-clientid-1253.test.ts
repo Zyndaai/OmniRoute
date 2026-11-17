@@ -40,6 +40,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-1253";
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-api-key-secret-1253";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const { GET } = await import("../../src/app/api/oauth/kiro/auto-import/route.ts");
 const { KiroService } = await import("../../src/lib/oauth/services/kiro.ts");
@@ -51,11 +52,12 @@ const ORIGINAL_FETCH = globalThis.fetch;
 
 let tmpHome: string;
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-kiro-1253-"));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   process.env.HOME = tmpHome;
   // Windows os.homedir() reads USERPROFILE, not HOME.
   process.env.USERPROFILE = tmpHome;
@@ -76,8 +78,8 @@ test.afterEach(() => {
   if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

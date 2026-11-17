@@ -13,19 +13,20 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-v1-ws-route-sec
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const wsRoute = await import("../../src/app/api/v1/ws/route.ts");
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   await localDb.updateSettings({
     wsAuth: false,
     requireLogin: true,
@@ -33,9 +34,9 @@ test.beforeEach(async () => {
   });
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {

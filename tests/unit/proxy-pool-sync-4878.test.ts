@@ -18,8 +18,10 @@ const addToPoolRoute =
 const syncRoute = await import("../../src/app/api/settings/free-proxies/sync/route.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
 
-function reset() {
-  core.resetDbInstance();
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -28,13 +30,13 @@ function makeReq(): Request {
   return new Request("http://localhost/test", { method: "POST" });
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
   addToPoolRoute._resetConnectivityTesterForTests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;

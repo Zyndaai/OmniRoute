@@ -23,6 +23,7 @@ const imageEditRoute = await import("../../src/app/api/v1/images/edits/route.ts"
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 const { ADOBE_FIREFLY_IMAGE_UPLOAD_URL, ADOBE_FIREFLY_IMAGE_SUBMIT_URL } =
   await import("../../open-sse/services/adobeFireflyClient.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 interface ErrorResponseBody {
   error: { message: string; code?: string };
@@ -40,6 +41,7 @@ async function resetStorage() {
   core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -85,7 +87,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
 });
 

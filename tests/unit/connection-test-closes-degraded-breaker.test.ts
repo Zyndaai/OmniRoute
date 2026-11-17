@@ -25,6 +25,7 @@ process.env.OMNIROUTE_DISABLE_CREDENTIAL_HEALTH_CHECK = "true";
 const originalFetch = globalThis.fetch;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { testSingleConnection } = await import("../../src/app/api/providers/[id]/test/route.ts");
 const { getCircuitBreaker, resetAllCircuitBreakers } =
@@ -69,9 +70,9 @@ function fail(breaker: ReturnType<typeof getCircuitBreaker>, times: number) {
   for (let i = 0; i < times; i++) breaker._onFailure();
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   mockFetchStatus(200);
@@ -81,9 +82,9 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

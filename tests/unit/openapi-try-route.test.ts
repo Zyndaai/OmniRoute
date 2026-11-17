@@ -15,12 +15,14 @@ process.env.INITIAL_PASSWORD = "openapi-try-password";
 process.env.JWT_SECRET = "openapi-try-jwt-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const route = await import("../../src/app/api/openapi/try/route.ts");
 
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -54,9 +56,9 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {
