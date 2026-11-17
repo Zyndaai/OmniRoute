@@ -51,12 +51,12 @@ afterEach(async () => {
     process.env.CLIPROXYAPI_API_KEY = originalEnvKey;
   }
   clearUpstreamProxyConfigCache();
-  const { dbCache } = await import("../../src/lib/db/readCache.ts");
-  dbCache?.invalidate?.("settings");
+  const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
+  invalidateDbCache("settings");
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   if (fs.existsSync(testDataDir))
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

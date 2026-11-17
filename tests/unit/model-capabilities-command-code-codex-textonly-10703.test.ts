@@ -32,8 +32,8 @@ const CC_TEXT_ONLY_CODEX: [string, string][] = [
 ];
 
 for (const [desc, modelId] of CC_TEXT_ONLY_CODEX) {
-  test(`#10703: ${desc} ${modelId} → supportsVision=false`, () => {
-    const caps = getResolvedModelCapabilities(modelId);
+  test(`#10703: ${desc} ${modelId} → supportsVision=false`, async () => {
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.supportsVision, false, `${modelId} is text-only via Command Code (#10703)`);
   });
 }
@@ -50,8 +50,8 @@ const MUST_STAY_VISION: [string, string][] = [
 ];
 
 for (const [desc, modelId] of MUST_STAY_VISION) {
-  test(`#10703 scope guard: ${desc} ${modelId} stays supportsVision=true`, () => {
-    const caps = getResolvedModelCapabilities(modelId);
+  test(`#10703 scope guard: ${desc} ${modelId} stays supportsVision=true`, async () => {
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.supportsVision, true, `${modelId} must not be overridden (#10703 scope)`);
   });
 }
@@ -59,12 +59,12 @@ for (const [desc, modelId] of MUST_STAY_VISION) {
 // ── The override must also beat a wrong synced attachment/modalit
 //    (the #4071 failure mode), mirroring the mimo-v2.5-pro guard tests. ──────
 
-test("#10703: override still wins when synced capability wrongly claims vision-support", () => {
+test("#10703: override still wins when synced capability wrongly claims vision-support", async () => {
   // No DB/synced fan-in in this repo for command-code static ids (they are
   // registry-driven), so a plain resolution is the authoritative check — a
   // registry `supportsVision: true` must be neutralized even without synced
   // data present.
-  const caps = getResolvedModelCapabilities("cmd/gpt-5.3-codex");
+  const caps = await getResolvedModelCapabilities("cmd/gpt-5.3-codex");
   assert.equal(caps.supportsVision, false);
   assert.equal(caps.provider, "command-code");
 });

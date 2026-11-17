@@ -40,8 +40,8 @@ type GP = {
 };
 type GContent = { role?: string; parts?: GP[] };
 
-function translate(mode: "native" | "text" | "context") {
-  return openaiToGeminiRequest(
+async function translate(mode: "native" | "text" | "context") {
+  return await openaiToGeminiRequest(
     "gemini-2.5-flash",
     { model: "gemini-2.5-flash", messages: MESSAGES, tools: TOOLS, stream: false },
     false,
@@ -50,8 +50,8 @@ function translate(mode: "native" | "text" | "context") {
   );
 }
 
-test('standard Gemini "text" mode: signature-less tool call/response stay as text (no native parts, no sentinel)', () => {
-  const result = translate("text");
+test('standard Gemini "text" mode: signature-less tool call/response stay as text (no native parts, no sentinel)', async () => {
+  const result = await translate("text");
   const allParts = (result.contents as GContent[]).flatMap((c) => c.parts ?? []);
 
   assert.equal(
@@ -71,8 +71,8 @@ test('standard Gemini "text" mode: signature-less tool call/response stay as tex
   );
 });
 
-test('standard Gemini "native" mode: native functionCall with no fake signature', () => {
-  const result = translate("native");
+test('standard Gemini "native" mode: native functionCall with no fake signature', async () => {
+  const result = await translate("native");
   const modelTurn = (result.contents as GContent[]).find(
     (c) => c.role === "model" && (c.parts ?? []).some((p) => p.functionCall)
   );

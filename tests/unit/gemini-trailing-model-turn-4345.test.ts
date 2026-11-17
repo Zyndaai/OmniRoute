@@ -48,16 +48,16 @@ const claudePrefill = {
   ],
 };
 
-test("openai→gemini: gemini-3 model drops a trailing assistant (prefill) turn", () => {
-  const result = openaiToGeminiRequest("gemini-3-pro-preview", openaiPrefill, false);
+test("openai→gemini: gemini-3 model drops a trailing assistant (prefill) turn", async () => {
+  const result = await openaiToGeminiRequest("gemini-3-pro-preview", openaiPrefill, false);
   const contents = result.contents as Contents;
   assert.equal(lastRole(contents), "user");
   assert.equal(contents.length, 1);
   assert.equal(contents[0].parts[0].text, "Hello");
 });
 
-test("openai→gemini: gemini-3.x model drops a trailing unanswered functionCall turn", () => {
-  const result = openaiToGeminiRequest("gemini-3.1-flash", openaiUnansweredToolCall, false);
+test("openai→gemini: gemini-3.x model drops a trailing unanswered functionCall turn", async () => {
+  const result = await openaiToGeminiRequest("gemini-3.1-flash", openaiUnansweredToolCall, false);
   const contents = result.contents as Contents;
   assert.equal(lastRole(contents), "user");
   assert.ok(
@@ -66,22 +66,22 @@ test("openai→gemini: gemini-3.x model drops a trailing unanswered functionCall
   );
 });
 
-test("openai→gemini: gemini-2.5 (outside the gate) keeps the trailing model turn", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-pro", openaiPrefill, false);
+test("openai→gemini: gemini-2.5 (outside the gate) keeps the trailing model turn", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-pro", openaiPrefill, false);
   const contents = result.contents as Contents;
   assert.equal(lastRole(contents), "model");
   assert.equal(contents.length, 2);
 });
 
-test("claude→gemini: gemini-3 model drops a trailing assistant (prefill) turn", () => {
-  const result = claudeToGeminiRequest("gemini-3-flash-preview", claudePrefill, false);
+test("claude→gemini: gemini-3 model drops a trailing assistant (prefill) turn", async () => {
+  const result = await claudeToGeminiRequest("gemini-3-flash-preview", claudePrefill, false);
   const contents = result.contents as Contents;
   assert.equal(lastRole(contents), "user");
   assert.equal(contents.length, 1);
 });
 
-test("claude→gemini: gemini-2.5 (outside the gate) keeps the trailing model turn", () => {
-  const result = claudeToGeminiRequest("gemini-2.5-flash", claudePrefill, false);
+test("claude→gemini: gemini-2.5 (outside the gate) keeps the trailing model turn", async () => {
+  const result = await claudeToGeminiRequest("gemini-2.5-flash", claudePrefill, false);
   const contents = result.contents as Contents;
   assert.equal(lastRole(contents), "model");
   assert.equal(contents.length, 2);

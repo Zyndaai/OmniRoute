@@ -21,7 +21,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-char-clou
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "char-cloudagent-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const indexMod = await import("../../src/lib/cloudAgent/index.ts");
 const registryMod = await import("../../src/lib/cloudAgent/registry.ts");
 const baseAgentMod = await import("../../src/lib/cloudAgent/baseAgent.ts");
@@ -35,8 +35,8 @@ const devinMod = await import("../../src/lib/cloudAgent/agents/devin.ts");
 const codexMod = await import("../../src/lib/cloudAgent/agents/codex.ts");
 const cursorMod = await import("../../src/lib/cloudAgent/agents/cursor.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -528,35 +528,35 @@ function row(overrides: Partial<Record<string, unknown>> = {}) {
   } as Parameters<typeof dbMod.insertCloudAgentTask>[0];
 }
 
-test("db: insert/get/list/update/delete round trip", () => {
+test("db: insert/get/list/update/delete round trip", async () => {
   dbMod.createCloudAgentTaskTable(); // idempotent (index.ts already ran it on import)
-  dbMod.insertCloudAgentTask(row());
-  assert.equal(dbMod.getCloudAgentTaskById("t-1")?.status, "queued");
-  assert.equal(dbMod.getCloudAgentTasksByProvider("jules").length, 1);
-  assert.equal(dbMod.getCloudAgentTasksByStatus("queued").length, 1);
-  assert.equal(dbMod.getAllCloudAgentTasks().length, 1);
+  await dbMod.insertCloudAgentTask(row());
+  assert.equal((await dbMod.getCloudAgentTaskById("t-1"))?.status, "queued");
+  assert.equal((await dbMod.getCloudAgentTasksByProvider("jules")).length, 1);
+  assert.equal((await dbMod.getCloudAgentTasksByStatus("queued")).length, 1);
+  assert.equal((await dbMod.getAllCloudAgentTasks()).length, 1);
 
-  dbMod.updateCloudAgentTask("t-1", { status: "running", error: "e" });
-  const updated = dbMod.getCloudAgentTaskById("t-1");
+  await dbMod.updateCloudAgentTask("t-1", { status: "running", error: "e" });
+  const updated = await dbMod.getCloudAgentTaskById("t-1");
   assert.equal(updated?.status, "running");
   assert.equal(updated?.error, "e");
 
-  dbMod.deleteCloudAgentTask("t-1");
-  assert.equal(dbMod.getCloudAgentTaskById("t-1") ?? null, null);
+  await dbMod.deleteCloudAgentTask("t-1");
+  assert.equal((await dbMod.getCloudAgentTaskById("t-1")) ?? null, null);
 });
 
-test("characterization: updateCloudAgentTask silently ignores non-whitelisted columns", () => {
-  dbMod.insertCloudAgentTask(row({ id: "t-2" }));
-  dbMod.updateCloudAgentTask("t-2", {
+test("characterization: updateCloudAgentTask silently ignores non-whitelisted columns", async () => {
+  await dbMod.insertCloudAgentTask(row({ id: "t-2" }));
+  await dbMod.updateCloudAgentTask("t-2", {
     provider_id: "devin",
     external_id: "other",
   } as Parameters<typeof dbMod.updateCloudAgentTask>[1]);
-  const after = dbMod.getCloudAgentTaskById("t-2");
+  const after = await dbMod.getCloudAgentTaskById("t-2");
   assert.equal(after?.provider_id, "jules");
   assert.equal(after?.external_id, "ext-1");
   // Updating a missing id is a silent no-op as well.
-  assert.doesNotThrow(() => dbMod.updateCloudAgentTask("missing", { status: "failed" }));
-  dbMod.deleteCloudAgentTask("t-2");
+  await assert.doesNotReject(() => dbMod.updateCloudAgentTask("missing", { status: "failed" }));
+  await dbMod.deleteCloudAgentTask("t-2");
 });
 
 test("serializeCloudAgentTask: camelCase shape, malformed JSON falls back to defaults", () => {
@@ -600,24 +600,24 @@ test("credentials: maskApiKey keeps the last 4 chars, short/empty → ****", () 
   assert.equal(credentialsMod.maskApiKey(""), "****");
 });
 
-test("credentials: save → get (decrypted) → list (masked) → delete", () => {
-  assert.equal(credentialsMod.getCloudAgentCredentialFromDb("devin"), null);
-  credentialsMod.saveCloudAgentCredential("devin", "devin-secret-9999", "https://d.example");
-  assert.deepEqual(credentialsMod.getCloudAgentCredentialFromDb("devin"), {
+test("credentials: save → get (decrypted) → list (masked) → delete", async () => {
+  assert.equal(await credentialsMod.getCloudAgentCredentialFromDb("devin"), null);
+  await credentialsMod.saveCloudAgentCredential("devin", "devin-secret-9999", "https://d.example");
+  assert.deepEqual(await credentialsMod.getCloudAgentCredentialFromDb("devin"), {
     apiKey: "devin-secret-9999",
     baseUrl: "https://d.example",
   });
-  credentialsMod.saveCloudAgentCredential("devin", "devin-secret-0000"); // upsert, baseUrl cleared
-  assert.deepEqual(credentialsMod.getCloudAgentCredentialFromDb("devin"), {
+  await credentialsMod.saveCloudAgentCredential("devin", "devin-secret-0000"); // upsert, baseUrl cleared
+  assert.deepEqual(await credentialsMod.getCloudAgentCredentialFromDb("devin"), {
     apiKey: "devin-secret-0000",
   });
-  const listed = credentialsMod.listCloudAgentCredentials();
+  const listed = await credentialsMod.listCloudAgentCredentials();
   assert.deepEqual(
     listed.map(({ providerId, apiKey, baseUrl }) => ({ providerId, apiKey, baseUrl })),
     [{ providerId: "devin", apiKey: "****0000", baseUrl: null }]
   );
-  credentialsMod.deleteCloudAgentCredential("devin");
-  assert.equal(credentialsMod.getCloudAgentCredentialFromDb("devin"), null);
+  await credentialsMod.deleteCloudAgentCredential("devin");
+  assert.equal(await credentialsMod.getCloudAgentCredentialFromDb("devin"), null);
 });
 
 test("CreateCloudAgentTaskSchema: invalid input is rejected (no throw on safeParse)", () => {

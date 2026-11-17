@@ -21,7 +21,6 @@ process.env.EXPOSE_CC_DISCOVERY_ALIASES = "1";
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
-const { API_KEY_COLUMN_FALLBACKS } = await import("../../src/lib/db/apiKeyColumnFallbacks.ts");
 const { parseAllowCcDiscoveryAliases } = await import("../../src/lib/db/apiKeys/rowParsers.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
 const { applyCatalogPostFilters } = await import("../../src/app/api/v1/models/catalogResponse.ts");
@@ -29,19 +28,18 @@ const { applyCatalogPostFilters } = await import("../../src/app/api/v1/models/ca
 const read = (relativePath: string) =>
   fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
 
-test.after(() => {
+test.after(async () => {
   delete process.env.EXPOSE_CC_DISCOVERY_ALIASES;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("allow_cc_discovery_aliases defaults on for legacy rows", () => {
-  const column = API_KEY_COLUMN_FALLBACKS.find(
-    (candidate: { name: string }) => candidate.name === "allow_cc_discovery_aliases"
-  );
-  assert.ok(column, "api_keys must gain an allow_cc_discovery_aliases column");
-  assert.match(column.definition, /NOT NULL DEFAULT 1/);
+  const schemaSql = read("src/lib/db/backends/postgres/migrations/0001_init.sql");
+  const line = schemaSql.split("\n").find((l) => /^\s*allow_cc_discovery_aliases\s/.test(l));
+  assert.ok(line, "api_keys must gain an allow_cc_discovery_aliases column");
+  assert.match(line, /NOT NULL DEFAULT true/);
 
   assert.equal(parseAllowCcDiscoveryAliases(undefined), true);
   assert.equal(parseAllowCcDiscoveryAliases(null), true);

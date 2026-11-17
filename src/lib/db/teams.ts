@@ -1,4 +1,5 @@
 import { db, type DbExecutor } from "@/lib/db/pg";
+import { invalidateApiKeyPolicyCache, loadApiKeyPolicyConfig } from "@/lib/db/readCache";
 
 export type TeamStatus = "active" | "archived";
 export type TeamBudgetDuration = "1d" | "7d" | "30d";
@@ -247,6 +248,7 @@ export async function updateTeam(id: string, input: TeamUpdateInput): Promise<Te
     if (isUniqueViolation(error)) throw new Error(DUPLICATE_NAME_ERROR);
     throw error;
   }
+  invalidateApiKeyPolicyCache();
   const updated = await getTeam(id);
   if (updated?.maxBudgetUsd && updated.budgetDuration && updated.budgetResetAt) {
     await advanceTeamBudgetWindow(updated, Date.now());
@@ -292,6 +294,7 @@ export async function archiveTeam(id: string, archivedAt?: string): Promise<Team
       [when, id]
     );
   });
+  invalidateApiKeyPolicyCache();
   return getTeam(id);
 }
 
@@ -372,7 +375,7 @@ export async function assignApiKeyBillingTeam(
 ): Promise<ApiKeyBillingTeamHistory> {
   const requestedAt = normalizeIso(effectiveAt);
 
-  return db().transaction(async (tx) => {
+  const binding = await db().transaction(async (tx) => {
     await assertAssignableTeamAndKey(tx, teamId, apiKeyId);
 
     const current = await tx.queryOne<BillingRow>(
@@ -399,6 +402,8 @@ export async function assignApiKeyBillingTeam(
     await insertBillingBinding(tx, row);
     return rowToBillingHistory(row);
   });
+  invalidateApiKeyPolicyCache();
+  return binding;
 }
 
 export async function unassignApiKeyBillingTeam(
@@ -418,18 +423,22 @@ export async function unassignApiKeyBillingTeam(
     "UPDATE api_key_billing_team_history SET valid_to = $1::timestamptz WHERE id = $2 AND valid_to IS NULL",
     [when, current.id]
   );
+  invalidateApiKeyPolicyCache();
   return result.changes > 0;
 }
 
+/** Read on every request (team usage limits): cached per key, see loadApiKeyPolicyConfig. */
 export async function getActiveBillingTeamForApiKey(apiKeyId: string): Promise<Team | null> {
-  const row = await db().queryOne<TeamRow>(
-    `SELECT teams.*
-       FROM api_key_billing_team_history binding
-       JOIN teams ON teams.id = binding.team_id
-       WHERE binding.api_key_id = $1 AND binding.valid_to IS NULL AND teams.status = 'active'`,
-    [apiKeyId]
-  );
-  return row ? rowToTeam(row) : null;
+  return loadApiKeyPolicyConfig(`team:${apiKeyId}`, async () => {
+    const row = await db().queryOne<TeamRow>(
+      `SELECT teams.*
+         FROM api_key_billing_team_history binding
+         JOIN teams ON teams.id = binding.team_id
+         WHERE binding.api_key_id = $1 AND binding.valid_to IS NULL AND teams.status = 'active'`,
+      [apiKeyId]
+    );
+    return row ? rowToTeam(row) : null;
+  });
 }
 
 export async function resolveBillingTeamIdForApiKeyAt(
@@ -535,6 +544,7 @@ export async function advanceTeamBudgetWindow(team: Team, nowMs = Date.now()): P
     [nextReset, updatedAt, team.id, team.budgetResetAt]
   );
   if (result.changes !== 1) return (await getTeam(team.id)) ?? team;
+  invalidateApiKeyPolicyCache();
   return { ...team, budgetResetAt: nextReset, updatedAt };
 }
 

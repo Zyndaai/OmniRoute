@@ -6,8 +6,7 @@ import {
   getClientIp,
   sanitizeForensicHeader,
 } from "../../../../src/app/api/v1/relay/chat/completions/relaySecurity.ts";
-import { getDbInstance } from "../../../../src/lib/db/core.ts";
-import { getRelayLogs } from "../../../../src/lib/db/relayProxies.ts";
+import { createRelayToken, getRelayLogs } from "../../../../src/lib/db/relayProxies.ts";
 
 // ─── Relay completions route: Bifrost upstream error normalization ──────────
 //
@@ -24,36 +23,9 @@ const ORIGINAL_BIFROST_STREAMING = process.env.BIFROST_STREAMING_ENABLED;
 const ORIGINAL_RELAY_BACKEND = process.env.OMNIROUTE_RELAY_BACKEND;
 const ORIGINAL_FETCH = globalThis.fetch;
 
-function seedRelayToken(rawToken: string) {
-  const id = `rl_test_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const now = Math.floor(Date.now() / 1000);
-  getDbInstance()
-    .prepare(
-      `
-      INSERT INTO relay_tokens (id, name, token_hash, token_prefix, description, combo_id,
-        allowed_models, max_tokens_per_request, max_requests_per_minute, max_requests_per_day,
-        max_cost_per_day, enabled, created_at, updated_at, expires_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-    `
-    )
-    .run(
-      id,
-      "relay-completions-err",
-      createHash("sha256").update(rawToken).digest("hex"),
-      "rl_test",
-      "",
-      null,
-      JSON.stringify(["*"]),
-      128000,
-      60,
-      10000,
-      0,
-      now,
-      now,
-      null,
-      "{}"
-    );
-  return { id, rawToken };
+async function seedRelayToken() {
+  const created = await createRelayToken({ name: "relay-completions-err" });
+  return { id: created.id, rawToken: created.rawToken };
 }
 
 function restoreEnv() {
@@ -83,7 +55,7 @@ function setupBifrostEnv() {
 
 test("relay route: normalizes plain-text Bifrost 404 into JSON error (Issue #1)", async () => {
   setupBifrostEnv();
-  const relayToken = seedRelayToken(`relay_err_${Date.now()}`);
+  const relayToken = await seedRelayToken();
 
   // Bifrost sidecar returns a raw HTML/plain-text non-OK response — the exact
   // "invalid character 'd'" scenario behind client JSON parse failures.
@@ -125,7 +97,7 @@ test("relay route: normalizes plain-text Bifrost 404 into JSON error (Issue #1)"
 
 test("relay route: normalizes HTML 502 from Bifrost into JSON error (Issue #1)", async () => {
   setupBifrostEnv();
-  const relayToken = seedRelayToken(`relay_err_${Date.now()}`);
+  const relayToken = await seedRelayToken();
 
   globalThis.fetch = async () => {
     return new Response(
@@ -155,7 +127,7 @@ test("relay route: normalizes HTML 502 from Bifrost into JSON error (Issue #1)",
   assert.ok(body?.error?.message);
 
   // Upstream 4xx/5xx must be recorded as analytics "error" (Issue #3).
-  const logs = getRelayLogs(relayToken.id, 10);
+  const logs = await getRelayLogs(relayToken.id, 10);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].status, "error");
   assert.equal(logs[0].status_code, 502);
@@ -165,7 +137,7 @@ test("relay route: normalizes HTML 502 from Bifrost into JSON error (Issue #1)",
 
 test("relay route: strips stale upstream content-length before serializing JSON error body", async () => {
   setupBifrostEnv();
-  const relayToken = seedRelayToken(`relay_err_${Date.now()}`);
+  const relayToken = await seedRelayToken();
 
   // The upstream Response carries an EXPLICIT content-length for its own (HTML)
   // body. Once the route replaces that body with a freshly-serialized JSON error,
@@ -218,7 +190,7 @@ test("relay route: strips stale upstream content-length before serializing JSON 
 
 test("relay route: upstream 401 recorded as analytics error not success (Issue #3)", async () => {
   setupBifrostEnv();
-  const relayToken = seedRelayToken(`relay_err_${Date.now()}`);
+  const relayToken = await seedRelayToken();
 
   globalThis.fetch = async () => {
     return new Response(JSON.stringify({ error: { message: "unauthorized" } }), {
@@ -244,7 +216,7 @@ test("relay route: upstream 401 recorded as analytics error not success (Issue #
   const res = await POST(req);
   assert.equal(res.status, 401);
 
-  const logs = getRelayLogs(relayToken.id, 10);
+  const logs = await getRelayLogs(relayToken.id, 10);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].status, "error");
   assert.equal(logs[0].status_code, 401);

@@ -12,6 +12,7 @@ const costRules = await import("../../src/domain/costRules.ts");
 const domainState = await import("../../src/lib/db/domainState.ts");
 const { SpendBatchWriter, flushSpendBatchWriter, resetSpendBatchWriterForTests } =
   await import("../../src/lib/spend/batchWriter.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function quietLogger() {
   return {
@@ -22,8 +23,8 @@ function quietLogger() {
 
 async function resetStorage() {
   resetSpendBatchWriterForTests();
-  costRules.resetCostData();
-  core.resetDbInstance();
+  await costRules.resetCostData();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -58,8 +59,8 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   resetSpendBatchWriterForTests();
-  costRules.resetCostData();
-  core.resetDbInstance();
+  await costRules.resetCostData();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -121,30 +122,30 @@ test("spend batch writer requeues failed flushes and flushes pending entries on 
 });
 
 test("recordCost buffers writes while budget checks and summaries still see pending spend", async () => {
-  costRules.setBudget("key-live", { dailyLimitUsd: 5 });
+  await costRules.setBudget("key-live", { dailyLimitUsd: 5 });
   costRules.recordCost("key-live", 3.5);
   costRules.recordCost("key-live", 1.0);
 
-  assert.deepEqual(domainState.loadCostEntries("key-live", 0), []);
-  assert.equal(costRules.getDailyTotal("key-live"), 4.5);
-  assert.equal(costRules.getCostSummary("key-live").dailyTotal, 4.5);
-  assert.equal(costRules.checkBudget("key-live", 0).periodUsed, 4.5);
-  assert.equal(costRules.checkBudget("key-live", 1).allowed, false);
+  assert.deepEqual(await domainState.loadCostEntries("key-live", 0), []);
+  assert.equal(await costRules.getDailyTotal("key-live"), 4.5);
+  assert.equal((await costRules.getCostSummary("key-live")).dailyTotal, 4.5);
+  assert.equal((await costRules.checkBudget("key-live", 0)).periodUsed, 4.5);
+  assert.equal((await costRules.checkBudget("key-live", 1)).allowed, false);
 
   const flushResult = await flushSpendBatchWriter();
   assert.equal(flushResult.flushedEntries, 2);
 
-  const persistedEntries = domainState.loadCostEntries("key-live", 0);
+  const persistedEntries = await domainState.loadCostEntries("key-live", 0);
   assert.equal(persistedEntries.length, 2);
-  assert.equal(costRules.getDailyTotal("key-live"), 4.5);
+  assert.equal(await costRules.getDailyTotal("key-live"), 4.5);
 });
 
 test("deleteBudget discards pending spend before it reaches the database", async () => {
-  costRules.setBudget("key-drop", { dailyLimitUsd: 10 });
+  await costRules.setBudget("key-drop", { dailyLimitUsd: 10 });
   costRules.recordCost("key-drop", 2);
-  costRules.deleteBudget("key-drop");
+  await costRules.deleteBudget("key-drop");
 
   const flushResult = await flushSpendBatchWriter();
   assert.equal(flushResult.flushedEntries, 0);
-  assert.deepEqual(domainState.loadCostEntries("key-drop", 0), []);
+  assert.deepEqual(await domainState.loadCostEntries("key-drop", 0), []);
 });

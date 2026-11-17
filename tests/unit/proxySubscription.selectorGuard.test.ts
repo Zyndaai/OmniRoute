@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const mod = await import("../../src/lib/proxySubscription/selectorGuard.ts");
 const {
@@ -97,28 +98,24 @@ test("async resolver reads the DB setting first, env as fallback", async () => {
   const prevDataDir = process.env.DATA_DIR;
   const prevEnv = process.env.SELECTOR_CONTROL_ALLOWLIST;
   process.env.DATA_DIR = dir;
-  const core = await import("../../src/lib/db/core.ts");
   try {
-    core.resetDbInstance();
+    await resetTestDb();
     process.env.SELECTOR_CONTROL_ALLOWLIST = "192.168.1.1";
     // No DB row → env.
     assert.deepEqual(await resolveSelectorAllowlist(), ["192.168.1.1"]);
-    // DB row → DB wins over env.
-    core
-      .getDbInstance()
-      .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-      .run("feature_flags", "SELECTOR_CONTROL_ALLOWLIST", "10.0.0.1");
+    // DB row → DB wins over env. Feature flags are config_entries rows with J-raw values.
+    const upsertFlag = `INSERT INTO config_entries (namespace, key, value)
+       VALUES ('feature_flags', 'SELECTOR_CONTROL_ALLOWLIST', to_jsonb($1::text))
+       ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+    await getTestBackend().execute(upsertFlag, ["10.0.0.1"]);
     assert.deepEqual(await resolveSelectorAllowlist(), ["10.0.0.1"]);
     // Blank DB row → env fallback.
-    core
-      .getDbInstance()
-      .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-      .run("feature_flags", "SELECTOR_CONTROL_ALLOWLIST", "   ");
+    await getTestBackend().execute(upsertFlag, ["   "]);
     assert.deepEqual(await resolveSelectorAllowlist(), ["192.168.1.1"]);
   } finally {
     if (prevEnv === undefined) delete process.env.SELECTOR_CONTROL_ALLOWLIST;
     else process.env.SELECTOR_CONTROL_ALLOWLIST = prevEnv;
-    core.resetDbInstance();
+    await resetTestDb();
     fs.rmSync(dir, { recursive: true, force: true });
     if (prevDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = prevDataDir;

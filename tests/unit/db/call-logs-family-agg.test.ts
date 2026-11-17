@@ -2,31 +2,22 @@
  * Provider family aggregation (#15005) — usage rows for members of a declared
  * connection family (e.g. kimi-coding + kimi-coding-apikey) collapse into a
  * single canonical group, while /api/provider-metrics keeps one row per member
- * (topology nodes) plus folded `familyMetrics`, and its correlated last-status
- * subqueries keep seeking idx_cl_provider_timestamp. DB handles are released in
- * test.after to prevent Node native test runner from hanging.
+ * (topology nodes) plus folded `familyMetrics`.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-family-agg-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../../src/lib/db/core.ts");
 const mod = await import("../../../src/lib/db/callLogStats.ts");
 const fam = await import("../../../src/lib/providerFamilyAgg.ts");
 const route = await import("../../../src/app/api/provider-metrics/route.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 let _idSeq = 0;
-function insertCallLog(row: Record<string, unknown>) {
-  const db = core.getDbInstance();
+async function insertCallLog(row: Record<string, unknown>) {
   const full = {
     method: "POST",
     path: "/v1/chat/completions",
@@ -52,47 +43,82 @@ function insertCallLog(row: Record<string, unknown>) {
     artifact_relpath: null,
     artifact_size_bytes: null,
     artifact_sha256: null,
-    has_request_body: 0,
-    has_response_body: 0,
-    has_pipeline_details: 0,
+    has_request_body: false,
+    has_response_body: false,
+    has_pipeline_details: false,
     request_summary: null,
     request_type: null,
     ...row,
     id: row.id ?? `log-family-${++_idSeq}`,
     timestamp: row.timestamp ?? "2025-07-02T12:00:00.000Z",
   };
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, requested_model, provider, account,
+      id, "timestamp", method, path, status, model, requested_model, provider, account,
       connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
       api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
       error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
       has_request_body, has_response_body, has_pipeline_details, request_summary, request_type
     ) VALUES (
-      @id, @timestamp, @method, @path, @status, @model, @requested_model, @provider, @account,
-      @connection_id, @duration, @tokens_in, @tokens_out, @cache_source, @source_format, @target_format,
-      @api_key_id, @api_key_name, @combo_name, @combo_step_id, @combo_execution_key,
-      @error_summary, @detail_state, @artifact_relpath, @artifact_size_bytes, @artifact_sha256,
-      @has_request_body, @has_response_body, @has_pipeline_details, @request_summary, @request_type
-    )`
-  ).run(full);
+      $1, $2, $3, $4, $5, $6, $7, $8, $9,
+      $10, $11, $12, $13, $14, $15, $16,
+      $17, $18, $19, $20, $21,
+      $22, $23, $24, $25, $26,
+      $27, $28, $29, $30, $31
+    )`,
+    [
+      full.id,
+      full.timestamp,
+      full.method,
+      full.path,
+      full.status,
+      full.model,
+      full.requested_model,
+      full.provider,
+      full.account,
+      full.connection_id,
+      full.duration,
+      full.tokens_in,
+      full.tokens_out,
+      full.cache_source,
+      full.source_format,
+      full.target_format,
+      full.api_key_id,
+      full.api_key_name,
+      full.combo_name,
+      full.combo_step_id,
+      full.combo_execution_key,
+      full.error_summary,
+      full.detail_state,
+      full.artifact_relpath,
+      full.artifact_size_bytes,
+      full.artifact_sha256,
+      Boolean(full.has_request_body),
+      Boolean(full.has_response_body),
+      Boolean(full.has_pipeline_details),
+      full.request_summary,
+      full.request_type,
+    ]
+  );
 }
 
-function seedConnection(provider: string) {
+async function seedConnection(provider: string) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT OR IGNORE INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run(`conn-family-${provider}`, provider, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+    [`conn-family-${provider}`, provider, now, now]
+  );
 }
 
 const CUTOFF = "2025-07-01T00:00:00.000Z";
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.before(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await resetTestDb();
 });
 
 // ---------------------------------------------------------------------------
@@ -111,36 +137,17 @@ test("family aggregation — resolution table maps every member to its canonical
   assert.equal(table.get("magnific"), "magnific");
 });
 
-test("family aggregation — last-status subqueries seek the provider index (migration 175)", () => {
-  const db = core.getDbInstance();
-  const plan = (
-    db.prepare("EXPLAIN QUERY PLAN " + mod.PROVIDER_METRICS_SQL).all() as Array<{
-      detail: string;
-    }>
-  )
-    .map((r) => r.detail)
-    .join(" | ");
-  const correlated = plan.match(/SEARCH c[23] USING (?:COVERING )?INDEX (\w+)/g) ?? [];
-  assert.equal(correlated.length, 2, `both correlated subqueries must SEARCH an index: ${plan}`);
-  for (const step of correlated) {
-    assert.ok(
-      step.includes("idx_cl_health_matrix_cover"),
-      `covering index must serve the last-status subqueries: ${step}`
-    );
-  }
-});
-
 // ---------------------------------------------------------------------------
-// GREEN — kimi-coding family collapses into one group
+// GREEN — xai-oauth family collapses into one group
 // ---------------------------------------------------------------------------
 
-test("family aggregation — xai-oauth and xao form one xai-oauth group", () => {
-  seedConnection("xai-oauth");
-  seedConnection("xao");
-  insertCallLog({ provider: "xai-oauth", status: 200, duration: 100 });
-  insertCallLog({ provider: "xao", status: 200, duration: 200 });
+test("family aggregation — xai-oauth and xao form one xai-oauth group", async () => {
+  await seedConnection("xai-oauth");
+  await seedConnection("xao");
+  await insertCallLog({ provider: "xai-oauth", status: 200, duration: 100 });
+  await insertCallLog({ provider: "xao", status: 200, duration: 200 });
 
-  const usage = mod.getProviderUsageSince(CUTOFF);
+  const usage = await mod.getProviderUsageSince(CUTOFF);
   assert.deepEqual(
     usage.filter((r) => r.provider === "xao"),
     [],
@@ -151,7 +158,7 @@ test("family aggregation — xai-oauth and xao form one xai-oauth group", () => 
   assert.equal(row.requests, 2, "requests are summed across members");
   assert.equal(row.avgLatencyMs, 150, "ROUND((100+200)/2)");
 
-  const metrics = mod.getProviderMetrics();
+  const metrics = await mod.getProviderMetrics();
   assert.ok(
     metrics.some((r) => r.provider === "xai-oauth"),
     "canonical member metrics row present"
@@ -162,24 +169,26 @@ test("family aggregation — xai-oauth and xao form one xai-oauth group", () => 
   );
 });
 
-test("family aggregation — member without a live connection is excluded (#10714)", () => {
-  seedConnection("kimi-coding");
+test("family aggregation — member without a live connection is excluded (#10714)", async () => {
+  await seedConnection("kimi-coding");
   // No seedConnection("kimi-coding-apikey") on purpose.
-  insertCallLog({ provider: "kimi-coding", status: 200, duration: 100 });
-  insertCallLog({ provider: "kimi-coding-apikey", status: 200, duration: 100 });
+  await insertCallLog({ provider: "kimi-coding", status: 200, duration: 100 });
+  await insertCallLog({ provider: "kimi-coding-apikey", status: 200, duration: 100 });
 
-  const row = mod.getProviderUsageSince(CUTOFF).find((r) => r.provider === "kimi-coding");
+  const row = (await mod.getProviderUsageSince(CUTOFF)).find(
+    (r) => r.provider === "kimi-coding"
+  );
   assert.ok(row, "canonical group present");
   assert.equal(row.requests, 1, "the member without a connection must not resurface");
 });
 
-test("family aggregation — lastStatus subquery shape is canonical", () => {
+test("family aggregation — lastStatus subquery shape is canonical", async () => {
   // Placeholder for the cross-member lastStatus proof, now folded into the
   // kimi-coding GREEN test (lastStatus/lastErrorStatus asserts). Kept as a
   // direct shape check on an isolated member pair instead of a duplicate DB
-  // scenario that collides with shared file-DB state.
-  seedConnection("kimi-coding-apikey-ls");
-  insertCallLog({
+  // scenario that collides with shared database state.
+  await seedConnection("kimi-coding-apikey-ls");
+  await insertCallLog({
     provider: "kimi-coding-apikey-ls",
     status: 500,
     duration: 100,
@@ -188,34 +197,24 @@ test("family aggregation — lastStatus subquery shape is canonical", () => {
     id: "log-family-ls-1",
   });
 
-  const plain = mod.getProviderMetrics().find((r) => r.provider === "kimi-coding-apikey-ls");
+  const plain = (await mod.getProviderMetrics()).find(
+    (r) => r.provider === "kimi-coding-apikey-ls"
+  );
   assert.ok(plain, "member group present");
   assert.equal(plain.lastStatus, 500);
 });
 
-test("family aggregation — planner keeps using the provider index for selection", () => {
-  const db = core.getDbInstance();
-  const plan = (
-    db
-      .prepare(
-        "EXPLAIN QUERY PLAN SELECT provider, COUNT(*) FROM call_logs WHERE timestamp >= '2025-07-01T00:00:00.000Z' GROUP BY 1"
-      )
-      .all() as Array<{ detail: string }>
-  )
-    .map((r) => r.detail)
-    .join(" | ");
-  assert.ok(!plan.includes("SCAN TABLE"), `must not table-scan, got: ${plan}`);
-});
-
-test("family aggregation — kimi-coding and kimi-coding-apikey form one group", () => {
-  seedConnection("kimi-coding");
-  seedConnection("kimi-coding-apikey");
+test("family aggregation — kimi-coding and kimi-coding-apikey form one group", async () => {
+  await seedConnection("kimi-coding");
+  await seedConnection("kimi-coding-apikey");
   const before =
-    mod.getProviderUsageSince(CUTOFF).find((r) => r.provider === "kimi-coding")?.requests ?? 0;
+    (await mod.getProviderUsageSince(CUTOFF)).find((r) => r.provider === "kimi-coding")
+      ?.requests ?? 0;
   const beforeSuccesses =
-    mod.getProviderUsageSince(CUTOFF).find((r) => r.provider === "kimi-coding")?.successes ?? 0;
-  insertCallLog({ provider: "kimi-coding", status: 200, duration: 100, id: "log-family-green-1" });
-  insertCallLog({
+    (await mod.getProviderUsageSince(CUTOFF)).find((r) => r.provider === "kimi-coding")
+      ?.successes ?? 0;
+  await insertCallLog({ provider: "kimi-coding", status: 200, duration: 100, id: "log-family-green-1" });
+  await insertCallLog({
     provider: "kimi-coding-apikey",
     status: 500,
     duration: 300,
@@ -223,7 +222,7 @@ test("family aggregation — kimi-coding and kimi-coding-apikey form one group",
     id: "log-family-green-2",
   });
 
-  const usage = mod.getProviderUsageSince(CUTOFF);
+  const usage = await mod.getProviderUsageSince(CUTOFF);
   assert.deepEqual(
     usage.filter((r) => r.provider === "kimi-coding-apikey"),
     [],
@@ -234,7 +233,7 @@ test("family aggregation — kimi-coding and kimi-coding-apikey form one group",
   assert.equal(row.requests, before + 2, "requests are summed across members");
   assert.equal(row.successes, beforeSuccesses + 1, "successes are summed across members");
 
-  const metrics = mod.getProviderMetrics();
+  const metrics = await mod.getProviderMetrics();
   const member = metrics.find((r) => r.provider === "kimi-coding-apikey");
   assert.ok(member, "family member keeps its own metrics row for its topology node");
   assert.ok(member.totalRequests >= 1);
@@ -250,9 +249,9 @@ test("family aggregation — kimi-coding and kimi-coding-apikey form one group",
 });
 
 test("family aggregation — /api/provider-metrics serves member metrics and familyMetrics", async () => {
-  seedConnection("kimi-coding");
-  seedConnection("kimi-coding-apikey");
-  insertCallLog({
+  await seedConnection("kimi-coding");
+  await seedConnection("kimi-coding-apikey");
+  await insertCallLog({
     provider: "kimi-coding-apikey",
     status: 503,
     duration: 50,

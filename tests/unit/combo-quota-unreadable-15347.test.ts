@@ -28,7 +28,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-unreadable-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { buildAutoCandidates } = await import("../../open-sse/services/combo.ts");
 const { scoreAutoTargets } = await import("../../open-sse/services/combo/autoStrategy.ts");
@@ -177,15 +177,15 @@ const QUOTA_AND_HEALTH_WEIGHTS = {
 };
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   READINGS.clear();
   THROWING.clear();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -245,7 +245,7 @@ test("a malformed quota ranks strictly below every real reading, even 100% used 
     connectionId: candidate.connectionId,
   })) as never[];
 
-  const ranked = scoreAutoTargets(targets, candidates, "general", QUOTA_AND_HEALTH_WEIGHTS);
+  const ranked = await scoreAutoTargets(targets, candidates, "general", QUOTA_AND_HEALTH_WEIGHTS);
   const scoreOf = (id: string) =>
     ranked.find((entry) => entry.target.connectionId === id)?.score as number;
 

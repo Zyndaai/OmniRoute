@@ -88,14 +88,14 @@ test("Claude -> OpenAI maps Claude server WebSearch to native Responses web_sear
   assert.deepEqual(result.tool_choice, { type: "web_search" });
 });
 
-test("translateRequest maps Claude server WebSearch natively only for Responses targets", () => {
+test("translateRequest maps Claude server WebSearch natively only for Responses targets", async () => {
   const body = {
     messages: [{ role: "user", content: "Search docs" }],
     tools: [{ type: "web_search_20250305", name: "web_search" }],
     tool_choice: { type: "tool", name: "web_search" },
   };
 
-  const responses = translateRequest(
+  const responses = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",
@@ -105,7 +105,7 @@ test("translateRequest maps Claude server WebSearch natively only for Responses 
   assert.deepEqual(responses.tools, [{ type: "web_search" }]);
   assert.deepEqual(responses.tool_choice, { type: "web_search" });
 
-  const chat = translateRequest(
+  const chat = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "gpt-4o",
@@ -453,8 +453,8 @@ test("Claude -> OpenAI passes output_config.effort=max through verbatim", () => 
   assert.equal(result.reasoning_effort, "max");
 });
 
-test("translateRequest maps disabled Claude thinking to reasoning_effort=none", () => {
-  const result = translateRequest(
+test("translateRequest maps disabled Claude thinking to reasoning_effort=none", async () => {
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "gpt-5",

@@ -8,50 +8,65 @@ import path from "node:path";
 // request. The capability snapshot owns that read and the live listing reuses it.
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-shared-custom-read-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.SQLITE_FILE = path.join(TEST_DATA_DIR, "storage.sqlite");
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
+const { writeCatalogColumn } = await import("../../src/lib/db/models/catalogRow.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const activeSynced = await import("../../src/lib/db/models/activeSyncedCatalog.ts");
 const snapshotModule = await import("../../src/lib/modelCapabilityResolutionSnapshot.ts");
 
-const CUSTOM_MODELS_SQL = "FROM key_value WHERE namespace = 'customModels'";
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
-function countCustomModelReads<T>(run: () => Promise<T>): Promise<{ result: T; reads: number }> {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare;
-  const callPrepare = originalPrepare.bind(db);
+/**
+ * Counts the statements that read the custom-models document of `provider_model_catalog`.
+ * The catalog is served from a process snapshot (readCache loadModelMetadataSnapshot), so
+ * `cold` drops it first: the count then shows how many reads one cold call costs.
+ */
+async function countCustomModelReads<T>(
+  run: () => Promise<T>,
+  { cold = true } = {}
+): Promise<{ result: T; reads: number }> {
+  if (cold) invalidateDbCache("model-capabilities");
+  const backend = getTestBackend() as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const originalQuery = backend.query;
+  const originalQueryOne = backend.queryOne;
   let reads = 0;
-  (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
-    if (String(sql).replace(/\s+/g, " ").includes(CUSTOM_MODELS_SQL)) reads++;
-    return callPrepare(sql);
-  }) as typeof db.prepare;
-  return run()
-    .then((result) => ({ result, reads }))
-    .finally(() => {
-      (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
-    });
+  const wrap =
+    (original: (...args: unknown[]) => unknown) =>
+    (sql: string, ...rest: unknown[]) => {
+      const normalized = String(sql).replace(/\s+/g, " ");
+      if (
+        normalized.includes("custom_models") &&
+        normalized.includes("FROM provider_model_catalog")
+      ) {
+        reads++;
+      }
+      return original(sql, ...rest);
+    };
+  backend.query = wrap(originalQuery) as typeof originalQuery;
+  backend.queryOne = wrap(originalQueryOne) as typeof originalQueryOne;
+  try {
+    const result = await run();
+    return { result, reads };
+  } finally {
+    backend.query = originalQuery;
+    backend.queryOne = originalQueryOne;
+  }
 }
 
-test.before(() => {
-  const db = core.getDbInstance();
-  const insert = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('customModels', ?, ?)"
-  );
-  insert.run(
-    "openai",
-    JSON.stringify([
-      { id: "gpt-4o", supportsVision: false },
-      { id: "no-flag" },
-      { id: "vision-on", supportsVision: true },
-    ])
-  );
-  insert.run("broken", "{not json");
-  insert.run("empty", JSON.stringify([]));
+test.before(async () => {
+  await writeCatalogColumn("custom_models", "openai", [
+    { id: "gpt-4o", supportsVision: false },
+    { id: "no-flag" },
+    { id: "vision-on", supportsVision: true },
+  ]);
+  // Malformed JSON text can no longer be stored (the column is jsonb); an empty document is.
+  await writeCatalogColumn("custom_models", "empty", []);
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -59,15 +74,20 @@ test.after(() => {
   }
 });
 
-test("readCustomModelsByProvider parses every row once and skips malformed JSON", () => {
-  const rows = modelsDb.readCustomModelsByProvider();
-  assert.deepEqual(Object.keys(rows).sort(), ["empty", "openai"]);
+test("readCustomModelsByProvider reads every non-empty row in one query and skips empty documents", async () => {
+  const { result: rows, reads } = await countCustomModelReads(() =>
+    modelsDb.readCustomModelsByProvider()
+  );
+  assert.equal(reads, 1);
+  assert.deepEqual(Object.keys(rows).sort(), ["openai"]);
   assert.equal((rows.openai as unknown[]).length, 3);
 });
 
-test("buildCustomModelVisionOverrides from pre-read rows equals the direct bulk read", () => {
-  const direct = modelsDb.listCustomModelVisionOverrides();
-  const derived = modelsDb.buildCustomModelVisionOverrides(modelsDb.readCustomModelsByProvider());
+test("buildCustomModelVisionOverrides from pre-read rows equals the direct bulk read", async () => {
+  const direct = await modelsDb.listCustomModelVisionOverrides();
+  const derived = modelsDb.buildCustomModelVisionOverrides(
+    await modelsDb.readCustomModelsByProvider()
+  );
   assert.deepEqual(
     [...derived].map(([p, m]) => [p, [...m]]),
     [...direct].map(([p, m]) => [p, [...m]])
@@ -88,7 +108,8 @@ test("the capability snapshot reads customModels once and exposes the rows", asy
 });
 
 test("getAllActiveSyncedModels reuses the snapshot rows instead of re-reading", async () => {
-  const snapshot = snapshotModule.createModelCapabilityResolutionSnapshot();
+  const snapshot = await snapshotModule.createModelCapabilityResolutionSnapshot();
+  // Cold, so a 0 proves the pre-read map was used rather than the process snapshot.
   const shared = await countCustomModelReads(() =>
     activeSynced.getAllActiveSyncedModels({
       customModelsByProvider: snapshot.customModelsByProvider,

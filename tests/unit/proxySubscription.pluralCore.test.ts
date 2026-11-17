@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // One registry row per valid `localCoreEndpoint` entry. Real loopback TCP
 // servers stand in for reachable cores; a port closed after binding stands in
@@ -17,14 +18,14 @@ const core = await import("../../src/lib/db/core.ts");
 const proxies = await import("../../src/lib/db/proxies.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -73,35 +74,33 @@ function startFeedServer(initialBody: string): Promise<{
 
 const NEEDS_CORE_FEED = "ss://YWVzLTI1Ni1nY206cGFzcw@203.0.113.9:8388#ss-node";
 
-function insertSubscription(id: string, url: string, localCoreEndpoint: string | null) {
+async function insertSubscription(id: string, url: string, localCoreEndpoint: string | null) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_subscriptions
-        (id, name, url, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, status, created_at, updated_at)
-       VALUES (?, ?, ?, 1, 'global', NULL, ?, 60, 'empty', ?, ?)`
-    )
-    .run(id, `sub-${id}`, url, localCoreEndpoint, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO proxy_subscriptions
+      (id, name, url, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, status, created_at, updated_at)
+     VALUES ($1, $2, $3, true, 'global', NULL, $4, 60, 'empty', $5, $6)`,
+    [id, `sub-${id}`, url, localCoreEndpoint, now, now]
+  );
 }
 
-function rowsForSub(id: string) {
-  return core
-    .getDbInstance()
-    .prepare("SELECT id, name, host, port FROM proxy_registry WHERE subscription_id = ?")
-    .all(id) as Array<{ id: string; name: string; host: string; port: number }>;
+async function rowsForSub(id: string) {
+  return getTestBackend().query<{ id: string; name: string; host: string; port: number }>(
+    "SELECT id, name, host, port FROM proxy_registry WHERE subscription_id = $1",
+    [id]
+  );
 }
 
-function errorOf(id: string): string | null {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT error FROM proxy_subscriptions WHERE id = ?")
-    .get(id) as { error: string | null } | undefined;
+async function errorOf(id: string): Promise<string | null> {
+  const row = await getTestBackend().queryOne<{ error: string | null }>(
+    "SELECT error FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  );
   return row?.error ?? null;
 }
 
-function detailOf(id: string): { code?: string; detail?: string } | null {
-  const raw = errorOf(id);
+async function detailOf(id: string): Promise<{ code?: string; detail?: string } | null> {
+  const raw = await errorOf(id);
   if (!raw) return null;
   try {
     return JSON.parse(raw);
@@ -111,15 +110,15 @@ function detailOf(id: string): { code?: string; detail?: string } | null {
 }
 
 test("single entry keeps the exact legacy name, row and status", async () => {
-  reset();
+  await reset();
   const tcp = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription("s1", feed.url, `socks5://127.0.0.1:${tcp.port}`);
+    await insertSubscription("s1", feed.url, `socks5://127.0.0.1:${tcp.port}`);
     const result = await sub.syncSubscription("s1");
     assert.equal(result.status, "ok");
     assert.equal(result.error, null);
-    const rows = rowsForSub("s1");
+    const rows = await rowsForSub("s1");
     assert.equal(rows.length, 1);
     assert.equal(rows[0].name, "sub-s1 (local core)");
   } finally {
@@ -129,14 +128,14 @@ test("single entry keeps the exact legacy name, row and status", async () => {
 });
 
 test("single gate-rejected entry warns INVALID with a redacted invalid detail", async () => {
-  reset();
+  await reset();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription("s1", feed.url, "socks5://user:pass@192.0.2.1:1080");
+    await insertSubscription("s1", feed.url, "socks5://user:pass@192.0.2.1:1080");
     const result = await sub.syncSubscription("s1");
     assert.equal(result.status, "error");
-    assert.equal(rowsForSub("s1").length, 0);
-    const parsed = detailOf("s1");
+    assert.equal((await rowsForSub("s1")).length, 0);
+    const parsed = await detailOf("s1");
     assert.equal(parsed?.code, "LOCAL_CORE_ENDPOINT_INVALID");
     assert.ok(parsed?.detail?.includes("invalid:"), `detail: ${parsed?.detail}`);
     assert.ok(!parsed?.detail?.includes("pass"), `password leaked: ${parsed?.detail}`);
@@ -147,20 +146,20 @@ test("single gate-rejected entry warns INVALID with a redacted invalid detail", 
 });
 
 test("three reachable entries create three rows and three pool members", async () => {
-  reset();
+  await reset();
   const a = await startTcpServer();
   const b = await startTcpServer();
   const c = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://127.0.0.1:${a.port}\nsocks5://127.0.0.1:${b.port}\nsocks5://127.0.0.1:${c.port}`
     );
     const result = await sub.syncSubscription("s1");
     assert.equal(result.status, "ok");
-    const rows = rowsForSub("s1");
+    const rows = await rowsForSub("s1");
     assert.equal(rows.length, 3);
     const seen = new Set<number>();
     for (let i = 0; i < 30; i++) {
@@ -181,20 +180,20 @@ test("three reachable entries create three rows and three pool members", async (
 });
 
 test("gate-rejected entry creates no row but warns with a redacted detail", async () => {
-  reset();
+  await reset();
   const a = await startTcpServer();
   const b = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://127.0.0.1:${a.port}\nsocks5://user:pass@192.0.2.1:1080\nsocks5://127.0.0.1:${b.port}`
     );
     const result = await sub.syncSubscription("s1");
     assert.equal(result.status, "ok");
-    assert.equal(rowsForSub("s1").length, 2);
-    const parsed = detailOf("s1");
+    assert.equal((await rowsForSub("s1")).length, 2);
+    const parsed = await detailOf("s1");
     assert.equal(parsed?.code, "LOCAL_CORE_ENDPOINT_INVALID");
     assert.ok(parsed?.detail?.includes("invalid:"), `detail: ${parsed?.detail}`);
     assert.ok(!parsed?.detail?.includes("pass"), `password leaked: ${parsed?.detail}`);
@@ -207,20 +206,20 @@ test("gate-rejected entry creates no row but warns with a redacted detail", asyn
 });
 
 test("unreachable entry still creates its row and is listed as unreachable", async () => {
-  reset();
+  await reset();
   const open = await startTcpServer();
   const shut = await closedPort();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://127.0.0.1:${open.port}\nsocks5://127.0.0.1:${shut}`
     );
     const result = await sub.syncSubscription("s1");
     assert.equal(result.status, "ok");
-    assert.equal(rowsForSub("s1").length, 2);
-    const parsed = detailOf("s1");
+    assert.equal((await rowsForSub("s1")).length, 2);
+    const parsed = await detailOf("s1");
     assert.equal(parsed?.code, "LOCAL_CORE_ENDPOINT_INVALID");
     assert.ok(parsed?.detail?.includes("unreachable:"), `detail: ${parsed?.detail}`);
     assert.ok(parsed?.detail?.includes(String(shut)), `detail: ${parsed?.detail}`);
@@ -231,56 +230,56 @@ test("unreachable entry still creates its row and is listed as unreachable", asy
 });
 
 test("re-sync of an unreachable entry keeps the row id and its assignments", async () => {
-  reset();
+  await reset();
   const shut = await closedPort();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription("s1", feed.url, `socks5://127.0.0.1:${shut}`);
+    await insertSubscription("s1", feed.url, `socks5://127.0.0.1:${shut}`);
     await sub.syncSubscription("s1");
-    const before = rowsForSub("s1");
+    const before = await rowsForSub("s1");
     assert.equal(before.length, 1);
-    const pooled = core
-      .getDbInstance()
-      .prepare("SELECT COUNT(*) AS n FROM proxy_assignments WHERE proxy_id = ?")
-      .get(before[0].id) as { n: number };
-    assert.equal(pooled.n, 1);
+    const pooled = await getTestBackend().queryOne<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM proxy_assignments WHERE proxy_id = $1",
+      [before[0].id]
+    );
+    assert.equal(pooled?.n, 1);
 
     await sub.syncSubscription("s1");
 
-    const after = rowsForSub("s1");
+    const after = await rowsForSub("s1");
     assert.equal(after.length, 1);
     assert.equal(after[0].id, before[0].id);
-    const pooled2 = core
-      .getDbInstance()
-      .prepare("SELECT COUNT(*) AS n FROM proxy_assignments WHERE proxy_id = ?")
-      .get(before[0].id) as { n: number };
-    assert.equal(pooled2.n, 1);
+    const pooled2 = await getTestBackend().queryOne<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM proxy_assignments WHERE proxy_id = $1",
+      [before[0].id]
+    );
+    assert.equal(pooled2?.n, 1);
   } finally {
     await feed.close();
   }
 });
 
 test("removing an entry from the field deletes its row on re-sync", async () => {
-  reset();
+  await reset();
   const a = await startTcpServer();
   const b = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://127.0.0.1:${a.port}\nsocks5://127.0.0.1:${b.port}`
     );
     await sub.syncSubscription("s1");
-    assert.equal(rowsForSub("s1").length, 2);
+    assert.equal((await rowsForSub("s1")).length, 2);
 
-    core
-      .getDbInstance()
-      .prepare("UPDATE proxy_subscriptions SET local_core_endpoint = ? WHERE id = ?")
-      .run(`socks5://127.0.0.1:${a.port}`, "s1");
+    await getTestBackend().execute(
+      "UPDATE proxy_subscriptions SET local_core_endpoint = $1 WHERE id = $2",
+      [`socks5://127.0.0.1:${a.port}`, "s1"]
+    );
     await sub.syncSubscription("s1");
 
-    const rows = rowsForSub("s1");
+    const rows = await rowsForSub("s1");
     assert.equal(rows.length, 1);
     assert.equal(rows[0].port, a.port);
   } finally {
@@ -291,18 +290,18 @@ test("removing an entry from the field deletes its row on re-sync", async () => 
 });
 
 test("scheme collision on one key creates one row and an exact key-collision prefix", async () => {
-  reset();
+  await reset();
   const tcp = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `http://127.0.0.1:${tcp.port}\nsocks5://127.0.0.1:${tcp.port}`
     );
     await sub.syncSubscription("s1");
-    assert.equal(rowsForSub("s1").length, 1);
-    const parsed = detailOf("s1");
+    assert.equal((await rowsForSub("s1")).length, 1);
+    const parsed = await detailOf("s1");
     assert.equal(parsed?.code, "LOCAL_CORE_ENDPOINT_INVALID");
     assert.ok(parsed?.detail?.includes("key-collision:"), `detail: ${parsed?.detail}`);
   } finally {
@@ -312,13 +311,13 @@ test("scheme collision on one key creates one row and an exact key-collision pre
 });
 
 test("combined feed lists all three motifs joined in order", async () => {
-  reset();
+  await reset();
   const open = await startTcpServer();
   const shut = await closedPort();
   const clash = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       [
@@ -330,8 +329,8 @@ test("combined feed lists all three motifs joined in order", async () => {
       ].join("\n")
     );
     await sub.syncSubscription("s1");
-    assert.equal(rowsForSub("s1").length, 3);
-    const parsed = detailOf("s1");
+    assert.equal((await rowsForSub("s1")).length, 3);
+    const parsed = await detailOf("s1");
     assert.equal(parsed?.code, "LOCAL_CORE_ENDPOINT_INVALID");
     const detail = parsed?.detail ?? "";
     const iInvalid = detail.indexOf("invalid:");
@@ -348,17 +347,17 @@ test("combined feed lists all three motifs joined in order", async () => {
 });
 
 test("detail never carries a password or userinfo", async () => {
-  reset();
+  await reset();
   const shut = await closedPort();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://operator:s3cret@127.0.0.1:${shut}\nsocks5://intruder:hunter2@192.0.2.1:1080`
     );
     await sub.syncSubscription("s1");
-    const raw = errorOf("s1") ?? "";
+    const raw = (await errorOf("s1")) ?? "";
     for (const secret of ["s3cret", "hunter2", "operator@", "intruder@"]) {
       assert.ok(!raw.includes(secret), `leaked ${secret}: ${raw}`);
     }
@@ -368,7 +367,7 @@ test("detail never carries a password or userinfo", async () => {
 });
 
 test("port-less entry probes the row port, not the probe default", async () => {
-  reset();
+  await reset();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
     // A listener on the upsert-rule port (8080) proves the verdict came from
@@ -383,16 +382,13 @@ test("port-less entry probes the row port, not the probe default", async () => {
       }
     );
     try {
-      insertSubscription("s1", feed.url, "socks5://127.0.0.1");
+      await insertSubscription("s1", feed.url, "socks5://127.0.0.1");
       await sub.syncSubscription("s1");
-      const rows = rowsForSub("s1");
+      const rows = await rowsForSub("s1");
       assert.equal(rows.length, 1);
       assert.equal(rows[0].port, 8080);
-      assert.equal(
-        errorOf("s1"),
-        null,
-        `port-less reachable entry must not warn: ${errorOf("s1")}`
-      );
+      const warning = await errorOf("s1");
+      assert.equal(warning, null, `port-less reachable entry must not warn: ${warning}`);
     } finally {
       await probe.close();
     }
@@ -402,13 +398,13 @@ test("port-less entry probes the row port, not the probe default", async () => {
 });
 
 test("concurrent probes do not stack sequential timeouts", async () => {
-  reset();
+  await reset();
   const a = await startTcpServer();
   const b = await startTcpServer();
   const c = await startTcpServer();
   const feed = await startFeedServer(NEEDS_CORE_FEED);
   try {
-    insertSubscription(
+    await insertSubscription(
       "s1",
       feed.url,
       `socks5://127.0.0.1:${a.port}\nsocks5://127.0.0.1:${b.port}\nsocks5://127.0.0.1:${c.port}`
@@ -416,7 +412,7 @@ test("concurrent probes do not stack sequential timeouts", async () => {
     const started = Date.now();
     await sub.syncSubscription("s1");
     const elapsed = Date.now() - started;
-    assert.equal(rowsForSub("s1").length, 3);
+    assert.equal((await rowsForSub("s1")).length, 3);
     // Three reachable loopback probes fan out: far below one full probe
     // timeout each, let alone three stacked. Generous bound — flakes only if
     // the probes ever serialize again.

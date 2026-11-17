@@ -26,25 +26,24 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-guard-"))
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { markAccountUnavailable } = await import("../../src/sse/services/auth.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const HOUR = 3_600_000;
 
-function readConnectionRow(connId: string) {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => {
-      get: (id: string) => { rate_limited_until: unknown; backoff_level: unknown } | undefined;
-    };
-  };
-  return db
-    .prepare("SELECT rate_limited_until, backoff_level FROM provider_connections WHERE id = ?")
-    .get(connId);
+// rate_limited_until is timestamptz now: reads come back as ISO strings, and the raw
+// epoch-number trap from the SQLite TEXT column no longer exists.
+async function readConnectionRow(connId: string) {
+  return getTestBackend().queryOne<{ rate_limited_until: string | null; backoff_level: number }>(
+    "SELECT rate_limited_until, backoff_level FROM provider_connections WHERE id = $1",
+    [connId]
+  );
 }
 
 test("markAccountUnavailable does not shorten an existing numeric-epoch cooldown (anti-thundering-herd guard)", async () => {
@@ -55,15 +54,14 @@ test("markAccountUnavailable does not shorten an existing numeric-epoch cooldown
   });
   const connId = (conn as { id: string }).id;
 
-  // Simulate the Antigravity full-quota path: a long (1h) cooldown persisted as
-  // a raw epoch number (the known write-side trap from #3954).
+  // Simulate the Antigravity full-quota path: a long (1h) cooldown persisted (1h).
   const longCooldownUntil = Date.now() + HOUR;
-  providersDb.setConnectionRateLimitUntil(connId, longCooldownUntil);
+  await providersDb.setConnectionRateLimitUntil(connId, longCooldownUntil);
 
-  const before = readConnectionRow(connId);
+  const before = await readConnectionRow(connId);
   assert.ok(
-    /^\d+(\.\d+)?$/.test(String(before?.rate_limited_until)),
-    `expected numeric epoch string, got ${String(before?.rate_limited_until)}`
+    before?.rate_limited_until && Number.isFinite(Date.parse(before.rate_limited_until)),
+    `expected a stored timestamp, got ${String(before?.rate_limited_until)}`
   );
 
   // A second, concurrent 429 hits the SAME connection while it is still cooling.
@@ -71,8 +69,8 @@ test("markAccountUnavailable does not shorten an existing numeric-epoch cooldown
   // (longer) cooldown untouched.
   await markAccountUnavailable(connId, 429, "rate limited", "antigravity");
 
-  const after = readConnectionRow(connId);
-  const afterUntilMs = Number(after?.rate_limited_until);
+  const after = await readConnectionRow(connId);
+  const afterUntilMs = Date.parse(String(after?.rate_limited_until));
 
   assert.ok(
     afterUntilMs >= longCooldownUntil - 1_000,

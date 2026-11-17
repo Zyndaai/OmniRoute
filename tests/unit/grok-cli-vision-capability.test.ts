@@ -9,12 +9,12 @@ import assert from "node:assert/strict";
 
 const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
 
-test("Grok Build grok-4.6 is vision capable", () => {
-  const caps = getResolvedModelCapabilities({ provider: "grok-cli", model: "grok-4.6" });
+test("Grok Build grok-4.6 is vision capable", async () => {
+  const caps = await getResolvedModelCapabilities({ provider: "grok-cli", model: "grok-4.6" });
   assert.equal(caps.supportsVision, true);
 });
 
-test("Grok Build grok-4.5 is not declared vision capable", () => {
-  const caps = getResolvedModelCapabilities({ provider: "grok-cli", model: "grok-4.5" });
+test("Grok Build grok-4.5 is not declared vision capable", async () => {
+  const caps = await getResolvedModelCapabilities({ provider: "grok-cli", model: "grok-4.5" });
   assert.notEqual(caps.supportsVision, true);
 });

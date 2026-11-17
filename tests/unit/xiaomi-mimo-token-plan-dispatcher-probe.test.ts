@@ -21,7 +21,7 @@ const { getUsageForProvider } = await import("../../open-sse/services/usage.ts")
 const { USAGE_SUPPORTED_PROVIDERS } =
   await import("../../open-sse/services/usage/supportedProviders.ts");
 const { isSupportedUsageConnection } = await import("../../src/lib/usage/providerLimits.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test("xiaomi-mimo-token-plan is declared supported by the dashboard gate", () => {
   assert.ok(
@@ -55,7 +55,7 @@ test("getUsageForProvider({provider: 'xiaomi-mimo-token-plan'}) returns a self-t
   );
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TMP_DATA_DIR, { recursive: true, force: true });
 });

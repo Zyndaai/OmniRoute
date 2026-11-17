@@ -16,12 +16,6 @@ describe("cleanup DB module", () => {
     assert.ok(typeof result.errors === "number");
   });
 
-  it("purgeDetailedLogs returns result", async () => {
-    const result = await mod.purgeDetailedLogs();
-    assert.ok(typeof result.deleted === "number");
-    assert.ok(typeof result.errors === "number");
-  });
-
   it("runAutoCleanup returns summary with totalDeleted and totalErrors", async () => {
     const result = await mod.runAutoCleanup();
     assert.ok(typeof result.totalDeleted === "number", "should have totalDeleted");

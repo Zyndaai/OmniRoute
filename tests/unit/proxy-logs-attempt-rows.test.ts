@@ -11,6 +11,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-attempt-rows-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const proxyLogsDb = await import("../../src/lib/db/proxyLogs.ts");
@@ -49,13 +50,13 @@ function logArgs(proxyInfo: unknown, status: number, correlationId: string | nul
   };
 }
 
-test.beforeEach(() => {
-  proxyLogger.clearProxyLogs();
+test.beforeEach(async () => {
+  await proxyLogger.clearProxyLogs();
 });
 
-test.after(() => {
-  proxyLogger.clearProxyLogs();
-  core.closeDbInstance();
+test.after(async () => {
+  await proxyLogger.clearProxyLogs();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -260,7 +261,7 @@ test("each send logs its own outlet egress address, not the final one", async ()
 
     const proxyInfo = mergeAppliedProxySink({ proxy: null, level: "direct", levelId: null }, sink);
     await safeLogEvents(logArgs(proxyInfo, 200, "corr-egress"));
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
 
     const rows = proxyLogger.getProxyLogs();
     assert.equal(rows.length, 2);
@@ -269,8 +270,8 @@ test("each send logs its own outlet egress address, not the final one", async ()
     assert.equal(byAttempt[0].egressIp, "203.0.113.11");
     assert.equal(byAttempt[1].attemptIssue, "served");
     assert.equal(byAttempt[1].egressIp, "203.0.113.22");
-    proxyLogger.flushProxyLogsSync();
-    const recent = proxyLogsDb.getRecentEgressIpForProxy("127.0.0.1", 18081);
+    await proxyLogger.flushProxyLogsSync();
+    const recent = await proxyLogsDb.getRecentEgressIpForProxy("127.0.0.1", 18081);
     assert.equal(recent?.egressIp, "203.0.113.11");
   } finally {
     proxyEgress._setEgressProbeForTests(null);
@@ -308,18 +309,16 @@ test("an abandoned send does not pull the latency average down", async () => {
     attemptNumber: 1,
     attemptIssue: "served",
   });
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT AVG(latency_ms) AS avg FROM proxy_logs
-       WHERE proxy_host = ? AND proxy_port = ?`
-    )
-    .get("127.0.0.1", 18091) as { avg: number };
+  const row = await getTestBackend().queryOne<{ avg: number }>(
+    `SELECT AVG(latency_ms)::float8 AS avg FROM proxy_logs
+     WHERE proxy_host = $1 AND proxy_port = $2`,
+    ["127.0.0.1", 18091]
+  );
   // Raw average mixes the 1 ms refusal in; the latency map must read 900.
-  assert.ok(row.avg < 900);
-  const picked = proxyLatency.pickByLatency(db, [
+  assert.ok(Number(row?.avg) < 900);
+  const picked = await proxyLatency.pickByLatency(undefined, [
     { host: "127.0.0.1", port: 18091 },
     { host: "127.0.0.1", port: 18092 },
   ]);

@@ -33,7 +33,7 @@ function chatBody(model: string, stream = false) {
 
 async function keyWithMonthlyQuota(limitUsd: number) {
   const key = await seedApiKey({ name: "monthly-capped" });
-  keyQuotaDb.upsertKeyQuotaLimits(key.id, { monthlyAmountUsd: limitUsd });
+  await keyQuotaDb.upsertKeyQuotaLimits(key.id, { monthlyAmountUsd: limitUsd });
   return key;
 }
 
@@ -52,11 +52,11 @@ function openAIStreamWithUsage(model: string, usage: Record<string, number>) {
 test.beforeEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = 0;
   await resetStorage();
-  costRules.resetCostData();
+  await costRules.resetCostData();
 });
 test.afterEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = h.originalRetryDelayMs;
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await resetStorage();
 });
 test.after(async () => {
@@ -94,7 +94,10 @@ test("Q2: a completed streaming call to an unpriced metered model closes the mon
 
   // The streaming charge is settled after the stream completes (fire-and-forget).
   const { checkKeyQuota } = await import("../../src/domain/keyQuota.ts");
-  const closed = await h.waitFor(() => checkKeyQuota(key.id).allowed === false, 5000);
+  const closed = await h.waitFor(
+    async () => (await checkKeyQuota(key.id)).allowed === false,
+    5000
+  );
   assert.ok(closed, "the monthly quota must close once the unpriced stream has completed");
 
   const second = await handleChat(

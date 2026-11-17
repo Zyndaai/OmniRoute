@@ -53,7 +53,7 @@ const mutableRegistry = skillRegistry as unknown as {
 const originalList = mutableRegistry.list;
 mutableRegistry.list = () => [{ name: "owner_probe", description: "owner probe", enabled: true }];
 
-const server = createMcpServer();
+const server = await createMcpServer();
 const dynamicHandler = getRegisteredHandler(server, "skill_owner_probe");
 
 let capturedOwner: unknown;
@@ -70,11 +70,11 @@ mutableExecutor.execute = async (
   return { output: { ok: true } };
 };
 
-test.after(() => {
+test.after(async () => {
   mutableRegistry.list = originalList;
   mutableExecutor.execute = originalExecute;
-  closeAuditDb();
-  coreDb.resetDbInstance();
+  await closeAuditDb();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;

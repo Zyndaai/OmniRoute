@@ -32,9 +32,8 @@
  * against regressing #13882/GHSA-2jm2 coverage, per the plan-file's ask.
  *
  * (A) and (B) are pure-function checks — no DB needed. (C) exercises the
- * real src/lib/db/{batches,files}.ts modules against an isolated SQLite
- * file. Self-isolating: DATA_DIR points at a fresh temp dir BEFORE any
- * @/lib/db/* module loads.
+ * real src/lib/db/{batches,files}.ts modules against the per-process
+ * isolated PostgreSQL database (tests/_setup/isolatePostgres.ts).
  */
 import { describe, it, after as afterAll } from "node:test";
 import assert from "node:assert";
@@ -50,7 +49,8 @@ const { resolveListScope, canAccessOwnedRecord } =
 type ApiKeyRequestScope = Awaited<
   ReturnType<typeof import("../../src/app/api/v1/_helpers/apiKeyScope.ts").getApiKeyRequestScope>
 >;
-const { resetDbInstance, getDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createBatch, listBatches } = await import("../../src/lib/db/batches.ts");
 const { createFile, listFiles } = await import("../../src/lib/db/files.ts");
 
@@ -60,12 +60,19 @@ const { createFile, listFiles } = await import("../../src/lib/db/files.ts");
 // (random) — making a cursor/ordering assertion flaky in either direction.
 // Force an explicit, distinct created_at directly (no update* helper exists
 // for files; batches has updateBatch but this keeps both paths identical).
-function setCreatedAt(table: "files" | "batches", id: string, createdAt: number): void {
-  getDbInstance().prepare(`UPDATE ${table} SET created_at = ? WHERE id = ?`).run(createdAt, id);
+async function setCreatedAt(
+  table: "files" | "batches",
+  id: string,
+  createdAt: number
+): Promise<void> {
+  await getTestBackend().execute(`UPDATE ${table} SET created_at = to_timestamp($1) WHERE id = $2`, [
+    createdAt,
+    id,
+  ]);
 }
 
-afterAll(() => {
-  resetDbInstance();
+afterAll(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -158,50 +165,50 @@ describe("#14481 (B) session+key precedence — the apiKeyId override is checked
 });
 
 describe("#14481 (C) an owner-scoped `after` cursor ignores a foreign tenant's id", () => {
-  it("listBatches() ignores an `after` cursor that belongs to a different tenant", () => {
+  it("listBatches() ignores an `after` cursor that belongs to a different tenant", async () => {
     // Two tenant-a batches straddling a tenant-b batch in time: 1000 < 2000 < 3000.
     // Pre-fix, getBatch() applies no owner filter, so `after: foreignBatch.id`
     // resolves and its created_at (2000) is trusted as the pagination bound —
     // it would incorrectly EXCLUDE the newer tenant-a batch (3000), leaking
     // the foreign batch's created_at as an existence+timestamp oracle.
     // Fixed: a foreign-owned cursor must be ignored, same as an unknown one.
-    const fileA = createFile({
+    const fileA = await createFile({
       filename: "a.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-a",
     });
-    const fileB = createFile({
+    const fileB = await createFile({
       filename: "b.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-b",
     });
 
-    const older = createBatch({
+    const older = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: fileA.id,
       apiKeyId: "tenant-a",
     });
-    const foreign = createBatch({
+    const foreign = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: fileB.id,
       apiKeyId: "tenant-b",
     });
-    const newer = createBatch({
+    const newer = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: fileA.id,
       apiKeyId: "tenant-a",
     });
-    setCreatedAt("batches", older.id, 1000);
-    setCreatedAt("batches", foreign.id, 2000);
-    setCreatedAt("batches", newer.id, 3000);
+    await setCreatedAt("batches", older.id, 1000);
+    await setCreatedAt("batches", foreign.id, 2000);
+    await setCreatedAt("batches", newer.id, 3000);
 
-    const rowsWithForeignCursor = listBatches("tenant-a", 20, foreign.id);
-    const rowsWithBogusCursor = listBatches("tenant-a", 20, "definitely-does-not-exist");
+    const rowsWithForeignCursor = await listBatches("tenant-a", 20, foreign.id);
+    const rowsWithBogusCursor = await listBatches("tenant-a", 20, "definitely-does-not-exist");
 
     assert.deepStrictEqual(
       rowsWithForeignCursor.map((r) => r.id).sort(),
@@ -215,60 +222,60 @@ describe("#14481 (C) an owner-scoped `after` cursor ignores a foreign tenant's i
     );
   });
 
-  it("listBatches() still honors an `after` cursor belonging to the SAME tenant", () => {
-    const file = createFile({
+  it("listBatches() still honors an `after` cursor belonging to the SAME tenant", async () => {
+    const file = await createFile({
       filename: "c.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-c",
     });
-    const older = createBatch({
+    const older = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
       apiKeyId: "tenant-c",
     });
-    const newer = createBatch({
+    const newer = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
       apiKeyId: "tenant-c",
     });
-    setCreatedAt("batches", older.id, 1000);
-    setCreatedAt("batches", newer.id, 2000);
+    await setCreatedAt("batches", older.id, 1000);
+    await setCreatedAt("batches", newer.id, 2000);
 
-    const page = listBatches("tenant-c", 20, newer.id);
+    const page = await listBatches("tenant-c", 20, newer.id);
     assert.deepStrictEqual(
       page.map((r) => r.id),
       [older.id]
     );
   });
 
-  it("listFiles() ignores an `after` cursor that belongs to a different tenant", () => {
-    const older = createFile({
+  it("listFiles() ignores an `after` cursor that belongs to a different tenant", async () => {
+    const older = await createFile({
       filename: "d1.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-d",
     });
-    const foreign = createFile({
+    const foreign = await createFile({
       filename: "e.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-e",
     });
-    const newer = createFile({
+    const newer = await createFile({
       filename: "d2.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-d",
     });
-    setCreatedAt("files", older.id, 1000);
-    setCreatedAt("files", foreign.id, 2000);
-    setCreatedAt("files", newer.id, 3000);
+    await setCreatedAt("files", older.id, 1000);
+    await setCreatedAt("files", foreign.id, 2000);
+    await setCreatedAt("files", newer.id, 3000);
 
-    const rowsWithForeignCursor = listFiles({ apiKeyId: "tenant-d", after: foreign.id });
-    const rowsWithBogusCursor = listFiles({
+    const rowsWithForeignCursor = await listFiles({ apiKeyId: "tenant-d", after: foreign.id });
+    const rowsWithBogusCursor = await listFiles({
       apiKeyId: "tenant-d",
       after: "definitely-does-not-exist",
     });
@@ -283,23 +290,23 @@ describe("#14481 (C) an owner-scoped `after` cursor ignores a foreign tenant's i
     );
   });
 
-  it("listFiles() still honors an `after` cursor belonging to the SAME tenant", () => {
-    const older = createFile({
+  it("listFiles() still honors an `after` cursor belonging to the SAME tenant", async () => {
+    const older = await createFile({
       filename: "f1.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-f",
     });
-    const newer = createFile({
+    const newer = await createFile({
       filename: "f2.jsonl",
       purpose: "batch",
       bytes: 10,
       apiKeyId: "tenant-f",
     });
-    setCreatedAt("files", older.id, 1000);
-    setCreatedAt("files", newer.id, 2000);
+    await setCreatedAt("files", older.id, 1000);
+    await setCreatedAt("files", newer.id, 2000);
 
-    const page = listFiles({ apiKeyId: "tenant-f", after: newer.id });
+    const page = await listFiles({ apiKeyId: "tenant-f", after: newer.id });
     assert.deepStrictEqual(
       page.map((r) => r.id),
       [older.id]

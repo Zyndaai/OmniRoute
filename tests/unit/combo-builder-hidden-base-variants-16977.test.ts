@@ -11,24 +11,44 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-hiddenbase-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const { mergeModelCompatOverride } = await import("../../src/lib/db/models/compat.ts");
 const { getComboBuilderOptions } = await import("../../src/lib/combos/builderOptions.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const PROVIDER = "aihorde";
 
+async function seedConnection(): Promise<string> {
+  const connection = await providersDb.createProviderConnection({
+    provider: PROVIDER,
+    authType: "apikey",
+    name: `${PROVIDER}-16977-${Math.random().toString(16).slice(2, 8)}`,
+    apiKey: "sk-test-16977",
+    isActive: true,
+    testStatus: "active",
+    providerSpecificData: {},
+  });
+  return (connection as { id: string }).id;
+}
+
 test("hidden base model: neither the base nor its generated effort variants appear", async () => {
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, "conn-16977", [
+  const connectionId = await seedConnection();
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     {
       id: "zzz-base-16977",
       name: "Base 16977",
@@ -53,7 +73,7 @@ test("hidden base model: neither the base nor its generated effort variants appe
 
   // Same store the provider-models PATCH route writes when a custom row
   // doesn't exist (synced-only model).
-  mergeModelCompatOverride(PROVIDER, "zzz-base-16977", { isHidden: true, modality: "chat" });
+  await mergeModelCompatOverride(PROVIDER, "zzz-base-16977", { isHidden: true, modality: "chat" });
 
   const after = (await getComboBuilderOptions()).providers
     .flatMap((p) => p.models)
@@ -67,7 +87,8 @@ test("hidden base model: neither the base nor its generated effort variants appe
 });
 
 test("visibility of one model does not leak into an unrelated model's variants", async () => {
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, "conn-16977-b", [
+  const connectionId = await seedConnection();
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     {
       id: "zzz-keep-16977",
       name: "Keep 16977",
@@ -75,7 +96,7 @@ test("visibility of one model does not leak into an unrelated model's variants",
       supportedThinkingEfforts: ["high"],
     },
   ] as never);
-  mergeModelCompatOverride(PROVIDER, "zzz-other-16977", { isHidden: true, modality: "chat" });
+  await mergeModelCompatOverride(PROVIDER, "zzz-other-16977", { isHidden: true, modality: "chat" });
 
   const ids = (await getComboBuilderOptions()).providers
     .flatMap((p) => p.models)

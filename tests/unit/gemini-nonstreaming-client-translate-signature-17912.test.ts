@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 const { translateNonStreamingClientResponse } =
   await import("../../open-sse/handlers/chatCore/nonStreamingClientTranslate.ts");
-const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { translateRequest, prefetchThoughtSignatures } =
+  await import("../../open-sse/translator/index.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { clearGeminiThoughtSignatureMemoryForTests, scopeGeminiThoughtSignatureNamespace } =
   await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
@@ -18,7 +19,9 @@ const CONNECTION_ID = "conn-17912-wiring";
 const MODEL = "gemini-4-argon";
 const SIGNATURE = "SIG_17912_WIRING_" + "B".repeat(80);
 
-test.beforeEach(() => clearGeminiThoughtSignatureMemoryForTests());
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatureMemoryForTests();
+});
 
 const geminiBody = () => ({
   candidates: [
@@ -54,7 +57,7 @@ function clientTranslate(signatureNamespace?: string | null) {
   return (result.translatedResponse ?? result.response ?? result) as ChatResponse;
 }
 
-function followUp(toolCall: ToolCall, namespace: string | null) {
+async function followUp(toolCall: ToolCall, namespace: string | null) {
   const body = {
     model: MODEL,
     messages: [
@@ -73,7 +76,7 @@ function followUp(toolCall: ToolCall, namespace: string | null) {
       },
     ],
   };
-  const translated = translateRequest(
+  const translated = (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.GEMINI,
     MODEL,
@@ -82,26 +85,33 @@ function followUp(toolCall: ToolCall, namespace: string | null) {
     null,
     "gemini",
     null,
-    namespace ? { signatureNamespace: namespace } : undefined
-  ) as Translated;
+    namespace
+      ? {
+          signatureNamespace: namespace,
+          // The async caller prefetches the persisted signatures (see chatCore); translators
+          // read only that snapshot.
+          thoughtSignatures: await prefetchThoughtSignatures(FORMATS.GEMINI, MODEL, body, namespace),
+        }
+      : undefined
+  )) as Translated;
   return translated.contents
     .flatMap((c: Content) => c.parts ?? [])
     .find((p: Part) => p.functionCall);
 }
 
-test("#17912: translateNonStreamingClientResponse stores the signature under the scoped namespace", () => {
+test("#17912: translateNonStreamingClientResponse stores the signature under the scoped namespace", async () => {
   const ns = scopeGeminiThoughtSignatureNamespace(CONNECTION_ID, MODEL) as string;
   const response = clientTranslate(ns);
   const toolCall = response.choices[0].message.tool_calls[0];
-  const fc = followUp(toolCall, CONNECTION_ID);
+  const fc = await followUp(toolCall, CONNECTION_ID);
   assert.ok(fc, "functionCall must survive in history");
   assert.equal(fc.thoughtSignature, SIGNATURE);
 });
 
-test("#17912 control: with no namespace on either side the signature still round-trips", () => {
+test("#17912 control: with no namespace on either side the signature still round-trips", async () => {
   const response = clientTranslate(null);
   const toolCall = response.choices[0].message.tool_calls[0];
-  const fc = followUp(toolCall, null);
+  const fc = await followUp(toolCall, null);
   assert.ok(fc);
   assert.equal(fc.thoughtSignature, SIGNATURE);
 });

@@ -196,8 +196,8 @@ before(async () => {
   ];
   installFetchStub();
 
-  engineeringKeyGroupId = createKeyGroup("Engineering", "mapped from Entra").id;
-  contractorKeyGroupId = createKeyGroup("Contractors", "default group").id;
+  engineeringKeyGroupId = (await createKeyGroup("Engineering", "mapped from Entra")).id;
+  contractorKeyGroupId = (await createKeyGroup("Contractors", "default group")).id;
 });
 
 beforeEach(() => {
@@ -208,9 +208,9 @@ beforeEach(() => {
   graphShouldFail = false;
 });
 
-after(() => {
+after(async () => {
   globalThis.fetch = realFetch;
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -384,9 +384,9 @@ describe("Entra SSO — group mapping", () => {
     );
     assert.equal(outcome.allow, true);
 
-    const identity = getSsoIdentity("user-oid-groups");
+    const identity = await getSsoIdentity("user-oid-groups");
     assert.ok(identity, "identity should be provisioned");
-    const groups = getKeyGroupsForApiKey(identity.apiKeyId);
+    const groups = await getKeyGroupsForApiKey(identity.apiKeyId);
     assert.deepEqual(
       groups.map((g) => g.id),
       [engineeringKeyGroupId]
@@ -410,10 +410,10 @@ describe("Entra SSO — group mapping", () => {
     const outcome = await clientApiPolicy.evaluate(policyContext(ssoRequest(token)));
 
     assert.equal(outcome.allow, true);
-    const identity = getSsoIdentity("user-oid-default");
+    const identity = await getSsoIdentity("user-oid-default");
     assert.ok(identity);
     assert.deepEqual(
-      getKeyGroupsForApiKey(identity.apiKeyId).map((g) => g.id),
+      (await getKeyGroupsForApiKey(identity.apiKeyId)).map((g) => g.id),
       [contractorKeyGroupId]
     );
   });
@@ -430,10 +430,10 @@ describe("Entra SSO — group mapping", () => {
     await clientApiPolicy.evaluate(
       policyContext(ssoRequest(await mintToken({ oid, groups: [ENTRA_GROUP_ENGINEERING] })))
     );
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
     assert.deepEqual(
-      getKeyGroupsForApiKey(identity.apiKeyId).map((g) => g.id),
+      (await getKeyGroupsForApiKey(identity.apiKeyId)).map((g) => g.id),
       [engineeringKeyGroupId]
     );
 
@@ -444,7 +444,7 @@ describe("Entra SSO — group mapping", () => {
       policyContext(ssoRequest(await mintToken({ oid, groups: [ENTRA_GROUP_CONTRACTORS] })))
     );
     assert.deepEqual(
-      getKeyGroupsForApiKey(identity.apiKeyId).map((g) => g.id),
+      (await getKeyGroupsForApiKey(identity.apiKeyId)).map((g) => g.id),
       [contractorKeyGroupId]
     );
   });
@@ -469,14 +469,18 @@ describe("Entra SSO — group mapping fails closed", () => {
     if (outcome.allow) return;
     assert.equal(outcome.status, 403);
     assert.equal(outcome.code, "AUTH_SSO_NO_GROUP");
-    assert.equal(getSsoIdentity("user-oid-typo"), null, "no shadow key should be provisioned");
+    assert.equal(
+      await getSsoIdentity("user-oid-typo"),
+      null,
+      "no shadow key should be provisioned"
+    );
   });
 
   it("denies a mapping whose key group has been deactivated", async () => {
     const { createKeyGroup: makeGroup, updateKeyGroup } =
       await import("../../src/lib/db/apiKeyGroups.ts");
-    const retired = makeGroup("Retired", "deactivated later").id;
-    updateKeyGroup(retired, { isActive: false });
+    const retired = (await makeGroup("Retired", "deactivated later")).id;
+    await updateKeyGroup(retired, { isActive: false });
 
     await configureSso({
       entraGroupMappings: [{ groupId: ENTRA_GROUP_ENGINEERING, keyGroupId: retired }],
@@ -527,10 +531,10 @@ describe("Entra SSO — group claim overage (>150 groups)", () => {
     const outcome = await clientApiPolicy.evaluate(policyContext(ssoRequest(token)));
 
     assert.equal(outcome.allow, true);
-    const identity = getSsoIdentity("user-oid-overage-b");
+    const identity = await getSsoIdentity("user-oid-overage-b");
     assert.ok(identity);
     assert.deepEqual(
-      getKeyGroupsForApiKey(identity.apiKeyId).map((g) => g.id),
+      (await getKeyGroupsForApiKey(identity.apiKeyId)).map((g) => g.id),
       [engineeringKeyGroupId]
     );
   });
@@ -570,7 +574,7 @@ describe("Entra SSO — just-in-time provisioning", () => {
     assert.equal(a.allow, true);
     assert.equal(b.allow, true);
 
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
 
     const { getApiKeys } = await import("../../src/lib/db/apiKeys.ts");
@@ -586,9 +590,9 @@ describe("Entra SSO — just-in-time provisioning", () => {
 
     assert.equal((await clientApiPolicy.evaluate(policyContext(ssoRequest(token)))).allow, true);
 
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
-    setSsoKeyActive(identity.apiKeyId, false);
+    await setSsoKeyActive(identity.apiKeyId, false);
 
     // Same token, still within the resolution-cache TTL: deactivation must win
     // anyway, because that is the instant kill-switch for a user whose Entra
@@ -608,7 +612,7 @@ describe("Entra SSO — shadow key secrets never leave the DB layer", () => {
       policyContext(ssoRequest(await mintToken({ oid, upn: "redact@corp.example" })))
     );
 
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
 
     const { getApiKeys, getApiKeyById } = await import("../../src/lib/db/apiKeys.ts");
@@ -623,7 +627,7 @@ describe("Entra SSO — shadow key secrets never leave the DB layer", () => {
 
     // Exposing it would create a permanent static credential that bypasses SSO,
     // but the policy layer still needs it internally.
-    assert.ok((getSsoShadowSecret(oid) ?? "").length > 0);
+    assert.ok(((await getSsoShadowSecret(oid)) ?? "").length > 0);
   });
 
   it("refuses the reveal endpoint for an SSO key while still revealing a normal one", async () => {
@@ -632,7 +636,7 @@ describe("Entra SSO — shadow key secrets never leave the DB layer", () => {
     await clientApiPolicy.evaluate(
       policyContext(ssoRequest(await mintToken({ oid, upn: "reveal@corp.example" })))
     );
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
 
     const revealRoute = await import("../../src/app/api/keys/[id]/reveal/route.ts");
@@ -735,7 +739,7 @@ describe("Entra SSO — auth→policy bridge (GHSA-2phc-xp22-9f56 class)", () =>
     const oid = "user-oid-bridge";
     await clientApiPolicy.evaluate(policyContext(ssoRequest(await mintToken({ oid }))));
 
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
 
     const stamped = new Request("http://localhost/api/v1/chat/completions", {
@@ -747,7 +751,7 @@ describe("Entra SSO — auth→policy bridge (GHSA-2phc-xp22-9f56 class)", () =>
     });
 
     const result = await enforceApiKeyPolicy(stamped, "gpt-4o-mini");
-    assert.equal(result.apiKey, getSsoShadowSecret(oid));
+    assert.equal(result.apiKey, await getSsoShadowSecret(oid));
     assert.ok(result.apiKeyInfo, "the SSO request must carry the shadow key's policy");
     assert.equal(result.apiKeyInfo?.id, identity.apiKeyId);
   });
@@ -762,7 +766,7 @@ describe("Entra SSO — auth→policy bridge (GHSA-2phc-xp22-9f56 class)", () =>
     const token = await mintToken({ oid });
     await clientApiPolicy.evaluate(policyContext(ssoRequest(token, { via: "both" })));
 
-    const identity = getSsoIdentity(oid);
+    const identity = await getSsoIdentity(oid);
     assert.ok(identity);
 
     const stamped = new Request("http://localhost/api/v1/chat/completions", {
@@ -777,7 +781,7 @@ describe("Entra SSO — auth→policy bridge (GHSA-2phc-xp22-9f56 class)", () =>
 
     const result = await enforceApiKeyPolicy(stamped, "gpt-4o-mini");
     assert.notEqual(result.apiKey, token, "the raw Entra JWT must never be used as the API key");
-    assert.equal(result.apiKey, getSsoShadowSecret(oid));
+    assert.equal(result.apiKey, await getSsoShadowSecret(oid));
     assert.equal(result.apiKeyInfo?.id, identity.apiKeyId);
   });
 

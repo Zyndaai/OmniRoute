@@ -85,15 +85,15 @@ function guardrail(maxImages: number, callVisionModel: (ref: string) => Promise<
   });
 }
 
-test("#17069: GLM text-only and vision-capable siblings have explicit metadata", () => {
+test("#17069: GLM text-only and vision-capable siblings have explicit metadata", async () => {
   for (const id of ["glm-5.3", "glm-5.3-high", "glm-5.3-low", "glm-5.3-max"]) {
-    assert.equal(getResolvedModelCapabilities(`glm/${id}`).supportsVision, false, id);
+    assert.equal((await getResolvedModelCapabilities(`glm/${id}`)).supportsVision, false, id);
   }
-  assert.equal(getResolvedModelCapabilities("glm/glm-5.3-flash").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("glm/glm-5.3-flash")).supportsVision, true);
 });
 
 test("#17069: a failed nested Read-tool image is replaced for confirmed text-only targets", async () => {
-  assert.equal(getResolvedModelCapabilities(TEXT_ONLY_MODEL).supportsVision, false);
+  assert.equal((await getResolvedModelCapabilities(TEXT_ONLY_MODEL)).supportsVision, false);
   const request = makeRequest([imagePart()]);
   const before = structuredClone(request);
   let calls = 0;
@@ -173,7 +173,7 @@ test("#17069: the /v1/messages guardrail result is safe after Claude-to-OpenAI t
   assert.equal(result.block, false);
   assert.ok(result.modifiedPayload);
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "glm-5.3",

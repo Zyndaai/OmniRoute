@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import { db, jsonb, type DbExecutor } from "./pg";
 import { isExclusiveConnectionActivelyLeased } from "./exclusiveConnectionLeases";
 import { finishModelCatalogWriteWithoutBackup } from "./models/modelCatalogWriteSignals";
+import { invalidateCatalogSnapshot } from "./models/catalogRow";
 import { ModelValidationError, type ValidationInput } from "../modelValidation/http";
 
 interface ConnectionRow {
@@ -54,7 +55,11 @@ function assertConnectionAvailable(
   if (leased) unavailable();
   const raw = connection.provider_specific_data;
   const data: Record<string, unknown> =
-    typeof raw === "string" ? JSON.parse(raw) : raw && typeof raw === "object" ? (raw as never) : {};
+    typeof raw === "string"
+      ? JSON.parse(raw)
+      : raw && typeof raw === "object"
+        ? (raw as never)
+        : {};
   if (data.cliproxyapiMode === "claude-native" || data.darioMode === "claude-native") unavailable();
 }
 
@@ -106,7 +111,9 @@ async function readState(
   return { fingerprint, models };
 }
 
-export async function createValidationSnapshot(input: ValidationInput): Promise<ValidationSnapshot> {
+export async function createValidationSnapshot(
+  input: ValidationInput
+): Promise<ValidationSnapshot> {
   const leased = await isExclusiveConnectionActivelyLeased(input.connectionId);
   return {
     provider: input.provider,
@@ -187,6 +194,7 @@ export async function commitValidatedModel(
     if (!isDeepStrictEqual(saved, JSON.parse(JSON.stringify(model))))
       throw new Error("Validated model readback failed");
   });
+  invalidateCatalogSnapshot();
   finishModelCatalogWriteWithoutBackup();
   return model;
 }

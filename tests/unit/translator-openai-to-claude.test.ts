@@ -25,7 +25,7 @@ function getClaudeEffortFixtures() {
   return { xhighModel, standardModel };
 }
 
-test("OpenAI -> Claude helpers normalize array content and strip empty nested text blocks", () => {
+test("OpenAI -> Claude helpers normalize array content and strip empty nested text blocks", async () => {
   const normalized = normalizeContentToString([
     { type: "text", text: "Line 1" },
     { type: "image_url", image_url: { url: "https://example.com/ignored.png" } },
@@ -55,8 +55,8 @@ test("OpenAI -> Claude helpers normalize array content and strip empty nested te
   ]);
 });
 
-test("OpenAI -> Claude maps system messages, parameters and assistant cache markers", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude maps system messages, parameters and assistant cache markers", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [
@@ -95,8 +95,8 @@ test("OpenAI -> Claude maps system messages, parameters and assistant cache mark
   assert.deepEqual(result.messages[1].content[0].cache_control, { type: "ephemeral" });
 });
 
-test("OpenAI -> Claude strips top_p when temperature is also present", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude strips top_p when temperature is also present", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Hello" }],
@@ -110,8 +110,8 @@ test("OpenAI -> Claude strips top_p when temperature is also present", () => {
   assert.equal(result.top_p, undefined);
 });
 
-test("OpenAI -> Claude converts multimodal content, tool declarations, tool calls and tool results", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude converts multimodal content, tool declarations, tool calls and tool results", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       // #5945: the redacted_thinking precursor is only emitted when the outbound
@@ -228,8 +228,8 @@ test("OpenAI -> Claude converts multimodal content, tool declarations, tool call
   });
 });
 
-test("OpenAI -> Claude does not leave tool results separated from their tool use", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude does not leave tool results separated from their tool use", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [
@@ -290,8 +290,8 @@ test("OpenAI -> Claude does not leave tool results separated from their tool use
   );
 });
 
-test("OpenAI -> Claude maps tool_choice and injects response_format instructions into system", () => {
-  const schemaResult = openaiToClaudeRequest(
+test("OpenAI -> Claude maps tool_choice and injects response_format instructions into system", async () => {
+  const schemaResult = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Return JSON" }],
@@ -314,7 +314,7 @@ test("OpenAI -> Claude maps tool_choice and injects response_format instructions
   assert.match(schemaResult.system[0].text, /strictly follows this JSON schema/i);
   assert.match(schemaResult.system[0].text, /"answer"/);
 
-  const jsonObjectResult = openaiToClaudeRequest(
+  const jsonObjectResult = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Return JSON" }],
@@ -328,13 +328,13 @@ test("OpenAI -> Claude maps tool_choice and injects response_format instructions
   assert.match(jsonObjectResult.system[0].text, /Respond ONLY with a JSON object/i);
 });
 
-test("OpenAI -> Claude turns reasoning settings into thinking budgets and expands max tokens", () => {
+test("OpenAI -> Claude turns reasoning settings into thinking budgets and expands max tokens", async () => {
   // `claude-4-sonnet` is a fixture that doesn't match any spec. Unknown caps
   // should not get an implicit default; the translator only preserves the
   // response room + thinking budget relationship.
   // fitThinkingToMaxTokens floors response room at MIN_RESPONSE_ROOM (1024)
   // and targets max_tokens = responseRoom + budget capped at modelCap.
-  const effortResult = openaiToClaudeRequest(
+  const effortResult = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Think harder" }],
@@ -348,7 +348,7 @@ test("OpenAI -> Claude turns reasoning settings into thinking budgets and expand
   // responseRoom=max(10,1024)=1024; target=1024+1024=2048
   assert.equal(effortResult.max_tokens, 2048);
 
-  const explicitThinkingResult = openaiToClaudeRequest(
+  const explicitThinkingResult = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Think harder" }],
@@ -367,8 +367,8 @@ test("OpenAI -> Claude turns reasoning settings into thinking budgets and expand
   assert.equal(explicitThinkingResult.max_tokens, 3024);
 });
 
-test("OpenAI -> Claude does not cap unknown models to a fallback maxOutputTokens", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude does not cap unknown models to a fallback maxOutputTokens", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [{ role: "user", content: "Reason about something hard" }],
@@ -382,9 +382,9 @@ test("OpenAI -> Claude does not cap unknown models to a fallback maxOutputTokens
   assert.deepEqual(result.thinking, { type: "enabled", budget_tokens: 131072 });
 });
 
-test("OpenAI -> Claude preserves xhigh only for Claude models that expose it", () => {
+test("OpenAI -> Claude preserves xhigh only for Claude models that expose it", async () => {
   const { xhighModel, standardModel } = getClaudeEffortFixtures();
-  const preserved = openaiToClaudeRequest(
+  const preserved = await openaiToClaudeRequest(
     xhighModel.id,
     {
       messages: [{ role: "user", content: "Think harder" }],
@@ -392,7 +392,7 @@ test("OpenAI -> Claude preserves xhigh only for Claude models that expose it", (
     },
     false
   );
-  const downgraded = openaiToClaudeRequest(
+  const downgraded = await openaiToClaudeRequest(
     standardModel.id,
     {
       messages: [{ role: "user", content: "Think harder" }],
@@ -413,8 +413,8 @@ test("OpenAI -> Claude preserves xhigh only for Claude models that expose it", (
   assert.equal(downgraded.max_tokens, 128000);
 });
 
-test("OpenAI -> Claude preserves max effort except for Haiku models", () => {
-  const preserved = openaiToClaudeRequest(
+test("OpenAI -> Claude preserves max effort except for Haiku models", async () => {
+  const preserved = await openaiToClaudeRequest(
     "claude-sonnet-4-6",
     {
       messages: [{ role: "user", content: "Think at max" }],
@@ -422,7 +422,7 @@ test("OpenAI -> Claude preserves max effort except for Haiku models", () => {
     },
     false
   );
-  const haiku = openaiToClaudeRequest(
+  const haiku = await openaiToClaudeRequest(
     "claude-haiku-4-5-20251001",
     {
       messages: [{ role: "user", content: "Think at max" }],
@@ -439,7 +439,7 @@ test("OpenAI -> Claude preserves max effort except for Haiku models", () => {
   assert.equal(haiku.max_tokens, 64000);
 });
 
-test("OpenAI -> Claude fits thinking budget within a 128k output cap (regression)", () => {
+test("OpenAI -> Claude fits thinking budget within a 128k output cap (regression)", async () => {
   // Real-world OpenCode scenario: caller asks for max_tokens=32000 with high effort.
   // High effort maps to budget=131072. The previous naive
   // `budget + 8192 = 139264` exceeded the 128000 output cap and caused
@@ -448,7 +448,7 @@ test("OpenAI -> Claude fits thinking budget within a 128k output cap (regression
   // shrink budget to (128000 - 32000) = 96000.
   // Pinned on Opus 4.6 — a model that still uses manual budgets. Opus 4.7+/Fable 5 are
   // adaptive-only now (no budget_tokens), so their effort path is covered separately below.
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-6",
     {
       messages: [{ role: "user", content: "Reason about something hard" }],
@@ -468,13 +468,13 @@ test("OpenAI -> Claude fits thinking budget within a 128k output cap (regression
   );
 });
 
-test("OpenAI -> Claude steers adaptive-only models via output_config.effort for EVERY level", () => {
+test("OpenAI -> Claude steers adaptive-only models via output_config.effort for EVERY level", async () => {
   // Opus 4.7+/Fable 5 reject a manual `thinking.budget_tokens`/`type:"enabled"` with 400.
   // reasoning_effort low/medium/high must therefore map to adaptive + output_config.effort
   // (preserving the requested level), NOT to the budget buckets older models use.
   for (const effort of ["low", "medium", "high", "xhigh", "max"]) {
     for (const model of ["claude-opus-4-8", "claude-opus-4-7", "claude-fable-5"]) {
-      const result = openaiToClaudeRequest(
+      const result = await openaiToClaudeRequest(
         model,
         {
           messages: [{ role: "user", content: "Reason" }],
@@ -502,9 +502,9 @@ test("OpenAI -> Claude steers adaptive-only models via output_config.effort for 
   }
 });
 
-test("OpenAI -> Claude keeps manual budgets for low/medium/high on pre-4.7 models (regression)", () => {
+test("OpenAI -> Claude keeps manual budgets for low/medium/high on pre-4.7 models (regression)", async () => {
   // Opus 4.6 still supports manual extended thinking: the budget buckets must be untouched.
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-6",
     {
       messages: [{ role: "user", content: "Reason" }],
@@ -518,7 +518,7 @@ test("OpenAI -> Claude keeps manual budgets for low/medium/high on pre-4.7 model
   assert.equal(result.output_config, undefined);
 });
 
-test("OpenAI -> Claude can disable OAuth prefixes and Antigravity strips Claude-only prompting", () => {
+test("OpenAI -> Claude can disable OAuth prefixes and Antigravity strips Claude-only prompting", async () => {
   const baseBody = {
     messages: [
       { role: "system", content: "User rules" },
@@ -546,7 +546,7 @@ test("OpenAI -> Claude can disable OAuth prefixes and Antigravity strips Claude-
     ],
   };
 
-  const noPrefix = openaiToClaudeRequest(
+  const noPrefix = await openaiToClaudeRequest(
     "claude-4-sonnet",
     { ...baseBody, _disableToolPrefix: true },
     false
@@ -559,7 +559,7 @@ test("OpenAI -> Claude can disable OAuth prefixes and Antigravity strips Claude-
     "read_file"
   );
 
-  const antigravity = openaiToClaudeRequestForAntigravity("claude-4-sonnet", baseBody, false);
+  const antigravity = await openaiToClaudeRequestForAntigravity("claude-4-sonnet", baseBody, false);
   assert.equal(
     antigravity.system.some((block) => String(block.text).includes("Claude Code")),
     false
@@ -572,12 +572,12 @@ test("OpenAI -> Claude can disable OAuth prefixes and Antigravity strips Claude-
   );
 });
 
-test("OpenAI -> Claude preserves reasoning_content on assistant tool call messages when thinking is enabled", () => {
+test("OpenAI -> Claude preserves reasoning_content on assistant tool call messages when thinking is enabled", async () => {
   // Bug: Kimi (and other thinking-enabled providers) require reasoning_content
   // on assistant messages that contain tool_calls. When reasoning_content is
   // present, it must be converted to a thinking block. When it's missing but
   // thinking is enabled, we must NOT drop the tool_calls.
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [
@@ -648,10 +648,10 @@ test("OpenAI -> Claude preserves reasoning_content on assistant tool call messag
   assert.deepEqual(toolUseBlock.input, { location: "Tokyo" });
 });
 
-test("OpenAI -> Claude handles assistant tool call messages without reasoning_content when thinking is enabled", () => {
+test("OpenAI -> Claude handles assistant tool call messages without reasoning_content when thinking is enabled", async () => {
   // When thinking is enabled but the assistant message has no reasoning_content,
   // the message should still be translated correctly with tool_calls preserved.
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [
@@ -694,9 +694,9 @@ test("OpenAI -> Claude handles assistant tool call messages without reasoning_co
   assert.equal(toolUseBlock.name, `${CLAUDE_OAUTH_TOOL_PREFIX}do_thing`);
 });
 
-test("OpenAI -> Claude treats developer role as system (fix for Responses API → Claude path)", () => {
+test("OpenAI -> Claude treats developer role as system (fix for Responses API → Claude path)", async () => {
   const MARKER = "MAGIC_IDENTITY_847261";
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-sonnet-4-6",
     {
       messages: [
@@ -725,7 +725,7 @@ test("OpenAI -> Claude treats developer role as system (fix for Responses API �
 
 // tool_choice "none" was mapped to Claude {type:"auto"}, so a request that listed tools
 // but switched tool use off still let the model call them.
-test("OpenAI -> Claude keeps tool_choice none as Claude none", () => {
+test("OpenAI -> Claude keeps tool_choice none as Claude none", async () => {
   const body = (toolChoice: unknown) => ({
     messages: [{ role: "user", content: "Just answer in text" }],
     tools: [
@@ -737,14 +737,16 @@ test("OpenAI -> Claude keeps tool_choice none as Claude none", () => {
     tool_choice: toolChoice,
   });
 
-  assert.deepEqual(openaiToClaudeRequest("claude-4-sonnet", body("none"), false).tool_choice, {
-    type: "none",
-  });
   assert.deepEqual(
-    openaiToClaudeRequest("claude-4-sonnet", body({ type: "none" }), false).tool_choice,
+    (await openaiToClaudeRequest("claude-4-sonnet", body("none"), false)).tool_choice,
     { type: "none" }
   );
-  assert.deepEqual(openaiToClaudeRequest("claude-4-sonnet", body("auto"), false).tool_choice, {
-    type: "auto",
-  });
+  assert.deepEqual(
+    (await openaiToClaudeRequest("claude-4-sonnet", body({ type: "none" }), false)).tool_choice,
+    { type: "none" }
+  );
+  assert.deepEqual(
+    (await openaiToClaudeRequest("claude-4-sonnet", body("auto"), false)).tool_choice,
+    { type: "auto" }
+  );
 });

@@ -79,9 +79,9 @@ function createContext(overrides: Partial<GuardrailContext> = {}): GuardrailCont
 
 // Fail loudly if the static capability drift makes the fixture invalid: the
 // describe path only runs for non-vision models.
-test("VB-CACHE-FIXTURE: text-only model resolves without vision support", () => {
+test("VB-CACHE-FIXTURE: text-only model resolves without vision support", async () => {
   assert.notEqual(
-    getResolvedModelCapabilities(TEXT_ONLY_MODEL).supportsVision,
+    (await getResolvedModelCapabilities(TEXT_ONLY_MODEL)).supportsVision,
     true,
     `${TEXT_ONLY_MODEL} must be text-only for this regression`
   );

@@ -15,15 +15,15 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-output-li
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { saveModelsDevCapabilities, clearModelsDevCapabilities } =
   await import("../../src/lib/modelsDevSync.ts");
 const { resolveComboTargetPipeline } =
   await import("../../open-sse/services/combo/targetResolution.ts");
 
-test.after(() => {
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+test.after(async () => {
+  await clearModelsDevCapabilities();
+  await resetTestDb();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {
@@ -96,7 +96,7 @@ async function orderFor(
 }
 
 test("a target whose own output limit fits its window keeps its declared place", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-fits": {
       primary: capabilityEntry(200_000, 64_000),
       big: capabilityEntry(1_000_000, 64_000),
@@ -106,7 +106,7 @@ test("a target whose own output limit fits its window keeps its declared place",
 });
 
 test("the window check uses each target's own output limit, not the pool's highest", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-mixed": {
       primary: capabilityEntry(200_000, 64_000),
       big: capabilityEntry(1_000_000, 128_000),
@@ -116,7 +116,7 @@ test("the window check uses each target's own output limit, not the pool's highe
 });
 
 test("a target whose own output limit still overflows its window is demoted", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-overflow": {
       primary: capabilityEntry(200_000, 100_000),
       big: capabilityEntry(1_000_000, 128_000),
@@ -126,7 +126,7 @@ test("a target whose own output limit still overflows its window is demoted", as
 });
 
 test("a target with an unknown output limit keeps the full requested budget", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-unknown": {
       primary: capabilityEntry(200_000, null),
       big: capabilityEntry(1_000_000, 64_000),
@@ -136,7 +136,7 @@ test("a target with an unknown output limit keeps the full requested budget", as
 });
 
 test("the preferred tier sizes each target the same way when another target is too small", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-three": {
       primary: capabilityEntry(200_000, 64_000),
       tiny: capabilityEntry(100_000, null),
@@ -151,7 +151,7 @@ test("the preferred tier sizes each target the same way when another target is t
 });
 
 test("a sole survivor that fits once sized does not pull hard-rejected targets back", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-sole": {
       primary: capabilityEntry(200_000, 64_000),
       notools: capabilityEntry(1_000_000, 64_000, false),
@@ -166,7 +166,7 @@ test("a sole survivor that fits once sized does not pull hard-rejected targets b
 test("without the advisory the context check still counts the full max_tokens", async () => {
   // `limited` is dropped for its output limit either way. Its context verdict
   // still counts toward tiering, and only the full budget makes it too small.
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-strict": {
       limited: capabilityEntry(200_000, 64_000),
       big: capabilityEntry(1_000_000, null),
@@ -179,7 +179,7 @@ test("without the advisory the context check still counts the full max_tokens", 
 });
 
 test("a max_tokens below the target's own output limit is not raised to that limit", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "tier-small-request": {
       primary: capabilityEntry(200_000, 64_000),
       big: capabilityEntry(1_000_000, 64_000),

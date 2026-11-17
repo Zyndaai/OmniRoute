@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "team-dashboard-read-"));
 process.env.DATA_DIR = dir;
 process.env.API_KEY_SECRET = "fixture-dashboard-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "1";
 process.env.OMNIROUTE_DISABLE_REDIS_AUTH_CACHE = "1";
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const keys = await import("../../src/lib/db/apiKeys.ts");
 const teams = await import("../../src/lib/db/teams.ts");
 const budgets = await import("../../src/lib/usage/teamUsageLimits.ts");
@@ -30,22 +30,21 @@ function req(url: string, secret?: string, body?: unknown) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   keys.resetApiKeyState();
   usage.clearPendingRequests();
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir);
 });
 test.after(() => {
-  core.resetDbInstance();
   keys.resetApiKeyState();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("real additive read handlers reject anonymous and non-management keys", async () => {
   const ordinary = await keys.createApiKey("ordinary", "fixture-ordinary");
-  const team = teams.createTeam({ name: "Protected" });
+  const team = await teams.createTeam({ name: "Protected" });
   for (const secret of [undefined, ordinary.key]) {
     const expected = secret ? 403 : 401;
     assert.equal(
@@ -69,27 +68,30 @@ test("real additive read handlers reject anonymous and non-management keys", asy
       expected
     );
   }
-  assert.equal(teams.getActiveBillingTeamForApiKey(ordinary.id), null);
+  assert.equal(await teams.getActiveBillingTeamForApiKey(ordinary.id), null);
 });
 
 test("safe projection has all keys, nullable names and only active ownership; default response stays unchanged", async () => {
   const admin = await keys.createApiKey("admin", "fixture-admin", ["manage"]);
   const key = await keys.createApiKey("", "fixture-unnamed");
-  const team = teams.createTeam({ name: "Owner" });
-  teams.assignApiKeyBillingTeam(key.id, team.id, "2026-01-01T00:00:00.000Z");
+  const team = await teams.createTeam({ name: "Owner" });
+  await teams.assignApiKeyBillingTeam(key.id, team.id, "2026-01-01T00:00:00.000Z");
   // Current schema requires names; an empty legacy name is still a safe option.
-  const db = core.getDbInstance();
-  const insert = db.prepare(
-    "INSERT INTO api_keys (id, name, key, machine_id, created_at) VALUES (?, ?, ?, ?, ?)"
-  );
-  for (let index = 0; index < 205; index++)
-    insert.run(
-      crypto.randomUUID(),
-      "fixture-" + index,
-      "invalid-fixture-" + index,
-      "fixture",
-      new Date().toISOString()
+  const backend = getTestBackend();
+  for (let index = 0; index < 205; index++) {
+    const rawKey = "invalid-fixture-" + index;
+    await backend.execute(
+      "INSERT INTO api_keys (id, name, key, key_hash, machine_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+      [
+        crypto.randomUUID(),
+        "fixture-" + index,
+        rawKey,
+        createHash("sha256").update(rawKey).digest("hex"),
+        "fixture",
+        new Date().toISOString(),
+      ]
     );
+  }
   const defaultBody = await (await listRoute.GET(req("/api/teams", admin.key))).json();
   assert.deepEqual(Object.keys(defaultBody), ["teams"]);
   const body = await (
@@ -102,8 +104,8 @@ test("safe projection has all keys, nullable names and only active ownership; de
     body.keyOptions.find((option: { id: string }) => option.id === key.id),
     { id: key.id, name: key.name, teamId: team.id, teamName: "Owner" }
   );
-  teams.archiveTeam(team.id);
-  const option = teams.listTeamKeyOptions().find((item) => item.id === key.id)!;
+  await teams.archiveTeam(team.id);
+  const option = (await teams.listTeamKeyOptions()).find((item) => item.id === key.id)!;
   assert.equal(option.teamId, null);
   assert.equal(option.teamName, null);
   assert.ok(!JSON.stringify(body).includes(admin.key));
@@ -118,9 +120,13 @@ test("zero-member team retains successful historical budget, report includes fai
       "dashboard-fixture": { input: 1, cached: 1, output: 1, reasoning: 1, cache_creation: 1 },
     },
   });
-  const team = teams.createTeam({ name: "Historical", maxBudgetUsd: 0.5, budgetDuration: "1d" });
+  const team = await teams.createTeam({
+    name: "Historical",
+    maxBudgetUsd: 0.5,
+    budgetDuration: "1d",
+  });
   const at = Date.now();
-  teams.assignApiKeyBillingTeam(key.id, team.id, new Date(at - 1000).toISOString());
+  await teams.assignApiKeyBillingTeam(key.id, team.id, new Date(at - 1000).toISOString());
   for (const success of [true, false]) {
     await usage.saveRequestUsage({
       provider: "openai",
@@ -132,8 +138,8 @@ test("zero-member team retains successful historical budget, report includes fai
       success,
     });
   }
-  teams.unassignApiKeyBillingTeam(key.id, new Date(at + 2).toISOString(), team.id);
-  assert.equal(teams.listTeamMembers(team.id).length, 0);
+  await teams.unassignApiKeyBillingTeam(key.id, new Date(at + 2).toISOString(), team.id);
+  assert.equal((await teams.listTeamMembers(team.id)).length, 0);
   assert.equal(await budgets.getTeamUsageLimitStatusForApiKey(key.id, at), null);
   const status = await budgets.getTeamUsageLimitStatusForTeam(team.id, at);
   assert.equal(status?.estimatedListCostUsd, 1);
@@ -144,17 +150,17 @@ test("zero-member team retains successful historical budget, report includes fai
   const body = await response.json();
   assert.equal(body.members.length, 0);
   assert.equal(body.budgetStatus.estimatedListCostUsd, 1);
-  teams.archiveTeam(team.id);
+  await teams.archiveTeam(team.id);
   assert.equal(await budgets.getTeamUsageLimitStatusForTeam(team.id, at), null);
 });
 
 test("handler transfer checks expected source inside transaction and preserves history on conflict", async () => {
   const admin = await keys.createApiKey("admin", "fixture-admin", ["manage"]);
-  const source = teams.createTeam({ name: "Source" });
-  const middle = teams.createTeam({ name: "Middle" });
-  const destination = teams.createTeam({ name: "Destination" });
-  teams.assignApiKeyBillingTeam(admin.id, source.id, "2026-01-01T00:00:00.000Z");
-  teams.assignApiKeyBillingTeam(admin.id, middle.id, "2026-01-02T00:00:00.000Z");
+  const source = await teams.createTeam({ name: "Source" });
+  const middle = await teams.createTeam({ name: "Middle" });
+  const destination = await teams.createTeam({ name: "Destination" });
+  await teams.assignApiKeyBillingTeam(admin.id, source.id, "2026-01-01T00:00:00.000Z");
+  await teams.assignApiKeyBillingTeam(admin.id, middle.id, "2026-01-02T00:00:00.000Z");
   const url = "/api/teams/" + destination.id + "/members";
   for (const expectedTeamId of [source.id, null]) {
     const conflict = await memberRoute.PUT(
@@ -162,8 +168,8 @@ test("handler transfer checks expected source inside transaction and preserves h
       params(destination.id)
     );
     assert.equal(conflict.status, 409);
-    assert.equal(teams.getActiveBillingTeamForApiKey(admin.id)?.id, middle.id);
-    assert.equal(teams.listApiKeyBillingHistory(admin.id).length, 2);
+    assert.equal((await teams.getActiveBillingTeamForApiKey(admin.id))?.id, middle.id);
+    assert.equal((await teams.listApiKeyBillingHistory(admin.id)).length, 2);
   }
   assert.equal(
     (
@@ -174,16 +180,16 @@ test("handler transfer checks expected source inside transaction and preserves h
     ).status,
     200
   );
-  assert.equal(teams.getActiveBillingTeamForApiKey(admin.id)?.id, destination.id);
-  assert.equal(teams.listApiKeyBillingHistory(admin.id).length, 3);
+  assert.equal((await teams.getActiveBillingTeamForApiKey(admin.id))?.id, destination.id);
+  assert.equal((await teams.listApiKeyBillingHistory(admin.id)).length, 3);
   // Omitted fourth argument keeps legacy assignment semantics.
-  teams.assignApiKeyBillingTeam(admin.id, source.id, "2027-01-01T00:00:00.000Z");
-  assert.equal(teams.getActiveBillingTeamForApiKey(admin.id)?.id, source.id);
+  await teams.assignApiKeyBillingTeam(admin.id, source.id, "2027-01-01T00:00:00.000Z");
+  assert.equal((await teams.getActiveBillingTeamForApiKey(admin.id))?.id, source.id);
 });
 
 test("a previously unassigned key accepts explicit null expectation", async () => {
   const admin = await keys.createApiKey("admin", "fixture-admin", ["manage"]);
-  const team = teams.createTeam({ name: "First" });
+  const team = await teams.createTeam({ name: "First" });
   const response = await memberRoute.PUT(
     req("/api/teams/" + team.id + "/members", admin.key, {
       apiKeyId: admin.id,

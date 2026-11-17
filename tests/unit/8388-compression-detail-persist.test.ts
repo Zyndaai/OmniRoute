@@ -24,8 +24,8 @@ const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../src/lib/db/compression.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(tmpDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

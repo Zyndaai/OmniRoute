@@ -9,7 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const ORIGINAL_API_KEY_SECRET = process.env.API_KEY_SECRET;
 process.env.API_KEY_SECRET = "test-usage-analytics-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { updatePricing } = await import("@/lib/db/settings");
 const localDb = { updatePricing };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -18,12 +18,24 @@ const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const aggregateHistory = await import("../../src/lib/usage/aggregateHistory.ts");
 const analyticsRoute = await import("../../src/app/api/usage/analytics/route.ts");
 const analyticsCache = await import("../../src/lib/usage/analyticsResponseCache.ts");
+const { getRetentionSettings } = await import("../../src/lib/db/retentionSettings.ts");
 
 const clearPendingRequests = usageHistory.clearPendingRequests;
 const EXPECTED_TOTAL_COST = 0.020925;
 
+/** Fixture insert with schema column names; boolean `success` may be given as 1/0. */
+async function insertRow(table: string, row: Record<string, unknown>) {
+  const cols = Object.keys(row);
+  const names = cols.map((c) => (c === "timestamp" ? '"timestamp"' : c)).join(", ");
+  const marks = cols.map((_, i) => `$${i + 1}`).join(", ");
+  const values = cols.map((c) =>
+    c === "success" && typeof row[c] === "number" ? row[c] === 1 : row[c]
+  );
+  await getTestBackend().execute(`INSERT INTO ${table} (${names}) VALUES (${marks})`, values);
+}
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -35,30 +47,29 @@ async function resetStorage() {
 }
 
 async function seedAnalyticsData() {
-  const db = core.getDbInstance();
-  const now = new Date();
   for (let i = 0; i < 20; i++) {
-    const timestamp = new Date(now.getTime() - i * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      i % 2 === 0 ? "openai" : "anthropic",
-      i % 2 === 0 ? "gpt-4o" : "claude-sonnet",
-      "test-conn",
-      "test-key",
-      "Primary Key",
-      100 + i,
-      50 + i,
-      1,
-      200 + i * 10,
-      timestamp
-    );
+    const timestamp = new Date(Date.now() - i * 60 * 60 * 1000).toISOString();
+    await insertRow("usage_history", {
+      provider: i % 2 === 0 ? "openai" : "anthropic",
+      model: i % 2 === 0 ? "gpt-4o" : "claude-sonnet",
+      connection_id: "test-conn",
+      api_key_id: "test-key",
+      api_key_name: "Primary Key",
+      tokens_input: 100 + i,
+      tokens_output: 50 + i,
+      success: 1,
+      latency_ms: 200 + i * 10,
+      timestamp,
+    });
   }
-  db.prepare(
-    `INSERT INTO call_logs (provider, model, requested_model, connection_id, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "gpt-4o-mini", "test-conn", new Date().toISOString());
+  await insertRow("call_logs", {
+    id: "seed-call-log",
+    provider: "openai",
+    model: "gpt-4o",
+    requested_model: "gpt-4o-mini",
+    connection_id: "test-conn",
+    timestamp: new Date().toISOString(),
+  });
 }
 
 function makeRequest(url: string) {
@@ -80,8 +91,8 @@ test.beforeEach(async () => {
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
@@ -124,20 +135,31 @@ test("GET /api/usage/analytics includes dailyTrend array with cost data", async 
 });
 
 test("GET /api/usage/analytics zero-fills inactive models in dailyByModel", async () => {
-  const db = core.getDbInstance();
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setUTCDate(yesterday.getUTCDate() - 1);
   const dates = [yesterday, today].map((date) => date.toISOString().slice(0, 10));
 
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "model-a", "openai-conn", 100, 50, 1, 200, `${dates[0]}T12:00:00.000Z`);
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("anthropic", "model-b", "anthropic-conn", 200, 20, 1, 250, `${dates[1]}T12:00:00.000Z`);
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "model-a",
+    connection_id: "openai-conn",
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: `${dates[0]}T12:00:00.000Z`,
+  });
+  await insertRow("usage_history", {
+    provider: "anthropic",
+    model: "model-b",
+    connection_id: "anthropic-conn",
+    tokens_input: 200,
+    tokens_output: 20,
+    success: 1,
+    latency_ms: 250,
+    timestamp: `${dates[1]}T12:00:00.000Z`,
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -172,11 +194,16 @@ test("GET /api/usage/analytics includes byModel array with cost calculations", a
 });
 
 test("GET /api/usage/analytics resolves Codex GPT-5.5 pricing through provider aliases", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "gpt-5.5", "codex-conn", 1000, 500, 1, 250, new Date().toISOString());
+  await insertRow("usage_history", {
+    provider: "codex",
+    model: "gpt-5.5",
+    connection_id: "codex-conn",
+    tokens_input: 1000,
+    tokens_output: 500,
+    success: 1,
+    latency_ms: 250,
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -190,20 +217,16 @@ test("GET /api/usage/analytics resolves Codex GPT-5.5 pricing through provider a
 });
 
 test("GET /api/usage/analytics can include flat-rate provider estimates for the costs page", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "claude",
-    "claude-opus-5",
-    "claude-code-conn",
-    1_000_000,
-    1_000_000,
-    1,
-    250,
-    new Date().toISOString()
-  );
+  await insertRow("usage_history", {
+    provider: "claude",
+    model: "claude-opus-5",
+    connection_id: "claude-code-conn",
+    tokens_input: 1_000_000,
+    tokens_output: 1_000_000,
+    success: 1,
+    latency_ms: 250,
+    timestamp: new Date().toISOString(),
+  });
 
   const defaultResponse = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?presets=1d")
@@ -239,12 +262,15 @@ test("GET /api/usage/analytics can include flat-rate provider estimates for the 
 });
 
 test("GET /api/usage/analytics preserves archived flat-rate estimates without changing billed cost", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO daily_usage_summary
-      (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("claude", "claude-opus-5", "2024-01-01", 2, 1_000_000, 1_000_000, 42.5);
+  await insertRow("daily_usage_summary", {
+    provider: "claude",
+    model: "claude-opus-5",
+    date: "2024-01-01",
+    total_requests: 2,
+    total_input_tokens: 1_000_000,
+    total_output_tokens: 1_000_000,
+    total_cost: 42.5,
+  });
 
   const billedResponse = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?range=all")
@@ -265,65 +291,62 @@ test("GET /api/usage/analytics preserves archived flat-rate estimates without ch
 });
 
 test("rollupUsageHistoryBeforeDate stores API-equivalent cost before deleting raw usage", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history
-      (provider, model, connection_id, tokens_input, tokens_output, tokens_cache_read,
-       tokens_cache_creation, tokens_reasoning, service_tier, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "claude",
-    "claude-opus-5",
-    "archived-claude",
-    1_000_000,
-    1_000_000,
-    0,
-    0,
-    0,
-    "standard",
-    1,
-    250,
-    "2024-01-01T12:00:00.000Z"
-  );
+  await insertRow("usage_history", {
+    provider: "claude",
+    model: "claude-opus-5",
+    connection_id: "archived-claude",
+    tokens_input: 1_000_000,
+    tokens_output: 1_000_000,
+    tokens_cache_read: 0,
+    tokens_cache_creation: 0,
+    tokens_reasoning: 0,
+    service_tier: "standard",
+    success: 1,
+    latency_ms: 250,
+    timestamp: "2024-01-01T12:00:00.000Z",
+  });
 
   const result = await aggregateHistory.rollupUsageHistoryBeforeDate("2024-02-01");
   assert.equal(result.errors, 0);
   const retryResult = await aggregateHistory.rollupUsageHistoryBeforeDate("2024-02-01");
   assert.equal(retryResult.errors, 0);
 
-  const archived = db
-    .prepare(
-      `SELECT total_requests, total_input_tokens, total_output_tokens, total_cost
-       FROM daily_usage_summary
-       WHERE provider = ? AND model = ? AND date = ?`
-    )
-    .get("claude", "claude-opus-5", "2024-01-01") as {
+  const archived = await getTestBackend().queryOne<{
     total_requests: number;
     total_input_tokens: number;
     total_output_tokens: number;
     total_cost: number;
-  };
-  assert.equal(archived.total_requests, 1);
-  assert.equal(archived.total_input_tokens, 1_000_000);
-  assert.equal(archived.total_output_tokens, 1_000_000);
-  assertClose(archived.total_cost, 30);
+  }>(
+    `SELECT total_requests, total_input_tokens, total_output_tokens, total_cost
+       FROM daily_usage_summary
+      WHERE provider = $1 AND model = $2 AND date = $3`,
+    ["claude", "claude-opus-5", "2024-01-01"]
+  );
+  assert.equal(archived?.total_requests, 1);
+  assert.equal(archived?.total_input_tokens, 1_000_000);
+  assert.equal(archived?.total_output_tokens, 1_000_000);
+  assertClose(archived!.total_cost, 30);
 });
 
 test("GET /api/usage/analytics applies Codex Fast tier multipliers and exposes tier split", async () => {
-  const db = core.getDbInstance();
   const timestamp = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "gpt-5.5", "codex-fast", 1000, 500, 1, 250, "priority", timestamp);
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "gpt-5.5", "codex-standard", 1000, 500, 1, 250, "standard", timestamp);
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "gpt-5.5", "codex-flex", 1000, 500, 1, 250, "flex", timestamp);
+  for (const [connectionId, serviceTier] of [
+    ["codex-fast", "priority"],
+    ["codex-standard", "standard"],
+    ["codex-flex", "flex"],
+  ]) {
+    await insertRow("usage_history", {
+      provider: "codex",
+      model: "gpt-5.5",
+      connection_id: connectionId,
+      tokens_input: 1000,
+      tokens_output: 500,
+      success: 1,
+      latency_ms: 250,
+      service_tier: serviceTier,
+      timestamp,
+    });
+  }
 
   const response = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?presets=1d")
@@ -357,11 +380,17 @@ test("GET /api/usage/analytics applies Codex Fast tier multipliers and exposes t
 });
 
 test("GET /api/usage/analytics does not report flex savings for non-Codex providers", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "openai-flex", 1000, 500, 1, 250, "flex", new Date().toISOString());
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "openai-flex",
+    tokens_input: 1000,
+    tokens_output: 500,
+    success: 1,
+    latency_ms: 250,
+    service_tier: "flex",
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -383,21 +412,17 @@ test("GET /api/usage/analytics applies Codex GPT-5.6 Sol Fast multiplier", async
   await localDb.updatePricing({
     codex: { "gpt-5.6-sol": { input: 5, output: 30 } },
   });
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, service_tier, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "codex",
-    "gpt-5.6-sol",
-    "codex-fast",
-    1000,
-    500,
-    1,
-    250,
-    "priority",
-    new Date().toISOString()
-  );
+  await insertRow("usage_history", {
+    provider: "codex",
+    model: "gpt-5.6-sol",
+    connection_id: "codex-fast",
+    tokens_input: 1000,
+    tokens_output: 500,
+    success: 1,
+    latency_ms: 250,
+    service_tier: "priority",
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -408,11 +433,16 @@ test("GET /api/usage/analytics applies Codex GPT-5.6 Sol Fast multiplier", async
 });
 
 test("GET /api/usage/analytics maps Codex auto-review usage to GPT-5.5 pricing", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "codex-auto-review", "codex-conn", 1000, 500, 1, 250, new Date().toISOString());
+  await insertRow("usage_history", {
+    provider: "codex",
+    model: "codex-auto-review",
+    connection_id: "codex-conn",
+    tokens_input: 1000,
+    tokens_output: 500,
+    success: 1,
+    latency_ms: 250,
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -424,20 +454,34 @@ test("GET /api/usage/analytics maps Codex auto-review usage to GPT-5.5 pricing",
 });
 
 test("GET /api/usage/analytics ignores normal combo routing in fallback statistics", async () => {
-  const db = core.getDbInstance();
   const timestamp = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("codex", "gpt-5.5", "codex-conn", 1000, 500, 1, 250, timestamp);
-  db.prepare(
-    `INSERT INTO call_logs (id, provider, model, requested_model, combo_name, connection_id, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("combo-call", "codex", "gpt-5.5", "combo/dev", "dev", "codex-conn", timestamp);
-  db.prepare(
-    `INSERT INTO call_logs (id, provider, model, requested_model, connection_id, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("same-model-call", "codex", "GPT-5.5", "gpt-5.5", "codex-conn", timestamp);
+  await insertRow("usage_history", {
+    provider: "codex",
+    model: "gpt-5.5",
+    connection_id: "codex-conn",
+    tokens_input: 1000,
+    tokens_output: 500,
+    success: 1,
+    latency_ms: 250,
+    timestamp,
+  });
+  await insertRow("call_logs", {
+    id: "combo-call",
+    provider: "codex",
+    model: "gpt-5.5",
+    requested_model: "combo/dev",
+    combo_name: "dev",
+    connection_id: "codex-conn",
+    timestamp,
+  });
+  await insertRow("call_logs", {
+    id: "same-model-call",
+    provider: "codex",
+    model: "GPT-5.5",
+    requested_model: "gpt-5.5",
+    connection_id: "codex-conn",
+    timestamp,
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -506,7 +550,6 @@ test("GET /api/usage/analytics includes cost by API key", async () => {
 });
 
 test("GET /api/usage/analytics does not double-count raw and aggregated rows", async () => {
-  const db = core.getDbInstance();
   const today = new Date();
   const todayStr = today.toISOString().split("T")[0];
   // The raw/aggregated split boundary is retention.usageHistory (365 days by
@@ -514,25 +557,42 @@ test("GET /api/usage/analytics does not double-count raw and aggregated rows", a
   // and deletes usage_history rows using that exact setting). Read it live
   // instead of hardcoding 30 days so this fixture stays valid regardless of
   // the configured retention window.
-  const { getUserDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
-  const rawRetentionDays = getUserDatabaseSettings().retention.usageHistory;
+  const rawRetentionDays = (await getRetentionSettings()).usageHistory;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - rawRetentionDays);
   const olderDate = new Date(cutoffDate);
   olderDate.setDate(olderDate.getDate() - 1);
   const olderDateStr = olderDate.toISOString().split("T")[0];
 
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "raw-current", 100, 50, 1, 200, today.toISOString());
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "raw-current",
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: today.toISOString(),
+  });
 
-  const insertSummary = db.prepare(
-    `INSERT INTO daily_usage_summary (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
-  insertSummary.run("openai", "gpt-4o", todayStr, 99, 9900, 9900, 0);
-  insertSummary.run("openai", "gpt-4o", olderDateStr, 1, 25, 10, 0);
+  await insertRow("daily_usage_summary", {
+    provider: "openai",
+    model: "gpt-4o",
+    date: todayStr,
+    total_requests: 99,
+    total_input_tokens: 9900,
+    total_output_tokens: 9900,
+    total_cost: 0,
+  });
+  await insertRow("daily_usage_summary", {
+    provider: "openai",
+    model: "gpt-4o",
+    date: olderDateStr,
+    total_requests: 1,
+    total_input_tokens: 25,
+    total_output_tokens: 10,
+    total_cost: 0,
+  });
 
   const response = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?range=all")
@@ -546,28 +606,29 @@ test("GET /api/usage/analytics does not double-count raw and aggregated rows", a
 
 test("GET /api/usage/analytics omits global aggregates when filtering by API key", async () => {
   const apiKey = await apiKeysDb.createApiKey("Scoped Key", "machine1234567890");
-  const db = core.getDbInstance();
 
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "openai",
-    "gpt-4o",
-    "scoped-conn",
-    apiKey.id,
-    "Scoped Key",
-    100,
-    50,
-    1,
-    200,
-    new Date().toISOString()
-  );
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "scoped-conn",
+    api_key_id: apiKey.id,
+    api_key_name: "Scoped Key",
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: new Date().toISOString(),
+  });
 
-  db.prepare(
-    `INSERT INTO daily_usage_summary (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "2024-01-01", 99, 9900, 9900, 0);
+  await insertRow("daily_usage_summary", {
+    provider: "openai",
+    model: "gpt-4o",
+    date: "2024-01-01",
+    total_requests: 99,
+    total_input_tokens: 9900,
+    total_output_tokens: 9900,
+    total_cost: 0,
+  });
 
   const response = await analyticsRoute.GET(
     makeRequest(`http://localhost/api/usage/analytics?range=all&apiKeyIds=${apiKey.id}`)
@@ -585,36 +646,31 @@ test("GET /api/usage/analytics groups renamed API key usage by stable ID", async
   const apiKey = await apiKeysDb.createApiKey("Averyanov", "machine1234567890");
   await apiKeysDb.updateApiKeyPermissions(apiKey.id, { name: "Alexander Averyanov" });
 
-  const db = core.getDbInstance();
   const now = Date.now();
-  const insertUsage = db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  insertUsage.run(
-    "openai",
-    "gpt-4o",
-    "test-conn",
-    apiKey.id,
-    "Averyanov",
-    100,
-    50,
-    1,
-    200,
-    new Date(now - 60_000).toISOString()
-  );
-  insertUsage.run(
-    "openai",
-    "gpt-4o",
-    "test-conn",
-    apiKey.id,
-    "Desktop",
-    200,
-    100,
-    1,
-    250,
-    new Date(now).toISOString()
-  );
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "test-conn",
+    api_key_id: apiKey.id,
+    api_key_name: "Averyanov",
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: new Date(now - 60_000).toISOString(),
+  });
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "test-conn",
+    api_key_id: apiKey.id,
+    api_key_name: "Desktop",
+    tokens_input: 200,
+    tokens_output: 100,
+    success: 1,
+    latency_ms: 250,
+    timestamp: new Date(now).toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -646,11 +702,18 @@ test("GET /api/usage/analytics does not persist guessed API key attribution", as
   });
   await apiKeysDb.createApiKey("Unrestricted Key", "machine1234567890");
 
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "legacy-conn", null, null, 100, 50, 1, 200, new Date().toISOString());
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "legacy-conn",
+    api_key_id: null,
+    api_key_name: null,
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -658,28 +721,47 @@ test("GET /api/usage/analytics does not persist guessed API key attribution", as
   assert.equal(response.status, 200);
   assert.equal(body.byApiKey.length, 0);
 
-  const row = db
-    .prepare("SELECT api_key_id, api_key_name FROM usage_history WHERE connection_id = ?")
-    .get("legacy-conn") as { api_key_id: string | null; api_key_name: string | null };
-  assert.equal(row.api_key_id, null);
-  assert.equal(row.api_key_name, null);
+  const row = await getTestBackend().queryOne<{
+    api_key_id: string | null;
+    api_key_name: string | null;
+  }>("SELECT api_key_id, api_key_name FROM usage_history WHERE connection_id = $1", [
+    "legacy-conn",
+  ]);
+  assert.equal(row?.api_key_id, null);
+  assert.equal(row?.api_key_name, null);
 });
 
 test("GET /api/usage/analytics?view=apiKeys returns only lifetime totals per API key", async () => {
   const usedKey = await apiKeysDb.createApiKey("Used Key", "machine1234567890");
   const idleKey = await apiKeysDb.createApiKey("Idle Key", "machine1234567890");
-  const db = core.getDbInstance();
   const now = Date.now();
   const at = (msAgo: number) => new Date(now - msAgo).toISOString();
-  const insertUsage = db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, 'c1', ?, ?, ?, ?, 1, 200, ?)`
-  );
-  insertUsage.run("openai", "gpt-4o", usedKey.id, "Used Key", 100, 50, at(86_400_000));
-  insertUsage.run("openai", "gpt-4o", usedKey.id, "Old Name", 200, 100, at(60_000));
-  insertUsage.run("anthropic", "claude-sonnet", usedKey.id, "Used Key", 300, 30, at(120_000));
+  const insertUsage = (
+    provider: string,
+    model: string,
+    apiKeyId: string | null,
+    apiKeyName: string,
+    tokensInput: number,
+    tokensOutput: number,
+    timestamp: string
+  ) =>
+    insertRow("usage_history", {
+      provider,
+      model,
+      connection_id: "c1",
+      api_key_id: apiKeyId,
+      api_key_name: apiKeyName,
+      tokens_input: tokensInput,
+      tokens_output: tokensOutput,
+      success: 1,
+      latency_ms: 200,
+      timestamp,
+    });
+  await insertUsage("openai", "gpt-4o", usedKey.id, "Used Key", 100, 50, at(86_400_000));
+  await insertUsage("openai", "gpt-4o", usedKey.id, "Old Name", 200, 100, at(60_000));
+  await insertUsage("anthropic", "claude-sonnet", usedKey.id, "Used Key", 300, 30, at(120_000));
   // Rows recorded before per-key ids carry only the key name.
-  insertUsage.run("openai", "gpt-4o", null, "Idle Key", 1000, 1000, at(30_000));
+  await insertUsage("openai", "gpt-4o", null, "Idle Key", 1000, 1000, at(30_000));
 
   const response = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?range=all&view=apiKeys")
@@ -748,15 +830,19 @@ test("GET /api/usage/analytics returns 500 on database errors", async () => {
 
 test("GET /api/usage/analytics does not throw Unknown named parameter on short range (needsAggregated=false)", async () => {
   // Regression: shared params object leaked agg-only bindings (@sinceDate, @rawCutoffDate)
-  // into queries that don't reference them, causing better-sqlite3 to throw.
+  // into queries that don't reference them, causing the query layer to reject the statement.
   // A short range (1h) triggers needsAggregated=false because the entire window
   // falls within the raw-data-only period.
-  const db = core.getDbInstance();
-  const now = new Date();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("openai", "gpt-4o", "test-conn", 100, 50, 1, 200, now.toISOString());
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    connection_id: "test-conn",
+    tokens_input: 100,
+    tokens_output: 50,
+    success: 1,
+    latency_ms: 200,
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(
     makeRequest("http://localhost/api/usage/analytics?range=1h")
@@ -768,19 +854,26 @@ test("GET /api/usage/analytics does not throw Unknown named parameter on short r
 });
 
 test("GET /api/usage/analytics does not throw Unknown named parameter with apiKey filter on long range", async () => {
-  // Regression: Object.assign(presetParams, params) leaked all main-query bindings
-  // into preset queries that only reference preset-prefixed placeholders.
+  // Regression: merged bindings leaked all main-query parameters into preset queries
+  // that only reference preset-prefixed placeholders.
   const apiKey = await apiKeysDb.createApiKey("Preset Key", "machine-preset1234");
-  const db = core.getDbInstance();
   const now = new Date();
 
   // Seed data old enough to trigger aggregated + preset path
   for (let i = 0; i < 5; i++) {
     const ts = new Date(now.getTime() - (35 + i) * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("openai", "gpt-4o", "test-conn", apiKey.id, apiKey.name, 100, 50, 1, 200, ts);
+    await insertRow("usage_history", {
+      provider: "openai",
+      model: "gpt-4o",
+      connection_id: "test-conn",
+      api_key_id: apiKey.id,
+      api_key_name: apiKey.name,
+      tokens_input: 100,
+      tokens_output: 50,
+      success: 1,
+      latency_ms: 200,
+      timestamp: ts,
+    });
   }
 
   const response = await analyticsRoute.GET(
@@ -789,14 +882,13 @@ test("GET /api/usage/analytics does not throw Unknown named parameter with apiKe
   const body = await response.json();
 
   assert.equal(response.status, 200);
-  // Core regression check: no "Unknown named parameter" error.
+  // Core regression check: the endpoint returns 200 without throwing.
   // The exact count depends on raw-vs-aggregated boundary; we only need to
   // confirm the endpoint returns 200 without throwing.
   assert.ok(typeof body.summary.totalRequests === "number");
 });
 
 test("rollupUsageHistoryBeforeDate prices each request, not the day's summed tokens", async () => {
-  const db = core.getDbInstance();
   const costCalculator = await import("../../src/lib/usage/costCalculator.ts");
 
   // Two requests, same provider/model/day/tier, so the rollup's
@@ -812,25 +904,20 @@ test("rollupUsageHistoryBeforeDate prices each request, not the day's summed tok
   ];
 
   for (const row of rows) {
-    db.prepare(
-      `INSERT INTO usage_history
-        (provider, model, connection_id, tokens_input, tokens_output, tokens_cache_read,
-         tokens_cache_creation, tokens_reasoning, service_tier, success, latency_ms, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      "openai",
-      "gpt-4o",
-      "clamp-conn",
-      row.input,
-      row.output,
-      row.cacheRead,
-      0,
-      0,
-      "standard",
-      1,
-      200,
-      "2024-03-01T12:00:00.000Z"
-    );
+    await insertRow("usage_history", {
+      provider: "openai",
+      model: "gpt-4o",
+      connection_id: "clamp-conn",
+      tokens_input: row.input,
+      tokens_output: row.output,
+      tokens_cache_read: row.cacheRead,
+      tokens_cache_creation: 0,
+      tokens_reasoning: 0,
+      service_tier: "standard",
+      success: 1,
+      latency_ms: 200,
+      timestamp: "2024-03-01T12:00:00.000Z",
+    });
   }
 
   // Ground truth: price every request individually, exactly as the live
@@ -859,16 +946,15 @@ test("rollupUsageHistoryBeforeDate prices each request, not the day's summed tok
   const result = await aggregateHistory.rollupUsageHistoryBeforeDate("2024-04-01");
   assert.equal(result.errors, 0);
 
-  const archived = db
-    .prepare(
-      `SELECT total_cost FROM daily_usage_summary
-       WHERE provider = ? AND model = ? AND date = ?`
-    )
-    .get("openai", "gpt-4o", "2024-03-01") as { total_cost: number };
+  const archived = await getTestBackend().queryOne<{ total_cost: number }>(
+    `SELECT total_cost FROM daily_usage_summary
+      WHERE provider = $1 AND model = $2 AND date = $3`,
+    ["openai", "gpt-4o", "2024-03-01"]
+  );
 
   // Retention must preserve the billed value. Archiving a day may not silently
   // discount it just because the day's requests were grouped before pricing.
-  assertClose(archived.total_cost, expectedCost);
+  assertClose(archived!.total_cost, expectedCost);
 });
 
 test("GET /api/usage/analytics uses per-row provider_cost_usd instead of re-pricing its tokens", async () => {
@@ -879,26 +965,21 @@ test("GET /api/usage/analytics uses per-row provider_cost_usd instead of re-pric
     kiro: { "gpt-5.6-luna": { input: 999, output: 999 } },
   });
   const apiKey = await apiKeysDb.createApiKey("Metered key", "test-machine");
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, account_key, api_key_id, api_key_name,
-       tokens_input, tokens_output, provider_credits, provider_cost_usd, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "kiro",
-    "gpt-5.6-luna",
-    "metered-conn",
-    "metered-account",
-    apiKey.id,
-    apiKey.name,
-    100000,
-    50000,
-    0.5,
-    0.01,
-    1,
-    200,
-    new Date().toISOString()
-  );
+  await insertRow("usage_history", {
+    provider: "kiro",
+    model: "gpt-5.6-luna",
+    connection_id: "metered-conn",
+    account_key: "metered-account",
+    api_key_id: apiKey.id,
+    api_key_name: apiKey.name,
+    tokens_input: 100000,
+    tokens_output: 50000,
+    provider_credits: 0.5,
+    provider_cost_usd: 0.01,
+    success: 1,
+    latency_ms: 200,
+    timestamp: new Date().toISOString(),
+  });
 
   const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
   const body = await response.json();
@@ -944,17 +1025,33 @@ test("GET /api/usage/analytics keeps measured and token-priced usage apart after
   await localDb.updatePricing({
     xai: { "grok-reported": { input: 1, output: 2 } },
   });
-  const db = core.getDbInstance();
   const timestamp = new Date(Date.now() - 400 * 86_400_000).toISOString();
-  const insert = db.prepare(
-    `INSERT INTO usage_history
-       (provider, model, tokens_input, tokens_output, provider_cost_usd, success, timestamp)
-     VALUES (?, ?, ?, ?, ?, 1, ?)`
-  );
   // Same token shape, one with a reported cost and one without.
-  insert.run("xai", "grok-reported", 100000, 50000, 0.01, timestamp);
-  insert.run("xai", "grok-reported", 100000, 50000, null, timestamp);
-  insert.run("openai", "gpt-4o", 100000, 0, null, timestamp);
+  await insertRow("usage_history", {
+    provider: "xai",
+    model: "grok-reported",
+    tokens_input: 100000,
+    tokens_output: 50000,
+    provider_cost_usd: 0.01,
+    success: 1,
+    timestamp,
+  });
+  await insertRow("usage_history", {
+    provider: "xai",
+    model: "grok-reported",
+    tokens_input: 100000,
+    tokens_output: 50000,
+    success: 1,
+    timestamp,
+  });
+  await insertRow("usage_history", {
+    provider: "openai",
+    model: "gpt-4o",
+    tokens_input: 100000,
+    tokens_output: 0,
+    success: 1,
+    timestamp,
+  });
 
   assert.equal((await aggregateHistory.rollupUsageHistoryBeforeDate("2100-01-01")).errors, 0);
 

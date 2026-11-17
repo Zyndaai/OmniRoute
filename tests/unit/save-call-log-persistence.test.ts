@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 import { saveCallLog, getCallLogs } from "../../src/lib/usage/callLogs.ts";
 
 test("saveCallLog persists to DB with correlationId", async () => {
-  const db = getDbInstance();
+  const b = getTestBackend();
   const testId = `test-corr-${Date.now()}`;
 
   await saveCallLog({
@@ -21,20 +21,21 @@ test("saveCallLog persists to DB with correlationId", async () => {
     targetFormat: "openai",
   });
 
-  const row = db
-    .prepare("SELECT id, correlation_id, status, model FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne(
+    "SELECT id, correlation_id, status, model FROM call_logs WHERE id = $1",
+    [testId]
+  )) as Record<string, unknown> | null;
   assert.ok(row, "row should exist in call_logs");
   assert.equal(row.id, testId);
   assert.equal(row.correlation_id, "test-correlation-id-123");
   assert.equal(row.status, 200);
   assert.equal(row.model, "test-model");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
 test("saveCallLog persists null correlationId when not provided", async () => {
-  const db = getDbInstance();
+  const b = getTestBackend();
   const testId = `test-nocorr-${Date.now()}`;
 
   await saveCallLog({
@@ -48,17 +49,17 @@ test("saveCallLog persists null correlationId when not provided", async () => {
     tokens: {},
   });
 
-  const row = db
-    .prepare("SELECT id, correlation_id FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne("SELECT id, correlation_id FROM call_logs WHERE id = $1", [
+    testId,
+  ])) as Record<string, unknown> | null;
   assert.ok(row, "row should exist");
   assert.equal(row.correlation_id, null, "correlation_id should be null when not provided");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
 test("getCallLogs returns correlationId", async () => {
-  const db = getDbInstance();
+  const b = getTestBackend();
   const testId = `test-getcid-${Date.now()}`;
 
   await saveCallLog({
@@ -78,32 +79,38 @@ test("getCallLogs returns correlationId", async () => {
   assert.ok(found, "log entry should be found via getCallLogs");
   assert.equal(found.correlationId, "cid-roundtrip-test");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
-test("call_logs table has correlation_id column", () => {
-  const db = getDbInstance();
-  const columns = db.prepare("PRAGMA table_info(call_logs)").all() as { name: string }[];
-  const colNames = columns.map((c) => c.name);
+test("call_logs table has correlation_id column", async () => {
+  const b = getTestBackend();
+  const columns = await b.query<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+  );
+  const colNames = columns.map((c) => c.column_name);
   assert.ok(colNames.includes("correlation_id"), "call_logs should have correlation_id column");
 
-  const indexes = db.prepare("PRAGMA index_list(call_logs)").all() as { name: string }[];
-  const idxNames = indexes.map((i) => i.name);
+  const indexes = await b.query<{ indexname: string }>(
+    "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'call_logs'"
+  );
+  const idxNames = indexes.map((i) => i.indexname);
   assert.ok(
-    idxNames.includes("idx_cl_correlation_id"),
-    "call_logs should have idx_cl_correlation_id index"
+    idxNames.includes("call_logs_correlation_idx"),
+    "call_logs should have call_logs_correlation_idx index"
   );
 });
 
-test("call_logs table has model_pinned column", () => {
-  const db = getDbInstance();
-  const columns = db.prepare("PRAGMA table_info(call_logs)").all() as { name: string }[];
-  const colNames = columns.map((c) => c.name);
+test("call_logs table has model_pinned column", async () => {
+  const b = getTestBackend();
+  const columns = await b.query<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+  );
+  const colNames = columns.map((c) => c.column_name);
   assert.ok(colNames.includes("model_pinned"), "call_logs should have model_pinned column");
 });
 
-test("saveCallLog persists modelPinned=true as 1", async () => {
-  const db = getDbInstance();
+test("saveCallLog persists modelPinned=true as true", async () => {
+  const b = getTestBackend();
   const testId = `test-pinned-${Date.now()}`;
 
   await saveCallLog({
@@ -118,17 +125,17 @@ test("saveCallLog persists modelPinned=true as 1", async () => {
     modelPinned: true,
   });
 
-  const row = db
-    .prepare("SELECT id, model_pinned FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne("SELECT id, model_pinned FROM call_logs WHERE id = $1", [
+    testId,
+  ])) as Record<string, unknown> | null;
   assert.ok(row, "row should exist");
-  assert.equal(row.model_pinned, 1, "model_pinned should be 1 when modelPinned=true");
+  assert.equal(row.model_pinned, true, "model_pinned should be true when modelPinned=true");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
-test("saveCallLog persists modelPinned=false as 0", async () => {
-  const db = getDbInstance();
+test("saveCallLog persists modelPinned=false as false", async () => {
+  const b = getTestBackend();
   const testId = `test-notpinned-${Date.now()}`;
 
   await saveCallLog({
@@ -143,27 +150,29 @@ test("saveCallLog persists modelPinned=false as 0", async () => {
     modelPinned: false,
   });
 
-  const row = db
-    .prepare("SELECT id, model_pinned FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne("SELECT id, model_pinned FROM call_logs WHERE id = $1", [
+    testId,
+  ])) as Record<string, unknown> | null;
   assert.ok(row, "row should exist");
-  assert.equal(row.model_pinned, 0, "model_pinned should be 0 when modelPinned=false");
+  assert.equal(row.model_pinned, false, "model_pinned should be false when modelPinned=false");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
-test("call_logs table has video_content_removed column", () => {
-  const db = getDbInstance();
-  const columns = db.prepare("PRAGMA table_info(call_logs)").all() as { name: string }[];
-  const colNames = columns.map((c) => c.name);
+test("call_logs table has video_content_removed column", async () => {
+  const b = getTestBackend();
+  const columns = await b.query<{ column_name: string }>(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+  );
+  const colNames = columns.map((c) => c.column_name);
   assert.ok(
     colNames.includes("video_content_removed"),
     "call_logs should have video_content_removed column"
   );
 });
 
-test("saveCallLog persists videoContentRemoved=true as 1 (#12150 P2)", async () => {
-  const db = getDbInstance();
+test("saveCallLog persists videoContentRemoved=true as true (#12150 P2)", async () => {
+  const b = getTestBackend();
   const testId = `test-videoremoved-${Date.now()}`;
 
   await saveCallLog({
@@ -178,21 +187,22 @@ test("saveCallLog persists videoContentRemoved=true as 1 (#12150 P2)", async () 
     videoContentRemoved: true,
   });
 
-  const row = db
-    .prepare("SELECT id, video_content_removed FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne(
+    "SELECT id, video_content_removed FROM call_logs WHERE id = $1",
+    [testId]
+  )) as Record<string, unknown> | null;
   assert.ok(row, "row should exist");
   assert.equal(
     row.video_content_removed,
-    1,
-    "video_content_removed should be 1 when videoContentRemoved=true"
+    true,
+    "video_content_removed should be true when videoContentRemoved=true"
   );
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
-test("saveCallLog defaults video_content_removed to 0 when absent (#12150 P2)", async () => {
-  const db = getDbInstance();
+test("saveCallLog defaults video_content_removed to false when absent (#12150 P2)", async () => {
+  const b = getTestBackend();
   const testId = `test-novideoremoved-${Date.now()}`;
 
   await saveCallLog({
@@ -206,21 +216,22 @@ test("saveCallLog defaults video_content_removed to 0 when absent (#12150 P2)", 
     tokens: { in: 10, out: 5 },
   });
 
-  const row = db
-    .prepare("SELECT id, video_content_removed FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = (await b.queryOne(
+    "SELECT id, video_content_removed FROM call_logs WHERE id = $1",
+    [testId]
+  )) as Record<string, unknown> | null;
   assert.ok(row, "row should exist");
   assert.equal(
     row.video_content_removed,
-    0,
-    "video_content_removed should default to 0 when not provided"
+    false,
+    "video_content_removed should default to false when not provided"
   );
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });
 
 test("getCallLogs returns modelPinned boolean", async () => {
-  const db = getDbInstance();
+  const b = getTestBackend();
   const testId = `test-pinned-roundtrip-${Date.now()}`;
 
   await saveCallLog({
@@ -240,5 +251,5 @@ test("getCallLogs returns modelPinned boolean", async () => {
   assert.ok(found, "log entry should be found via getCallLogs");
   assert.equal(found.modelPinned, true, "getCallLogs should return modelPinned as boolean true");
 
-  db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+  await b.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
 });

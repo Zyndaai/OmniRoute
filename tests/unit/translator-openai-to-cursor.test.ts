@@ -169,7 +169,7 @@ test("native Cursor keeps tool-result roles and contents for inline exec replies
 
   const { translateRequest } = await import("../../open-sse/translator/index.ts");
   const { FORMATS } = await import("../../open-sse/translator/formats.ts");
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CURSOR,
     "grok-4.7",

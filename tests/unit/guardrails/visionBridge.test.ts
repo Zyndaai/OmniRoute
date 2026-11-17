@@ -163,7 +163,7 @@ test("VB-S02: passthroughs for vision-capable model (gpt-4o)", async () => {
 
   // If supportsVision is true, it should passthrough (no modification)
   // If supportsVision is null/undefined (no sync data), it will process — that's correct behavior
-  const capabilities = getResolvedModelCapabilities("openai/gpt-4o");
+  const capabilities = await getResolvedModelCapabilities("openai/gpt-4o");
   if (capabilities.supportsVision === true) {
     assert.strictEqual(result.block, false);
     assert.strictEqual(result.modifiedPayload, undefined);
@@ -204,7 +204,7 @@ test("VB-S02b: respects native vision support for GPT-family models", async () =
     // If supportsVision is true, payload should be unmodified.
     // If supportsVision is null, the guardrail reroutes (modifiedPayload defined, model changed).
     // Both are correct behavior — the key invariant is no describe call.
-    const caps = getResolvedModelCapabilities(model);
+    const caps = await getResolvedModelCapabilities(model);
     if (caps.supportsVision === true) {
       assert.strictEqual(
         result.modifiedPayload,
@@ -237,7 +237,7 @@ test("VB-S02c: Conol multimodal models bypass the vision bridge", async () => {
 
   const result = await guardrail.preCall(payload, createContext({ model }));
 
-  assert.equal(getResolvedModelCapabilities(model).supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities(model)).supportsVision, true);
   assert.strictEqual(result.block, false);
   assert.strictEqual(result.modifiedPayload, undefined);
   assert.strictEqual(visionCallCount, 0);
@@ -265,7 +265,7 @@ test("VB-S02d: Conol text-only models remain eligible for the vision bridge", as
 
   const result = await guardrail.preCall(payload, createContext({ model }));
 
-  assert.equal(getResolvedModelCapabilities(model).supportsVision, false);
+  assert.equal((await getResolvedModelCapabilities(model)).supportsVision, false);
   assert.strictEqual(result.block, false);
   assert.notStrictEqual(result.modifiedPayload, undefined);
   // #9759: with a configured vision model, individual text-only models REROUTE
@@ -278,8 +278,8 @@ test("VB-S02d: Conol text-only models remain eligible for the vision bridge", as
   assert.strictEqual(visionCallCount, 0, "reroute keeps images; no describe call");
 });
 
-test("VB-S02: model capabilities returns supportsVision for known models", () => {
-  const gpt4oCaps = getResolvedModelCapabilities("openai/gpt-4o");
+test("VB-S02: model capabilities returns supportsVision for known models", async () => {
+  const gpt4oCaps = await getResolvedModelCapabilities("openai/gpt-4o");
   // supportsVision may be true (if sync data exists) or null (if not synced)
   assert.ok(gpt4oCaps.supportsVision === true || gpt4oCaps.supportsVision === null);
 });

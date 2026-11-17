@@ -31,6 +31,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function buildCapability(overrides = {}) {
   return {
@@ -55,8 +56,9 @@ function buildCapability(overrides = {}) {
   };
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -64,8 +66,8 @@ function resetStorage() {
 // Mirrors the real models.dev `mistral` provider keying observed on the live API:
 // short-form `pixtral-12b` (vision), verbatim `pixtral-large-latest` (vision),
 // short-form `ministral-8b` (text-only).
-function seedMistralCapabilities() {
-  modelsDevSync.saveModelsDevCapabilities({
+async function seedMistralCapabilities() {
+  await modelsDevSync.saveModelsDevCapabilities({
     mistral: {
       "pixtral-12b": buildCapability({
         attachment: true,
@@ -92,19 +94,19 @@ function seedMistralCapabilities() {
   });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#4073 mistral/pixtral-12b-latest resolves vision via the synced `-latest` alias (not the heuristic)", () => {
-  seedMistralCapabilities();
+test("#4073 mistral/pixtral-12b-latest resolves vision via the synced `-latest` alias (not the heuristic)", async () => {
+  await seedMistralCapabilities();
 
-  const latest = modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-12b-latest");
+  const latest = await modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-12b-latest");
   // attachment === true can ONLY come from the synced row keyed `pixtral-12b`.
   assert.equal(
     latest.attachment,
@@ -114,39 +116,39 @@ test("#4073 mistral/pixtral-12b-latest resolves vision via the synced `-latest` 
   assert.equal(latest.supportsVision, true);
 });
 
-test("#4073 exact-keyed `-latest` models still resolve directly (no regression)", () => {
-  seedMistralCapabilities();
+test("#4073 exact-keyed `-latest` models still resolve directly (no regression)", async () => {
+  await seedMistralCapabilities();
 
   // pixtral-large-latest is stored verbatim — the direct lookup must keep working.
-  const large = modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-large-latest");
+  const large = await modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-large-latest");
   assert.equal(large.attachment, true);
   assert.equal(large.supportsVision, true);
 
   // And the bare short id resolves directly too.
-  const bare = modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-12b");
+  const bare = await modelCapabilities.getResolvedModelCapabilities("mistral/pixtral-12b");
   assert.equal(bare.attachment, true);
   assert.equal(bare.supportsVision, true);
 });
 
-test("#4073 the `-latest` strip carries the synced verdict for text-only models too", () => {
-  seedMistralCapabilities();
+test("#4073 the `-latest` strip carries the synced verdict for text-only models too", async () => {
+  await seedMistralCapabilities();
 
   // ministral-8b is text-only; the heuristic does not recognise it, so the only
   // way attachment is a concrete `false` (not null) is the synced row resolving
   // through the stripped alias. This proves the strip returns the row's real
   // verdict rather than fabricating a positive.
-  const ministral = modelCapabilities.getResolvedModelCapabilities("mistral/ministral-8b-latest");
+  const ministral = await modelCapabilities.getResolvedModelCapabilities("mistral/ministral-8b-latest");
   assert.equal(ministral.attachment, false, "synced false must win, resolved via stripped alias");
   assert.equal(ministral.supportsVision, false);
 });
 
-test("#4073 the `-latest` strip never fabricates a match for an unknown id", () => {
-  seedMistralCapabilities();
+test("#4073 the `-latest` strip never fabricates a match for an unknown id", async () => {
+  await seedMistralCapabilities();
 
   // No synced row for `unknown-text-model` (stripped) nor its `-latest` form, and
   // the heuristic doesn't recognise it → attachment null, vision null. The strip
   // must not invent a capability out of nothing.
-  const unknown = modelCapabilities.getResolvedModelCapabilities(
+  const unknown = await modelCapabilities.getResolvedModelCapabilities(
     "mistral/unknown-text-model-latest"
   );
   assert.equal(unknown.attachment, null);

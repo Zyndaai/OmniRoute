@@ -16,6 +16,7 @@ process.env.OMNIROUTE_PLUGINS_DIR = TEST_PLUGINS_DIR;
 
 const coreDb = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
 const { skillExecutor } = await import("../../src/lib/skills/executor.ts");
 
@@ -29,7 +30,7 @@ function resetSkillsRuntime() {
 
 async function resetStorage() {
   resetSkillsRuntime();
-  coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -51,9 +52,9 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   resetSkillsRuntime();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_PLUGINS_DIR === undefined) delete process.env.OMNIROUTE_PLUGINS_DIR;
@@ -80,11 +81,11 @@ test("skillExecutor executes a registered handler and persists execution history
   assert.equal(execution.errorMessage, null);
   assert.equal(typeof execution.durationMs, "number");
 
-  const stored = skillExecutor.getExecution(execution.id);
+  const stored = await skillExecutor.getExecution(execution.id);
   assert.equal(stored?.status, "success");
   assert.deepEqual(stored?.output, { echoed: "hello:key-a:session-1" });
 
-  const listed = skillExecutor.listExecutions("key-a");
+  const listed = await skillExecutor.listExecutions("key-a");
   assert.equal(listed.length, 1);
   assert.equal(listed[0].id, execution.id);
 });
@@ -110,7 +111,7 @@ test("skillExecutor sanitizes failed outputs and nested error subtrees before pe
     { value: "failure" },
     { apiKeyId: "key-a", sessionId: "session-output" }
   );
-  const storedFailure = skillExecutor.getExecution(failedOutput.id);
+  const storedFailure = await skillExecutor.getExecution(failedOutput.id);
   const failureSerialized = JSON.stringify({ failedOutput, storedFailure });
 
   assert.equal((failedOutput.output as Record<string, unknown>)?.status, 502);
@@ -132,7 +133,7 @@ test("skillExecutor sanitizes failed outputs and nested error subtrees before pe
     { value: "success" },
     { apiKeyId: "key-a", sessionId: "session-success" }
   );
-  const storedSuccess = skillExecutor.getExecution(successfulOutput.id);
+  const storedSuccess = await skillExecutor.getExecution(successfulOutput.id);
   const successSerialized = JSON.stringify({ successfulOutput, storedSuccess });
 
   assert.equal(
@@ -160,7 +161,7 @@ test("skillExecutor treats failure discriminators and aliased error objects as b
       { value: "discriminated-failure" },
       { apiKeyId: "key-a", sessionId: "session-discriminated" }
     );
-    const stored = skillExecutor.getExecution(execution.id);
+    const stored = await skillExecutor.getExecution(execution.id);
     assert.equal(execution.status, "error");
     assert.equal(stored?.status, "error");
     assert.doesNotMatch(
@@ -181,8 +182,9 @@ test("skillExecutor treats failure discriminators and aliased error objects as b
     { apiKeyId: "key-a", sessionId: "session-alias" }
   );
   assert.equal(aliased.status, "success");
+  const storedAliased = await skillExecutor.getExecution(aliased.id);
   assert.doesNotMatch(
-    JSON.stringify({ aliased, stored: skillExecutor.getExecution(aliased.id) }),
+    JSON.stringify({ aliased, stored: storedAliased }),
     /skill-discriminator-secret|srv\/private|skill-discriminator\.ts/i
   );
 
@@ -196,8 +198,9 @@ test("skillExecutor treats failure discriminators and aliased error objects as b
   );
   assert.equal(cycleSafe.status, "success");
   assert.doesNotThrow(() => JSON.stringify(cycleSafe.output));
+  const storedCycle = await skillExecutor.getExecution(cycleSafe.id);
   assert.doesNotMatch(
-    JSON.stringify({ cycleSafe, stored: skillExecutor.getExecution(cycleSafe.id) }),
+    JSON.stringify({ cycleSafe, stored: storedCycle }),
     /skill-discriminator-secret|srv\/private|skill-discriminator\.ts/i
   );
 });
@@ -220,7 +223,7 @@ test("skillExecutor records handler lookup failures as errored executions", asyn
     /Handler not found: echo-handler/
   );
 
-  const executions = skillExecutor.listExecutions("key-a");
+  const executions = await skillExecutor.listExecutions("key-a");
   assert.equal(executions.length, 1);
   assert.equal(executions[0].status, "error");
   assert.match(executions[0].errorMessage, /Handler not found/);
@@ -239,7 +242,7 @@ test("skillExecutor records disabled skills and missing skills as direct failure
     /Skill not found/
   );
 
-  assert.equal(skillExecutor.listExecutions("key-a").length, 0);
+  assert.equal((await skillExecutor.listExecutions("key-a")).length, 0);
 });
 
 test("skillExecutor records handler errors as error and timeouts as timeout", async () => {
@@ -265,7 +268,7 @@ test("skillExecutor records handler errors as error and timeouts as timeout", as
     String(failed.errorMessage),
     /skill-db-secret|srv\/private|skill-executor\.ts|\bat execute\b/i
   );
-  const storedFailure = skillExecutor.getExecution(failed.id);
+  const storedFailure = await skillExecutor.getExecution(failed.id);
   assert.match(String(storedFailure?.errorMessage), /handler exploded/);
   assert.doesNotMatch(
     String(storedFailure?.errorMessage),
@@ -314,7 +317,7 @@ test("executeClaimed executes registered handler and returns SkillExecution with
   assert.deepEqual(execution.output, { echoed: "claimed:key-a" });
 
   // Must NOT write to skill_executions (only execute() does).
-  const count = skillExecutor.countExecutions("key-a");
+  const count = await skillExecutor.countExecutions("key-a");
   assert.equal(count, 0, "executeClaimed must not write skill_executions row");
 });
 
@@ -331,6 +334,6 @@ test("execute still writes exactly 1 skill_executions row (existing contract pre
     { apiKeyId: "key-a", sessionId: "session-persist" }
   );
 
-  const count = skillExecutor.countExecutions("key-a");
+  const count = await skillExecutor.countExecutions("key-a");
   assert.equal(count, 1, "execute must write exactly 1 skill_executions row");
 });

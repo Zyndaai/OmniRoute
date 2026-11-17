@@ -52,51 +52,53 @@ function capabilityEntry(limitContext: unknown, overrides: Record<string, unknow
     temperature: true,
     structured_output: true,
     limit: { context: limitContext, output: limitContext },
+    modalities_input: "[]",
+    modalities_output: "[]",
     ...overrides,
   };
 }
 
-test.before(() => {
-  clearModelsDevCapabilities();
+test.before(async () => {
+  await clearModelsDevCapabilities();
   // Mirrors the exact production row from the issue: limit_context and limit_output
   // both wrongly synced to 1048576 for ollama-cloud/deepseek-v4-flash, while the real
   // upstream output cap (per the reporter's boundary test) is 65536.
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     [PROVIDER]: {
       [MODEL]: capabilityEntry(1048576, { reasoning: true, limit_output: 1048576 }),
     },
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#6524: with only the (wrong) synced catalog data, the buffer no longer inflates (#9507)", () => {
+test("#6524: with only the (wrong) synced catalog data, the buffer no longer inflates (#9507)", async () => {
   // #9507: the reasoning-token buffer never enlarges an explicit client
   // max_tokens, so even with a wrong synced output cap (1048576) the client's
   // 64000 is forwarded verbatim — which already stays under the real upstream
   // cap (65536), fully resolving the reporter's symptom without needing an
   // operator override. (Previously this asserted 96000, the inflation past the
   // real cap; that inflation is the defect #9507 removes.)
-  const result = resolveReasoningBufferedMaxTokens(TARGET, 64000);
+  const result = await resolveReasoningBufferedMaxTokens(TARGET, 64000);
   assert.equal(result, 64000);
 });
 
-test("#6524: an operator-set max_output_tokens override clamps the reasoning buffer", () => {
+test("#6524: an operator-set max_output_tokens override clamps the reasoning buffer", async () => {
   assert.ok(
-    setModelCapabilityOverride(TARGET, "max_output_tokens", REAL_UPSTREAM_OUTPUT_CAP),
+    await setModelCapabilityOverride(TARGET, "max_output_tokens", REAL_UPSTREAM_OUTPUT_CAP),
     "expected the max_output_tokens override to be written"
   );
   try {
-    const result = resolveReasoningBufferedMaxTokens(TARGET, 64000);
+    const result = await resolveReasoningBufferedMaxTokens(TARGET, 64000);
     assert.ok(
       result === null || result <= REAL_UPSTREAM_OUTPUT_CAP,
       `expected max_tokens to stay <= ${REAL_UPSTREAM_OUTPUT_CAP}, got ${result} ` +
         `(reproduces reported 64000 -> 96000 inflation, upstream then 400s)`
     );
   } finally {
-    removeModelCapabilityOverride(TARGET, "max_output_tokens");
+    await removeModelCapabilityOverride(TARGET, "max_output_tokens");
   }
 });

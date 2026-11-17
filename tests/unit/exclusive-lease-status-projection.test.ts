@@ -6,7 +6,6 @@ import test from "node:test";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lease-status-projection-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -16,8 +15,8 @@ const OWNER = "vlo_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const EMAIL = "lease-connection-owner@example.com";
 const DISPLAY_NAME = "Lease Connection Owner";
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -33,7 +32,7 @@ test("status lease object never carries the joined connection identity columns",
     testStatus: "active",
   })) as { id: string };
 
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "key-status-projection",
     provider: "glm",
@@ -43,7 +42,7 @@ test("status lease object never carries the joined connection identity columns",
   assert.equal(acquired.kind, "ACQUIRED");
   if (acquired.kind !== "ACQUIRED") return;
 
-  const status = leases.getExclusiveConnectionLeaseStatus({
+  const status = await leases.getExclusiveConnectionLeaseStatus({
     leaseOwnerId: OWNER,
     generation: acquired.lease.generation,
     apiKeyId: "key-status-projection",

@@ -16,16 +16,16 @@ async function withFlag<T>(
   const { getFeatureFlagOverride, setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("../../src/lib/db/featureFlags.ts");
   const prev = process.env[KEY];
-  const prevOverride = getFeatureFlagOverride(KEY);
+  const prevOverride = await getFeatureFlagOverride(KEY);
   if (env === undefined) delete process.env[KEY];
   else process.env[KEY] = env;
-  if (dbOverride === undefined) removeFeatureFlagOverride(KEY);
-  else setFeatureFlagOverride(KEY, dbOverride);
+  if (dbOverride === undefined) await removeFeatureFlagOverride(KEY);
+  else await setFeatureFlagOverride(KEY, dbOverride);
   try {
     return await fn();
   } finally {
-    if (prevOverride === undefined) removeFeatureFlagOverride(KEY);
-    else setFeatureFlagOverride(KEY, prevOverride);
+    if (prevOverride === undefined) await removeFeatureFlagOverride(KEY);
+    else await setFeatureFlagOverride(KEY, prevOverride);
     if (prev === undefined) delete process.env[KEY];
     else process.env[KEY] = prev;
   }

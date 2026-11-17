@@ -8,9 +8,9 @@ async function fixturePayload(): Promise<string> {
   return readFile(new URL("../fixtures/radar-offers-canonical.json", import.meta.url), "utf8");
 }
 
-test("offers accessor short-circuits before cache when Radar is disabled", () => {
+test("offers accessor short-circuits before cache when Radar is disabled", async () => {
   let reads = 0;
-  const result = getRadarOffers({
+  const result = await getRadarOffers({
     getFlag: () => false,
     getCache: () => {
       reads += 1;
@@ -22,13 +22,13 @@ test("offers accessor short-circuits before cache when Radar is disabled", () =>
   assert.equal(reads, 0);
 });
 
-test("offers accessor fails closed for missing, corrupt, or non-live cache", () => {
+test("offers accessor fails closed for missing, corrupt, or non-live cache", async () => {
   for (const cache of [
     null,
     { version: "x", tier: "live", payload: "not-json", fetchedAt: "now" },
     { version: "x", tier: "community", payload: "{}", fetchedAt: "now" },
   ]) {
-    assert.deepEqual(getRadarOffers({ getFlag: () => true, getCache: () => cache }), {
+    assert.deepEqual(await getRadarOffers({ getFlag: () => true, getCache: () => cache }), {
       offers: [],
       meta: null,
     });
@@ -37,7 +37,7 @@ test("offers accessor fails closed for missing, corrupt, or non-live cache", () 
 
 test("offers accessor revalidates the cache and removes expired entries", async () => {
   const payload = await fixturePayload();
-  const result = getRadarOffers({
+  const result = await getRadarOffers({
     getFlag: () => true,
     getCache: () => ({
       version: "2026.08.09.1",

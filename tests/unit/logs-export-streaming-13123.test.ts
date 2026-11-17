@@ -16,27 +16,23 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
-import { useDecollidedMigrationsDir } from "./helpers/decollidedMigrationsDir.ts";
-
-useDecollidedMigrationsDir();
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-logs-export-13123-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const route = await import("../../src/app/api/logs/export/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-function insertProxyLog(row: { id: string; timestamp: string; provider?: string }) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO proxy_logs (id, timestamp, provider, status, proxy_type) VALUES (?, ?, ?, ?, ?)`
-  ).run(row.id, row.timestamp, row.provider ?? "openai", "ok", "http");
+async function insertProxyLog(row: { id: string; timestamp: string; provider?: string }) {
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, timestamp, provider, status, proxy_type) VALUES ($1, $2, $3, $4, $5)`,
+    [row.id, row.timestamp, row.provider ?? "openai", "ok", "http"]
+  );
 }
 
 async function seedCallLog(id: string, timestamp: string) {
@@ -75,21 +71,27 @@ describe("GET /api/logs/export streaming and row cap (#13123)", () => {
   });
 
   after(async () => {
-    core.resetDbInstance();
+    await core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   for (const failDuringHydration of [false, true]) {
     it(`#13999: real HTTP count reflects emitted rows after ${failDuringHydration ? "hydration failure" : "concurrent deletion"}`, async () => {
       for (let i = 0; i < 3; i++) await seedCallLog(`concurrent-${i}`, hoursAgo(i + 1));
+      const db = getTestBackend();
+      let hidden = false;
       const server = http.createServer(async (_req, res) => {
         const response = await route.GET(
           new Request("http://localhost/api/logs/export?hours=24&type=call-logs&limit=2")
         );
         // COUNT has completed and the first row has started hydration. Change the
-        // real SQLite source before the iterator can hydrate its remaining IDs.
-        if (failDuringHydration) core.getDbInstance().exec("DROP TABLE call_logs");
-        else core.getDbInstance().prepare("DELETE FROM call_logs WHERE id = ?").run("concurrent-1");
+        // real Postgres source before the iterator can hydrate its remaining IDs.
+        // The hydration failure hides the table (renamed back in finally) so the
+        // next SELECT fails; the concurrent case deletes one row.
+        if (failDuringHydration) {
+          await db.execute("ALTER TABLE call_logs RENAME TO call_logs_hidden");
+          hidden = true;
+        } else await db.execute("DELETE FROM call_logs WHERE id = $1", ["concurrent-1"]);
         res.writeHead(response.status, Object.fromEntries(response.headers));
         assert.ok(response.body);
         Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>).pipe(res);
@@ -113,6 +115,7 @@ describe("GET /api/logs/export streaming and row cap (#13123)", () => {
           assert.ok(!body.error.includes("at /"));
         } else assert.equal(body.error, undefined);
       } finally {
+        if (hidden) await db.execute("ALTER TABLE call_logs_hidden RENAME TO call_logs");
         server.closeAllConnections();
         await new Promise<void>((resolve, reject) =>
           server.close((err) => (err ? reject(err) : resolve()))
@@ -174,9 +177,9 @@ describe("GET /api/logs/export streaming and row cap (#13123)", () => {
   });
 
   it("streams proxy-logs from the real route via LIMIT/OFFSET pagination (iterateProxyLogsSince)", async () => {
-    insertProxyLog({ id: "px-1", timestamp: hoursAgo(3) });
-    insertProxyLog({ id: "px-2", timestamp: hoursAgo(2) });
-    insertProxyLog({ id: "px-3", timestamp: hoursAgo(1) });
+    await insertProxyLog({ id: "px-1", timestamp: hoursAgo(3) });
+    await insertProxyLog({ id: "px-2", timestamp: hoursAgo(2) });
+    await insertProxyLog({ id: "px-3", timestamp: hoursAgo(1) });
 
     const response = await route.GET(
       new Request("http://localhost/api/logs/export?hours=168&type=proxy-logs&limit=2")

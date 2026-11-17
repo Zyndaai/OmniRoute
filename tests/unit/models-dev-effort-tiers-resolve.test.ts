@@ -6,17 +6,17 @@ import { resetDbInstance } from "../../src/lib/db/core.ts";
 
 const FLAG = "MODELS_DEV_EFFORT_TIERS_ENABLED";
 
-test.after(() => {
+test.after(async () => {
   delete process.env[FLAG];
-  resetDbInstance();
+  await resetDbInstance();
 });
 
-function withFlag<T>(value: "true" | undefined, fn: () => T): T {
+async function withFlag<T>(value: "true" | undefined, fn: () => Promise<T>): Promise<T> {
   const previous = process.env[FLAG];
   if (value === undefined) delete process.env[FLAG];
   else process.env[FLAG] = value;
   try {
-    return fn();
+    return await fn();
   } finally {
     if (previous === undefined) delete process.env[FLAG];
     else process.env[FLAG] = previous;
@@ -69,27 +69,27 @@ const unregistered = snapshotWith({
   },
 } as ModelCapabilityResolutionSnapshot["synced"]);
 
-test("flag off (default): synced models.dev tiers are not used — previous behavior", () => {
-  const caps = withFlag(undefined, () =>
+test("flag off (default): synced models.dev tiers are not used — previous behavior", async () => {
+  const caps = await withFlag(undefined, () =>
     getResolvedModelCapabilities("anthropic/claude-haiku-9-9", undefined, unregistered)
   );
   assert.equal(caps.supportsThinking, true);
   assert.equal(caps.supportedThinkingEfforts, null);
 });
 
-test("flag on: synced models.dev tiers reach the resolved model, unknown tiers dropped", () => {
-  const caps = withFlag("true", () =>
+test("flag on: synced models.dev tiers reach the resolved model, unknown tiers dropped", async () => {
+  const caps = await withFlag("true", () =>
     getResolvedModelCapabilities("anthropic/claude-haiku-9-9", undefined, unregistered)
   );
   assert.equal(caps.supportsThinking, true);
   assert.deepEqual(caps.supportedThinkingEfforts, ["minimal", "low", "medium", "high", "max"]);
 });
 
-test("flag on: a synced list with no known tier resolves to null, not an empty list", () => {
+test("flag on: a synced list with no known tier resolves to null, not an empty list", async () => {
   const onlyUnknown = snapshotWith({
     anthropic: { "claude-haiku-9-9": syncedRow(["turbo"]) },
   } as ModelCapabilityResolutionSnapshot["synced"]);
-  const caps = withFlag("true", () =>
+  const caps = await withFlag("true", () =>
     getResolvedModelCapabilities("anthropic/claude-haiku-9-9", undefined, onlyUnknown)
   );
   assert.equal(caps.supportedThinkingEfforts, null);
@@ -98,13 +98,13 @@ test("flag on: a synced list with no known tier resolves to null, not an empty l
 // ZCode's registry declares supportedThinkingEfforts: [] on purpose: the thinking toggle
 // exists, reasoning_effort does not. The empty registry list wins over synced tiers with
 // the flag in either position.
-test("an empty registry effort list stays empty (flag off and on)", () => {
+test("an empty registry effort list stays empty (flag off and on)", async () => {
   const zcode = snapshotWith({
     zcode: { "glm-5.3": syncedRow(["low", "medium", "high", "max"]) },
     zai: { "glm-5.3": syncedRow(["low", "medium", "high", "max"]) },
   } as ModelCapabilityResolutionSnapshot["synced"]);
   for (const flag of [undefined, "true"] as const) {
-    const caps = withFlag(flag, () =>
+    const caps = await withFlag(flag, () =>
       getResolvedModelCapabilities("zcode/glm-5.3", undefined, zcode)
     );
     assert.deepEqual(caps.supportedThinkingEfforts, [], `flag=${flag ?? "off"}`);

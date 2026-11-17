@@ -27,7 +27,7 @@ for (const [normal, spark] of [
   [80, 0],
   [0, 0],
 ])
-  test(`Codex account preserves independent scope eligibility ${normal}/${spark}`, () => {
+  test(`Codex account preserves independent scope eligibility ${normal}/${spark}`, async () => {
     const c = { id: `codex-${normal}-${spark}`, provider: "codex", isActive: true };
     const usage = {
       fetchedAt: at(0),
@@ -39,10 +39,12 @@ for (const [normal, spark] of [
       },
     };
     const representatives = availabilityScopes(c.provider, usage);
-    const decisions = representatives.map((scope) => ({
-      model: scope.model,
-      decision: evaluateCachedQuotaAvailability(c, usage, policy, scope.model),
-    }));
+    const decisions = await Promise.all(
+      representatives.map(async (scope) => ({
+        model: scope.model,
+        decision: await evaluateCachedQuotaAvailability(c, usage, policy, scope.model),
+      }))
+    );
     for (const { model, decision } of decisions) {
       const route = evaluateQuotaCutoff(
         convertCachedUsageToQuotaInfo(c.provider, usage, model),
@@ -51,7 +53,7 @@ for (const [normal, spark] of [
       );
       assert.equal(decision.usable, route.proceed);
     }
-    const payload = buildConnectionQuotaAvailability(c, usage, policy);
+    const payload = await buildConnectionQuotaAvailability(c, usage, policy);
     assert.equal(payload.account.usable, normal > 0);
     assert.deepEqual(
       payload.account,
@@ -74,7 +76,7 @@ for (const [normal, spark] of [
 
 for (const enabled of [true, false])
   for (const blockedWindow of ["session", "weekly", "both"])
-    test(`Codex blocked ordinary window controls recovery with healthy Spark, preflight ${enabled}, window ${blockedWindow}`, () => {
+    test(`Codex blocked ordinary window controls recovery with healthy Spark, preflight ${enabled}, window ${blockedWindow}`, async () => {
       const weeklyBlocked = blockedWindow !== "session";
       const c = { id: `ordinary-${enabled}-${blockedWindow}`, provider: "codex", isActive: true };
       const usage = {
@@ -86,7 +88,7 @@ for (const enabled of [true, false])
           [CODEX_SPARK_QUOTA_WEEKLY]: q(80, 300),
         },
       };
-      const payload = buildConnectionQuotaAvailability(c, usage, { ...policy, enabled });
+      const payload = await buildConnectionQuotaAvailability(c, usage, { ...policy, enabled });
       const ordinary = payload.scopes.find((s) => s.id === "account")!;
       assert.equal(payload.account.usable, false);
       assert.deepEqual(payload.account.blockers, ordinary.decision.blockers);
@@ -109,7 +111,7 @@ for (const enabled of [true, false])
 
 for (const provider of ["agy", "antigravity"])
   for (const otherRemaining of [0, 80])
-    test(`${provider} independent pools determine the account with other pool ${otherRemaining}`, () => {
+    test(`${provider} independent pools determine the account with other pool ${otherRemaining}`, async () => {
       const usage = {
         fetchedAt: at(0),
         quotas: {
@@ -124,7 +126,7 @@ for (const provider of ["agy", "antigravity"])
         ],
       };
       const c = { id: `${provider}-${otherRemaining}`, provider, isActive: true };
-      const payload = buildConnectionQuotaAvailability(c, usage, policy);
+      const payload = await buildConnectionQuotaAvailability(c, usage, policy);
       assert.equal(payload.account.usable, otherRemaining > 0);
       assert.deepEqual(
         payload.account.blockers,
@@ -141,7 +143,7 @@ for (const provider of ["agy", "antigravity"])
       if (otherRemaining > 0) assert.equal(view.partial, true);
     });
 
-test("Claude scoped metadata explains only the requested model", () => {
+test("Claude scoped metadata explains only the requested model", async () => {
   const usage = {
     ...normalizeClaudeUsageQuotas({
       five_hour: { utilization: 20, resets_at: at(1) },
@@ -151,22 +153,25 @@ test("Claude scoped metadata explains only the requested model", () => {
     fetchedAt: at(0),
   };
   const c = { id: "claude-scoped", provider: "claude" };
-  const payload = buildConnectionQuotaAvailability(c, usage, policy);
+  const payload = await buildConnectionQuotaAvailability(c, usage, policy);
   assert.equal(payload.account.usable, true);
-  assert.equal(evaluateCachedQuotaAvailability(c, usage, policy, "claude-opus-4").usable, true);
-  const scoped = evaluateCachedQuotaAvailability(c, usage, policy, "claude-sonnet-4");
+  assert.equal(
+    (await evaluateCachedQuotaAvailability(c, usage, policy, "claude-opus-4")).usable,
+    true
+  );
+  const scoped = await evaluateCachedQuotaAvailability(c, usage, policy, "claude-sonnet-4");
   assert.equal(scoped.usable, false);
   assert.ok(scoped.blockers.every((b) => b.name.includes("sonnet")));
 });
 
 for (const enabled of [true, false])
-  test(`Kiro usable alternative is not an exhausted constraint with preflight ${enabled}`, () => {
+  test(`Kiro usable alternative is not an exhausted constraint with preflight ${enabled}`, async () => {
     const usage = {
       fetchedAt: at(0),
       quotas: { requests: q(0, 168), requests_freetrial: q(80), storage: q(0) },
     };
     const c = { id: `kiro-${enabled}`, provider: "kiro" };
-    const payload = buildConnectionQuotaAvailability(c, usage, { ...policy, enabled });
+    const payload = await buildConnectionQuotaAvailability(c, usage, { ...policy, enabled });
     if (enabled) {
       assert.equal(payload.account.usable, false);
       assert.deepEqual(
@@ -179,8 +184,8 @@ for (const enabled of [true, false])
     }
   });
 
-test("all exhausted alternative budgets form one constraint at their first recovery", () => {
-  const payload = buildConnectionQuotaAvailability(
+test("all exhausted alternative budgets form one constraint at their first recovery", async () => {
+  const payload = await buildConnectionQuotaAvailability(
     { id: "kiro-alternatives-blocked", provider: "kiro" },
     { fetchedAt: at(0), quotas: { requests: q(0, 168), requests_freetrial: q(0) } },
     policy
@@ -190,12 +195,12 @@ test("all exhausted alternative budgets form one constraint at their first recov
   assert.equal(payload.account.blockers[0].resetAt, at(1));
 });
 
-test("limit-policy and cutoff blockers are both retained", () => {
+test("limit-policy and cutoff blockers are both retained", async () => {
   const usage: Partial<ProviderLimitsCacheEntry> = {
     fetchedAt: at(0),
     quotas: { session: q(5), weekly: q(0, 144) },
   };
-  const payload = buildConnectionQuotaAvailability(
+  const payload = await buildConnectionQuotaAvailability(
     {
       id: "combined-constraints",
       provider: "kimi-coding",

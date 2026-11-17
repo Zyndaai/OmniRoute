@@ -8,6 +8,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-skills-marketpla
 const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
+import { resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { GLOBAL_SKILL_OWNER_ID, skillRegistry } = await import("../../src/lib/skills/registry.ts");
@@ -20,24 +22,23 @@ function clearSkillRegistry() {
   skillRegistry.invalidateCache();
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(tmpDir, { recursive: true });
   clearSkillRegistry();
-  core.getDbInstance();
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   await settingsDb.updateSettings({
     skillsProvider: "skillsmp",
     requireLogin: false,
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   clearSkillRegistry();
   process.env.DATA_DIR = originalDataDir;
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

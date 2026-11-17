@@ -15,7 +15,7 @@ const { openaiToClaudeRequest } = await import(
 // dropped from the translated request (worse than a 400: the caller has no
 // idea the tool never made it upstream).
 
-test("openaiToClaudeRequest: bare {function:{...}} tool (no parent type) is NOT dropped", () => {
+test("openaiToClaudeRequest: bare {function:{...}} tool (no parent type) is NOT dropped", async () => {
   const request = {
     messages: [{ role: "user", content: "hi" }],
     tools: [
@@ -29,7 +29,7 @@ test("openaiToClaudeRequest: bare {function:{...}} tool (no parent type) is NOT 
     ],
   };
 
-  const translated = openaiToClaudeRequest("claude-sonnet-4", request, false);
+  const translated = await openaiToClaudeRequest("claude-sonnet-4", request, false);
 
   assert.ok(Array.isArray(translated.tools), "expected translated.tools to be an array");
   assert.equal(translated.tools.length, 1, "expected the bare-function tool to survive translation");
@@ -43,7 +43,7 @@ test("openaiToClaudeRequest: bare {function:{...}} tool (no parent type) is NOT 
   });
 });
 
-test("openaiToClaudeRequest: spec-shape {type:'function', function:{...}} tool still converts (no regression)", () => {
+test("openaiToClaudeRequest: spec-shape {type:'function', function:{...}} tool still converts (no regression)", async () => {
   const request = {
     messages: [{ role: "user", content: "hi" }],
     tools: [
@@ -58,7 +58,7 @@ test("openaiToClaudeRequest: spec-shape {type:'function', function:{...}} tool s
     ],
   };
 
-  const translated = openaiToClaudeRequest("claude-sonnet-4", request, false);
+  const translated = await openaiToClaudeRequest("claude-sonnet-4", request, false);
 
   assert.equal(translated.tools.length, 1);
   assert.match(translated.tools[0].name, /get_weather$/);

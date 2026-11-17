@@ -1,13 +1,3 @@
-// ENVIRONMENT NOTE (sandbox better-sqlite3 / glibc limitation, not a code defect):
-// This test constructs or exercises a real better-sqlite3-backed SQLite database.
-// better-sqlite3 is a native addon; production and CI load it normally, but some
-// sandboxes/dev boxes ship a system glibc older than the prebuilt binary requires
-// ("GLIBC_2.29 not found"), so the native module fails to dlopen and any test that
-// reaches better-sqlite3 directly (or asserts stdout that the load-failure warning
-// would pollute) fails HERE while passing in CI. This is a known environment
-// limitation, not a defect in the code under test: the OmniRoute runtime itself
-// cascades to node:sqlite/sql.js when better-sqlite3 is unavailable. See
-// tests/unit/_helpers/betterSqlite3Availability.ts for a guard helper.
 /**
  * #7274: session affinity ("sticky session") was hardcoded to work for the
  * `codex` provider only — `resolveSessionAffinityTtlMs()` bailed to 0 for
@@ -44,7 +34,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // NOTE: every module that transitively touches src/lib/db/core.ts (which
 // resolves DATA_DIR at MODULE-LOAD time, not lazily) must be imported
@@ -67,7 +57,7 @@ const { resolveSessionAffinityTtlMs } =
 const { DefaultExecutor } = await import("../../open-sse/executors/default.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -91,7 +81,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -114,7 +104,7 @@ test("#7274 a non-Codex provider with sessionAffinityTtlMs > 0 persists and reus
     "first request pins to the forced connection"
   );
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-generic", "glm", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-generic", "glm", 60_000))?.connectionId,
     connectionA.id,
     "an affinity pin must now be created for a non-Codex provider (previously impossible)"
   );
@@ -181,90 +171,9 @@ test("#7274 resolveSessionAffinityTtlMs now applies to any provider, not just co
   assert.equal(ttl, 45_000, 'the provider !== "codex" early-return must be gone');
 });
 
-// ── 2b. raw-SQL migration: additive, idempotent carry-over ──────────────────
-
-test("#7274 migration 124 carries codexSessionAffinityTtlMs over to sessionAffinityTtlMs, additively and idempotently", () => {
-  const migrationSql = fs.readFileSync(
-    path.join(process.cwd(), "src/lib/db/migrations/124_generic_session_affinity_ttl.sql"),
-    "utf8"
-  );
-
-  const db = new Database(":memory:");
-  try {
-    db.exec(
-      `CREATE TABLE key_value (
-        namespace TEXT NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT,
-        PRIMARY KEY (namespace, key)
-      );`
-    );
-    db.prepare(
-      "INSERT INTO key_value (namespace, key, value) VALUES ('settings', 'codexSessionAffinityTtlMs', '60000')"
-    ).run();
-
-    db.exec(migrationSql);
-
-    const row = db
-      .prepare(
-        "SELECT value FROM key_value WHERE namespace = 'settings' AND key = 'sessionAffinityTtlMs'"
-      )
-      .get() as { value: string } | undefined;
-    assert.equal(row?.value, "60000", "the generic key must carry the old value over");
-
-    const oldRow = db
-      .prepare(
-        "SELECT value FROM key_value WHERE namespace = 'settings' AND key = 'codexSessionAffinityTtlMs'"
-      )
-      .get() as { value: string } | undefined;
-    assert.equal(
-      oldRow?.value,
-      "60000",
-      "the migration is additive — the old key/row is not deleted"
-    );
-
-    // Idempotency: re-running the migration (as the runner would on a replay)
-    // must not throw and must not change the already-carried-over value.
-    assert.doesNotThrow(() => db.exec(migrationSql));
-    const rowAfterReplay = db
-      .prepare(
-        "SELECT value FROM key_value WHERE namespace = 'settings' AND key = 'sessionAffinityTtlMs'"
-      )
-      .get() as { value: string } | undefined;
-    assert.equal(rowAfterReplay?.value, "60000");
-  } finally {
-    db.close();
-  }
-});
-
-test("#7274 migration 124 is a no-op when the operator never configured the legacy key (fresh install)", () => {
-  const migrationSql = fs.readFileSync(
-    path.join(process.cwd(), "src/lib/db/migrations/124_generic_session_affinity_ttl.sql"),
-    "utf8"
-  );
-
-  const db = new Database(":memory:");
-  try {
-    db.exec(
-      `CREATE TABLE key_value (
-        namespace TEXT NOT NULL,
-        key TEXT NOT NULL,
-        value TEXT,
-        PRIMARY KEY (namespace, key)
-      );`
-    );
-
-    assert.doesNotThrow(() => db.exec(migrationSql));
-    const row = db
-      .prepare(
-        "SELECT value FROM key_value WHERE namespace = 'settings' AND key = 'sessionAffinityTtlMs'"
-      )
-      .get();
-    assert.equal(row, undefined, "no row should be created when there was nothing to carry over");
-  } finally {
-    db.close();
-  }
-});
+// Migration 124 (the legacy key carry-over) was a numbered SQLite migration and is gone with the
+// SQLite runner, so its raw-SQL cases are deleted. The settings-resolution fallback above still
+// covers operators who only ever set codexSessionAffinityTtlMs.
 
 // ── 3. header-leak guard (data-leak-adjacent — Rule from the plan's Risks) ──
 

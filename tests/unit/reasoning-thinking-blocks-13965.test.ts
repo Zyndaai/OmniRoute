@@ -17,25 +17,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 import { getCallLogById, getCallLogs, saveCallLog } from "../../src/lib/usage/callLogs.ts";
 import { getObservedReasoning } from "../../src/lib/usage/tokenAccounting.ts";
 
 const THINKING = "The user wants a weather lookup, so I should call the tool first.";
-
-test.after(() => {
-  try {
-    const db = getDbInstance();
-    db.prepare("DELETE FROM call_logs WHERE id LIKE 'test-13965-%'").run();
-  } catch {
-    // best-effort cleanup
-  }
-  try {
-    resetDbInstance();
-  } catch {
-    // best-effort handle release (per DB-handle hang rule)
-  }
-});
 
 // ── getObservedReasoning: structured content arrays ────────────────────────
 
@@ -87,15 +73,13 @@ test("getObservedReasoning: redacted/empty thinking and plain text → no reason
 // ── Persistence + API exposure ──────────────────────────────────────────────
 
 async function readReasoningColumns(id: string) {
-  return getDbInstance()
-    .prepare(
-      "SELECT tokens_reasoning, reasoning_source, reasoning_chars FROM call_logs WHERE id = ?"
-    )
-    .get(id) as {
+  return getTestBackend().queryOne<{
     tokens_reasoning: number | null;
     reasoning_source: string | null;
     reasoning_chars: number | null;
-  };
+  }>(`SELECT tokens_reasoning, reasoning_source, reasoning_chars FROM call_logs WHERE id = $1`, [
+    id,
+  ]);
 }
 
 test("saveCallLog observes thinking blocks in an OpenAI-wrapped agnes response", async () => {

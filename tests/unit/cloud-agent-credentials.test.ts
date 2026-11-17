@@ -21,17 +21,18 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "cloud-agent-creds-te
 
 const core = await import("../../src/lib/db/core.ts");
 const creds = await import("../../src/lib/cloudAgent/credentials.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("migration 061 provisions cloud_agent_credentials (table exists after DB init)", () => {
-  const db = core.getDbInstance();
-  const row = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-    .get("cloud_agent_credentials") as { name?: string } | undefined;
+test("migration 061 provisions cloud_agent_credentials (table exists after DB init)", async () => {
+  const row = await getTestBackend().queryOne<{ name?: string }>(
+    "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+    ["cloud_agent_credentials"]
+  );
   assert.equal(
     row?.name,
     "cloud_agent_credentials",
@@ -47,35 +48,35 @@ test("ensureCredentialsTable is no longer exported (inline DDL removed)", () => 
   );
 });
 
-test("save → get round-trips and decrypts the API key", () => {
-  creds.saveCloudAgentCredential("devin", "sk-secret-123", "https://api.devin.example");
-  const got = creds.getCloudAgentCredentialFromDb("devin");
+test("save → get round-trips and decrypts the API key", async () => {
+  await creds.saveCloudAgentCredential("devin", "sk-secret-123", "https://api.devin.example");
+  const got = await creds.getCloudAgentCredentialFromDb("devin");
   assert.deepEqual(got, { apiKey: "sk-secret-123", baseUrl: "https://api.devin.example" });
 });
 
-test("get returns null for unknown provider", () => {
-  assert.equal(creds.getCloudAgentCredentialFromDb("does-not-exist"), null);
+test("get returns null for unknown provider", async () => {
+  assert.equal(await creds.getCloudAgentCredentialFromDb("does-not-exist"), null);
 });
 
-test("save upserts (ON CONFLICT) rather than duplicating", () => {
-  creds.saveCloudAgentCredential("jules", "sk-first");
-  creds.saveCloudAgentCredential("jules", "sk-second", "https://jules.example");
-  const got = creds.getCloudAgentCredentialFromDb("jules");
+test("save upserts (ON CONFLICT) rather than duplicating", async () => {
+  await creds.saveCloudAgentCredential("jules", "sk-first");
+  await creds.saveCloudAgentCredential("jules", "sk-second", "https://jules.example");
+  const got = await creds.getCloudAgentCredentialFromDb("jules");
   assert.deepEqual(got, { apiKey: "sk-second", baseUrl: "https://jules.example" });
 });
 
-test("list returns masked keys, never the plaintext", () => {
-  creds.saveCloudAgentCredential("codex-cloud", "sk-supersecretvalue");
-  const list = creds.listCloudAgentCredentials();
+test("list returns masked keys, never the plaintext", async () => {
+  await creds.saveCloudAgentCredential("codex-cloud", "sk-supersecretvalue");
+  const list = await creds.listCloudAgentCredentials();
   const entry = list.find((c) => c.providerId === "codex-cloud");
   assert.ok(entry, "saved provider must appear in the list");
   assert.equal(entry.apiKey, "****alue");
   assert.ok(!entry.apiKey.includes("supersecret"), "plaintext key must never be returned");
 });
 
-test("delete removes the credential", () => {
-  creds.saveCloudAgentCredential("temp", "sk-temp");
-  assert.ok(creds.getCloudAgentCredentialFromDb("temp"));
-  creds.deleteCloudAgentCredential("temp");
-  assert.equal(creds.getCloudAgentCredentialFromDb("temp"), null);
+test("delete removes the credential", async () => {
+  await creds.saveCloudAgentCredential("cursor-cloud", "sk-temp");
+  assert.ok(await creds.getCloudAgentCredentialFromDb("cursor-cloud"));
+  await creds.deleteCloudAgentCredential("cursor-cloud");
+  assert.equal(await creds.getCloudAgentCredentialFromDb("cursor-cloud"), null);
 });

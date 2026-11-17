@@ -7,9 +7,9 @@ import { cleanupTempDataDir } from "../_setup/tempDataDir.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-provider-costs-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "provider-window-costs-test-secret";
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
 const { updatePricing } = await import("@/lib/db/settings");
@@ -21,11 +21,21 @@ const { getProviderWindowCostBreakdown } =
   await import("../../src/lib/usage/providerWindowCosts.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeys.resetApiKeyState();
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await cleanupTempDataDir(TEST_DATA_DIR);
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+// Limits cache rows are only stored for a connection that exists (orphan guard).
+async function seedConnection(id: string, provider: string) {
+  const now = new Date().toISOString();
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at)
+     VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
+    [id, provider, now, now]
+  );
 }
 
 test.beforeEach(async () => {
@@ -33,9 +43,9 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await cleanupTempDataDir(TEST_DATA_DIR);
 });
 
@@ -47,14 +57,15 @@ test("Codex provider window costs use the weekly reset window and API key USD li
   });
 
   const key = await apiKeys.createApiKey("Codex Key", "machine-codex-window");
-  costRules.setBudget(key.id, {
+  await costRules.setBudget(key.id, {
     dailyLimitUsd: 0,
     weeklyLimitUsd: 40,
     resetInterval: "weekly",
     resetTime: "00:00",
   });
 
-  providerLimits.setProviderLimitsCache("codex-conn", {
+  await seedConnection("codex-conn", "codex");
+  await providerLimits.setProviderLimitsCache("codex-conn", {
     quotas: {
       "session (5h)": {
         used: 0,
@@ -121,14 +132,15 @@ test("Claude provider window costs split spending across API keys from the curre
 
   const heavyKey = await apiKeys.createApiKey("Claude Heavy", "machine-claude-heavy");
   const lightKey = await apiKeys.createApiKey("Claude Light", "machine-claude-light");
-  costRules.setBudget(heavyKey.id, {
+  await costRules.setBudget(heavyKey.id, {
     dailyLimitUsd: 0,
     weeklyLimitUsd: 20,
     resetInterval: "weekly",
     resetTime: "00:00",
   });
 
-  providerLimits.setProviderLimitsCache("claude-conn", {
+  await seedConnection("claude-conn", "claude");
+  await providerLimits.setProviderLimitsCache("claude-conn", {
     quotas: {
       "Session (5hr)": {
         used: 2,
@@ -202,7 +214,8 @@ test("provider window costs use the recorded reset event as the cost cutoff", as
     },
   });
 
-  providerLimits.setProviderLimitsCache("claude-reset-event", {
+  await seedConnection("claude-reset-event", "claude");
+  await providerLimits.setProviderLimitsCache("claude-reset-event", {
     quotas: {
       "weekly (7d)": {
         used: 25,
@@ -216,18 +229,15 @@ test("provider window costs use the recorded reset event as the cost cutoff", as
     fetchedAt: "2026-06-25T12:00:00.000Z",
   });
 
-  core
-    .getDbInstance()
-    .prepare(
-      `
+  await getTestBackend().execute(
+    `
       INSERT INTO provider_quota_reset_events
         (provider, connection_id, window_key, window_started_at, window_resets_at,
          observed_at, previous_remaining_percentage, new_remaining_percentage,
-         previous_used_percentage, new_used_percentage, raw_data)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    )
-    .run(
+         previous_used_percentage, new_used_percentage)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `,
+    [
       "claude",
       "claude-reset-event",
       "weekly (7d)",
@@ -238,8 +248,8 @@ test("provider window costs use the recorded reset event as the cost cutoff", as
       100,
       100,
       0,
-      null
-    );
+    ]
+  );
 
   await usageHistory.saveRequestUsage({
     provider: "claude",
@@ -277,7 +287,8 @@ test("provider window costs cut at an observed same-resetAt quota reset", async 
   });
 
   const targetResetAt = "2026-07-02T23:00:00.000Z";
-  providerLimits.setProviderLimitsCache("claude-early-reset", {
+  await seedConnection("claude-early-reset", "claude");
+  await providerLimits.setProviderLimitsCache("claude-early-reset", {
     quotas: {
       "weekly (7d)": {
         used: 7,
@@ -291,30 +302,30 @@ test("provider window costs cut at an observed same-resetAt quota reset", async 
     fetchedAt: "2026-07-02T00:04:00.000Z",
   });
 
-  const db = core.getDbInstance();
-  db.prepare(
+  const b = getTestBackend();
+  await b.execute(
     `
     INSERT INTO provider_quota_reset_events
       (provider, connection_id, window_key, window_started_at, window_resets_at,
        observed_at, previous_remaining_percentage, new_remaining_percentage,
-       previous_used_percentage, new_used_percentage, raw_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    "claude",
-    "claude-early-reset",
-    "weekly (7d)",
-    "2026-06-25T23:00:00.000Z",
-    targetResetAt,
-    "2026-06-25T23:04:00.000Z",
-    0,
-    100,
-    100,
-    0,
-    null
+       previous_used_percentage, new_used_percentage)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  `,
+    [
+      "claude",
+      "claude-early-reset",
+      "weekly (7d)",
+      "2026-06-25T23:00:00.000Z",
+      targetResetAt,
+      "2026-06-25T23:04:00.000Z",
+      0,
+      100,
+      100,
+      0,
+    ]
   );
 
-  const insertSnapshot = db.prepare(`
+  const insertSnapshot = `
     INSERT INTO quota_snapshots (
       provider,
       connection_id,
@@ -325,41 +336,41 @@ test("provider window costs cut at an observed same-resetAt quota reset", async 
       window_duration_ms,
       raw_data,
       created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertSnapshot.run(
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+  `;
+  await b.execute(insertSnapshot, [
     "claude",
     "claude-early-reset",
     "weekly (7d)",
     4,
-    0,
+    false,
     targetResetAt,
     null,
     null,
-    "2026-07-01T00:05:00.000Z"
-  );
-  insertSnapshot.run(
+    "2026-07-01T00:05:00.000Z",
+  ]);
+  await b.execute(insertSnapshot, [
     "claude",
     "claude-early-reset",
     "weekly (7d)",
     100,
-    0,
+    false,
     targetResetAt,
     null,
     null,
-    "2026-07-01T21:41:13.293Z"
-  );
-  insertSnapshot.run(
+    "2026-07-01T21:41:13.293Z",
+  ]);
+  await b.execute(insertSnapshot, [
     "claude",
     "claude-early-reset",
     "weekly (7d)",
     93,
-    0,
+    false,
     targetResetAt,
     null,
     null,
-    "2026-07-02T00:04:00.000Z"
-  );
+    "2026-07-02T00:04:00.000Z",
+  ]);
 
   await usageHistory.saveRequestUsage({
     provider: "claude",
@@ -398,7 +409,8 @@ test("provider window costs prefer recorded USD history over repricing usage tok
 
   const key = await apiKeys.createApiKey("Recorded USD Key", "machine-recorded-usd");
 
-  providerLimits.setProviderLimitsCache("claude-recorded-cost", {
+  await seedConnection("claude-recorded-cost", "claude");
+  await providerLimits.setProviderLimitsCache("claude-recorded-cost", {
     quotas: {
       "weekly (7d)": {
         used: 50,
@@ -431,14 +443,15 @@ test("provider window costs prefer recorded USD history over repricing usage tok
     timestamp: "2026-06-24T10:01:00.000Z",
   });
 
-  core
-    .getDbInstance()
-    .prepare("INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES (?, ?, ?)")
-    .run(key.id, 10, Date.parse("2026-06-24T10:00:00.010Z"));
-  core
-    .getDbInstance()
-    .prepare("INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES (?, ?, ?)")
-    .run(key.id, 7, Date.parse("2026-06-24T10:01:00.010Z"));
+  const b = getTestBackend();
+  await b.execute(
+    "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES ($1, $2, $3)",
+    [key.id, 10, new Date("2026-06-24T10:00:00.010Z").toISOString()]
+  );
+  await b.execute(
+    "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES ($1, $2, $3)",
+    [key.id, 7, new Date("2026-06-24T10:01:00.010Z").toISOString()]
+  );
 
   const result = await getProviderWindowCostBreakdown({
     provider: "claude",

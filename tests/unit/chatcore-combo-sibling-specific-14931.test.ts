@@ -22,7 +22,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sibling-14931-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 
@@ -42,7 +42,7 @@ const originalFetch = globalThis.fetch;
 const originalKnownEnv = process.env[KNOWN_LIMIT_ENV];
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -98,14 +98,14 @@ test.before(async () => {
     });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   if (originalKnownEnv === undefined) {
     delete process.env[KNOWN_LIMIT_ENV];
   } else {
     process.env[KNOWN_LIMIT_ENV] = originalKnownEnv;
   }
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

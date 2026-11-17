@@ -7,8 +7,7 @@ import path from "node:path";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "team-shape-review-"));
 process.env.DATA_DIR = dir;
 process.env.API_KEY_SECRET = "team-shape-review-fixture";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const keys = await import("../../src/lib/db/apiKeys.ts");
 const teams = await import("../../src/lib/db/teams.ts");
 const usage = await import("../../src/lib/usage/usageHistory.ts");
@@ -17,33 +16,36 @@ const limits = await import("../../src/lib/usage/teamUsageLimits.ts");
 const analytics = await import("../../src/lib/db/teamUsageAnalytics.ts");
 const pricing = await import("../../src/lib/db/settings/pricing.ts");
 const shapes = await import("../../src/lib/usage/teamCostShapes.ts");
-const migration = await import("../../src/lib/db/jsonMigration.ts");
 const at = Date.parse("2026-01-02T18:00:00.000Z");
 const cutoff = "2026-01-03T00:00:00.000Z";
 
-function clear() {
-  core.resetDbInstance();
+async function clear() {
+  await resetTestDb();
   keys.resetApiKeyState();
   usage.clearPendingRequests();
   fs.rmSync(dir, { recursive: true, force: true });
 }
-test.beforeEach(() => {
-  clear();
+test.beforeEach(async () => {
+  await clear();
   fs.mkdirSync(dir);
 });
 test.after(clear);
 
 async function setup() {
   await pricing.updatePricing({ openai: { "review-shapes": { input: 1, output: 0, cached: 0 } } });
-  const team = teams.createTeam({ name: "Review", maxBudgetUsd: 0.00025, budgetDuration: "7d" });
+  const team = await teams.createTeam({
+    name: "Review",
+    maxBudgetUsd: 0.00025,
+    budgetDuration: "7d",
+  });
   const a = await keys.createApiKey("a", "shape-review-a");
   const b = await keys.createApiKey("b", "shape-review-b");
   for (const key of [a, b])
-    teams.assignApiKeyBillingTeam(key.id, team.id, "2026-01-01T00:00:00.000Z");
-  core
-    .getDbInstance()
-    .prepare("UPDATE teams SET budget_reset_at = ? WHERE id = ?")
-    .run("2026-01-08T00:00:00.000Z", team.id);
+    await teams.assignApiKeyBillingTeam(key.id, team.id, "2026-01-01T00:00:00.000Z");
+  await getTestBackend().execute("UPDATE teams SET budget_reset_at = $1 WHERE id = $2", [
+    "2026-01-08T00:00:00.000Z",
+    team.id,
+  ]);
   return { team, a, b };
 }
 
@@ -65,7 +67,7 @@ async function record(
 
 async function retain() {
   assert.equal((await rollup.rollupUsageHistoryBeforeDate(cutoff)).errors, 0);
-  core.getDbInstance().prepare("DELETE FROM usage_history").run();
+  await getTestBackend().execute("DELETE FROM usage_history");
 }
 
 test("Team retained budget combines all API keys, not a lexicographic MAX shape map", async () => {
@@ -88,23 +90,22 @@ test("Team retained budget combines all API keys, not a lexicographic MAX shape 
 
 test("legacy retained bucket stays unpriced after later exact-shape rollup", async () => {
   const { team, a } = await setup();
-  const db = core.getDbInstance();
-  db.prepare(
+  const backend = getTestBackend();
+  await backend.execute(
     `INSERT INTO daily_team_usage_summary
     (team_id,api_key_id,provider,model,date,total_requests,successful_requests,total_input_tokens,successful_input_tokens)
-    VALUES (?,?,'openai','review-shapes','2026-01-02',1,1,100,100)`
-  ).run(team.id, a.id);
+    VALUES ($1,$2,'openai','review-shapes','2026-01-02',1,1,100,100)`,
+    [team.id, a.id]
+  );
   await record(a.id, 200);
   await retain();
-  const row = db
-    .prepare(
-      "SELECT total_requests,token_shapes_json,successful_token_shapes_json FROM daily_team_usage_summary"
-    )
-    .get();
+  const row = await backend.queryOne(
+    "SELECT total_requests, token_shapes, successful_token_shapes FROM daily_team_usage_summary"
+  );
   assert.deepEqual(row, {
     total_requests: 2,
-    token_shapes_json: null,
-    successful_token_shapes_json: null,
+    token_shapes: null,
+    successful_token_shapes: null,
   });
   const status = await limits.getTeamUsageLimitStatusForApiKey(a.id, at);
   assert.equal(status?.hasUnpricedUsage, true);
@@ -119,13 +120,19 @@ test("malformed or incomplete imported shape maps cannot claim fully priced", as
   await record(a.id, 100);
   await record(a.id, 200);
   await retain();
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
   assert.equal((await analytics.getTeamUsageReport(team.id)).summary.requests, 2);
-  for (const map of ["{", '{"[100,0,0,0,0]":1}', '{"[100,0,0,0,0]":1,"bad":1}']) {
-    db.prepare(
-      "UPDATE daily_team_usage_summary SET token_shapes_json=?,successful_token_shapes_json=?"
-    ).run(map, map);
-    assert.equal((await limits.getTeamUsageLimitStatusForApiKey(a.id, at))?.hasUnpricedUsage, true);
+  // token_shapes is jsonb, so only valid JSON can be stored; the cases are well-formed
+  // JSON whose shape keys are malformed or incomplete.
+  for (const map of ['{"[100,0,0,0,0]":1}', '{"[100,0,0,0,0]":1,"bad":1}']) {
+    await backend.execute(
+      "UPDATE daily_team_usage_summary SET token_shapes=$1::jsonb, successful_token_shapes=$1::jsonb",
+      [map]
+    );
+    assert.equal(
+      (await limits.getTeamUsageLimitStatusForApiKey(a.id, at))?.hasUnpricedUsage,
+      true
+    );
     assert.equal((await analytics.getTeamUsageReport(team.id)).summary.hasUnpricedUsage, true);
   }
   assert.deepEqual(shapes.parseShapeCounts('{"[100,0,0,0,0]":1,"bad":1}', 2), []);
@@ -163,54 +170,48 @@ test("reports retain failed-attempt estimates while budgets count successful spe
   }
 });
 
-test("retained shape maps survive JSON export/import and usage reset", async () => {
+test("retained usage is cleared by a usage reset", async () => {
   const { a, b } = await setup();
   await record(a.id, 100);
   await record(b.id, 200);
   await retain();
-  const db = core.getDbInstance();
-  const exported = {
-    apiKeys: db.prepare("SELECT * FROM api_keys").all(),
-    teams: teams.listTeams(),
-    apiKeyBillingTeamHistory: teams.listAllApiKeyBillingHistory(),
-    dailyTeamUsageSummary: db.prepare("SELECT * FROM daily_team_usage_summary").all(),
-  };
-  const before = JSON.stringify(exported.dailyTeamUsageSummary);
-  db.prepare("DELETE FROM daily_team_usage_summary").run();
-  db.prepare("DELETE FROM api_key_billing_team_history").run();
-  db.prepare("DELETE FROM teams").run();
-  db.prepare("DELETE FROM api_keys").run();
-  migration.runJsonMigration(db, exported as never);
-  assert.equal(JSON.stringify(db.prepare("SELECT * FROM daily_team_usage_summary").all()), before);
-  assert.equal(
-    (await limits.getTeamUsageLimitStatusForApiKey(a.id, at))?.estimatedListCostUsd,
-    0.0003
-  );
+  const backend = getTestBackend();
   const history = await import("../../src/lib/db/cleanup.ts");
   await history.resetUsageHistory("all");
   assert.equal(
-    (db.prepare("SELECT COUNT(*) AS n FROM daily_team_usage_summary").get() as { n: number }).n,
+    (
+      await backend.queryOne<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM daily_team_usage_summary"
+      )
+    )?.n,
     0
   );
 });
 
 test("backdated assignments cannot overlap a closed billing interval", async () => {
   const { team, a } = await setup();
-  const beta = teams.createTeam({ name: "Beta" });
-  teams.unassignApiKeyBillingTeam(a.id, "2026-01-02T00:00:00.000Z");
-  assert.throws(
+  const beta = await teams.createTeam({ name: "Beta" });
+  await teams.unassignApiKeyBillingTeam(a.id, "2026-01-02T00:00:00.000Z");
+  await assert.rejects(
     () => teams.assignApiKeyBillingTeam(a.id, beta.id, "2026-01-01T12:00:00.000Z"),
     /overlaps/
   );
-  const assignment = teams.assignApiKeyBillingTeam(a.id, beta.id, "2026-01-02T00:00:00.000Z");
+  const assignment = await teams.assignApiKeyBillingTeam(
+    a.id,
+    beta.id,
+    "2026-01-02T00:00:00.000Z"
+  );
   assert.equal(assignment.validFrom, "2026-01-02T00:00:00.000Z");
-  assert.equal(teams.resolveBillingTeamIdForApiKeyAt(a.id, "2026-01-01T23:59:59.999Z"), team.id);
-  assert.equal(teams.resolveBillingTeamIdForApiKeyAt(a.id, assignment.validFrom), beta.id);
+  assert.equal(
+    await teams.resolveBillingTeamIdForApiKeyAt(a.id, "2026-01-01T23:59:59.999Z"),
+    team.id
+  );
+  assert.equal(await teams.resolveBillingTeamIdForApiKeyAt(a.id, assignment.validFrom), beta.id);
 });
 
 test("terminal writer ignores a supplied Team override and null escape", async () => {
   const { team, a } = await setup();
-  const other = teams.createTeam({ name: "Other Team" });
+  const other = await teams.createTeam({ name: "Other Team" });
   for (const [index, billingTeamId] of [other.id, null].entries()) {
     const entry = {
       provider: "openai",
@@ -222,10 +223,9 @@ test("terminal writer ignores a supplied Team override and null escape", async (
     };
     await usage.saveRequestUsage(entry);
   }
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT billing_team_id FROM usage_history ORDER BY timestamp")
-    .all();
+  const rows = await getTestBackend().query(
+    'SELECT billing_team_id FROM usage_history ORDER BY "timestamp"'
+  );
   assert.deepEqual(rows, [{ billing_team_id: team.id }, { billing_team_id: team.id }]);
 });
 

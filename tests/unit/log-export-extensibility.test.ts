@@ -18,6 +18,8 @@ process.env.STORAGE_ENCRYPTION_KEY = "log-export-extensibility-test-key";
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..");
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const destinationsDb = await import("../../src/lib/db/logExportDestinations.ts");
 const registry = await import("../../src/lib/logExport/registry.ts");
 const secrets = await import("../../src/lib/logExport/secrets.ts");
@@ -59,20 +61,19 @@ const fakeDestination = {
   },
 };
 
-function insertCallLogs(count: number) {
-  const db = coreDb.getDbInstance();
-  const statement = db.prepare(
-    `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
-                            tokens_in, tokens_out)
-     VALUES (?, ?, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 10, 1, 2)`
-  );
+async function insertCallLogs(count: number) {
   for (let i = 0; i < count; i++) {
-    statement.run(`ext-log-${i}`, new Date(Date.UTC(2026, 7, 28, 12, 0, i)).toISOString());
+    await db().execute(
+      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
+                              tokens_in, tokens_out)
+       VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 10, 1, 2)`,
+      [`ext-log-${i}`, new Date(Date.UTC(2026, 7, 28, 12, 0, i)).toISOString()]
+    );
   }
 }
 
-test.beforeEach(() => {
-  coreDb.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   sent.length = 0;
@@ -85,14 +86,14 @@ test.afterEach(() => {
   runner.__setLogExportChildOptionsForTest(null);
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
 test("runner_ThirdPartyDestination_DrivesTheWholePipelineWithNoBigQueryCode", async () => {
-  insertCallLogs(5);
-  const destination = destinationsDb.createLogExportDestination({
+  await insertCallLogs(5);
+  const destination = await destinationsDb.createLogExportDestination({
     name: "Fake sink",
     type: "unit-test-sink",
     enabled: true,
@@ -121,7 +122,7 @@ test("runner_ThirdPartyDestination_DrivesTheWholePipelineWithNoBigQueryCode", as
     sent.map((batch) => batch.length),
     [2, 2, 1]
   );
-  assert.equal(destinationsDb.getLogExportDestination(destination.id)?.exportedTotal, 5);
+  assert.equal((await destinationsDb.getLogExportDestination(destination.id))?.exportedTotal, 5);
 });
 
 test("secrets_ThirdPartyDestination_EncryptsAndRedactsItsOwnDeclaredSecretFields", () => {
@@ -147,8 +148,8 @@ test("registry_ThirdPartyDestination_IsRenderableByTheDashboardWithoutUiChanges"
   );
 });
 
-test("presenter_ThirdPartyDestination_ProjectsWithoutKnowingTheType", () => {
-  const destination = destinationsDb.createLogExportDestination({
+test("presenter_ThirdPartyDestination_ProjectsWithoutKnowingTheType", async () => {
+  const destination = await destinationsDb.createLogExportDestination({
     name: "Fake sink",
     type: "unit-test-sink",
     enabled: false,
@@ -157,20 +158,20 @@ test("presenter_ThirdPartyDestination_ProjectsWithoutKnowingTheType", () => {
       apiToken: "super-secret-token",
     }),
   });
-  const view = presenter.toDestinationView(destination);
+  const view = await presenter.toDestinationView(destination);
   assert.equal(view.typeAvailable, true);
   assert.equal(view.typeLabel, "Unit Test Sink");
   assert.equal(view.config.apiToken, secrets.SECRET_PLACEHOLDER);
 });
 
-test("presenter_UnregisteredType_DegradesInsteadOfCrashing", () => {
-  const destination = destinationsDb.createLogExportDestination({
+test("presenter_UnregisteredType_DegradesInsteadOfCrashing", async () => {
+  const destination = await destinationsDb.createLogExportDestination({
     name: "Removed plugin",
     type: "some-removed-plugin",
     enabled: true,
     config: { anything: "value" },
   });
-  const view = presenter.toDestinationView(destination);
+  const view = await presenter.toDestinationView(destination);
   assert.equal(view.typeAvailable, false);
   assert.equal(view.typeLabel, "some-removed-plugin");
 });

@@ -24,11 +24,16 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { isAccountUnavailable, getEarliestRateLimitedUntil, filterAvailableAccounts } =
   await import("../../open-sse/services/accountFallback.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await core.ensureDbInitialized();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -82,29 +87,34 @@ test("#3954 filterAvailableAccounts: excludes a numeric-epoch-string future cool
   );
 });
 
-// ── End-to-end: the write coercion that triggers the real bug ───────────────
+// ── End-to-end: the write path the original bug came from ───────────────────
+// The SQLite TEXT-affinity coercion no longer exists: rate_limited_until is a timestamptz
+// column, so the write stores a real timestamp and the read returns it as an ISO string.
 
-test("#3954 setConnectionRateLimitUntil stores a numeric string that selection still honors", async () => {
+test("#3954 setConnectionRateLimitUntil stores a timestamp that selection still honors", async () => {
   const conn = await providersDb.createProviderConnection({
     provider: "antigravity",
     authType: "oauth",
     name: "AG 3954",
   });
   const connId = (conn as { id: string }).id;
-  providersDb.setConnectionRateLimitUntil(connId, Date.now() + HOUR);
+  const until = Date.now() + HOUR;
+  await providersDb.setConnectionRateLimitUntil(connId, until);
 
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { get: (id: string) => { rate_limited_until: unknown } | undefined };
-  };
-  const row = db
-    .prepare("SELECT rate_limited_until FROM provider_connections WHERE id = ?")
-    .get(connId);
+  const row = await getTestBackend().queryOne<{ rate_limited_until: unknown }>(
+    "SELECT rate_limited_until FROM provider_connections WHERE id = $1",
+    [connId]
+  );
   const stored = row?.rate_limited_until;
 
-  // It is persisted in the numeric-string form (NOT ISO) — this is the trap.
+  // Persisted as a timestamp that round-trips to the written instant.
   assert.ok(
-    /^\d+(\.\d+)?$/.test(String(stored)),
-    `expected numeric epoch string, got ${String(stored)}`
+    Number.isFinite(Date.parse(String(stored))),
+    `expected a timestamp, got ${String(stored)}`
+  );
+  assert.ok(
+    Math.abs(Date.parse(String(stored)) - until) < 1000,
+    `timestamp drifted: ${String(stored)}`
   );
   // The selection filter must still treat this connection as unavailable.
   assert.equal(isAccountUnavailable(String(stored)), true);

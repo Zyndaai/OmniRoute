@@ -17,21 +17,23 @@ process.env.API_KEY_SECRET = "model-access-policy-wrapper-test-secret";
 const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
 const groups = await import("../../src/lib/db/apiKeyGroups.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function removeStorage() {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   apiKeys.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   removeStorage();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeys.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   removeStorage();
   for (const [name, value] of Object.entries(previousEnvironment)) {
     if (value === undefined) delete process.env[name];
@@ -63,10 +65,10 @@ test("a resolved group deny overrides an allowed requested alias", async () => {
     modelAccessMode: "restricted",
     allowedModels: ["friendly-alias"],
   });
-  const group = groups.createKeyGroup("Resolved target policy");
-  groups.addGroupPermission(group.id, "*", "allow");
-  groups.addGroupPermission(group.id, "denied-target", "deny", "openai");
-  assert.equal(groups.addKeyToGroup(key.id, group.id), true);
+  const group = await groups.createKeyGroup("Resolved target policy");
+  await groups.addGroupPermission(group.id, "*", "allow");
+  await groups.addGroupPermission(group.id, "denied-target", "deny", "openai");
+  assert.equal(await groups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(
     await apiKeys.isModelAllowedForKey(key.key, "friendly-alias", "openai/denied-target"),
@@ -84,10 +86,10 @@ test("permission caching keeps distinct resolved targets for the same requested 
     modelAccessMode: "restricted",
     allowedModels: ["friendly-alias"],
   });
-  const group = groups.createKeyGroup("Cached target policy");
-  groups.addGroupPermission(group.id, "*", "allow");
-  groups.addGroupPermission(group.id, "denied-target", "deny", "openai");
-  assert.equal(groups.addKeyToGroup(key.id, group.id), true);
+  const group = await groups.createKeyGroup("Cached target policy");
+  await groups.addGroupPermission(group.id, "*", "allow");
+  await groups.addGroupPermission(group.id, "denied-target", "deny", "openai");
+  assert.equal(await groups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(
     await apiKeys.isModelAllowedForKey(key.key, "friendly-alias", "openai/safe-target"),
@@ -109,9 +111,9 @@ test("an allow-all group cannot widen a restricted empty per-key allow-list", as
     modelAccessMode: "restricted",
     allowedModels: [],
   });
-  const group = groups.createKeyGroup("Allow all group");
-  groups.addGroupPermission(group.id, "*", "allow");
-  assert.equal(groups.addKeyToGroup(key.id, group.id), true);
+  const group = await groups.createKeyGroup("Allow all group");
+  await groups.addGroupPermission(group.id, "*", "allow");
+  assert.equal(await groups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, "openai/safe-target"), false);
 });
@@ -122,10 +124,10 @@ test("group allow rules cannot grant a model outside the per-key allow-list", as
     modelAccessMode: "restricted",
     allowedModels: ["model-a"],
   });
-  const group = groups.createKeyGroup("Broader group allow-list");
-  groups.addGroupPermission(group.id, "model-a", "allow");
-  groups.addGroupPermission(group.id, "model-b", "allow");
-  assert.equal(groups.addKeyToGroup(key.id, group.id), true);
+  const group = await groups.createKeyGroup("Broader group allow-list");
+  await groups.addGroupPermission(group.id, "model-a", "allow");
+  await groups.addGroupPermission(group.id, "model-b", "allow");
+  assert.equal(await groups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, "model-a"), true);
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, "model-b"), false);
@@ -137,10 +139,10 @@ test("a group deny on the requested alias still applies when the resolved target
     modelAccessMode: "restricted",
     allowedModels: ["openai/safe-target"],
   });
-  const group = groups.createKeyGroup("Requested alias policy");
-  groups.addGroupPermission(group.id, "*", "allow");
-  groups.addGroupPermission(group.id, "denied-alias", "deny");
-  assert.equal(groups.addKeyToGroup(key.id, group.id), true);
+  const group = await groups.createKeyGroup("Requested alias policy");
+  await groups.addGroupPermission(group.id, "*", "allow");
+  await groups.addGroupPermission(group.id, "denied-alias", "deny");
+  assert.equal(await groups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(
     await apiKeys.isModelAllowedForKey(key.key, "safe-alias", "openai/safe-target"),

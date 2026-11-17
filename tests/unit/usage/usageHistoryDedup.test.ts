@@ -20,13 +20,14 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-usage-ded
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 // Dynamic imports so DATA_DIR is set before any module initialises the DB.
-const { resetDbInstance, getDbInstance } = await import("../../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../../helpers/postgres.ts");
 const { onUsageRecorded } = await import("../../../src/lib/usage/usageEvents.ts");
 const { saveRequestUsage } = await import("../../../src/lib/usage/usageHistory.ts");
 
 // Cleanup: close DB handle and temp directory so the test runner doesn't hang.
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -57,34 +58,34 @@ function makeEntry(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function countRows(db: ReturnType<typeof getDbInstance>): number {
-  const row = db.prepare("SELECT COUNT(*) AS cnt FROM usage_history").get() as { cnt: number };
-  return row.cnt;
+async function countRows(): Promise<number> {
+  const row = await getTestBackend().queryOne<{ cnt: number }>(
+    "SELECT COUNT(*)::int AS cnt FROM usage_history"
+  );
+  return Number(row?.cnt ?? 0);
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 test("saveRequestUsage: first insert creates exactly one row", async () => {
-  const db = getDbInstance();
-  const before = countRows(db);
+  const before = await countRows();
   const entry = makeEntry({ timestamp: new Date().toISOString() });
 
   await saveRequestUsage(entry);
 
-  assert.equal(countRows(db), before + 1, "Expected exactly one new row after first insert");
+  assert.equal(await countRows(), before + 1, "Expected exactly one new row after first insert");
 });
 
 test("saveRequestUsage: duplicate entry (same key fields) inserts only ONE row", async () => {
-  const db = getDbInstance();
   const ts = new Date().toISOString();
   const entry = makeEntry({ timestamp: ts });
 
   await saveRequestUsage(entry);
-  const afterFirst = countRows(db);
+  const afterFirst = await countRows();
 
   // Insert identical entry a second time — should be a no-op.
   await saveRequestUsage(entry);
-  const afterSecond = countRows(db);
+  const afterSecond = await countRows();
 
   assert.equal(
     afterSecond,
@@ -113,37 +114,34 @@ test("saveRequestUsage: emitUsageRecorded fires on real insert but NOT on duplic
 });
 
 test("saveRequestUsage: two entries with different timestamps are both inserted", async () => {
-  const db = getDbInstance();
-  const before = countRows(db);
+  const before = await countRows();
 
   await saveRequestUsage(makeEntry({ timestamp: new Date(Date.now() - 5000).toISOString() }));
   await saveRequestUsage(makeEntry({ timestamp: new Date(Date.now() - 4000).toISOString() }));
 
   assert.equal(
-    countRows(db),
+    await countRows(),
     before + 2,
     "Two distinct entries (different timestamps) should both be inserted"
   );
 });
 
 test("saveRequestUsage: two entries with different providers are both inserted", async () => {
-  const db = getDbInstance();
-  const before = countRows(db);
+  const before = await countRows();
   const ts = new Date().toISOString();
 
   await saveRequestUsage(makeEntry({ timestamp: ts, provider: "provider-A" }));
   await saveRequestUsage(makeEntry({ timestamp: ts, provider: "provider-B" }));
 
   assert.equal(
-    countRows(db),
+    await countRows(),
     before + 2,
     "Two entries with different providers should both be inserted"
   );
 });
 
 test("saveRequestUsage: legacy dedup retains endpoint and cpa auth backfills", async () => {
-  const db = getDbInstance();
-  const before = countRows(db);
+  const before = await countRows();
   const ts = "2026-10-11T12:34:56.789Z";
   const entry = makeEntry({ timestamp: ts, endpoint: null, cpaAuthIndex: null });
 
@@ -154,10 +152,11 @@ test("saveRequestUsage: legacy dedup retains endpoint and cpa auth backfills", a
     cpaAuthIndex: "auth-index-fixture",
   });
 
-  assert.equal(countRows(db), before + 1);
-  const row = db
-    .prepare("SELECT endpoint, cpa_auth_index FROM usage_history WHERE timestamp = ?")
-    .get(ts) as { endpoint: string | null; cpa_auth_index: string | null };
+  assert.equal(await countRows(), before + 1);
+  const row = await getTestBackend().queryOne<{ endpoint: string | null; cpa_auth_index: string | null }>(
+    'SELECT endpoint, cpa_auth_index FROM usage_history WHERE "timestamp" = $1',
+    [ts]
+  );
   assert.deepEqual(row, {
     endpoint: "/v1/chat/completions",
     cpa_auth_index: "auth-index-fixture",
@@ -165,15 +164,14 @@ test("saveRequestUsage: legacy dedup retains endpoint and cpa auth backfills", a
 });
 
 test("saveRequestUsage: opt-in physical attempts insert same natural key twice", async () => {
-  const db = getDbInstance();
-  const before = countRows(db);
+  const before = await countRows();
   const entry = makeEntry({ timestamp: new Date().toISOString() });
 
   await saveRequestUsage(entry, { deduplicate: false });
   await saveRequestUsage(entry, { deduplicate: false });
 
   assert.equal(
-    countRows(db),
+    await countRows(),
     before + 2,
     "Distinct physical attempts must not share the legacy natural-key dedup"
   );

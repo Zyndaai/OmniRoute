@@ -27,6 +27,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-egress-lo
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const auth = await import("../../src/sse/services/auth.ts");
@@ -54,9 +55,7 @@ const OTHER_EGRESS_IP = "203.0.113.88";
 let seedSeq = 0;
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 // #3023 apikey dedup: createProviderConnection merges on key VALUE, so each
@@ -77,7 +76,11 @@ async function seedConnection(
   return (conn as Record<string, unknown>).id as string;
 }
 
-function seedProxyLog(connectionId: string, egressIp: string, provider: string = "opencode-go") {
+async function seedProxyLog(
+  connectionId: string,
+  egressIp: string,
+  provider: string = "opencode-go"
+): Promise<void> {
   proxyLogger.logProxyEvent({
     status: "success",
     provider,
@@ -92,11 +95,11 @@ function seedProxyLog(connectionId: string, egressIp: string, provider: string =
   // makes the whole suite flaky (it happens to pass only when the batch timer
   // fires in the gap). Flush synchronously so the seeded egress IP is durable
   // before markAccountUnavailable() reads it.
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -105,9 +108,9 @@ test("siblings sharing the egress IP are cooled down with the same cooldown", as
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // Body = the REAL opencode 429 envelope ("monthly usage limit reached").
   // Verified empirically: on this path it is intercepted by the
@@ -181,9 +184,9 @@ test("three connections sharing one egress IP: ONE upstream call for the whole p
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // Body = the REAL opencode 429 envelope ("monthly usage limit reached").
   // On the markAccountUnavailable path checkFallbackError intercepts it with
@@ -224,8 +227,8 @@ async function rotateZenPool(): Promise<{ upstreamCalls: number; siblingCooled: 
   await resetStorage();
   const connA = await seedConnection("opencode-zen");
   const connB = await seedConnection("opencode-zen");
-  seedProxyLog(connA, SHARED_EGRESS_IP, "opencode-zen");
-  seedProxyLog(connB, SHARED_EGRESS_IP, "opencode-zen");
+  await seedProxyLog(connA, SHARED_EGRESS_IP, "opencode-zen");
+  await seedProxyLog(connB, SHARED_EGRESS_IP, "opencode-zen");
   // RATE_LIMIT_TEXT_429 carries no quota text, so a lone connection keeps a short
   // scaled cooldown and the sibling's state is decided only by the egress branch.
   const first = await auth.markAccountUnavailable(
@@ -272,9 +275,9 @@ test("counter-test: the SAME rotation burns N calls for a non-allowlisted provid
   const connA = await seedConnection("ollama-cloud");
   const connB = await seedConnection("ollama-cloud");
   const connC = await seedConnection("ollama-cloud");
-  seedProxyLog(connA, SHARED_EGRESS_IP, "ollama-cloud");
-  seedProxyLog(connB, SHARED_EGRESS_IP, "ollama-cloud");
-  seedProxyLog(connC, SHARED_EGRESS_IP, "ollama-cloud");
+  await seedProxyLog(connA, SHARED_EGRESS_IP, "ollama-cloud");
+  await seedProxyLog(connB, SHARED_EGRESS_IP, "ollama-cloud");
+  await seedProxyLog(connC, SHARED_EGRESS_IP, "ollama-cloud");
 
   // Same shared IP, same helper, same 429 — only the allowlist differs. This
   // is what makes the "=== 1" above a measurement instead of an artifact of
@@ -292,9 +295,9 @@ test("combo path: one upstream call too — the pool is cooled, the combo advanc
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // The combo caller downgrades persistUnavailableState to false for a 429
   // (chat.ts step 8). The branch ignores that downgrade, exactly like the
@@ -341,7 +344,7 @@ test("account-scoped 401/403 still rotate across all connections (rotation prese
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
       const id = await seedConnection("opencode-go");
-      seedProxyLog(id, SHARED_EGRESS_IP);
+      await seedProxyLog(id, SHARED_EGRESS_IP);
       ids.push(id);
     }
     let upstreamCalls = 0;
@@ -394,9 +397,9 @@ test("agentrouter stays connection-scoped: IP-sharing siblings are NOT pre-coole
   const connA = await seedConnection("agentrouter");
   const connB = await seedConnection("agentrouter");
   const connC = await seedConnection("agentrouter");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // The agentrouter account-quota body (账户额度不足) matches the
   // agentrouter-user-quota-exhausted rule (scope "connection") — the
@@ -439,9 +442,9 @@ test("an out-of-allowlist provider with a RATE_LIMIT_EXCEEDED 429 stays per-conn
   const connA = await seedConnection("ollama-cloud");
   const connB = await seedConnection("ollama-cloud");
   const connC = await seedConnection("ollama-cloud");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // "too many requests" carries no quota-exhaustion keyword → on this path
   // checkFallbackError classifies it rate_limit_exceeded via the 429 status
@@ -535,9 +538,9 @@ test("a sibling with a longer existing cooldown is not shortened", async () => {
     rateLimitedUntil: futureCooldown,
   });
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // "rate limit reached" carries no quota-exhaustion keyword → status_429 →
   // rate_limit_exceeded with the transient-scaled backoff (~seconds, capped
@@ -588,9 +591,9 @@ test("position-guard: the allowlist predicate is the guard that gates the branch
   const connA = await seedConnection("ollama-cloud");
   const connB = await seedConnection("ollama-cloud");
   const connC = await seedConnection("ollama-cloud");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   let upstreamCalls = 0;
   const tried: string[] = [];
@@ -623,8 +626,8 @@ test("a sibling in a TERMINAL status is never overwritten by the cooldown", asyn
   await resetStorage();
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go", { testStatus: "banned" });
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
 
   const result = await auth.markAccountUnavailable(
     connA,
@@ -654,8 +657,8 @@ test("a connection with a unique egress IP is locked alone", async () => {
   await resetStorage();
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, OTHER_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, OTHER_EGRESS_IP);
 
   const result = await auth.markAccountUnavailable(
     connA,
@@ -684,7 +687,7 @@ test("a connection with a unique egress IP is locked alone", async () => {
 test("never terminal + failing connection C IS written by the branch (backoffLevel set)", async () => {
   await resetStorage();
   const connA = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
 
   const result = await auth.markAccountUnavailable(
     connA,
@@ -731,9 +734,9 @@ test("disableCooling connection skips the egress branch entirely", async () => {
   });
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   const result = await auth.markAccountUnavailable(
     connA,
@@ -763,9 +766,9 @@ test("a QUOTA_EXHAUSTED body triggers the egress lock too (both reasons covered)
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   // "quota has been exceeded" matches the global errorConfig text rule →
   // quota_exhausted (NOT rate_limit_exceeded): proves the predicate accepts
@@ -810,9 +813,9 @@ test("a RATE_LIMIT_EXCEEDED 429 (no quota text) triggers the egress lock with a 
   const connA = await seedConnection("opencode-go");
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
 
   const result = await auth.markAccountUnavailable(
     connA,
@@ -851,10 +854,10 @@ test("cross-provider: an unrelated provider sharing the egress IP is NOT cooled"
   const connB = await seedConnection("opencode-go");
   const connC = await seedConnection("opencode-go");
   const connAnthropic = await seedConnection("anthropic");
-  seedProxyLog(connA, SHARED_EGRESS_IP);
-  seedProxyLog(connB, SHARED_EGRESS_IP);
-  seedProxyLog(connC, SHARED_EGRESS_IP);
-  seedProxyLog(connAnthropic, SHARED_EGRESS_IP, "anthropic");
+  await seedProxyLog(connA, SHARED_EGRESS_IP);
+  await seedProxyLog(connB, SHARED_EGRESS_IP);
+  await seedProxyLog(connC, SHARED_EGRESS_IP);
+  await seedProxyLog(connAnthropic, SHARED_EGRESS_IP, "anthropic");
 
   // The egress IP budget is PER PROVIDER (the opencode free tier is
   // IP-bucketed, not account-bucketed — see #9611): in the default no-proxy

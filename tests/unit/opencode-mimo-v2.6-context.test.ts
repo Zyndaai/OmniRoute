@@ -17,11 +17,11 @@ test("opencode registries declare an explicit real contextLength for mimo-v2.6-f
   }
 });
 
-test("contextManager.getTokenLimit resolves mimo-v2.6-flash-free to its real 1M window, not the 200000 provider default", () => {
-  assert.equal(getTokenLimit("opencode-zen", V26), REAL_WINDOW);
-  assert.equal(getTokenLimit("opencode-go", V26), REAL_WINDOW);
+test("contextManager.getTokenLimit resolves mimo-v2.6-flash-free to its real 1M window, not the 200000 provider default", async () => {
+  assert.equal(await getTokenLimit("opencode-zen", V26), REAL_WINDOW);
+  assert.equal(await getTokenLimit("opencode-go", V26), REAL_WINDOW);
 });
 
-test("mimo-v2.5-free resolves to its real 1M window, not a stale understated registry value", () => {
-  assert.equal(getTokenLimit("opencode-zen", "mimo-v2.5-free"), REAL_WINDOW);
+test("mimo-v2.5-free resolves to its real 1M window, not a stale understated registry value", async () => {
+  assert.equal(await getTokenLimit("opencode-zen", "mimo-v2.5-free"), REAL_WINDOW);
 });

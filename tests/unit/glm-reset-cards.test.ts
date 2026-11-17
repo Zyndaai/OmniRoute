@@ -9,7 +9,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-glm-reset
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-glm-reset-cards-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const leasesDb = await import("../../src/lib/db/exclusiveConnectionLeases.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -54,7 +54,7 @@ function json(body: unknown, status = 200) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -76,7 +76,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -380,7 +380,7 @@ test("consumeGlmResetCard atomically fences the connection while the wire operat
   const redemption = glmResetCards.consumeGlmResetCard(connection.id, "redeem-fenced");
   await started;
 
-  const competingLease = leasesDb.acquireExclusiveConnectionLease({
+  const competingLease = await leasesDb.acquireExclusiveConnectionLease({
     leaseOwnerId: `vlo_${"a".repeat(43)}`,
     apiKeyId: "test-competing-key",
     provider: "glm",
@@ -415,7 +415,7 @@ test("consumeGlmResetCard releases its operation lease after success and failure
   failList = true;
   await assert.rejects(() => glmResetCards.listGlmResetCards(connection.id));
 
-  const competingLease = leasesDb.acquireExclusiveConnectionLease({
+  const competingLease = await leasesDb.acquireExclusiveConnectionLease({
     leaseOwnerId: `vlo_${"b".repeat(43)}`,
     apiKeyId: "test-after-operation",
     provider: "glm",
@@ -423,7 +423,7 @@ test("consumeGlmResetCard releases its operation lease after success and failure
   });
   assert.equal(competingLease.kind, "ACQUIRED");
   if (competingLease.kind === "ACQUIRED") {
-    leasesDb.releaseExclusiveConnectionLease({
+    await leasesDb.releaseExclusiveConnectionLease({
       leaseOwnerId: `vlo_${"b".repeat(43)}`,
       generation: competingLease.lease.generation,
       apiKeyId: "test-after-operation",

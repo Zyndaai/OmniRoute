@@ -1,44 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-proxies-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
-});
-
-test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb();
 });
 
 test("proxy CRUD redacts secrets by default and preserves stored credentials when omitted", async () => {
@@ -204,16 +173,18 @@ test("proxy health stats aggregate proxy_logs and force delete removes assignmen
 
   await proxiesDb.assignProxyToScope("global", null, proxy.id);
 
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
   const now = new Date().toISOString();
-  const insertLog = db.prepare(`
-    INSERT INTO proxy_logs (
-      id, timestamp, status, proxy_type, proxy_host, proxy_port, latency_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertLog.run("proxy-log-1", now, "success", "http", "stats.local", 8080, 100);
-  insertLog.run("proxy-log-2", now, "error", "http", "stats.local", 8080, 250);
-  insertLog.run("proxy-log-3", now, "timeout", "http", "stats.local", 8080, 400);
+  const insertLog = (id: string, status: string, latencyMs: number) =>
+    backend.execute(
+      `INSERT INTO proxy_logs (
+        id, "timestamp", status, proxy_type, proxy_host, proxy_port, latency_ms
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, now, status, "http", "stats.local", 8080, latencyMs]
+    );
+  await insertLog("proxy-log-1", "success", 100);
+  await insertLog("proxy-log-2", "error", 250);
+  await insertLog("proxy-log-3", "timeout", 400);
 
   const stats = await proxiesDb.getProxyHealthStats({ hours: 2 });
 
@@ -282,43 +253,32 @@ test("assignProxyToScope normalizes key scope, supports removal, and blocks dele
 });
 
 test("legacy proxy config migrates into the registry and subsequent runs can be skipped", async () => {
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
+  const seedLegacyProxyConfig = (key: string, value: unknown) =>
+    backend.execute(
+      `INSERT INTO config_entries (namespace, key, value) VALUES ('proxyConfig', $1, $2::jsonb)`,
+      [key, JSON.stringify(value)]
+    );
 
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "global",
-    JSON.stringify("http://global-user:global-pass@global.local:8080")
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "providers",
-    JSON.stringify({
-      openai: "https://provider.local:8443",
-      broken: "not a proxy url",
-    })
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "combos",
-    JSON.stringify({
-      "combo-1": {
-        type: "socks5",
-        host: "combo.local",
-        port: 1080,
-      },
-    })
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "keys",
-    JSON.stringify({
-      "conn-1": {
-        type: "http",
-        host: "account.local",
-        port: 9000,
-      },
-    })
-  );
+  await seedLegacyProxyConfig("global", "http://global-user:global-pass@global.local:8080");
+  await seedLegacyProxyConfig("providers", {
+    openai: "https://provider.local:8443",
+    broken: "not a proxy url",
+  });
+  await seedLegacyProxyConfig("combos", {
+    "combo-1": {
+      type: "socks5",
+      host: "combo.local",
+      port: 1080,
+    },
+  });
+  await seedLegacyProxyConfig("keys", {
+    "conn-1": {
+      type: "http",
+      host: "account.local",
+      port: 9000,
+    },
+  });
 
   const migrated = await proxiesDb.migrateLegacyProxyConfigToRegistry();
   const assignments = await proxiesDb.getProxyAssignments();

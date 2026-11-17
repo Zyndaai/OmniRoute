@@ -9,7 +9,7 @@
  *   3. No cap configured → behaviour unchanged (no block).
  *   4. Cap value ≤ EPSILON → ignored (placeholder skip, consistent with planRegistry pattern).
  *
- * Uses real SQLite (same single-dir reset pattern as db-quota-pools.test.ts).
+ * Uses the real PostgreSQL test database (per-file isolation via tests/_setup/isolatePostgres.ts).
  * Live enforceQuotaShare + recordConsumption path ensures end-to-end correctness.
  *
  * Part of: Group B — Quota Sharing Engine, Fase 3 #7.
@@ -20,8 +20,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
-// ── Single isolated DATA_DIR (same pattern as db-quota-pools.test.ts) ────
+// ── Isolated DATA_DIR for files the modules still write ────────────────────
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-model-cap-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
@@ -31,27 +32,12 @@ const { createPool, upsertAllocations } = await import("../../src/lib/db/quotaPo
 const { setModelCap } = await import("../../src/lib/db/quotaModelCaps.ts");
 const { enforceQuotaShare, recordConsumption } = await import("../../src/lib/quota/enforce.ts");
 const { resetQuotaStoreSingleton } = await import("../../src/lib/quota/storeFactory.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-// ── Storage reset helper (same as db-quota-pools.test.ts) ────────────────
+// ── Storage reset helper ──────────────────────────────────────────────────
 async function resetStorage() {
   resetQuotaStoreSingleton();
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 // ── Test fixtures ─────────────────────────────────────────────────────────
@@ -68,14 +54,25 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 // ── Helper: create pool with KEY_A allocation ─────────────────────────────
-function makePool() {
-  const pool = createPool({ connectionId: CONN_ID, name: "Model Cap Test Pool" });
-  upsertAllocations(pool.id, [{ apiKeyId: KEY_A, weight: 100, policy: "hard" }]);
+async function makePool() {
+  // quota_allocations.api_key_id references api_keys: seed the key row first.
+  await getTestBackend().execute(
+    `INSERT INTO api_keys (id, name, key, key_hash) VALUES ($1, 'model cap key', 'test', $2)
+     ON CONFLICT (id) DO NOTHING`,
+    [KEY_A, createHash("sha256").update(KEY_A).digest("hex")]
+  );
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, auth_type, is_active)
+     VALUES ($1, $2, 'apikey', true) ON CONFLICT (id) DO NOTHING`,
+    [CONN_ID, PROVIDER]
+  );
+  const pool = await createPool({ connectionId: CONN_ID, name: "Model Cap Test Pool" });
+  await upsertAllocations(pool.id, [{ apiKeyId: KEY_A, weight: 100, policy: "hard" }]);
   return pool;
 }
 
@@ -83,8 +80,8 @@ function makePool() {
 // Scenario 1: cap N requests on model M → block after N uses
 // ---------------------------------------------------------------------------
 test("per-(key,model) cap — keyA blocked on model M after N requests", async () => {
-  const pool = makePool();
-  setModelCap({
+  const pool = await makePool();
+  await setModelCap({
     poolId: pool.id,
     apiKeyId: KEY_A,
     model: MODEL_M,
@@ -123,8 +120,8 @@ test("per-(key,model) cap — keyA blocked on model M after N requests", async (
 // Scenario 2: keyA blocked on M still allowed on M2
 // ---------------------------------------------------------------------------
 test("per-(key,model) cap — keyA blocked on M, still allowed on M2 same pool", async () => {
-  const pool = makePool();
-  setModelCap({
+  const pool = await makePool();
+  await setModelCap({
     poolId: pool.id,
     apiKeyId: KEY_A,
     model: MODEL_M,
@@ -170,7 +167,7 @@ test("per-(key,model) cap — keyA blocked on M, still allowed on M2 same pool",
 // Scenario 3: no cap configured → behaviour unchanged (allow)
 // ---------------------------------------------------------------------------
 test("per-(key,model) cap — no cap configured → no block (unchanged behaviour)", async () => {
-  makePool();
+  await makePool();
   // No setModelCap call — cap table is empty
 
   const result = await enforceQuotaShare({
@@ -190,17 +187,15 @@ test("per-(key,model) cap — no cap configured → no block (unchanged behaviou
 // Scenario 4: cap ≤ EPSILON → ignored (placeholder skip)
 // ---------------------------------------------------------------------------
 test("per-(key,model) cap — EPSILON cap value → ignored, request allowed", async () => {
-  const pool = makePool();
+  const pool = await makePool();
 
   // Insert a placeholder cap directly (Number.EPSILON > 0 passes DB CHECK constraint
   // but enforce.ts skips it: !(capValue > Number.EPSILON) → true for EPSILON).
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO quota_allocation_model_caps (pool_id, api_key_id, model, cap_value, cap_unit)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(pool.id, KEY_A, MODEL_M, Number.EPSILON, "requests");
+  await getTestBackend().execute(
+    `INSERT INTO quota_allocation_model_caps (pool_id, api_key_id, model, cap_value, cap_unit)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [pool.id, KEY_A, MODEL_M, Number.EPSILON, "requests"]
+  );
 
   const result = await enforceQuotaShare({
     apiKeyId: KEY_A,

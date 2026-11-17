@@ -21,22 +21,31 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-semcache-optin-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.OMNIROUTE_SEMANTIC_CACHE_ENABLED;
 
 const core = await import("../../src/lib/db/core.ts");
 const { DEFAULT_SEMANTIC_CACHE_CONFIG, resolveSemanticCacheConfig } =
   await import("../../open-sse/config/semanticCacheConfig.ts");
-const { ensureSemanticCacheDbBridge } =
+const { ensureSemanticCacheDbBridge, refreshSemanticCacheDbBridge } =
   await import("../../src/lib/cache/semanticCacheDbBridge.ts");
-const { getDatabaseSettings, updateDatabaseSettings } =
-  await import("../../src/lib/db/databaseSettings.ts");
+const { getDatabaseSettingsSection } = await import("../../src/lib/db/databaseSettingsSections.ts");
+const { setConfigValue } = await import("../../src/lib/db/configEntries.ts");
+const { encryptCacheValue } = await import("../../src/lib/db/cacheSecrets.ts");
 const { DEFAULT_DATABASE_SETTINGS } = await import("../../src/types/databaseSettings.ts");
 const { detectModelModality, normalizeDiscoveredModels } =
   await import("../../src/lib/providerModels/modelDiscovery.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+/** Writes cache settings the way the cache-config route does, then refreshes the resolver snapshot. */
+async function setCacheSettings(cache: Record<string, unknown>) {
+  await ensureSemanticCacheDbBridge();
+  for (const [key, value] of Object.entries(cache)) {
+    await setConfigValue("databaseSettings", `cache.${key}`, encryptCacheValue(key, value));
+  }
+  await refreshSemanticCacheDbBridge();
+}
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -47,18 +56,18 @@ test("dual-layer manager is off by default (no env, no DB override)", () => {
   assert.equal(DEFAULT_DATABASE_SETTINGS.cache.semanticCacheEnabled, true);
 });
 
-test("DB bridge enables the vector layer only when master + vector toggles are both on", () => {
-  ensureSemanticCacheDbBridge();
+test("DB bridge enables the vector layer only when master + vector toggles are both on", async () => {
+  await ensureSemanticCacheDbBridge();
 
   // Fresh install: master on (legacy default), vector opt-in absent → manager off.
-  assert.equal(getDatabaseSettings().cache.semanticCacheEnabled, true);
+  assert.equal((await getDatabaseSettingsSection("cache")).semanticCacheEnabled, true);
   assert.equal(resolveSemanticCacheConfig().enabled, false);
 
-  updateDatabaseSettings({ cache: { semanticCacheVectorEnabled: true } });
+  await setCacheSettings({ semanticCacheVectorEnabled: true });
   assert.equal(resolveSemanticCacheConfig().enabled, true);
 
   // Master off wins even when the vector opt-in is on.
-  updateDatabaseSettings({ cache: { semanticCacheEnabled: false } });
+  await setCacheSettings({ semanticCacheEnabled: false });
   assert.equal(resolveSemanticCacheConfig().enabled, false);
 });
 

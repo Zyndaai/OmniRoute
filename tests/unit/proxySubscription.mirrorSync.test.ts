@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-multi-mirror-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -11,8 +12,8 @@ const core = await import("../../src/lib/db/core.ts");
 const proxies = await import("../../src/lib/db/proxies.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -21,60 +22,36 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function insertSubscription(
-  db: ReturnType<typeof core.getDbInstance>,
-  id: string,
-  url: string,
-  mirrorUrls: string[] | null
-) {
-  const hasMirror = hasMirrorColumn(db);
-  const cols = hasMirror
-    ? "(id, name, url, mirror_urls, enabled, mode, update_interval_minutes, status, created_at, updated_at)"
-    : "(id, name, url, enabled, mode, update_interval_minutes, status, created_at, updated_at)";
-  const vals = hasMirror
-    ? [
-        id,
-        `sub-${id}`,
-        url,
-        mirrorUrls ? JSON.stringify(mirrorUrls) : null,
-        1,
-        "global",
-        60,
-        "empty",
-        nowIso(),
-        nowIso(),
-      ]
-    : [id, `sub-${id}`, url, 1, "global", 60, "empty", nowIso(), nowIso()];
-  const placeholders = vals.map(() => "?").join(",");
-  db.prepare(`INSERT INTO proxy_subscriptions ${cols} VALUES (${placeholders})`).run(...vals);
+async function insertSubscription(id: string, url: string, mirrorUrls: string[] | null) {
+  await getTestBackend().execute(
+    `INSERT INTO proxy_subscriptions (id, name, url, mirror_urls, enabled, mode, update_interval_minutes, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, true, 'global', 60, 'empty', $5, $6)`,
+    [
+      id,
+      `sub-${id}`,
+      url,
+      mirrorUrls ? JSON.stringify(mirrorUrls) : null,
+      nowIso(),
+      nowIso(),
+    ]
+  );
 }
 
-function hasMirrorColumn(db: ReturnType<typeof core.getDbInstance>): boolean {
-  try {
-    const cols = db.prepare("PRAGMA table_info(proxy_subscriptions)").all() as Array<{
-      name?: string;
-    }>;
-    return cols.some((c) => c.name === "mirror_urls");
-  } catch {
-    return false;
-  }
-}
-
-function poolHosts(id: string): string[] {
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT host FROM proxy_registry WHERE subscription_id = ?")
-    .all(id) as Array<{ host: string }>;
+async function poolHosts(id: string): Promise<string[]> {
+  const rows = await getTestBackend().query<{ host: string }>(
+    "SELECT host FROM proxy_registry WHERE subscription_id = $1",
+    [id]
+  );
   return rows.map((r) => r.host).sort();
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("two healthy feeds sync the union into the pool", async () => {
-  reset();
+  await reset();
   const { fetchSubscriptionFeeds } = await import("../../src/lib/proxySubscription/multiSource.ts");
   const feeds = await fetchSubscriptionFeeds(
     {
@@ -103,8 +80,7 @@ test("two healthy feeds sync the union into the pool", async () => {
 
 test("partial failure syncs survivors and drops the dead feed nodes", async () => {
   await reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "m-partial", "https://example.com/primary", [
+  await insertSubscription("m-partial", "https://example.com/primary", [
     "https://example.com/mirror",
   ]);
   await proxies.createProxy({
@@ -130,7 +106,7 @@ test("partial failure syncs survivors and drops the dead feed nodes", async () =
 });
 
 test("total failure refuses with pool and last nodes intact", async () => {
-  reset();
+  await reset();
   const { fetchSubscriptionFeeds } = await import("../../src/lib/proxySubscription/multiSource.ts");
   const feeds = await fetchSubscriptionFeeds(
     { url: "https://example.com/primary", mirrorUrls: ["https://example.com/mirror"] },
@@ -162,9 +138,8 @@ test("mirror list coerces leniently: trims, dedupes, caps, excludes primary", as
 });
 
 test("pool union: direct upsert of merged nodes keeps both feeds", async () => {
-  reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "m-union", "https://example.com/primary", null);
+  await reset();
+  await insertSubscription("m-union", "https://example.com/primary", null);
   const { parseSubscription } = await import("../../src/lib/proxySubscription/parse.ts");
   const { mergeParsedSources } = await import("../../src/lib/proxySubscription/coreConfig/sync.ts");
   const merged = mergeParsedSources([
@@ -185,5 +160,5 @@ test("pool union: direct upsert of merged nodes keeps both feeds", async () => {
       { claimOwnership: false }
     );
   }
-  assert.deepEqual(poolHosts("m-union"), ["203.0.113.10", "203.0.113.11"]);
+  assert.deepEqual(await poolHosts("m-union"), ["203.0.113.10", "203.0.113.11"]);
 });

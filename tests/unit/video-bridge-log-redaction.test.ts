@@ -32,6 +32,7 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-video-log-redact
 process.env.DATA_DIR = testDataDir;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { getCallLogById, getCallLogs } = await import("../../src/lib/usage/callLogs.ts");
 const { persistAttemptLogs } = await import("../../open-sse/handlers/chatCore/attemptLogging.ts");
 const { recordEarlyKeepaliveBytes, takeEarlyKeepaliveBytes } =
@@ -124,8 +125,8 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -171,11 +172,11 @@ test("#12150 P2 surface 2: persistAttemptLogs marks the call_logs row video_cont
   );
   const row = await pollForCallLog(id);
   assert.ok(row, "call log row should be persisted");
-  const marker = coreDb
-    .getDbInstance()
-    .prepare("SELECT video_content_removed FROM call_logs WHERE id = ?")
-    .get(row.id) as { video_content_removed: number };
-  assert.equal(marker.video_content_removed, 1);
+  const marker = await getTestBackend().queryOne<{ video_content_removed: boolean }>(
+    "SELECT video_content_removed FROM call_logs WHERE id = $1",
+    [row.id]
+  );
+  assert.equal(marker?.video_content_removed, true);
 });
 
 test("#12150 P2 surface 2: the marker defaults to 0 for an ordinary (non-video) request", async () => {
@@ -186,11 +187,11 @@ test("#12150 P2 surface 2: the marker defaults to 0 for an ordinary (non-video) 
   );
   const row = await pollForCallLog(id);
   assert.ok(row);
-  const marker = coreDb
-    .getDbInstance()
-    .prepare("SELECT video_content_removed FROM call_logs WHERE id = ?")
-    .get(row.id) as { video_content_removed: number };
-  assert.equal(marker.video_content_removed, 0);
+  const marker = await getTestBackend().queryOne<{ video_content_removed: boolean }>(
+    "SELECT video_content_removed FROM call_logs WHERE id = $1",
+    [row.id]
+  );
+  assert.equal(marker?.video_content_removed, false);
 });
 
 test("control: without a redaction map the persisted requestBody keeps the original text (model path untouched)", async () => {

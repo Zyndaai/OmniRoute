@@ -21,43 +21,47 @@ import {
 } from "../../src/domain/costRules.ts";
 
 describe("costRules", () => {
-  before(() => resetCostData());
-  after(() => resetCostData());
+  before(async () => {
+    await resetCostData();
+  });
+  after(async () => {
+    await resetCostData();
+  });
 
-  it("should allow when no budget set", () => {
-    const result = checkBudget("key-1");
+  it("should allow when no budget set", async () => {
+    const result = await checkBudget("key-1");
     assert.equal(result.allowed, true);
   });
 
-  it("should set and get budget", () => {
-    setBudget("key-1", { dailyLimitUsd: 10.0, warningThreshold: 0.8 });
-    const budget = getBudget("key-1");
+  it("should set and get budget", async () => {
+    await setBudget("key-1", { dailyLimitUsd: 10.0, warningThreshold: 0.8 });
+    const budget = await getBudget("key-1");
     assert.equal(budget.dailyLimitUsd, 10.0);
     assert.equal(budget.warningThreshold, 0.8);
   });
 
-  it("should record costs and check budget", () => {
+  it("should record costs and check budget", async () => {
     recordCost("key-1", 5.0);
-    const result = checkBudget("key-1");
+    const result = await checkBudget("key-1");
     assert.equal(result.allowed, true);
     assert.equal(result.dailyUsed, 5.0);
   });
 
-  it("should detect warning threshold", () => {
+  it("should detect warning threshold", async () => {
     recordCost("key-1", 4.0); // total = 9.0 / 10.0 = 90% > 80%
-    const result = checkBudget("key-1");
+    const result = await checkBudget("key-1");
     assert.equal(result.allowed, true);
     assert.equal(result.warningReached, true);
   });
 
-  it("should block when budget exceeded", () => {
-    const result = checkBudget("key-1", 2.0); // 9.0 + 2.0 = 11.0 > 10.0
+  it("should block when budget exceeded", async () => {
+    const result = await checkBudget("key-1", 2.0); // 9.0 + 2.0 = 11.0 > 10.0
     assert.equal(result.allowed, false);
     assert.ok(result.reason.includes("exceeded"));
   });
 
-  it("should get cost summary", () => {
-    const summary = getCostSummary("key-1");
+  it("should get cost summary", async () => {
+    const summary = await getCostSummary("key-1");
     assert.ok(summary.dailyTotal >= 9.0);
     assert.equal(summary.totalEntries, 2);
   });
@@ -76,55 +80,59 @@ import {
 } from "../../src/domain/fallbackPolicy.ts";
 
 describe("fallbackPolicy", () => {
-  before(() => resetAllFallbacks());
-  after(() => resetAllFallbacks());
-
-  it("should return empty chain for unknown model", () => {
-    assert.deepEqual(resolveFallbackChain("unknown"), []);
-    assert.equal(hasFallback("unknown"), false);
+  before(async () => {
+    await resetAllFallbacks();
+  });
+  after(async () => {
+    await resetAllFallbacks();
   });
 
-  it("should register fallback chain sorted by priority", () => {
-    registerFallback("gpt-4o", [
+  it("should return empty chain for unknown model", async () => {
+    assert.deepEqual(await resolveFallbackChain("unknown"), []);
+    assert.equal(await hasFallback("unknown"), false);
+  });
+
+  it("should register fallback chain sorted by priority", async () => {
+    await registerFallback("gpt-4o", [
       { provider: "azure", priority: 2 },
       { provider: "openai", priority: 0 },
       { provider: "github", priority: 1 },
     ]);
-    const chain = resolveFallbackChain("gpt-4o");
+    const chain = await resolveFallbackChain("gpt-4o");
     assert.equal(chain[0].provider, "openai");
     assert.equal(chain[1].provider, "github");
     assert.equal(chain[2].provider, "azure");
   });
 
-  it("should exclude specified providers", () => {
-    const chain = resolveFallbackChain("gpt-4o", ["openai"]);
+  it("should exclude specified providers", async () => {
+    const chain = await resolveFallbackChain("gpt-4o", ["openai"]);
     assert.equal(chain.length, 2);
     assert.equal(chain[0].provider, "github");
   });
 
-  it("should get next fallback", () => {
-    assert.equal(getNextFallback("gpt-4o"), "openai");
-    assert.equal(getNextFallback("gpt-4o", ["openai"]), "github");
-    assert.equal(getNextFallback("gpt-4o", ["openai", "github", "azure"]), null);
+  it("should get next fallback", async () => {
+    assert.equal(await getNextFallback("gpt-4o"), "openai");
+    assert.equal(await getNextFallback("gpt-4o", ["openai"]), "github");
+    assert.equal(await getNextFallback("gpt-4o", ["openai", "github", "azure"]), null);
   });
 
-  it("should respect enabled flag", () => {
-    registerFallback("test-model", [
+  it("should respect enabled flag", async () => {
+    await registerFallback("test-model", [
       { provider: "a", enabled: false },
       { provider: "b", enabled: true },
     ]);
-    const chain = resolveFallbackChain("test-model");
+    const chain = await resolveFallbackChain("test-model");
     assert.equal(chain.length, 1);
     assert.equal(chain[0].provider, "b");
   });
 
-  it("should remove fallback chain", () => {
-    removeFallback("test-model");
-    assert.equal(hasFallback("test-model"), false);
+  it("should remove fallback chain", async () => {
+    await removeFallback("test-model");
+    assert.equal(await hasFallback("test-model"), false);
   });
 
-  it("should list all chains", () => {
-    const all = getAllFallbackChains();
+  it("should list all chains", async () => {
+    const all = await getAllFallbackChains();
     assert.ok("gpt-4o" in all);
   });
 });

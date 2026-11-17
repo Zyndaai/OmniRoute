@@ -7,19 +7,19 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-logs-route-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const proxyLogsRoute = await import("../../src/app/api/usage/proxy-logs/route.ts");
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  proxyLogger.clearProxyLogs();
+  await proxyLogger.clearProxyLogs();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -40,6 +40,7 @@ test("GET /api/usage/proxy-logs returns filtered proxy logs", async () => {
     clientIp: "127.0.0.1",
     latencyMs: 42,
   });
+  await proxyLogger.flushProxyLogsSync();
 
   const response = await proxyLogsRoute.GET(
     new Request("http://localhost/api/usage/proxy-logs?provider=openai&status=success")
@@ -59,6 +60,7 @@ test("DELETE /api/usage/proxy-logs clears proxy logs", async () => {
     level: "global",
     error: "proxy failed",
   });
+  await proxyLogger.flushProxyLogsSync();
 
   const deleteResponse = await proxyLogsRoute.DELETE();
   const deleteBody = await deleteResponse.json();

@@ -13,18 +13,18 @@ test("isModelAllowedForKey respects provider parameter in checkKeyModelAccess", 
   );
   assert.ok(createdKey);
 
-  const group = apiKeyGroups.createKeyGroup("Provider Test Group", "Testing provider param");
+  const group = await apiKeyGroups.createKeyGroup("Provider Test Group", "Testing provider param");
   assert.ok(group);
 
-  apiKeyGroups.addKeyToGroup(createdKey.id, group.id);
+  await apiKeyGroups.addKeyToGroup(createdKey.id, group.id);
 
-  apiKeyGroups.addGroupPermission(group.id, "gpt-4*", "deny", "openai");
-  apiKeyGroups.addGroupPermission(group.id, "*", "allow");
+  await apiKeyGroups.addGroupPermission(group.id, "gpt-4*", "deny", "openai");
+  await apiKeyGroups.addGroupPermission(group.id, "*", "allow");
 
-  const res1 = apiKeyGroups.checkKeyModelAccess(createdKey.id, "gpt-4", "openai");
+  const res1 = await apiKeyGroups.checkKeyModelAccess(createdKey.id, "gpt-4", "openai");
   console.log("checkKeyModelAccess openai/gpt-4:", res1);
 
-  const res2 = apiKeyGroups.checkKeyModelAccess(createdKey.id, "gpt-4", "anthropic");
+  const res2 = await apiKeyGroups.checkKeyModelAccess(createdKey.id, "gpt-4", "anthropic");
   console.log("checkKeyModelAccess anthropic/gpt-4:", res2);
 
   // Model with provider "openai" matching pattern "gpt-4*" should be denied

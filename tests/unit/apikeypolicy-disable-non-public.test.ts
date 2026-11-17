@@ -40,7 +40,7 @@ rateLimiter.setRateLimiterTestMode(true);
 
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -108,7 +108,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -282,7 +282,7 @@ test("disableNonPublicModels=true + existing combo name → not rejected by publ
   }
 
   if (comboDb && typeof comboDb.createCombo === "function") {
-    comboDb.createCombo({ name: "test-combo-dnp", targets: [] });
+    await comboDb.createCombo({ name: "test-combo-dnp", targets: [] });
     apiKeysDb.clearApiKeyCaches();
 
     const result2 = await policy.enforceApiKeyPolicy(makeRequest(created.key), "test-combo-dnp");

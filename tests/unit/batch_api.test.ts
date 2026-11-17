@@ -21,7 +21,7 @@ const {
 } = await import("@/lib/db/batches");
 const { createProviderConnection } = await import("@/lib/db/providers");
 const { createApiKey } = await import("@/lib/db/apiKeys");
-const { getDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const {
   initBatchProcessor,
   stopBatchProcessor,
@@ -42,16 +42,7 @@ test.afterEach(async () => {
   if (typeof resetBatchProcessorState === "function") {
     resetBatchProcessorState();
   }
-  try {
-    const db = getDbInstance();
-    db.prepare("DELETE FROM batch_item_checkpoints").run();
-    db.prepare("DELETE FROM batches").run();
-    db.prepare("DELETE FROM files").run();
-    db.prepare("DELETE FROM provider_connections").run();
-    db.prepare("DELETE FROM api_keys").run();
-  } catch (err) {
-    console.error("Failed to clean up db tables:", err);
-  }
+  await resetTestDb();
 });
 
 test("Batch API and Processing", async () => {
@@ -84,7 +75,7 @@ test("Batch API and Processing", async () => {
     }),
   ].join("\n");
 
-  const file = createFile({
+  const file = await createFile({
     bytes: Buffer.byteLength(batchItems),
     filename: "test_batch.jsonl",
     purpose: "batch",
@@ -95,7 +86,7 @@ test("Batch API and Processing", async () => {
   assert.ok(file.id.startsWith("file-"), "File ID should start with file-");
 
   // 2. Create a batch
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -117,7 +108,7 @@ test("Batch API and Processing", async () => {
 
   // Poll for status change
   let maxAttempts = 30;
-  let currentBatch = getBatch(batch.id);
+  let currentBatch = await getBatch(batch.id);
   while (
     maxAttempts > 0 &&
     currentBatch?.status !== "completed" &&
@@ -125,7 +116,7 @@ test("Batch API and Processing", async () => {
     currentBatch?.status !== "cancelled"
   ) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    currentBatch = getBatch(batch.id);
+    currentBatch = await getBatch(batch.id);
     const progress = currentBatch?.requestCountsTotal
       ? `${currentBatch.requestCountsCompleted}/${currentBatch.requestCountsTotal}`
       : "not started";
@@ -169,15 +160,15 @@ test("Batch API and Processing", async () => {
   assert.strictEqual(currentBatch?.requestCountsCompleted, 2);
   assert.ok(currentBatch?.outputFileId, "Should have output file ID");
 
-  const inputFileAfter = getFile(file.id);
+  const inputFileAfter = await getFile(file.id);
   assert.ok(inputFileAfter, "Input file should exist");
 
-  const outputFile = getFile(currentBatch.outputFileId!);
+  const outputFile = await getFile(currentBatch.outputFileId!);
   assert.ok(outputFile, "Output file should exist");
 
   // 4. Check output file content
   if (currentBatch?.outputFileId) {
-    const outputContent = getFileContent(currentBatch.outputFileId);
+    const outputContent = await getFileContent(currentBatch.outputFileId);
     assert.ok(outputContent, "Output file content should exist");
     const lines = outputContent
       .toString()
@@ -225,7 +216,7 @@ test("Batch handles and counts failures correctly", async () => {
       }),
     ].join("\n");
 
-    const file = createFile({
+    const file = await createFile({
       bytes: Buffer.byteLength(batchItems),
       filename: "fail_batch.jsonl",
       purpose: "batch",
@@ -234,7 +225,7 @@ test("Batch handles and counts failures correctly", async () => {
     });
 
     // 2. Create a batch
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -243,14 +234,14 @@ test("Batch handles and counts failures correctly", async () => {
 
     // 3. Poll for completion
     let maxAttempts = 20;
-    let currentBatch = getBatch(batch.id);
+    let currentBatch = await getBatch(batch.id);
     while (
       maxAttempts > 0 &&
       currentBatch?.status !== "completed" &&
       currentBatch?.status !== "failed"
     ) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      currentBatch = getBatch(batch.id);
+      currentBatch = await getBatch(batch.id);
       maxAttempts--;
     }
 
@@ -262,7 +253,7 @@ test("Batch handles and counts failures correctly", async () => {
     assert.ok(!currentBatch?.outputFileId, "Should NOT have output file if no successes");
 
     if (currentBatch?.errorFileId) {
-      const errorContent = getFileContent(currentBatch.errorFileId);
+      const errorContent = await getFileContent(currentBatch.errorFileId);
       const result = JSON.parse(errorContent.toString());
       assert.ok(
         result.response.status_code >= 400,
@@ -313,7 +304,7 @@ test("Batch dispatches non-chat endpoints through the matching route handler", a
       }),
     ].join("\n");
 
-    const file = createFile({
+    const file = await createFile({
       bytes: Buffer.byteLength(batchItems),
       filename: "embeddings_batch.jsonl",
       purpose: "batch",
@@ -321,7 +312,7 @@ test("Batch dispatches non-chat endpoints through the matching route handler", a
       apiKeyId: null,
     });
 
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: "/v1/embeddings",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -329,14 +320,14 @@ test("Batch dispatches non-chat endpoints through the matching route handler", a
     });
 
     let maxAttempts = 20;
-    let currentBatch = getBatch(batch.id);
+    let currentBatch = await getBatch(batch.id);
     while (
       maxAttempts > 0 &&
       currentBatch?.status !== "completed" &&
       currentBatch?.status !== "failed"
     ) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      currentBatch = getBatch(batch.id);
+      currentBatch = await getBatch(batch.id);
       maxAttempts--;
     }
 
@@ -344,7 +335,7 @@ test("Batch dispatches non-chat endpoints through the matching route handler", a
     assert.strictEqual(currentBatch?.requestCountsCompleted, 1);
     assert.ok(currentBatch?.outputFileId, "embedding batch should produce an output file");
 
-    const outputContent = getFileContent(currentBatch.outputFileId!);
+    const outputContent = await getFileContent(currentBatch.outputFileId!);
     const result = JSON.parse(outputContent.toString());
     assert.strictEqual(result.response.status_code, 200);
     assert.ok(Array.isArray(result.response.body.data));
@@ -370,7 +361,7 @@ test("Batch rejects input lines whose url does not match the batch endpoint", as
       }),
     ].join("\n");
 
-    const file = createFile({
+    const file = await createFile({
       bytes: Buffer.byteLength(batchItems),
       filename: "wrong_endpoint_batch.jsonl",
       purpose: "batch",
@@ -378,7 +369,7 @@ test("Batch rejects input lines whose url does not match the batch endpoint", as
       apiKeyId: null,
     });
 
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -387,7 +378,7 @@ test("Batch rejects input lines whose url does not match the batch endpoint", as
 
     await processPendingBatches();
 
-    const currentBatch = getBatch(batch.id);
+    const currentBatch = await getBatch(batch.id);
     assert.strictEqual(currentBatch?.status, "failed");
     assert.match(
       String(currentBatch?.errors?.[0]?.message || ""),
@@ -429,7 +420,7 @@ test("Batch forces stream: false for all requests", async () => {
       }),
     ].join("\n");
 
-    const file = createFile({
+    const file = await createFile({
       bytes: Buffer.byteLength(batchItems),
       filename: "stream_force_batch.jsonl",
       purpose: "batch",
@@ -437,7 +428,7 @@ test("Batch forces stream: false for all requests", async () => {
       apiKeyId: null,
     });
 
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -445,21 +436,21 @@ test("Batch forces stream: false for all requests", async () => {
     });
 
     let maxAttempts = 20;
-    let currentBatch = getBatch(batch.id);
+    let currentBatch = await getBatch(batch.id);
     while (
       maxAttempts > 0 &&
       currentBatch?.status !== "completed" &&
       currentBatch?.status !== "failed"
     ) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      currentBatch = getBatch(batch.id);
+      currentBatch = await getBatch(batch.id);
       maxAttempts--;
     }
 
     assert.strictEqual(currentBatch?.status, "completed", "Batch should be completed");
     const outputFileId = currentBatch?.outputFileId || currentBatch?.errorFileId;
     assert.ok(outputFileId, "Should have output or error file ID");
-    const outputContent = getFileContent(outputFileId!);
+    const outputContent = await getFileContent(outputFileId!);
     const result = JSON.parse(outputContent.toString());
 
     // It shouldn't have "Unexpected token d" error which happens if it tries to parse SSE stream as JSON
@@ -485,7 +476,7 @@ test("Batch API response format is spec-compliant", async () => {
   const apiKey = await createApiKey("Spec Test Key", "test-machine");
 
   // Create a mock file first to satisfy foreign key constraint
-  const file = createFile({
+  const file = await createFile({
     bytes: 10,
     filename: "mock.jsonl",
     purpose: "batch",
@@ -494,7 +485,7 @@ test("Batch API response format is spec-compliant", async () => {
   });
 
   // Create a mock batch directly
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -503,7 +494,7 @@ test("Batch API response format is spec-compliant", async () => {
   });
 
   // Mock an update with some counts and usage
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "completed",
     requestCountsTotal: 10,
     requestCountsCompleted: 8,
@@ -518,7 +509,7 @@ test("Batch API response format is spec-compliant", async () => {
     },
   });
 
-  const updatedBatch = getBatch(batch.id)!;
+  const updatedBatch = (await getBatch(batch.id))!;
 
   // Test the formatter used in API routes (simulate the route's response)
   function formatBatchResponse(batch: any) {
@@ -576,7 +567,7 @@ test("List batches pagination and response format", async () => {
   const apiKey = await createApiKey("List Test Key", "test-machine");
 
   // 1. Create multiple batches
-  const file = createFile({
+  const file = await createFile({
     bytes: 10,
     filename: "list_mock.jsonl",
     purpose: "batch",
@@ -587,14 +578,14 @@ test("List batches pagination and response format", async () => {
   const batchOrder: Array<{ createdAt: number; id: string }> = [];
   const baseCreatedAt = Math.floor(Date.now() / 1000) - 10_000;
   for (let i = 0; i < 5; i++) {
-    const b = createBatch({
+    const b = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
       apiKeyId: apiKey.id,
       metadata: { index: i },
     });
-    updateBatch(b.id, { createdAt: baseCreatedAt + i });
+    await updateBatch(b.id, { createdAt: baseCreatedAt + i });
     batchOrder.push({ createdAt: baseCreatedAt + i, id: b.id });
   }
 
@@ -603,13 +594,13 @@ test("List batches pagination and response format", async () => {
 
   // 2. Test listBatches logic (direct DB call)
   const { listBatches } = await import("@/lib/db/batches");
-  const allBatches = listBatches(apiKey.id, 10);
+  const allBatches = await listBatches(apiKey.id, 10);
   assert.strictEqual(allBatches.length, 5);
   assert.strictEqual(allBatches[0].id, batchIds[0]);
 
   // 3. Test pagination logic (as implemented in the route)
   const limit = 2;
-  const batchesPage1 = listBatches(apiKey.id, limit + 1);
+  const batchesPage1 = await listBatches(apiKey.id, limit + 1);
   const hasMore1 = batchesPage1.length > limit;
   const data1 = hasMore1 ? batchesPage1.slice(0, limit) : batchesPage1;
 
@@ -619,7 +610,7 @@ test("List batches pagination and response format", async () => {
   assert.strictEqual(data1[1].id, batchIds[1]);
 
   const after = data1[1].id;
-  const batchesPage2 = listBatches(apiKey.id, limit + 1, after);
+  const batchesPage2 = await listBatches(apiKey.id, limit + 1, after);
   const hasMore2 = batchesPage2.length > limit;
   const data2 = hasMore2 ? batchesPage2.slice(0, limit) : batchesPage2;
 
@@ -629,7 +620,7 @@ test("List batches pagination and response format", async () => {
   assert.strictEqual(data2[1].id, batchIds[3]);
 
   const after2 = data2[1].id;
-  const batchesPage3 = listBatches(apiKey.id, limit + 1, after2);
+  const batchesPage3 = await listBatches(apiKey.id, limit + 1, after2);
   const hasMore3 = batchesPage3.length > limit;
   const data3 = hasMore3 ? batchesPage3.slice(0, limit) : batchesPage3;
 
@@ -642,21 +633,21 @@ test("Batch cleanup honors output_expires_after for output artifacts", async () 
   const apiKey = await createApiKey("Batch Retention Key", "test-machine");
   const now = Math.floor(Date.now() / 1000);
 
-  const inputFile = createFile({
+  const inputFile = await createFile({
     bytes: 10,
     filename: "retention_input.jsonl",
     purpose: "batch",
     content: Buffer.from("{}"),
     apiKeyId: apiKey.id,
   });
-  const outputFile = createFile({
+  const outputFile = await createFile({
     bytes: 10,
     filename: "retention_output.jsonl",
     purpose: "batch_output",
     content: Buffer.from("{}"),
     apiKeyId: apiKey.id,
   });
-  const errorFile = createFile({
+  const errorFile = await createFile({
     bytes: 10,
     filename: "retention_error.jsonl",
     purpose: "batch_output",
@@ -664,7 +655,7 @@ test("Batch cleanup honors output_expires_after for output artifacts", async () 
     apiKeyId: apiKey.id,
   });
 
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: inputFile.id,
@@ -673,7 +664,7 @@ test("Batch cleanup honors output_expires_after for output artifacts", async () 
     outputExpiresAfterAnchor: "created_at",
   });
 
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "completed",
     createdAt: now - 3700,
     completedAt: now - 30,
@@ -683,9 +674,12 @@ test("Batch cleanup honors output_expires_after for output artifacts", async () 
 
   await processPendingBatches();
 
-  assert.ok(getFile(inputFile.id), "input file should still follow completion_window retention");
-  assert.equal(getFile(outputFile.id), null);
-  assert.equal(getFile(errorFile.id), null);
+  assert.ok(
+    await getFile(inputFile.id),
+    "input file should still follow completion_window retention"
+  );
+  assert.equal(await getFile(outputFile.id), null);
+  assert.equal(await getFile(errorFile.id), null);
 });
 
 test("Batch processor recovers orphaned finalizing batches during startup recovery", async () => {
@@ -702,7 +696,7 @@ test("Batch processor recovers orphaned finalizing batches during startup recove
     }),
   ].join("\n");
 
-  const inputFile = createFile({
+  const inputFile = await createFile({
     bytes: Buffer.byteLength(batchItems),
     filename: "finalizing.jsonl",
     purpose: "batch",
@@ -710,21 +704,21 @@ test("Batch processor recovers orphaned finalizing batches during startup recove
     apiKeyId: apiKey.id,
   });
 
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: inputFile.id,
     apiKeyId: apiKey.id,
   });
 
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "finalizing",
     finalizingAt: Math.floor(Date.now() / 1000),
     requestCountsTotal: 1,
     requestCountsCompleted: 1,
   });
-  ensureBatchItemCheckpoints(batch.id, [{ lineNumber: 1, customId: "req-recovery" }]);
-  markBatchItemResult(
+  await ensureBatchItemCheckpoints(batch.id, [{ lineNumber: 1, customId: "req-recovery" }]);
+  await markBatchItemResult(
     batch.id,
     { lineNumber: 1, customId: "req-recovery" },
     {
@@ -764,7 +758,7 @@ test("Batch processor recovers orphaned finalizing batches during startup recove
     await processPendingBatches();
     await waitForAllBatches();
 
-    const recoveredBatch = getBatch(batch.id);
+    const recoveredBatch = await getBatch(batch.id);
     assert.strictEqual(recoveredBatch?.status, "completed");
     assert.strictEqual(fetchCount, 0);
   } finally {
@@ -791,7 +785,7 @@ test("Files upload route stores multipart content", async () => {
 
   assert.strictEqual(response.status, 200);
   assert.ok(json.id);
-  assert.strictEqual(getFileContent(json.id)?.toString(), fileContent);
+  assert.strictEqual((await getFileContent(json.id))?.toString(), fileContent);
 });
 
 test("Files and batches routes expose explicit CORS preflight handlers", async () => {
@@ -817,14 +811,14 @@ test("Files and batches routes expose explicit CORS preflight handlers", async (
 });
 
 test("Batch by-id route hides ownerless records from anonymous requests (GHSA-2jm2-mpx8-6523)", async () => {
-  const file = createFile({
+  const file = await createFile({
     bytes: 2,
     filename: "ownerless.jsonl",
     purpose: "batch",
     content: Buffer.from("{}"),
     apiKeyId: null,
   });
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -848,7 +842,7 @@ test("Batch by-id route hides ownerless records from anonymous requests (GHSA-2j
 test("Batch Cancel API", async () => {
   const apiKey = await createApiKey("Cancel Test Key", "test-machine");
 
-  const file = createFile({
+  const file = await createFile({
     bytes: 10,
     filename: "cancel_mock.jsonl",
     purpose: "batch",
@@ -856,7 +850,7 @@ test("Batch Cancel API", async () => {
     apiKeyId: apiKey.id,
   });
 
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -868,18 +862,18 @@ test("Batch Cancel API", async () => {
 
   // 2. Cancel it
   const cancellingAt = Math.floor(Date.now() / 1000);
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "cancelling",
     cancellingAt,
   });
 
-  const updatedBatch = getBatch(batch.id)!;
+  const updatedBatch = (await getBatch(batch.id))!;
   assert.strictEqual(updatedBatch.status, "cancelling");
   assert.strictEqual(updatedBatch.cancellingAt, cancellingAt);
 
   // 3. Test that it can't be cancelled if already terminal
-  updateBatch(batch.id, { status: "completed" });
-  const terminalBatch = getBatch(batch.id)!;
+  await updateBatch(batch.id, { status: "completed" });
+  const terminalBatch = (await getBatch(batch.id))!;
   assert.strictEqual(terminalBatch.status, "completed");
 
   // In actual API this would return 400, here we just verify state logic
@@ -911,7 +905,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
     }),
   ].join("\n");
 
-  const file = createFile({
+  const file = await createFile({
     bytes: Buffer.byteLength(batchItems),
     filename: "cancel_mid_flight.jsonl",
     purpose: "batch",
@@ -919,7 +913,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
     apiKeyId: apiKey.id,
   });
 
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -927,7 +921,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
   });
 
   (globalThis as any).fetch = async () => {
-    updateBatch(batch.id, {
+    await updateBatch(batch.id, {
       status: "cancelled",
       cancelledAt: Math.floor(Date.now() / 1000),
     });
@@ -955,7 +949,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
   try {
     await processPendingBatches();
 
-    let currentBatch = getBatch(batch.id);
+    let currentBatch = await getBatch(batch.id);
     let remainingAttempts = 40;
     while (
       remainingAttempts > 0 &&
@@ -963,7 +957,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
       !["cancelled", "completed", "failed", "expired"].includes(currentBatch.status)
     ) {
       await new Promise((resolve) => setTimeout(resolve, 50));
-      currentBatch = getBatch(batch.id);
+      currentBatch = await getBatch(batch.id);
       remainingAttempts--;
     }
 
@@ -981,7 +975,7 @@ test("List files pagination and response format", async () => {
   // 1. Create multiple files
   const fileIds: string[] = [];
   for (let i = 0; i < 5; i++) {
-    const f = createFile({
+    const f = await createFile({
       bytes: 10 + i,
       filename: `file_${i}.jsonl`,
       purpose: i % 2 === 0 ? "batch" : "fine-tune",
@@ -992,7 +986,7 @@ test("List files pagination and response format", async () => {
   }
 
   // Default order is DESC (by created_at, then ID)
-  const allFilesSorted = listFiles({ apiKeyId: apiKey.id, order: "desc" });
+  const allFilesSorted = await listFiles({ apiKeyId: apiKey.id, order: "desc" });
   const sortedFileIds = allFilesSorted.map((f) => f.id);
 
   // 2. Test listFiles options
@@ -1000,30 +994,30 @@ test("List files pagination and response format", async () => {
   assert.strictEqual(allFilesSorted[0].id, sortedFileIds[0]);
 
   // 3. Test filtering by purpose
-  const batchFiles = listFiles({ apiKeyId: apiKey.id, purpose: "batch" });
+  const batchFiles = await listFiles({ apiKeyId: apiKey.id, purpose: "batch" });
   assert.strictEqual(batchFiles.length, 3); // 0, 2, 4
   assert.ok(batchFiles.every((f) => f.purpose === "batch"));
 
   // 4. Test pagination
   const limit = 2;
-  const page1 = listFiles({ apiKeyId: apiKey.id, limit });
+  const page1 = await listFiles({ apiKeyId: apiKey.id, limit });
   assert.strictEqual(page1.length, 2);
   assert.strictEqual(page1[0].id, sortedFileIds[0]);
   assert.strictEqual(page1[1].id, sortedFileIds[1]);
 
   const after = page1[1].id;
-  const page2 = listFiles({ apiKeyId: apiKey.id, limit, after });
+  const page2 = await listFiles({ apiKeyId: apiKey.id, limit, after });
   assert.strictEqual(page2.length, 2);
   assert.strictEqual(page2[0].id, sortedFileIds[2]);
   assert.strictEqual(page2[1].id, sortedFileIds[3]);
 
   const after2 = page2[1].id;
-  const page3 = listFiles({ apiKeyId: apiKey.id, limit, after: after2 });
+  const page3 = await listFiles({ apiKeyId: apiKey.id, limit, after: after2 });
   assert.strictEqual(page3.length, 1);
   assert.strictEqual(page3[0].id, sortedFileIds[4]);
 
   // 5. Test sorting
-  const ascFiles = listFiles({ apiKeyId: apiKey.id, order: "asc" });
+  const ascFiles = await listFiles({ apiKeyId: apiKey.id, order: "asc" });
   assert.strictEqual(ascFiles.length, 5);
   assert.strictEqual(ascFiles[0].id, [...sortedFileIds].reverse()[0]);
 });
@@ -1045,7 +1039,7 @@ test("File upload with expiration and spec-compliant response", async () => {
   const expiresAfterSeconds = 3600;
   const expiresAt = Math.floor(Date.now() / 1000) + expiresAfterSeconds;
 
-  const record = createFile({
+  const record = await createFile({
     bytes: mockFile.size,
     filename: mockFile.name,
     purpose: "batch",
@@ -1073,7 +1067,7 @@ test("File upload with expiration and spec-compliant response", async () => {
 test("Retrieve file spec compliance", async () => {
   const apiKey = await createApiKey("File Retrieve Test Key", "test-machine");
 
-  const record = createFile({
+  const record = await createFile({
     bytes: 123,
     filename: "retrieve_test.jsonl",
     purpose: "batch",
@@ -1102,7 +1096,7 @@ test("Retrieve file spec compliance", async () => {
 test("File deletion", async () => {
   const apiKey = await createApiKey("File Delete Test Key", "test-machine");
 
-  const record = createFile({
+  const record = await createFile({
     bytes: 123,
     filename: "delete_test.jsonl",
     purpose: "batch",
@@ -1110,22 +1104,22 @@ test("File deletion", async () => {
     apiKeyId: apiKey.id,
   });
 
-  const fileBefore = getFile(record.id);
+  const fileBefore = await getFile(record.id);
   assert.ok(fileBefore !== null);
   assert.strictEqual(fileBefore.id, record.id);
 
-  const deleted = deleteFile(record.id);
+  const deleted = await deleteFile(record.id);
   assert.ok(deleted);
 
-  const fileAfter = getFile(record.id);
+  const fileAfter = await getFile(record.id);
   assert.strictEqual(fileAfter, null);
 
   // Verify deletion of content for security
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT content, deleted_at FROM files WHERE id = ?")
-    .get(record.id) as any;
-  assert.ok(row !== undefined);
+  const row = await getTestBackend().queryOne<{ content: unknown; deleted_at: unknown }>(
+    "SELECT content, deleted_at FROM files WHERE id = $1",
+    [record.id]
+  );
+  assert.ok(row !== undefined && row !== null);
   assert.strictEqual(row.content, null);
   assert.ok(row.deleted_at !== null);
 });
@@ -1136,7 +1130,7 @@ test("Retrieve file content spec compliance", async () => {
     '{"id":"req_1","custom_id":"request-1","response":{"status_code":200,"body":{"choices":[{"message":{"content":"Hello"}}]}}}'
   );
 
-  const record = createFile({
+  const record = await createFile({
     bytes: content.length,
     filename: "content_test.jsonl",
     purpose: "batch",
@@ -1145,12 +1139,12 @@ test("Retrieve file content spec compliance", async () => {
     apiKeyId: apiKey.id,
   });
 
-  const retrievedContent = getFileContent(record.id);
+  const retrievedContent = await getFileContent(record.id);
   assert.ok(retrievedContent !== null);
   assert.deepStrictEqual(retrievedContent, content);
 
   // Verify ownership check logic (similar to route.ts)
-  const file = getFile(record.id);
+  const file = await getFile(record.id);
   assert.ok(file !== null);
   assert.strictEqual(file.apiKeyId, apiKey.id);
 
@@ -1167,7 +1161,7 @@ test("File metadata helpers do not load content blobs", async () => {
   const apiKey = await createApiKey("File Metadata Test Key", "test-machine");
   const content = Buffer.from("large-content-placeholder");
 
-  const record = createFile({
+  const record = await createFile({
     bytes: content.length,
     filename: "metadata_only.jsonl",
     purpose: "batch",
@@ -1176,15 +1170,15 @@ test("File metadata helpers do not load content blobs", async () => {
     apiKeyId: apiKey.id,
   });
 
-  const file = getFile(record.id);
-  const files = listFiles({ apiKeyId: apiKey.id });
+  const file = await getFile(record.id);
+  const files = await listFiles({ apiKeyId: apiKey.id });
   const listedFile = files.find((candidate) => candidate.id === record.id);
 
   assert.ok(file !== null);
   assert.ok(listedFile);
   assert.equal("content" in file, false);
   assert.equal("content" in listedFile, false);
-  assert.deepEqual(getFileContent(record.id), content);
+  assert.deepEqual(await getFileContent(record.id), content);
 });
 
 test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () => {
@@ -1199,7 +1193,7 @@ test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () =
       }),
     ].join("\n");
 
-    const file = createFile({
+    const file = await createFile({
       bytes: Buffer.byteLength(batchItems),
       filename: "embed_batch.jsonl",
       purpose: "batch",
@@ -1207,7 +1201,7 @@ test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () =
       apiKeyId: null,
     });
 
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: "/v1/embeddings",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -1215,14 +1209,14 @@ test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () =
     });
 
     let maxAttempts = 20;
-    let currentBatch = getBatch(batch.id);
+    let currentBatch = await getBatch(batch.id);
     while (
       maxAttempts > 0 &&
       currentBatch?.status !== "completed" &&
       currentBatch?.status !== "failed"
     ) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      currentBatch = getBatch(batch.id);
+      currentBatch = await getBatch(batch.id);
       maxAttempts--;
     }
 
@@ -1237,7 +1231,7 @@ test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () =
     // The embeddings handler returns errors about missing credentials or invalid embedding models.
     const outputFileId = currentBatch?.outputFileId || currentBatch?.errorFileId;
     assert.ok(outputFileId, "Should have an output or error file");
-    const outputContent = getFileContent(outputFileId!);
+    const outputContent = await getFileContent(outputFileId!);
     assert.ok(outputContent, "Output file should have content");
     const result = JSON.parse(outputContent.toString());
     const errorMsg = result.response?.body?.error?.message || "";
@@ -1253,7 +1247,7 @@ test("Batch dispatches to embeddings handler for /v1/embeddings URL", async () =
 test("getTerminalBatches returns only terminal statuses ordered oldest first", async () => {
   const apiKey = await createApiKey("Terminal Batches Test Key", "test-machine");
 
-  const file = createFile({
+  const file = await createFile({
     bytes: 10,
     filename: "terminal_mock.jsonl",
     purpose: "batch",
@@ -1262,46 +1256,46 @@ test("getTerminalBatches returns only terminal statuses ordered oldest first", a
   });
 
   // Create batches in different terminal and non-terminal states
-  const completedBatch = createBatch({
+  const completedBatch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
     apiKeyId: apiKey.id,
   });
-  updateBatch(completedBatch.id, {
+  await updateBatch(completedBatch.id, {
     status: "completed",
     completedAt: Math.floor(Date.now() / 1000),
   });
 
-  const failedBatch = createBatch({
+  const failedBatch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
     apiKeyId: apiKey.id,
   });
-  updateBatch(failedBatch.id, { status: "failed", failedAt: Math.floor(Date.now() / 1000) });
+  await updateBatch(failedBatch.id, { status: "failed", failedAt: Math.floor(Date.now() / 1000) });
 
-  const cancelledBatch = createBatch({
+  const cancelledBatch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
     apiKeyId: apiKey.id,
   });
-  updateBatch(cancelledBatch.id, {
+  await updateBatch(cancelledBatch.id, {
     status: "cancelled",
     cancelledAt: Math.floor(Date.now() / 1000),
   });
 
-  const expiredBatch = createBatch({
+  const expiredBatch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
     apiKeyId: apiKey.id,
   });
-  updateBatch(expiredBatch.id, { status: "expired", expiredAt: Math.floor(Date.now() / 1000) });
+  await updateBatch(expiredBatch.id, { status: "expired", expiredAt: Math.floor(Date.now() / 1000) });
 
   // This one should NOT appear in terminal batches
-  const pendingBatch = createBatch({
+  const pendingBatch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -1314,7 +1308,7 @@ test("getTerminalBatches returns only terminal statuses ordered oldest first", a
     cancelledBatch.id,
     expiredBatch.id,
   ]);
-  const terminal = getTerminalBatches();
+  const terminal = await getTerminalBatches();
 
   // All returned batches must be terminal
   for (const b of terminal) {

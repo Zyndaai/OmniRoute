@@ -8,13 +8,13 @@ import {
 import { fitThinkingToMaxTokens } from "../../open-sse/translator/request/openai-to-claude/thinkingBudget.ts";
 import { openaiToClaudeRequest } from "../../open-sse/translator/request/openai-to-claude.ts";
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
 });
 
 for (const callerMaxTokens of [64000, 128000]) {
-  test(`Haiku preserves the capped output allowance for caller max_tokens=${callerMaxTokens}`, () => {
-    const result = fitThinkingToMaxTokens("claude-haiku-4-5-20251001", callerMaxTokens, {
+  test(`Haiku preserves the capped output allowance for caller max_tokens=${callerMaxTokens}`, async () => {
+    const result = await fitThinkingToMaxTokens("claude-haiku-4-5-20251001", callerMaxTokens, {
       type: "enabled",
       budget_tokens: 1024,
     });
@@ -25,8 +25,8 @@ for (const callerMaxTokens of [64000, 128000]) {
   });
 }
 
-test("Haiku fits a high thinking budget while preserving the capped output allowance", () => {
-  const result = fitThinkingToMaxTokens("claude-haiku-4-5-20251001", 128000, {
+test("Haiku fits a high thinking budget while preserving the capped output allowance", async () => {
+  const result = await fitThinkingToMaxTokens("claude-haiku-4-5-20251001", 128000, {
     type: "enabled",
     budget_tokens: 131072,
   });
@@ -36,8 +36,8 @@ test("Haiku fits a high thinking budget while preserving the capped output allow
   assert.equal(result.maxTokens - Number(result.thinking?.budget_tokens), 1024);
 });
 
-test("OpenAI -> Claude preserves Haiku's capped output allowance with low effort", () => {
-  const result = openaiToClaudeRequest(
+test("OpenAI -> Claude preserves Haiku's capped output allowance with low effort", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-haiku-4-5-20251001",
     {
       messages: [{ role: "user", content: "Think about this" }],
@@ -52,11 +52,11 @@ test("OpenAI -> Claude preserves Haiku's capped output allowance with low effort
 });
 
 for (const cap of [2047, 2048]) {
-  test(`thinking respects the minimum response room with an output cap of ${cap}`, () => {
+  test(`thinking respects the minimum response room with an output cap of ${cap}`, async () => {
     const target = "opencode-go/qwen3.7-plus";
-    assert.ok(setModelCapabilityOverride(target, "max_output_tokens", cap));
+    assert.ok(await setModelCapabilityOverride(target, "max_output_tokens", cap));
     try {
-      const result = fitThinkingToMaxTokens(
+      const result = await fitThinkingToMaxTokens(
         "qwen3.7-plus",
         128000,
         { type: "enabled", budget_tokens: 1024 },
@@ -71,7 +71,7 @@ for (const cap of [2047, 2048]) {
         assert.equal(result.maxTokens - Number(result.thinking?.budget_tokens), 1024);
       }
     } finally {
-      removeModelCapabilityOverride(target, "max_output_tokens");
+      await removeModelCapabilityOverride(target, "max_output_tokens");
     }
   });
 }

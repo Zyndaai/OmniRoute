@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Operator failure signal: an authenticated operator push writes a dated
 // outage signal into the refusal memory under its own reason, so the next
@@ -15,16 +16,15 @@ const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const memory = await import("../../open-sse/utils/proxyRefusalMemory.ts");
 const { POST } = await import("../../src/app/api/settings/proxies/operator-egress/route.ts");
 
-function resetStorage() {
+async function resetStorage() {
   memory.__resetProxyRefusalMemoryForTesting();
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -96,12 +96,11 @@ function memberPush(member: Member, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function refusalRowCount(): number {
-  return (
-    core.getDbInstance().prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress").get() as {
-      n: number;
-    }
-  ).n;
+async function refusalRowCount(): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM proxy_operator_egress"
+  );
+  return Number(row?.n ?? 0);
 }
 
 test("outage push on a healthy member sets it aside from the next send", async () => {
@@ -196,7 +195,7 @@ test("a borrowed quota reason is rejected before any write", async () => {
   const body = memberPush(member, { reason: "ip_quota_429" });
   const response = await pushRefusals(body);
   assert.equal(response.status, 400);
-  assert.equal(refusalRowCount(), 0);
+  assert.equal(await refusalRowCount(), 0);
   const entryKey = memory.proxyEgressKey(`http://${member.host}:${member.port}`);
   assert.equal(memory.isProxyAvoided(entryKey), false);
 });
@@ -206,7 +205,7 @@ test("an invalid signal leaves the address table untouched", async () => {
   const body = memberPush(member, { reason: "ip_quota_429" });
   const response = await pushRefusals(body);
   assert.equal(response.status, 400);
-  assert.equal(refusalRowCount(), 0);
+  assert.equal(await refusalRowCount(), 0);
 });
 
 test("explicit recovery clears the outage but keeps a region refusal", async () => {

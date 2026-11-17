@@ -46,7 +46,7 @@ test("~optional (and other tilde-prefixed Standard Schema keys) are stripped at 
   );
 });
 
-test("OpenAI -> Gemini request strips ~optional from a tool parameter's subschema", () => {
+test("OpenAI -> Gemini request strips ~optional from a tool parameter's subschema", async () => {
   const body = {
     messages: [{ role: "user", content: "hi" }],
     tools: [
@@ -67,7 +67,7 @@ test("OpenAI -> Gemini request strips ~optional from a tool parameter's subschem
     ],
   };
 
-  const result = openaiToGeminiRequest("gemini-3.7-flash-low", body, false) as {
+  const result = (await openaiToGeminiRequest("gemini-3.7-flash-low", body, false)) as {
     tools?: Array<{ functionDeclarations?: Array<{ parameters: unknown }> }>;
   };
 

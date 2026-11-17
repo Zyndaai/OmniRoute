@@ -11,105 +11,97 @@
 // shared retention helper core.ts's health-check path now calls -- plus the
 // cleanup.ts wrappers that wire them into the automatic sweep.
 
-import { describe, it, beforeEach, after } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-terminal-cleanup-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const { createFile, getFileContent, pruneExpiredFiles } = await import("../../src/lib/db/files.ts");
 const { createBatch, getBatch, deleteTerminalBatchesOlderThan } =
   await import("../../src/lib/db/batches.ts");
 const { cleanupOldBatches, cleanupExpiredFiles } = await import("../../src/lib/db/cleanup.ts");
-
-// Repo test rule: DB-touching tests must close the handle in test.after(), or
-// the native test runner can hang indefinitely on a dangling connection.
-after(() => {
-  delete process.env.BATCH_AND_FILE_AUTO_CLEANUP_ENABLED;
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const DAY = 24 * 60 * 60;
 
-function backdateBatch(batchId: string, column: string, epochSeconds: number, status: string) {
-  core
-    .getDbInstance()
-    .prepare(`UPDATE batches SET ${column} = ?, status = ? WHERE id = ?`)
-    .run(epochSeconds, status, batchId);
+async function backdateBatch(batchId: string, column: string, epochSeconds: number, status: string) {
+  await getTestBackend().execute(
+    `UPDATE batches SET ${column} = to_timestamp($1), status = $2 WHERE id = $3`,
+    [epochSeconds, status, batchId]
+  );
 }
 
-function seedBatchWithCheckpoint(overrides: { column: string; ageDays: number; status: string }) {
-  const inputFile = createFile({
+async function seedBatchWithCheckpoint(overrides: {
+  column: string;
+  ageDays: number;
+  status: string;
+}) {
+  const inputFile = await createFile({
     bytes: 4,
     filename: "in.jsonl",
     purpose: "batch",
     content: Buffer.from("{}"),
   });
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: inputFile.id,
     status: "validating",
   });
   const cutoffSeconds = Math.floor(Date.now() / 1000) - overrides.ageDays * DAY;
-  backdateBatch(batch.id, overrides.column, cutoffSeconds, overrides.status);
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO batch_item_checkpoints (batch_id, line_number, status, created_at, updated_at)
-       VALUES (?, 0, 'completed', ?, ?)`
-    )
-    .run(batch.id, cutoffSeconds, cutoffSeconds);
+  await backdateBatch(batch.id, overrides.column, cutoffSeconds, overrides.status);
+  await getTestBackend().execute(
+    `INSERT INTO batch_item_checkpoints (batch_id, line_number, status, created_at, updated_at)
+     VALUES ($1, 0, 'completed', to_timestamp($2), to_timestamp($2))`,
+    [batch.id, cutoffSeconds]
+  );
   return { batch, inputFile };
 }
 
+async function checkpointCount(batchId: string): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM batch_item_checkpoints WHERE batch_id = $1",
+    [batchId]
+  );
+  return Number(row?.n ?? 0);
+}
+
 describe("deleteTerminalBatchesOlderThan", () => {
-  beforeEach(() => {
-    core.getDbInstance().exec("DELETE FROM batches; DELETE FROM batch_item_checkpoints;");
+  beforeEach(async () => {
+    await resetTestDb();
   });
 
-  it("deletes a completed batch older than the retention window, and its checkpoint", () => {
-    const { batch } = seedBatchWithCheckpoint({
+  it("deletes a completed batch older than the retention window, and its checkpoint", async () => {
+    const { batch } = await seedBatchWithCheckpoint({
       column: "completed_at",
       ageDays: 40,
       status: "completed",
     });
 
-    const result = deleteTerminalBatchesOlderThan(30);
+    const result = await deleteTerminalBatchesOlderThan(30);
 
     assert.equal(result.deletedBatches, 1);
-    assert.equal(getBatch(batch.id), null);
-    const remainingCheckpoints = core
-      .getDbInstance()
-      .prepare("SELECT COUNT(*) AS n FROM batch_item_checkpoints WHERE batch_id = ?")
-      .get(batch.id) as { n: number };
-    assert.equal(remainingCheckpoints.n, 0);
+    assert.equal(await getBatch(batch.id), null);
+    assert.equal(await checkpointCount(batch.id), 0);
   });
 
-  it("leaves a completed batch newer than the retention window untouched", () => {
-    const { batch } = seedBatchWithCheckpoint({
+  it("leaves a completed batch newer than the retention window untouched", async () => {
+    const { batch } = await seedBatchWithCheckpoint({
       column: "completed_at",
       ageDays: 5,
       status: "completed",
     });
 
-    const result = deleteTerminalBatchesOlderThan(30);
+    const result = await deleteTerminalBatchesOlderThan(30);
 
     assert.equal(result.deletedBatches, 0);
-    assert.ok(getBatch(batch.id), "batch newer than the retention window must survive");
+    assert.ok(await getBatch(batch.id), "batch newer than the retention window must survive");
   });
 
-  it("also covers failed, cancelled, and expired batches -- not just completed", () => {
-    seedBatchWithCheckpoint({ column: "failed_at", ageDays: 40, status: "failed" });
-    seedBatchWithCheckpoint({ column: "cancelled_at", ageDays: 40, status: "cancelled" });
-    seedBatchWithCheckpoint({ column: "expired_at", ageDays: 40, status: "expired" });
+  it("also covers failed, cancelled, and expired batches -- not just completed", async () => {
+    await seedBatchWithCheckpoint({ column: "failed_at", ageDays: 40, status: "failed" });
+    await seedBatchWithCheckpoint({ column: "cancelled_at", ageDays: 40, status: "cancelled" });
+    await seedBatchWithCheckpoint({ column: "expired_at", ageDays: 40, status: "expired" });
 
-    const result = deleteTerminalBatchesOlderThan(30);
+    const result = await deleteTerminalBatchesOlderThan(30);
 
     assert.equal(
       result.deletedBatches,
@@ -118,21 +110,24 @@ describe("deleteTerminalBatchesOlderThan", () => {
     );
   });
 
-  it("never touches a batch that is still in progress, regardless of age", () => {
-    const { batch } = seedBatchWithCheckpoint({
+  it("never touches a batch that is still in progress, regardless of age", async () => {
+    const { batch } = await seedBatchWithCheckpoint({
       column: "created_at",
       ageDays: 90,
       status: "in_progress",
     });
 
-    const result = deleteTerminalBatchesOlderThan(30);
+    const result = await deleteTerminalBatchesOlderThan(30);
 
     assert.equal(result.deletedBatches, 0);
-    assert.ok(getBatch(batch.id), "a non-terminal batch must never be swept, no matter how old");
+    assert.ok(
+      await getBatch(batch.id),
+      "a non-terminal batch must never be swept, no matter how old"
+    );
   });
 
   it("cleanupOldBatches() wraps the same behavior with the OMNIROUTE_BATCH_RETENTION_DAYS default, when BATCH_AND_FILE_AUTO_CLEANUP_ENABLED=true", async () => {
-    seedBatchWithCheckpoint({ column: "completed_at", ageDays: 40, status: "completed" });
+    await seedBatchWithCheckpoint({ column: "completed_at", ageDays: 40, status: "completed" });
 
     process.env.BATCH_AND_FILE_AUTO_CLEANUP_ENABLED = "true";
     try {
@@ -145,7 +140,7 @@ describe("deleteTerminalBatchesOlderThan", () => {
   });
 
   it("cleanupOldBatches() deletes nothing by default (BATCH_AND_FILE_AUTO_CLEANUP_ENABLED unset -- fail closed, #12999)", async () => {
-    const { batch } = seedBatchWithCheckpoint({
+    const { batch } = await seedBatchWithCheckpoint({
       column: "completed_at",
       ageDays: 40,
       status: "completed",
@@ -160,11 +155,11 @@ describe("deleteTerminalBatchesOlderThan", () => {
       "default behavior must stay identical until an operator opts in"
     );
     assert.equal(result.errors, 0);
-    assert.ok(getBatch(batch.id), "the terminal batch must survive with the flag unset");
+    assert.ok(await getBatch(batch.id), "the terminal batch must survive with the flag unset");
   });
 
   it("cleanupOldBatches() deletes nothing when BATCH_AND_FILE_AUTO_CLEANUP_ENABLED=false", async () => {
-    const { batch } = seedBatchWithCheckpoint({
+    const { batch } = await seedBatchWithCheckpoint({
       column: "completed_at",
       ageDays: 40,
       status: "completed",
@@ -174,7 +169,7 @@ describe("deleteTerminalBatchesOlderThan", () => {
     try {
       const result = await cleanupOldBatches();
       assert.equal(result.deleted, 0);
-      assert.ok(getBatch(batch.id));
+      assert.ok(await getBatch(batch.id));
     } finally {
       delete process.env.BATCH_AND_FILE_AUTO_CLEANUP_ENABLED;
     }
@@ -182,9 +177,13 @@ describe("deleteTerminalBatchesOlderThan", () => {
 });
 
 describe("pruneExpiredFiles", () => {
-  it("clears content for a file past its own expires_at, keeping the row", () => {
+  beforeEach(async () => {
+    await resetTestDb();
+  });
+
+  it("clears content for a file past its own expires_at, keeping the row", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const file = createFile({
+    const file = await createFile({
       bytes: 4,
       filename: "expired.jsonl",
       purpose: "batch",
@@ -192,22 +191,22 @@ describe("pruneExpiredFiles", () => {
       expiresAt: now - DAY,
     });
 
-    const deleted = pruneExpiredFiles(now);
+    const deleted = await pruneExpiredFiles(now);
 
     assert.equal(deleted, 1);
     // The row survives (metadata/audit trail) -- only the BLOB is what was
     // actually consuming the 5.19 GB observed live.
-    const row = core
-      .getDbInstance()
-      .prepare("SELECT deleted_at, content FROM files WHERE id = ?")
-      .get(file.id) as { deleted_at: number | null; content: Buffer | null };
-    assert.ok(row.deleted_at, "deleted_at must be set");
-    assert.equal(row.content, null, "content BLOB must be cleared");
+    const row = await getTestBackend().queryOne<{ deleted_at: string | null; content: Buffer | null }>(
+      "SELECT deleted_at, content FROM files WHERE id = $1",
+      [file.id]
+    );
+    assert.ok(row?.deleted_at, "deleted_at must be set");
+    assert.equal(row?.content, null, "content BLOB must be cleared");
   });
 
-  it("leaves a file with no expiry, or one not yet expired, untouched", () => {
+  it("leaves a file with no expiry, or one not yet expired, untouched", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const neverExpires = createFile({
+    const neverExpires = await createFile({
       // "batch" auto-assigns a 30-day expires_at (see createFile()) -- a
       // different purpose is needed here to get a genuinely null expiry.
       bytes: 4,
@@ -215,7 +214,7 @@ describe("pruneExpiredFiles", () => {
       purpose: "assistants",
       content: Buffer.from("data"),
     });
-    const notYetExpired = createFile({
+    const notYetExpired = await createFile({
       bytes: 4,
       filename: "future.jsonl",
       purpose: "batch",
@@ -223,35 +222,38 @@ describe("pruneExpiredFiles", () => {
       expiresAt: now + DAY,
     });
 
-    const deleted = pruneExpiredFiles(now);
+    const deleted = await pruneExpiredFiles(now);
 
     assert.equal(deleted, 0);
-    assert.ok(getFileContent(neverExpires.id), "a file with no expiry must keep its content");
-    assert.ok(getFileContent(notYetExpired.id), "a not-yet-expired file must keep its content");
+    assert.ok(await getFileContent(neverExpires.id), "a file with no expiry must keep its content");
+    assert.ok(
+      await getFileContent(notYetExpired.id),
+      "a not-yet-expired file must keep its content"
+    );
   });
 
-  it("never re-processes a file that was already explicitly deleted", () => {
+  it("never re-processes a file that was already explicitly deleted", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const file = createFile({
+    const file = await createFile({
       bytes: 4,
       filename: "already-deleted.jsonl",
       purpose: "batch",
       content: Buffer.from("data"),
       expiresAt: now - DAY,
     });
-    core
-      .getDbInstance()
-      .prepare("UPDATE files SET deleted_at = ?, content = NULL WHERE id = ?")
-      .run(now - 100, file.id);
+    await getTestBackend().execute(
+      "UPDATE files SET deleted_at = to_timestamp($1), content = NULL WHERE id = $2",
+      [now - 100, file.id]
+    );
 
-    const deleted = pruneExpiredFiles(now);
+    const deleted = await pruneExpiredFiles(now);
 
     assert.equal(deleted, 0, "an already-deleted row must not be counted again");
   });
 
   it("cleanupExpiredFiles() wraps the same behavior for the automatic sweep, when BATCH_AND_FILE_AUTO_CLEANUP_ENABLED=true", async () => {
     const now = Math.floor(Date.now() / 1000);
-    createFile({
+    await createFile({
       bytes: 4,
       filename: "expired-2.jsonl",
       purpose: "batch",
@@ -273,7 +275,7 @@ describe("pruneExpiredFiles", () => {
 
   it("cleanupExpiredFiles() clears nothing by default (BATCH_AND_FILE_AUTO_CLEANUP_ENABLED unset -- fail closed, #12999)", async () => {
     const now = Math.floor(Date.now() / 1000);
-    const file = createFile({
+    const file = await createFile({
       bytes: 4,
       filename: "expired-3.jsonl",
       purpose: "batch",
@@ -291,7 +293,7 @@ describe("pruneExpiredFiles", () => {
     );
     assert.equal(result.errors, 0);
     assert.ok(
-      getFileContent(file.id),
+      await getFileContent(file.id),
       "the expired file's content must survive with the flag unset"
     );
   });

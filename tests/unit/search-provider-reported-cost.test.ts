@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // Provider-reported search cost: an operator-trusted search backend can report
 // what a call actually cost in `usage.search_cost_usd`, which then replaces the
@@ -11,7 +12,6 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-search-reported-cost-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Dynamic imports: DATA_DIR must be set before the DB modules load (repo test pattern).
 const core = await import("../../src/lib/db/core.ts");
@@ -29,8 +29,8 @@ const ADAPTER_BASE = "http://127.0.0.1:9091/adapter";
 const originalFetch = globalThis.fetch;
 let keyCounter = 0;
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   batchWriter.resetSpendBatchWriterForTests();
@@ -44,7 +44,7 @@ test.after(async () => {
   globalThis.fetch = originalFetch;
   await closeCallLogSaves(500).catch(() => {});
   batchWriter.resetSpendBatchWriterForTests();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -84,7 +84,7 @@ const searxngBody = (usage: unknown) => ({
 // promise exposed; yield event-loop turns (no wall-clock wait) until it lands.
 async function ledgerRows(apiKeyId: string, expected: number) {
   for (let i = 0; i < 500; i++) {
-    const rows = costLedger.listLedgerEntries(apiKeyId);
+    const rows = await costLedger.listLedgerEntries(apiKeyId);
     if (rows.length >= expected) return rows;
     await nextTurn();
   }
@@ -151,7 +151,7 @@ test("opted-in operator baseUrl: reported cost is billed and lands in the ledger
   assert.equal(rows[0].model, "searxng-search/search");
   assert.equal(rows[0].requestId, "req-ok-1");
   assert.equal(rows[0].success, true);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0.25);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0.25);
 });
 
 test("caller provider_options.baseUrl never gets its reported cost trusted", async () => {
@@ -172,8 +172,8 @@ test("caller provider_options.baseUrl never gets its reported cost trusted", asy
   assert.equal(data.usage.search_cost_usd, SEARCH_PROVIDERS["searxng-search"].costPerQuery);
   assert.equal(data.usage.cost_source, undefined);
   await settle();
-  assert.equal(costLedger.listLedgerEntries(apiKeyId).length, 0);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0);
+  assert.equal((await costLedger.listLedgerEntries(apiKeyId)).length, 0);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0);
 });
 
 test("without the opt-in a reported cost is ignored and costPerQuery is billed", async () => {
@@ -230,7 +230,7 @@ test("a request id is charged once even when reported again", async () => {
   await settle();
   const rows = await ledgerRows(apiKeyId, 1);
   assert.equal(rows.length, 1);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0.1);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0.1);
 });
 
 test("a cache hit records no cost", async () => {
@@ -258,7 +258,7 @@ test("a cache hit records no cost", async () => {
   assert.equal(calls, 1);
   await settle();
   assert.equal((await ledgerRows(apiKeyId, 1)).length, 1);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0.2);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0.2);
 });
 
 test("an error response from a trusted endpoint still charges its reported cost", async () => {
@@ -279,7 +279,7 @@ test("an error response from a trusted endpoint still charges its reported cost"
   assert.equal(rows[0].amountUsd, 0.07);
   assert.equal(rows[0].requestId, "req-err");
   assert.equal(rows[0].success, false);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0.07);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0.07);
 });
 
 test("an error response without the opt-in charges nothing", async () => {
@@ -292,8 +292,8 @@ test("an error response without the opt-in charges nothing", async () => {
   );
 
   await settle();
-  assert.equal(costLedger.listLedgerEntries(apiKeyId).length, 0);
-  assert.equal(costRules.getCostSummary(apiKeyId).totalCostToday, 0);
+  assert.equal((await costLedger.listLedgerEntries(apiKeyId)).length, 0);
+  assert.equal((await costRules.getCostSummary(apiKeyId)).totalCostToday, 0);
 });
 
 test("per-key daily/weekly USD quotas count reported and static search spend, chat excluded", async () => {
@@ -326,7 +326,7 @@ test("per-key daily/weekly USD quotas count reported and static search spend, ch
   await ledgerRows(otherKeyId, 1);
 
   // A chat call's ledger row (chat spend is already counted from usage_history).
-  costLedger.recordLedgerEntry({
+  await costLedger.recordLedgerEntry({
     apiKeyId,
     provider: "openai",
     model: "gpt-4o",

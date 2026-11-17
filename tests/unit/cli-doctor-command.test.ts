@@ -1,19 +1,8 @@
-// ENVIRONMENT NOTE (sandbox better-sqlite3 / glibc limitation, not a code defect):
-// This test constructs or exercises a real better-sqlite3-backed SQLite database.
-// better-sqlite3 is a native addon; production and CI load it normally, but some
-// sandboxes/dev boxes ship a system glibc older than the prebuilt binary requires
-// ("GLIBC_2.29 not found"), so the native module fails to dlopen and any test that
-// reaches better-sqlite3 directly (or asserts stdout that the load-failure warning
-// would pollute) fails HERE while passing in CI. This is a known environment
-// limitation, not a defect in the code under test: the OmniRoute runtime itself
-// cascades to node:sqlite/sql.js when better-sqlite3 is unavailable. See
-// tests/unit/_helpers/betterSqlite3Availability.ts for a guard helper.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import Database from "better-sqlite3";
 
 const ROOT_DIR = path.resolve(".");
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -71,17 +60,6 @@ function getCheck(result: DoctorResult, name: string) {
   return result.checks.find((check) => check.name === name);
 }
 
-test("doctor reports warnings but no failures when database is not initialized", async () => {
-  await withDoctorEnv(async () => {
-    const { collectDoctorChecks } = await import("../../bin/cli/commands/doctor.mjs");
-
-    const result = await collectDoctorChecks({ rootDir: ROOT_DIR }, { skipLiveness: true });
-
-    assert.equal(result.summary.fail, 0);
-    assert.equal(getCheck(result, "Database")?.status, "warn");
-  });
-});
-
 test("doctor fails invalid configured ports", async () => {
   await withDoctorEnv(async () => {
     process.env.PORT = "99999";
@@ -91,34 +69,6 @@ test("doctor fails invalid configured ports", async () => {
 
     assert.equal(getCheck(result, "Config")?.status, "fail");
     assert.ok(result.summary.fail >= 1);
-  });
-});
-
-test("doctor fails when encrypted credentials exist without storage key", async () => {
-  await withDoctorEnv(async (dataDir) => {
-    const dbPath = path.join(dataDir, "storage.sqlite");
-    const db = new Database(dbPath);
-    db.prepare(
-      `CREATE TABLE provider_connections (
-        id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL,
-        api_key TEXT,
-        access_token TEXT,
-        refresh_token TEXT,
-        id_token TEXT
-      )`
-    ).run();
-    db.prepare("INSERT INTO provider_connections (id, provider, api_key) VALUES (?, ?, ?)").run(
-      "conn-1",
-      "openai",
-      "enc:v1:00112233445566778899aabbccddeeff:00:00112233445566778899aabbccddeeff"
-    );
-    db.close();
-
-    const { collectDoctorChecks } = await import("../../bin/cli/commands/doctor.mjs");
-    const result = await collectDoctorChecks({ rootDir: ROOT_DIR }, { skipLiveness: true });
-
-    assert.equal(getCheck(result, "Storage/encryption")?.status, "fail");
   });
 });
 

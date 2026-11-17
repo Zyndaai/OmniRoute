@@ -16,13 +16,18 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const store = await import("../../src/lib/db/responsesContinuationStore.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function insertCallLog(row: {
+async function insertCallLog(row: {
   id: string;
   responseId: string | null;
   apiKeyId: string | null;
@@ -30,30 +35,30 @@ function insertCallLog(row: {
   artifactRelPath: string | null;
   videoContentRemoved?: 0 | 1;
 }) {
-  const db = core.getDbInstance();
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO call_logs
-      (id, timestamp, method, path, status, model, provider, account, duration,
+      (id, "timestamp", method, path, status, model, provider, account, duration,
        tokens_in, tokens_out, api_key_id, detail_state, artifact_relpath, response_id,
        video_content_removed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    row.id,
-    new Date().toISOString(),
-    "POST",
-    "/v1/responses",
-    200,
-    "gpt-5.4-pro",
-    "openai",
-    "acc1",
-    100,
-    10,
-    20,
-    row.apiKeyId,
-    row.detailState,
-    row.artifactRelPath,
-    row.responseId,
-    row.videoContentRemoved ?? 0
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    [
+      row.id,
+      new Date().toISOString(),
+      "POST",
+      "/v1/responses",
+      200,
+      "gpt-5.4-pro",
+      "openai",
+      "acc1",
+      100,
+      10,
+      20,
+      row.apiKeyId,
+      row.detailState,
+      row.artifactRelPath,
+      row.responseId,
+      (row.videoContentRemoved ?? 0) === 1,
+    ]
   );
 }
 
@@ -73,8 +78,8 @@ function writeArtifact(relPath: string, pipeline: Record<string, unknown>) {
   );
 }
 
-test("resolvePreviousResponseState reconstructs input/output from the call-log artifact", () => {
-  insertCallLog({
+test("resolvePreviousResponseState reconstructs input/output from the call-log artifact", async () => {
+  await insertCallLog({
     id: "log-1",
     responseId: "resp_abc",
     apiKeyId: "key-1",
@@ -90,14 +95,14 @@ test("resolvePreviousResponseState reconstructs input/output from the call-log a
     },
   });
 
-  const result = store.resolvePreviousResponseState("resp_abc", "key-1");
+  const result = await store.resolvePreviousResponseState("resp_abc", "key-1");
   assert.deepEqual(result, {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
 });
 
-test("resolvePreviousResponseState reads output from a wrapped (streaming) clientResponse shape", () => {
+test("resolvePreviousResponseState reads output from a wrapped (streaming) clientResponse shape", async () => {
   // A streaming reply's clientResponse is clientPayloadCollector.build()'s output,
   // which always nests the caller-supplied summary under `.summary` (see
   // createStructuredSSECollector in streamPayloadCollector.ts) rather than
@@ -106,7 +111,7 @@ test("resolvePreviousResponseState reads output from a wrapped (streaming) clien
   // cause of previous_response_id continuation always failing for a streaming
   // Responses-API passthrough connection (fixed alongside the clientPayload
   // builder gap in open-sse/utils/stream.ts).
-  insertCallLog({
+  await insertCallLog({
     id: "log-1-streamed",
     responseId: "resp_streamed",
     apiKeyId: "key-1",
@@ -128,14 +133,14 @@ test("resolvePreviousResponseState reads output from a wrapped (streaming) clien
     },
   });
 
-  const result = store.resolvePreviousResponseState("resp_streamed", "key-1");
+  const result = await store.resolvePreviousResponseState("resp_streamed", "key-1");
   assert.deepEqual(result, {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
 });
 
-test("resolvePreviousResponseState chains off effectiveInput, not the pre-reconstruction clientRawRequest.body", () => {
+test("resolvePreviousResponseState chains off effectiveInput, not the pre-reconstruction clientRawRequest.body", async () => {
   // Live incident (2026-09-03): clientRawRequest.body is deliberately captured
   // BEFORE chat.ts's own previous_response_id reconstruction runs
   // (captureDeferredClientRawBody's whole point -- it must reflect the raw
@@ -148,7 +153,7 @@ test("resolvePreviousResponseState chains off effectiveInput, not the pre-recons
   // rejects outright ("Please ensure that function call turn comes
   // immediately after a user turn..."). effectiveInput is captured AFTER
   // reconstruction and must be what this function chains off.
-  insertCallLog({
+  await insertCallLog({
     id: "log-continued-turn",
     responseId: "resp_continued",
     apiKeyId: "key-1",
@@ -178,7 +183,7 @@ test("resolvePreviousResponseState chains off effectiveInput, not the pre-recons
     },
   });
 
-  const result = store.resolvePreviousResponseState("resp_continued", "key-1");
+  const result = await store.resolvePreviousResponseState("resp_continued", "key-1");
   assert.deepEqual(result, {
     input: [
       { type: "message", role: "user", content: "hi" },
@@ -190,8 +195,8 @@ test("resolvePreviousResponseState chains off effectiveInput, not the pre-recons
   });
 });
 
-test("resolvePreviousResponseState falls back to clientRawRequest.body.input when effectiveInput is absent (pre-fix artifacts)", () => {
-  insertCallLog({
+test("resolvePreviousResponseState falls back to clientRawRequest.body.input when effectiveInput is absent (pre-fix artifacts)", async () => {
+  await insertCallLog({
     id: "log-legacy-no-effective-input",
     responseId: "resp_legacy",
     apiKeyId: "key-1",
@@ -207,20 +212,20 @@ test("resolvePreviousResponseState falls back to clientRawRequest.body.input whe
     },
   });
 
-  const result = store.resolvePreviousResponseState("resp_legacy", "key-1");
+  const result = await store.resolvePreviousResponseState("resp_legacy", "key-1");
   assert.deepEqual(result, {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
 });
 
-test("resolvePreviousResponseState returns null for an unknown response id", () => {
-  const result = store.resolvePreviousResponseState("resp_does_not_exist", "key-1");
+test("resolvePreviousResponseState returns null for an unknown response id", async () => {
+  const result = await store.resolvePreviousResponseState("resp_does_not_exist", "key-1");
   assert.equal(result, null);
 });
 
-test("resolvePreviousResponseState never crosses tenants (scoped by api_key_id)", () => {
-  insertCallLog({
+test("resolvePreviousResponseState never crosses tenants (scoped by api_key_id)", async () => {
+  await insertCallLog({
     id: "log-2",
     responseId: "resp_tenant_a",
     apiKeyId: "key-a",
@@ -233,13 +238,13 @@ test("resolvePreviousResponseState never crosses tenants (scoped by api_key_id)"
     clientResponse: { id: "resp_tenant_a", output: [{ role: "assistant", content: "reply" }] },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_tenant_a", "key-b"), null);
-  assert.equal(store.resolvePreviousResponseState("resp_tenant_a", null), null);
-  assert.notEqual(store.resolvePreviousResponseState("resp_tenant_a", "key-a"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_tenant_a", "key-b"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_tenant_a", null), null);
+  assert.notEqual(await store.resolvePreviousResponseState("resp_tenant_a", "key-a"), null);
 });
 
-test("resolvePreviousResponseState returns null when the artifact is missing on disk", () => {
-  insertCallLog({
+test("resolvePreviousResponseState returns null when the artifact is missing on disk", async () => {
+  await insertCallLog({
     id: "log-3",
     responseId: "resp_missing_file",
     apiKeyId: "key-1",
@@ -247,11 +252,11 @@ test("resolvePreviousResponseState returns null when the artifact is missing on 
     artifactRelPath: "2026-01-01/does-not-exist.json",
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_missing_file", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_missing_file", "key-1"), null);
 });
 
-test("resolvePreviousResponseState fails closed when the pipeline payload was size-limit-omitted", () => {
-  insertCallLog({
+test("resolvePreviousResponseState fails closed when the pipeline payload was size-limit-omitted", async () => {
+  await insertCallLog({
     id: "log-4",
     responseId: "resp_omitted",
     apiKeyId: "key-1",
@@ -266,10 +271,10 @@ test("resolvePreviousResponseState fails closed when the pipeline payload was si
     clientResponse: { id: "resp_omitted", output: [] },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_omitted", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_omitted", "key-1"), null);
 });
 
-test("resolvePreviousResponseState resolves input from clientRawRequest when providerRequest was translated to a different upstream wire shape", () => {
+test("resolvePreviousResponseState resolves input from clientRawRequest when providerRequest was translated to a different upstream wire shape", async () => {
   // Real shape from a live auto-routed free-tier connection: OmniRoute
   // translates the client's Responses-API request into Chat Completions
   // (`messages`, no `input` at all) before forwarding upstream. Reading
@@ -279,7 +284,7 @@ test("resolvePreviousResponseState resolves input from clientRawRequest when pro
   // The client's own request is always Responses-API shaped (this store only
   // fires for sourceFormat === OPENAI_RESPONSES, see chat.ts), so
   // clientRawRequest is the correct source regardless of upstream shape.
-  insertCallLog({
+  await insertCallLog({
     id: "log-6",
     responseId: "resp_gen-translate-mode",
     apiKeyId: "key-1",
@@ -299,14 +304,14 @@ test("resolvePreviousResponseState resolves input from clientRawRequest when pro
     },
   });
 
-  const result = store.resolvePreviousResponseState("resp_gen-translate-mode", "key-1");
+  const result = await store.resolvePreviousResponseState("resp_gen-translate-mode", "key-1");
   assert.deepEqual(result, {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
 });
 
-test("resolvePreviousResponseState fails closed when the stored input array was log-truncated", () => {
+test("resolvePreviousResponseState fails closed when the stored input array was log-truncated", async () => {
   // Real production shape: cloneBoundedChatLogPayload (chatCore/logTruncation.ts)
   // and cloneBoundedForLog (utils/requestLogger.ts) both prepend an
   // `_omniroute_truncated_array` sentinel in place of the items they dropped
@@ -316,7 +321,7 @@ test("resolvePreviousResponseState fails closed when the stored input array was 
   // produced a live 400: "input item type 'missing' cannot be represented in
   // Chat Completions" -- worse than the plain cache-miss this function is
   // otherwise designed to fail into.
-  insertCallLog({
+  await insertCallLog({
     id: "log-7",
     responseId: "resp_gen-truncated-history",
     apiKeyId: "key-1",
@@ -341,10 +346,10 @@ test("resolvePreviousResponseState fails closed when the stored input array was 
     },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_gen-truncated-history", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-truncated-history", "key-1"), null);
 });
 
-test("resolvePreviousResponseState fails closed when the streaming collector truncated the response", () => {
+test("resolvePreviousResponseState fails closed when the streaming collector truncated the response", async () => {
   // Live incident (2026-09-02): a huge/reasoning-heavy response blew past
   // createStructuredSSECollector's own event-count cap mid-stream. The
   // stored clientResponse then carries `_truncated: true` and
@@ -358,7 +363,7 @@ test("resolvePreviousResponseState fails closed when the streaming collector tru
   // upstream provider then rejected outright ("Input required: specify
   // prompt or messages"), breaking the conversation. Measured live: ~22%
   // of a sample of recent successful Ping responses carried this flag.
-  insertCallLog({
+  await insertCallLog({
     id: "log-8",
     responseId: "resp_gen-collector-truncated",
     apiKeyId: "key-1",
@@ -376,17 +381,17 @@ test("resolvePreviousResponseState fails closed when the streaming collector tru
     },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_gen-collector-truncated", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-collector-truncated", "key-1"), null);
 });
 
-test("resolvePreviousResponseState fails closed on an empty output array even without the _truncated flag", () => {
+test("resolvePreviousResponseState fails closed on an empty output array even without the _truncated flag", async () => {
   // Belt-and-suspenders for the same failure class when the collector
   // truncated without ever setting `_truncated` (or for a non-streaming
   // response that somehow logged zero output items): a response the
   // client actually received as real/successful always has at least one
   // output item, so an empty array here is never a legitimate prior turn
   // to reconstruct from.
-  insertCallLog({
+  await insertCallLog({
     id: "log-9",
     responseId: "resp_gen-empty-output",
     apiKeyId: "key-1",
@@ -399,10 +404,10 @@ test("resolvePreviousResponseState fails closed on an empty output array even wi
     clientResponse: { id: "resp_gen-empty-output", output: [] },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_gen-empty-output", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-empty-output", "key-1"), null);
 });
 
-test("resolvePreviousResponseState fails closed when the row had video content removed (#12150 P2)", () => {
+test("resolvePreviousResponseState fails closed when the row had video content removed (#12150 P2)", async () => {
   // #12150 P2 surface 2: the persisted clientRawRequest snapshot had its video
   // transcript cues structurally redacted to [redacted-video-transcript] before
   // storage (videoBridgeSnapshotRedaction). The stored input therefore no longer
@@ -411,7 +416,7 @@ test("resolvePreviousResponseState fails closed when the row had video content r
   // owning row is marked video_content_removed=1 this must fail closed (return
   // null) so the client resends full history, exactly like previous_response_not_found,
   // even though the artifact itself is otherwise a perfectly resolvable 'ready' row.
-  insertCallLog({
+  await insertCallLog({
     id: "log-video-removed",
     responseId: "resp_video_removed",
     apiKeyId: "key-1",
@@ -432,13 +437,13 @@ test("resolvePreviousResponseState fails closed when the row had video content r
     },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_video_removed", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_video_removed", "key-1"), null);
 });
 
-test("resolvePreviousResponseState still resolves a normal row (video_content_removed=0)", () => {
+test("resolvePreviousResponseState still resolves a normal row (video_content_removed=0)", async () => {
   // Guard the fail-closed above does not over-fire: an ordinary row (the default
   // 0) resolves exactly as before.
-  insertCallLog({
+  await insertCallLog({
     id: "log-video-notremoved",
     responseId: "resp_video_notremoved",
     apiKeyId: "key-1",
@@ -455,14 +460,14 @@ test("resolvePreviousResponseState still resolves a normal row (video_content_re
     },
   });
 
-  assert.deepEqual(store.resolvePreviousResponseState("resp_video_notremoved", "key-1"), {
+  assert.deepEqual(await store.resolvePreviousResponseState("resp_video_notremoved", "key-1"), {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
 });
 
-test("resolvePreviousResponseState returns null when detail logging was never captured for this row", () => {
-  insertCallLog({
+test("resolvePreviousResponseState returns null when detail logging was never captured for this row", async () => {
+  await insertCallLog({
     id: "log-5",
     responseId: "resp_no_detail",
     apiKeyId: "key-1",
@@ -470,7 +475,7 @@ test("resolvePreviousResponseState returns null when detail logging was never ca
     artifactRelPath: null,
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_no_detail", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_no_detail", "key-1"), null);
 });
 
 // Proven live in production (2026-09-06, nvidia/nemotron-3.5-lightning:free via
@@ -508,7 +513,7 @@ test("resolvePreviousResponseState resolves via the pending bridge while saveCal
   // The client's next turn can arrive before the queued artifact write below
   // has even started -- the bridge, seeded synchronously inside saveCallLog
   // before this call returns, must already answer correctly.
-  assert.deepEqual(store.resolvePreviousResponseState("resp_gen-race-abc123", "key-1"), {
+  assert.deepEqual(await store.resolvePreviousResponseState("resp_gen-race-abc123", "key-1"), {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
@@ -517,7 +522,7 @@ test("resolvePreviousResponseState resolves via the pending bridge while saveCal
 
   // Once the durable row lands, the same id must still resolve -- now from
   // call_logs/the artifact, with the bridge entry already cleared.
-  assert.deepEqual(store.resolvePreviousResponseState("resp_gen-race-abc123", "key-1"), {
+  assert.deepEqual(await store.resolvePreviousResponseState("resp_gen-race-abc123", "key-1"), {
     input: [{ type: "message", role: "user", content: "hi" }],
     output: [{ type: "message", role: "assistant", content: "hello" }],
   });
@@ -539,9 +544,9 @@ test("resolvePreviousResponseState never lets the pending bridge cross tenants",
     },
   });
 
-  assert.equal(store.resolvePreviousResponseState("resp_gen-tenant-bridge", "key-b"), null);
-  assert.equal(store.resolvePreviousResponseState("resp_gen-tenant-bridge", null), null);
-  assert.notEqual(store.resolvePreviousResponseState("resp_gen-tenant-bridge", "key-a"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-tenant-bridge", "key-b"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-tenant-bridge", null), null);
+  assert.notEqual(await store.resolvePreviousResponseState("resp_gen-tenant-bridge", "key-a"), null);
 
   await save;
 });
@@ -562,7 +567,7 @@ test("resolvePreviousResponseState does not bridge a response id that saveCallLo
       clientResponse: { id: "resp_gen-nolog", output: [{ role: "assistant", content: "hi" }] },
     },
   });
-  assert.equal(store.resolvePreviousResponseState("resp_gen-nolog", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-nolog", "key-1"), null);
 
   // No pipeline payload at all -- nothing to reconstruct from.
   await callLogs.saveCallLog({
@@ -574,7 +579,7 @@ test("resolvePreviousResponseState does not bridge a response id that saveCallLo
     apiKeyId: "key-1",
     responseId: "resp_gen-no-pipeline",
   });
-  assert.equal(store.resolvePreviousResponseState("resp_gen-no-pipeline", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-no-pipeline", "key-1"), null);
 });
 
 test("the pending bridge shares the durable path's fail-closed rules (video-redacted turns never bridge)", async () => {
@@ -596,11 +601,11 @@ test("the pending bridge shares the durable path's fail-closed rules (video-reda
 
   // Even mid-flight (bridge-only, durable row not yet written), a
   // video-redacted turn must fail closed exactly like the durable path does.
-  assert.equal(store.resolvePreviousResponseState("resp_gen-video-bridge", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-video-bridge", "key-1"), null);
 
   await save;
 
-  assert.equal(store.resolvePreviousResponseState("resp_gen-video-bridge", "key-1"), null);
+  assert.equal(await store.resolvePreviousResponseState("resp_gen-video-bridge", "key-1"), null);
 });
 
 

@@ -18,6 +18,7 @@ const { translateRequest } = await import("../../open-sse/translator/index.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { setParamFilterConfig, deleteParamFilterConfig } =
   await import("../../src/lib/db/paramFilters.ts");
+const { refreshParamFilterSnapshot } = await import("../../open-sse/translator/paramSupport.ts");
 
 const { MODEL_SPECS } = await import("../../src/shared/constants/modelSpecs.ts");
 const { setPayloadRulesConfig, resetPayloadRulesConfigForTests } =
@@ -27,8 +28,8 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -58,8 +59,8 @@ test("explicit hash intent follows translated reasoning representations before p
     },
   ];
   for (const variant of variants) {
-    const translated = ["low", "high"].map(
-      (effort) =>
+    const translated = (await Promise.all(
+      ["low", "high"].map((effort) =>
         translateRequest(
           variant.source,
           variant.target,
@@ -74,8 +75,9 @@ test("explicit hash intent follows translated reasoning representations before p
           false,
           null,
           variant.provider
-        ) as Record<string, unknown>
-    );
+        )
+      )
+    )) as Record<string, unknown>[];
     assert.ok(
       translated.every((request) => request[variant.field] !== undefined),
       variant.field
@@ -531,7 +533,7 @@ test("Codex Responses routing clamps reasoning effort to the nearest declared ti
   // gated by destination provider, but since #10788 glm-5.2 declares its live tier
   // vocabulary {high, max}, the out-of-vocabulary `low` clamps up to the nearest
   // declared tier (`high`) instead of passing through verbatim.
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI,
     "glm-5.2",
@@ -562,8 +564,8 @@ test("Codex Responses routing clamps reasoning effort to the nearest declared ti
   assert.equal(outbound.verbosity, undefined);
 });
 
-test("Codex Responses reasoning effort is translated to Claude thinking for z.ai", () => {
-  const translated = translateRequest(
+test("Codex Responses reasoning effort is translated to Claude thinking for z.ai", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "glm-5.2",
@@ -630,11 +632,12 @@ test("preserves verbosity when the resolved target is actually GPT-5", async () 
 });
 
 test("applies provider parameter filters at the universal target boundary", async () => {
-  setParamFilterConfig("opencode-go", {
+  await setParamFilterConfig("opencode-go", {
     block: ["source_only_control"],
     allow: [],
     autoLearn: false,
   });
+  await refreshParamFilterSnapshot();
   try {
     const out = await prepareUpstreamBody({
       translatedBody: {
@@ -649,7 +652,8 @@ test("applies provider parameter filters at the universal target boundary", asyn
     });
     assert.equal(out.source_only_control, undefined);
   } finally {
-    deleteParamFilterConfig("opencode-go");
+    await deleteParamFilterConfig("opencode-go");
+    await refreshParamFilterSnapshot();
   }
 });
 

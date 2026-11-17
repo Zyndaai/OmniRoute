@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const mod = await import("../../src/lib/proxySubscription/selectorTrigger.ts");
 const {
@@ -55,14 +56,13 @@ test("endpoint line matches its row through symmetric normalization", async () =
   const prevFlag = process.env.PROXY_SKIP_RECENTLY_FAILED;
   process.env.DATA_DIR = dir;
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  const core = await import("../../src/lib/db/core.ts");
   const proxyHealth = await import("../../src/lib/proxyHealth.ts");
   proxyHealth.__setProxyHealthTcpCheckForTesting(async () => true);
   const sub = await import("../../src/lib/proxySubscription/index.ts");
   const trigger = await import("../../src/lib/proxySubscription/selectorTrigger.ts");
   const http = await import("node:http");
   try {
-    core.resetDbInstance();
+    await resetTestDb();
     const feedSrv = http.createServer((_req, res) => {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end("ss://YWVzLTI1Ni1nY206cGFzcw@203.0.113.9:8388#ss-node");
@@ -111,10 +111,10 @@ test("endpoint line matches its row through symmetric normalization", async () =
         controlSecret: "sym-secret",
       });
       await sub.syncSubscription(created.id);
-      const rows = core
-        .getDbInstance()
-        .prepare("SELECT host, port FROM proxy_registry WHERE subscription_id = ?")
-        .all(created.id) as Array<{ host: string; port: number }>;
+      const rows = await getTestBackend().query<{ host: string; port: number }>(
+        "SELECT host, port FROM proxy_registry WHERE subscription_id = $1",
+        [created.id]
+      );
       assert.equal(rows.length, 1);
       assert.equal(rows[0].port, 1080);
       assert.equal(rows[0].host, "127.0.0.1");
@@ -128,7 +128,7 @@ test("endpoint line matches its row through symmetric normalization", async () =
     }
   } finally {
     proxyHealth.__setProxyHealthTcpCheckForTesting(null);
-    core.resetDbInstance();
+    await resetTestDb();
     (await import("node:fs")).rmSync(dir, { recursive: true, force: true });
     if (prevDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = prevDataDir;

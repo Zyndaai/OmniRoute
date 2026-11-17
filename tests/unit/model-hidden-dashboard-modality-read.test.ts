@@ -21,6 +21,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hidden-da
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getHiddenModelsByProvider, getModelCompatOverrides } =
   await import("../../src/lib/db/models.ts");
 const { isHiddenForModality } = await import("../../src/shared/utils/modelVisibility.ts");
@@ -65,14 +66,15 @@ function dashboardIsHidden(overrides: OverrideRow[], customRows: OverrideRow[] =
   return isModelHiddenFn(MODEL_ID, buildCompatMap(customRows), buildCompatMap(overrides));
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -83,7 +85,7 @@ test("premise: the dashboard's chat-scoped PATCH stores hiddenModalities.chat, n
   assert.equal(response.status, 200);
 
   const [override] = await readOverrides();
-  const [stored] = getModelCompatOverrides(PROVIDER);
+  const [stored] = await getModelCompatOverrides(PROVIDER);
   assert.ok(override, "the chat-scoped hide must persist an override row");
   assert.equal(override.hiddenModalities?.chat, true);
   assert.equal(
@@ -145,8 +147,10 @@ test("a custom-model hide flag keeps precedence over the override map", () => {
 test("the chat scope does not leak into other modalities (#12172 preserved)", async () => {
   await providerModelsRoute.PATCH(patchRequest({ isHidden: true, modality: "chat" }));
 
-  assert.deepEqual([...(getHiddenModelsByProvider("chat").get(PROVIDER) ?? [])], [MODEL_ID]);
-  assert.equal(getHiddenModelsByProvider("images").get(PROVIDER)?.has(MODEL_ID) ?? false, false);
+  const chatHidden = await getHiddenModelsByProvider("chat");
+  const imageHidden = await getHiddenModelsByProvider("images");
+  assert.deepEqual([...(chatHidden.get(PROVIDER) ?? [])], [MODEL_ID]);
+  assert.equal(imageHidden.get(PROVIDER)?.has(MODEL_ID) ?? false, false);
 });
 
 test("isHiddenForModality precedence: scoped entry wins, legacy flag is the fallback", () => {

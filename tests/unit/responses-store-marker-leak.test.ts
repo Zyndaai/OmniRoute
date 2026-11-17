@@ -25,7 +25,7 @@ test("translateRequest never leaks the internal _omnirouteResponsesStore marker 
   };
   const credentials = { providerSpecificData: { openaiStoreEnabled: true } };
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI,
     "gpt-5-nano",

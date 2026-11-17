@@ -19,6 +19,7 @@ const { AI_PROVIDERS, APIKEY_PROVIDERS, getProviderByAlias, getProviderById } =
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const dbCore = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 
 const AGENT_RESPONSES_URL = "https://api.perplexity.ai/v1/responses";
@@ -69,8 +70,8 @@ const DOCUMENTED_AGENT_MODEL_IDS = [
   "perplexity/sonar",
 ] as const;
 
-test.after(() => {
-  dbCore.resetDbInstance();
+test.after(async () => {
+  await dbCore.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -88,14 +89,14 @@ test.after(() => {
 
 async function seedOneItemAgentLiveCatalog() {
   const now = new Date().toISOString();
-  dbCore
-    .getDbInstance()
-    .prepare(
-      `INSERT OR REPLACE INTO provider_connections
-         (id, provider, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(AGENT_CONNECTION_ID, "perplexity-agent", 1, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections
+       (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, true, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = true,
+       updated_at = EXCLUDED.updated_at`,
+    [AGENT_CONNECTION_ID, "perplexity-agent", now, now]
+  );
 
   await replaceSyncedAvailableModelsForConnection("perplexity-agent", AGENT_CONNECTION_ID, [
     {

@@ -23,8 +23,8 @@ function okResponse(content: string) {
   });
 }
 
-test("resolveComboTargets treats a pin-only step as implicit allowlist [connectionId]", () => {
-  const targets = resolveComboTargets(
+test("resolveComboTargets treats a pin-only step as implicit allowlist [connectionId]", async () => {
+  const targets = await resolveComboTargets(
     {
       name: "offical-fable",
       strategy: "priority",
@@ -43,8 +43,8 @@ test("resolveComboTargets treats a pin-only step as implicit allowlist [connecti
   assert.deepEqual(targets[0].allowedConnectionIds, ["20x-account"]);
 });
 
-test("resolveComboTargets treats an empty allowlist plus a pin as [connectionId]", () => {
-  const targets = resolveComboTargets(
+test("resolveComboTargets treats an empty allowlist plus a pin as [connectionId]", async () => {
+  const targets = await resolveComboTargets(
     {
       name: "empty-list-pin",
       strategy: "priority",
@@ -62,8 +62,8 @@ test("resolveComboTargets treats an empty allowlist plus a pin as [connectionId]
   assert.deepEqual(targets[0].allowedConnectionIds, ["20x-account"]);
 });
 
-test("resolveComboTargets keeps an explicit allowlist even when a pin is also set", () => {
-  const targets = resolveComboTargets(
+test("resolveComboTargets keeps an explicit allowlist even when a pin is also set", async () => {
+  const targets = await resolveComboTargets(
     {
       name: "multi",
       strategy: "priority",
@@ -82,8 +82,8 @@ test("resolveComboTargets keeps an explicit allowlist even when a pin is also se
   assert.deepEqual(targets[0].allowedConnectionIds, ["primary", "secondary"]);
 });
 
-test("resolveComboTargets does not invent an allowlist for an unpinned step", () => {
-  const targets = resolveComboTargets(
+test("resolveComboTargets does not invent an allowlist for an unpinned step", async () => {
+  const targets = await resolveComboTargets(
     {
       name: "open-pool",
       strategy: "round-robin",

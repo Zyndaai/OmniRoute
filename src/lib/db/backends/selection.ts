@@ -5,6 +5,18 @@ import { classifyPgError } from "./postgres/errors";
 import type { DbBackend } from "./types";
 
 const URL_ENV = "OMNIROUTE_POSTGRES_URL";
+const POOL_MAX_ENV = "OMNIROUTE_PG_POOL_MAX";
+/**
+ * Per-process pool size. A request runs dozens of short queries and a usage write holds a
+ * client across a transaction, so 4 queued under load. N processes x this value must stay
+ * below the server's max_connections (100 by default).
+ */
+const DEFAULT_POOL_MAX = 10;
+
+export function resolvePoolMax(raw = process.env[POOL_MAX_ENV]): number {
+  const n = Number(raw?.trim());
+  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : DEFAULT_POOL_MAX;
+}
 
 declare global {
   var __omnirouteDbBackend: DbBackend | undefined;
@@ -16,7 +28,7 @@ export function getDbBackend(): DbBackend {
   const url = process.env[URL_ENV]?.trim();
   if (!url) throw new Error(`${URL_ENV} is required: OmniRoute stores its data in PostgreSQL.`);
   const instanceId = process.env.OMNIROUTE_INSTANCE_ID?.trim() || os.hostname();
-  const backend = createPostgresBackend(createPgPool(url, { instanceId }));
+  const backend = createPostgresBackend(createPgPool(url, { instanceId, max: resolvePoolMax() }));
   globalThis.__omnirouteDbBackend = backend;
   return backend;
 }

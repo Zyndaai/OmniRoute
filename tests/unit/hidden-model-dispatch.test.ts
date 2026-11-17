@@ -7,6 +7,7 @@ import test from "node:test";
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hidden-dispatch-"));
 process.env.DATA_DIR = dataDir;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "hidden-dispatch-fixture-secret";
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providers = await import("../../src/lib/db/providers.ts");
 const models = await import("../../src/lib/db/models.ts");
@@ -36,7 +37,7 @@ async function chat(model: string, apiKey?: string): Promise<Response> {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(dataDir, { recursive: true });
   aliases.invalidateAliasCache();
@@ -67,8 +68,8 @@ test.beforeEach(async () => {
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -79,7 +80,7 @@ test("a visible model remains callable through the HTTP chat route", async () =>
 });
 
 test("an individually hidden model returns 404 before upstream dispatch", async () => {
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   const response = await chat("openai/gpt-4o-mini");
   assert.deepEqual(
     { status: response.status, dispatchedModels: [...dispatchedModels] },
@@ -94,23 +95,23 @@ test("a persisted model alias cannot dispatch an individually hidden target", as
   const modelAliases = await import("../../src/lib/db/models/aliases.ts");
   await modelAliases.setModelAlias("private-fixture-model", "openai/gpt-4o-mini");
   aliases.invalidateAliasCache();
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   const response = await chat("private-fixture-model");
   assert.equal(response.status, 404);
   assert.deepEqual(dispatchedModels, []);
 });
 
 test("hide then unhide takes effect on the next request without a stale visibility cache", async () => {
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("openai/gpt-4o-mini")).status, 404);
   assert.deepEqual(dispatchedModels, []);
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: false });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: false });
   assert.equal((await chat("openai/gpt-4o-mini")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o-mini"]);
 });
 
 test("an image-only hide does not disable the chat model with the same id", async () => {
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true, modality: "images" });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true, modality: "images" });
   assert.equal((await chat("openai/gpt-4o-mini")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o-mini"]);
 });
@@ -120,7 +121,7 @@ for (const [storedProvider, requestProvider] of [
   ["gh", "github"],
 ]) {
   test(`hide persisted under ${storedProvider} rejects requests using ${requestProvider}`, async () => {
-    models.mergeModelCompatOverride(storedProvider, "gpt-4o", { isHidden: true });
+    await models.mergeModelCompatOverride(storedProvider, "gpt-4o", { isHidden: true });
     const response = await chat(`${requestProvider}/gpt-4o`);
     assert.equal(response.status, 404);
     assert.deepEqual(dispatchedModels, []);
@@ -151,7 +152,7 @@ for (const storedAsPrefix of [false, true]) {
     assert.equal((await chat("private-node/vendor/model-x")).status, 200);
     assert.deepEqual(dispatchedModels, ["vendor/model-x"]);
     dispatchedModels.length = 0;
-    models.mergeModelCompatOverride(storedAsPrefix ? "private-node" : nodeId, "vendor/model-x", {
+    await models.mergeModelCompatOverride(storedAsPrefix ? "private-node" : nodeId, "vendor/model-x", {
       isHidden: true,
     });
     for (const prefix of [nodeId, "private-node"]) {
@@ -165,7 +166,7 @@ for (const storedAsPrefix of [false, true]) {
 }
 
 test("a model hidden for another provider does not block a visible OpenAI model", async () => {
-  models.mergeModelCompatOverride("github", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("github", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("openai/gpt-4o-mini")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o-mini"]);
 });
@@ -175,7 +176,7 @@ test("a connection default does not replace a visible concrete bare model", asyn
   assert.equal((await chat("gpt-4o")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o"]);
   dispatchedModels.length = 0;
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("gpt-4o")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o"]);
 });
@@ -190,7 +191,7 @@ test("a connection default cannot replace a visible request with a hidden model"
     assert.equal((await chat("gpt-4o")).status, 200);
     assert.deepEqual(dispatchedModels, ["gpt-4o-mini"]);
     dispatchedModels.length = 0;
-    models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+    await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
     assert.equal((await chat("gpt-4o")).status, 404);
     assert.deepEqual(dispatchedModels, []);
   } finally {
@@ -209,7 +210,7 @@ test("visibility does not override API-key denial or grant access to visible mod
   });
   assert.equal((await chat("openai/gpt-4o-mini", key.key)).status, 403);
   assert.deepEqual(dispatchedModels, []);
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("openai/gpt-4o-mini", key.key)).status, 403);
   assert.deepEqual(dispatchedModels, []);
   assert.equal((await chat("openai/gpt-4o", key.key)).status, 200);
@@ -227,7 +228,7 @@ test("catalog exposure lists remain compatible with explicit visible-model reque
 });
 
 test("a custom model's explicit unhide retains precedence over its compatibility override", async () => {
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   await models.addCustomModel("openai", "gpt-4o-mini");
   await models.updateCustomModel("openai", "gpt-4o-mini", { isHidden: false });
   assert.equal((await chat("openai/gpt-4o-mini")).status, 200);
@@ -235,7 +236,7 @@ test("a custom model's explicit unhide retains precedence over its compatibility
 });
 
 test("a provider redirect checks the native destination's hidden model", async () => {
-  models.mergeModelCompatOverride("deepseek", "deepseek-v4-pro", { isHidden: true });
+  await models.mergeModelCompatOverride("deepseek", "deepseek-v4-pro", { isHidden: true });
   const response = await chat("codex/deepseek-v4-pro");
   assert.equal(response.status, 404);
   assert.deepEqual(dispatchedModels, []);
@@ -249,11 +250,11 @@ test("the HTTP combo route sends only visible siblings and returns404 when all a
     strategy: "priority",
     models: ["openai/gpt-4o-mini", "openai/gpt-4o"],
   });
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("hidden-dispatch-combo")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o"]);
   dispatchedModels.length = 0;
-  models.mergeModelCompatOverride("openai", "gpt-4o", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o", { isHidden: true });
   const response = await chat("hidden-dispatch-combo");
   assert.equal(response.status, 404);
   assert.deepEqual(dispatchedModels, []);
@@ -287,7 +288,7 @@ test("a global reasoning rule cannot redirect a visible model to a hidden target
   assert.equal((await chat("openai/gpt-4o")).status, 200);
   assert.deepEqual(dispatchedModels, ["gpt-4o-mini"]);
   dispatchedModels.length = 0;
-  models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   assert.equal((await chat("openai/gpt-4o")).status, 404);
   assert.deepEqual(dispatchedModels, []);
   rules.invalidateReasoningRoutingRuleCache();
@@ -297,7 +298,7 @@ test("withHiddenModelGate keeps agy and antigravity visibility independent despi
   const { createVisibleResolvedModelGate } =
     await import("../../src/sse/handlers/chat/resolvedModelPolicy.ts");
 
-  models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
+  await models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
 
   const agyGate = createVisibleResolvedModelGate({
     apiKeyInfo: null,
@@ -326,8 +327,8 @@ test("withHiddenModelGate keeps agy and antigravity visibility independent despi
   const agDenied = await antigravityGate(["antigravity/claude-opus-5-5-high"]);
   assert.equal(agDenied?.status, 404);
 
-  models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: false });
-  models.mergeModelCompatOverride("agy", "claude-opus-5-5-high", { isHidden: true });
+  await models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: false });
+  await models.mergeModelCompatOverride("agy", "claude-opus-5-5-high", { isHidden: true });
 
   const agyGateWhenHidden = createVisibleResolvedModelGate({
     apiKeyInfo: null,
@@ -356,7 +357,7 @@ test("withHiddenModelGate infers agy visibility for unprefixed requests only whe
       modelStr: "claude-opus-5-5-high",
     });
 
-  models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
+  await models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
 
   // Only an agy connection exists: the unprefixed request is an agy request, so hiding the
   // model on antigravity must not block it.

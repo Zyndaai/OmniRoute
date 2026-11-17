@@ -13,7 +13,12 @@
 
 import { db, type DbExecutor } from "./pg";
 import { clearApiKeyCaches } from "./apiKeys";
-import { getCachedProviderConnectionById, invalidateModelCatalogCache } from "./readCache";
+import {
+  getCachedProviderConnectionById,
+  invalidateApiKeyPolicyCache,
+  invalidateModelCatalogCache,
+  loadApiKeyPolicyConfig,
+} from "./readCache";
 // Phase B2: auto-mint/prune quotaShared-* combos when pool allocations change.
 // Imported lazily (dynamic import in the hook) to avoid circular-dependency
 // risk between db/ and quota/ modules. Sync hooks are fire-and-forget; deletion
@@ -377,6 +382,7 @@ export async function createPool(input: PoolCreate): Promise<QuotaPool> {
     }
     return (await batchBuildPools([row as PoolRow], tx))[0];
   });
+  invalidateApiKeyPolicyCache();
 
   // Phase B2: fire-and-forget combo sync; failures are logged but never thrown.
   void serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
@@ -476,12 +482,14 @@ export async function updatePool(id: string, input: PoolUpdate): Promise<QuotaPo
       await replaceAllocations(tx, id, input.allocations);
     }
 
-    const row = await tx.queryOne<PoolRow>(`SELECT ${POOL_COLUMNS} FROM quota_pools WHERE id = $1`, [
-      id,
-    ]);
+    const row = await tx.queryOne<PoolRow>(
+      `SELECT ${POOL_COLUMNS} FROM quota_pools WHERE id = $1`,
+      [id]
+    );
     return row ? (await batchBuildPools([row], tx))[0] : null;
   });
   if (!result) return null;
+  invalidateApiKeyPolicyCache();
 
   // Phase B2: fire-and-forget combo sync; failures are logged but never thrown.
   void serializeQuotaComboMaintenance(id, () => syncQuotaCombosGuarded(id));
@@ -501,7 +509,7 @@ export async function deletePool(id: string): Promise<boolean> {
   // Mark before the first await: an update or allocation write issued right after
   // deletePool() starts must already see the pool as deleting.
   deletingPools.add(id);
-  let exists: { id: string } | null;
+  let exists: { id: string } | undefined;
   try {
     exists = await db().queryOne<{ id: string }>("SELECT id FROM quota_pools WHERE id = $1", [id]);
   } catch (error) {
@@ -535,6 +543,7 @@ export async function deletePool(id: string): Promise<boolean> {
     // Direct rewrite of key permission metadata happens above; clear API-key
     // caches so any primed permission entries pick up the new allowed_quotas set.
     clearApiKeyCaches();
+    invalidateApiKeyPolicyCache();
     invalidateModelCatalogCache();
 
     return true;
@@ -614,6 +623,7 @@ export async function upsertAllocations(
       await replaceAllocations(tx, pid, normalizedAllocations);
     }
   });
+  invalidateApiKeyPolicyCache();
 
   // Phase B2: fire-and-forget combo sync for the target pool only; failures are
   // logged but never thrown. Sibling pools' combos are synced on their own lifecycle.
@@ -627,13 +637,17 @@ export async function upsertAllocations(
 export async function listAllocationsForApiKey(
   apiKeyId: string
 ): Promise<Array<{ poolId: string; allocation: PoolAllocation }>> {
-  const rows = await db().query<AllocationRow>(
-    `SELECT pool_id, api_key_id, weight, cap_value, cap_unit, policy
-     FROM quota_allocations
-     WHERE api_key_id = $1`,
-    [apiKeyId]
-  );
-  return rows.map((row) => ({ poolId: row.pool_id, allocation: rowToAllocation(row) }));
+  // Read before and after every request by quota enforcement: cached per key
+  // (loadApiKeyPolicyConfig); every allocation write above invalidates it.
+  return loadApiKeyPolicyConfig(`quota-allocations:${apiKeyId}`, async () => {
+    const rows = await db().query<AllocationRow>(
+      `SELECT pool_id, api_key_id, weight, cap_value, cap_unit, policy
+       FROM quota_allocations
+       WHERE api_key_id = $1`,
+      [apiKeyId]
+    );
+    return rows.map((row) => ({ poolId: row.pool_id, allocation: rowToAllocation(row) }));
+  });
 }
 
 /**

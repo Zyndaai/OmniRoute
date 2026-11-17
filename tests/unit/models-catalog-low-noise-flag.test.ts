@@ -18,13 +18,27 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const featureFlagsDb = await import("../../src/lib/db/featureFlags.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const featureFlagsUtil = await import("../../src/shared/utils/featureFlags.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
+// Flag reads are synchronous and served from an in-process snapshot, so refresh it after each write.
+async function setPrefixFlag(value: string) {
+  await featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", value);
+  await featureFlagsUtil.refreshFeatureFlagSnapshot();
+}
+
+async function removePrefixFlag() {
+  await featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+  await featureFlagsUtil.refreshFeatureFlagSnapshot();
+}
 
 type ModelsResponseBody = {
   data: Array<{ id: string }>;
 };
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -57,13 +71,13 @@ test.beforeEach(async () => {
 test.after(async () => {
   if (originalCatalogBuildTimeout === undefined) delete process.env.CATALOG_BUILD_TIMEOUT_MS;
   else process.env.CATALOG_BUILD_TIMEOUT_MS = originalCatalogBuildTimeout;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("MODELS_CATALOG_PREFIX_MODE=alias suppresses canonical provider-id prefixes", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "alias");
+  await setPrefixFlag("alias");
   try {
     await seedConnection("claude", "claude-access");
     await seedConnection("cline", "cline-access");
@@ -78,12 +92,12 @@ test("MODELS_CATALOG_PREFIX_MODE=alias suppresses canonical provider-id prefixes
     assert.ok(ids.has("cl/demo-custom"), "alias prefix cl/ should be present");
     assert.equal(ids.has("cline/demo-custom"), false, "canonical prefix cline/ should be absent");
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 
 test("MODELS_CATALOG_PREFIX_MODE=dual emits both alias and canonical prefixes (default)", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "dual");
+  await setPrefixFlag("dual");
   try {
     await seedConnection("claude", "claude-access");
     const ids = await getIds();
@@ -93,12 +107,12 @@ test("MODELS_CATALOG_PREFIX_MODE=dual emits both alias and canonical prefixes (d
       "canonical prefix claude/ should be present in dual mode"
     );
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 
 test("?prefix=alias query param overrides flag to alias-only mode", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "dual");
+  await setPrefixFlag("dual");
   try {
     await seedConnection("claude", "claude-access");
     const ids = await getIds("http://localhost/api/v1/models?prefix=alias");
@@ -109,12 +123,12 @@ test("?prefix=alias query param overrides flag to alias-only mode", async () => 
       "canonical prefix absent with ?prefix=alias"
     );
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 
 test("?prefix=canonical query param overrides flag to canonical-only mode", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "dual");
+  await setPrefixFlag("dual");
   try {
     await seedConnection("claude", "claude-access");
     const ids = await getIds("http://localhost/api/v1/models?prefix=canonical");
@@ -128,7 +142,7 @@ test("?prefix=canonical query param overrides flag to canonical-only mode", asyn
       "canonical prefix present with ?prefix=canonical"
     );
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 
@@ -274,7 +288,7 @@ test("#11632 ?prefix=dual keeps the full three-level Codex-native chain", async 
 });
 
 test("#11632 MODELS_CATALOG_PREFIX_MODE=alias flag path gates Codex-native roots", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "alias");
+  await setPrefixFlag("alias");
   try {
     await seedCodexConnection("codex-primary");
 
@@ -290,12 +304,12 @@ test("#11632 MODELS_CATALOG_PREFIX_MODE=alias flag path gates Codex-native roots
         "same rows as ?prefix=alias"
     );
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 
 test("#11632 MODELS_CATALOG_PREFIX_MODE=canonical flag path gates Codex-native roots", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "canonical");
+  await setPrefixFlag("canonical");
   try {
     await seedCodexConnection("codex-primary");
 
@@ -309,7 +323,7 @@ test("#11632 MODELS_CATALOG_PREFIX_MODE=canonical flag path gates Codex-native r
         "re-rooted to parent null"
     );
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE");
+    await removePrefixFlag();
   }
 });
 

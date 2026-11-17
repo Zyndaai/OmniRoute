@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-dashboard-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -13,7 +14,6 @@ const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
@@ -25,7 +25,7 @@ const { normalizeComboStep } = await import("../../src/lib/combos/steps.ts");
 
 async function resetStorage() {
   comboMetrics.resetAllComboMetrics();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -100,7 +100,12 @@ async function seedDashboardCombo() {
     comboExecutionKey: secondStep.id,
   });
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  // quota_snapshots.connection_id references provider_connections(id); the write is dropped without the row.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    ["dashboard-conn-a", "openai"]
+  );
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "dashboard-conn-a",
     window_key: "daily",

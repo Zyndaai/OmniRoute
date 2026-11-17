@@ -4,6 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 // A mirror that drops out for one sync must not lose its nodes: a partial
 // fetch upserts the healthy feeds and keeps the unavailable feed's last
@@ -44,16 +45,16 @@ function startFeed(): Promise<FeedServer> {
   });
 }
 
-function poolHosts(id: string): string[] {
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT host FROM proxy_registry WHERE subscription_id = ?")
-    .all(id) as Array<{ host: string }>;
+async function poolHosts(id: string): Promise<string[]> {
+  const rows = await getTestBackend().query<{ host: string }>(
+    "SELECT host FROM proxy_registry WHERE subscription_id = $1",
+    [id]
+  );
   return rows.map((r) => r.host).sort();
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -72,19 +73,19 @@ test("an unavailable mirror keeps its nodes until every feed answers again", asy
     const id = (created as { id: string }).id;
 
     await sub.syncSubscription(id);
-    assert.deepEqual(poolHosts(id), ["203.0.113.10", "203.0.113.11"]);
+    assert.deepEqual(await poolHosts(id), ["203.0.113.10", "203.0.113.11"]);
 
     // 404 is a permanent error (no retry): the mirror is down for this sync.
     mirror.set(404, "gone");
     const partial = await sub.syncSubscription(id);
     assert.equal(partial.status, "ok");
-    assert.deepEqual(poolHosts(id), ["203.0.113.10", "203.0.113.11"]);
+    assert.deepEqual(await poolHosts(id), ["203.0.113.10", "203.0.113.11"]);
 
     // Every feed answers again and the mirror changed its node: the stale
     // row goes now.
     mirror.set(200, "http://203.0.113.12:8080#gamma");
     await sub.syncSubscription(id);
-    assert.deepEqual(poolHosts(id), ["203.0.113.10", "203.0.113.12"]);
+    assert.deepEqual(await poolHosts(id), ["203.0.113.10", "203.0.113.12"]);
   } finally {
     await primary.close();
     await mirror.close();

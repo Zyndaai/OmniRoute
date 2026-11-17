@@ -35,6 +35,8 @@ process.env.LOG_DIR = TEST_LOG_DIR;
 process.env.APP_LOG_TO_FILE = "false";
 
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const { resolveLocalSyncedEndpointRoute } =
   await import("../../src/lib/providerModels/syncedEndpointRouting.ts");
@@ -45,25 +47,29 @@ const RAW_MODEL_ID = "/models/Qwen3-Embedding-4B-Q8_0.gguf";
 const ALIAS_MODEL_ID = `${ALIAS}/${RAW_MODEL_ID}`;
 const CONNECTION_ID = "c7e7371e-709d-4f3d-a704-b0767bf7f1bc";
 
-beforeEach(() => {
-  core
-    .getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace IN ('customModels', 'syncedAvailableModels')")
-    .run();
+beforeEach(async () => {
+  await resetTestDb();
+  // Synced model rows reference provider_connections (FK).
+  await db().execute("INSERT INTO provider_connections (id, provider) VALUES ($1, $2)", [
+    CONNECTION_ID,
+    PROVIDER,
+  ]);
 });
 
-function seedSyncedModelWithNoCapabilityData() {
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-    )
-    .run(
-      `${PROVIDER}:${CONNECTION_ID}`,
-      // Exact shape llama.cpp discovery actually persists: no supportedEndpoints,
-      // no apiFormat -- the raw /v1/models response has nothing to carry them.
-      JSON.stringify([{ id: RAW_MODEL_ID, name: RAW_MODEL_ID, source: "imported" }])
-    );
+/** Stores the synced model list exactly as discovery persists it for this connection. */
+async function storeSyncedModels(models: unknown[]) {
+  await db().execute(
+    `INSERT INTO connection_model_sync (connection_id, provider, models)
+     VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (connection_id) DO UPDATE SET models = EXCLUDED.models`,
+    [CONNECTION_ID, PROVIDER, JSON.stringify(models)]
+  );
+}
+
+async function seedSyncedModelWithNoCapabilityData() {
+  // Exact shape llama.cpp discovery actually persists: no supportedEndpoints,
+  // no apiFormat -- the raw /v1/models response has nothing to carry them.
+  await storeSyncedModels([{ id: RAW_MODEL_ID, name: RAW_MODEL_ID, source: "imported" }]);
 }
 
 test("updateCustomModel: createIfMissing upserts instead of 404ing on a never-imported model", async () => {
@@ -97,7 +103,7 @@ test("updateCustomModel: without createIfMissing, still returns null for a never
 });
 
 test("resolveLocalSyncedEndpointRoute: an operator override rescues a model with no supportedEndpoints of its own", async () => {
-  seedSyncedModelWithNoCapabilityData();
+  await seedSyncedModelWithNoCapabilityData();
 
   const beforeOverride = await resolveLocalSyncedEndpointRoute(ALIAS_MODEL_ID, "embeddings");
   assert.equal(
@@ -121,7 +127,7 @@ test("resolveLocalSyncedEndpointRoute: an operator override rescues a model with
 });
 
 test("resolveLocalSyncedEndpointRoute: an override for a different model does not leak onto this one", async () => {
-  seedSyncedModelWithNoCapabilityData();
+  await seedSyncedModelWithNoCapabilityData();
   await modelsDb.updateCustomModel(
     PROVIDER,
     `${ALIAS}/some-other-model.gguf`,
@@ -138,7 +144,7 @@ test("resolveLocalSyncedEndpointRoute: a caller who collapses the double slash t
   // ("/models/Qwen3-Embedding-4B-Q8_0.gguf"), so "<alias>/<rawId>" reads as
   // "llamacpp//models/..." -- correct, but easy for an operator to naturally
   // collapse to a single slash when typing/pasting it by hand.
-  seedSyncedModelWithNoCapabilityData();
+  await seedSyncedModelWithNoCapabilityData();
   await modelsDb.updateCustomModel(
     PROVIDER,
     ALIAS_MODEL_ID, // saved under the catalog's own double-slash id
@@ -161,22 +167,14 @@ test("resolveLocalSyncedEndpointRoute: a caller who collapses the double slash t
 });
 
 test("resolveLocalSyncedEndpointRoute: a model's own genuine supportedEndpoints still work with no override needed", async () => {
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-    )
-    .run(
-      `${PROVIDER}:${CONNECTION_ID}`,
-      JSON.stringify([
-        {
-          id: RAW_MODEL_ID,
-          name: RAW_MODEL_ID,
-          source: "imported",
-          supportedEndpoints: ["embeddings"],
-        },
-      ])
-    );
+  await storeSyncedModels([
+    {
+      id: RAW_MODEL_ID,
+      name: RAW_MODEL_ID,
+      source: "imported",
+      supportedEndpoints: ["embeddings"],
+    },
+  ]);
 
   const route = await resolveLocalSyncedEndpointRoute(ALIAS_MODEL_ID, "embeddings");
   assert.ok(route, "a genuinely-annotated synced entry must resolve without needing an override");

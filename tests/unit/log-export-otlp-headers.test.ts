@@ -5,10 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { build } from "esbuild";
 import { writeEsmWorkerScopes } from "../../scripts/build/colocate-standalone.mjs";
+import { db as pgDb } from "../../src/lib/db/pg.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 import {
   containsSensitiveErrorCredential,
   redactSensitiveErrorText,
@@ -620,16 +621,15 @@ test("standalone redactor still rejects credentials stripped with canonical stac
 
 async function exerciseExportChild(compiled = false, langfuseMapping = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "otlp-header-child-"));
-  const db = new DatabaseSync(path.join(dir, "storage.sqlite"));
-  db.exec(`CREATE TABLE call_logs (id TEXT, timestamp TEXT, model TEXT, status INTEGER, path TEXT,
-    provider TEXT, account TEXT, connection_id TEXT, artifact_relpath TEXT, detail_state TEXT,
-    error_summary TEXT, has_pipeline_details INTEGER);
-    CREATE TABLE provider_nodes (id TEXT, name TEXT, prefix TEXT);
-    CREATE TABLE provider_connections (id TEXT, name TEXT, email TEXT);`);
+  // The export child reads call_logs from the shared PostgreSQL database.
+  await resetTestDb();
   fs.mkdirSync(path.join(dir, "call_logs"));
-  db.prepare(
-    "INSERT INTO call_logs (id,timestamp,path,status,artifact_relpath,detail_state,has_pipeline_details) VALUES (?,?,?,200,?,'ready',1)"
-  ).run(row.id, row.timestamp, row.path, "headers.json");
+  const insertCallLog = (id: string, timestamp: string, artifactRelPath: string) =>
+    pgDb().execute(
+      "INSERT INTO call_logs (id,timestamp,path,status,artifact_relpath,detail_state,has_pipeline_details) VALUES ($1,$2,$3,200,$4,'ready',true)",
+      [id, timestamp, row.path, artifactRelPath]
+    );
+  await insertCallLog(row.id, row.timestamp, "headers.json");
   const logger = await createRequestLogger("openai", "openai", "synthetic", {
     enabled: true,
     captureStreamChunks: false,
@@ -665,7 +665,6 @@ async function exerciseExportChild(compiled = false, langfuseMapping = false) {
     })
   );
   const detail = await resolveCallLogDetail(
-    db,
     {
       id: row.id,
       timestamp: row.timestamp,
@@ -683,11 +682,8 @@ async function exerciseExportChild(compiled = false, langfuseMapping = false) {
     JSON.parse(hydrated[0].record.pipelineClientRequest!).headers["X-Review"],
     escapedQuotedCredential
   );
-  const insert = db.prepare(
-    "INSERT INTO call_logs (id,timestamp,path,status,artifact_relpath,detail_state,has_pipeline_details) VALUES (?,?,?,200,?,'ready',1)"
-  );
   for (const name of ["missing", "corrupt", "clipped"])
-    insert.run(name, row.timestamp, row.path, `${name}.json`);
+    await insertCallLog(name, row.timestamp, `${name}.json`);
   fs.writeFileSync(path.join(dir, "call_logs/corrupt.json"), "{invalid-snapshot-content");
   fs.writeFileSync(
     path.join(dir, "call_logs/clipped.json"),
@@ -697,7 +693,6 @@ async function exerciseExportChild(compiled = false, langfuseMapping = false) {
       },
     })
   );
-  db.close();
   const payloads: ReturnType<typeof buildOtlpPayload>[] = [];
   const server = http.createServer(async (req, res) => {
     const parts: Buffer[] = [];
@@ -741,6 +736,9 @@ async function exerciseExportChild(compiled = false, langfuseMapping = false) {
           NODE_OPTIONS: process.env.NODE_OPTIONS,
           HOME: process.env.HOME,
           TMPDIR: process.env.TMPDIR,
+          ...(process.env.OMNIROUTE_POSTGRES_URL
+            ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+            : {}),
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });

@@ -22,24 +22,12 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-apikey
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret-for-crc-operations-do-not-use-in-prod";
 
-const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   apiKeys.resetApiKeyState();
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
+  await resetTestDb();
 }
 
 await resetStorage();
@@ -478,7 +466,8 @@ test("setApiKeyExpiry sets expiry on existing key", async () => {
   assert.equal(result, true);
   const meta = await apiKeys.getApiKeyMetadata(created.key);
   assert.ok(meta);
-  assert.equal(meta!.expiresAt, "2030-12-31T23:59:59Z");
+  // Postgres returns timestamps as ISO strings with milliseconds; compare the instant.
+  assert.equal(Date.parse(meta!.expiresAt as string), Date.parse("2030-12-31T23:59:59Z"));
 });
 
 test("setApiKeyExpiry clears expiry with null", async () => {

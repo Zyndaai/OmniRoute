@@ -13,10 +13,11 @@ process.env.APP_LOG_TO_FILE = "false";
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const issueAgentRoute = await import("../../src/app/api/issue-agent/runs/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -44,11 +45,9 @@ test.afterEach(() => {
   delete process.env.OMNIROUTE_ISSUE_AGENT_ENABLED;
 });
 
-// Close the SQLite handle the route opened. Without this the connection stays
-// open until process exit, and the isolateDataDir cleanup hook then fails with
-// EPERM on Windows, leaving storage.sqlite(-shm/-wal) behind for the next run.
-test.after(() => {
-  core.resetDbInstance();
+// Close the pool the route opened so the test process can exit cleanly.
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 test("issue-agent live triage traverses the normal chat-completions POST route", async () => {

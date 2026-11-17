@@ -22,7 +22,6 @@ const DEDICATED_API_KEY = "cpa-dedicated-data-plane-key";
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.STORAGE_ENCRYPTION_KEY = "cliproxy-health-model-auth-test-key";
 process.env.OMNIROUTE_ADOPT_EXISTING_SERVICE = "1";
 
@@ -90,7 +89,7 @@ after(async () => {
   if (supervisor) await supervisor.stop();
   unregisterSupervisor("cliproxy");
   await new Promise<void>((resolve) => fakeCliproxy.close(() => resolve()));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -112,8 +111,12 @@ test("embedded CLIProxyAPI uses public health and dedicated model credentials", 
   const status = await supervisor.start();
   assert.equal(status.state, "running", "the public /healthz probe must accept the fake service");
 
+  // Discovery runs in the background: wait until the authenticated response has been persisted,
+  // not merely requested, before asserting on the stored models.
+  const hasDiscoveredModel = async () =>
+    (await getServiceModels("cliproxy")).some((model) => model.id === "cliproxy/fake-cpa-model");
   const deadline = Date.now() + 3_000;
-  while (modelAuthorizationHeaders.length === 0 && Date.now() < deadline) {
+  while ((modelAuthorizationHeaders.length === 0 || !(await hasDiscoveredModel())) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 
@@ -123,10 +126,7 @@ test("embedded CLIProxyAPI uses public health and dedicated model credentials", 
     [`Bearer ${DEDICATED_API_KEY}`],
     "/v1/models must receive only settings.cliproxyapi_api_key"
   );
-  assert.ok(
-    getServiceModels("cliproxy").some((model) => model.id === "cliproxy/fake-cpa-model"),
-    "the authenticated discovery response must be persisted"
-  );
+  assert.ok(await hasDiscoveredModel(), "the authenticated discovery response must be persisted");
 
   stopServiceModelSync("cliproxy");
   await supervisor.stop();

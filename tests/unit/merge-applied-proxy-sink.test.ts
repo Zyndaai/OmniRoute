@@ -15,13 +15,13 @@ const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const { withUpstreamStatus, mergeAppliedProxySink, safeLogEvents } =
   await import("../../src/sse/handlers/chatHelpers.ts");
 
-test.beforeEach(() => {
-  proxyLogger.clearProxyLogs();
+test.beforeEach(async () => {
+  await proxyLogger.clearProxyLogs();
 });
 
-test.after(() => {
-  proxyLogger.clearProxyLogs();
-  core.closeDbInstance();
+test.after(async () => {
+  await proxyLogger.clearProxyLogs();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

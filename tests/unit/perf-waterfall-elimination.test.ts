@@ -11,7 +11,7 @@
 //    against the pre-fix serial source and GREEN against the batched source.
 //  - Where the real call graph is reachable from a unit test (the cache
 //    route), we also exercise the module end-to-end against an isolated temp
-//    DB to prove batching did not disturb result correctness.
+//    database to prove batching did not disturb result correctness.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -81,7 +81,7 @@ test("F1: cache route GET batches its four async reads (#11396)", () => {
   assert.match(body, /getCacheTrend\(trendHours\)/);
   // settings-load failure must degrade to {} *inside* the batch, not reject
   // the whole Promise.all and 500 the stats endpoint
-  assert.match(body, /getCachedSettings\(\)\.catch\(\s*\(\s*\)\s*=>\s*\(\s*\{\}\s*\)\s*\)/);
+  assert.match(body, /getCachedSettings\(\)\.catch\(\(\): Record<string, unknown> => \(\{\}\)\)/);
 
   // no serial waterfall remains for the same reads
   assert.doesNotMatch(src, /await getIdempotencyStats\(\)\s*;/);
@@ -92,63 +92,49 @@ test("F1: cache route GET batches its four async reads (#11396)", () => {
 
 // ─── F1 behavioral: real route + real DB, isolated temp data dir ───────────
 let core: typeof import("../../src/lib/db/core.ts");
+let helpers: typeof import("../helpers/postgres.ts");
 let TEST_DATA_DIR: string;
 
 test.before(async () => {
   TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-perf-waterfall-"));
   process.env.DATA_DIR = TEST_DATA_DIR;
-  process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
   core = await import("../../src/lib/db/core.ts");
+  helpers = await import("../helpers/postgres.ts");
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await helpers.resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core?.resetDbInstance();
+test.after(async () => {
+  await core?.resetDbInstance();
   if (TEST_DATA_DIR) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
   delete process.env.DATA_DIR;
-  delete process.env.DISABLE_SQLITE_AUTO_BACKUP;
 });
 
 test("F1: cache GET returns correct shapes + trend window after batching (#11396)", async () => {
   const route = await import("../../src/app/api/cache/route.ts");
-  const db = core.getDbInstance();
+  const backend = helpers.getTestBackend();
 
-  // usage_history is the single source for metrics + trend; ensure it exists
-  const hasTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='usage_history'")
-    .get();
-  if (!hasTable) {
-    db.prepare(
-      `CREATE TABLE usage_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        provider TEXT, model TEXT, connection_id TEXT, api_key_id TEXT, api_key_name TEXT,
-        tokens_input INTEGER DEFAULT 0, tokens_output INTEGER DEFAULT 0,
-        tokens_cache_read INTEGER DEFAULT 0, tokens_cache_creation INTEGER DEFAULT 0,
-        tokens_reasoning INTEGER DEFAULT 0, status TEXT, timestamp TEXT,
-        success INTEGER, latency_ms INTEGER DEFAULT 0, ttft_ms INTEGER DEFAULT 0,
-        error_code TEXT
-      )`
-    ).run();
-  }
-
+  // usage_history is the single source for metrics + trend (table comes from the migrations)
   const now = Date.now();
   const iso = (t: number) => new Date(t).toISOString();
-  const insert = db.prepare(
-    `INSERT INTO usage_history
-       (provider, model, connection_id, api_key_id, api_key_name,
-        tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
-        tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
+  const insert = (row: Array<string | number | boolean | null>) =>
+    backend.execute(
+      `INSERT INTO usage_history
+         (provider, model, connection_id, api_key_id, api_key_name,
+          tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
+          tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, "timestamp")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      row
+    );
   // cache hit (tokens_cache_read > 0)
-  insert.run(
+  await insert([
     "test-provider",
     "test-model",
     "conn-1",
@@ -160,14 +146,14 @@ test("F1: cache GET returns correct shapes + trend window after batching (#11396
     0,
     0,
     "ok",
-    1,
+    true,
     123,
     45,
     null,
-    iso(now - 3_600_000)
-  );
+    iso(now - 3_600_000),
+  ]);
   // cache creation (tokens_cache_creation > 0)
-  insert.run(
+  await insert([
     "test-provider",
     "test-model",
     "conn-2",
@@ -179,14 +165,14 @@ test("F1: cache GET returns correct shapes + trend window after batching (#11396
     1500,
     0,
     "ok",
-    1,
+    true,
     200,
     50,
     null,
-    iso(now - 7_200_000)
-  );
+    iso(now - 7_200_000),
+  ]);
   // plain request — must not pollute cache metrics
-  insert.run(
+  await insert([
     "test-provider",
     "test-model",
     "conn-3",
@@ -198,12 +184,12 @@ test("F1: cache GET returns correct shapes + trend window after batching (#11396
     0,
     0,
     "ok",
-    1,
+    true,
     90,
     30,
     null,
-    iso(now - 300_000)
-  );
+    iso(now - 300_000),
+  ]);
 
   const req = new Request("http://localhost/api/cache?trendHours=48", {
     method: "GET",
@@ -293,7 +279,7 @@ test("N2: provider deletion cleanup helpers run in parallel (#11396)", () => {
   assert.match(src, /Failed to clean up LKGP refs for deleted connections/);
 
   // side effects that followed the serially-awaited cleanups must still run
-  assert.match(src, /revokeNativeCodexTurnPinsForConnection\(id\)/);
+  assert.match(src, /revokeNativeCodexTurnPinsForConnection\(connectionId\)/);
   assert.match(src, /removeConnectionHealth\(id\)/);
 
   // no serial awaits left behind

@@ -102,13 +102,6 @@ test("next config declares Turbopack aliases, runtime assets and server external
     tracingIncludes.includes("./open-sse/services/compression/engines/rtk/filters/**/*.json")
   );
   assert.ok(tracingIncludes.includes("./open-sse/services/compression/rules/**/*.json"));
-  // sql.js WASM must ship in the standalone bundle: sqljsAdapter resolves it from
-  // node_modules/sql.js/dist/sql-wasm.wasm at runtime (driver fallback tier), but
-  // Next traces sql-wasm.js without auto-including the runtime .wasm asset.
-  assert.ok(
-    tracingIncludes.includes("./node_modules/sql.js/dist/sql-wasm.wasm"),
-    "sql-wasm.wasm must be trace-included so the sql.js fallback works in standalone builds"
-  );
   assert.ok(
     tracingExcludes.some((p) => p.includes("_tasks")),
     "outputFileTracingExcludes should exclude _tasks"
@@ -124,10 +117,6 @@ test("next config declares Turbopack aliases, runtime assets and server external
 
   for (const packageName of [
     "thread-stream",
-    "better-sqlite3",
-    // sqlite-vec ships a native vec0.so loaded at runtime; without externalizing it
-    // the Turbopack build fails with "Unknown module type" on the .so (issue #3066).
-    "sqlite-vec",
     "node-machine-id",
     "wreq-js",
     "fs",
@@ -138,28 +127,6 @@ test("next config declares Turbopack aliases, runtime assets and server external
     "tls",
   ]) {
     assert.ok(serverExternalPackages.has(packageName), `${packageName} should be externalized`);
-  }
-});
-
-test("Turbopack aliases better-sqlite3 to the stub ONLY when OMNIROUTE_BETTER_SQLITE3_STUB=1 (#11343)", async () => {
-  const original = process.env.OMNIROUTE_BETTER_SQLITE3_STUB;
-  try {
-    delete process.env.OMNIROUTE_BETTER_SQLITE3_STUB;
-    const { default: def } = await loadNextConfig("bettersqlite-default");
-    assert.equal(def.turbopack.resolveAlias["better-sqlite3"], undefined);
-    // The default build must keep the real package reachable as an external, which
-    // is exactly what the alias silently defeated.
-    assert.ok(new Set(def.serverExternalPackages).has("better-sqlite3"));
-
-    process.env.OMNIROUTE_BETTER_SQLITE3_STUB = "1";
-    const { default: stubbed } = await loadNextConfig("bettersqlite-optin");
-    assert.equal(
-      stubbed.turbopack.resolveAlias["better-sqlite3"],
-      "./src/lib/db/better-sqlite3.stub.js"
-    );
-  } finally {
-    if (original === undefined) delete process.env.OMNIROUTE_BETTER_SQLITE3_STUB;
-    else process.env.OMNIROUTE_BETTER_SQLITE3_STUB = original;
   }
 });
 

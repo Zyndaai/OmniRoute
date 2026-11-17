@@ -223,8 +223,8 @@ test("DeepSeek defaults to OpenAI Chat Completions and exposes Responses + Anthr
   assert.equal(alternates[1].format, "claude");
 });
 
-test("DeepSeek reuses the generic Chat-to-Responses and Responses-to-Anthropic translators", () => {
-  const responsesBody = translateRequest(
+test("DeepSeek reuses the generic Chat-to-Responses and Responses-to-Anthropic translators", async () => {
+  const responsesBody = (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "deepseek-v4-pro",
@@ -237,7 +237,7 @@ test("DeepSeek reuses the generic Chat-to-Responses and Responses-to-Anthropic t
     true,
     {},
     "deepseek"
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
   assert.equal(responsesBody.messages, undefined);
   assert.equal(responsesBody.max_output_tokens, 123);
   assert.deepEqual(responsesBody.input, [
@@ -249,7 +249,7 @@ test("DeepSeek reuses the generic Chat-to-Responses and Responses-to-Anthropic t
     },
   ]);
 
-  const anthropicBody = translateRequest(
+  const anthropicBody = (await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "deepseek-v4-pro",
@@ -261,7 +261,7 @@ test("DeepSeek reuses the generic Chat-to-Responses and Responses-to-Anthropic t
     true,
     {},
     "deepseek"
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
   assert.equal(anthropicBody.input, undefined);
   assert.deepEqual(anthropicBody.messages, [
     { role: "user", content: [{ type: "text", text: "hello" }] },

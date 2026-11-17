@@ -21,7 +21,8 @@ import { join } from "node:path";
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "omniroute-4136-"));
 
 const { createSSETransformStreamWithLogger } = await import("../../open-sse/utils/stream.ts");
-const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { translateRequest, prefetchThoughtSignatures } =
+  await import("../../open-sse/translator/index.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { clearGeminiThoughtSignatures } =
   await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
@@ -36,13 +37,13 @@ const CLAUDE_SIGNATURE = "CLAUDE_PRODUCED_SIGNATURE_4136";
 
 const textEncoder = new TextEncoder();
 
-test.beforeEach(() => {
-  clearGeminiThoughtSignatures();
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatures();
 });
 
-test.after(() => {
-  clearGeminiThoughtSignatures();
-  resetDbInstance();
+test.after(async () => {
+  await clearGeminiThoughtSignatures();
+  await resetDbInstance();
 });
 
 async function streamClaudeToolCallResponse() {
@@ -84,7 +85,7 @@ async function streamClaudeToolCallResponse() {
   return new Response(source.pipeThrough(transform)).text();
 }
 
-function followUpRequestBody(model: string) {
+async function followUpRequestBody(model: string) {
   const body = {
     messages: [
       { role: "user", content: "read /a" },
@@ -111,8 +112,16 @@ function followUpRequestBody(model: string) {
       },
     ],
   };
+  // The translator is synchronous over its inputs; the signature store is read ahead of it,
+  // as the production caller does via prefetchThoughtSignatures.
+  const thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.ANTIGRAVITY,
+    model,
+    body,
+    CONNECTION_ID
+  );
   return JSON.stringify(
-    translateRequest(
+    await translateRequest(
       FORMATS.OPENAI,
       FORMATS.ANTIGRAVITY,
       model,
@@ -121,7 +130,7 @@ function followUpRequestBody(model: string) {
       null,
       "antigravity",
       null,
-      { signatureNamespace: CONNECTION_ID }
+      { signatureNamespace: CONNECTION_ID, thoughtSignatures }
     )
   );
 }
@@ -130,7 +139,7 @@ test("#4136: a Claude-produced thought signature is NOT replayed to a Gemini mod
   const streamed = await streamClaudeToolCallResponse();
   assert.ok(streamed.includes(TOOL_CALL_ID), "stream must emit the tool call");
 
-  const geminiFollowUp = followUpRequestBody(GEMINI_MODEL);
+  const geminiFollowUp = await followUpRequestBody(GEMINI_MODEL);
   assert.equal(
     geminiFollowUp.includes(CLAUDE_SIGNATURE),
     false,
@@ -141,7 +150,7 @@ test("#4136: a Claude-produced thought signature is NOT replayed to a Gemini mod
 test("#4136: the same model family still gets its cached thought signature", async () => {
   await streamClaudeToolCallResponse();
 
-  const claudeFollowUp = followUpRequestBody(CLAUDE_MODEL);
+  const claudeFollowUp = await followUpRequestBody(CLAUDE_MODEL);
   assert.ok(
     claudeFollowUp.includes(CLAUDE_SIGNATURE),
     "a Claude follow-up on the same connection must keep re-attaching the Claude signature"

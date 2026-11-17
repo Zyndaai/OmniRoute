@@ -6,27 +6,32 @@ import path from "node:path";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "health-poll-16552-"));
 process.env.DATA_DIR = dir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
 const providers = await import("../../src/lib/db/providers.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { buildProviderHealthMatrix } =
   await import("../../src/lib/monitoring/providerHealthMatrix.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("#16552 matrix polls share call-log stats across provider and includeHealthy filters", async (t) => {
   let now = Date.parse("2026-10-15T12:00:00Z");
   t.mock.method(Date, "now", () => now);
-  const db = core.getDbInstance();
-  const original = db.prepare.bind(db);
+  // The matrix reads through the process backend (db() = getDbBackend()); count the stats query there.
+  const backend = getTestBackend();
+  const original = backend.query.bind(backend);
   let queries = 0;
-  db.prepare = (sql) => {
+  backend.query = ((sql: string, params?: unknown[]) => {
     if (sql.includes("WITH log_targets AS")) queries++;
-    return original(sql);
-  };
+    return original(sql, params as never);
+  }) as typeof backend.query;
   try {
     const first = await buildProviderHealthMatrix({ range: "24h", provider: "poll-a" });
     now += 1_000;
@@ -53,6 +58,6 @@ test("#16552 matrix polls share call-log stats across provider and includeHealth
     await buildProviderHealthMatrix({ range: "7d", provider: "poll-a" });
     assert.equal(queries, 2, "different ranges never reuse the wrong query window");
   } finally {
-    db.prepare = original;
+    backend.query = original;
   }
 });

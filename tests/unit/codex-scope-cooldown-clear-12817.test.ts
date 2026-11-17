@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-codex-clear-12817-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -16,7 +17,7 @@ const quotaSnapshots = await import("../../src/lib/db/quotaSnapshots.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -99,8 +100,8 @@ async function persistBothChildCooldowns(id: string): Promise<{
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -149,9 +150,9 @@ test("#12817 PUT rateLimitedUntil:\"\" also drops nested Codex child cooldowns",
 test("#12817 clearConnectionRateLimit strips nested Codex child cooldowns", async () => {
   const connection = await seedCodexConnection();
   await persistBothChildCooldowns(connection.id);
-  rateLimit.setConnectionRateLimitUntil(connection.id, Date.now() + 90_000);
+  await rateLimit.setConnectionRateLimitUntil(connection.id, Date.now() + 90_000);
 
-  rateLimit.clearConnectionRateLimit(connection.id);
+  await rateLimit.clearConnectionRateLimit(connection.id);
 
   const after = await readConnection(connection.id);
   const data = psd(after);
@@ -237,7 +238,7 @@ test("#12860 saveQuotaSnapshot with headroom lifts fallback-sourced scope cooldo
   const before = await readConnection(connection.id);
   assert.ok(codexAccount.getCodexChildCooldown(before as never, "gpt-5.5"));
 
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "primary",
@@ -272,7 +273,7 @@ test("#12860 saveQuotaSnapshot with headroom does NOT lift authoritative quota_r
   const before = await readConnection(connection.id);
   assert.ok(codexAccount.getCodexChildCooldown(before as never, "gpt-5.5"));
 
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "session",
@@ -299,7 +300,7 @@ test("#12860 saveQuotaSnapshot does NOT lift scope cooldown if another window fo
   });
 
   // Weekly window is currently exhausted (0% remaining)
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "weekly",
@@ -311,7 +312,7 @@ test("#12860 saveQuotaSnapshot does NOT lift scope cooldown if another window fo
   });
 
   // Session window reports 100% headroom, but weekly is still exhausted
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "session",
@@ -326,7 +327,7 @@ test("#12860 saveQuotaSnapshot does NOT lift scope cooldown if another window fo
   assert.ok(codexAccount.getCodexChildCooldown(mid as never, "gpt-5.5"));
 
   // Now weekly also recovers to 100% headroom
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "weekly",
@@ -346,7 +347,7 @@ test("#12860 saveQuotaSnapshot for spark scope with headroom lifts only spark co
   const connection = await seedCodexConnection();
   await persistBothChildCooldowns(connection.id);
 
-  quotaSnapshots.saveQuotaSnapshot({
+  await quotaSnapshots.saveQuotaSnapshot({
     provider: "codex",
     connection_id: connection.id,
     window_key: "gpt_5_3_codex_spark_session",
@@ -382,7 +383,15 @@ test("#12860 setQuotaCache with fresh usage headroom lifts fallback-sourced scop
     },
   });
 
-  const after = await readConnection(connection.id);
+  // setQuotaCache persists fire-and-forget (the cache is the routing source of
+  // truth), so wait for the lift to land in the database before asserting.
+  let after = await readConnection(connection.id);
+  for (let i = 0; i < 100; i++) {
+    const until = psd(after).codexScopeRateLimitedUntil as Record<string, unknown> | undefined;
+    if (until?.codex === undefined) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    after = await readConnection(connection.id);
+  }
   const data = psd(after);
   const until = data.codexScopeRateLimitedUntil as Record<string, unknown> | undefined;
   assert.equal(until?.codex, undefined);
@@ -404,7 +413,7 @@ test("#12860 quota_reset cooldown that just elapsed is still held by the skew gr
     },
   });
 
-  const lifted = providersDb.liftCodexScopeCooldownOnHeadroom(connection.id, "codex");
+  const lifted = await providersDb.liftCodexScopeCooldownOnHeadroom(connection.id, "codex");
   assert.equal(lifted, false);
 
   const after = await readConnection(connection.id);
@@ -423,7 +432,7 @@ test("#12860 quota_reset cooldown past the skew grace window is lifted", async (
     },
   });
 
-  const lifted = providersDb.liftCodexScopeCooldownOnHeadroom(connection.id, "codex");
+  const lifted = await providersDb.liftCodexScopeCooldownOnHeadroom(connection.id, "codex");
   assert.equal(lifted, true);
 
   const after = await readConnection(connection.id);
@@ -432,7 +441,7 @@ test("#12860 quota_reset cooldown past the skew grace window is lifted", async (
 
 test("#12860 hasCodexScopeCooldown short-circuits the snapshot scan when nothing is parked", async () => {
   const connection = await seedCodexConnection();
-  assert.equal(providersDb.hasCodexScopeCooldown(connection.id, "codex"), false);
+  assert.equal(await providersDb.hasCodexScopeCooldown(connection.id, "codex"), false);
 
   await codexAccount.persistCodexChildCooldown({
     connectionId: connection.id,
@@ -440,10 +449,10 @@ test("#12860 hasCodexScopeCooldown short-circuits the snapshot scan when nothing
     rateLimitedUntil: futureIso(120_000),
   });
 
-  assert.equal(providersDb.hasCodexScopeCooldown(connection.id, "codex"), true);
-  assert.equal(providersDb.hasCodexScopeCooldown(connection.id, "spark"), false);
+  assert.equal(await providersDb.hasCodexScopeCooldown(connection.id, "codex"), true);
+  assert.equal(await providersDb.hasCodexScopeCooldown(connection.id, "spark"), false);
 
   const glm = await seedGlmConnection();
-  assert.equal(providersDb.hasCodexScopeCooldown(glm.id, "codex"), false);
-  assert.equal(providersDb.hasCodexScopeCooldown("does-not-exist", "codex"), false);
+  assert.equal(await providersDb.hasCodexScopeCooldown(glm.id, "codex"), false);
+  assert.equal(await providersDb.hasCodexScopeCooldown("does-not-exist", "codex"), false);
 });

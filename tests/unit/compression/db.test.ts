@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach, after } from "node:test";
+import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,19 +12,18 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../../src/lib/db/core.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../../src/lib/db/compression.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 
-beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+before(async () => {
+  await core.ensureDbInitialized();
 });
 
-afterEach(() => {
-  core.resetDbInstance();
+beforeEach(async () => {
+  await resetTestDb();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -76,7 +75,6 @@ describe("updateCompressionSettings", () => {
 
   it("persists the Lite proactive tool-result truncation switch across reload", async () => {
     await updateCompressionSettings({ lite: { compressToolResults: false } });
-    core.resetDbInstance();
 
     const settings = await getCompressionSettings();
     assert.equal(settings.lite?.compressToolResults, false);
@@ -86,7 +84,6 @@ describe("updateCompressionSettings", () => {
     await updateCompressionSettings({
       lite: { compressToolResults: true, maxToolLength: 8000 },
     });
-    core.resetDbInstance();
 
     const settings = await getCompressionSettings();
     assert.equal(settings.lite?.compressToolResults, true);
@@ -97,9 +94,7 @@ describe("updateCompressionSettings", () => {
     await updateCompressionSettings({
       lite: { compressToolResults: true, maxToolLength: 8000 },
     });
-    core.resetDbInstance();
     await updateCompressionSettings({ lite: { compressToolResults: false } });
-    core.resetDbInstance();
 
     const settings = await getCompressionSettings();
     assert.equal(settings.lite?.compressToolResults, false);
@@ -110,11 +105,9 @@ describe("updateCompressionSettings", () => {
     await updateCompressionSettings({
       lite: { compressToolResults: true, maxToolLength: 8000 },
     });
-    core.resetDbInstance();
     await updateCompressionSettings({
       lite: { compressToolResults: true, maxToolLength: null },
     } as Parameters<typeof updateCompressionSettings>[0]);
-    core.resetDbInstance();
 
     const settings = await getCompressionSettings();
     assert.equal(settings.lite?.compressToolResults, true);
@@ -123,18 +116,18 @@ describe("updateCompressionSettings", () => {
 
   describe("a partial cavemanOutputMode write", () => {
     const writeThenRead = async (cavemanOutputMode: Partial<CavemanOutputModeConfig>) => {
-      core.resetDbInstance();
       await updateCompressionSettings({ cavemanOutputMode } as Parameters<
         typeof updateCompressionSettings
       >[0]);
-      core.resetDbInstance();
       return (await getCompressionSettings()).cavemanOutputMode;
     };
-    const seedStoredRow = (value: unknown) =>
-      core
-        .getDbInstance()
-        .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-        .run("compression", "cavemanOutputMode", value);
+    // `valueJson` is JSON text, stored in the jsonb config row.
+    const seedStoredRow = (valueJson: string) =>
+      getTestBackend().execute(
+        `INSERT INTO config_entries (namespace, key, value) VALUES ('compression', 'cavemanOutputMode', $1::jsonb)
+         ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+        [valueJson]
+      );
 
     it("keeps the stored enabled and intensity when it only sends autoClarity", async () => {
       await updateCompressionSettings({
@@ -200,7 +193,7 @@ describe("updateCompressionSettings", () => {
     });
 
     it("keeps the valid fields of a partially populated stored row", async () => {
-      seedStoredRow(JSON.stringify({ intensity: "ultra", autoClarity: false }));
+      await seedStoredRow(JSON.stringify({ intensity: "ultra", autoClarity: false }));
       assert.deepEqual(await writeThenRead({ enabled: true }), {
         enabled: true,
         intensity: "ultra",
@@ -208,24 +201,9 @@ describe("updateCompressionSettings", () => {
       });
     });
 
-    it("treats a non-text, unparseable, or null stored row as absent", async () => {
-      seedStoredRow(
-        Buffer.from(JSON.stringify({ enabled: true, intensity: "ultra", autoClarity: true }))
-      );
-      assert.deepEqual(await writeThenRead({ autoClarity: false }), {
-        enabled: false,
-        intensity: "lite",
-        autoClarity: false,
-      });
-
-      seedStoredRow("{not valid json");
-      assert.deepEqual(await writeThenRead({ enabled: true }), {
-        enabled: true,
-        intensity: "lite",
-        autoClarity: true,
-      });
-
-      seedStoredRow("null");
+    it("treats a null or unusable stored row as absent", async () => {
+      // jsonb cannot hold a BLOB or unparseable text, so only the JSON null case is reachable.
+      await seedStoredRow("null");
       assert.deepEqual(await writeThenRead({ autoClarity: false }), {
         enabled: false,
         intensity: "lite",

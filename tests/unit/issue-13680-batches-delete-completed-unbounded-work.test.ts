@@ -26,8 +26,8 @@ const { createBatch, deleteCompletedBatches, INSTANCE_SWEEP_CHUNK, MAX_CHUNKS_PE
   await import("../../src/lib/db/batches.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
-function seedCompletedBatch(label: string, apiKeyId: string | null = null) {
-  const file = createFile({
+async function seedCompletedBatch(label: string, apiKeyId: string | null = null) {
+  const file = await createFile({
     bytes: 1,
     filename: `${label}.jsonl`,
     purpose: "batch",
@@ -44,18 +44,18 @@ function seedCompletedBatch(label: string, apiKeyId: string | null = null) {
 }
 
 describe("#13680 — deleteCompletedBatches has a per-request chunk cap", () => {
-  after(() => {
-    resetDbInstance();
+  after(async () => {
+    await resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it("stops after MAX_CHUNKS_PER_REQUEST chunks and reports hasMore instead of sweeping the whole table in one synchronous call", () => {
+  it("stops after MAX_CHUNKS_PER_REQUEST chunks and reports hasMore instead of sweeping the whole table in one call", async () => {
     const cap = MAX_CHUNKS_PER_REQUEST * INSTANCE_SWEEP_CHUNK;
     const total = cap + 1; // one row past the cap: proves the loop stops at it
 
-    for (let i = 0; i < total; i++) seedCompletedBatch(`issue13680-${i}`);
+    for (let i = 0; i < total; i++) await seedCompletedBatch(`issue13680-${i}`);
 
-    const result = deleteCompletedBatches({ allTenants: true }) as {
+    const result = (await deleteCompletedBatches({ allTenants: true })) as {
       deletedBatches: number;
       deletedFiles: number;
       hasMore?: boolean;
@@ -73,7 +73,7 @@ describe("#13680 — deleteCompletedBatches has a per-request chunk cap", () => 
     );
   });
 
-  it("resumes across repeated calls until hasMore is false, sweeping the entire backlog", () => {
+  it("resumes across repeated calls until hasMore is false, sweeping the entire backlog", async () => {
     // Key-scoped on purpose: isolates this test's count from the leftover
     // unowned batch the previous test's `allTenants` sweep may not have caught
     // (its cap+1 seed leaves exactly one row past MAX_CHUNKS_PER_REQUEST), so
@@ -81,7 +81,7 @@ describe("#13680 — deleteCompletedBatches has a per-request chunk cap", () => 
     const apiKeyId = "resume-key-13680";
     const cap = MAX_CHUNKS_PER_REQUEST * INSTANCE_SWEEP_CHUNK;
     const total = cap + 50;
-    for (let i = 0; i < total; i++) seedCompletedBatch(`issue13680-resume-${i}`, apiKeyId);
+    for (let i = 0; i < total; i++) await seedCompletedBatch(`issue13680-resume-${i}`, apiKeyId);
 
     let totalDeleted = 0;
     let hasMore = true;
@@ -89,7 +89,7 @@ describe("#13680 — deleteCompletedBatches has a per-request chunk cap", () => 
     while (hasMore) {
       calls++;
       if (calls > 10) throw new Error("resumption did not converge within 10 calls");
-      const result = deleteCompletedBatches({ apiKeyId }) as {
+      const result = (await deleteCompletedBatches({ apiKeyId })) as {
         deletedBatches: number;
         hasMore: boolean;
       };

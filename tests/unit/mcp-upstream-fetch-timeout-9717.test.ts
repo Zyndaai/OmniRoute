@@ -94,7 +94,7 @@ function withEnv(vars: Record<string, string | undefined>) {
 }
 
 async function callRouteRequest() {
-  const handler = getRegisteredHandler(createMcpServer(), "omniroute_route_request");
+  const handler = getRegisteredHandler(await createMcpServer(), "omniroute_route_request");
   return handler(
     { model: "test-model", messages: [{ role: "user", content: "hi" }] },
     { authInfo: { clientId: "test-9717", scopes: ["execute:completions"] } }

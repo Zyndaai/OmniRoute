@@ -213,7 +213,7 @@ test("AntigravityExecutor.transformRequest preserves Gemini Flash upstream IDs",
 
 test("AntigravityExecutor.transformRequest sends Claude through Gemini-compatible Cloud Code schema", async () => {
   const executor = new AntigravityExecutor();
-  const bridged = openaiToAntigravityRequest(
+  const bridged = await openaiToAntigravityRequest(
     "claude-opus-4-6-thinking",
     {
       messages: [{ role: "user", content: "Hello" }],

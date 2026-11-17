@@ -25,14 +25,15 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "combos-auto-14889-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
 const cooperativeYield = await import("../../open-sse/services/autoCombo/cooperativeYield.ts");
 const combosAutoRoute = await import("../../src/app/api/combos/auto/route.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -43,31 +44,36 @@ test.after(() => {
 async function countDbReads(
   fn: () => Promise<unknown>
 ): Promise<{ syncedReads: number; capabilityReads: number; overrideReads: number }> {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { all: (...args: unknown[]) => unknown[] };
-  };
-  const realPrepare = db.prepare.bind(db);
+  const db = getTestBackend() as unknown as Record<
+    "query" | "queryOne",
+    (sql: string, ...rest: unknown[]) => unknown
+  >;
+  const real = { query: db.query.bind(db), queryOne: db.queryOne.bind(db) };
   let syncedReads = 0;
   let capabilityReads = 0;
   let overrideReads = 0;
-  db.prepare = ((sql: string, ...rest: unknown[]) => {
-    if (typeof sql === "string") {
-      if (sql.includes("syncedAvailableModels")) syncedReads++;
-      if (sql.includes("model_capabilities")) capabilityReads++;
-      if (
-        sql.includes("model_capability_overrides") ||
-        sql.includes("model_context_overrides") ||
-        sql.includes("customModels") ||
-        sql.includes("modelCompatOverrides")
-      )
-        overrideReads++;
-    }
-    return (realPrepare as (...a: unknown[]) => unknown)(sql, ...rest);
-  }) as typeof db.prepare;
+  const count = (sql: unknown) => {
+    if (typeof sql !== "string") return;
+    if (sql.includes("connection_model_sync")) syncedReads++;
+    if (sql.includes("model_capabilities")) capabilityReads++;
+    if (
+      sql.includes("model_capability_overrides") ||
+      sql.includes("model_context_overrides") ||
+      sql.includes("provider_model_catalog")
+    )
+      overrideReads++;
+  };
+  for (const name of ["query", "queryOne"] as const) {
+    db[name] = (sql: string, ...rest: unknown[]) => {
+      count(sql);
+      return real[name](sql, ...rest);
+    };
+  }
   try {
     await fn();
   } finally {
-    db.prepare = realPrepare;
+    db.query = real.query;
+    db.queryOne = real.queryOne;
   }
   return { syncedReads, capabilityReads, overrideReads };
 }
@@ -232,8 +238,11 @@ test("vision filter parity holds for the pre-resolved branch", async () => {
     { provider: "opencode-zen", model: "deepseek-v4-flash" },
   ];
   for (const candidate of forced) {
-    assert.equal(filter?.({ ...candidate, resolvedSupportsVision: true }), false);
-    assert.equal(filter?.({ ...candidate, resolvedSupportsVision: true }), filter?.(candidate));
+    assert.equal(await filter?.({ ...candidate, resolvedSupportsVision: true }), false);
+    assert.equal(
+      await filter?.({ ...candidate, resolvedSupportsVision: true }),
+      await filter?.(candidate)
+    );
   }
 });
 
@@ -318,15 +327,15 @@ test("preparation stays resilient for a model missing from every source", async 
   // branches: the snapshot holds no row, the on-demand read finds none.
   const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
   const probe = { provider: "no-such-provider-14889", model: "no-such-model-14889" };
-  const fromSnapshot = getResolvedModelCapabilities(
+  const fromSnapshot = await getResolvedModelCapabilities(
     probe,
     undefined,
     // The prepared snapshot carries the same empty verdict for unknown rows.
-    (
+    await (
       await import("../../src/lib/modelCapabilityResolutionSnapshot.ts")
     ).createModelCapabilityResolutionSnapshot()
   );
-  const onDemand = getResolvedModelCapabilities(probe);
+  const onDemand = await getResolvedModelCapabilities(probe);
   assert.equal(fromSnapshot.supportsVision, onDemand.supportsVision);
   assert.equal(fromSnapshot.contextWindow, onDemand.contextWindow);
   for (const candidate of prepared.regularCandidates) {
@@ -335,7 +344,7 @@ test("preparation stays resilient for a model missing from every source", async 
   }
   // An empty pool answers null limits, the same verdict as the on-demand path.
   const { computeAdvertisedLimits } = virtualFactory;
-  assert.deepEqual(computeAdvertisedLimits([]), {
+  assert.deepEqual(await computeAdvertisedLimits([]), {
     contextLength: null,
     maxOutputTokens: null,
   });

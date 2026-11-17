@@ -58,8 +58,10 @@ async function authCookieHeader(): Promise<string> {
   return `auth_token=${token}`;
 }
 
-function seed(entry: Partial<Parameters<typeof radarDb.setRadarCache>[0]> = {}): void {
-  radarDb.setRadarCache({
+async function seed(
+  entry: Partial<Parameters<typeof radarDb.setRadarCache>[0]> = {}
+): Promise<void> {
+  await radarDb.setRadarCache({
     version: FIXTURE.version,
     generatedAt: FIXTURE.generatedAt,
     tier: "community",
@@ -70,10 +72,10 @@ function seed(entry: Partial<Parameters<typeof radarDb.setRadarCache>[0]> = {}):
   });
 }
 
-test("the catalog cache persists the feed's own build date", () => {
-  seed();
+test("the catalog cache persists the feed's own build date", async () => {
+  await seed();
 
-  const cache = radarDb.getRadarCache();
+  const cache = await radarDb.getRadarCache();
 
   assert.ok(cache);
   assert.equal(cache.generatedAt, FIXTURE.generatedAt);
@@ -85,10 +87,10 @@ test("the catalog cache persists the feed's own build date", () => {
   );
 });
 
-test("a row cached before this column existed reads back as an unknown date", () => {
-  seed({ generatedAt: undefined });
+test("a row cached before this column existed reads back as an unknown date", async () => {
+  await seed({ generatedAt: undefined });
 
-  const cache = radarDb.getRadarCache();
+  const cache = await radarDb.getRadarCache();
 
   assert.ok(cache);
   assert.equal(cache.generatedAt, null, "unknown must stay unknown, never the fetch time");
@@ -125,10 +127,10 @@ test("syncRadar writes the build date it just validated", async () => {
   assert.equal(written[0].generatedAt, FIXTURE.generatedAt);
 });
 
-test("getRadarCatalog reports the build date alongside the fetch date", () => {
-  seed();
+test("getRadarCatalog reports the build date alongside the fetch date", async () => {
+  await seed();
 
-  const { meta } = getRadarCatalog();
+  const { meta } = await getRadarCatalog();
 
   assert.ok(meta, "an active feed must expose its metadata");
   assert.equal(meta.generatedAt, FIXTURE.generatedAt);
@@ -136,7 +138,7 @@ test("getRadarCatalog reports the build date alongside the fetch date", () => {
 });
 
 test("GET /api/radar/status reports the build date as its own field", async () => {
-  seed();
+  await seed();
   const { GET } = await import("../../src/app/api/radar/status/route.ts");
 
   const res = await GET(
@@ -158,17 +160,17 @@ test("GET /api/radar/status reports the build date as its own field", async () =
 });
 
 test("status omits the build date for the caches that never store one", async () => {
-  seed();
+  await seed();
   // Both must be present in the response, otherwise the assertion below would
   // pass on an `{ available: false }` stub that carries no field either.
-  radarDb.setRadarOffersCache({
+  await radarDb.setRadarOffersCache({
     version: "2026.08.24.1",
     tier: "live",
     payload: JSON.stringify({ offers: [] }),
     signature: "test-signature",
     fetchedAt: FETCHED_AT,
   });
-  radarDb.setRadarIntelCache({
+  await radarDb.setRadarIntelCache({
     version: "2026.08.24.1",
     tier: "live",
     payload: JSON.stringify({ intel: {} }),
@@ -204,8 +206,8 @@ test("status omits the build date for the caches that never store one", async ()
   assert.equal(body.feeds.catalog.generatedAt, FIXTURE.generatedAt);
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   delete process.env.RADAR_ENABLED;
   delete process.env.INITIAL_PASSWORD;
   try {

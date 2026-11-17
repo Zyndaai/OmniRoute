@@ -21,33 +21,32 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-ag-local-usage-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 // Load usage.ts up-front (its index.ts proxyFetch patch runs at module eval) before mocks.
 const usageModule = await import("../../open-sse/services/usage.ts");
 const { getUsageForProvider } = usageModule;
 
 const originalFetch = globalThis.fetch;
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("Antigravity fetchAvailableModels(used=0) → localUsageHistory when usage_history has rows", async () => {
-  core.resetDbInstance();
+  await resetTestDb();
 
   // resetTime an hour out → the 5h local-usage window is [now-4h, now+1h).
   const resetTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
   const seededTimestamp = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // within window
 
   // Seed a usage_history row keyed by the public upstream id the fallback queries.
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { run: (...a: unknown[]) => unknown };
-  };
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, tokens_reasoning, success, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?)`
-  ).run("antigravity", "gemini-3.8-flash-high", "conn-local-1", 1000, 1500, 500, seededTimestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, tokens_reasoning, success, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, true, $7::timestamptz)`,
+    ["antigravity", "gemini-3.8-flash-high", "conn-local-1", 1000, 1500, 500, seededTimestamp]
+  );
   // Total seeded tokens = 3000 → ceil(3000/1000) = 3 units used.
 
   globalThis.fetch = (async (input: any) => {
@@ -86,7 +85,7 @@ test("Antigravity fetchAvailableModels(used=0) → localUsageHistory when usage_
 });
 
 test("Antigravity stays fetchAvailableModels when usage_history has no matching rows", async () => {
-  core.resetDbInstance();
+  await resetTestDb();
 
   const resetTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 

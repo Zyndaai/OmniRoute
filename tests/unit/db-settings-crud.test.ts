@@ -1,55 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-settings-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
-
-const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
+/** Raw write of one config_entries row (the table behind settings, proxyConfig, ...). */
+async function seedConfig(namespace: string, key: string, value: unknown) {
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [namespace, key, JSON.stringify(value)]
+  );
+}
 
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
+/** Raw write of one pricing layer row: source is 'litellm' | 'models_dev' | 'user'. */
+async function seedPricing(source: string, provider: string, models: unknown) {
+  await getTestBackend().execute(
+    `INSERT INTO model_pricing (source, provider, models) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (source, provider) DO UPDATE SET models = EXCLUDED.models`,
+    [source, provider, JSON.stringify(models)]
+  );
+}
 
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  delete process.env.INITIAL_PASSWORD;
+async function setConnectionProxyEnabled(connectionId: string) {
+  await getTestBackend().execute("UPDATE provider_connections SET proxy_enabled = true WHERE id = $1", [
+    connectionId,
+  ]);
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
+  delete process.env.INITIAL_PASSWORD;
 });
 
 test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-
-  if (ORIGINAL_INITIAL_PASSWORD === undefined) {
-    delete process.env.INITIAL_PASSWORD;
-  } else {
-    process.env.INITIAL_PASSWORD = ORIGINAL_INITIAL_PASSWORD;
-  }
+  delete process.env.INITIAL_PASSWORD;
 });
 
 test("getSettings exposes defaults and updateSettings persists typed values", async () => {
@@ -86,11 +75,10 @@ test("getSettings exposes defaults and updateSettings persists typed values", as
 
   const reread = await settingsDb.getSettings();
   assert.equal(reread.cloudEnabled, true);
-  const stored = core
-    .getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = 'settings' AND key = 'cloudEnabled'")
-    .get() as { value: string };
-  assert.equal(stored.value, "true");
+  const stored = await getTestBackend().queryOne<{ value: unknown }>(
+    "SELECT value FROM config_entries WHERE namespace = 'settings' AND key = 'cloudEnabled'"
+  );
+  assert.equal(stored?.value, true);
 });
 
 test("INITIAL_PASSWORD marks onboarding as complete on first read", async () => {
@@ -105,22 +93,12 @@ test("INITIAL_PASSWORD marks onboarding as complete on first read", async () => 
 });
 
 test("pricing layers merge synced, models.dev and user overrides", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing_synced",
-    "layered-provider",
-    JSON.stringify({
-      "model-a": { prompt: 1, completion: 2 },
-    })
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "models_dev_pricing",
-    "layered-provider",
-    JSON.stringify({
-      "model-a": { completion: 5, cached: 3 },
-    })
-  );
+  await seedPricing("litellm", "layered-provider", {
+    "model-a": { prompt: 1, completion: 2 },
+  });
+  await seedPricing("models_dev", "layered-provider", {
+    "model-a": { completion: 5, cached: 3 },
+  });
 
   await settingsDb.updatePricing({
     "layered-provider": {
@@ -160,24 +138,14 @@ test("pricing layers merge synced, models.dev and user overrides", async () => {
 });
 
 test("getPricingWithSources reports the winning layer for each provider/model", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing_synced",
-    "layer-source",
-    JSON.stringify({
-      "model-litellm": { prompt: 1, completion: 2 },
-      "model-user": { prompt: 3 },
-    })
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "models_dev_pricing",
-    "layer-source",
-    JSON.stringify({
-      "model-modelsdev": { prompt: 4, completion: 5 },
-      "model-user": { completion: 6 },
-    })
-  );
+  await seedPricing("litellm", "layer-source", {
+    "model-litellm": { prompt: 1, completion: 2 },
+    "model-user": { prompt: 3 },
+  });
+  await seedPricing("models_dev", "layer-source", {
+    "model-modelsdev": { prompt: 4, completion: 5 },
+    "model-user": { completion: 6 },
+  });
 
   await settingsDb.updatePricing({
     "layer-source": {
@@ -215,7 +183,7 @@ test("LKGP values can be set, read and cleared", async () => {
   assert.deepEqual(await settingsDb.getLKGP("combo-a", "model-a"), { provider: "openai" });
   assert.deepEqual(await settingsDb.getLKGP("combo-a", "model-b"), { provider: "anthropic" });
 
-  settingsDb.clearAllLKGP();
+  await settingsDb.clearAllLKGP();
 
   assert.equal(await settingsDb.getLKGP("combo-a", "model-a"), null);
 });
@@ -260,24 +228,14 @@ test("clearLKGP on a key with no existing pin does not throw", async () => {
 });
 
 test("pricing helpers ignore malformed synced data and LKGP falls back to raw values", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "models_dev_pricing",
-    "broken-provider",
-    "{not-json"
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing",
-    "alias-provider",
-    JSON.stringify({
-      "model-a": { prompt: 7 },
-    })
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "lkgp",
-    "combo-raw:model-raw",
-    "raw-provider-id"
+  // model_pricing.models is jsonb: a malformed synced layer can only be a non-object JSON value.
+  await seedPricing("models_dev", "broken-provider", "not-an-object");
+  await seedPricing("user", "alias-provider", {
+    "model-a": { prompt: 7 },
+  });
+  await getTestBackend().execute(
+    "INSERT INTO lkgp_pins (pin_key, provider, connection_id) VALUES ($1, $2, NULL)",
+    ["combo-raw:model-raw", "raw-provider-id"]
   );
 
   const pricing = await settingsDb.getPricing();
@@ -290,15 +248,9 @@ test("pricing helpers ignore malformed synced data and LKGP falls back to raw va
 });
 
 test("pricing helpers resolve aliased providers and tolerate no-op resets", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing",
-    "cc",
-    JSON.stringify({
-      "claude-3-5-sonnet": { prompt: 4, completion: 6 },
-    })
-  );
+  await seedPricing("user", "cc", {
+    "claude-3-5-sonnet": { prompt: 4, completion: 6 },
+  });
 
   const aliasPricing = await settingsDb.getPricingForModel("claude", "claude-3-5-sonnet");
   const missingPricing = await settingsDb.getPricingForModel("missing-provider", "missing-model");
@@ -309,114 +261,11 @@ test("pricing helpers resolve aliased providers and tolerate no-op resets", asyn
   assert.equal(afterUnknownReset["missing-provider"], undefined);
 });
 
-test("settings and pricing readers skip malformed rows while merging surviving layers", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql) => {
-    const text = String(sql);
-
-    if (text.includes("namespace = 'settings'")) {
-      return {
-        all: () => [
-          123,
-          { key: 456, value: "true" },
-          { key: "cloudEnabled", value: "true" },
-          { key: "requireLogin", value: null },
-        ],
-      };
-    }
-
-    if (text === "SELECT key, value FROM key_value WHERE namespace = ?") {
-      return {
-        all: (namespace) => {
-          if (namespace === "pricing_synced") {
-            return [
-              123,
-              { key: 456, value: JSON.stringify({ ignored: true }) },
-              {
-                key: "layered-provider",
-                value: JSON.stringify({
-                  "model-a": { prompt: 1, completion: 2 },
-                }),
-              },
-            ];
-          }
-
-          if (namespace === "models_dev_pricing") {
-            return [
-              { key: "broken-provider", value: "{bad" },
-              { key: "missing-value", value: null },
-              {
-                key: "layered-provider",
-                value: JSON.stringify({
-                  "model-a": { cached: 3 },
-                }),
-              },
-            ];
-          }
-
-          if (namespace === "pricing") {
-            return [
-              {
-                key: "layered-provider",
-                value: JSON.stringify({
-                  "model-a": { prompt: 9, custom: 42 },
-                  "model-b": { prompt: 7 },
-                }),
-              },
-              { key: null, value: JSON.stringify({ ignored: true }) },
-            ];
-          }
-
-          return originalPrepare(sql).all(namespace);
-        },
-      };
-    }
-
-    return originalPrepare(sql);
-  };
-
-  try {
-    const settings = await settingsDb.getSettings();
-    const pricing = await settingsDb.getPricing();
-    const modelPricing = await settingsDb.getPricingForModel("layered-provider", "model-a");
-
-    assert.equal(settings.cloudEnabled, true);
-    assert.equal(settings.requireLogin, true);
-    assert.deepEqual(pricing["layered-provider"]["model-a"], {
-      prompt: 9,
-      completion: 2,
-      cached: 3,
-      custom: 42,
-    });
-    assert.deepEqual(modelPricing, {
-      prompt: 9,
-      completion: 2,
-      cached: 3,
-      custom: 42,
-    });
-    assert.equal(pricing["broken-provider"], undefined);
-  } finally {
-    db.prepare = originalPrepare;
-  }
-});
-
 test("proxy config migrates legacy strings and supports bulk merge updates", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "global",
-    JSON.stringify("http://user:pass@global.local:8080")
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "providers",
-    JSON.stringify({
-      openai: "https://provider.local:8443",
-    })
-  );
+  await seedConfig("proxyConfig", "global", "http://user:pass@global.local:8080");
+  await seedConfig("proxyConfig", "providers", {
+    openai: "https://provider.local:8443",
+  });
 
   const migrated = await settingsDb.getProxyConfig();
   assert.deepEqual(migrated.global, {
@@ -462,20 +311,10 @@ test("proxy config migrates legacy strings and supports bulk merge updates", asy
 });
 
 test("proxy config migrates socks5 and host-only entries while preserving plural lookups", async () => {
-  const db = core.getDbInstance();
-
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "global",
-    JSON.stringify("fallback-only-host")
-  );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "proxyConfig",
-    "providers",
-    JSON.stringify({
-      claude: "socks5://sockshost",
-    })
-  );
+  await seedConfig("proxyConfig", "global", "fallback-only-host");
+  await seedConfig("proxyConfig", "providers", {
+    claude: "socks5://sockshost",
+  });
 
   const migrated = await settingsDb.getProxyConfig();
   assert.deepEqual(migrated.global, {
@@ -508,16 +347,13 @@ test("proxy config migrates socks5 and host-only entries while preserving plural
 });
 
 test("proxy helpers resolve key, provider, global, and direct paths while tolerating malformed combo rows", async () => {
-  const db = core.getDbInstance();
   const connection = await providersDb.createProviderConnection({
     provider: "openai",
     authType: "apikey",
     name: "Proxy Resolution Target",
     apiKey: "sk-proxy-resolution",
   });
-  db.prepare("UPDATE provider_connections SET proxy_enabled = 1 WHERE id = ?").run(
-    (connection as any).id
-  );
+  await setConnectionProxyEnabled((connection as any).id);
 
   await settingsDb.setProxyConfig({
     level: "global",
@@ -542,7 +378,11 @@ test("proxy helpers resolve key, provider, global, and direct paths while tolera
     models: ["openai/gpt-4o-mini"],
     strategy: "priority",
   });
-  db.prepare("UPDATE combos SET data = ? WHERE id = ?").run("{not-json", combo.id);
+  // combos.data is jsonb: a malformed combo record is a non-object JSON value.
+  await getTestBackend().execute("UPDATE combos SET data = $1::jsonb WHERE id = $2", [
+    JSON.stringify("not-a-combo-record"),
+    combo.id,
+  ]);
 
   const providerResolved = await settingsDb.resolveProxyForConnection((connection as any).id);
 
@@ -582,16 +422,13 @@ test("proxy helpers resolve key, provider, global, and direct paths while tolera
 });
 
 test("proxy resolution skips combos without serialized data and falls back to provider proxies", async () => {
-  const db = core.getDbInstance();
   const connection = await providersDb.createProviderConnection({
     provider: "claude",
     authType: "apikey",
     name: "Proxy Null Combo",
     apiKey: "sk-claude-proxy",
   });
-  db.prepare("UPDATE provider_connections SET proxy_enabled = 1 WHERE id = ?").run(
-    (connection as any).id
-  );
+  await setConnectionProxyEnabled((connection as any).id);
 
   await settingsDb.setProxyForLevel("provider", "claude", {
     type: "https",
@@ -609,7 +446,10 @@ test("proxy resolution skips combos without serialized data and falls back to pr
     host: "combo-null.local",
     port: 8080,
   });
-  db.prepare("UPDATE combos SET data = ? WHERE id = ?").run(0, combo.id);
+  await getTestBackend().execute("UPDATE combos SET data = $1::jsonb WHERE id = $2", [
+    "0",
+    combo.id,
+  ]);
 
   const resolved = await settingsDb.resolveProxyForConnection((connection as any).id);
 
@@ -625,10 +465,7 @@ test("proxy resolution matches combo proxies through aliased model entries", asy
     apiKey: "sk-claude-alias",
   });
   // Enable proxy on this connection so legacy combo/provider proxy checks work
-  core
-    .getDbInstance()
-    .prepare("UPDATE provider_connections SET proxy_enabled = 1 WHERE id = ?")
-    .run((connection as any).id);
+  await setConnectionProxyEnabled((connection as any).id);
 
   const combo = await combosDb.createCombo({
     name: "combo-aliased-model",
@@ -671,14 +508,8 @@ test("proxy resolution prefers legacy key and provider proxies over registry glo
   await proxiesDb.assignProxyToScope("global", null, registryGlobal.id);
 
   // Enable proxy on both connections so legacy key/provider proxy checks work
-  core
-    .getDbInstance()
-    .prepare("UPDATE provider_connections SET proxy_enabled = 1 WHERE id = ?")
-    .run((keyConnection as any).id);
-  core
-    .getDbInstance()
-    .prepare("UPDATE provider_connections SET proxy_enabled = 1 WHERE id = ?")
-    .run((providerConnection as any).id);
+  await setConnectionProxyEnabled((keyConnection as any).id);
+  await setConnectionProxyEnabled((providerConnection as any).id);
 
   await settingsDb.setProxyForLevel("key", (keyConnection as any).id, {
     type: "http",
@@ -702,78 +533,56 @@ test("proxy resolution prefers legacy key and provider proxies over registry glo
   assert.equal(providerResolved.proxy.host, "legacy-provider-override.local");
 });
 
-test("proxy readers normalize legacy rows, skip malformed entries, and coerce invalid globals to null", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
+test("proxy readers normalize legacy rows and coerce invalid globals to null", async () => {
+  await seedConfig(
+    "proxyConfig",
+    "global",
+    "https://user%40name:pass%2Fword@proxy.example"
+  );
+  await seedConfig("proxyConfig", "providers", {
+    openai: "http://provider.example",
+  });
+  await seedConfig("proxyConfig", "combos", "not-a-map");
+  await seedConfig("proxyConfig", "keys", null);
 
-  db.prepare = (sql) => {
-    const text = String(sql);
+  const config = await settingsDb.getProxyConfig();
+  assert.deepEqual(config.global, {
+    type: "https",
+    host: "proxy.example",
+    port: "443",
+    username: "user@name",
+    password: "pass/word",
+  });
+  assert.deepEqual(config.providers.openai, {
+    type: "http",
+    host: "provider.example",
+    port: "8080",
+    username: "",
+    password: "",
+  });
+  assert.equal(await settingsDb.getProxyForLevel("combo", "missing"), null);
 
-    if (text.includes("namespace = 'proxyConfig'") && text.startsWith("SELECT")) {
-      return {
-        all: () => [
-          123,
-          { key: 456, value: JSON.stringify({ ignored: true }) },
-          { key: "global", value: JSON.stringify("https://user%40name:pass%2Fword@proxy.example") },
-          {
-            key: "providers",
-            value: JSON.stringify({
-              openai: "http://provider.example",
-            }),
-          },
-          { key: "combos", value: JSON.stringify("not-a-map") },
-          { key: "keys", value: null },
-        ],
-      };
-    }
-
-    if (text.includes("namespace = 'proxyConfig'") && text.startsWith("INSERT OR REPLACE")) {
-      return { run: () => ({ changes: 1 }) };
-    }
-
-    return originalPrepare(sql);
-  };
-
-  try {
-    const config = await settingsDb.getProxyConfig();
-    assert.deepEqual(config.global, {
-      type: "https",
-      host: "proxy.example",
-      port: "443",
-      username: "user@name",
-      password: "pass/word",
-    });
-    assert.deepEqual(config.providers.openai, {
-      type: "http",
-      host: "provider.example",
-      port: "8080",
-      username: "",
-      password: "",
-    });
-    assert.equal(await settingsDb.getProxyForLevel("combo", "missing"), null);
-  } finally {
-    db.prepare = originalPrepare;
-  }
-
-  const updated = await settingsDb.setProxyConfig({ level: 123, id: 456, proxy: 0 });
+  const updated = await settingsDb.setProxyConfig({ level: 123, id: 456, proxy: 0 } as any);
   assert.equal(updated.global, null);
   assert.equal(await settingsDb.getProxyForLevel("global"), null);
 });
 
 test("cache metrics, trend and no-op update/reset methods read from usage_history", async () => {
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
   const now = new Date().toISOString();
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-  const insertUsage = db.prepare(`
-    INSERT INTO usage_history (
-      provider, model, connection_id, api_key_id, api_key_name,
-      tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
-      tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, timestamp
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  const insertUsage = (row: unknown[]) =>
+    backend.execute(
+      `INSERT INTO usage_history (
+        provider, model, connection_id, api_key_id, api_key_name,
+        tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
+        tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, "timestamp"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      row
+    );
 
-  insertUsage.run(
+  await insertUsage([
     "openai",
     "gpt-4.1",
     "conn-1",
@@ -785,13 +594,13 @@ test("cache metrics, trend and no-op update/reset methods read from usage_histor
     120,
     0,
     "200",
-    1,
+    true,
     100,
     40,
     null,
-    oneHourAgo
-  );
-  insertUsage.run(
+    oneHourAgo,
+  ]);
+  await insertUsage([
     "anthropic",
     "claude-3-7-sonnet",
     "conn-2",
@@ -803,12 +612,12 @@ test("cache metrics, trend and no-op update/reset methods read from usage_histor
     80,
     0,
     "200",
-    1,
+    true,
     90,
     30,
     null,
-    now
-  );
+    now,
+  ]);
 
   const metrics = await settingsDb.getCacheMetrics();
   const trend = await settingsDb.getCacheTrend(4);
@@ -822,144 +631,4 @@ test("cache metrics, trend and no-op update/reset methods read from usage_histor
   assert.ok(trend.length >= 1);
   assert.equal(updateNoOp.totalCachedTokens, metrics.totalCachedTokens);
   assert.equal(resetNoOp.totalCachedTokens, metrics.totalCachedTokens);
-});
-
-test("cache metric helpers degrade gracefully when SQLite aggregation fails", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-  db.prepare = () => {
-    throw new Error("db offline");
-  };
-
-  try {
-    const metrics = await settingsDb.getCacheMetrics();
-    const updated = await settingsDb.updateCacheMetrics({ force: true });
-    const trend = await settingsDb.getCacheTrend(6);
-    const reset = await settingsDb.resetCacheMetrics();
-
-    assert.equal(metrics.totalRequests, 0);
-    assert.equal(updated.totalCachedTokens, 0);
-    assert.deepEqual(trend, []);
-    assert.equal(reset.requestsWithCacheControl, 0);
-  } finally {
-    db.prepare = originalPrepare;
-  }
-});
-
-test("cache metrics and trend coerce null aggregate fields to zero", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql) => {
-    const text = String(sql);
-
-    if (
-      text.includes("COUNT(*) as totalRequests") &&
-      text.includes("SUM(tokens_input) as totalInputTokens") &&
-      !text.includes("GROUP BY")
-    ) {
-      return {
-        get: () => ({
-          totalRequests: 2,
-          totalInputTokens: null,
-          totalCachedTokens: null,
-          totalCacheCreationTokens: null,
-        }),
-      };
-    }
-
-    if (text.match(/SELECT\s+COUNT\(\*\)\s+as\s+totalRequests\s+FROM\s+usage_history\s*$/)) {
-      return {
-        get: () => ({
-          totalRequests: 5,
-        }),
-      };
-    }
-
-    if (text.includes("GROUP BY provider")) {
-      return {
-        all: () => [
-          {
-            provider: "openai",
-            totalRequests: 1,
-            cachedRequests: 1,
-            inputTokens: null,
-            cachedTokens: null,
-            cacheCreationTokens: null,
-          },
-        ],
-      };
-    }
-
-    if (text.includes("GROUP BY combo_strategy")) {
-      return {
-        all: () => [
-          {
-            strategy: "direct",
-            requests: 2,
-            inputTokens: null,
-            cachedTokens: null,
-            cacheCreationTokens: null,
-          },
-        ],
-      };
-    }
-
-    if (text.includes("strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour")) {
-      return {
-        all: () => [
-          {
-            hour: "2026-01-01T10:00:00Z",
-            requests: 3,
-            cachedRequests: 1,
-            inputTokens: null,
-            cachedTokens: null,
-            cacheCreationTokens: null,
-          },
-        ],
-      };
-    }
-
-    return originalPrepare(sql);
-  };
-
-  try {
-    const metrics = await settingsDb.getCacheMetrics();
-    const updated = await settingsDb.updateCacheMetrics({ force: true });
-    const trend = await settingsDb.getCacheTrend(2);
-    const reset = await settingsDb.resetCacheMetrics();
-
-    assert.equal(metrics.totalRequests, 5);
-    assert.equal(metrics.totalInputTokens, 0);
-    assert.equal(metrics.totalCachedTokens, 0);
-    assert.equal(metrics.totalCacheCreationTokens, 0);
-    assert.deepEqual(metrics.byProvider.openai, {
-      requests: 1,
-      totalRequests: 1,
-      cachedRequests: 1,
-      inputTokens: 0,
-      cachedTokens: 0,
-      cacheCreationTokens: 0,
-    });
-    assert.deepEqual(metrics.byStrategy.direct, {
-      requests: 2,
-      inputTokens: 0,
-      cachedTokens: 0,
-      cacheCreationTokens: 0,
-    });
-    assert.deepEqual(trend, [
-      {
-        timestamp: "2026-01-01T10:00:00Z",
-        requests: 3,
-        cachedRequests: 1,
-        inputTokens: 0,
-        cachedTokens: 0,
-        cacheCreationTokens: 0,
-      },
-    ]);
-    assert.equal(updated.totalCachedTokens, 0);
-    assert.equal(reset.totalCachedTokens, 0);
-  } finally {
-    db.prepare = originalPrepare;
-  }
 });

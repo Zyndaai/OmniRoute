@@ -1,8 +1,9 @@
-import { describe, it, beforeEach, after } from "node:test";
+import { describe, it, beforeEach, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Set DATA_DIR to temp dir before any imports that touch DB
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-test-flags-"));
@@ -18,6 +19,7 @@ const {
   setFeatureFlagOverride,
   removeFeatureFlagOverride,
   clearAllFeatureFlagOverrides,
+  clearFeatureFlagOverrideCache,
 } = await import("../../src/lib/db/featureFlags.ts");
 const {
   resolveFeatureFlag,
@@ -29,7 +31,26 @@ const {
   isArenaEloSyncEnabled,
   isControlPlaneProxyDirectFallbackEnabled,
   areContextWindowChecksDisabled,
+  refreshFeatureFlagSnapshot,
 } = await import("../../src/shared/utils/featureFlags.ts");
+
+// The sync flag resolvers read an in-process snapshot of the overrides. Writes go to the
+// database, so a test refreshes the snapshot right after each write.
+async function setOverride(key: string, value: string): Promise<void> {
+  await setFeatureFlagOverride(key, value);
+  await refreshFeatureFlagSnapshot();
+}
+
+async function removeOverride(key: string): Promise<void> {
+  await removeFeatureFlagOverride(key);
+  await refreshFeatureFlagSnapshot();
+}
+
+async function resetFlagStore(): Promise<void> {
+  await resetTestDb();
+  clearFeatureFlagOverrideCache();
+  await refreshFeatureFlagSnapshot();
+}
 
 // #10889 added OMNIROUTE_OIDC_DISABLE_PASSWORD_LOGIN, bumping the count to 51.
 // The codex-app-server work then added OMNIROUTE_CODEX_APP_SERVER_ENABLED
@@ -440,58 +461,52 @@ describe("featureFlagDefinitions", () => {
 // Test group 2 — DB module
 // ──────────────────────────────────────────────────────
 describe("featureFlags DB module", () => {
-  function resetDb() {
-    core.resetDbInstance();
-    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    fs.mkdirSync(tmpDir, { recursive: true });
-  }
-
-  beforeEach(() => {
-    resetDb();
+  beforeEach(async () => {
+    await resetFlagStore();
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it("getFeatureFlagOverrides returns empty object when no overrides", () => {
-    const overrides = getFeatureFlagOverrides();
+  it("getFeatureFlagOverrides returns empty object when no overrides", async () => {
+    const overrides = await getFeatureFlagOverrides();
     assert.deepStrictEqual(overrides, {});
   });
 
-  it("setFeatureFlagOverride stores value in key_value table", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-    const overrides = getFeatureFlagOverrides();
+  it("setFeatureFlagOverride stores value in the flag store", async () => {
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    const overrides = await getFeatureFlagOverrides();
     assert.strictEqual(overrides["REQUIRE_API_KEY"], "true");
   });
 
-  it("getFeatureFlagOverride returns the stored value", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-    assert.strictEqual(getFeatureFlagOverride("REQUIRE_API_KEY"), "true");
+  it("getFeatureFlagOverride returns the stored value", async () => {
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    assert.strictEqual(await getFeatureFlagOverride("REQUIRE_API_KEY"), "true");
   });
 
-  it("getFeatureFlagOverride returns undefined for unset flag", () => {
-    assert.strictEqual(getFeatureFlagOverride("REQUIRE_API_KEY"), undefined);
+  it("getFeatureFlagOverride returns undefined for unset flag", async () => {
+    assert.strictEqual(await getFeatureFlagOverride("REQUIRE_API_KEY"), undefined);
   });
 
-  it("removeFeatureFlagOverride deletes the override", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-    removeFeatureFlagOverride("REQUIRE_API_KEY");
-    assert.strictEqual(getFeatureFlagOverride("REQUIRE_API_KEY"), undefined);
+  it("removeFeatureFlagOverride deletes the override", async () => {
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    await removeFeatureFlagOverride("REQUIRE_API_KEY");
+    assert.strictEqual(await getFeatureFlagOverride("REQUIRE_API_KEY"), undefined);
   });
 
-  it("clearAllFeatureFlagOverrides removes all overrides", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-    setFeatureFlagOverride("INPUT_SANITIZER_ENABLED", "true");
-    clearAllFeatureFlagOverrides();
-    assert.deepStrictEqual(getFeatureFlagOverrides(), {});
+  it("clearAllFeatureFlagOverrides removes all overrides", async () => {
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    await setFeatureFlagOverride("INPUT_SANITIZER_ENABLED", "true");
+    await clearAllFeatureFlagOverrides();
+    assert.deepStrictEqual(await getFeatureFlagOverrides(), {});
   });
 
-  it("setFeatureFlagOverride overwrites existing value", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-    setFeatureFlagOverride("REQUIRE_API_KEY", "false");
-    assert.strictEqual(getFeatureFlagOverride("REQUIRE_API_KEY"), "false");
+  it("setFeatureFlagOverride overwrites existing value", async () => {
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    await setFeatureFlagOverride("REQUIRE_API_KEY", "false");
+    assert.strictEqual(await getFeatureFlagOverride("REQUIRE_API_KEY"), "false");
   });
 });
 
@@ -499,25 +514,19 @@ describe("featureFlags DB module", () => {
 // Test group 3 — Resolver
 // ──────────────────────────────────────────────────────
 describe("resolveFeatureFlag", () => {
-  function resetDb() {
-    core.resetDbInstance();
-    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    fs.mkdirSync(tmpDir, { recursive: true });
-  }
-
-  beforeEach(() => {
-    resetDb();
+  beforeEach(async () => {
+    await resetFlagStore();
     delete process.env["REQUIRE_API_KEY"];
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     delete process.env["REQUIRE_API_KEY"];
   });
 
-  it("returns DB override when set", () => {
-    setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+  it("returns DB override when set", async () => {
+    await setOverride("REQUIRE_API_KEY", "true");
     assert.strictEqual(resolveFeatureFlag("REQUIRE_API_KEY"), "true");
   });
 
@@ -531,26 +540,26 @@ describe("resolveFeatureFlag", () => {
     assert.strictEqual(resolveFeatureFlag("REQUIRE_API_KEY"), "false");
   });
 
-  it("DB takes priority over ENV", () => {
+  it("DB takes priority over ENV", async () => {
     process.env["REQUIRE_API_KEY"] = "env-value";
-    setFeatureFlagOverride("REQUIRE_API_KEY", "db-value");
+    await setOverride("REQUIRE_API_KEY", "db-value");
     assert.strictEqual(resolveFeatureFlag("REQUIRE_API_KEY"), "db-value");
     delete process.env["REQUIRE_API_KEY"];
   });
 
   describe("isFeatureFlagEnabled", () => {
-    it("returns true for 'true'", () => {
-      setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    it("returns true for 'true'", async () => {
+      await setOverride("REQUIRE_API_KEY", "true");
       assert.ok(isFeatureFlagEnabled("REQUIRE_API_KEY"));
     });
 
-    it("returns true for '1'", () => {
-      setFeatureFlagOverride("SKILLS_SANDBOX_NETWORK_ENABLED", "1");
+    it("returns true for '1'", async () => {
+      await setOverride("SKILLS_SANDBOX_NETWORK_ENABLED", "1");
       assert.ok(isFeatureFlagEnabled("SKILLS_SANDBOX_NETWORK_ENABLED"));
     });
 
-    it("returns true for 'yes'", () => {
-      setFeatureFlagOverride("REQUIRE_API_KEY", "yes");
+    it("returns true for 'yes'", async () => {
+      await setOverride("REQUIRE_API_KEY", "yes");
       assert.ok(isFeatureFlagEnabled("REQUIRE_API_KEY"));
     });
 
@@ -558,8 +567,8 @@ describe("resolveFeatureFlag", () => {
       assert.ok(!isFeatureFlagEnabled("REQUIRE_API_KEY"));
     });
 
-    it("returns false for '0'", () => {
-      setFeatureFlagOverride("REQUIRE_API_KEY", "0");
+    it("returns false for '0'", async () => {
+      await setOverride("REQUIRE_API_KEY", "0");
       assert.ok(!isFeatureFlagEnabled("REQUIRE_API_KEY"));
     });
 
@@ -571,54 +580,58 @@ describe("resolveFeatureFlag", () => {
   });
 
   describe("resolveAllFeatureFlags", () => {
-    it(`returns all ${EXPECTED_FEATURE_FLAG_COUNT} flags`, () => {
-      const all = resolveAllFeatureFlags();
+    it(`returns all ${EXPECTED_FEATURE_FLAG_COUNT} flags`, async () => {
+      const all = await resolveAllFeatureFlags();
       assert.strictEqual(all.length, EXPECTED_FEATURE_FLAG_COUNT);
     });
 
-    it("marks DB-overridden flags with source 'db'", () => {
-      setFeatureFlagOverride("REQUIRE_API_KEY", "true");
-      const all = resolveAllFeatureFlags();
+    it("marks DB-overridden flags with source 'db'", async () => {
+      await setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+      const all = await resolveAllFeatureFlags();
       const flag = all.find((f) => f.key === "REQUIRE_API_KEY");
       assert.strictEqual(flag?.source, "db");
     });
 
-    it("marks ENV-set flags with source 'env'", () => {
+    it("marks ENV-set flags with source 'env'", async () => {
       process.env["REQUIRE_API_KEY"] = "true";
-      const all = resolveAllFeatureFlags();
+      const all = await resolveAllFeatureFlags();
       const flag = all.find((f) => f.key === "REQUIRE_API_KEY");
       assert.strictEqual(flag?.source, "env");
       delete process.env["REQUIRE_API_KEY"];
     });
 
-    it("marks default flags with source 'default'", () => {
-      const all = resolveAllFeatureFlags();
+    it("marks default flags with source 'default'", async () => {
+      const all = await resolveAllFeatureFlags();
       const flag = all.find((f) => f.key === "REQUIRE_API_KEY");
       assert.strictEqual(flag?.source, "default");
     });
   });
 
   describe("backward compatibility", () => {
-    it("isRequireApiKeyEnabled uses the resolved REQUIRE_API_KEY flag", () => {
-      setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+    it("isRequireApiKeyEnabled uses the resolved REQUIRE_API_KEY flag", async () => {
+      await setOverride("REQUIRE_API_KEY", "true");
       assert.strictEqual(isRequireApiKeyEnabled(), true);
     });
 
-    it("isRequireApiKeyEnabled fails closed when the flag store cannot be read", () => {
+    it("isRequireApiKeyEnabled fails closed when the flag store cannot be read", async () => {
+      // Postgres replacement for the unreadable-database fixture: every database call fails.
+      const backend = getTestBackend();
+      const failing = async () => {
+        throw new Error("simulated flag store outage");
+      };
       const originalError = console.error;
       console.error = () => {};
+      const mocks = [
+        mock.method(backend, "query", failing),
+        mock.method(backend, "queryOne", failing),
+        mock.method(backend, "execute", failing),
+      ];
       try {
-        core.resetDbInstance();
-        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        fs.mkdirSync(tmpDir, { recursive: true });
-        const blockerPath = path.join(tmpDir, "storage.sqlite");
-        fs.mkdirSync(blockerPath, { recursive: true });
+        await refreshFeatureFlagSnapshot();
         assert.strictEqual(isRequireApiKeyEnabled(), true);
       } finally {
+        for (const m of mocks) m.mock.restore();
         console.error = originalError;
-        core.resetDbInstance();
-        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        fs.mkdirSync(tmpDir, { recursive: true });
       }
     });
 
@@ -627,61 +640,64 @@ describe("resolveFeatureFlag", () => {
       assert.strictEqual(typeof result, "boolean");
     });
 
-    it("isModelCatalogNamesEnabled defaults on and follows overrides", () => {
+    it("isModelCatalogNamesEnabled defaults on and follows overrides", async () => {
       assert.strictEqual(isModelCatalogNamesEnabled(), true);
       try {
-        setFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
+        await setOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
         assert.strictEqual(isModelCatalogNamesEnabled(), false);
       } finally {
-        removeFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES");
+        await removeOverride("MODEL_CATALOG_INCLUDE_NAMES");
       }
     });
 
-    it("isArenaEloSyncEnabled defaults on and follows DB overrides", () => {
+    it("isArenaEloSyncEnabled defaults on and follows DB overrides", async () => {
       assert.strictEqual(isArenaEloSyncEnabled(), true);
       try {
-        setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "false");
+        await setOverride("ARENA_ELO_SYNC_ENABLED", "false");
         assert.strictEqual(isArenaEloSyncEnabled(), false);
       } finally {
-        removeFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED");
+        await removeOverride("ARENA_ELO_SYNC_ENABLED");
       }
     });
 
-    it("isControlPlaneProxyDirectFallbackEnabled defaults off and follows DB overrides", () => {
+    it("isControlPlaneProxyDirectFallbackEnabled defaults off and follows DB overrides", async () => {
       assert.strictEqual(isControlPlaneProxyDirectFallbackEnabled(), false);
       try {
-        setFeatureFlagOverride("OMNIROUTE_CONTROL_PLANE_PROXY_DIRECT_FALLBACK", "true");
+        await setOverride("OMNIROUTE_CONTROL_PLANE_PROXY_DIRECT_FALLBACK", "true");
         assert.strictEqual(isControlPlaneProxyDirectFallbackEnabled(), true);
       } finally {
-        removeFeatureFlagOverride("OMNIROUTE_CONTROL_PLANE_PROXY_DIRECT_FALLBACK");
+        await removeOverride("OMNIROUTE_CONTROL_PLANE_PROXY_DIRECT_FALLBACK");
       }
     });
 
-    it("areContextWindowChecksDisabled defaults off and follows DB overrides", () => {
+    it("areContextWindowChecksDisabled defaults off and follows DB overrides", async () => {
       assert.strictEqual(areContextWindowChecksDisabled(), false);
       try {
-        setFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
+        await setOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
         assert.strictEqual(areContextWindowChecksDisabled(), true);
       } finally {
-        removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+        await removeOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
       }
     });
 
-    it("areContextWindowChecksDisabled keeps checks enabled when the flag store is unreadable", () => {
+    it("areContextWindowChecksDisabled keeps checks enabled when the flag store is unreadable", async () => {
+      const backend = getTestBackend();
+      const failing = async () => {
+        throw new Error("simulated flag store outage");
+      };
       const originalError = console.error;
       console.error = () => {};
+      const mocks = [
+        mock.method(backend, "query", failing),
+        mock.method(backend, "queryOne", failing),
+        mock.method(backend, "execute", failing),
+      ];
       try {
-        core.resetDbInstance();
-        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        fs.mkdirSync(tmpDir, { recursive: true });
-        const blockerPath = path.join(tmpDir, "storage.sqlite");
-        fs.mkdirSync(blockerPath, { recursive: true });
+        await refreshFeatureFlagSnapshot();
         assert.strictEqual(areContextWindowChecksDisabled(), false);
       } finally {
+        for (const m of mocks) m.mock.restore();
         console.error = originalError;
-        core.resetDbInstance();
-        fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        fs.mkdirSync(tmpDir, { recursive: true });
       }
     });
   });
@@ -708,15 +724,15 @@ describe("featureFlagUpdateSchema validation", () => {
     assert.deepStrictEqual(def.enumValues, ["disabled", "warn", "block"]);
   });
 
-  it("setFeatureFlagOverride throws for unknown keys", () => {
-    assert.throws(
+  it("setFeatureFlagOverride throws for unknown keys", async () => {
+    await assert.rejects(
       () => setFeatureFlagOverride("UNKNOWN_FLAG_XYZ", "true"),
       /Unknown feature flag key/
     );
   });
 
-  it("setFeatureFlagOverride throws for invalid enum value", () => {
-    assert.throws(
+  it("setFeatureFlagOverride throws for invalid enum value", async () => {
+    await assert.rejects(
       () => setFeatureFlagOverride("INJECTION_GUARD_MODE", "invalid_mode"),
       /Invalid value/
     );

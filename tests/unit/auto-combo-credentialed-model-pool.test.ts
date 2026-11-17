@@ -15,6 +15,7 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
 const candidateHandler = await import("../../open-sse/handlers/autoComboCandidates.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type VirtualComboResult = Awaited<ReturnType<typeof virtualFactory.createVirtualAutoCombo>>;
 type LogicalCandidate = {
@@ -25,7 +26,7 @@ type LogicalCandidate = {
 };
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -150,7 +151,7 @@ test("connection model exclusions narrow only that model's account allowlist", a
 
 test("hiding the first registry model does not drop the credentialed provider", async () => {
   await seedConnections();
-  modelsDb.setModelIsHidden("antigravity", "claude-sonnet-4-6", true);
+  await modelsDb.setModelIsHidden("antigravity", "claude-sonnet-4-6", true);
 
   const combo = await virtualFactory.createVirtualAutoCombo(undefined);
   const modelStrings = antigravityCandidates(combo).map((candidate) => candidate.model);

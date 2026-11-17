@@ -108,8 +108,8 @@ test("#9008 Gemini → Claude: lowercased upstream name restored to declared Pas
   assert.equal(toolUseName(result), "WebSearch");
 });
 
-test("#9008 Claude → Gemini keeps identity toolNameMap entries for PascalCase tools", () => {
-  const result = claudeToGeminiRequest(
+test("#9008 Claude → Gemini keeps identity toolNameMap entries for PascalCase tools", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3.6-flash",
     {
       messages: [{ role: "user", content: "read the file" }],
@@ -134,8 +134,8 @@ test("#9008 Claude → Gemini keeps identity toolNameMap entries for PascalCase 
   assert.equal(result._toolNameMap.get("WebSearch"), "WebSearch");
 });
 
-test("#9008 OpenAI → Gemini keeps identity toolNameMap entries for PascalCase tools", () => {
-  const result = openaiToGeminiRequest(
+test("#9008 OpenAI → Gemini keeps identity toolNameMap entries for PascalCase tools", async () => {
+  const result = await openaiToGeminiRequest(
     "gemini-3.6-flash",
     {
       messages: [{ role: "user", content: "search" }],

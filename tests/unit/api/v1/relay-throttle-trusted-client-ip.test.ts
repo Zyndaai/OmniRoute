@@ -5,7 +5,6 @@
 // when no stamp exists.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,8 +17,7 @@ process.env.RELAY_IP_PER_MINUTE = "2";
 const relaySecurity =
   await import("../../../../src/app/api/v1/relay/chat/completions/relaySecurity.ts");
 const authzHeaders = await import("../../../../src/server/authz/headers.ts");
-const { getDbInstance } = await import("../../../../src/lib/db/core.ts");
-const { getRelayLogs } = await import("../../../../src/lib/db/relayProxies.ts");
+const { createRelayToken, getRelayLogs } = await import("../../../../src/lib/db/relayProxies.ts");
 
 const { getClientIp, checkIpRateLimit } = relaySecurity;
 
@@ -126,41 +124,16 @@ async function postRelay(rawToken: string, headers: Record<string, string>) {
   );
 }
 
-// Seeded like the sibling relay tests: createRelayToken() hashes through a CommonJS `require`
-// that the ESM test runtime does not provide.
-function seedToken(name: string) {
-  const id = `rl_test_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const rawToken = `relay_${name}_${Math.random().toString(16).slice(2)}`;
-  const now = Math.floor(Date.now() / 1000);
-  getDbInstance()
-    .prepare(
-      `INSERT INTO relay_tokens (id, name, token_hash, token_prefix, description, combo_id,
-        allowed_models, max_tokens_per_request, max_requests_per_minute, max_requests_per_day,
-        max_cost_per_day, enabled, created_at, updated_at, expires_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
-    )
-    .run(
-      id,
-      name,
-      createHash("sha256").update(rawToken).digest("hex"),
-      "rl_test",
-      "",
-      null,
-      JSON.stringify(["relay-throttle-only-model"]),
-      128000,
-      60,
-      10000,
-      0,
-      now,
-      now,
-      null,
-      "{}"
-    );
-  return { id, rawToken };
+async function seedToken(name: string) {
+  const created = await createRelayToken({
+    name,
+    allowedModels: ["relay-throttle-only-model"],
+  });
+  return { id: created.id, rawToken: created.rawToken };
 }
 
 test("relay route: a direct caller cannot reset the throttle by rotating X-Forwarded-For", async () => {
-  const token = seedToken("relay-throttle-rotating-xff");
+  const token = await seedToken("relay-throttle-rotating-xff");
 
   const first = await postRelay(token.rawToken, { "x-forwarded-for": "198.51.100.1" });
   const second = await postRelay(token.rawToken, { "x-forwarded-for": "198.51.100.2" });
@@ -172,13 +145,13 @@ test("relay route: a direct caller cannot reset the throttle by rotating X-Forwa
   assert.equal(third.headers.get("X-RateLimit-Scope"), "ip");
 
   // The forensic row keeps the best-known address for the operator.
-  const [latest] = getRelayLogs(token.id, 1);
+  const [latest] = await getRelayLogs(token.id, 1);
   assert.equal(latest.status, "rate_limited");
   assert.equal(latest.client_ip, "198.51.100.3");
 });
 
 test("relay route: clients the pipeline stamped apart get separate buckets", async () => {
-  const token = seedToken("relay-throttle-stamped-clients");
+  const token = await seedToken("relay-throttle-stamped-clients");
   const stamped = (ip: string, xff: string) => ({
     [TRUSTED_CLIENT_IP]: ip,
     "x-forwarded-for": xff,
@@ -193,7 +166,7 @@ test("relay route: clients the pipeline stamped apart get separate buckets", asy
   assert.equal(limited.status, 429);
   assert.equal(limited.headers.get("X-RateLimit-Scope"), "ip");
 
-  const [latest] = getRelayLogs(token.id, 1);
+  const [latest] = await getRelayLogs(token.id, 1);
   assert.equal(latest.status, "rate_limited");
   assert.equal(latest.client_ip, "203.0.113.1", "forensic row carries the trusted address");
 });

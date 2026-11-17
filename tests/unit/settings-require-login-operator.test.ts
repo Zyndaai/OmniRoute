@@ -56,14 +56,14 @@ await settingsDb.updateSettings({
 const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-login", ["manage"]);
 const adminKey = await apiKeysDb.createApiKey("admin-automation", "machine-login", ["admin"]);
 const inferenceKey = await apiKeysDb.createApiKey("inference-only", "machine-login", []);
-const adminToken = accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
-const writeToken = accessTokensDb.createAccessToken({ name: "remote-write", scope: "write" });
+const adminToken = await accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
+const writeToken = await accessTokensDb.createAccessToken({ name: "remote-write", scope: "write" });
 const originalGetCookieStore = loginRoute.authRouteInternals.getCookieStore;
 
-test.after(() => {
+test.after(async () => {
   loginRoute.authRouteInternals.getCookieStore = originalGetCookieStore;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -98,10 +98,10 @@ async function keepingOperatorState(run: () => Promise<void>) {
   }
 }
 
-function failureReasons(): string[] {
-  return compliance
-    .getAuditLog({ action: "settings.update_failed", limit: 100 })
-    .map((row) => (row.details as { reason?: string } | null)?.reason ?? "");
+async function failureReasons(): Promise<string[]> {
+  return (await compliance.getAuditLog({ action: "settings.update_failed", limit: 100 })).map(
+    (row) => (row.details as { reason?: string } | null)?.reason ?? ""
+  );
 }
 
 async function loginWith(password: string): Promise<number> {
@@ -156,13 +156,13 @@ for (const { label, token, operatorMessage } of MACHINE_CREDENTIALS) {
 
 test("a refused machine credential is audited as settings.update_failed / OPERATOR_REQUIRED", () =>
   keepingOperatorState(async () => {
-    const before = failureReasons().filter((r) => r === "OPERATOR_REQUIRED").length;
+    const before = (await failureReasons()).filter((r) => r === "OPERATOR_REQUIRED").length;
     const response = await post(
       { password: "attacker-chosen" },
       { authorization: `Bearer ${manageKey.key}` }
     );
     assert.equal(response.status, 403);
-    const after = failureReasons().filter((r) => r === "OPERATOR_REQUIRED").length;
+    const after = (await failureReasons()).filter((r) => r === "OPERATOR_REQUIRED").length;
     assert.equal(after, before + 1);
   }));
 
@@ -173,7 +173,7 @@ test("a dashboard session without currentPassword cannot change the password (40
     assert.equal(response.status, 403, text);
     assert.match(text, /currentPassword/);
     assert.equal(await storedPasswordHash(), CURRENT_HASH);
-    assert.ok(failureReasons().includes("PASSWORD_REQUIRED"));
+    assert.ok((await failureReasons()).includes("PASSWORD_REQUIRED"));
   }));
 
 test("a dashboard session with a wrong currentPassword cannot change the password (403)", () =>
@@ -182,7 +182,7 @@ test("a dashboard session with a wrong currentPassword cannot change the passwor
     const text = await response.text();
     assert.equal(response.status, 403, text);
     assert.equal(await storedPasswordHash(), CURRENT_HASH);
-    assert.ok(failureReasons().includes("PASSWORD_MISMATCH"));
+    assert.ok((await failureReasons()).includes("PASSWORD_MISMATCH"));
   }));
 
 test("a dashboard session with the current password rotates it and the new password logs in", () =>

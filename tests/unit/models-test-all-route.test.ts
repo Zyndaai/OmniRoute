@@ -9,17 +9,16 @@ process.env.DATA_DIR = dataDir;
 process.env.OMNIROUTE_DISABLE_AUTH = "1";
 delete process.env.REQUIRE_API_KEY;
 
-const core = await import("@/lib/db/core");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { createProviderConnection } = await import("@/lib/db/providers");
 const route = await import("@/app/api/models/test-all/route");
 
-before(() => {
-  core.resetDbInstance();
-  core.getDbInstance();
+before(async () => {
+  await resetTestDb();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await resetTestDb();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

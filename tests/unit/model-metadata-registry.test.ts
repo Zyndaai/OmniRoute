@@ -11,9 +11,11 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const registry = await import("../../src/lib/modelMetadataRegistry.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -28,7 +30,7 @@ test.after(async () => {
 });
 
 test("canonical model metadata merges static and synced capabilities into one record", async () => {
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "gpt-4o": {
         tool_call: true,
@@ -52,7 +54,7 @@ test("canonical model metadata merges static and synced capabilities into one re
     },
   });
 
-  const metadata = registry.getCanonicalModelMetadata({ provider: "openai", model: "gpt-4o" });
+  const metadata = await registry.getCanonicalModelMetadata({ provider: "openai", model: "gpt-4o" });
 
   assert.ok(metadata);
   assert.equal(metadata.provider, "openai");

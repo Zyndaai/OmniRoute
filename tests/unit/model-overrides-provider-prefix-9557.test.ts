@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const moduleDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-model-overrides-prefix-"));
 process.env.DATA_DIR = moduleDataDir;
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const nodes = await import("../../src/lib/db/providers/nodes.ts");
+const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const models = await import("../../src/lib/db/models.ts");
 const overrides = await import("../../src/lib/db/modelCapabilityOverrides.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
@@ -20,21 +21,37 @@ const prefixIndex = await import("../../src/lib/providerNodePrefixes.ts");
 // Runtime prefix→node resolution (same path the request pipeline uses).
 const sseModel = await import("../../src/sse/services/model.ts");
 
-beforeEach(() => {
-  coreDb.resetDbInstance();
+beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(moduleDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(moduleDataDir, { recursive: true });
-  coreDb.getDbInstance();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await resetTestDb();
   fs.rmSync(moduleDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const NODE_ID = "openai-compatible-chat-02669115-2545-4896-b003-cb4dac09d441";
 const NODE_PREFIX = "vibeproxy";
 const NODE_TYPE = "openai-compatible";
+
+// Synced models attach to a real connection (connection_model_sync has a foreign key to
+// provider_connections), so the node gets one connection that carries its synced list.
+async function seedSyncedModels(nodeId: string, modelIds: string[]) {
+  const connection = await createProviderConnection({
+    provider: nodeId,
+    name: `${nodeId}-connection`,
+    authType: "apikey",
+    apiKey: "sk-test-9557",
+    isActive: true,
+  });
+  await models.replaceSyncedAvailableModelsForConnection(
+    nodeId,
+    connection.id,
+    modelIds.map((id) => ({ id, name: id }))
+  );
+}
 
 async function seedNodeWithSyncedModel(modelId = "gpt-4o", opts: { prefix?: string | null } = {}) {
   await nodes.createProviderNode({
@@ -45,9 +62,7 @@ async function seedNodeWithSyncedModel(modelId = "gpt-4o", opts: { prefix?: stri
     apiType: "chat",
     baseUrl: "https://example.com/v1",
   });
-  await models.replaceSyncedAvailableModelsForConnection(NODE_ID, NODE_ID, [
-    { id: modelId, name: modelId },
-  ]);
+  await seedSyncedModels(NODE_ID, [modelId]);
 }
 
 describe("issue #9557: model overrides expose configured provider prefix, not node UUID", () => {
@@ -133,18 +148,18 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
     assert.equal(patch.status, 200);
 
     // Persisted under the internal node id (where runtime lookup reads it).
-    const stored = overrides.listModelCapabilityOverrides();
+    const stored = await overrides.listModelCapabilityOverrides();
     assert.equal(stored.length, 1);
     assert.equal(stored[0].provider, NODE_ID);
     assert.equal(stored[0].modelId, "gpt-4o");
 
     // Runtime capability lookup resolves provider/model and applies the override.
-    const resolved = caps.getResolvedModelCapabilities({
+    const resolved = await caps.getResolvedModelCapabilities({
       provider: NODE_ID,
       model: "gpt-4o",
     });
     assert.equal(resolved.maxOutputTokens, 123456);
-    const explicit = caps.getExplicitModelOutputCap({ provider: NODE_ID, model: "gpt-4o" });
+    const explicit = await caps.getExplicitModelOutputCap({ provider: NODE_ID, model: "gpt-4o" });
     assert.equal(explicit, 123456);
   });
 
@@ -156,34 +171,27 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
     assert.equal(info.provider, NODE_ID, "prefix must route to the internal node id at runtime");
   });
 
-  it("index winner matches runtime getModelInfo for a duplicated prefix", async () => {
-    // Two nodes share the prefix. Runtime resolves the FIRST openai-compatible
-    // node by id order. The prefix index must select that same winner so the
-    // UI and PATCH agree with the routing seam.
+  it("index winner matches runtime getModelInfo for the prefixed node", async () => {
+    // The schema allows one node per public prefix (provider_nodes_prefix_uq), so a second
+    // node cannot claim the prefix. The prefix index must still agree with the routing seam
+    // for the node that owns it, so the UI and PATCH point at the node runtime uses.
     const nodeAId = NODE_ID;
     const nodeBId = "openai-compatible-chat-22222222-2222-4333-8444-555555555555";
-    await nodes.createProviderNode({
-      id: nodeBId,
-      type: NODE_TYPE,
-      prefix: NODE_PREFIX,
-      name: "VibeProxy B",
-      apiType: "chat",
-      baseUrl: "https://example.com/b/v1",
-    });
-    await nodes.createProviderNode({
-      id: nodeAId,
-      type: NODE_TYPE,
-      prefix: NODE_PREFIX,
-      name: "VibeProxy A",
-      apiType: "chat",
-      baseUrl: "https://example.com/a/v1",
-    });
-    await models.replaceSyncedAvailableModelsForConnection(nodeAId, nodeAId, [
-      { id: "gpt-4o", name: "gpt-4o" },
-    ]);
+    await seedNodeWithSyncedModel("gpt-4o");
+    await assert.rejects(
+      nodes.createProviderNode({
+        id: nodeBId,
+        type: NODE_TYPE,
+        prefix: NODE_PREFIX,
+        name: "VibeProxy B",
+        apiType: "chat",
+        baseUrl: "https://example.com/b/v1",
+      }),
+      nodes.ProviderNodePrefixConflictError
+    );
 
     const info = await sseModel.getModelInfo(`${NODE_PREFIX}/gpt-4o`);
-    assert.equal(info.provider, nodeAId, "runtime resolves the first node by id");
+    assert.equal(info.provider, nodeAId, "runtime resolves the prefix to its node");
 
     const index = await prefixIndex.getProviderPrefixIndex();
     assert.equal(
@@ -208,7 +216,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
       })
     );
     assert.equal(patch.status, 200);
-    assert.equal(overrides.listModelCapabilityOverrides()[0].provider, info.provider);
+    assert.equal((await overrides.listModelCapabilityOverrides())[0].provider, info.provider);
   });
 
   it("GET surfaces stored overrides under the public prefix and old raw rows still list/apply", async () => {
@@ -229,7 +237,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
 
     // Old raw-UUID-keyed row inserted directly (legacy pre-#9557 data).
     assert.equal(
-      overrides.setModelCapabilityOverride(`${NODE_ID}/gpt-4o`, "max_output_tokens", 55555),
+      await overrides.setModelCapabilityOverride(`${NODE_ID}/gpt-4o`, "max_output_tokens", 55555),
       true
     );
 
@@ -249,7 +257,8 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
 
     // Old raw row still applies at runtime.
     assert.equal(
-      caps.getResolvedModelCapabilities({ provider: NODE_ID, model: "gpt-4o" }).maxOutputTokens,
+      (await caps.getResolvedModelCapabilities({ provider: NODE_ID, model: "gpt-4o" }))
+        .maxOutputTokens,
       55555
     );
   });
@@ -301,37 +310,36 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
     assert.equal(delPayload.overrides.length, 1, "remaining override still present");
   });
 
-  it("duplicate prefix selects the same runtime winner; losing node never falls back to UUID", async () => {
-    // Two nodes share the same prefix → the runtime winner is the FIRST
-    // openai-compatible node by id order. The index and PATCH must choose that
-    // same winner; the losing node must NOT be targetable/displayed under the
-    // prefix and must NOT fall back to a node-UUID target.
+  it("a second node cannot share the prefix; the winner stays routable and the other node is never a target", async () => {
+    // The schema allows one node per public prefix (provider_nodes_prefix_uq), so the
+    // "first by id wins" duplicate case cannot be stored. The single prefixed node stays the
+    // only public target, and an unprefixed compatible node must never fall back to a UUID.
     const nodeAId = NODE_ID;
     const nodeBId = "openai-compatible-chat-11111111-2222-4333-8444-555555555555";
+    await seedNodeWithSyncedModel("gpt-4o");
+    await assert.rejects(
+      nodes.createProviderNode({
+        id: nodeBId,
+        type: NODE_TYPE,
+        prefix: NODE_PREFIX,
+        name: "VibeProxy B",
+        apiType: "chat",
+        baseUrl: "https://example.com/b/v1",
+      }),
+      nodes.ProviderNodePrefixConflictError
+    );
     await nodes.createProviderNode({
       id: nodeBId,
       type: NODE_TYPE,
-      prefix: NODE_PREFIX,
-      name: "VibeProxy B",
+      prefix: null,
+      name: "VibeProxy B (unprefixed)",
       apiType: "chat",
       baseUrl: "https://example.com/b/v1",
     });
-    await nodes.createProviderNode({
-      id: nodeAId,
-      type: NODE_TYPE,
-      prefix: NODE_PREFIX,
-      name: "VibeProxy A",
-      apiType: "chat",
-      baseUrl: "https://example.com/a/v1",
-    });
-    await models.replaceSyncedAvailableModelsForConnection(nodeAId, nodeAId, [
-      { id: "gpt-4o", name: "gpt-4o" },
-    ]);
 
     const index = await prefixIndex.getProviderPrefixIndex();
-    // Runtime resolves the first openai-compatible node by id order → nodeAId.
     assert.equal(index.entries.get(NODE_PREFIX)?.status, "unique");
-    assert.equal(index.entries.get(NODE_PREFIX)?.nodeId, nodeAId, "winner is first by id");
+    assert.equal(index.entries.get(NODE_PREFIX)?.nodeId, nodeAId, "winner is the prefixed node");
     assert.equal(index.prefixToNode.get(NODE_PREFIX), nodeAId);
     assert.equal(index.nodeToPrefix.get(nodeAId), NODE_PREFIX);
     // Losing node is ineligible — no node-UUID target, no prefix→node mapping.
@@ -366,7 +374,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
       })
     );
     assert.equal(patch.status, 200);
-    const stored = overrides.listModelCapabilityOverrides();
+    const stored = await overrides.listModelCapabilityOverrides();
     assert.equal(stored.length, 1);
     assert.equal(stored[0].provider, nodeAId, "PATCH must persist to the runtime winner");
 
@@ -392,7 +400,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
       )
     );
     assert.equal(loseDelete.status, 400);
-    assert.equal(overrides.listModelCapabilityOverrides().length, 1);
+    assert.equal((await overrides.listModelCapabilityOverrides()).length, 1);
   });
 
   it("reserved prefix (cx → codex) is not advertised and not canonicalized to any node", async () => {
@@ -442,7 +450,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
     );
     assert.equal(patch.status, 200, "PATCH must route reserved prefix via resolveProviderAlias");
 
-    const stored = overrides.listModelCapabilityOverrides();
+    const stored = await overrides.listModelCapabilityOverrides();
     assert.equal(
       stored.length,
       1,
@@ -521,9 +529,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
       apiType: "chat",
       baseUrl: "https://example.com/np/v1",
     });
-    await models.replaceSyncedAvailableModelsForConnection(noPrefixNodeId, noPrefixNodeId, [
-      { id: "np-model", name: "np-model" },
-    ]);
+    await seedSyncedModels(noPrefixNodeId, ["np-model"]);
 
     const patch = await overrideRoute.PATCH(
       new Request("http://localhost/api/model-capability-overrides", {
@@ -537,7 +543,7 @@ describe("issue #9557: model overrides expose configured provider prefix, not no
       })
     );
     assert.equal(patch.status, 400, "no-prefix compatible node UUID must not be writable");
-    assert.equal(overrides.listModelCapabilityOverrides().length, 0);
+    assert.equal((await overrides.listModelCapabilityOverrides()).length, 0);
 
     const rawDelete = await overrideRoute.DELETE(
       new Request(

@@ -69,9 +69,9 @@ function candidate(
   } as AutoProviderCandidate;
 }
 
-test("#4540: exhausted (statusPenalty) candidate scores strictly BELOW an identical healthy one without being hard-blocked", () => {
+test("#4540: exhausted (statusPenalty) candidate scores strictly BELOW an identical healthy one without being hard-blocked", async () => {
   const targets = [target("dead", "m", "dead-conn"), target("healthy", "m", "healthy-conn")];
-  const ranked = scoreAutoTargets(
+  const ranked = await scoreAutoTargets(
     targets,
     [
       // Exhausted connection with no numeric quota fetcher: quotaRemaining stays 100,

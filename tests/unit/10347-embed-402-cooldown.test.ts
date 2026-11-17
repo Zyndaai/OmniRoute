@@ -22,31 +22,28 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-embed-402
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { handleEmbedding } = await import("../../open-sse/handlers/embeddings.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function readConnectionRow(connId: string) {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => {
-      get: (id: string) =>
-        | {
-            test_status: unknown;
-            rate_limited_until: unknown;
-            last_error_type: unknown;
-          }
-        | undefined;
-    };
-  };
-  return db
-    .prepare(
-      "SELECT test_status, rate_limited_until, last_error_type FROM provider_connections WHERE id = ?"
-    )
-    .get(connId);
+async function readConnectionRow(connId: string) {
+  return (await getTestBackend().queryOne<{
+    test_status: unknown;
+    rate_limited_until: unknown;
+    last_error_type: unknown;
+  }>(
+    "SELECT test_status, rate_limited_until, last_error_type FROM provider_connections WHERE id = $1",
+    [connId]
+  )) as {
+    test_status: unknown;
+    rate_limited_until: unknown;
+    last_error_type: unknown;
+  } | null;
 }
 
 test("embed 402 marks the connection terminal credits_exhausted (stops re-selection)", async () => {
@@ -82,7 +79,7 @@ test("embed 402 marks the connection terminal credits_exhausted (stops re-select
     assert.equal(result.success, false);
     assert.equal(result.status, 402);
 
-    const row = readConnectionRow(connId);
+    const row = await readConnectionRow(connId);
     // markAccountUnavailable classifies a payment-required 402 as the TERMINAL state
     // credits_exhausted (last_error_type quota_exhausted) with no transient numeric
     // cooldown — the terminal marker is what excludes the account from the embed

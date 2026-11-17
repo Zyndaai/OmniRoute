@@ -11,25 +11,25 @@ const { applyThinkingBudget, setThinkingBudgetConfig, ThinkingMode, DEFAULT_THIN
 // Both must now be declared `supportsReasoning: false` so the field is stripped, while reasoning
 // models (gpt-oss) keep it.
 
-test("#12134 groq/groq/compound strips reasoning_effort", () => {
+test("#12134 groq/groq/compound strips reasoning_effort", async () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH });
-  const out = applyThinkingBudget({
+  const out = (await applyThinkingBudget({
     model: "groq/groq/compound",
     messages: [{ role: "user", content: "hi" }],
     reasoning_effort: "medium",
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(out.reasoning_effort, undefined, "reasoning_effort must be stripped for compound");
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 
-test("#12134 groq/groq/compound strips output_config.effort and thinking", () => {
+test("#12134 groq/groq/compound strips output_config.effort and thinking", async () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH });
-  const out = applyThinkingBudget({
+  const out = (await applyThinkingBudget({
     model: "groq/groq/compound",
     messages: [{ role: "user", content: "hi" }],
     output_config: { effort: "high" },
     thinking: { type: "enabled", budget_tokens: 10240 },
-  }) as Record<string, { effort?: unknown } | undefined>;
+  })) as Record<string, { effort?: unknown } | undefined>;
   assert.equal(out.thinking, undefined, "thinking must be stripped");
   assert.ok(
     !out.output_config || out.output_config.effort === undefined,
@@ -38,24 +38,24 @@ test("#12134 groq/groq/compound strips output_config.effort and thinking", () =>
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 
-test("#12134 groq/allam-2-7b strips reasoning_effort", () => {
+test("#12134 groq/allam-2-7b strips reasoning_effort", async () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH });
-  const out = applyThinkingBudget({
+  const out = (await applyThinkingBudget({
     model: "groq/allam-2-7b",
     messages: [{ role: "user", content: "hi" }],
     reasoning_effort: "low",
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(out.reasoning_effort, undefined, "reasoning_effort must be stripped for allam");
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 
-test("#12134 groq/openai/gpt-oss-20b KEEPS reasoning_effort (reasoning model — no regression)", () => {
+test("#12134 groq/openai/gpt-oss-20b KEEPS reasoning_effort (reasoning model — no regression)", async () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH });
-  const out = applyThinkingBudget({
+  const out = (await applyThinkingBudget({
     model: "groq/openai/gpt-oss-20b",
     messages: [{ role: "user", content: "hi" }],
     reasoning_effort: "high",
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(out.reasoning_effort, "high", "gpt-oss is a reasoning model — must keep the field");
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });

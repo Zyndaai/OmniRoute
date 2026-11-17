@@ -1,8 +1,12 @@
 // Re-export from open-sse with localDb integration
 import { getModelAliases, getCustomModels } from "@/lib/db/models";
-import { getComboById, getComboByNameInsensitive } from "@/lib/db/combos";
-import { getCachedComboByName } from "@/lib/db/readCache";
-import { getCachedProviderNodes, getCachedSettings } from "@/lib/db/readCache";
+import {
+  getCachedComboById,
+  getCachedComboByName,
+  getCachedComboForModel,
+  getCachedProviderNodes,
+  getCachedSettings,
+} from "@/lib/db/readCache";
 
 import { getSyncedAutoAliases } from "@/lib/providerModels/syncedAutoAliases.ts";
 import { getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
@@ -704,18 +708,10 @@ export async function getCombo(modelStr) {
     }
   }
 
-  // #4446: the opencode-plugin publishes combos as ModelV2 `id: combo.id`, and
-  // the OpenCode `--model` dispatch path forwards a lowercased bare slug. The
-  // exact, case-sensitive name match above misses both a combo addressed by its
-  // stored id (UUID/slug) and a lowercased display name (e.g. "master-light" for
-  // a combo named "MASTER-LIGHT"). These two fallbacks only run after the exact
-  // match fails, so they never re-route a combo that already resolves today.
-  combo = await getComboById(modelStr);
-  if (combo && Array.isArray(combo.models) && combo.models.length > 0) {
-    return combo;
-  }
-
-  combo = await getComboByNameInsensitive(modelStr);
+  // #4446: the opencode-plugin publishes combos as ModelV2 `id: combo.id`. The name
+  // lookup above is already case-insensitive (combo names are unique on lower(name)),
+  // so the lowercased-slug case is covered; a combo addressed by its id is not.
+  combo = await getCachedComboById(modelStr);
   if (combo && Array.isArray(combo.models) && combo.models.length > 0) {
     return combo;
   }
@@ -772,10 +768,7 @@ async function getComboByClientNamespacedName(modelStr: unknown) {
     if (await isKnownProviderSegment(segment)) return null;
   }
 
-  let combo = await getCachedComboByName(baseName);
-  if (!combo || !Array.isArray(combo.models) || combo.models.length === 0) {
-    combo = await getComboByNameInsensitive(baseName);
-  }
+  const combo = await getCachedComboByName(baseName);
   if (combo && Array.isArray(combo.models) && combo.models.length > 0) {
     console.info(`[MODEL] "${modelStr}" → combo "${combo.name}" (client namespace stripped)`);
     return combo;
@@ -807,13 +800,12 @@ export async function getComboForModel(modelStr) {
 
   // 2. NEW — check model-combo mappings table (pattern match)
   try {
-    const { resolveComboForModel } = await import("@/lib/db/modelComboMappings");
-    const mapped = await resolveComboForModel(baseModelStr || modelStr);
-    if (mapped && (mapped as any).models?.length > 0) {
+    const mapped = await getCachedComboForModel(baseModelStr || modelStr);
+    if (mapped && Array.isArray(mapped.models) && mapped.models.length > 0) {
       return mapped;
     }
   } catch {
-    // If the mappings table doesn't exist yet (pre-migration), continue gracefully
+    // A failed mapping lookup must not fail the request; treat it as "no mapping".
   }
 
   return null;

@@ -53,9 +53,9 @@ function capabilityEntry(limitContext: unknown, overrides: Record<string, unknow
   };
 }
 
-test.before(() => {
+test.before(async () => {
   // A thinking-capable model with a large output cap: the #3587 guards all pass.
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     zhipu: {
       "glm-5.2": capabilityEntry(200000, { reasoning: true, limit_output: 65536 }),
       // Deliberately NOT prefixed with a real MODEL_SPECS key (e.g. "glm-5.2") —
@@ -75,22 +75,22 @@ test.before(() => {
   });
 });
 
-test.after(() => {
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+test.after(async () => {
+  await clearModelsDevCapabilities();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#6274 reasoning buffer does not inflate probe-sized max_tokens", () => {
+test("#6274 reasoning buffer does not inflate probe-sized max_tokens", async () => {
   // The Claude-Code `/model` probe (max_tokens: 1) must pass through (was 1001).
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", 1),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", 1),
     1,
     "probe-sized max_tokens=1 must not be inflated"
   );
   // Just below the trigger threshold is still treated as a probe.
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", REASONING_BUFFER_MIN_TRIGGER - 1),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", REASONING_BUFFER_MIN_TRIGGER - 1),
     REASONING_BUFFER_MIN_TRIGGER - 1,
     "budgets below REASONING_BUFFER_MIN_TRIGGER are respected verbatim"
   );
@@ -99,21 +99,24 @@ test("#6274 reasoning buffer does not inflate probe-sized max_tokens", () => {
   // (256 -> 1256, 32000 -> 48000); that violated the #1761 contract that
   // upward adjustment must be opt-in. The over-cap clamp still narrows.
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", REASONING_BUFFER_MIN_TRIGGER),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", REASONING_BUFFER_MIN_TRIGGER),
     REASONING_BUFFER_MIN_TRIGGER,
     "budgets at the threshold are forwarded verbatim (#9507)"
   );
   // A realistic reasoning budget is forwarded verbatim, not enlarged.
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", 32000),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2", 32000),
     32000,
     "genuine reasoning budgets are forwarded verbatim (#9507)"
   );
 });
 
-test("reasoning buffer requires an explicit cap and preserves near-cap budgets", () => {
+test("reasoning buffer requires an explicit cap and preserves near-cap budgets", async () => {
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/totally-fictitious-model-6714-no-output-cap", 32000),
+    await resolveReasoningBufferedMaxTokens(
+      "zhipu/totally-fictitious-model-6714-no-output-cap",
+      32000
+    ),
     null,
     "missing model output cap should disable heuristic token inflation"
   );
@@ -121,14 +124,14 @@ test("reasoning buffer requires an explicit cap and preserves near-cap budgets",
   // Known cap below the heuristic result: preserve the caller's in-range budget
   // rather than inflating to a value that may reduce response room unexpectedly.
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 32000),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 32000),
     32000,
     "known model output cap should preserve in-range near-cap budgets"
   );
 
   // Known cap below the caller value still clamps the requested value itself.
   assert.equal(
-    resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 41000),
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 41000),
     40000,
     "requested max_tokens above the model output cap should be capped"
   );

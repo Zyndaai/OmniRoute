@@ -6,8 +6,7 @@ import {
   getClientIp,
   sanitizeForensicHeader,
 } from "../../../../src/app/api/v1/relay/chat/completions/relaySecurity.ts";
-import { getDbInstance } from "../../../../src/lib/db/core.ts";
-import { getRelayLogs } from "../../../../src/lib/db/relayProxies.ts";
+import { createRelayToken, getRelayLogs } from "../../../../src/lib/db/relayProxies.ts";
 
 // ─── T-12 (#3932 PR-4): bifrost sidecar proxy route ──────────────────────
 //
@@ -23,36 +22,9 @@ const ORIGINAL_BIFROST_TIMEOUT = process.env.BIFROST_TIMEOUT_MS;
 const ORIGINAL_BIFROST_STREAMING = process.env.BIFROST_STREAMING_ENABLED;
 const ORIGINAL_FETCH = globalThis.fetch;
 
-function seedRelayToken(rawToken: string) {
-  const id = `rl_test_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const now = Math.floor(Date.now() / 1000);
-  getDbInstance()
-    .prepare(
-      `
-      INSERT INTO relay_tokens (id, name, token_hash, token_prefix, description, combo_id,
-        allowed_models, max_tokens_per_request, max_requests_per_minute, max_requests_per_day,
-        max_cost_per_day, enabled, created_at, updated_at, expires_at, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-    `
-    )
-    .run(
-      id,
-      "bifrost-sse-lifecycle",
-      createHash("sha256").update(rawToken).digest("hex"),
-      "rl_test",
-      "",
-      null,
-      JSON.stringify(["*"]),
-      128000,
-      60,
-      10000,
-      0,
-      now,
-      now,
-      null,
-      "{}"
-    );
-  return { id, rawToken };
+async function seedRelayToken() {
+  const created = await createRelayToken({ name: "bifrost-sse-lifecycle" });
+  return { id: created.id, rawToken: created.rawToken };
 }
 
 function restoreEnv() {
@@ -192,7 +164,7 @@ test("bifrost route: records relay usage after SSE stream completion", async () 
   delete process.env.OMNIROUTE_BIFROST_KEY;
   delete process.env.BIFROST_STREAMING_ENABLED;
 
-  const relayToken = seedRelayToken(`relay_bifrost_sse_${Date.now()}`);
+  const relayToken = await seedRelayToken();
   let forwardedRequestId: string | null = null;
 
   globalThis.fetch = async (_input, init) => {
@@ -233,11 +205,11 @@ test("bifrost route: records relay usage after SSE stream completion", async () 
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("X-Routed-By"), "bifrost");
   assert.equal(forwardedRequestId, "bifrost-sse-lifecycle-test");
-  assert.equal(getRelayLogs(relayToken.id, 10).length, 0);
+  assert.equal((await getRelayLogs(relayToken.id, 10)).length, 0);
 
   assert.match(await res.text(), /delta/);
 
-  const logs = getRelayLogs(relayToken.id, 10);
+  const logs = await getRelayLogs(relayToken.id, 10);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].status, "success");
   assert.equal(logs[0].status_code, 200);

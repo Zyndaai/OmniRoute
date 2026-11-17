@@ -44,11 +44,11 @@ test("muse-spark-1.3 models declare the real 1M context window and 128K output l
   }
 });
 
-test("context limit resolves muse-spark-1.3 models to the 1M window, not the provider default", () => {
+test("context limit resolves muse-spark-1.3 models to the 1M window, not the provider default", async () => {
   for (const { id } of PROVIDERS) {
     for (const modelId of MODEL_IDS) {
       assert.equal(
-        getTokenLimit(id, modelId),
+        await getTokenLimit(id, modelId),
         1048576,
         `getTokenLimit(${id}, ${modelId}) must return the 1M window`
       );

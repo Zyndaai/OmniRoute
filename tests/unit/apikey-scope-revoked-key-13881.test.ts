@@ -25,12 +25,12 @@ const { getApiKeyRequestScope, resolveListScope, canAccessOwnedRecord } =
   await import("../../src/app/api/v1/_helpers/apiKeyScope.ts");
 const filesRoute = await import("../../src/app/api/v1/files/route.ts");
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
-function seedFile(apiKeyId: string | null) {
+async function seedFile(apiKeyId: string | null) {
   return createFile({
     bytes: 4,
     filename: "seed.jsonl",
@@ -52,7 +52,7 @@ describe("issue #13881 — revoked/expired/banned API key must fail closed in ge
     const created = await createApiKey("revoke-me", "machine-13881-a", []);
     const rawKey = created.key;
     const keyId = created.id;
-    seedFile(keyId);
+    await seedFile(keyId);
 
     const revoked = await revokeApiKey(keyId);
     assert.equal(revoked, true, "revokeApiKey should succeed");
@@ -69,7 +69,7 @@ describe("issue #13881 — revoked/expired/banned API key must fail closed in ge
     const created = await createApiKey("revoke-me-2", "machine-13881-b", []);
     const rawKey = created.key;
     const keyId = created.id;
-    seedFile(keyId);
+    await seedFile(keyId);
 
     await revokeApiKey(keyId);
 
@@ -99,7 +99,7 @@ describe("issue #13881 — revoked/expired/banned API key must fail closed in ge
     const created = await createApiKey("expired-me", "machine-13881-d", []);
     const rawKey = created.key;
     const keyId = created.id;
-    seedFile(keyId);
+    await seedFile(keyId);
 
     await setApiKeyExpiry(keyId, new Date(Date.now() - 60_000).toISOString());
     assert.equal(await validateApiKey(rawKey), false, "expired key must fail validateApiKey");
@@ -115,7 +115,7 @@ describe("issue #13881 — revoked/expired/banned API key must fail closed in ge
     const created = await createApiKey("banned-me", "machine-13881-e", []);
     const rawKey = created.key;
     const keyId = created.id;
-    seedFile(keyId);
+    await seedFile(keyId);
 
     await updateApiKeyPermissions(keyId, { isBanned: true });
     assert.equal(await validateApiKey(rawKey), false, "banned key must fail validateApiKey");
@@ -131,7 +131,7 @@ describe("issue #13881 — revoked/expired/banned API key must fail closed in ge
     const created = await createApiKey("still-active", "machine-13881-f", []);
     const rawKey = created.key;
     const keyId = created.id;
-    seedFile(keyId);
+    await seedFile(keyId);
 
     assert.equal(await validateApiKey(rawKey), true, "freshly created key must be valid");
 

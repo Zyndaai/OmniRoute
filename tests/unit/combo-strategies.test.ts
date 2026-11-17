@@ -10,7 +10,7 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 const ORIGINAL_FETCH = globalThis.fetch;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const dbCore = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { clearAllStickyBindings } =
   await import("../../open-sse/services/combo/sessionStickiness.ts");
@@ -23,8 +23,8 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { saveModelsDevCapabilities } = await import("../../src/lib/modelsDevSync.ts");
 
-after(() => {
-  dbCore.resetDbInstance();
+after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -246,7 +246,7 @@ test("least-used strategy prefers the model with fewer recorded combo requests",
 });
 
 test("context-optimized strategy prefers the largest context window", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "test-context": {
       small: capability(8_000),
       large: capability(64_000),

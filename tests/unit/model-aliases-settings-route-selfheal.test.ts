@@ -16,12 +16,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-model-aliases-selfheal-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.JWT_SECRET = process.env.JWT_SECRET || "model-aliases-selfheal-jwt";
 
-const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const modelDeprecation = await import("../../open-sse/services/modelDeprecation.ts");
@@ -29,7 +29,7 @@ const route = await import("../../src/app/api/settings/model-aliases/route.ts");
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -91,10 +91,11 @@ test("GET /api/settings/model-aliases skips hydration when custom aliases are al
 
   // Write different data directly to DB (bypass updateSettings to avoid
   // triggering applyRuntimeSettings, which would overwrite _customAliases).
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'modelAliases', ?)"
-  ).run(JSON.stringify({ "db-only-model": "db-target" }));
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('settings', 'modelAliases', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify({ "db-only-model": "db-target" })]
+  );
 
   const response = await route.GET(
     await makeManagementSessionRequest("http://localhost/api/settings/model-aliases")

@@ -37,7 +37,6 @@ export function registerComboRepositoryConformance(
     assert.deepEqual(await harness.combos.findById(String(zulu.id)), zulu);
     assert.deepEqual(await harness.combos.findByName("Zulu"), zulu);
     assert.equal(await harness.combos.findByName("zulu"), null);
-    assert.deepEqual(await harness.combos.findByNameInsensitive("zulu"), zulu);
 
     const page = await harness.combos.list(1, 1);
     assert.deepEqual(

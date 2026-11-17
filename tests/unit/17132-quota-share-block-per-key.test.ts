@@ -33,7 +33,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-17132-quota-share-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const modelCapsDb = await import("../../src/lib/db/quotaModelCaps.ts");
 const { getQuotaStore } = await import("../../src/lib/quota/QuotaStore.ts");
@@ -46,8 +46,6 @@ const { applyComboTargetExhaustion } =
   await import("../../open-sse/services/combo/targetExhaustion.ts");
 const { checkFallbackError } = await import("../../open-sse/services/accountFallback.ts");
 
-// Trigger migration once at module load so the schema is ready.
-core.getDbInstance();
 
 const CONNECTION_ID = "conn-1732-shared";
 const API_KEY_ID = "key-1732-capped";
@@ -65,12 +63,23 @@ type PreHookBlockResult = {
 };
 
 async function seedModelCapBlock(): Promise<void> {
-  const pool = poolsDb.createPool({
+  // Pool allocations and the pool's connection are foreign keys now.
+  const backend = getTestBackend();
+  await backend.execute(
+    `INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+    [CONNECTION_ID, PROVIDER]
+  );
+  await backend.execute(
+    `INSERT INTO api_keys (id, name, key, key_hash) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO NOTHING`,
+    [API_KEY_ID, "17132-capped", "sk-17132-capped", "a".repeat(64)]
+  );
+  const pool = await poolsDb.createPool({
     connectionId: CONNECTION_ID,
     name: "17132-quota-share-pool",
     allocations: [{ apiKeyId: API_KEY_ID, weight: 100, policy: "hard" }],
   });
-  modelCapsDb.setModelCap({
+  await modelCapsDb.setModelCap({
     poolId: pool.id,
     apiKeyId: API_KEY_ID,
     model: MODEL,

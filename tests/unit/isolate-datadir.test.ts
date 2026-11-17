@@ -105,12 +105,14 @@ test("isolateDataDir respects an explicitly set OMNIROUTE_PLUGINS_DIR", () => {
 
 const OPEN_DB_PREFIX = "OPEN_DB_PROBE ";
 
-// A child that opens the real SQLite DB in its isolated DATA_DIR and exits without closing
-// it, as most test files do. On Windows the open handle makes the exit hook's rmSync fail.
-function dataDirWithOpenDbFromChild(): string {
+// A child that writes a file into its isolated DATA_DIR and exits, as test files do when they keep
+// local state (call-log artifacts, plugins). The database is PostgreSQL now, so no open file handle
+// is left behind; the sweep must still remove the directory once its owner has exited.
+function dataDirWithFilesFromChild(): string {
   const script = [
-    'const { getDbInstance } = await import("./src/lib/db/core.ts");',
-    "getDbInstance();",
+    'const fs = await import("node:fs");',
+    'const path = await import("node:path");',
+    'fs.writeFileSync(path.join(process.env.DATA_DIR, "marker.txt"), "x");',
     `console.log(${JSON.stringify(OPEN_DB_PREFIX)} + process.env.DATA_DIR);`,
   ].join("\n");
   const result = spawnSync(
@@ -134,8 +136,8 @@ function dataDirWithOpenDbFromChild(): string {
 
 test("isolateDataDir leaves no DATA_DIR behind once the next test process starts", () => {
   // Windows leaked one of these per test file (7,236 dirs, 39 GB in three days) because the
-  // exit hook cannot remove a DB that is still open. POSIX removes it at exit already.
-  const leaked = dataDirWithOpenDbFromChild();
+  // exit hook could not remove an open SQLite file. The sweep is still the safety net.
+  const leaked = dataDirWithFilesFromChild();
   dataDirFromChild(undefined);
   assert.equal(fs.existsSync(leaked), false, `expected ${leaked} to be swept`);
 });

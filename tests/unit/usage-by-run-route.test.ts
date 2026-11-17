@@ -18,7 +18,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-usage-by-
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "usage-by-run-api-key-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const costLedger = await import("../../src/lib/db/costLedger.ts");
 const routeModule = await import("../../src/app/api/usage/by-run/route.ts");
 
@@ -33,15 +33,24 @@ const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 const TEST_JWT_SECRET = "usage-by-run-route-jwt-secret";
 const TEST_INITIAL_PASSWORD = "usage-by-run-route-password";
 
-function insertCallLog(db, { id, correlationId, sessionTag }) {
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, model, correlation_id, session_tag)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, new Date().toISOString(), "openai", "gpt-4o", correlationId, sessionTag);
+async function insertCallLog({
+  id,
+  correlationId,
+  sessionTag,
+}: {
+  id: string;
+  correlationId: string;
+  sessionTag: string;
+}) {
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", provider, model, correlation_id, session_tag)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, new Date().toISOString(), "openai", "gpt-4o", correlationId, sessionTag]
+  );
 }
 
-function insertLedgerRow(requestId, amountUsd, timestamp = "2026-09-14T00:00:00.000Z") {
-  costLedger.recordLedgerEntry({
+async function insertLedgerRow(requestId: string, amountUsd: number, timestamp = "2026-09-14T00:00:00.000Z") {
+  await costLedger.recordLedgerEntry({
     apiKeyId: "key-1",
     provider: "openai",
     model: "gpt-4o",
@@ -60,7 +69,7 @@ function insertLedgerRow(requestId, amountUsd, timestamp = "2026-09-14T00:00:00.
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.JWT_SECRET = TEST_JWT_SECRET;
@@ -87,7 +96,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_JWT_SECRET === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = ORIGINAL_JWT_SECRET;
@@ -97,13 +106,12 @@ test.after(async () => {
 
 test("GET /api/usage/by-run returns the ledger cost of a call tagged with the run", async () => {
   const cookie = await dashboardCookie();
-  const db = core.getDbInstance();
-  insertCallLog(db, {
+  await insertCallLog({
     id: "call-1",
     correlationId: "req-1",
     sessionTag: "lane-a/run-1",
   });
-  insertLedgerRow("req-1", 0.025);
+  await insertLedgerRow("req-1", 0.025);
 
   const response = await routeModule.GET(makeRequest("?run_id=lane-a%2Frun-1", cookie));
   const body = (await response.json()) as ByRunTestBody;
@@ -124,11 +132,10 @@ test("GET /api/usage/by-run returns the ledger cost of a call tagged with the ru
 
 test("GET /api/usage/by-run excludes calls tagged with another run", async () => {
   const cookie = await dashboardCookie();
-  const db = core.getDbInstance();
-  insertCallLog(db, { id: "call-1", correlationId: "req-1", sessionTag: "lane-a/run-1" });
-  insertCallLog(db, { id: "call-2", correlationId: "req-2", sessionTag: "lane-a/run-2" });
-  insertLedgerRow("req-1", 0.025, "2026-09-14T00:00:00.000Z");
-  insertLedgerRow("req-2", 9.99, "2026-09-14T12:00:00.000Z");
+  await insertCallLog({ id: "call-1", correlationId: "req-1", sessionTag: "lane-a/run-1" });
+  await insertCallLog({ id: "call-2", correlationId: "req-2", sessionTag: "lane-a/run-2" });
+  await insertLedgerRow("req-1", 0.025, "2026-09-14T00:00:00.000Z");
+  await insertLedgerRow("req-2", 9.99, "2026-09-14T12:00:00.000Z");
 
   const response = await routeModule.GET(makeRequest("?run_id=lane-a%2Frun-1", cookie));
   const body = (await response.json()) as ByRunTestBody;
@@ -141,13 +148,12 @@ test("GET /api/usage/by-run excludes calls tagged with another run", async () =>
 
 test("GET /api/usage/by-run matches the tag exactly instead of by prefix", async () => {
   const cookie = await dashboardCookie();
-  const db = core.getDbInstance();
   // A lane-only tag plus a per-run tag: asking for the lane must give the
   // lane-tagged call only, never the runs inside it.
-  insertCallLog(db, { id: "call-lane", correlationId: "req-lane", sessionTag: "lane-a" });
-  insertCallLog(db, { id: "call-run", correlationId: "req-run", sessionTag: "lane-a/run-1" });
-  insertLedgerRow("req-lane", 0.1, "2026-09-14T00:00:00.000Z");
-  insertLedgerRow("req-run", 0.2, "2026-09-14T12:00:00.000Z");
+  await insertCallLog({ id: "call-lane", correlationId: "req-lane", sessionTag: "lane-a" });
+  await insertCallLog({ id: "call-run", correlationId: "req-run", sessionTag: "lane-a/run-1" });
+  await insertLedgerRow("req-lane", 0.1, "2026-09-14T00:00:00.000Z");
+  await insertLedgerRow("req-run", 0.2, "2026-09-14T12:00:00.000Z");
 
   const laneResponse = await routeModule.GET(makeRequest("?run_id=lane-a", cookie));
   const laneBody = (await laneResponse.json()) as ByRunTestBody;
@@ -166,9 +172,8 @@ test("GET /api/usage/by-run matches the tag exactly instead of by prefix", async
 
 test("GET /api/usage/by-run omits a call that has no ledger row", async () => {
   const cookie = await dashboardCookie();
-  const db = core.getDbInstance();
   // Non-priced call (free/local provider): correlation_id exists, ledger row does not.
-  insertCallLog(db, { id: "call-1", correlationId: "req-unpriced", sessionTag: "lane-a/run-1" });
+  await insertCallLog({ id: "call-1", correlationId: "req-unpriced", sessionTag: "lane-a/run-1" });
 
   const response = await routeModule.GET(makeRequest("?run_id=lane-a%2Frun-1", cookie));
   const body = (await response.json()) as ByRunTestBody;
@@ -179,11 +184,10 @@ test("GET /api/usage/by-run omits a call that has no ledger row", async () => {
 
 test("GET /api/usage/by-run orders rows newest first", async () => {
   const cookie = await dashboardCookie();
-  const db = core.getDbInstance();
-  insertCallLog(db, { id: "call-1", correlationId: "req-old", sessionTag: "lane-a/run-1" });
-  insertCallLog(db, { id: "call-2", correlationId: "req-new", sessionTag: "lane-a/run-1" });
-  insertLedgerRow("req-old", 0.1, "2026-09-13T00:00:00.000Z");
-  insertLedgerRow("req-new", 0.2, "2026-09-14T00:00:00.000Z");
+  await insertCallLog({ id: "call-1", correlationId: "req-old", sessionTag: "lane-a/run-1" });
+  await insertCallLog({ id: "call-2", correlationId: "req-new", sessionTag: "lane-a/run-1" });
+  await insertLedgerRow("req-old", 0.1, "2026-09-13T00:00:00.000Z");
+  await insertLedgerRow("req-new", 0.2, "2026-09-14T00:00:00.000Z");
 
   const response = await routeModule.GET(makeRequest("?run_id=lane-a%2Frun-1", cookie));
   const body = (await response.json()) as ByRunTestBody;
@@ -219,7 +223,6 @@ test("GET /api/usage/by-run requires management authentication", async () => {
   assert.equal(body.error.message, "Authentication required");
 });
 
-test("getCostBySessionTag: an empty tag reads nothing", () => {
-  core.getDbInstance();
-  assert.deepEqual(costLedger.getCostBySessionTag(""), []);
+test("getCostBySessionTag: an empty tag reads nothing", async () => {
+  assert.deepEqual(await costLedger.getCostBySessionTag(""), []);
 });

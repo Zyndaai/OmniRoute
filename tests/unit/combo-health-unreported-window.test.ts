@@ -13,17 +13,23 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-combo-health-u
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const comboForecast = await import("../../src/lib/usage/comboForecast.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { buildProviderHealth, buildQuotaHealth } =
   await import("../../src/lib/usage/comboHealth.ts");
 
 async function resetStorage() {
-  coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  // quota_snapshots.connection_id references provider_connections(id); without the row the
+  // snapshot write is dropped as a foreign-key violation.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    ["conn-1", "antigravity"]
+  );
 }
 
 // saveQuotaSnapshot stamps created_at with millisecond precision; make the order unambiguous.
@@ -33,8 +39,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -77,34 +83,34 @@ test("isUnreportedQuotaSnapshot recognises only the fractionReported:false marke
 });
 
 test("an unreported window written last does not become the provider's remaining quota", async () => {
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 69.1 });
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 69.1 });
   await tick();
-  quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
+  await quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
 
-  const q = buildQuotaHealth(["antigravity"], SINCE);
+  const q = await buildQuotaHealth(["antigravity"], SINCE);
   assert.equal(q.providers[0].remainingPct, 69.1);
   assert.equal(q.worstRemainingPct, 69.1);
   assert.equal(q.providers[0].isExhausted, false);
 });
 
 test("an unreported window does not drag the first reading or the trend", async () => {
-  quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
+  await quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
   await tick();
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 80 });
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 80 });
 
   const h = buildProviderHealth(
     "antigravity",
-    quotaSnapshotsDb.getQuotaSnapshots({ provider: "antigravity", since: SINCE })
+    await quotaSnapshotsDb.getQuotaSnapshots({ provider: "antigravity", since: SINCE })
   );
   assert.equal(h.remainingPct, 80);
   assert.equal(h.trend, "stable");
 });
 
-test("only unreported windows read as unknown (null), never 0%", () => {
-  quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...UNREPORTED, window_key: "chat_23310" });
+test("only unreported windows read as unknown (null), never 0%", async () => {
+  await quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...UNREPORTED, window_key: "chat_23310" });
 
-  const q = buildQuotaHealth(["antigravity"], SINCE);
+  const q = await buildQuotaHealth(["antigravity"], SINCE);
   assert.equal(q.providers[0].remainingPct, null);
   assert.equal(q.worstRemainingPct, null);
   assert.equal(q.providers[0].isExhausted, false);
@@ -124,9 +130,9 @@ test("combo forecast ignores an unreported window when projecting a connection's
       },
     ],
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 60 });
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...REPORTED, remaining_percentage: 60 });
   await tick();
-  quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
+  await quotaSnapshotsDb.saveQuotaSnapshot(UNREPORTED);
 
   const forecast = await comboForecast.buildComboForecastResponse({
     range: "7d",

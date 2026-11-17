@@ -45,7 +45,7 @@ function resultText(result: { content?: Array<{ type: string; text: string }> })
 }
 
 test("forceEnforceScopes denies an HTTP authInfo caller with a narrow (non-manage) scope even though OMNIROUTE_MCP_ENFORCE_SCOPES is off", async () => {
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const getHealth = getRegisteredHandler(server, "omniroute_get_health");
 
   // Real per-key HTTP Authorization scope resolution — resolveCallerScopeContext gives this
@@ -65,7 +65,7 @@ test("forceEnforceScopes denies an HTTP authInfo caller with a narrow (non-manag
 });
 
 test("forceEnforceScopes does not block an HTTP authInfo caller that already holds manage scope", async () => {
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const getHealth = getRegisteredHandler(server, "omniroute_get_health");
 
   const extra = { authInfo: { clientId: "http-manage-caller", scopes: ["manage"] } };
@@ -85,7 +85,7 @@ test("forceEnforceScopes does not block an HTTP authInfo caller that already hol
 });
 
 test("forceEnforceScopes leaves the stdio path (no authInfo) unaffected — env-fallback scope resolution, not force-enforced", async () => {
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const getHealth = getRegisteredHandler(server, "omniroute_get_health");
 
   // stdio tool calls never populate extra.authInfo (see httpTransport.ts / scopeEnforcement.ts
@@ -104,12 +104,8 @@ test("forceEnforceScopes leaves the stdio path (no authInfo) unaffected — env-
 });
 
 test.after(async () => {
-  // Windows cannot delete a data dir whose storage.sqlite is still open: close the MCP audit
-  // handle (its own connection) as well as the shared DB singleton.
-  const { closeAuditDb } = await import("../../open-sse/mcp-server/audit.ts");
-  closeAuditDb();
   const core = await import("../../src/lib/db/core.ts");
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(process.env.DATA_DIR as string, {
     recursive: true,
     force: true,

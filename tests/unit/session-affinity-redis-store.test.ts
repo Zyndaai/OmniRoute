@@ -4,11 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // Synthetic data is isolated from the worktree and the operator's DATA_DIR.
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-affinity-store-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.REDIS_URL;
 delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 const core = await import("../../src/lib/db/core.ts");
@@ -98,7 +98,7 @@ function injected(redis: FakeRedis, configured = true) {
 }
 const warnings: unknown[][] = [];
 let originalWarn: typeof console.warn;
-test.beforeEach(() => {
+test.beforeEach(async () => {
   originalWarn = console.warn;
   console.warn = (...args: unknown[]) => {
     warnings.push(args);
@@ -106,17 +106,14 @@ test.beforeEach(() => {
   warnings.length = 0;
   factory._setSessionAffinityRedisForTests(null);
   delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
-  core
-    .getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ?")
-    .run("session_account_affinity");
+  await resetTestDb();
 });
 test.afterEach(() => {
   console.warn = originalWarn;
 });
-test.after(() => {
+test.after(async () => {
   factory._setSessionAffinityRedisForTests(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -162,7 +159,7 @@ test("two store instances share a pin and resolve identity before instance-local
   const instanceB = factory.getSessionAffinityStore();
   assert.notEqual(instanceA, instanceB);
   // B has no local shadow: its read must actually come from the shared Redis.
-  affinity.deleteSessionAccountAffinity("session", "codex");
+  await affinity.deleteSessionAccountAffinity("session", "codex");
   const b = account("instance-b");
   const record = await instanceB.get("session", "codex", 100, 1_001);
   const plan = pin.planSessionAffinityConnection(
@@ -221,7 +218,7 @@ test("a pin outside the candidate pool is a miss; legacy SQLite pins still resol
   );
   factory._setSessionAffinityRedisForTests(null);
   delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
-  affinity.upsertSessionAccountAffinity("legacy", "codex", "legacy-id", Date.now(), 60_000);
+  await affinity.upsertSessionAccountAffinity("legacy", "codex", "legacy-id", Date.now(), 60_000);
   const legacy = await factory.getSessionAffinityStore().get("legacy", "codex", 60_000);
   assert.equal(
     identity.resolveSessionAffinityConnection(legacy, [{ id: "legacy-id" }], "codex")?.id,
@@ -262,7 +259,7 @@ test("Redis errors fall back per call, writes reach SQLite and warnings are thro
   assert.equal(warnings.length, 1);
   assert.match(String(warnings[0]), /Redis.*SQLite/i);
   await store.delete("failure", "codex");
-  assert.equal(affinity.getSessionAccountAffinity("failure", "codex", 60_000), null);
+  assert.equal(await affinity.getSessionAccountAffinity("failure", "codex", 60_000), null);
 });
 
 test("hung Redis bounds admission and handles a rejection arriving after the timeout", async () => {
@@ -285,7 +282,7 @@ test("hung Redis bounds admission and handles a rejection arriving after the tim
   await store.upsert("hang-write", "codex", "fallback", Date.now(), 60_000);
   assert.ok(performance.now() - writeStart < factory.SESSION_AFFINITY_REDIS_TIMEOUT_MS + 500);
   assert.equal(
-    affinity.getSessionAccountAffinity("hang-write", "codex", 60_000)?.connectionId,
+    (await affinity.getSessionAccountAffinity("hang-write", "codex", 60_000))?.connectionId,
     "fallback"
   );
   redis.pendingReject?.(new Error("synthetic late write rejection"));
@@ -433,7 +430,7 @@ test("callback deletion is explicitly best-effort for Redis failures", async () 
   redis.failure = "error";
   assert.doesNotThrow(() => affinity.deleteSessionAccountAffinityBestEffort("callback", "codex"));
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(affinity.getSessionAccountAffinity("callback", "codex", 60_000), null);
+  assert.equal(await affinity.getSessionAccountAffinity("callback", "codex", 60_000), null);
   assert.equal(warnings.length, 1);
 });
 

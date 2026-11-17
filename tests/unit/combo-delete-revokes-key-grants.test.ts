@@ -20,9 +20,10 @@ const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { isComboNameAllowedForKey } = await import("../../src/shared/utils/apiKeyPolicy.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR))
@@ -42,7 +43,7 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -70,12 +71,13 @@ async function allowedCombosOf(id: string): Promise<string[] | null> {
   return key?.allowedCombos ?? null;
 }
 
-function rawAllowedCombos(id: string): unknown {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT allowed_combos FROM api_keys WHERE id = ?")
-    .get(id) as { allowed_combos: unknown } | undefined;
-  return row?.allowed_combos;
+// The raw jsonb value as text, so "[]" (deny all) and NULL (allow all) stay distinguishable.
+async function rawAllowedCombos(id: string): Promise<unknown> {
+  const row = await getTestBackend().queryOne<{ allowed: string | null }>(
+    "SELECT allowed_combos::text AS allowed FROM api_keys WHERE id = $1",
+    [id]
+  );
+  return row?.allowed;
 }
 
 test("deleting a combo strips its name (bare and combo/ prefixed) from restricted keys", async () => {
@@ -119,7 +121,7 @@ test("a key whose only grant was the deleted combo stays restricted ([] — neve
 
   await combosDb.deleteCombo(c1);
 
-  assert.equal(rawAllowedCombos(keyA.id), "[]");
+  assert.equal(await rawAllowedCombos(keyA.id), "[]");
   assert.deepEqual(await allowedCombosOf(keyA.id), []);
   assert.equal(isComboNameAllowedForKey(await allowedCombosOf(keyA.id), "c1"), false);
 });
@@ -128,24 +130,24 @@ test("combo/* keys and unrelated keys are left untouched", async () => {
   const c1 = await createCombo("c1");
   const allKey = await createKey("all", ["combo/*"]);
   const otherKey = await createKey("other", ["other", "c1-suffix"]);
-  const rawAllBefore = rawAllowedCombos(allKey.id);
-  const rawOtherBefore = rawAllowedCombos(otherKey.id);
+  const rawAllBefore = await rawAllowedCombos(allKey.id);
+  const rawOtherBefore = await rawAllowedCombos(otherKey.id);
 
   await combosDb.deleteCombo(c1);
 
-  assert.equal(rawAllowedCombos(allKey.id), rawAllBefore);
-  assert.equal(rawAllowedCombos(otherKey.id), rawOtherBefore);
+  assert.equal(await rawAllowedCombos(allKey.id), rawAllBefore);
+  assert.equal(await rawAllowedCombos(otherKey.id), rawOtherBefore);
 });
 
-test("the grant survives while another case variant of the name still exists", async () => {
+test("combo names are unique case-insensitively, so one case variant owns a grant at a time", async () => {
+  // PostgreSQL enforces combos_name_ci_uq (lower(name)); SQLite let "C1" and "c1" coexist.
+  // The grant therefore always belongs to the single combo that holds the name.
   const upper = await createCombo("C1");
-  const lower = await createCombo("c1");
   const keyA = await createKey("A", ["c1"]);
 
-  await combosDb.deleteCombo(upper);
-  assert.deepEqual(await allowedCombosOf(keyA.id), ["c1"]);
+  await assert.rejects(() => createCombo("c1"), /duplicate key value/);
 
-  await combosDb.deleteCombo(lower);
+  await combosDb.deleteCombo(upper);
   assert.deepEqual(await allowedCombosOf(keyA.id), []);
 });
 
@@ -161,24 +163,31 @@ test("a case-variant grant is revoked when the last matching combo is deleted", 
 test("if the key update fails the combo deletion is rolled back", async () => {
   const c1 = await createCombo("c1");
   const keyA = await createKey("A", ["c1"]);
-  core
-    .getDbInstance()
-    .exec(
-      "CREATE TRIGGER fail_key_update BEFORE UPDATE ON api_keys BEGIN SELECT RAISE(ABORT, 'grant cleanup failure'); END;"
-    );
+  const backend = getTestBackend();
+  await backend.execute(`
+    CREATE OR REPLACE FUNCTION fail_key_update_fn() RETURNS trigger AS $$
+    BEGIN RAISE EXCEPTION 'grant cleanup failure'; END;
+    $$ LANGUAGE plpgsql
+  `);
+  await backend.execute(
+    "CREATE TRIGGER fail_key_update BEFORE UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION fail_key_update_fn()"
+  );
 
-  await assert.rejects(() => combosDb.deleteCombo(c1), /grant cleanup failure/);
-
-  assert.ok(await combosDb.getComboById(c1), "combo row must still exist after rollback");
-  core.getDbInstance().exec("DROP TRIGGER fail_key_update");
+  try {
+    await assert.rejects(() => combosDb.deleteCombo(c1), /grant cleanup failure/);
+    assert.ok(await combosDb.getComboById(c1), "combo row must still exist after rollback");
+  } finally {
+    await backend.execute("DROP TRIGGER IF EXISTS fail_key_update ON api_keys");
+    await backend.execute("DROP FUNCTION IF EXISTS fail_key_update_fn()");
+  }
   assert.deepEqual(await allowedCombosOf(keyA.id), ["c1"]);
 });
 
 test("deleting a missing combo returns false and leaves keys untouched", async () => {
   const keyA = await createKey("A", ["c1"]);
-  const rawBefore = rawAllowedCombos(keyA.id);
+  const rawBefore = await rawAllowedCombos(keyA.id);
 
   assert.equal(await combosDb.deleteCombo("missing-id"), false);
 
-  assert.equal(rawAllowedCombos(keyA.id), rawBefore);
+  assert.equal(await rawAllowedCombos(keyA.id), rawBefore);
 });

@@ -17,6 +17,7 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const settingsRoute = await import("../../src/app/api/settings/route.ts");
 const logoutRoute = await import("../../src/app/api/auth/logout/route.ts");
 const sessionToken = await import("../../src/shared/utils/dashboardSessionToken.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const {
   DASHBOARD_SESSION_COOKIE,
@@ -41,15 +42,15 @@ async function sessionIssuedAgo(ageSeconds: number, withJti = false): Promise<st
   return jwt.sign(secret);
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.INITIAL_PASSWORD;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) delete process.env.INITIAL_PASSWORD;
   else process.env.INITIAL_PASSWORD = ORIGINAL_INITIAL_PASSWORD;

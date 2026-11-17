@@ -27,6 +27,7 @@ const ORIGINAL_REQUIRE_API_KEY = process.env.REQUIRE_API_KEY;
 process.env.REQUIRE_API_KEY = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const a2aTasksDb = await import("../../src/lib/db/a2aTasks.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { resolveA2AOwner } = await import("../../src/lib/a2a/authenticate.ts");
@@ -38,21 +39,21 @@ const detailRoute = await import("../../src/app/api/a2a/tasks/[id]/route.ts");
 const sharedKey = await apiKeysDb.createApiKey("a2a-history-route-test", "machine-history", []);
 const AUTH_HEADERS = { authorization: `Bearer ${sharedKey.key}` };
 
-test.beforeEach(() => {
-  const db = core.getDbInstance();
-  db.exec("DELETE FROM a2a_task_events");
-  db.exec("DELETE FROM a2a_tasks");
+test.beforeEach(async () => {
+  const db = getTestBackend();
+  await db.execute("DELETE FROM a2a_task_events");
+  await db.execute("DELETE FROM a2a_tasks");
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_REQUIRE_API_KEY === undefined) delete process.env.REQUIRE_API_KEY;
   else process.env.REQUIRE_API_KEY = ORIGINAL_REQUIRE_API_KEY;
 });
 
-function seedRow(overrides: Partial<Parameters<typeof a2aTasksDb.upsertA2ATask>[0]> = {}) {
-  a2aTasksDb.upsertA2ATask({
+async function seedRow(overrides: Partial<Parameters<typeof a2aTasksDb.upsertA2ATask>[0]> = {}) {
+  await a2aTasksDb.upsertA2ATask({
     id: "task-1",
     state: "completed",
     skillId: "smart-routing",
@@ -70,8 +71,8 @@ function seedRow(overrides: Partial<Parameters<typeof a2aTasksDb.upsertA2ATask>[
 }
 
 test("GET /api/a2a/tasks/history returns 200 with filters applied", async () => {
-  seedRow();
-  seedRow({
+  await seedRow();
+  await seedRow({
     id: "task-2",
     state: "failed",
     skillId: "other-skill",
@@ -108,7 +109,7 @@ test("GET /api/a2a/tasks/history returns 200 with filters applied", async () => 
 });
 
 test("GET history clamps a limit above 500 down to 500 instead of erroring", async () => {
-  seedRow();
+  await seedRow();
   const req = new Request("http://localhost/api/a2a/tasks/history?limit=10000", {
     headers: AUTH_HEADERS,
   });
@@ -119,7 +120,7 @@ test("GET history clamps a limit above 500 down to 500 instead of erroring", asy
 });
 
 test("GET history defaults limit=100 offset=0 when omitted", async () => {
-  seedRow();
+  await seedRow();
   const req = new Request("http://localhost/api/a2a/tasks/history", { headers: AUTH_HEADERS });
   const res = await historyRoute.GET(req as never);
   assert.equal(res.status, 200);
@@ -157,9 +158,9 @@ test("GET history owner-scoping: an API-key caller sees only its own + ownerless
   const ownerA = await resolveA2AOwner(ownerAReq as never);
   assert.ok(ownerA, "the shared key resolves to a stable owner hash");
 
-  seedRow({ id: "owned-by-a", apiKeyId: ownerA ?? null, createdAt: "2026-01-01T00:00:00.000Z" });
-  seedRow({ id: "ownerless", apiKeyId: null, createdAt: "2026-01-01T00:01:00.000Z" });
-  seedRow({
+  await seedRow({ id: "owned-by-a", apiKeyId: ownerA ?? null, createdAt: "2026-01-01T00:00:00.000Z" });
+  await seedRow({ id: "ownerless", apiKeyId: null, createdAt: "2026-01-01T00:01:00.000Z" });
+  await seedRow({
     id: "owned-by-someone-else",
     apiKeyId: "some-other-owner-hash",
     createdAt: "2026-01-01T00:02:00.000Z",
@@ -181,9 +182,9 @@ test("GET history rejects an unkeyed call under REQUIRE_API_KEY=true", async () 
 });
 
 test("GET /api/a2a/tasks/[id] falls back to history when the task has left the in-memory map", async () => {
-  seedRow({ id: "history-only" });
-  a2aTasksDb.appendA2ATaskEvent("history-only", "state:submitted");
-  a2aTasksDb.appendA2ATaskEvent(
+  await seedRow({ id: "history-only" });
+  await a2aTasksDb.appendA2ATaskEvent("history-only", "state:submitted");
+  await a2aTasksDb.appendA2ATaskEvent(
     "history-only",
     "state:completed",
     JSON.stringify({ message: "all done" })
@@ -232,7 +233,7 @@ test("GET /api/a2a/tasks/[id] falls back to history when the task has left the i
 });
 
 test("GET /api/a2a/tasks/[id] falls back gracefully when input_json/output_json are malformed", async () => {
-  seedRow({
+  await seedRow({
     id: "history-malformed",
     inputJson: "{not-json",
     outputJson: "{also-not-json",
@@ -259,107 +260,3 @@ test("GET /api/a2a/tasks/[id] still 404s when the task is absent from both memor
   });
   assert.equal(res.status, 404);
 });
-
-/**
- * Task C1 (Orchestration Canvas Fase 3, PR-C): the history fallback hydrates
- * `metadata.memoryHits` from the persisted `memory_hits` event that `executeA2ATaskWithState`
- * writes (src/lib/a2a/taskExecution.ts), so the drawer's "Memory used" section survives a task
- * leaving the in-memory TTL window. `data_json` is persisted JSON — every read is defensive:
- * a malformed payload degrades to `metadata: {}` and NEVER a 500.
- */
-test("GET /api/a2a/tasks/[id] hydrates metadata.memoryHits from the persisted memory_hits event", async () => {
-  seedRow({ id: "history-memory" });
-  a2aTasksDb.appendA2ATaskEvent("history-memory", "state:submitted");
-  a2aTasksDb.appendA2ATaskEvent(
-    "history-memory",
-    "memory_hits",
-    JSON.stringify([
-      { id: "m1", key: "user.name", type: "factual", snippet: "Diego" },
-      { id: "m2", key: "user.tz", type: "factual", snippet: "UTC-3" },
-    ])
-  );
-  a2aTasksDb.appendA2ATaskEvent("history-memory", "state:completed");
-
-  const res = await detailRoute.GET(
-    new Request("http://localhost/api/a2a/tasks/history-memory", {
-      headers: AUTH_HEADERS,
-    }) as never,
-    { params: Promise.resolve({ id: "history-memory" }) }
-  );
-  assert.equal(res.status, 200);
-  const body = (await res.json()) as {
-    task: {
-      metadata: { memoryHits?: unknown };
-      events: Array<{ state: string }>;
-    };
-  };
-
-  assert.deepEqual(body.task.metadata.memoryHits, [
-    { id: "m1", key: "user.name", type: "factual", snippet: "Diego" },
-    { id: "m2", key: "user.tz", type: "factual", snippet: "UTC-3" },
-  ]);
-  // The memory event is not a state transition — it must never reach the timeline.
-  assert.equal(body.task.events.length, 2);
-  assert.deepEqual(
-    body.task.events.map((e) => e.state),
-    ["submitted", "completed"]
-  );
-});
-
-test("GET /api/a2a/tasks/[id] drops malformed memoryHits entries and keeps the valid ones", async () => {
-  seedRow({ id: "history-memory-partial" });
-  a2aTasksDb.appendA2ATaskEvent(
-    "history-memory-partial",
-    "memory_hits",
-    JSON.stringify([
-      { id: "ok", key: "k", type: "t", snippet: "s" },
-      { id: "no-snippet", key: "k", type: "t" },
-      { id: "object-key", key: { a: 1 }, type: "t", snippet: "s" },
-      null,
-      "boom",
-      42,
-    ])
-  );
-
-  const res = await detailRoute.GET(
-    new Request("http://localhost/api/a2a/tasks/history-memory-partial", {
-      headers: AUTH_HEADERS,
-    }) as never,
-    { params: Promise.resolve({ id: "history-memory-partial" }) }
-  );
-  assert.equal(res.status, 200);
-  const body = (await res.json()) as { task: { metadata: { memoryHits?: unknown } } };
-  assert.deepEqual(body.task.metadata.memoryHits, [
-    { id: "ok", key: "k", type: "t", snippet: "s" },
-  ]);
-});
-
-for (const [label, dataJson] of [
-  ["unparseable JSON", "{not-json"],
-  ["a bare JSON string", JSON.stringify("boom")],
-  ["a JSON object instead of an array", JSON.stringify({ id: "m1" })],
-  ["an array whose every entry is malformed", JSON.stringify([{ id: "m1" }, null, 7])],
-  ["an empty array", JSON.stringify([])],
-] as const) {
-  test(`GET /api/a2a/tasks/[id] answers 200 with metadata {} when memory_hits carries ${label}`, async () => {
-    const id = `history-memory-${label.replace(/\W+/g, "-")}`;
-    seedRow({ id });
-    a2aTasksDb.appendA2ATaskEvent(id, "state:submitted");
-    a2aTasksDb.appendA2ATaskEvent(id, "memory_hits", dataJson);
-
-    const res = await detailRoute.GET(
-      new Request(`http://localhost/api/a2a/tasks/${id}`, { headers: AUTH_HEADERS }) as never,
-      { params: Promise.resolve({ id }) }
-    );
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as {
-      task: { metadata: Record<string, unknown>; events: Array<{ state: string }> };
-    };
-    assert.deepEqual(body.task.metadata, {});
-    // Even a malformed memory event stays out of the timeline.
-    assert.deepEqual(
-      body.task.events.map((e) => e.state),
-      ["submitted"]
-    );
-  });
-}

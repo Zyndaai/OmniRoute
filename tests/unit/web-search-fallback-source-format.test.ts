@@ -7,7 +7,7 @@ import {
 import { translateRequest } from "../../open-sse/translator/index.ts";
 import { FORMATS } from "../../open-sse/translator/formats.ts";
 
-test("Claude forced native search remains a Claude tool until translation to Cursor", () => {
+test("Claude forced native search remains a Claude tool until translation to Cursor", async () => {
   const original = {
     model: "claude-opus-5",
     messages: [{ role: "user", content: "Search Python history" }],
@@ -24,7 +24,7 @@ test("Claude forced native search remains a Claude tool until translation to Cur
   assert.equal(body.tools[0].name, name);
   assert.ok((body.tools[0] as Record<string, unknown>).input_schema);
   assert.deepEqual(body.tool_choice, { type: "tool", name });
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "claude-opus-5",

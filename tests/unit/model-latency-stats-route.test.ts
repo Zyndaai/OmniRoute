@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-model-latency-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -13,13 +14,12 @@ const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const route = await import("../../src/app/api/usage/model-latency-stats/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -184,15 +184,16 @@ test("model latency stats route returns 400 for maxRows above the allowed cap", 
 test("model latency stats route returns sanitized 500 body when the aggregate throws", async () => {
   await enableManagementAuth();
 
-  // Drop the table the aggregate reads so getModelLatencyStats() hits a real
-  // SQLite error ("no such table: usage_history") and the route's catch block
+  // Rename the table the aggregate reads so getModelLatencyStats() hits a real
+  // database error ("relation \"usage_history\" does not exist") and the route's catch block
   // has to produce a real sanitized 500 — no module-namespace mocking (ESM
   // bindings here are non-writable at runtime under node:test) and no
-  // fabricated error message. The whole handle is NOT closed any more: since
-  // #15063 management auth reads the dashboard-session state from the DB and
-  // fails closed (401) on a closed connection, which would never reach the
-  // aggregate.
-  core.getDbInstance().exec("DROP TABLE usage_history");
+  // fabricated error message. The table is renamed back afterwards, so the shared
+  // database stays usable. Management auth reads the dashboard-session state from
+  // the database and fails closed (401) if the connection is unusable, which would
+  // never reach the aggregate, so only the one table is hidden.
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE usage_history RENAME TO usage_history_hidden_test");
 
   try {
     const response = await route.GET(
@@ -205,6 +206,6 @@ test("model latency stats route returns sanitized 500 body when the aggregate th
     assert.ok(typeof body.error.message === "string");
     assert.ok(!body.error.message.includes("at /"));
   } finally {
-    core.resetDbInstance();
+    await backend.execute("ALTER TABLE usage_history_hidden_test RENAME TO usage_history");
   }
 });

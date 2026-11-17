@@ -20,8 +20,8 @@ const { createBatch } = await import("../../src/lib/db/batches.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const files = await import("../../src/app/api/v1/files/route.ts");
 const batches = await import("../../src/app/api/v1/batches/route.ts");
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true });
 });
 const cookie = `auth_token=${await new SignJWT({ authenticated: true, sub: "admin" }).setProtectedHeader({ alg: "HS256" }).setExpirationTime("1h").sign(new TextEncoder().encode(process.env.JWT_SECRET))}`;
@@ -32,15 +32,15 @@ await updateApiKeyPermissions(restricted.id, { allowedEndpoints: ["chat"] });
 const revoked = await createApiKey("header-revoked", "test-device", []);
 await revokeApiKey(revoked.id);
 const managed = await createApiKey("header-managed", "test-device", ["manage"]);
-function seed(apiKeyId: string, label: string) {
-  const file = createFile({
+async function seed(apiKeyId: string, label: string) {
+  const file = await createFile({
     filename: `${label}.jsonl`,
     purpose: "batch",
     bytes: 2,
     content: Buffer.from("{}"),
     apiKeyId,
   });
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -48,8 +48,8 @@ function seed(apiKeyId: string, label: string) {
   });
   return { files: file.id, batches: batch.id };
 }
-const owned = seed(owner.id, "owned");
-const other = seed(foreign.id, "foreign");
+const owned = await seed(owner.id, "owned");
+const other = await seed(foreign.id, "foreign");
 for (const [resource, route] of [
   ["files", files],
   ["batches", batches],

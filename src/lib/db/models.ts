@@ -24,11 +24,7 @@ import {
   persistCanonicalSyncedAvailableModels,
 } from "./models/syncedAvailableModelPersistence";
 import { finishModelCatalogWriteWithoutBackup } from "./models/modelCatalogWriteSignals";
-import {
-  readAllCatalogColumn,
-  readCatalogColumn,
-  updateCatalogColumn,
-} from "./models/catalogRow";
+import { readAllCatalogColumn, readCatalogColumn, updateCatalogColumn } from "./models/catalogRow";
 import {
   readCompatList,
   updateCompatList,
@@ -239,10 +235,7 @@ export async function replaceCustomModels(
   return merged;
 }
 
-function mergeCustomModels(
-  models: CustomModelReplacement[],
-  existingMap: Map<string, JsonRecord>
-) {
+function mergeCustomModels(models: CustomModelReplacement[], existingMap: Map<string, JsonRecord>) {
   // Keep existing per-model compat flags if model still exists
   return models.map((m) => {
     const prev = existingMap.get(m.id);
@@ -538,7 +531,11 @@ export async function replaceSyncedAvailableModelsForConnection(
 ): Promise<SyncedAvailableModel[]> {
   const key = `${providerId}:${connectionId}`;
   const normalizedModels = normalizeSyncedAvailableModels(models, providerId);
-  await persistCanonicalSyncedAvailableModels(key, normalizedModels, normalizeSyncedAvailableModels);
+  await persistCanonicalSyncedAvailableModels(
+    key,
+    normalizedModels,
+    normalizeSyncedAvailableModels
+  );
   notifyQuotaCombosForProvider(providerId);
   // #12849: stamp the sync time on every successful sync — even a re-sync that
   // returns an unchanged list proves the catalog is still current, so staleness
@@ -684,9 +681,7 @@ export async function updateCustomModel(
 ) {
   const next = await updateCatalogColumn("custom_models", providerId, (currentDoc) => {
     const outcome = applyCustomModelUpdate(asModelList(currentDoc), modelId, updates, options);
-    return outcome
-      ? { value: outcome.models, result: outcome.next }
-      : { skip: true, result: null };
+    return outcome ? { value: outcome.models, result: outcome.next } : { skip: true, result: null };
   });
   if (next) finishModelCatalogWriteWithoutBackup();
   return next;
@@ -965,25 +960,17 @@ export async function getHiddenModelsByProvider(
   modality: string = "chat"
 ): Promise<Map<string, Set<string>>> {
   const visibilityByProvider = new Map<string, Map<string, boolean>>();
-  const catalogRows = await db().query<{
-    provider: string;
-    compat_overrides: unknown;
-    custom_models: unknown;
-  }>(
-    `SELECT provider, compat_overrides, custom_models FROM provider_model_catalog
-     WHERE compat_overrides <> '[]'::jsonb OR custom_models <> '[]'::jsonb`
-  );
   // Compat overrides first, custom models second: a custom row wins over a compat one.
   const rows = [
-    ...catalogRows.map((row) => ({
+    ...(await readAllCatalogColumn("compat_overrides")).map(({ provider, value }) => ({
       namespace: "modelCompatOverrides",
-      key: row.provider,
-      value: row.compat_overrides,
+      key: provider,
+      value,
     })),
-    ...catalogRows.map((row) => ({
+    ...(await readAllCatalogColumn("custom_models")).map(({ provider, value }) => ({
       namespace: "customModels",
-      key: row.provider,
-      value: row.custom_models,
+      key: provider,
+      value,
     })),
   ];
 

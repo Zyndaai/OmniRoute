@@ -28,7 +28,6 @@ import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-connection-activation-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "connection-activation-test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Stub every outbound provider probe deterministically: no test in this suite may
 // depend on real network reachability. Requests to the fake compatible-provider
@@ -51,6 +50,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 const { testSingleConnection } = await import("../../src/app/api/providers/[id]/test/route.ts");
@@ -102,9 +102,9 @@ async function createConnection(
   return { id: connection.id as string, isActive: connection.isActive };
 }
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -132,13 +132,13 @@ test("#11446: testSingleConnection activates a connection once a test actually p
   const result = await testSingleConnection(connectionId);
   assert.equal(result.valid, true, `expected a passing test, got ${JSON.stringify(result)}`);
 
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT is_active FROM provider_connections WHERE id = ?")
-    .get(connectionId) as { is_active: number };
+  const row = await getTestBackend().queryOne<{ is_active: boolean }>(
+    "SELECT is_active FROM provider_connections WHERE id = $1",
+    [connectionId]
+  );
   assert.equal(
-    row.is_active,
-    1,
+    row?.is_active,
+    true,
     "a passing test must activate a previously-inactive connection — see #11446"
   );
 });
@@ -155,13 +155,13 @@ test("#11446: testSingleConnection never activates a connection whose test genui
   const result = await testSingleConnection(connectionId);
   assert.equal(result.valid, false, `expected a failing test, got ${JSON.stringify(result)}`);
 
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT is_active FROM provider_connections WHERE id = ?")
-    .get(connectionId) as { is_active: number };
+  const row = await getTestBackend().queryOne<{ is_active: boolean }>(
+    "SELECT is_active FROM provider_connections WHERE id = $1",
+    [connectionId]
+  );
   assert.equal(
-    row.is_active,
-    0,
+    row?.is_active,
+    false,
     "a failing test must leave an inactive connection inactive — it must never silently " +
       "advertise an unverified/invalid connection"
   );
@@ -178,29 +178,31 @@ test("#11446: testSingleConnection activates a connection whose test is skipped 
   // probe result. (Distinct from an exclusive-lease-busy skip, which is a
   // temporary "try again later" and must NOT activate — see
   // tests/unit/exclusive-lease-connection-test-isolation.test.ts.)
-  const db = core.getDbInstance();
-  db.prepare(
+  const b = getTestBackend();
+  await b.execute(
     `INSERT INTO provider_connections
      (id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at)
-     VALUES (?, ?, 'apikey', ?, ?, 0, 'unknown', ?, ?)`
-  ).run(
-    "activation-skip-connection",
-    "totally-unregistered-test-provider-11446",
-    "Activation Skip Connection",
-    "sk-activation-skip",
-    new Date().toISOString(),
-    new Date().toISOString()
+     VALUES ($1, $2, 'apikey', $3, $4, false, 'unknown', $5, $6)`,
+    [
+      "activation-skip-connection",
+      "totally-unregistered-test-provider-11446",
+      "Activation Skip Connection",
+      "sk-activation-skip",
+      new Date().toISOString(),
+      new Date().toISOString(),
+    ]
   );
 
   const result = await testSingleConnection("activation-skip-connection");
   assert.equal(result.skipped, true, `expected a skipped test, got ${JSON.stringify(result)}`);
 
-  const row = db
-    .prepare("SELECT is_active FROM provider_connections WHERE id = ?")
-    .get("activation-skip-connection") as { is_active: number };
+  const row = await b.queryOne<{ is_active: boolean }>(
+    "SELECT is_active FROM provider_connections WHERE id = $1",
+    ["activation-skip-connection"]
+  );
   assert.equal(
-    row.is_active,
-    1,
+    row?.is_active,
+    true,
     "a skipped/unsupported test must still activate a previously-inactive connection — see #11446"
   );
 });

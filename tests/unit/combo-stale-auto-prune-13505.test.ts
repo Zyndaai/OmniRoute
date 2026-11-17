@@ -12,7 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-13505-aut
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "auto-prune-13505-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -87,19 +87,19 @@ async function seedCombos() {
   return connectionId;
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
   delete process.env[COMBO_AUTO_PRUNE_FLAG];
   modelSyncRoute.__resetLoopbackReadinessForTests?.();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   delete process.env[COMBO_AUTO_PRUNE_FLAG];
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -115,7 +115,7 @@ test("auto-prune OFF (default) only flags stale steps", async () => {
     `${PROVIDER}/kept-model`,
     `${PROVIDER}/dropped-model`,
   ]);
-  assert.equal(compliance.getAuditLog({ action: PRUNED_ACTION }).length, 0);
+  assert.equal((await compliance.getAuditLog({ action: PRUNED_ACTION })).length, 0);
 });
 
 test("auto-prune ON removes stale steps, keeps valid ones, audits each removal", async () => {
@@ -141,7 +141,7 @@ test("auto-prune ON removes stale steps, keeps valid ones, audits each removal",
   assert.deepEqual(await comboModels("mixed-b"), [`${PROVIDER}/kept-model`]);
   assert.deepEqual(await comboModels("only-stale"), [`${PROVIDER}/dropped-model`]);
 
-  const audit = compliance.getAuditLog({ action: PRUNED_ACTION });
+  const audit = await compliance.getAuditLog({ action: PRUNED_ACTION });
   assert.deepEqual(audit.map((entry) => entry.target).sort(), ["mixed", "mixed-b"]);
 });
 
@@ -164,6 +164,6 @@ for (const [label, upstream] of SKIPPED_SYNCS) {
     const response = await syncWith(connectionId, upstream);
     assert.notEqual(response.status, 200);
     assert.deepEqual(await comboModels(`${label}-sync`), before);
-    assert.equal(compliance.getAuditLog({ action: PRUNED_ACTION }).length, 0);
+    assert.equal((await compliance.getAuditLog({ action: PRUNED_ACTION })).length, 0);
   });
 }

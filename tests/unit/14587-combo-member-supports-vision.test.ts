@@ -26,8 +26,8 @@ function combo(models: string[]) {
   };
 }
 
-test("#14587 model steps expose per-member supportsVision when capabilities are requested", () => {
-  const out = projectCombo(combo(["acme/sees", "acme/blind", "acme/unknown"]), {
+test("#14587 model steps expose per-member supportsVision when capabilities are requested", async () => {
+  const out = await projectCombo(combo(["acme/sees", "acme/blind", "acme/unknown"]), {
     includeCapabilities: true,
     resolveCapabilities,
   });
@@ -38,20 +38,20 @@ test("#14587 model steps expose per-member supportsVision when capabilities are 
   assert.equal(out?.capabilities?.multimodal, false);
 });
 
-test("#14587 invariant: multimodal === every member supportsVision === true", () => {
+test("#14587 invariant: multimodal === every member supportsVision === true", async () => {
   for (const ids of [
     ["acme/sees"],
     ["acme/sees", "acme/sees"],
     ["acme/sees", "acme/blind"],
     ["acme/sees", "acme/unknown"],
   ]) {
-    const out = projectCombo(combo(ids), { includeCapabilities: true, resolveCapabilities });
+    const out = await projectCombo(combo(ids), { includeCapabilities: true, resolveCapabilities });
     const every = out!.models.every((m) => m.supportsVision === true);
     assert.equal(out!.capabilities!.multimodal, every, ids.join(","));
   }
 });
 
-test("#14587 supportsVision is omitted without includeCapabilities", () => {
-  const out = projectCombo(combo(["acme/sees"]));
+test("#14587 supportsVision is omitted without includeCapabilities", async () => {
+  const out = await projectCombo(combo(["acme/sees"]));
   assert.equal("supportsVision" in out!.models[0], false);
 });

@@ -21,11 +21,11 @@ test("dynamic root path traversal outside bounding box throws error", async () =
   const subFolder = path.join(tmpBase, "allowed-sub");
   fs.mkdirSync(subFolder, { recursive: true });
 
-  setLocalCorpusRoot(subFolder);
+  await setLocalCorpusRoot(subFolder);
 
   const outsideFolder = fs.mkdtempSync(path.join(os.tmpdir(), "omni-corpus-outside-"));
 
-  assert.throws(() => getConfiguredLocalCorpusStatus(outsideFolder), /Path traversal forbidden/);
+  await assert.rejects(() => getConfiguredLocalCorpusStatus(outsideFolder), /Path traversal forbidden/);
 
   fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(outsideFolder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -36,9 +36,9 @@ test("path traversal check rejects sibling directory with matching string prefix
   const siblingFolder = tmpBase + "-sibling";
   fs.mkdirSync(siblingFolder, { recursive: true });
 
-  setLocalCorpusRoot(tmpBase);
+  await setLocalCorpusRoot(tmpBase);
 
-  assert.throws(() => getConfiguredLocalCorpusStatus(siblingFolder), /Path traversal forbidden/);
+  await assert.rejects(() => getConfiguredLocalCorpusStatus(siblingFolder), /Path traversal forbidden/);
 
   fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(siblingFolder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -49,9 +49,9 @@ test("search and read configured local corpus support dynamic root within bounds
   const sampleFile = path.join(tmpBase, "test.txt");
   fs.writeFileSync(sampleFile, "Line 1: searchable text\nLine 2: content");
 
-  setLocalCorpusRoot(tmpBase);
+  await setLocalCorpusRoot(tmpBase);
 
-  const status = getConfiguredLocalCorpusStatus(tmpBase);
+  const status = await getConfiguredLocalCorpusStatus(tmpBase);
   assert.equal(typeof status.indexedBytes, "number");
 
   const searchResults = await searchConfiguredLocalCorpus("searchable", {
@@ -69,7 +69,7 @@ test("search and read configured local corpus support dynamic root within bounds
 
 test("LRU cache respects access order and OMNIROUTE_CORPUS_CACHE_SIZE", async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omni-corpus-lru-root-"));
-  setLocalCorpusRoot(tmpRoot);
+  await setLocalCorpusRoot(tmpRoot);
 
   process.env.OMNIROUTE_CORPUS_CACHE_SIZE = "2";
 
@@ -81,17 +81,17 @@ test("LRU cache respects access order and OMNIROUTE_CORPUS_CACHE_SIZE", async ()
   fs.mkdirSync(dir2, { recursive: true });
   fs.mkdirSync(dir3, { recursive: true });
 
-  const idx1 = getConfiguredLocalCorpusStatus(dir1);
-  getConfiguredLocalCorpusStatus(dir2);
+  const idx1 = await getConfiguredLocalCorpusStatus(dir1);
+  await getConfiguredLocalCorpusStatus(dir2);
 
   // Access dir1 again so its access order is updated (making dir2 the least recently used)
-  getConfiguredLocalCorpusStatus(dir1);
+  await getConfiguredLocalCorpusStatus(dir1);
 
   // Add dir3, which causes cache capacity (2) to be exceeded -> evicts dir2
-  getConfiguredLocalCorpusStatus(dir3);
+  await getConfiguredLocalCorpusStatus(dir3);
 
   // Accessing dir1 again should return the existing cached index instance
-  const idx1Again = getConfiguredLocalCorpusStatus(dir1);
+  const idx1Again = await getConfiguredLocalCorpusStatus(dir1);
   assert.equal(idx1.indexedBytes, idx1Again.indexedBytes);
 
   delete process.env.OMNIROUTE_CORPUS_CACHE_SIZE;

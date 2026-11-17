@@ -8,12 +8,13 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-jobs-api-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_WARMUP_ENABLED = "1";
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { getJobRegistry, __resetJobRegistry } =
   await import("../../../src/lib/jobRegistry/index.ts");
+const { registerBudgetResetJob } = await import("../../../src/lib/jobs/budgetResetJob.ts");
 const route = await import("../../../src/app/api/jobs/route.ts");
 const runsRoute = await import("../../../src/app/api/jobs/[id]/runs/route.ts");
 const enableRoute = await import("../../../src/app/api/jobs/[id]/enable/route.ts");
@@ -21,24 +22,24 @@ const disableRoute = await import("../../../src/app/api/jobs/[id]/disable/route.
 const runNowRoute = await import("../../../src/app/api/jobs/[id]/run-now/route.ts");
 const { isLocalOnlyPath } = await import("../../../src/server/authz/routeGuard.ts");
 
-function resetAll() {
+async function resetAll() {
   try {
     getJobRegistry().stopAll();
   } catch {
     // no singleton yet
   }
   __resetJobRegistry();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetAll();
+test.beforeEach(async () => {
+  await resetAll();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -52,8 +53,11 @@ async function json(res: Response) {
 
 test("GET /api/jobs -> 200 + list with lastRun, seeds present", async () => {
   const reg = getJobRegistry();
+  // The budget_reset job is wired at boot (initCloudSync); the SQLite seed rows
+  // from migration 146 do not exist on PostgreSQL, so wire it the same way here.
+  await registerBudgetResetJob(reg);
   // Register a custom job so listJobs reflects runtime registrations.
-  reg.register({
+  await reg.register({
     id: "custom",
     type: "interval",
     cron: null,
@@ -70,8 +74,7 @@ test("GET /api/jobs -> 200 + list with lastRun, seeds present", async () => {
   const body = (await json(res)) as { data: Array<{ id: string; lastRun: unknown }> };
   assert.ok(Array.isArray(body.data));
   const ids = body.data.map((j) => j.id);
-  assert.ok(ids.includes("budget_reset"), "seeded budget_reset present");
-  assert.ok(ids.includes("warmup"), "seeded warmup present");
+  assert.ok(ids.includes("budget_reset"), "wired budget_reset present");
   assert.ok(ids.includes("custom"), "runtime-registered custom present");
   // DTO whitelist: no handler/timer leaked.
   for (const job of body.data) {
@@ -82,7 +85,7 @@ test("GET /api/jobs -> 200 + list with lastRun, seeds present", async () => {
 
 test("GET /api/jobs/:id/runs -> 200 + history", async () => {
   const reg = getJobRegistry();
-  reg.register({
+  await reg.register({
     id: "custom",
     type: "interval",
     cron: null,
@@ -114,7 +117,7 @@ test("GET /api/jobs/unknown/runs -> 404", async () => {
 
 test("POST /api/jobs/:id/enable -> 200 + enabled:true", async () => {
   const reg = getJobRegistry();
-  reg.register({
+  await reg.register({
     id: "custom",
     type: "interval",
     cron: null,
@@ -133,12 +136,12 @@ test("POST /api/jobs/:id/enable -> 200 + enabled:true", async () => {
   assert.equal(res.status, 200);
   const body = (await json(res)) as { data: { id: string; enabled: boolean } };
   assert.deepEqual(body.data, { id: "custom", enabled: true });
-  assert.equal(reg.listJobs().find((j) => j.id === "custom")!.enabled, true);
+  assert.equal((await reg.listJobs()).find((j) => j.id === "custom")!.enabled, true);
 });
 
 test("POST /api/jobs/:id/disable -> 200 + enabled:false", async () => {
   const reg = getJobRegistry();
-  reg.register({
+  await reg.register({
     id: "custom",
     type: "interval",
     cron: null,
@@ -157,12 +160,12 @@ test("POST /api/jobs/:id/disable -> 200 + enabled:false", async () => {
   assert.equal(res.status, 200);
   const body = (await json(res)) as { data: { id: string; enabled: boolean } };
   assert.deepEqual(body.data, { id: "custom", enabled: false });
-  assert.equal(reg.listJobs().find((j) => j.id === "custom")!.enabled, false);
+  assert.equal((await reg.listJobs()).find((j) => j.id === "custom")!.enabled, false);
 });
 
 test("POST /api/jobs/:id/run-now -> 200 + started:true", async () => {
   const reg = getJobRegistry();
-  reg.register({
+  await reg.register({
     id: "custom",
     type: "interval",
     cron: null,

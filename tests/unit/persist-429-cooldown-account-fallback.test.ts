@@ -17,8 +17,12 @@
  *      `clearConnectionRateLimit` for direct use by other consumers
  *      (e.g. provider-specific executors).
  *
+ * `applyErrorState` and `resetAccountState` are synchronous and fire the DB write
+ * without awaiting it, so these tests poll until the write lands.
+ *
  * These tests mirror the harness from `antigravity-429-quota-cooldown.test.ts`
- * so they share the same DATA_DIR sandbox and DB reset pattern.
+ * so they share the same DATA_DIR sandbox. Each test file gets its own Postgres
+ * database from tests/_setup/isolatePostgres.ts.
  */
 
 import { test } from "node:test";
@@ -37,8 +41,8 @@ import { applyErrorState, resetAccountState } from "../../open-sse/services/acco
 const { markConnectionRateLimitedUntil, clearConnectionRateLimit } =
   await import("@/lib/db/providers");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -53,13 +57,24 @@ async function makeConnection(provider: string, name: string): Promise<string> {
   return (conn as any).id as string;
 }
 
+/** Polls until `check()` returns the expected value (the fire-and-forget DB write lands). */
+async function waitForValue(check: () => Promise<boolean>, expected: boolean): Promise<boolean> {
+  const deadline = Date.now() + 2_000;
+  let value = await check();
+  while (value !== expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    value = await check();
+  }
+  return value;
+}
+
 // ── applyErrorState persistence (Bug Fix A) ────────────────────────────────
 
 test("applyErrorState: 429 cascade persists cooldown via setConnectionRateLimitUntil", async () => {
   const connId = await makeConnection("opencode-go", "OC-GO Cascade Test");
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "should start as not rate-limited"
   );
@@ -73,12 +88,12 @@ test("applyErrorState: 429 cascade persists cooldown via setConnectionRateLimitU
   );
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await waitForValue(() => providersDb.isConnectionRateLimited(connId), true),
     true,
     "should be rate-limited in the DB after applyErrorState with 429"
   );
 
-  const limited = providersDb.getRateLimitedConnections("opencode-go");
+  const limited = await providersDb.getRateLimitedConnections("opencode-go");
   assert.ok(
     limited.some((c: any) => c.id === connId),
     "should appear in getRateLimitedConnections list for the provider"
@@ -86,8 +101,8 @@ test("applyErrorState: 429 cascade persists cooldown via setConnectionRateLimitU
 
   // Sanity: the persisted timestamp is in the future (within reason).
   const row = limited.find((c: any) => c.id === connId) as any;
-  if (row?.rate_limited_until) {
-    const ts = Number(row.rate_limited_until);
+  if (row?.rateLimitedUntil) {
+    const ts = Number(row.rateLimitedUntil);
     assert.ok(ts > before, `cooldown timestamp ${ts} must be > request start ${before}`);
   }
 });
@@ -104,7 +119,7 @@ test("applyErrorState: non-429 / non-rateLimit errors do NOT persist a cooldown"
   );
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "non-rate-limit error should not persist a cooldown"
   );
@@ -130,9 +145,9 @@ test("resetAccountState clears the persisted cooldown after a success", async ()
   const connId = await makeConnection("opencode-go", "OC-GO Reset Test");
 
   // Force the connection into a cooled state.
-  providersDb.setConnectionRateLimitUntil(connId, Date.now() + 60_000);
+  await providersDb.setConnectionRateLimitUntil(connId, Date.now() + 60_000);
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     true,
     "precondition: should be rate-limited after explicit set"
   );
@@ -140,7 +155,7 @@ test("resetAccountState clears the persisted cooldown after a success", async ()
   resetAccountState({ id: connId, backoffLevel: 1, status: "error" });
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await waitForValue(() => providersDb.isConnectionRateLimited(connId), false),
     false,
     "resetAccountState should clear the persisted cooldown"
   );
@@ -148,31 +163,31 @@ test("resetAccountState clears the persisted cooldown after a success", async ()
 
 // ── localDb re-exports (Bug Fix F) ──────────────────────────────────────────
 
-test("localDb.markConnectionRateLimitedUntil: writes cooldown; never throws on bad id", () => {
+test("localDb.markConnectionRateLimitedUntil: writes cooldown; never throws on bad id", async () => {
   const connId = "non-existent-id-xxxxx";
   // Must not throw even though the id doesn't exist — DB write failure
   // inside the wrapper must never crash the request path.
-  assert.doesNotThrow(() => markConnectionRateLimitedUntil(connId, 5_000));
+  await assert.doesNotReject(markConnectionRateLimitedUntil(connId, 5_000));
 });
 
-test("localDb.clearConnectionRateLimit: does not throw on bad id", () => {
+test("localDb.clearConnectionRateLimit: does not throw on bad id", async () => {
   const connId = "non-existent-id-xxxxx";
-  assert.doesNotThrow(() => clearConnectionRateLimit(connId));
+  await assert.doesNotReject(clearConnectionRateLimit(connId));
 });
 
 test("localDb.markConnectionRateLimitedUntil + clearConnectionRateLimit round-trip", async () => {
   const connId = await makeConnection("opencode-go", "OC-GO RoundTrip");
 
-  markConnectionRateLimitedUntil(connId, 60_000);
+  await markConnectionRateLimitedUntil(connId, 60_000);
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     true,
     "after markConnectionRateLimitedUntil the connection should be limited"
   );
 
-  clearConnectionRateLimit(connId);
+  await clearConnectionRateLimit(connId);
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "after clearConnectionRateLimit the connection should not be limited"
   );
@@ -193,12 +208,12 @@ test("multi-key scenario: cooling one OpenCode-Go key does NOT poison other keys
   );
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connA),
+    await waitForValue(() => providersDb.isConnectionRateLimited(connA), true),
     true,
     "key A should be rate-limited after monthly envelope"
   );
   assert.equal(
-    providersDb.isConnectionRateLimited(connB),
+    await providersDb.isConnectionRateLimited(connB),
     false,
     "key B should remain available — scope is per-connection, not per-provider"
   );

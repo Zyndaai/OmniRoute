@@ -15,18 +15,16 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES = "true";
 process.env.API_KEY_SECRET = "test-api-key-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const route = await import("../../src/app/api/settings/proxies/egress/route.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
-  proxyLogger.clearProxyLogs();
-  // clearProxyLogs() reopens the DB; release it so Windows can delete the data dir.
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
+  await proxyLogger.clearProxyLogs();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -38,12 +36,12 @@ async function setupAuth() {
   return key.key;
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -70,7 +68,7 @@ test("GET /api/settings/proxies/egress adds an anonymous summary to the existing
   // logProxyEvent only enqueues for the 1s/100-entry background batch; the route
   // below reads persisted proxy_logs synchronously, so flush before asserting or
   // the rows are not yet on disk (timing-flaky otherwise).
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 
   const response = await route.GET(
     new Request("https://example.com/api/settings/proxies/egress", {

@@ -18,9 +18,24 @@ const functionalGatewayDb = await import("../../src/lib/db/functionalGatewayMirr
 const modelsDb = await import("../../src/lib/db/models.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const featureFlagsUtil = await import("../../src/shared/utils/featureFlags.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
+// Flag reads are synchronous and served from an in-process snapshot, so refresh it after each write.
+async function setFlag(key: string, value: string) {
+  await featureFlagsDb.setFeatureFlagOverride(key, value);
+  await featureFlagsUtil.refreshFeatureFlagSnapshot();
+}
+
+async function removeFlag(key: string) {
+  await featureFlagsDb.removeFeatureFlagOverride(key);
+  await featureFlagsUtil.refreshFeatureFlagSnapshot();
+}
 
 async function resetStorage() {
-  core.resetDbInstance();
+  // Each test starts from an empty database; resetDbInstance alone keeps the rows.
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -64,8 +79,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -77,8 +92,8 @@ test("v1 models catalog requires independent permission for functional gateway m
     accessToken: "kimi-access",
   });
   await seedConnection("agentrouter");
-  featureFlagsDb.setFeatureFlagOverride("EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS", "true");
-  functionalGatewayDb.setFunctionalGatewayProviderSetting("agentrouter", "on");
+  await setFlag("EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS", "true");
+  await functionalGatewayDb.setFunctionalGatewayProviderSetting("agentrouter", "on");
 
   const restrictedKey = await apiKeysDb.createApiKey(
     "catalog-functional-mirror",
@@ -125,8 +140,8 @@ test("v1 models catalog requires independent permission for functional gateway m
 const REFINEMENTS_FLAG = "CATALOG_MIRROR_REFINEMENTS_ENABLED";
 
 async function gatewayCatalogIds(refined: boolean): Promise<Set<string>> {
-  if (refined) featureFlagsDb.setFeatureFlagOverride(REFINEMENTS_FLAG, "true");
-  else featureFlagsDb.removeFeatureFlagOverride(REFINEMENTS_FLAG);
+  if (refined) await setFlag(REFINEMENTS_FLAG, "true");
+  else await removeFlag(REFINEMENTS_FLAG);
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
   const response = await v1ModelsCatalog.getUnifiedModelsResponse(
     new Request("http://localhost/api/v1/models")
@@ -137,8 +152,8 @@ async function gatewayCatalogIds(refined: boolean): Promise<Set<string>> {
 
 async function enableAgentrouterMirrors() {
   const gateway = (await seedConnection("agentrouter")) as { id: string };
-  featureFlagsDb.setFeatureFlagOverride("EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS", "true");
-  functionalGatewayDb.setFunctionalGatewayProviderSetting("agentrouter", "on");
+  await setFlag("EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS", "true");
+  await functionalGatewayDb.setFunctionalGatewayProviderSetting("agentrouter", "on");
   return gateway;
 }
 
@@ -182,7 +197,7 @@ test("refinements: an unowned model is still mirrored and still needs its own pe
   await enableAgentrouterMirrors();
   const [unowned] = await pickUnownedMirroredIds();
   const ownerPrefix = unowned.slice(0, unowned.indexOf("/"));
-  featureFlagsDb.setFeatureFlagOverride(REFINEMENTS_FLAG, "true");
+  await setFlag(REFINEMENTS_FLAG, "true");
 
   const listFor = async (allowedModels: string[], name: string) => {
     const key = await apiKeysDb.createApiKey(name, `machine-${name}`);

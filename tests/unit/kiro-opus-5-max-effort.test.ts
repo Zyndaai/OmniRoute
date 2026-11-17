@@ -30,8 +30,8 @@ test("Kiro Opus 5 exposes max through the Claude catalog path", () => {
   assert.ok(models.some((model) => model.id === "kr/claude-opus-5-max"));
 });
 
-test("Kiro Opus 5 forwards max as the provider-native adaptive effort", () => {
-  const payload = buildKiroPayload(
+test("Kiro Opus 5 forwards max as the provider-native adaptive effort", async () => {
+  const payload = await buildKiroPayload(
     "claude-opus-5",
     {
       messages: [{ role: "user", content: "Solve a hard problem" }],

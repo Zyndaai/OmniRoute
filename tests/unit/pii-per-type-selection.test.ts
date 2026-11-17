@@ -32,22 +32,22 @@ const EMAIL = "jdoe@example.com";
 const CPF = "529.982.247-25";
 const TOKEN = "SK-abcdefghij0123456789";
 
-function resetAll() {
-  clearAllFeatureFlagOverrides();
-  setPiiSettings({ enabledTypes: null, customPatterns: [] });
+async function resetAll() {
+  await clearAllFeatureFlagOverrides();
+  await setPiiSettings({ enabledTypes: null, customPatterns: [] });
   clearPiiSettingsCache();
   resetPiiDetectionStats();
   delete process.env.PII_REDACTION_ENABLED;
   delete process.env.PII_RESPONSE_SANITIZATION;
 }
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test("response sanitizer honours the per-type selection", () => {
-  resetAll();
+test("response sanitizer honours the per-type selection", async () => {
+  await resetAll();
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
     const text = `mail ${EMAIL} cpf ${CPF}`;
@@ -55,7 +55,7 @@ test("response sanitizer honours the per-type selection", () => {
     assert.ok(all.text.includes("[EMAIL_REDACTED]"));
     assert.ok(all.text.includes("[CPF_REDACTED]"), "unset selection keeps every type");
 
-    setPiiSettings({ enabledTypes: ["email"] });
+    await setPiiSettings({ enabledTypes: ["email"] });
     const onlyEmail = sanitizePII(text);
     assert.ok(onlyEmail.text.includes("[EMAIL_REDACTED]"));
     assert.ok(onlyEmail.text.includes(CPF), "a deselected type is left alone");
@@ -64,15 +64,15 @@ test("response sanitizer honours the per-type selection", () => {
       ["email"]
     );
   } finally {
-    resetAll();
+    await resetAll();
   }
 });
 
 test("request masker honours the per-type selection (ssn_us maps to ssn)", async () => {
-  resetAll();
+  await resetAll();
   process.env.PII_REDACTION_ENABLED = "true";
   try {
-    setPiiSettings({ enabledTypes: ["ssn"] });
+    await setPiiSettings({ enabledTypes: ["ssn"] });
     const body = {
       messages: [{ role: "user", content: `mail ${EMAIL} ssn 123-45-6789 cpf ${CPF}` }],
     };
@@ -84,16 +84,16 @@ test("request masker honours the per-type selection (ssn_us maps to ssn)", async
     assert.ok(content.includes(EMAIL), "email is not selected");
     assert.ok(content.includes(CPF), "cpf is not selected");
   } finally {
-    resetAll();
+    await resetAll();
   }
 });
 
 test("custom patterns are redacted on both sides when masking is on", async () => {
-  resetAll();
+  await resetAll();
   process.env.PII_REDACTION_ENABLED = "true";
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
-    setPiiSettings({
+    await setPiiSettings({
       customPatterns: [
         {
           id: "tok",
@@ -127,13 +127,13 @@ test("custom patterns are redacted on both sides when masking is on", async () =
     assert.equal(custom.text, "x [CUSTOM_REDACTED]");
     assert.deepEqual(custom.detections, [{ type: "custom:t", count: 1 }]);
   } finally {
-    resetAll();
+    await resetAll();
   }
 });
 
 test("flags off: payloads pass through untouched even with custom patterns stored", async () => {
-  resetAll();
-  setPiiSettings({
+  await resetAll();
+  await setPiiSettings({
     enabledTypes: ["email"],
     customPatterns: [
       { id: "t", name: "t", type: "regex", pattern: "SK-[a-z0-9]{20}", enabled: true },
@@ -149,10 +149,10 @@ test("flags off: payloads pass through untouched even with custom patterns store
   );
   assert.equal((req as { modifiedPayload?: unknown }).modifiedPayload, undefined);
   assert.equal(getPiiDetectionStats().total, 0, "nothing is counted while masking is off");
-  resetAll();
+  await resetAll();
 });
 
-test("catastrophic custom regex is rejected by the schema and skipped at runtime", () => {
+test("catastrophic custom regex is rejected by the schema and skipped at runtime", async () => {
   const evil = {
     id: "evil",
     name: "evil",
@@ -175,14 +175,14 @@ test("catastrophic custom regex is rejected by the schema and skipped at runtime
   assert.equal(compilePiiCustomPattern({ type: "regex", pattern: "x".repeat(501) }).ok, false);
 
   // A hand-written unsafe row in the DB is skipped instead of being compiled raw.
-  resetAll();
+  await resetAll();
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
-    setPiiSettings({ customPatterns: [evil] });
+    await setPiiSettings({ customPatterns: [evil] });
     const text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
     assert.equal(sanitizePII(text).text, text);
   } finally {
-    resetAll();
+    await resetAll();
   }
 });
 
@@ -200,7 +200,7 @@ test("schema refuses duplicate ids, unknown types and empty updates", () => {
 });
 
 test("detection counters count types (never values) while masking is on", async () => {
-  resetAll();
+  await resetAll();
   process.env.PII_REDACTION_ENABLED = "true";
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
@@ -218,6 +218,6 @@ test("detection counters count types (never values) while masking is on", async 
     assert.deepEqual(Object.keys(stats).sort(), ["request", "response", "since", "total"]);
     assert.ok(!Number.isNaN(Date.parse(stats.since)), "since is a timestamp");
   } finally {
-    resetAll();
+    await resetAll();
   }
 });

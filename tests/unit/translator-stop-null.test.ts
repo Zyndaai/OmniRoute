@@ -15,16 +15,16 @@ const baseBody = () => ({
   messages: [{ role: "user", content: "hi" }],
 });
 
-test("openaiToClaudeRequest omits stop_sequences when stop is null", () => {
-  const result = openaiToClaudeRequest("claude-haiku-4-5", { ...baseBody(), stop: null }, false);
+test("openaiToClaudeRequest omits stop_sequences when stop is null", async () => {
+  const result = await openaiToClaudeRequest("claude-haiku-4-5", { ...baseBody(), stop: null }, false);
   assert.equal("stop_sequences" in result, false);
 });
 
-test("openaiToClaudeRequest keeps string stop values and drops non-string entries", () => {
-  const single = openaiToClaudeRequest("claude-haiku-4-5", { ...baseBody(), stop: "END" }, false);
+test("openaiToClaudeRequest keeps string stop values and drops non-string entries", async () => {
+  const single = await openaiToClaudeRequest("claude-haiku-4-5", { ...baseBody(), stop: "END" }, false);
   assert.deepEqual(single.stop_sequences, ["END"]);
 
-  const list = openaiToClaudeRequest(
+  const list = await openaiToClaudeRequest(
     "claude-haiku-4-5",
     { ...baseBody(), stop: ["A", null, "B"] },
     false
@@ -32,16 +32,16 @@ test("openaiToClaudeRequest keeps string stop values and drops non-string entrie
   assert.deepEqual(list.stop_sequences, ["A", "B"]);
 });
 
-test("openaiToGeminiRequest omits stopSequences when stop is null", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-flash", { ...baseBody(), stop: null }, false);
+test("openaiToGeminiRequest omits stopSequences when stop is null", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-flash", { ...baseBody(), stop: null }, false);
   assert.equal("stopSequences" in result.generationConfig, false);
 });
 
-test("openaiToGeminiRequest keeps string stop values and drops non-string entries", () => {
-  const single = openaiToGeminiRequest("gemini-2.5-flash", { ...baseBody(), stop: "END" }, false);
+test("openaiToGeminiRequest keeps string stop values and drops non-string entries", async () => {
+  const single = await openaiToGeminiRequest("gemini-2.5-flash", { ...baseBody(), stop: "END" }, false);
   assert.deepEqual(single.generationConfig.stopSequences, ["END"]);
 
-  const list = openaiToGeminiRequest(
+  const list = await openaiToGeminiRequest(
     "gemini-2.5-flash",
     { ...baseBody(), stop: ["A", null, "B"] },
     false

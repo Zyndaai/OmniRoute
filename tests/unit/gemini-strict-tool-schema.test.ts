@@ -41,7 +41,7 @@ test("strict is in GEMINI_UNSUPPORTED_SCHEMA_KEYS", () => {
   assert.ok(GEMINI_UNSUPPORTED_SCHEMA_KEYS.has("strict"));
 });
 
-test("OpenAI -> Gemini request strips strict from OpenAI-style function tool parameters", () => {
+test("OpenAI -> Gemini request strips strict from OpenAI-style function tool parameters", async () => {
   const body = {
     messages: [{ role: "user", content: "hi" }],
     tools: [
@@ -56,7 +56,7 @@ test("OpenAI -> Gemini request strips strict from OpenAI-style function tool par
     ],
   };
 
-  const result = openaiToGeminiRequest("gemini-3.7-flash-low", body, false) as {
+  const result = (await openaiToGeminiRequest("gemini-3.7-flash-low", body, false)) as {
     tools?: Array<{ functionDeclarations?: Array<{ parameters: unknown }> }>;
   };
 

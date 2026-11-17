@@ -8,6 +8,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-skills-route-"))
 const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
 const skillsRoute = await import("../../src/app/api/skills/route.ts");
@@ -21,12 +23,11 @@ function clearSkillRegistry() {
   }
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(tmpDir, { recursive: true });
   clearSkillRegistry();
-  core.getDbInstance();
 }
 
 async function registerSkill(overrides = {}) {
@@ -52,12 +53,12 @@ async function registerSkill(overrides = {}) {
   });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   clearSkillRegistry();
   process.env.DATA_DIR = originalDataDir;
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -170,11 +171,11 @@ test("skills by-id PUT updates enabled state, validates input, and surfaces pars
   const updatedBody = (await updated.json()) as any;
   const invalidBody = (await invalid.json()) as any;
   const malformedBody = (await malformed.json()) as any;
-  const loadedSkillRow = core
-    .getDbInstance()
-    .prepare("SELECT enabled FROM skills WHERE id = ?")
-    .get(created.id);
-  const isEnabled = loadedSkillRow ? (loadedSkillRow as any).enabled === 1 : false;
+  const loadedSkillRow = await getTestBackend().queryOne<{ enabled: boolean }>(
+    "SELECT enabled FROM skills WHERE id = $1",
+    [created.id]
+  );
+  const isEnabled = loadedSkillRow ? loadedSkillRow.enabled === true : false;
 
   assert.equal(updated.status, 200);
   assert.deepEqual(updatedBody, { success: true, enabled: true });

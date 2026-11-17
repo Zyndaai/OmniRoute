@@ -12,7 +12,7 @@ const handoffDb = await import("../../src/lib/db/contextHandoffs.ts");
 const contextHandoff = await import("../../open-sse/services/contextHandoff.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -32,7 +32,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -205,7 +205,7 @@ test("maybeGenerateHandoff skips below the warning threshold", async () => {
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(called, false);
-  assert.equal(handoffDb.getHandoff("sess-low", "relay-combo"), null);
+  assert.equal(await handoffDb.getHandoff("sess-low", "relay-combo"), null);
 });
 
 test("maybeGenerateHandoff persists a structured handoff once the threshold is reached", async () => {
@@ -354,7 +354,7 @@ test("maybeGenerateHandoff allows a new attempt after a failed in-flight generat
 
   contextHandoff.maybeGenerateHandoff(options);
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(handoffDb.getHandoff("sess-retry", "relay-combo"), null);
+  assert.equal(await handoffDb.getHandoff("sess-retry", "relay-combo"), null);
 
   contextHandoff.maybeGenerateHandoff(options);
   const saved = await waitFor(() => handoffDb.getHandoff("sess-retry", "relay-combo"));
@@ -440,11 +440,11 @@ test("maybeGenerateHandoff respects explicit empty handoffProviders and skips ge
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(called, false);
-  assert.equal(handoffDb.getHandoff("sess-disabled", "relay-combo"), null);
+  assert.equal(await handoffDb.getHandoff("sess-disabled", "relay-combo"), null);
 });
 
-test("context handoff DB module upserts and deletes active handoffs", () => {
-  handoffDb.upsertHandoff({
+test("context handoff DB module upserts and deletes active handoffs", async () => {
+  await handoffDb.upsertHandoff({
     sessionId: "sess-db",
     comboName: "relay-combo",
     fromAccount: "conn-a",
@@ -458,7 +458,7 @@ test("context handoff DB module upserts and deletes active handoffs", () => {
     generatedAt: "2099-04-08T10:00:00.000Z",
     expiresAt: "2099-01-01T00:00:00.000Z",
   });
-  handoffDb.upsertHandoff({
+  await handoffDb.upsertHandoff({
     sessionId: "sess-db",
     comboName: "relay-combo",
     fromAccount: "conn-b",
@@ -473,13 +473,13 @@ test("context handoff DB module upserts and deletes active handoffs", () => {
     expiresAt: "2099-01-01T00:00:00.000Z",
   });
 
-  const saved = handoffDb.getHandoff("sess-db", "relay-combo");
+  const saved = await handoffDb.getHandoff("sess-db", "relay-combo");
   assert.equal(saved.fromAccount, "conn-b");
   assert.equal(saved.summary, "Updated summary");
-  assert.equal(handoffDb.hasActiveHandoff("sess-db", "relay-combo"), true);
+  assert.equal(await handoffDb.hasActiveHandoff("sess-db", "relay-combo"), true);
 
-  handoffDb.deleteHandoff("sess-db", "relay-combo");
-  assert.equal(handoffDb.getHandoff("sess-db", "relay-combo"), null);
+  await handoffDb.deleteHandoff("sess-db", "relay-combo");
+  assert.equal(await handoffDb.getHandoff("sess-db", "relay-combo"), null);
 });
 
 test("selectMessagesForSummary filters falsy values and preserves system/developer messages", () => {
@@ -594,7 +594,7 @@ test("maybeGenerateUniversalHandoff stops re-summarizing after an unparseable an
 
   // Positive anchor: the feature still runs — the first switch DID generate.
   assert.equal(calls, 1, `expected exactly one summarization call, got ${calls}`);
-  assert.equal(handoffDb.getHandoff("sess-unparseable", "weighted-combo"), null);
+  assert.equal(await handoffDb.getHandoff("sess-unparseable", "weighted-combo"), null);
 });
 
 test("maybeGenerateUniversalHandoff still generates and persists a usable handoff", async () => {
@@ -628,7 +628,7 @@ test("a transient upstream failure does not arm the unparseable backoff", async 
 
   contextHandoff.maybeGenerateUniversalHandoff(options);
   await new Promise((resolve) => setTimeout(resolve, 40));
-  assert.equal(handoffDb.getHandoff("sess-transient", "weighted-combo"), null);
+  assert.equal(await handoffDb.getHandoff("sess-transient", "weighted-combo"), null);
 
   contextHandoff.maybeGenerateUniversalHandoff(options);
   const saved = await waitFor(() => handoffDb.getHandoff("sess-transient", "weighted-combo"));

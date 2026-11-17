@@ -76,9 +76,9 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
     assert.deepEqual(toolMsg.cache_control, { type: "ephemeral" });
   });
 
-  test("preserve mode: openai→claude emits block-level cache_control on tool_result", () => {
+  test("preserve mode: openai→claude emits block-level cache_control on tool_result", async () => {
     const openai = filterToOpenAIFormat(buildToolBody(), { preserveCacheControl: true });
-    const claude = openaiToClaudeRequest("claude-opus-5", openai, false, null);
+    const claude = await openaiToClaudeRequest("claude-opus-5", openai, false, null);
     const msgs = claude.messages;
     const toolResultMsg = msgs.find(
       (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result")
@@ -91,9 +91,9 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
     assert.equal(JSON.stringify(toolResult.content).includes("cache_control"), false);
   });
 
-  test("strip mode: openai→claude emits no NESTED tool_result.content marker", () => {
+  test("strip mode: openai→claude emits no NESTED tool_result.content marker", async () => {
     const openai = filterToOpenAIFormat(buildToolBody(), { preserveCacheControl: false });
-    const claude = openaiToClaudeRequest("claude-opus-5", openai, false, null);
+    const claude = await openaiToClaudeRequest("claude-opus-5", openai, false, null);
     for (const msg of claude.messages) {
       if (!Array.isArray(msg.content)) continue;
       for (const block of msg.content) {
@@ -124,8 +124,8 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
   // Verified against the captured 157-message live body: without this the
   // direct leg still emitted 2 nested markers.
 
-  test("direct openai→claude hoists a nested marker off role:'tool' content", () => {
-    const claude = openaiToClaudeRequest("claude-opus-5", buildToolBody(), false, null);
+  test("direct openai→claude hoists a nested marker off role:'tool' content", async () => {
+    const claude = await openaiToClaudeRequest("claude-opus-5", buildToolBody(), false, null);
     const toolResult = claude.messages
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .find((b) => b.type === "tool_result");
@@ -134,7 +134,7 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
     assert.equal(JSON.stringify(toolResult.content).includes("cache_control"), false);
   });
 
-  test("direct openai→claude hoists a marker nested in a user-turn tool_result part", () => {
+  test("direct openai→claude hoists a marker nested in a user-turn tool_result part", async () => {
     const body = {
       model: "claude-opus-5",
       messages: [
@@ -164,7 +164,7 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
         },
       ],
     };
-    const claude = openaiToClaudeRequest("claude-opus-5", body, false, null);
+    const claude = await openaiToClaudeRequest("claude-opus-5", body, false, null);
     const toolResult = claude.messages
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .find((b) => b.type === "tool_result");
@@ -173,10 +173,10 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
     assert.equal(JSON.stringify(toolResult.content).includes("cache_control"), false);
   });
 
-  test("an explicit block-level marker wins over a nested one", () => {
+  test("an explicit block-level marker wins over a nested one", async () => {
     const body = buildToolBody();
     body.messages[3].cache_control = { type: "ephemeral", ttl: "1h" };
-    const claude = openaiToClaudeRequest("claude-opus-5", body, false, null);
+    const claude = await openaiToClaudeRequest("claude-opus-5", body, false, null);
     const toolResult = claude.messages
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .find((b) => b.type === "tool_result");
@@ -184,10 +184,10 @@ describe("OpenAI tool-message cache_control (tool_result.content 400)", () => {
     assert.equal(JSON.stringify(toolResult.content).includes("cache_control"), false);
   });
 
-  test("tool_result without any marker gains no cache_control key", () => {
+  test("tool_result without any marker gains no cache_control key", async () => {
     const body = buildToolBody();
     delete body.messages[3].content[0].cache_control;
-    const claude = openaiToClaudeRequest("claude-opus-5", body, false, null);
+    const claude = await openaiToClaudeRequest("claude-opus-5", body, false, null);
     const toolResult = claude.messages
       .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
       .find((b) => b.type === "tool_result");

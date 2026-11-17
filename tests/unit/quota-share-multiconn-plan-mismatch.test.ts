@@ -31,13 +31,16 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-13876-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "quota-13876-plan-mismatch-secret";
 
 const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const plansDb = await import("../../src/lib/db/providerPlans.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -50,20 +53,30 @@ test("multi-connection pool: consumption served via a non-primary connection is 
 
   const PROVIDER = "quota-13876-test-provider"; // not in the built-in catalog on purpose
 
+  // Pool and plan rows reference provider connections and the API key by foreign key.
+  for (const id of ["conn-primary", "conn-secondary"]) {
+    await getTestBackend().execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [id, PROVIDER]
+    );
+  }
+  const key = await apiKeysDb.createApiKey("quota-13876-key", "machine-13876-plan-mismatch");
+  const apiKeyId = key.id as string;
+
   // Pool with 2 member connections sharing quota for one API key.
   // conn-primary is connectionIds[0] — the one the wizard PUTs the plan to.
   // conn-secondary is a normal pool member that can also serve requests
   // (fallback/round-robin across accounts in the same pool).
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: "conn-primary",
     connectionIds: ["conn-primary", "conn-secondary"],
     name: "Repro Pool #13876",
-    allocations: [{ apiKeyId: "key-shared", weight: 100, policy: "hard" }],
+    allocations: [{ apiKeyId, weight: 100, policy: "hard" }],
   });
 
   // The operator opens the wizard's "Limite" step and sets a custom plan —
   // this PUTs only to /api/quota/plans/conn-primary (PoolWizard.tsx primaryConnectionId).
-  plansDb.upsertPlan(
+  await plansDb.upsertPlan(
     "conn-primary",
     PROVIDER,
     [{ unit: "tokens", window: "daily", limit: 100000 }],
@@ -72,7 +85,7 @@ test("multi-connection pool: consumption served via a non-primary connection is 
 
   // Sanity: conn-secondary has no override and the provider has no catalog
   // entry, so resolvePlan for it falls through to the empty plan.
-  const secondaryPlan = resolvePlan("conn-secondary", PROVIDER);
+  const secondaryPlan = await resolvePlan("conn-secondary", PROVIDER);
   assert.equal(
     secondaryPlan.dimensions.length,
     0,
@@ -82,7 +95,7 @@ test("multi-connection pool: consumption served via a non-primary connection is 
   // A real request gets served through conn-secondary (the pool's fallback
   // member) and completes successfully — the POST-hook fires.
   await recordConsumption({
-    apiKeyId: "key-shared",
+    apiKeyId,
     connectionId: "conn-secondary",
     provider: PROVIDER,
     cost: { tokens: 5000, usd: 0, requests: 1 },
@@ -91,7 +104,7 @@ test("multi-connection pool: consumption served via a non-primary connection is 
   // The Quota Sharing dashboard reads usage the same way the REST route does:
   // resolve the plan from pool.connectionId (always the primary) and read
   // poolUsageWithDimensions with those dimensions.
-  const primaryPlan = resolvePlan(pool.connectionId, PROVIDER);
+  const primaryPlan = await resolvePlan(pool.connectionId, PROVIDER);
   assert.equal(
     primaryPlan.dimensions.length,
     1,

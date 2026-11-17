@@ -6,7 +6,7 @@ function makeFakePngBase64(approxBytes: number): string {
   return Buffer.alloc(approxBytes, 65).toString("base64");
 }
 
-test("#8368: inline base64 PNG image_url is NOT counted as raw text (bounded image-token estimate)", () => {
+test("#8368: inline base64 PNG image_url is NOT counted as raw text (bounded image-token estimate)", async () => {
   const base64 = makeFakePngBase64(1_900_000); // ~1.9MB, matches issue repro
   const messages = [
     { role: "user", content: "Please describe this image." },
@@ -19,11 +19,10 @@ test("#8368: inline base64 PNG image_url is NOT counted as raw text (bounded ima
     },
   ];
   const estimated = estimateTokens(messages);
+  const limit = await getTokenLimit("codex");
   assert.ok(
     estimated < 5000,
-    `BUG #8368 reproduced: image-bearing message estimated at ${estimated} tokens (limit ${getTokenLimit(
-      "codex"
-    )})`
+    `BUG #8368 reproduced: image-bearing message estimated at ${estimated} tokens (limit ${limit})`
   );
 });
 

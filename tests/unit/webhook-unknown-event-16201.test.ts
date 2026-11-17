@@ -38,7 +38,7 @@ const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 test.after(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -188,18 +188,18 @@ test("Telegram token validation and URL remain unchanged without a network reque
   assert.throws(() => telegram.buildTelegramUrl("invalid"), /Invalid Telegram bot token format/);
 });
 
-function seedFailures(id: string) {
-  for (let count = 0; count < 9; count++) db.recordWebhookDelivery(id, 500, false);
-  assert.equal(db.getWebhook(id)?.failure_count, 9);
+async function seedFailures(id: string) {
+  for (let count = 0; count < 9; count++) await db.recordWebhookDelivery(id, 500, false);
+  assert.equal((await db.getWebhook(id))?.failure_count, 9);
 }
 
-function assertRecordedSuccess(id: string, event: string) {
-  const rows = deliveries.getDeliveries(id, 10);
+async function assertRecordedSuccess(id: string, event: string) {
+  const rows = await deliveries.getDeliveries(id, 10);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].event_type, event);
   assert.equal(rows[0].status, "success");
   assert.equal(rows[0].http_status, 200);
-  const webhook = db.getWebhook(id);
+  const webhook = await db.getWebhook(id);
   assert.equal(webhook?.failure_count, 0);
   assert.equal(webhook?.enabled, true);
 }
@@ -207,26 +207,29 @@ function assertRecordedSuccess(id: string, event: string) {
 test("unknown events reach wildcard receivers and keep delivery identity and counters", async () => {
   received.length = 0;
   const event = "future.event" as WebhookEvent;
-  const hooks = (["slack", "discord", "custom"] as const).map((kind) =>
-    db.createWebhook({
-      kind,
-      url: `${baseUrl}/${kind}`,
-      events: ["*"],
-      secret: "synthetic-secret",
-    })
-  );
-  const other = db.createWebhook({
+  const hooks = [];
+  for (const kind of ["slack", "discord", "custom"] as const) {
+    hooks.push(
+      await db.createWebhook({
+        kind,
+        url: `${baseUrl}/${kind}`,
+        events: ["*"],
+        secret: "synthetic-secret",
+      })
+    );
+  }
+  const other = await db.createWebhook({
     kind: "slack",
     url: `${baseUrl}/other`,
     events: ["request.failed"],
   });
   try {
-    hooks.forEach((hook) => seedFailures(hook.id));
+    for (const hook of hooks) await seedFailures(hook.id);
     await dispatcher.dispatchEvent(event, { marker: "same-data" });
     assert.deepEqual(received.map((hit) => hit.path).sort(), ["/custom", "/discord", "/slack"]);
-    hooks.forEach((hook) => assertRecordedSuccess(hook.id, event));
-    assert.equal(deliveries.getDeliveries(other.id, 10).length, 0);
-    assert.equal(db.getWebhook(other.id)?.failure_count, 0);
+    for (const hook of hooks) await assertRecordedSuccess(hook.id, event);
+    assert.equal((await deliveries.getDeliveries(other.id, 10)).length, 0);
+    assert.equal((await db.getWebhook(other.id))?.failure_count, 0);
     const custom = received.find((hit) => hit.path === "/custom")!;
     const payload = JSON.parse(custom.body);
     assert.equal(payload.event, event);
@@ -245,7 +248,7 @@ test("unknown events reach wildcard receivers and keep delivery identity and cou
       "🔔 Webhook Event"
     );
   } finally {
-    [...hooks, other].forEach((hook) => db.deleteWebhook(hook.id));
+    for (const hook of [...hooks, other]) await db.deleteWebhook(hook.id);
   }
 });
 
@@ -254,21 +257,25 @@ for (const kind of ["slack", "discord"] as const) {
     received.length = 0;
     const receiverPath = `/reject-${kind}`;
     statuses.set(receiverPath, 400);
-    const hook = db.createWebhook({ kind, url: `${baseUrl}${receiverPath}`, events: ["*"] });
+    const hook = await db.createWebhook({
+      kind,
+      url: `${baseUrl}${receiverPath}`,
+      events: ["*"],
+    });
     try {
-      seedFailures(hook.id);
+      await seedFailures(hook.id);
       await dispatcher.dispatchEvent("future.event" as WebhookEvent, {});
       assert.equal(received.length, 1);
       assert.equal(received[0].path, receiverPath);
-      const rows = deliveries.getDeliveries(hook.id, 10);
+      const rows = await deliveries.getDeliveries(hook.id, 10);
       assert.equal(rows.length, 1);
       assert.equal(rows[0].status, "failed");
       assert.equal(rows[0].http_status, 400);
       assert.equal(rows[0].event_type, "future.event");
-      assert.equal(db.getWebhook(hook.id)?.failure_count, 10);
-      assert.equal(db.getWebhook(hook.id)?.enabled, false);
+      assert.equal((await db.getWebhook(hook.id))?.failure_count, 10);
+      assert.equal((await db.getWebhook(hook.id))?.enabled, false);
     } finally {
-      db.deleteWebhook(hook.id);
+      await db.deleteWebhook(hook.id);
       statuses.delete(receiverPath);
     }
   });

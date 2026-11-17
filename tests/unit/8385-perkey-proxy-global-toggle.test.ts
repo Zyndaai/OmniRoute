@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -25,26 +26,19 @@ interface ProxyResolution {
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("issue #8385: global perKeyProxyEnabled=false must override a connection's per_key_proxy_enabled=1", async () => {
   await resetStorage();
 
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'perKeyProxyEnabled', 'false')"
-    )
-    .run();
+  await settingsDb.updateSettings({ perKeyProxyEnabled: false });
 
   const conn = (await providersDb.createProviderConnection({
     provider: "openai",
@@ -79,12 +73,7 @@ test("issue #8385: global perKeyProxyEnabled=false must override a connection's 
 test("issue #8385: global perKeyProxyEnabled=true still allows the per-key assignment to apply", async () => {
   await resetStorage();
 
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'perKeyProxyEnabled', 'true')"
-    )
-    .run();
+  await settingsDb.updateSettings({ perKeyProxyEnabled: true });
 
   const conn = (await providersDb.createProviderConnection({
     provider: "openai",

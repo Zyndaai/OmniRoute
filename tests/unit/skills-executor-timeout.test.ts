@@ -2,8 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import "../_setup/isolateDataDir.ts";
-
-process.env.DISABLE_SQLITE_AUTO_BACKUP ||= "true";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const core = await import("../../src/lib/db/core.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
@@ -16,8 +15,8 @@ const API_KEY_ID = "executor-timeout";
 skillExecutor.registerHandler("timeout-fast", async () => ({ ok: true }));
 skillExecutor.registerHandler("timeout-slow", () => new Promise(() => {}));
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 function pendingTimers(): number {
@@ -37,11 +36,11 @@ test("a skill that outlives the executor timeout is recorded as timeout and pers
   assert.equal(run.status, SkillStatus.TIMEOUT);
   assert.equal(run.errorMessage, "Skill execution timed out");
 
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT status FROM skill_executions WHERE id = ?")
-    .get(run.id) as { status: string };
-  assert.equal(row.status, "timeout");
+  const row = await getTestBackend().queryOne<{ status: string }>(
+    "SELECT status FROM skill_executions WHERE id = $1",
+    [run.id]
+  );
+  assert.equal(row?.status, "timeout");
 });
 
 test("a handler that settles in time leaves no pending timeout timer behind", async () => {

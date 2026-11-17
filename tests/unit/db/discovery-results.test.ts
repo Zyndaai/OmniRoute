@@ -1,33 +1,19 @@
-import { describe, test, before, after } from "node:test";
+import { describe, test, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { resetTestDb } from "../../helpers/postgres.ts";
 
-// Isolate the DB into a throwaway DATA_DIR so migrations run against a fresh file.
-let tmpDataDir: string;
+// The database is isolated per test file (tests/_setup/isolatePostgres.ts); reset it once
+// so the migrated seed rows are present and nothing from another file leaks in.
 let mod: typeof import("@/lib/db/discoveryResults");
-let core: typeof import("@/lib/db/core");
 
 before(async () => {
-  tmpDataDir = mkdtempSync(join(tmpdir(), "omniroute-discovery-"));
-  process.env.DATA_DIR = tmpDataDir;
-  core = await import("@/lib/db/core");
-  core.resetDbInstance();
-  // Touch the instance so migrations (incl. 074_discovery_results) apply.
-  core.getDbInstance();
+  await resetTestDb();
   mod = await import("@/lib/db/discoveryResults");
 });
 
-after(() => {
-  core.resetDbInstance();
-  if (tmpDataDir)
-    rmSync(tmpDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
-
 describe("discoveryResults DB module", () => {
-  test("upsert inserts a new row and returns it with an id", () => {
-    const row = mod.upsertDiscoveryResult({
+  test("upsert inserts a new row and returns it with an id", async () => {
+    const row = await mod.upsertDiscoveryResult({
       providerId: "acme",
       method: "free_tier",
       authType: "none",
@@ -43,8 +29,8 @@ describe("discoveryResults DB module", () => {
     assert.equal(row.status, "pending");
   });
 
-  test("upsert on the same (provider, method, endpoint) updates instead of duplicating", () => {
-    const first = mod.upsertDiscoveryResult({
+  test("upsert on the same (provider, method, endpoint) updates instead of duplicating", async () => {
+    const first = await mod.upsertDiscoveryResult({
       providerId: "beta",
       method: "web_cookie",
       authType: "cookie",
@@ -53,7 +39,7 @@ describe("discoveryResults DB module", () => {
       status: "pending",
       endpoint: "https://beta.example/chat",
     });
-    const second = mod.upsertDiscoveryResult({
+    const second = await mod.upsertDiscoveryResult({
       providerId: "beta",
       method: "web_cookie",
       authType: "cookie",
@@ -65,19 +51,19 @@ describe("discoveryResults DB module", () => {
     assert.equal(second.id, first.id);
     assert.equal(second.feasibility, 5);
     assert.equal(second.status, "testing");
-    const all = mod.getDiscoveryResults("beta");
+    const all = await mod.getDiscoveryResults("beta");
     assert.equal(all.length, 1);
   });
 
-  test("getDiscoveryResults filters by providerId and returns all when omitted", () => {
-    const beta = mod.getDiscoveryResults("beta");
+  test("getDiscoveryResults filters by providerId and returns all when omitted", async () => {
+    const beta = await mod.getDiscoveryResults("beta");
     assert.ok(beta.every((r) => r.providerId === "beta"));
-    const all = mod.getDiscoveryResults();
+    const all = await mod.getDiscoveryResults();
     assert.ok(all.length >= 2);
   });
 
-  test("getDiscoveryResultById returns the row or null", () => {
-    const created = mod.upsertDiscoveryResult({
+  test("getDiscoveryResultById returns the row or null", async () => {
+    const created = await mod.upsertDiscoveryResult({
       providerId: "gamma",
       method: "trial",
       authType: "api_key",
@@ -85,13 +71,13 @@ describe("discoveryResults DB module", () => {
       riskLevel: "low",
       status: "pending",
     });
-    const found = mod.getDiscoveryResultById(created.id!);
+    const found = await mod.getDiscoveryResultById(created.id!);
     assert.equal(found?.providerId, "gamma");
-    assert.equal(mod.getDiscoveryResultById(999999), null);
+    assert.equal(await mod.getDiscoveryResultById(999999), null);
   });
 
-  test("markVerified sets status=verified and stamps verified_at", () => {
-    const created = mod.upsertDiscoveryResult({
+  test("markVerified sets status=verified and stamps verified_at", async () => {
+    const created = await mod.upsertDiscoveryResult({
       providerId: "delta",
       method: "public_api",
       authType: "api_key",
@@ -99,17 +85,17 @@ describe("discoveryResults DB module", () => {
       riskLevel: "none",
       status: "pending",
     });
-    const updated = mod.markVerified(created.id!);
+    const updated = await mod.markVerified(created.id!);
     assert.equal(updated?.status, "verified");
     assert.ok(updated?.verifiedAt);
   });
 
-  test("markVerified on a missing id returns null", () => {
-    assert.equal(mod.markVerified(999999), null);
+  test("markVerified on a missing id returns null", async () => {
+    assert.equal(await mod.markVerified(999999), null);
   });
 
-  test("deleteDiscoveryResult removes the row and returns true, false if absent", () => {
-    const created = mod.upsertDiscoveryResult({
+  test("deleteDiscoveryResult removes the row and returns true, false if absent", async () => {
+    const created = await mod.upsertDiscoveryResult({
       providerId: "epsilon",
       method: "free_tier",
       authType: "none",
@@ -117,16 +103,16 @@ describe("discoveryResults DB module", () => {
       riskLevel: "none",
       status: "pending",
     });
-    assert.equal(mod.deleteDiscoveryResult(created.id!), true);
-    assert.equal(mod.getDiscoveryResultById(created.id!), null);
-    assert.equal(mod.deleteDiscoveryResult(created.id!), false);
+    assert.equal(await mod.deleteDiscoveryResult(created.id!), true);
+    assert.equal(await mod.getDiscoveryResultById(created.id!), null);
+    assert.equal(await mod.deleteDiscoveryResult(created.id!), false);
   });
 });
 
 describe("discovery service reporter delegation", () => {
   test("persistDiscoveryResult writes through and getDiscoveryResults reads it back", async () => {
     const svc = await import("@/lib/discovery/index");
-    const saved = svc.persistDiscoveryResult({
+    const saved = await svc.persistDiscoveryResult({
       providerId: "zeta",
       method: "public_api",
       authType: "api_key",
@@ -136,7 +122,7 @@ describe("discovery service reporter delegation", () => {
       models: ["zeta-1"],
     });
     assert.ok(saved.id! > 0);
-    const read = svc.getDiscoveryResults("zeta");
+    const read = await svc.getDiscoveryResults("zeta");
     assert.equal(read.length, 1);
     assert.equal(read[0].providerId, "zeta");
     assert.deepEqual(read[0].models, ["zeta-1"]);

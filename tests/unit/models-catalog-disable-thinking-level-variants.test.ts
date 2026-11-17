@@ -6,10 +6,11 @@ import {
   setFeatureFlagOverride,
 } from "../../src/lib/db/featureFlags.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { refreshFeatureFlagSnapshot } from "../../src/shared/utils/featureFlags.ts";
 
-after(() => {
-  removeFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS");
-  resetDbInstance();
+after(async () => {
+  await removeFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS");
+  await resetDbInstance();
 });
 
 test("catalog advertises claude effort variants by default", async () => {
@@ -35,7 +36,9 @@ test("catalog advertises claude effort variants by default", async () => {
 });
 
 test("catalog filters claude effort variants when the flag is set", async () => {
-  setFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS", "true");
+  await setFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS", "true");
+  // Flag reads are synchronous and served from an in-process snapshot (see featureFlags.ts).
+  await refreshFeatureFlagSnapshot();
   const out = await applyCatalogPostFilters(
     new Request("http://localhost/v1/models"),
     [
@@ -51,7 +54,8 @@ test("catalog filters claude effort variants when the flag is set", async () => 
 });
 
 test("catalog advertises claude effort variants when the flag is explicitly unset", async () => {
-  setFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS", "false");
+  await setFeatureFlagOverride("OMNIROUTE_DISABLE_THINKING_LEVEL_VARIANTS", "false");
+  await refreshFeatureFlagSnapshot();
   const out = await applyCatalogPostFilters(
     new Request("http://localhost/v1/models"),
     [

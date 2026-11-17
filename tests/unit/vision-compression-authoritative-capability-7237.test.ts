@@ -36,7 +36,7 @@ function imageBody() {
 }
 
 describe("#7237 vision-capable models keep their images through compression", () => {
-  it("the id-fragment heuristic now agrees with the authoritative spec for gpt-5.5", () => {
+  it("the id-fragment heuristic now agrees with the authoritative spec for gpt-5.5", async () => {
     // Originally this case documented a DRIFT: the fragment list had no gpt-5.x
     // entry, so the heuristic said false while modelSpecs said true. Commit
     // 68cb678780 (enable vision flags for CC models) added the "gpt-5" fragment
@@ -44,7 +44,7 @@ describe("#7237 vision-capable models keep their images through compression", ()
     // guarding is the AGREEMENT plus the fact that modelSpecs stays authoritative.
     assert.equal(isVisionModelId("gpt-5.5"), true);
     assert.equal(
-      getResolvedModelCapabilities({ model: "gpt-5.5" }).supportsVision,
+      (await getResolvedModelCapabilities({ model: "gpt-5.5" })).supportsVision,
       true,
       "modelSpecs.ts registers gpt-5.5 with supportsVision:true — authoritative source agrees"
     );

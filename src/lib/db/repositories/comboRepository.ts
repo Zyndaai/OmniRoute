@@ -153,10 +153,6 @@ export async function getComboByName(name: string) {
   return normalizeStoredCombo(combo, db(), [typeof combo.name === "string" ? combo.name : name]);
 }
 
-export async function getComboByNameInsensitive(name: string) {
-  return getComboByName(name);
-}
-
 export async function createCombo(data: JsonRecord) {
   const now = new Date().toISOString();
   return db().transaction(async (tx) => {
@@ -372,7 +368,6 @@ export const comboRepository: ComboRepository = {
   count: getCombosCount,
   findById: getComboById,
   findByName: getComboByName,
-  findByNameInsensitive: getComboByNameInsensitive,
   create: createCombo,
   update: updateCombo,
   reorder: reorderCombos,

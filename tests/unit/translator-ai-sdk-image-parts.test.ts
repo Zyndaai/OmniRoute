@@ -24,8 +24,8 @@ test("#1330: Gemini maps AI SDK image string to inlineData", () => {
   });
 });
 
-test("#1330: Claude maps AI SDK image string to a base64 image source block", () => {
-  const out = claude.openaiToClaudeRequest(
+test("#1330: Claude maps AI SDK image string to a base64 image source block", async () => {
+  const out = (await claude.openaiToClaudeRequest(
     "claude-sonnet-4-6",
     {
       messages: [
@@ -33,7 +33,7 @@ test("#1330: Claude maps AI SDK image string to a base64 image source block", ()
       ],
     },
     false
-  ) as { messages: { content: { type: string; source?: Record<string, unknown> }[] }[] };
+  )) as { messages: { content: { type: string; source?: Record<string, unknown> }[] }[] };
 
   const block = out.messages[0].content.find((b) => b.type === "image");
   assert.ok(block, "expected an image block");
@@ -44,8 +44,8 @@ test("#1330: Claude maps AI SDK image string to a base64 image source block", ()
   });
 });
 
-test("#1330: Kiro maps AI SDK image string to userInputMessage.images bytes", () => {
-  const payload = kiro.buildKiroPayload(
+test("#1330: Kiro maps AI SDK image string to userInputMessage.images bytes", async () => {
+  const payload = await kiro.buildKiroPayload(
     "kr/claude-sonnet-4.6",
     {
       messages: [

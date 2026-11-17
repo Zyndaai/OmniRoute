@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,21 +13,41 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-conv-turn
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { hashTurnContent } = await import("../../open-sse/services/conversationTracker.ts");
 const { resolveTurnDisplayContent } =
   await import("../../open-sse/services/conversationTurnContent.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+before(async () => {
+  await core.ensureDbInitialized();
+});
+
+beforeEach(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function insertCallLog(row: { id: string; correlationId: string; artifactRelPath: string | null }) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, method, path, status, model, correlation_id, artifact_relpath)
-     VALUES (?, ?, 'POST', '/v1/chat/completions', 200, 'big-pickle', ?, ?)`
-  ).run(row.id, new Date().toISOString(), row.correlationId, row.artifactRelPath);
+async function insertCallLog(row: {
+  id: string;
+  correlationId: string;
+  artifactRelPath: string | null;
+}) {
+  // The resolver only reads artifacts whose detail is published ('ready').
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", method, path, status, model, correlation_id, artifact_relpath, detail_state)
+     VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'big-pickle', $3, $4, $5)`,
+    [
+      row.id,
+      new Date().toISOString(),
+      row.correlationId,
+      row.artifactRelPath,
+      row.artifactRelPath ? "ready" : "none",
+    ]
+  );
 }
 
 function writeArtifact(relPath: string, clientRawRequestBody: unknown) {
@@ -47,8 +67,12 @@ function writeArtifact(relPath: string, clientRawRequestBody: unknown) {
   );
 }
 
-test("resolveTurnDisplayContent resolves plain text turns from the artifact's raw request body", () => {
-  insertCallLog({ id: "log-1", correlationId: "corr-1", artifactRelPath: "2026-01-01/log-1.json" });
+test("resolveTurnDisplayContent resolves plain text turns from the artifact's raw request body", async () => {
+  await insertCallLog({
+    id: "log-1",
+    correlationId: "corr-1",
+    artifactRelPath: "2026-01-01/log-1.json",
+  });
   writeArtifact("2026-01-01/log-1.json", {
     messages: [
       { role: "user", content: "hello there" },
@@ -56,7 +80,7 @@ test("resolveTurnDisplayContent resolves plain text turns from the artifact's ra
     ],
   });
 
-  const result = resolveTurnDisplayContent([{ lastCorrelationId: "corr-1" }]);
+  const result = await resolveTurnDisplayContent([{ lastCorrelationId: "corr-1" }]);
   const userHash = hashTurnContent({
     role: "user",
     text: "hello there",
@@ -70,14 +94,18 @@ test("resolveTurnDisplayContent resolves plain text turns from the artifact's ra
   });
 });
 
-test("resolveTurnDisplayContent resolves tool_use/tool_result shape, full and untruncated", () => {
+test("resolveTurnDisplayContent resolves tool_use/tool_result shape, full and untruncated", async () => {
   const bigArgs = JSON.stringify({ path: "/tmp/big.md", content: "line\n".repeat(2000) });
-  insertCallLog({ id: "log-2", correlationId: "corr-2", artifactRelPath: "2026-01-01/log-2.json" });
+  await insertCallLog({
+    id: "log-2",
+    correlationId: "corr-2",
+    artifactRelPath: "2026-01-01/log-2.json",
+  });
   writeArtifact("2026-01-01/log-2.json", {
     input: [{ type: "function_call", name: "write", call_id: "c1", arguments: bigArgs }],
   });
 
-  const result = resolveTurnDisplayContent([{ lastCorrelationId: "corr-2" }]);
+  const result = await resolveTurnDisplayContent([{ lastCorrelationId: "corr-2" }]);
   const hash = hashTurnContent({
     role: "tool",
     text: bigArgs,
@@ -92,8 +120,12 @@ test("resolveTurnDisplayContent resolves tool_use/tool_result shape, full and un
   assert.ok(content!.textPreview.length > 8000);
 });
 
-test("resolveTurnDisplayContent groups nodes by correlation id, reading each artifact once", () => {
-  insertCallLog({ id: "log-3", correlationId: "corr-3", artifactRelPath: "2026-01-01/log-3.json" });
+test("resolveTurnDisplayContent groups nodes by correlation id, reading each artifact once", async () => {
+  await insertCallLog({
+    id: "log-3",
+    correlationId: "corr-3",
+    artifactRelPath: "2026-01-01/log-3.json",
+  });
   writeArtifact("2026-01-01/log-3.json", {
     messages: [
       { role: "user", content: "a" },
@@ -102,7 +134,7 @@ test("resolveTurnDisplayContent groups nodes by correlation id, reading each art
     ],
   });
 
-  const result = resolveTurnDisplayContent([
+  const result = await resolveTurnDisplayContent([
     { lastCorrelationId: "corr-3" },
     { lastCorrelationId: "corr-3" },
     { lastCorrelationId: "corr-3" },
@@ -118,24 +150,26 @@ test("resolveTurnDisplayContent groups nodes by correlation id, reading each art
   }
 });
 
-test("resolveTurnDisplayContent skips nodes with no correlation id without throwing", () => {
-  const result = resolveTurnDisplayContent([{ lastCorrelationId: null }]);
+test("resolveTurnDisplayContent skips nodes with no correlation id without throwing", async () => {
+  const result = await resolveTurnDisplayContent([{ lastCorrelationId: null }]);
   assert.equal(result.size, 0);
 });
 
-test("resolveTurnDisplayContent omits content for an unresolvable correlation id (missing call_logs row, purged artifact, or no pipeline captured)", () => {
-  const missingRow = resolveTurnDisplayContent([{ lastCorrelationId: "corr-does-not-exist" }]);
+test("resolveTurnDisplayContent omits content for an unresolvable correlation id (missing call_logs row, purged artifact, or no pipeline captured)", async () => {
+  const missingRow = await resolveTurnDisplayContent([
+    { lastCorrelationId: "corr-does-not-exist" },
+  ]);
   assert.equal(missingRow.size, 0);
 
-  insertCallLog({ id: "log-4", correlationId: "corr-4", artifactRelPath: null });
-  const noArtifact = resolveTurnDisplayContent([{ lastCorrelationId: "corr-4" }]);
+  await insertCallLog({ id: "log-4", correlationId: "corr-4", artifactRelPath: null });
+  const noArtifact = await resolveTurnDisplayContent([{ lastCorrelationId: "corr-4" }]);
   assert.equal(noArtifact.size, 0);
 
-  insertCallLog({
+  await insertCallLog({
     id: "log-5",
     correlationId: "corr-5",
     artifactRelPath: "2026-01-01/does-not-exist.json",
   });
-  const missingFile = resolveTurnDisplayContent([{ lastCorrelationId: "corr-5" }]);
+  const missingFile = await resolveTurnDisplayContent([{ lastCorrelationId: "corr-5" }]);
   assert.equal(missingFile.size, 0);
 });

@@ -30,6 +30,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   _setOpencodeFreeModelsForTests,
+  refreshOpencodeFreeCatalog,
   applyFreeTierRequestContract,
   configuredPlaceholderToolNames,
   DEFAULT_PLACEHOLDER_TOOL_NAME,
@@ -1101,36 +1102,56 @@ test("buildHeaders leaves an opencode-go session unchanged", () => {
 });
 
 test("an opencode-go synced catalog row is not in the free set", async () => {
-  // SQLITE_FILE is fixed when the db module loads, so this uses that test database
-  // and removes the rows afterwards. A later case must not inherit the synced set.
-  const core = await import("../../src/lib/db/core.ts");
+  // The synced rows live in Postgres (this process's isolated database). The gate reads a
+  // snapshot, so it is rebuilt explicitly before asserting, and the rows are removed after.
   const { saveModelsDevPricing, clearModelsDevPricing } =
     await import("../../src/lib/modelsDevSync.ts");
-  const db = core.getDbInstance();
-  const insert = db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-  );
-  const remove = db.prepare(
-    "DELETE FROM key_value WHERE namespace = 'syncedAvailableModels' AND key IN (?, ?, ?)"
-  );
+  const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
+  const { getTestBackend } = await import("../helpers/postgres.ts");
+  // Synced rows belong to a connection, so each provider gets a connection row first.
+  const syncedRows: Array<{ provider: string; connectionId: string }> = [
+    { provider: "opencode", connectionId: "free-conn-opencode" },
+    { provider: "opencode-zen", connectionId: "free-conn-opencode-zen" },
+    { provider: "opencode-go", connectionId: "free-conn-opencode-go" },
+  ];
+  const backend = getTestBackend();
   try {
-    saveModelsDevPricing({
+    for (const { provider, connectionId } of syncedRows) {
+      await backend.execute(
+        `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+         VALUES ($1, $2, true, now(), now()) ON CONFLICT (id) DO NOTHING`,
+        [connectionId, provider]
+      );
+    }
+    await saveModelsDevPricing({
       opencode: {
         "zen-free": { input: 0, output: 0 },
         "pickle-zen": { input: 0, output: 0 },
         "big-pickle": { input: 0, output: 0 },
       },
     });
-    insert.run("opencode:conn", JSON.stringify([{ id: "zen-free" }]));
-    insert.run("opencode-zen:conn", JSON.stringify([{ id: "pickle-zen" }]));
-    insert.run("opencode-go:conn", JSON.stringify([{ id: "big-pickle" }]));
+    await replaceSyncedAvailableModelsForConnection("opencode", syncedRows[0].connectionId, [
+      { id: "zen-free" },
+    ]);
+    await replaceSyncedAvailableModelsForConnection("opencode-zen", syncedRows[1].connectionId, [
+      { id: "pickle-zen" },
+    ]);
+    await replaceSyncedAvailableModelsForConnection("opencode-go", syncedRows[2].connectionId, [
+      { id: "big-pickle" },
+    ]);
     _setOpencodeFreeModelsForTests(null);
+    await refreshOpencodeFreeCatalog();
     assert.equal(isPremiumOpencodeModel("zen-free", "opencode"), false);
     assert.equal(isPremiumOpencodeModel("pickle-zen", "opencode-zen"), false);
     assert.equal(isPremiumOpencodeModel("big-pickle", "opencode"), true);
   } finally {
-    remove.run("opencode:conn", "opencode-zen:conn", "opencode-go:conn");
-    clearModelsDevPricing();
+    for (const { provider, connectionId } of syncedRows) {
+      await replaceSyncedAvailableModelsForConnection(provider, connectionId, []);
+    }
+    await backend.execute("DELETE FROM provider_connections WHERE id = ANY($1::text[])", [
+      syncedRows.map((row) => row.connectionId),
+    ]);
+    await clearModelsDevPricing();
     _setOpencodeFreeModelsForTests(null);
   }
 });

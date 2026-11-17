@@ -8,7 +8,6 @@ import ts from "typescript";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cas-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.REDIS_URL;
 const core = await import("../../src/lib/db/core.ts");
 const local = await import("../../src/lib/db/sessionAffinity/sqliteStore.ts");
@@ -84,8 +83,8 @@ test.afterEach(() => {
   factory._setSessionAffinityRedisForTests(null);
   delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 });
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -192,7 +191,7 @@ test("rejected winner outside the pool keeps the local candidate without changin
   assert.equal(selected?.id, "local");
   assert.equal(redis.value, winner);
   assert.equal(redis.writes, 1);
-  assert.equal(local.getSessionAccountAffinity("synthetic-absent", "codex", 60_000), null);
+  assert.equal(await local.getSessionAccountAffinity("synthetic-absent", "codex", 60_000), null);
   assert.deepEqual(usage, [["local", 1]]);
   assert.equal(logs.filter(([level]) => level === "debug").length, 1);
   assert.ok(
@@ -220,7 +219,7 @@ test("durably claimed lease candidate cannot switch after rejected CAS and leave
   assert.equal(redis.value, winner);
   assert.equal(redis.writes, 1);
   assert.deepEqual(usage, [["local-y", 1]]);
-  assert.equal(local.getSessionAccountAffinity("synthetic-lease", "codex", 60_000), null);
+  assert.equal(await local.getSessionAccountAffinity("synthetic-lease", "codex", 60_000), null);
 });
 
 test("store reports the rejected winner to its caller without caching the losing pin", async (t) => {
@@ -234,5 +233,5 @@ test("store reports the rejected winner to its caller without caching the losing
     .getSessionAffinityStore()
     .upsert("synthetic-outcome", "codex", "loser", Date.now(), 60_000);
   assert.deepEqual(result, winner);
-  assert.equal(local.getSessionAccountAffinity("synthetic-outcome", "codex", 60_000), null);
+  assert.equal(await local.getSessionAccountAffinity("synthetic-outcome", "codex", 60_000), null);
 });

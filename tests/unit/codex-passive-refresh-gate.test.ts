@@ -8,10 +8,10 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-codex-refresh-g
 process.env.DATA_DIR = dataDir;
 process.env.API_KEY_SECRET = "synthetic-refresh-gate-secret";
 process.env.REQUIRE_API_KEY = "false";
-const core = await import("../../src/lib/db/core.ts");
 const db = await import("../../src/lib/db/providers.ts");
 const settings = await import("../../src/lib/db/settings.ts");
 const cache = await import("../../src/lib/db/readCache.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const tokens = await import("../../open-sse/services/tokenRefresh.ts");
 const wrappers = await import("../../src/sse/services/tokenRefresh.ts");
 const { handleChat } = await import("../../src/sse/handlers/chat.ts");
@@ -29,6 +29,32 @@ let tokenCalls = 0;
 let dispatches: string[] = [];
 let passive = true;
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
+
+type SqlMethod = "query" | "queryOne" | "execute";
+
+/**
+ * Runs `onCall` before every SQL statement the process backend issues, so tests can count writes
+ * or inject failures. Returns the function that restores the original methods.
+ */
+function spyOnSql(onCall: (sql: string, params?: unknown[]) => void): () => void {
+  const backend = getTestBackend() as unknown as Record<
+    SqlMethod,
+    (...args: unknown[]) => unknown
+  >;
+  const names: SqlMethod[] = ["query", "queryOne", "execute"];
+  const originals = {} as Record<SqlMethod, (...args: unknown[]) => unknown>;
+  for (const name of names) {
+    const original = backend[name];
+    originals[name] = original;
+    backend[name] = (sql: unknown, params?: unknown) => {
+      onCall(String(sql), params as unknown[] | undefined);
+      return original.call(backend, sql, params);
+    };
+  }
+  return () => {
+    for (const name of names) backend[name] = originals[name];
+  };
+}
 
 function request(url: string, body: unknown) {
   return new Request(`http://localhost${url}`, {
@@ -87,7 +113,7 @@ async function nonterminal(id: string) {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
   await settings.updateSettings({
@@ -118,10 +144,11 @@ test.beforeEach(async () => {
   dispatches = [];
   mockFetch();
 });
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   delete process.env.OMNIROUTE_TOKEN_REFRESH_PASSIVE_PROVIDERS;
-  core.resetDbInstance();
+  const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -323,18 +350,15 @@ test("active authentication recovery never invokes passive credential helpers", 
   const { default: cryptoModule } = await import("node:crypto");
   const { syncBuiltinESMExports } = await import("node:module");
   const createHash = cryptoModule.createHash;
-  const database = core.getDbInstance();
-  const prepare = database.prepare;
   let helperCalls = 0;
   cryptoModule.createHash = (...args: Parameters<typeof createHash>) => {
     if (new Error().stack?.includes("passiveCodex")) helperCalls++;
     return createHash(...args);
   };
   syncBuiltinESMExports();
-  database.prepare = function (sql: string) {
+  const restoreSql = spyOnSql(() => {
     if (new Error().stack?.includes("resolvePassiveCodex")) helperCalls++;
-    return prepare.call(this, sql);
-  };
+  });
   try {
     const helper = await import("../../open-sse/services/tokenRefresh/passiveCodex.ts");
     helper.recordRejectedToken({ accessToken: "synthetic-spy-control" });
@@ -353,7 +377,7 @@ test("active authentication recovery never invokes passive credential helpers", 
     assert.ok(tokenCalls > 0);
     assert.equal(helperCalls, 0);
   } finally {
-    database.prepare = prepare;
+    restoreSql();
     cryptoModule.createHash = createHash;
     syncBuiltinESMExports();
   }
@@ -372,12 +396,9 @@ test("shared entry points bypass cached rows, return only token fields and never
   await cache.getCachedProviderConnectionById(c.id);
   await db.updateProviderConnection(c.id, { accessToken: "synthetic-synchronized" });
   let writes = 0;
-  const database = core.getDbInstance();
-  const prepare = database.prepare;
-  database.prepare = function (sql: string) {
-    if (/^UPDATE provider_connections/i.test(sql)) writes++;
-    return prepare.call(this, sql);
-  };
+  const restoreSql = spyOnSql((sql) => {
+    if (/^\s*UPDATE provider_connections/i.test(sql)) writes++;
+  });
   let persists = 0;
   try {
     for (const provider of ["codex", "cx"]) {
@@ -397,7 +418,7 @@ test("shared entry points bypass cached rows, return only token fields and never
     assert.equal(persists, 0);
     assert.equal(writes, 0);
   } finally {
-    database.prepare = prepare;
+    restoreSql();
   }
 });
 
@@ -526,25 +547,22 @@ test("passive gate logs never include token values or prefixes even when reread 
     { connectionId: "synthetic-missing", refreshToken: c.refreshToken },
     log
   );
-  const database = core.getDbInstance();
-  const prepare = database.prepare;
   const debug = console.debug;
   console.debug = (...args: unknown[]) => {
     lines.push(args);
   };
-  database.prepare = function (sql: string) {
-    if (sql === "SELECT * FROM provider_connections WHERE id = ?") {
+  const restoreSql = spyOnSql((sql, params) => {
+    if (/FROM provider_connections\b/.test(sql) && params?.includes(c.id)) {
       throw new Error(`synthetic database failure ${c.accessToken}`);
     }
-    return prepare.call(this, sql);
-  };
+  });
   try {
     assert.equal(
       (await tokens.getAccessToken("codex", { ...c, connectionId: c.id }, log)).error,
       "refresh_disabled"
     );
   } finally {
-    database.prepare = prepare;
+    restoreSql();
     console.debug = debug;
   }
   assert.equal(lines.length, 1);

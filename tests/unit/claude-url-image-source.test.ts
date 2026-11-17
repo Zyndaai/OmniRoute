@@ -14,8 +14,13 @@ const { claudeToOpenAIRequest } =
   await import("../../open-sse/translator/request/claude-to-openai.ts");
 const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
-const { buildGeminiThoughtSignatureKey, storeGeminiThoughtSignature } =
-  await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const {
+  buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
+  storeGeminiThoughtSignature,
+} = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const { prefetchThoughtSignatures } = await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
 type Part = Record<string, unknown>;
 type Message = { role: string; content?: unknown; tool_call_id?: string };
@@ -46,11 +51,24 @@ function toOpenAI(messages: unknown[]): Message[] {
 
 let signatureSeq = 0;
 
-function toGemini(messages: unknown[]): Part[] {
-  const ns = `url-image-${++signatureSeq}`;
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_1"), "SIG");
-  const result = claudeToGeminiRequest("gemini-2.5-pro", { messages }, false, {
+// The signature store is async, so the chat pipeline prefetches the historical tool calls'
+// signatures (chatCore → prefetchThoughtSignatures) and the translator reads that snapshot.
+// Mirror that here: store under the model-scoped namespace, prefetch, then translate.
+const GEMINI_MODEL = "gemini-2.5-pro";
+
+async function toGemini(messages: unknown[]): Promise<Part[]> {
+  const raw = `url-image-${++signatureSeq}`;
+  const ns = scopeGeminiThoughtSignatureNamespace(raw, GEMINI_MODEL);
+  await storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_1"), "SIG");
+  const thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.GEMINI,
+    GEMINI_MODEL,
+    { messages },
+    raw
+  );
+  const result = await claudeToGeminiRequest(GEMINI_MODEL, { messages }, false, {
     _signatureNamespace: ns,
+    _thoughtSignatures: thoughtSignatures,
   });
   return result.contents.flatMap((c: { parts: Part[] }) => c.parts);
 }
@@ -82,16 +100,18 @@ test("claude→openai still lifts a base64 tool_result image", () => {
   });
 });
 
-test("claude→gemini sends a URL image as fileData", () => {
-  const parts = toGemini([{ role: "user", content: [{ type: "text", text: "look" }, urlImage] }]);
+test("claude→gemini sends a URL image as fileData", async () => {
+  const parts = await toGemini([
+    { role: "user", content: [{ type: "text", text: "look" }, urlImage] },
+  ]);
   assert.deepEqual(parts, [
     { text: "look" },
     { fileData: { fileUri: IMAGE_URL, mimeType: "image/*" } },
   ]);
 });
 
-test("claude→gemini sends a URL image from a tool_result after the tool response", () => {
-  const parts = toGemini(toolCallHistory([urlImage]));
+test("claude→gemini sends a URL image from a tool_result after the tool response", async () => {
+  const parts = await toGemini(toolCallHistory([urlImage]));
   const fileDataIndex = parts.findIndex((p) => p.fileData);
   const responseIndex = parts.findIndex((p) => p.functionResponse);
   assert.notEqual(fileDataIndex, -1, "the image must survive");
@@ -105,18 +125,18 @@ test("claude→gemini sends a URL image from a tool_result after the tool respon
   );
 });
 
-test("claude→gemini still sends a base64 image as inlineData", () => {
-  const parts = toGemini([{ role: "user", content: [base64Image] }]);
+test("claude→gemini still sends a base64 image as inlineData", async () => {
+  const parts = await toGemini([{ role: "user", content: [base64Image] }]);
   assert.deepEqual(parts, [{ inlineData: { mimeType: "image/png", data: "iVBORw0K" } }]);
 });
 
-test("claude→gemini keeps both tool_result images in order after the response and folds the text that follows into it", () => {
+test("claude→gemini keeps both tool_result images in order after the response and folds the text that follows into it", async () => {
   // The trailing text is the shape #13335 was about: Claude Code appends a reminder after the
   // tool result, and the images have to land right after the response. Since #16601 that
   // reminder is folded into functionResponse.response.result instead of following the images
   // as a loose text part, which Vertex Gemini 3.6+ Flash rejects next to a functionResponse
   // (#16443).
-  const parts = toGemini([
+  const parts = await toGemini([
     {
       role: "assistant",
       content: [{ type: "tool_use", id: "tu_1", name: "screenshot", input: {} }],
@@ -140,10 +160,10 @@ test("claude→gemini keeps both tool_result images in order after the response 
   );
 });
 
-test("claude→gemini sends a URL image from a signature-less tool result too", () => {
+test("claude→gemini sends a URL image from a signature-less tool result too", async () => {
   // Without a stored thought signature the tool result becomes context text (#8979 / #3688);
   // the image still follows it, as the base64 half does.
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     { messages: toolCallHistory([urlImage]) },
     false,
@@ -161,7 +181,7 @@ test("claude→gemini sends a URL image from a signature-less tool result too", 
   });
 });
 
-test("a url source that Gemini cannot fetch is dropped, not forwarded", () => {
+test("a url source that Gemini cannot fetch is dropped, not forwarded", async () => {
   // Before: these were dropped silently. Forwarding them as a fileUri would turn a request
   // that worked without the image into a 400 from Gemini.
   for (const url of [
@@ -172,18 +192,19 @@ test("a url source that Gemini cannot fetch is dropped, not forwarded", () => {
   ]) {
     const block = { type: "image", source: { type: "url", url } };
     assert.deepEqual(
-      toGemini([{ role: "user", content: [{ type: "text", text: "hi" }, block] }]),
+      await toGemini([{ role: "user", content: [{ type: "text", text: "hi" }, block] }]),
       [{ text: "hi" }],
       `expected ${JSON.stringify(url)} to be dropped`
     );
   }
 });
 
-test("an image block with neither source shape is left alone", () => {
+test("an image block with neither source shape is left alone", async () => {
   const odd = { type: "image", source: { type: "file", file_id: "file_123" } };
-  assert.deepEqual(toGemini([{ role: "user", content: [{ type: "text", text: "hi" }, odd] }]), [
-    { text: "hi" },
-  ]);
+  assert.deepEqual(
+    await toGemini([{ role: "user", content: [{ type: "text", text: "hi" }, odd] }]),
+    [{ text: "hi" }]
+  );
   const messages = toOpenAI(toolCallHistory([odd]));
   assert.equal(
     messages.find((m) => m.role === "tool")?.content,

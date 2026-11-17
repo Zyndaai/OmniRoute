@@ -52,7 +52,7 @@ test("RADAR_ENABLED feature flag defaults to OFF", async (t) => {
   await t.test("effective runtime resolution is OFF with no override", async () => {
     delete process.env.RADAR_ENABLED;
     const { clearAllFeatureFlagOverrides } = await import("@/lib/db/featureFlags");
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
 
     const { isFeatureFlagEnabled } = await import("@/shared/utils/featureFlags");
     assert.strictEqual(isFeatureFlagEnabled("RADAR_ENABLED"), false);

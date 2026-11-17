@@ -187,6 +187,9 @@ test("pii masker guardrail redacts request and response payloads", async () => {
 test("pii masker respects feature flag overrides (DB and env)", async () => {
   const { setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("@/lib/db/featureFlags");
+  // Flag reads are synchronous over an in-process snapshot of the DB overrides,
+  // so the freshly written override has to be loaded before the guardrail reads it.
+  const { refreshFeatureFlagSnapshot } = await import("@/shared/utils/featureFlags");
 
   await withEnv(
     {
@@ -194,7 +197,8 @@ test("pii masker respects feature flag overrides (DB and env)", async () => {
     },
     async () => {
       try {
-        setFeatureFlagOverride("PII_REDACTION_ENABLED", "true");
+        await setFeatureFlagOverride("PII_REDACTION_ENABLED", "true");
+        await refreshFeatureFlagSnapshot();
         const guardrail = new PIIMaskerGuardrail();
         const preCall = await guardrail.preCall({
           messages: [{ role: "user", content: "Email me at dev@example.com" }],
@@ -206,7 +210,8 @@ test("pii masker respects feature flag overrides (DB and env)", async () => {
         const preBody = preCall?.modifiedPayload as ChatLikePayload;
         assert.match(String(preBody.messages?.[0]?.content), /\[EMAIL_REDACTED\]/);
       } finally {
-        removeFeatureFlagOverride("PII_REDACTION_ENABLED");
+        await removeFeatureFlagOverride("PII_REDACTION_ENABLED");
+        await refreshFeatureFlagSnapshot();
       }
     }
   );

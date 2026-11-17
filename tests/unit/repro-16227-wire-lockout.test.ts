@@ -27,9 +27,9 @@ const auth = await import("../../src/sse/services/auth.ts");
 const locks = await import("../../open-sse/services/accountFallback.ts");
 const family = await import("../../open-sse/services/modelFamilyFallback.ts");
 
-test.after(() => {
+test.after(async () => {
   locks.clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   globalThis.fetch = originalFetch;
   for (const [name, value] of Object.entries(previousEnvironment)) {
     if (value === undefined) delete process.env[name];
@@ -64,7 +64,7 @@ test("family fallback skips a sibling locked by a real Anthropic404 under its da
     error: { type: "not_found_error", message: "model: claude-opus-4-8" },
   });
 
-  assert.equal(next(), "anthropic/claude-opus-4.8", "unlocked sibling control");
+  assert.equal(await next(), "anthropic/claude-opus-4.8", "unlocked sibling control");
   await auth.markAccountUnavailable(
     otherConnection.id,
     404,
@@ -73,7 +73,7 @@ test("family fallback skips a sibling locked by a real Anthropic404 under its da
     "claude-opus-4-8"
   );
   assert.equal(locks.isModelLocked("anthropic", otherConnection.id, "claude-opus-4-8"), true);
-  assert.equal(next(), "anthropic/claude-opus-4.8", "another account's lock must not apply");
+  assert.equal(await next(), "anthropic/claude-opus-4.8", "another account's lock must not apply");
 
   await auth.markAccountUnavailable(connection.id, 404, errorBody, "anthropic", "claude-opus-4-8");
   assert.equal(
@@ -85,7 +85,7 @@ test("family fallback skips a sibling locked by a real Anthropic404 under its da
   assert.equal(stored.testStatus, "active", "a model404 must preserve account health");
   assert.ok(!stored.rateLimitedUntil, "a model404 must not cool the whole account");
   assert.equal(
-    next(),
+    await next(),
     "anthropic/claude-opus-4.7",
     "the locked wire alias must be excluded from family dispatch"
   );

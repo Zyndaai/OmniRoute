@@ -1,68 +1,12 @@
-// ENVIRONMENT NOTE (sandbox better-sqlite3 / glibc limitation, not a code defect):
-// This test constructs or exercises a real better-sqlite3-backed SQLite database.
-// better-sqlite3 is a native addon; production and CI load it normally, but some
-// sandboxes/dev boxes ship a system glibc older than the prebuilt binary requires
-// ("GLIBC_2.29 not found"), so the native module fails to dlopen and any test that
-// reaches better-sqlite3 directly (or asserts stdout that the load-failure warning
-// would pollute) fails HERE while passing in CI. This is a known environment
-// limitation, not a defect in the code under test: the OmniRoute runtime itself
-// cascades to node:sqlite/sql.js when better-sqlite3 is unavailable. See
-// tests/unit/_helpers/betterSqlite3Availability.ts for a guard helper.
+// The SQLite scope-backfill migration case (075_api_key_self_service_usage_scopes) was removed
+// with the numbered SQLite migrations; the PostgreSQL schema is a single designed init migration.
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import DatabaseSync from "better-sqlite3";
 
 import { SELF_ACCOUNT_QUOTA_SCOPE, SELF_USAGE_SCOPE } from "../../src/shared/constants/selfServiceScopes.ts";
 import { buildApiKeySelfServiceStatus } from "../../src/lib/usage/apiKeySelfService.ts";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const migrationPath = path.join(
-  repoRoot,
-  "src/lib/db/migrations/075_api_key_self_service_usage_scopes.sql"
-);
-
-test("self-service scope migration backfills own usage once and preserves explicit account quota opt-in", () => {
-  const sql = fs.readFileSync(migrationPath, "utf8");
-  const db = new DatabaseSync(":memory:");
-  db.exec(`
-    CREATE TABLE api_keys (
-      id TEXT PRIMARY KEY,
-      scopes TEXT
-    );
-
-    INSERT INTO api_keys (id, scopes) VALUES
-      ('legacy-empty', '[]'),
-      ('legacy-null', NULL),
-      ('custom', '["custom:scope"]'),
-      ('quota-opt-in', '["${SELF_ACCOUNT_QUOTA_SCOPE}"]'),
-      ('already-disabled-after-migration', '["custom:scope"]');
-  `);
-
-  db.exec(sql);
-  db.prepare("UPDATE api_keys SET scopes = ? WHERE id = ?").run(
-    JSON.stringify(["custom:scope"]),
-    "already-disabled-after-migration"
-  );
-  db.exec(sql);
-
-  const rows = db.prepare("SELECT id, scopes FROM api_keys ORDER BY id").all() as Array<{
-    id: string;
-    scopes: string;
-  }>;
-  const scopesById = new Map(rows.map((row) => [row.id, JSON.parse(row.scopes) as string[]]));
-
-  assert.deepEqual(scopesById.get("legacy-empty"), [SELF_USAGE_SCOPE]);
-  assert.deepEqual(scopesById.get("legacy-null"), [SELF_USAGE_SCOPE]);
-  assert.deepEqual(scopesById.get("custom"), ["custom:scope", SELF_USAGE_SCOPE]);
-  assert.deepEqual(scopesById.get("quota-opt-in"), [
-    SELF_ACCOUNT_QUOTA_SCOPE,
-    SELF_USAGE_SCOPE,
-  ]);
-  assert.deepEqual(scopesById.get("already-disabled-after-migration"), ["custom:scope"]);
-});
+type SelfServiceDeps = NonNullable<Parameters<typeof buildApiKeySelfServiceStatus>[1]>;
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   const tokenRows = overrides.tokenRows ?? {
@@ -92,14 +36,13 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
         warningThreshold: null,
       }),
       checkBudget: () => ({ allowed: true }),
-      getDbInstance: () => ({
-        prepare: () => ({
-          get: (...params: unknown[]) => {
+      getDbInstance: () =>
+        ({
+          queryOne: async (_sql: string, params: unknown[]) => {
             dbParams.push(params);
             return tokenRows;
           },
-        }),
-      }),
+        }) as unknown as ReturnType<NonNullable<SelfServiceDeps["getDbInstance"]>>,
       getProviderConnectionById: async () => null,
       getProviderConnections: async () => [],
       fetchAndPersistProviderLimits: async () => {

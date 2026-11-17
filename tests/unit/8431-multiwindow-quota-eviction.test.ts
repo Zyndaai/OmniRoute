@@ -32,9 +32,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const coreDb = await import("../../src/lib/db/core.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -48,15 +49,23 @@ const COLD_WINDOWS = [
 ];
 const HOT_WINDOWS = ["Monthly", "Bonus Pack 5", "Bonus Pack 6"];
 
-test("#8431 idle healthy windows survive rehydration even when hot windows accumulate >200 rows", () => {
-  const connectionId = "conn-codebuddy-cn-8431";
+test("#8431 idle healthy windows survive rehydration even when hot windows accumulate >200 rows", async () => {
+  // quota_snapshots.connection_id is a foreign key to provider_connections, so the
+  // fixture needs a real connection row (writes for unknown connections are dropped).
   const provider = "codebuddy-cn";
+  const connectionId = (
+    await providersDb.createProviderConnection({
+      provider,
+      apiKey: "test-key",
+      isActive: true,
+    })
+  ).id;
 
   // 6 cold, healthy windows — each written exactly once (mirrors the #4438
   // no-op-write dedup for windows whose value never changes) and BEFORE the
   // hot rows below.
   for (const windowKey of COLD_WINDOWS) {
-    quotaSnapshotsDb.saveQuotaSnapshot({
+    await quotaSnapshotsDb.saveQuotaSnapshot({
       provider,
       connection_id: connectionId,
       window_key: windowKey,
@@ -72,7 +81,7 @@ test("#8431 idle healthy windows survive rehydration even when hot windows accum
   // all created after the cold rows, exceeding the old LIMIT 200.
   for (let i = 0; i < 70; i++) {
     for (const windowKey of HOT_WINDOWS) {
-      quotaSnapshotsDb.saveQuotaSnapshot({
+      await quotaSnapshotsDb.saveQuotaSnapshot({
         provider,
         connection_id: connectionId,
         window_key: windowKey,
@@ -85,7 +94,7 @@ test("#8431 idle healthy windows survive rehydration even when hot windows accum
     }
   }
 
-  const rehydrated = quotaSnapshotsDb.getLatestQuotaSnapshotsForConnection(connectionId);
+  const rehydrated = await quotaSnapshotsDb.getLatestQuotaSnapshotsForConnection(connectionId);
   const rehydratedKeys = rehydrated
     .map((s) => (s as unknown as { windowKey?: string }).windowKey ?? s.window_key)
     .sort();
@@ -103,11 +112,17 @@ test("#8431 idle healthy windows survive rehydration even when hot windows accum
   );
 });
 
-test("#8431 a single-window provider is still correctly reported exhausted", () => {
-  const connectionId = "conn-single-window-8431";
+test("#8431 a single-window provider is still correctly reported exhausted", async () => {
   const provider = "openai";
+  const connectionId = (
+    await providersDb.createProviderConnection({
+      provider,
+      apiKey: "test-key",
+      isActive: true,
+    })
+  ).id;
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider,
     connection_id: connectionId,
     window_key: "weekly",

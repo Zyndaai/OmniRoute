@@ -13,10 +13,14 @@ import assert from "node:assert/strict";
 
 const { openaiToGeminiRequest } =
   await import("../../open-sse/translator/request/openai-to-gemini.ts");
-const { claudeToGeminiRequest } =
-  await import("../../open-sse/translator/request/claude-to-gemini.ts");
-const { buildGeminiThoughtSignatureKey, storeGeminiThoughtSignature } =
-  await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const { translateRequest, prefetchThoughtSignatures } =
+  await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
+const {
+  buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
+  storeGeminiThoughtSignature,
+} = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -26,12 +30,38 @@ interface GeminiRequestLike {
 }
 
 const CLAUDE_SIGNATURE_NAMESPACE = "regression-3440";
+const GEMINI_MODEL = "gemini-2.5-pro";
 
-function seedClaudeThoughtSignature() {
-  storeGeminiThoughtSignature(
-    buildGeminiThoughtSignatureKey(CLAUDE_SIGNATURE_NAMESPACE, "tu_weather_1"),
+async function seedClaudeThoughtSignature() {
+  await storeGeminiThoughtSignature(
+    buildGeminiThoughtSignatureKey(
+      scopeGeminiThoughtSignatureNamespace(CLAUDE_SIGNATURE_NAMESPACE, GEMINI_MODEL),
+      "tu_weather_1"
+    ),
     "SIG_3440"
   );
+}
+
+// Claude -> Gemini through the translate entry point, which prefetches the persisted
+// thought signatures the synchronous translator reads (the signature store is async).
+async function translateClaudeToGemini(provider: string | null): Promise<GeminiRequestLike> {
+  const thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.GEMINI,
+    GEMINI_MODEL,
+    CLAUDE_TOOL_BODY,
+    CLAUDE_SIGNATURE_NAMESPACE
+  );
+  return (await translateRequest(
+    FORMATS.CLAUDE,
+    FORMATS.GEMINI,
+    GEMINI_MODEL,
+    structuredClone(CLAUDE_TOOL_BODY),
+    false,
+    null,
+    provider,
+    null,
+    { signatureNamespace: CLAUDE_SIGNATURE_NAMESPACE, thoughtSignatures }
+  )) as GeminiRequestLike;
 }
 
 function findFunctionCall(result: GeminiRequestLike): UnknownRecord | undefined {
@@ -109,8 +139,8 @@ const CLAUDE_TOOL_BODY = {
   ],
 };
 
-test("#3440 OpenAI->Gemini: vertex provider omits id from functionCall and functionResponse", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
+test("#3440 OpenAI->Gemini: vertex provider omits id from functionCall and functionResponse", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
     _provider: "vertex",
   });
 
@@ -124,16 +154,16 @@ test("#3440 OpenAI->Gemini: vertex provider omits id from functionCall and funct
   assert.equal(fr.id, undefined, "functionResponse.id must be omitted for Vertex");
 });
 
-test("#3440 OpenAI->Gemini: vertex-partner provider also omits id", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
+test("#3440 OpenAI->Gemini: vertex-partner provider also omits id", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
     _provider: "vertex-partner",
   });
   assert.equal(findFunctionCall(result)?.id, undefined);
   assert.equal(findFunctionResponse(result)?.id, undefined);
 });
 
-test("#3440 OpenAI->Gemini: public gemini provider PRESERVES id (Gemini 3+ signature matching)", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
+test("#3440 OpenAI->Gemini: public gemini provider PRESERVES id (Gemini 3+ signature matching)", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, {
     _provider: "gemini",
   });
   assert.equal(
@@ -143,17 +173,14 @@ test("#3440 OpenAI->Gemini: public gemini provider PRESERVES id (Gemini 3+ signa
   );
 });
 
-test("#3440 OpenAI->Gemini: no provider hint PRESERVES id (default, non-vertex)", () => {
-  const result = openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, null);
+test("#3440 OpenAI->Gemini: no provider hint PRESERVES id (default, non-vertex)", async () => {
+  const result = await openaiToGeminiRequest("gemini-2.5-pro", OPENAI_TOOL_BODY, false, null);
   assert.equal(findFunctionCall(result)?.id, "call_weather_1");
 });
 
-test("#3440 Claude->Gemini: vertex provider omits id from functionCall and functionResponse", () => {
-  seedClaudeThoughtSignature();
-  const result = claudeToGeminiRequest("gemini-2.5-pro", CLAUDE_TOOL_BODY, false, {
-    _provider: "vertex",
-    _signatureNamespace: CLAUDE_SIGNATURE_NAMESPACE,
-  });
+test("#3440 Claude->Gemini: vertex provider omits id from functionCall and functionResponse", async () => {
+  await seedClaudeThoughtSignature();
+  const result = await translateClaudeToGemini("vertex");
   assert.equal(
     findFunctionCall(result)?.id,
     undefined,
@@ -174,11 +201,9 @@ test("#3440 Claude->Gemini: vertex provider omits id from functionCall and funct
   );
 });
 
-test("#3440 Claude->Gemini: no provider hint PRESERVES id (default, non-vertex)", () => {
-  seedClaudeThoughtSignature();
-  const result = claudeToGeminiRequest("gemini-2.5-pro", CLAUDE_TOOL_BODY, false, {
-    _signatureNamespace: CLAUDE_SIGNATURE_NAMESPACE,
-  });
+test("#3440 Claude->Gemini: no provider hint PRESERVES id (default, non-vertex)", async () => {
+  await seedClaudeThoughtSignature();
+  const result = await translateClaudeToGemini(null);
   assert.equal(findFunctionCall(result)?.id, "tu_weather_1");
 
   const nonVertexPart = findFunctionCallPart(result);

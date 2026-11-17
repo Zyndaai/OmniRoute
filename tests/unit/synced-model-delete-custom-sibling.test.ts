@@ -21,19 +21,34 @@ delete process.env.INITIAL_PASSWORD;
 
 const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const providerModelsRoute = await import("../../src/app/api/provider-models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "deepseek";
-const CONNECTION = "conn-delete-sibling";
 const FLASH = "deepseek-v4-flash";
 const PRO = "deepseek-v4-pro";
 
-test.after(() => {
-  // Release the SQLite handle so the Node test runner can exit, then remove the
+test.after(async () => {
+  // Release the DB pool so the Node test runner can exit, then remove the
   // throwaway DATA_DIR (CLAUDE.md "Database Handles in Tests").
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
+
+/**
+ * Synced model rows hang off a real provider connection (connection_model_sync has a
+ * foreign key to provider_connections), so each test creates one and uses its id.
+ */
+async function seedConnection(): Promise<string> {
+  const conn = await providersDb.createProviderConnection({
+    provider: PROVIDER,
+    authType: "apikey",
+    name: "delete-sibling",
+    apiKey: "sk-deepseek-delete-sibling",
+  });
+  return conn.id as string;
+}
 
 /** Invoke the real DELETE handler so the test tracks production behavior. */
 async function deleteProviderModel(provider: string, modelId: string) {
@@ -46,14 +61,15 @@ async function deleteProviderModel(provider: string, modelId: string) {
 }
 
 test("A: deleting a custom model leaves a same-id synced sibling re-importable", async () => {
-  core.resetDbInstance();
+  await resetTestDb();
+  const connectionId = await seedConnection();
 
   // Provider sync brings both models in; operator eye-hides one.
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION, [
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     { id: FLASH, name: FLASH },
     { id: PRO, name: PRO },
   ]);
-  modelsDb.mergeModelCompatOverride(PROVIDER, FLASH, { isHidden: true });
+  await modelsDb.mergeModelCompatOverride(PROVIDER, FLASH, { isHidden: true });
 
   // Step 2 — operator manually adds a custom model with the SAME id.
   await modelsDb.addCustomModel(PROVIDER, FLASH, FLASH);
@@ -70,7 +86,7 @@ test("A: deleting a custom model leaves a same-id synced sibling re-importable",
   );
 
   // The decisive assertion: a later re-sync must bring the model back.
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION, [
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     { id: FLASH, name: FLASH },
     { id: PRO, name: PRO },
   ]);
@@ -82,9 +98,10 @@ test("A: deleting a custom model leaves a same-id synced sibling re-importable",
 });
 
 test("B: deleting a synced-only model is temporary and re-sync restores it", async () => {
-  core.resetDbInstance();
+  await resetTestDb();
+  const connectionId = await seedConnection();
 
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION, [
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     { id: PRO, name: PRO },
   ]);
 
@@ -96,7 +113,7 @@ test("B: deleting a synced-only model is temporary and re-sync restores it", asy
     )
   );
 
-  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION, [
+  await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, connectionId, [
     { id: PRO, name: PRO },
   ]);
   assert.ok(

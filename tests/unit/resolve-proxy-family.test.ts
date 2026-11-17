@@ -15,6 +15,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 describe("resolved proxy config → URL family encoding", () => {
   it("encodes ipv6 family resolved from a connection's proxy", () => {
@@ -35,14 +36,14 @@ describe("resolved proxy config → URL family encoding", () => {
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -121,12 +122,7 @@ test("api-key-level proxy carries family=ipv6 (Step 2 object literal)", async ()
     apiKey: "sk-key-ipv6",
   });
   const connId = (conn as any).id;
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'perKeyProxyEnabled', 'true')"
-    )
-    .run();
+  await settingsDb.updateSettings({ perKeyProxyEnabled: true });
   // #8385: the global toggle is a true AND-override — the connection's own
   // per_key_proxy_enabled must also be on for the api-key-level proxy to apply.
   await providersDb.updateProviderConnection(connId, { perKeyProxyEnabled: true });

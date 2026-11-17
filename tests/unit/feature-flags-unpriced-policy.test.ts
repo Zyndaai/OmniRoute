@@ -4,10 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { NextRequest } from "next/server";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-flag-policy-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 // Hermetic secrets: API key creation needs API_KEY_SECRET for its CRC, and the
 // train/CI shells do not export one. Restore the caller's values in test.after.
 const originalApiKeySecret = process.env.API_KEY_SECRET;
@@ -86,7 +86,7 @@ async function assertGet(expected: State, dbCount?: number, envCount?: number) {
   assert.equal(flag.source, expected.source);
   assert.equal(flag.configuredSource, expected.configuredSource);
   assert.equal(flag.sourceKey, expected.sourceKey);
-  const resolved = flags.resolveAllFeatureFlags().find((f) => f.key === POLICY);
+  const resolved = (await flags.resolveAllFeatureFlags()).find((f) => f.key === POLICY);
   assert.equal(resolved?.effectiveValue, expected.effectiveValue);
   if (dbCount !== undefined) assert.equal(payload.summary.overriddenByDb, dbCount);
   if (envCount !== undefined) assert.equal(payload.summary.overriddenByEnv, envCount);
@@ -116,8 +116,10 @@ async function assertUpdate(result: Update, before: State, after: State) {
 test.beforeEach(async () => {
   delete process.env[POLICY];
   delete process.env[LEGACY];
-  flagsDb.clearAllFeatureFlagOverrides();
-  core.getDbInstance().exec("DELETE FROM usage_history");
+  await resetTestDb();
+  flagsDb.clearFeatureFlagOverrideCache();
+  await flags.refreshFeatureFlagSnapshot();
+  await flagsDb.clearAllFeatureFlagOverrides();
   cookie = `auth_token=${await mintDashboardSessionToken(new TextEncoder().encode(process.env.JWT_SECRET))}`;
   const key = await keys.createApiKey("flag-policy-test", "flag-policy-fixture");
   await keys.updateApiKeyPermissions(key.id, { usageLimitEnabled: true, weeklyUsageLimitUsd: 100 });
@@ -136,10 +138,10 @@ test.beforeEach(async () => {
   });
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env[POLICY];
   delete process.env[LEGACY];
-  core.resetDbInstance();
+  await core.resetDbInstance();
   keys.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true });
   restoreEnv("API_KEY_SECRET", originalApiKeySecret);
@@ -154,8 +156,9 @@ function restoreEnv(name: string, value: string | undefined): void {
 for (const source of ["db", "env"] as const) {
   for (const value of ["true", "1", "yes", "false", "TRUE", "", "invalid"]) {
     test(`GET and enforcement agree when boolean ${source}=${JSON.stringify(value)} is inherited`, async () => {
-      if (source === "db") flagsDb.setFeatureFlagOverride(LEGACY, value);
+      if (source === "db") await flagsDb.setFeatureFlagOverride(LEGACY, value);
       else process.env[LEGACY] = value;
+      await flags.refreshFeatureFlagSnapshot();
       const actualSource = source === "env" && value === "" ? "default" : source;
       const policy = ["true", "1", "yes"].includes(value) ? "count_as_zero" : "fail_closed";
       await assertGet(
@@ -164,7 +167,7 @@ for (const source of ["db", "env"] as const) {
         actualSource === "env" ? 1 : 0
       );
       assert.equal(
-        flagsDb.getFeatureFlagOverride(POLICY),
+        await flagsDb.getFeatureFlagOverride(POLICY),
         undefined,
         "reading an inherited policy must never persist an enum"
       );
@@ -173,16 +176,16 @@ for (const source of ["db", "env"] as const) {
 }
 
 test("enum PUT previous/effective provenance and reset follow the real boolean policy", async () => {
-  flagsDb.setFeatureFlagOverride(LEGACY, "true");
+  await flagsDb.setFeatureFlagOverride(LEGACY, "true");
   const inherited = state("count_as_zero", "db", "default", LEGACY);
   const explicit = state("fail_closed", "db", "db", POLICY);
   await assertGet(inherited, 1, 0);
   await assertUpdate(await putPolicy("fail_closed"), inherited, explicit);
   await assertGet(explicit, 2, 0);
   await assertUpdate(await putPolicy(), explicit, inherited);
-  assert.equal(flagsDb.getFeatureFlagOverride(POLICY), undefined);
+  assert.equal(await flagsDb.getFeatureFlagOverride(POLICY), undefined);
   assert.equal(
-    flagsDb.getFeatureFlagOverride(LEGACY),
+    await flagsDb.getFeatureFlagOverride(LEGACY),
     "true",
     "enum reset must not delete its inherited boolean"
   );
@@ -217,14 +220,15 @@ test("boolean PUT and reset immediately change inherited policy but not an expli
 
 for (const value of ["invalid", "", " count_as_zero "]) {
   test(`raw DB enum ${JSON.stringify(value)} stays explicit and fail-closed`, async () => {
-    flagsDb.setFeatureFlagOverride(LEGACY, "true");
+    await flagsDb.setFeatureFlagOverride(LEGACY, "true");
     process.env[POLICY] = "count_as_zero";
     // Bypass the public writer only to reproduce an existing malformed stored row.
-    core
-      .getDbInstance()
-      .prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-      .run("feature_flags", POLICY, value);
+    await getTestBackend().execute(
+      "INSERT INTO config_entries (namespace, key, value) VALUES ($1, $2, $3::jsonb) ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value",
+      ["feature_flags", POLICY, JSON.stringify(value)]
+    );
     flagsDb.clearFeatureFlagOverrideCache(POLICY);
+    await flags.refreshFeatureFlagSnapshot();
     const invalid = state("fail_closed", "db", "db", POLICY);
     await assertGet(invalid, 2, 0);
     await assertUpdate(await putPolicy(), invalid, state("count_as_zero", "env", "env", POLICY));
@@ -232,7 +236,7 @@ for (const value of ["invalid", "", " count_as_zero "]) {
 }
 
 test("invalid enum env stays explicit; empty enum env is absent", async () => {
-  flagsDb.setFeatureFlagOverride(LEGACY, "true");
+  await flagsDb.setFeatureFlagOverride(LEGACY, "true");
   for (const value of ["invalid", "COUNT_AS_ZERO", " "]) {
     process.env[POLICY] = value;
     await assertGet(state("fail_closed", "env", "env", POLICY), 1, 1);
@@ -242,10 +246,10 @@ test("invalid enum env stays explicit; empty enum env is absent", async () => {
 });
 
 test("invalid enum PUT is rejected without changing either flag", async () => {
-  flagsDb.setFeatureFlagOverride(LEGACY, "true");
+  await flagsDb.setFeatureFlagOverride(LEGACY, "true");
   const response = await route.PUT(request("PUT", { key: POLICY, value: "invalid" }));
   assert.equal(response.status, 400);
-  assert.equal(flagsDb.getFeatureFlagOverride(POLICY), undefined);
+  assert.equal(await flagsDb.getFeatureFlagOverride(POLICY), undefined);
   await assertGet(state("count_as_zero", "db", "default", LEGACY));
 });
 
@@ -256,8 +260,9 @@ test("unreadable flag store never advertises success or relaxes enforcement via 
   // read (#15063). Warm that cache first so this test still reaches the route's own
   // unreadable-flag-store handling (500) once the table goes offline.
   await getCachedSettings();
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_offline");
+  const backend = getTestBackend();
+  // Postgres replacement for renaming the SQLite table away: the flag table is unreachable.
+  await backend.execute("ALTER TABLE config_entries RENAME TO config_entries_offline");
   flagsDb.clearFeatureFlagOverrideCache();
   try {
     const get = await route.GET(request());
@@ -269,7 +274,7 @@ test("unreadable flag store never advertises success or relaxes enforcement via 
     assert.ok(rejection, "unreadable settings must never allow the request");
     assert.ok([400, 503].includes(rejection.status));
   } finally {
-    db.exec("ALTER TABLE key_value_offline RENAME TO key_value");
+    await backend.execute("ALTER TABLE config_entries_offline RENAME TO config_entries");
     flagsDb.clearFeatureFlagOverrideCache();
   }
 });

@@ -37,18 +37,22 @@ function capability(limitOutput: number) {
   };
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("#16515 a combo's max_output_tokens honours a member's max_output_tokens override", async () => {
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: { "override-member": capability(1_048_576) },
     gemini: { "plain-member": capability(384_000) },
   });
   assert.equal(
-    overridesDb.setModelCapabilityOverride("openai/override-member", "max_output_tokens", 65_536),
+    await overridesDb.setModelCapabilityOverride(
+      "openai/override-member",
+      "max_output_tokens",
+      65_536
+    ),
     true
   );
   await combosDb.createCombo({

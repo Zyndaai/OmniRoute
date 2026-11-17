@@ -27,13 +27,14 @@ const { syncQuotaCombos, removeQuotaCombosForPool } =
 const { quotaModelName, isQuotaModelName, parseQuotaModelName, quotaPoolSlug } =
   await import("../../src/lib/quota/quotaModelNaming.ts");
 const { PROVIDER_MODELS } = await import("../../open-sse/config/providerModels.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Test lifecycle helpers
 // ---------------------------------------------------------------------------
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -57,7 +58,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -91,7 +92,7 @@ test("syncQuotaCombos: creates one combo per glm model with correct name and tar
   assert.ok(connId, "connection should have an id");
 
   // Pool defaults to "group-demo" (GroupDemo → slug "groupdemo").
-  const pool = poolsDb.createPool({ connectionId: connId, name: "TestGlmPool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "TestGlmPool" });
 
   await syncQuotaCombos(pool.id);
 
@@ -127,7 +128,7 @@ test("syncQuotaCombos: each combo has a single step with provider=glm and connec
     apiKey: "sk-test-glm-step",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "StepCheckPool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "StepCheckPool" });
 
   await syncQuotaCombos(pool.id);
 
@@ -167,7 +168,7 @@ test("syncQuotaCombos: idempotent — calling twice produces no duplicates", asy
     apiKey: "sk-test-glm-idem",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "IdempotentPool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "IdempotentPool" });
 
   await syncQuotaCombos(pool.id);
   const afterFirst = await listQuotaCombos();
@@ -195,7 +196,7 @@ test("syncQuotaCombos: prunes stale combos for same pool slug", async () => {
     apiKey: "sk-test-glm-prune",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "PrunePool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "PrunePool" });
 
   await syncQuotaCombos(pool.id);
 
@@ -240,7 +241,7 @@ test("removeQuotaCombosForPool: removes all quota combos for the pool", async ()
     apiKey: "sk-test-glm-remove",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "RemovePool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "RemovePool" });
 
   await syncQuotaCombos(pool.id);
 
@@ -275,8 +276,8 @@ test("syncQuotaCombos: does not affect quota combos for a different provider in 
   const connOrId = (connOr as Record<string, unknown>).id as string;
 
   // Both pools default to "group-demo" (same group).
-  const poolA = poolsDb.createPool({ connectionId: connGlmId, name: "PoolAlpha" });
-  const poolB = poolsDb.createPool({ connectionId: connOrId, name: "PoolBeta" });
+  const poolA = await poolsDb.createPool({ connectionId: connGlmId, name: "PoolAlpha" });
+  const poolB = await poolsDb.createPool({ connectionId: connOrId, name: "PoolBeta" });
 
   await syncQuotaCombos(poolA.id);
   await syncQuotaCombos(poolB.id);
@@ -353,7 +354,7 @@ test("syncQuotaCombos: pool with no resolvable connection does NOT prune existin
     apiKey: "sk-test-glm-guardb",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "GuardBPool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "GuardBPool" });
 
   await syncQuotaCombos(pool.id);
   const before = await listQuotaCombos();
@@ -399,17 +400,14 @@ test("syncQuotaCombos: pool whose join table is emptied (truly no connectionIds)
     apiKey: "sk-test-glm-guardb-empty",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "GuardBEmptyPool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "GuardBEmptyPool" });
 
   await syncQuotaCombos(pool.id);
   const before = await listQuotaCombos();
   assert.ok(before.length > 0, "expected combos after initial sync");
 
   // Empty the join table for this pool AND delete the connection row.
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { run: (...p: unknown[]) => unknown };
-  };
-  db.prepare("DELETE FROM quota_pool_connections WHERE pool_id = ?").run(pool.id);
+  await getTestBackend().execute("DELETE FROM quota_pool_connections WHERE pool_id = $1", [pool.id]);
   await providersDb.deleteProviderConnection(connId);
 
   await syncQuotaCombos(pool.id);

@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 const { projectCombo, projectComboStep } =
   await import("../../src/app/api/v1/combos/projectCombo.ts");
 
-test("#2300 projectComboStep keeps model + providerId, drops connectionId/weight/label", () => {
+test("#2300 projectComboStep keeps model + providerId, drops connectionId/weight/label", async () => {
   const out = projectComboStep({
     id: "step_internal_id",
     kind: "model",
@@ -32,7 +32,7 @@ test("#2300 projectComboStep keeps model + providerId, drops connectionId/weight
   });
 });
 
-test("#2300 projectComboStep keeps combo-ref's comboName, drops weight/label", () => {
+test("#2300 projectComboStep keeps combo-ref's comboName, drops weight/label", async () => {
   const out = projectComboStep({
     id: "step_internal",
     kind: "combo-ref",
@@ -44,7 +44,7 @@ test("#2300 projectComboStep keeps combo-ref's comboName, drops weight/label", (
   assert.deepEqual(out, { kind: "combo-ref", comboName: "fallback-combo" });
 });
 
-test("#2300 projectComboStep returns null for unknown kinds + malformed steps", () => {
+test("#2300 projectComboStep returns null for unknown kinds + malformed steps", async () => {
   assert.equal(projectComboStep({ kind: "unknown" }), null);
   assert.equal(projectComboStep({ kind: "model" }), null); // missing model
   assert.equal(projectComboStep({ kind: "combo-ref" }), null); // missing comboName
@@ -52,8 +52,8 @@ test("#2300 projectComboStep returns null for unknown kinds + malformed steps", 
   assert.equal(projectComboStep({ not_a_kind: true }), null);
 });
 
-test("#2300 projectCombo preserves name/strategy/description, projects models", () => {
-  const out = projectCombo({
+test("#2300 projectCombo preserves name/strategy/description, projects models", async () => {
+  const out = await projectCombo({
     id: "internal_id",
     name: "my-combo",
     strategy: "priority",
@@ -85,19 +85,19 @@ test("#2300 projectCombo preserves name/strategy/description, projects models", 
   assert.ok(!serialized.includes("sortOrder"), "sortOrder must not leak");
 });
 
-test("#2300 projectCombo defaults strategy to 'priority' when missing", () => {
-  const out = projectCombo({ name: "default-strategy", models: [] });
+test("#2300 projectCombo defaults strategy to 'priority' when missing", async () => {
+  const out = await projectCombo({ name: "default-strategy", models: [] });
   assert.equal(out?.strategy, "priority");
 });
 
-test("#2300 projectCombo returns null for empty name", () => {
-  assert.equal(projectCombo({ name: "", models: [] }), null);
-  assert.equal(projectCombo({ name: "   ", models: [] }), null);
-  assert.equal(projectCombo({ models: [] }), null);
+test("#2300 projectCombo returns null for empty name", async () => {
+  assert.equal(await projectCombo({ name: "", models: [] }), null);
+  assert.equal(await projectCombo({ name: "   ", models: [] }), null);
+  assert.equal(await projectCombo({ models: [] }), null);
 });
 
-test("#2300 projectCombo filters out malformed step entries silently", () => {
-  const out = projectCombo({
+test("#2300 projectCombo filters out malformed step entries silently", async () => {
+  const out = await projectCombo({
     name: "noisy",
     strategy: "auto",
     models: [
@@ -112,8 +112,8 @@ test("#2300 projectCombo filters out malformed step entries silently", () => {
   assert.equal(out?.models[0].model, "openai/gpt-5");
 });
 
-test("#2300 projectCombo omits description when empty", () => {
-  const out = projectCombo({ name: "no-desc", strategy: "priority", models: [] });
+test("#2300 projectCombo omits description when empty", async () => {
+  const out = await projectCombo({ name: "no-desc", strategy: "priority", models: [] });
   assert.equal("description" in (out ?? {}), false);
 });
 
@@ -123,7 +123,7 @@ test("#2300 projectCombo omits description when empty", () => {
  * as one duplicated step. `accountPinned` says which it is; the connectionId it
  * is derived from must stay stripped.
  */
-test("#10968 projectComboStep reports a pinned account without the connectionId", () => {
+test("#10968 projectComboStep reports a pinned account without the connectionId", async () => {
   const out = projectComboStep({
     kind: "model",
     model: "jina-ai/some-embed",
@@ -140,7 +140,7 @@ test("#10968 projectComboStep reports a pinned account without the connectionId"
   assert.ok(!JSON.stringify(out).includes("conn_secret_xyz"), "connection id must not leak");
 });
 
-test("#10968 projectComboStep reports false for an unpinned model step", () => {
+test("#10968 projectComboStep reports false for an unpinned model step", async () => {
   assert.equal(
     projectComboStep({ kind: "model", model: "jina-ai/some-embed", providerId: "jina-ai" })
       ?.accountPinned,
@@ -148,7 +148,7 @@ test("#10968 projectComboStep reports false for an unpinned model step", () => {
   );
 });
 
-test("#10968 an empty or non-string connectionId is not a pin", () => {
+test("#10968 an empty or non-string connectionId is not a pin", async () => {
   // Same shape test providerId gets: present but empty pins nothing, and a
   // non-string cannot be a connection id at all.
   for (const connectionId of ["", null, 0, false, {}, []]) {
@@ -160,7 +160,7 @@ test("#10968 an empty or non-string connectionId is not a pin", () => {
   }
 });
 
-test("#10968 a combo-ref carries no accountPinned", () => {
+test("#10968 a combo-ref carries no accountPinned", async () => {
   const out = projectComboStep({
     kind: "combo-ref",
     comboName: "fallback-combo",
@@ -171,13 +171,13 @@ test("#10968 a combo-ref carries no accountPinned", () => {
   assert.equal("accountPinned" in (out ?? {}), false);
 });
 
-test("#10968 malformed steps stay null rather than gaining the flag", () => {
+test("#10968 malformed steps stay null rather than gaining the flag", async () => {
   assert.equal(projectComboStep({ kind: "model", connectionId: "conn_X" }), null);
   assert.equal(projectComboStep({ kind: "unknown", connectionId: "conn_X" }), null);
 });
 
-test("#10968 two pinned accounts of one provider are no longer identical", () => {
-  const out = projectCombo({
+test("#10968 two pinned accounts of one provider are no longer identical", async () => {
+  const out = await projectCombo({
     name: "failover",
     strategy: "priority",
     models: [

@@ -26,9 +26,11 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "combos-duplicate-err
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const duplicateRoute = await import("../../src/app/api/combos/duplicate/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -39,7 +41,8 @@ test.after(() => {
 test("#16969: a 500 from POST /api/combos/duplicate must not leak the raw exception message", async () => {
   await settingsDb.updateSettings({ requireLogin: false });
   // Real failure seam: the connection lookup now fails with a raw SQLite error.
-  core.getDbInstance().exec("DROP TABLE provider_connections");
+  await getTestBackend().execute("ALTER TABLE provider_connections RENAME TO provider_connections_gone");
+  invalidateDbCache();
 
   const res = await duplicateRoute.POST(
     new Request("http://localhost/api/combos/duplicate", {
@@ -55,7 +58,10 @@ test("#16969: a 500 from POST /api/combos/duplicate must not leak the raw except
   assert.equal(res.status, 500, `expected 500, got ${res.status}: ${serialized}`);
   assert.equal(body.error, "Failed to duplicate auto-combo");
   assert.equal(body.details, undefined, `500 body must not carry raw details: ${serialized}`);
-  assert.ok(!/no such table/i.test(serialized), `raw SQLite error leaked: ${serialized}`);
+  assert.ok(
+    !/does not exist|no such table/i.test(serialized),
+    `raw database error leaked: ${serialized}`
+  );
   assert.ok(!serialized.includes("provider_connections"), `table name leaked: ${serialized}`);
   assert.ok(!serialized.includes("at /"), "error response must not leak stack traces");
 });

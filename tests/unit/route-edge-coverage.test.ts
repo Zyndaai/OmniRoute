@@ -10,7 +10,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret";
 process.env.CLOUD_URL = "http://cloud.example";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -38,10 +38,19 @@ async function resetStorage() {
   delete process.env.REQUIRE_API_KEY;
   delete process.env.ENABLE_SOCKS5_PROXY;
 
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+/** Writes a raw customModels row (the same jsonb shape the dashboard stores). */
+async function setCustomModelsRaw(provider: string, value: unknown) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_model_catalog (provider, custom_models) VALUES ($1, $2::jsonb)
+     ON CONFLICT (provider) DO UPDATE SET custom_models = EXCLUDED.custom_models, updated_at = now()`,
+    [provider, JSON.stringify(value)]
+  );
 }
 
 async function enableManagementAuth() {
@@ -91,45 +100,45 @@ async function seedOpenAIConnection({
   });
 }
 
-async function withPrepareFailure(match, message, fn) {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql, ...args) => {
-    const sqlText = String(sql);
-    const matched = typeof match === "function" ? match(sqlText) : sqlText.includes(match);
-    if (matched) {
-      throw new Error(message);
-    }
-    return originalPrepare(sql, ...args);
-  };
-
+// Intercepts every query on the shared backend whose SQL or parameters contain `match`.
+// `hook` either throws (simulating a DB failure) or returns the rows/value to hand back
+// instead of running the statement. Everything else runs for real.
+async function withSqlHook(match, hook, fn) {
+  const backend = getTestBackend();
+  const methods = ["query", "queryOne", "execute"];
+  const originals = Object.fromEntries(methods.map((m) => [m, backend[m]]));
+  for (const method of methods) {
+    const original = originals[method];
+    backend[method] = async (sql, params = []) => {
+      const sqlText = String(sql);
+      const matched = sqlText.includes(match) || JSON.stringify(params ?? []).includes(match);
+      if (matched) {
+        return hook({ method, sql: sqlText, params });
+      }
+      return original.call(backend, sql, params);
+    };
+  }
   try {
     return await fn();
   } finally {
-    db.prepare = originalPrepare;
+    for (const method of methods) {
+      backend[method] = originals[method];
+    }
   }
 }
 
+async function withPrepareFailure(match, message, fn) {
+  return withSqlHook(
+    match,
+    () => {
+      throw new Error(message);
+    },
+    fn
+  );
+}
+
 async function withPrepareOverride(match, override, fn) {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql, ...args) => {
-    const sqlText = String(sql);
-    const matched = typeof match === "function" ? match(sqlText) : sqlText.includes(match);
-    const statement = originalPrepare(sql, ...args);
-    if (!matched) {
-      return statement;
-    }
-    return override({ sqlText, statement, args });
-  };
-
-  try {
-    return await fn();
-  } finally {
-    db.prepare = originalPrepare;
-  }
+  return withSqlHook(match, override, fn);
 }
 
 test.beforeEach(async () => {
@@ -170,6 +179,10 @@ test("api keys route covers auth, create, masking, pagination fallback and cloud
     );
     const createdBody = (await created.json()) as any;
     const stored = await apiKeysDb.getApiKeyById(createdBody.id);
+    // Cloud sync is fire-and-forget (void syncKeysToCloudIfEnabled), so wait for its fetch.
+    for (let i = 0; i < 100 && fetchCalls.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
 
     await apiKeysDb.createApiKey("Alpha", MACHINE_ID);
     await apiKeysDb.createApiKey("Beta", MACHINE_ID);
@@ -192,7 +205,7 @@ test("api keys route covers auth, create, masking, pagination fallback and cloud
     assert.equal(createdBody.noLog, true);
     assert.match(createdBody.key, /^sk-/);
     assert.equal(stored?.noLog, true);
-    assert.equal(compliance.isNoLog(createdBody.id), true);
+    assert.equal(await compliance.isNoLog(createdBody.id), true);
 
     assert.equal(paged.status, 200);
     assert.equal(pagedBody.total, 4);
@@ -539,13 +552,8 @@ test("settings proxy route covers default types, null maps, registry fallback, a
   await localDb.assignProxyToScope("global", null, missingRegistryProxy.id);
 
   await withPrepareOverride(
-    "FROM proxy_registry WHERE id = ?",
-    ({ statement }) => ({
-      ...statement,
-      get() {
-        return undefined;
-      },
-    }),
+    "FROM proxy_registry WHERE id = $1",
+    ({ method }) => (method === "queryOne" ? null : []),
     async () => {
       const response = await settingsProxyRoute.GET(
         new Request("http://localhost/api/settings/proxy?level=global")
@@ -558,7 +566,7 @@ test("settings proxy route covers default types, null maps, registry fallback, a
   );
 
   await withPrepareFailure(
-    "SELECT key, value FROM key_value WHERE namespace = 'proxyConfig'",
+    "proxyConfig",
     "proxy config read failure",
     async () => {
       const response = await settingsProxyRoute.GET(
@@ -570,7 +578,7 @@ test("settings proxy route covers default types, null maps, registry fallback, a
   );
 
   await withPrepareFailure(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('proxyConfig', 'global', ?)",
+    "proxyConfig",
     "proxy config write failure",
     async () => {
       const response = await settingsProxyRoute.PUT(
@@ -590,7 +598,7 @@ test("settings proxy route covers default types, null maps, registry fallback, a
   );
 
   await withPrepareFailure(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('proxyConfig', 'global', ?)",
+    "proxyConfig",
     "proxy config delete failure",
     async () => {
       const response = await settingsProxyRoute.DELETE(
@@ -916,13 +924,13 @@ test("embeddings route tolerates custom-model and provider-node lookup failures"
 
   try {
     await withPrepareFailure(
-      "SELECT key, value FROM key_value WHERE namespace = 'customModels'",
+      "custom_models",
       "custom models unavailable",
       async () => {
         const response = await embeddingsRoute.GET();
         const body = (await response.json()) as any;
 
-        assert.equal(response.status, 200);
+        assert.equal(response.status, 200, `GET body: ${JSON.stringify(body)}`);
         assert.ok(body.data.some((model) => model.id === "openai/text-embedding-3-small"));
       }
     );
@@ -1059,20 +1067,12 @@ test("embeddings route GET skips malformed, non-embedding, and duplicate custom 
     ["embeddings"]
   );
 
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('customModels', ?, ?)"
-  ).run("broken-embed-provider", JSON.stringify({ invalid: true }));
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('customModels', ?, ?)"
-  ).run(
-    "mixed-embed-provider",
-    JSON.stringify([
-      { name: "Missing Id", supportedEndpoints: ["embeddings"] },
-      { id: "chat-only", supportedEndpoints: ["chat"] },
-      { id: "edge-embed", supportedEndpoints: ["embeddings"] },
-    ])
-  );
+  await setCustomModelsRaw("broken-embed-provider", { invalid: true });
+  await setCustomModelsRaw("mixed-embed-provider", [
+    { name: "Missing Id", supportedEndpoints: ["embeddings"] },
+    { id: "chat-only", supportedEndpoints: ["chat"] },
+    { id: "edge-embed", supportedEndpoints: ["embeddings"] },
+  ]);
 
   const response = await embeddingsRoute.GET();
   const body = (await response.json()) as any;
@@ -1098,15 +1098,7 @@ test("embeddings route tolerates non-array provider nodes and remote fallback lo
   try {
     await withPrepareOverride(
       "SELECT * FROM provider_nodes",
-      ({ statement }) =>
-        new Proxy(statement, {
-          get(target, prop, receiver) {
-            if (prop === "all") {
-              return () => ({ broken: true });
-            }
-            return Reflect.get(target, prop, receiver);
-          },
-        }),
+      () => ({ broken: true }),
       async () => {
         const response = await embeddingsRoute.POST(
           makeRequest("http://localhost/v1/embeddings", {
@@ -1121,21 +1113,13 @@ test("embeddings route tolerates non-array provider nodes and remote fallback lo
     let providerNodeSelects = 0;
     const remoteFallback = await withPrepareOverride(
       "SELECT * FROM provider_nodes",
-      ({ statement }) =>
-        new Proxy(statement, {
-          get(target, prop, receiver) {
-            if (prop === "all") {
-              return (...args) => {
-                providerNodeSelects++;
-                if (providerNodeSelects === 1) {
-                  return [];
-                }
-                throw new Error("remote provider node lookup failed");
-              };
-            }
-            return Reflect.get(target, prop, receiver);
-          },
-        }),
+      () => {
+        providerNodeSelects++;
+        if (providerNodeSelects === 1) {
+          return [];
+        }
+        throw new Error("remote provider node lookup failed");
+      },
       async () =>
         embeddingsRoute.POST(
           makeRequest("http://localhost/v1/embeddings", {
@@ -1208,21 +1192,13 @@ test("embeddings route handles responses provider nodes, invalid local nodes, an
     localDb.invalidateDbCache("nodes");
     const remoteResponse = await withPrepareOverride(
       "SELECT * FROM provider_nodes",
-      ({ statement }) =>
-        new Proxy(statement, {
-          get(target, prop, receiver) {
-            if (prop === "all") {
-              return () => [
-                {
-                  prefix: "remoteprefix",
-                  apiType: "responses",
-                  baseUrl: "https://remote.example.com/v1beta/openai",
-                },
-              ];
-            }
-            return Reflect.get(target, prop, receiver);
-          },
-        }),
+      () => [
+        {
+          prefix: "remoteprefix",
+          apiType: "responses",
+          baseUrl: "https://remote.example.com/v1beta/openai",
+        },
+      ],
       async () =>
         embeddingsRoute.POST(
           makeRequest("http://localhost/v1/embeddings", {

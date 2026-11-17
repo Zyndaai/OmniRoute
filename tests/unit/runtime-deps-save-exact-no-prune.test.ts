@@ -1,10 +1,7 @@
-// Regression (port of decolua/9router#1606): the SQLite and tray runtime installers
-// must persist their package to the user-writable runtime dir's package.json
-// (`--save-exact`) instead of using `--no-save`. Both installers write to the SAME
-// runtime dir (`~/.omniroute/runtime`), so a `--no-save` install marks the other's
-// package as "extraneous" and a later sibling `npm install` prunes it — reproducing
-// "No SQLite driver available" after a tray install removes the just-installed
-// better-sqlite3. Saving each dep with an exact version keeps both.
+// Regression (port of decolua/9router#1606): the tray runtime installer must persist
+// its package to the user-writable runtime dir's package.json (`--save-exact`) instead
+// of using `--no-save`, so a sibling runtime install does not prune it as "extraneous".
+// (The SQLite runtime installer case was removed with the SQLite driver.)
 //
 // Instead of mocking child_process, we put a fake `npm` on PATH that records its
 // arguments to a log file and exits 0. This exercises the real spawnSync/execSync
@@ -62,21 +59,6 @@ function installLineFor(pkgPrefix: string): string | undefined {
     .split("\n")
     .find((line) => line.includes("install") && line.includes(pkgPrefix));
 }
-
-test("npmInstallRuntime saves better-sqlite3 with --save-exact (never --no-save)", async (t) => {
-  if (process.platform === "win32") return; // sh stub is POSIX-only
-  setup();
-  t.after(teardown);
-
-  const { npmInstallRuntime } = await import("../../bin/cli/runtime/nativeDeps.mjs");
-  const ok = npmInstallRuntime(["better-sqlite3@12.9.0"], { silent: true });
-  assert.equal(ok, true, "fake npm should exit 0");
-
-  const line = installLineFor("better-sqlite3");
-  assert.ok(line, "expected an npm install for better-sqlite3");
-  assert.ok(!line!.includes("--no-save"), "must not use --no-save (prunes sibling runtime dep)");
-  assert.ok(line!.includes("--save-exact"), "must persist with --save-exact");
-});
 
 test("installSystray saves systray2 with --save-exact (never --no-save)", async (t) => {
   if (process.platform === "win32") return; // loadSystray returns null on win32

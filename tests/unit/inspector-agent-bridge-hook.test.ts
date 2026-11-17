@@ -17,16 +17,14 @@ import type { IncomingMessage } from "node:http";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ab-hook-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { resetDbInstance, getDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const { addCustomHost, toggleCustomHost } =
   await import("../../src/lib/db/inspectorCustomHosts.ts");
 const { recordRequestStart } = await import("../../src/mitm/inspector/agentBridgeHook.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  getDbInstance();
+  await resetTestDb();
 }
 
 function makeFakeReq(host: string): IncomingMessage {
@@ -41,13 +39,13 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("recordRequestStart: custom-host entry → source=custom-host, agent=undefined", async () => {
-  addCustomHost("my-app.example.com", "app", "My App");
+  await addCustomHost("my-app.example.com", "app", "My App");
 
   const entry = await recordRequestStart({
     req: makeFakeReq("my-app.example.com"),
@@ -76,8 +74,8 @@ test("recordRequestStart: non-custom host → source=agent-bridge, agent=agentId
 });
 
 test("recordRequestStart: disabled custom-host → source=agent-bridge (not matched)", async () => {
-  addCustomHost("disabled-app.example.com");
-  toggleCustomHost("disabled-app.example.com", false);
+  await addCustomHost("disabled-app.example.com");
+  await toggleCustomHost("disabled-app.example.com", false);
 
   const entry = await recordRequestStart({
     req: makeFakeReq("disabled-app.example.com"),

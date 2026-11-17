@@ -39,7 +39,6 @@ import path from "node:path";
 
 process.env.API_KEY_SECRET ||= "api-key-allow-auto-combos-test-secret";
 
-const { API_KEY_COLUMN_FALLBACKS } = await import("../../src/lib/db/apiKeyColumnFallbacks.ts");
 const { parseAllowAutoCombos } = await import("../../src/lib/db/apiKeys/rowParsers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
@@ -51,15 +50,14 @@ function read(relativePath: string) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
 }
 
-test("R1: allow_auto_combos is declared NOT NULL DEFAULT 1 so legacy keys keep auto/*", () => {
-  const column = API_KEY_COLUMN_FALLBACKS.find(
-    (c: { name: string }) => c.name === "allow_auto_combos"
-  );
-  assert.ok(column, "api_keys must gain an allow_auto_combos column");
+test("R1: allow_auto_combos is declared NOT NULL DEFAULT true so legacy keys keep auto/*", () => {
+  const schemaSql = read("src/lib/db/backends/postgres/migrations/0001_init.sql");
+  const line = schemaSql.split("\n").find((l) => /^\s*allow_auto_combos\s/.test(l));
+  assert.ok(line, "api_keys must gain an allow_auto_combos column");
   assert.match(
-    column.definition,
-    /NOT NULL DEFAULT 1/,
-    "default must be 1 — an existing key must not silently lose auto/* access"
+    line,
+    /NOT NULL DEFAULT true/,
+    "default must be true — an existing key must not silently lose auto/* access"
   );
 });
 

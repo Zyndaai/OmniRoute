@@ -13,7 +13,6 @@ import type { AddressInfo } from "node:net";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-search-upstream-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "search-upstream-test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
@@ -42,18 +41,18 @@ test.before(async () => {
 
 test.after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  proxyLogger.clearProxyLogs();
+  await proxyLogger.clearProxyLogs();
   await closeCallLogSaves(500).catch(() => {});
   try {
-    core.resetDbInstance();
+    await core.resetDbInstance();
   } catch {}
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {}
 });
 
-test.beforeEach(() => {
-  proxyLogger.clearProxyLogs();
+test.beforeEach(async () => {
+  await proxyLogger.clearProxyLogs();
 });
 
 function fetchParams(pathSuffix: string, timeoutMs = 5000) {

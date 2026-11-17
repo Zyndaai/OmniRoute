@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { toOllamaTagModel } from "../../src/lib/vscode/tagModels.ts";
 
-test("raw and grouped tags retain their distinct published identifiers", () => {
+test("raw and grouped tags retain their distinct published identifiers", async () => {
   const model = { id: "custom/gpt-example", owned_by: "custom", context_length: 8192 };
-  const raw = toOllamaTagModel(model, "raw");
-  const grouped = toOllamaTagModel(model, "grouped");
+  const raw = await toOllamaTagModel(model, "raw");
+  const grouped = await toOllamaTagModel(model, "grouped");
   assert.equal(raw.name, "custom/gpt-example");
   assert.equal(raw.model, raw.name);
   assert.equal(raw.digest, "omniroute:custom/gpt-example");
@@ -19,8 +19,8 @@ test("raw and grouped tags retain their distinct published identifiers", () => {
   assert.equal(raw.size, 0);
 });
 
-test("missing tag ids and context keep the existing fallback values", () => {
-  const tag = toOllamaTagModel({}, "raw");
+test("missing tag ids and context keep the existing fallback values", async () => {
+  const tag = await toOllamaTagModel({}, "raw");
   assert.equal(tag.model, "unknown");
   assert.equal(tag.details.family, "omniroute");
   assert.equal(tag.details.parameter_size, "unknown");

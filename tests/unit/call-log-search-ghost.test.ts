@@ -20,6 +20,8 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-search-ghost-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const mod = await import("../../src/lib/db/callLogStats.ts");
 const { SEARCH_PROVIDERS, SEARCH_CREDENTIAL_FALLBACKS } =
@@ -31,68 +33,65 @@ const KEYLESS_IDS = Object.values(SEARCH_PROVIDERS)
   .map((provider) => provider.id);
 
 let idSeq = 0;
-function insertSearchLog(provider: string | null, fields: Record<string, unknown> = {}) {
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
+async function insertSearchLog(provider: string | null, fields: Record<string, unknown> = {}) {
+  const p = {
+    id: `log-ghost-${++idSeq}`,
+    timestamp: new Date().toISOString(),
+    status: 200,
+    duration: 100,
+    summary: JSON.stringify({ query: `q-${idSeq}` }),
+    provider,
+    ...fields,
+  };
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", method, path, status, model, provider, duration,
         tokens_in, tokens_out, cache_source, request_type, detail_state, error_summary,
         request_summary, has_request_body, has_response_body, has_pipeline_details)
-       VALUES (@id, @timestamp, 'POST', '/v1/search', @status, 'search', @provider, @duration,
-        0, 0, 'upstream', 'search', 'none', NULL, @summary, 0, 0, 0)`
-    )
-    .run({
-      id: `log-ghost-${++idSeq}`,
-      timestamp: new Date().toISOString(),
-      status: 200,
-      duration: 100,
-      summary: JSON.stringify({ query: `q-${idSeq}` }),
-      provider,
-      ...fields,
-    });
+       VALUES ($1, $2, 'POST', '/v1/search', $3, 'search', $4, $5,
+        0, 0, 'upstream', 'search', 'none', NULL, $6::jsonb, false, false, false)`,
+    [p.id, p.timestamp, p.status, p.provider, p.duration, p.summary]
+  );
 }
 
-function insertConnection(id: string, provider: string) {
+async function insertConnection(id: string, provider: string) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run(id, provider, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, $3, $4)`,
+    [id, provider, now, now]
+  );
 }
 
-test.before(() => {
-  core.resetDbInstance();
-  insertConnection("conn-ghost-brave", "brave-search");
-  insertConnection("conn-ghost-perplexity-chat", "perplexity");
+test.before(async () => {
+  await resetTestDb();
+  await insertConnection("conn-ghost-brave", "brave-search");
+  await insertConnection("conn-ghost-perplexity-chat", "perplexity");
 
-  insertSearchLog("brave-search", { duration: 50 });
-  insertSearchLog("brave-search", { duration: 150, status: 502 });
-  insertSearchLog("perplexity-search", { duration: 90 }); // live via credential fallback
-  insertSearchLog("duckduckgo-free", { duration: 70 }); // keyless, no connection row
-  insertSearchLog("duckduckgo-free", { duration: 30 });
-  insertSearchLog("searxng-search", { duration: 40 }); // keyless, no connection row
-  insertSearchLog("context7", { duration: 60 }); // anonymous tier, no connection row
+  await insertSearchLog("brave-search", { duration: 50 });
+  await insertSearchLog("brave-search", { duration: 150, status: 502 });
+  await insertSearchLog("perplexity-search", { duration: 90 }); // live via credential fallback
+  await insertSearchLog("duckduckgo-free", { duration: 70 }); // keyless, no connection row
+  await insertSearchLog("duckduckgo-free", { duration: 30 });
+  await insertSearchLog("searxng-search", { duration: 40 }); // keyless, no connection row
+  await insertSearchLog("context7", { duration: 60 }); // anonymous tier, no connection row
   // Ghosts
-  insertSearchLog("tavily-search", { duration: 80 }); // connection deleted
-  insertSearchLog("-", { duration: 80 });
-  insertSearchLog(null, { duration: 80 });
+  await insertSearchLog("tavily-search", { duration: 80 }); // connection deleted
+  await insertSearchLog("-", { duration: 80 });
+  await insertSearchLog(null, { duration: 80 });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const FLAG = "SEARCH_STATS_HIDE_DELETED_CONNECTIONS";
 
-function withFlag<T>(value: "true" | undefined, fn: () => T): T {
+async function withFlag<T>(value: "true" | undefined, fn: () => Promise<T>): Promise<T> {
   const previous = process.env[FLAG];
   if (value === undefined) delete process.env[FLAG];
   else process.env[FLAG] = value;
   try {
-    return fn();
+    return await fn();
   } finally {
     if (previous === undefined) delete process.env[FLAG];
     else process.env[FLAG] = previous;
@@ -125,36 +124,36 @@ test("registry fixtures used here are real: keyless ids and the perplexity fallb
   assert.equal(SEARCH_CREDENTIAL_FALLBACKS["perplexity-search"], "perplexity");
 });
 
-test("flag off (default): NULL and '-' rows are hidden, deleted-connection traffic still counts", () => {
-  withFlag(undefined, () => {
-    const stats = mod.getSearchProviderStats();
+test("flag off (default): NULL and '-' rows are hidden, deleted-connection traffic still counts", async () => {
+  await withFlag(undefined, async () => {
+    const stats = await mod.getSearchProviderStats();
     assert.deepEqual(
       Object.fromEntries(stats.map((r) => [r.provider, r.requests])),
       HISTORICAL_COUNTS
     );
     assert.deepEqual(
-      Object.fromEntries(mod.getSearchProviderCounts().map((r) => [r.provider, r.cnt])),
+      Object.fromEntries((await mod.getSearchProviderCounts()).map((r) => [r.provider, r.cnt])),
       HISTORICAL_COUNTS
     );
-    const recent = mod.getRecentSearchLogs().map((r) => r.provider);
+    const recent = (await mod.getRecentSearchLogs()).map((r) => r.provider);
     assert.equal(recent.length, 8);
     assert.ok(
       recent.includes("tavily-search"),
       "deleted connection still listed with the flag off"
     );
     assert.ok(!recent.includes("-") && !recent.includes(null as unknown as string));
-    const aggregate = mod.getSearchAggregateStats(todayStartIso());
+    const aggregate = await mod.getSearchAggregateStats(todayStartIso());
     assert.equal(aggregate.total, 8);
     assert.equal(
       aggregate.total,
-      mod.getSearchProviderCounts().reduce((sum, r) => sum + r.cnt, 0)
+      (await mod.getSearchProviderCounts()).reduce((sum, r) => sum + r.cnt, 0)
     );
   });
 });
 
-test("flag on: getSearchProviderStats keeps live + keyless providers and drops ghosts", () => {
-  withFlag("true", () => {
-    const rows = mod.getSearchProviderStats();
+test("flag on: getSearchProviderStats keeps live + keyless providers and drops ghosts", async () => {
+  await withFlag("true", async () => {
+    const rows = await mod.getSearchProviderStats();
     const byProvider = Object.fromEntries(rows.map((r) => [r.provider, r]));
     assert.deepEqual(Object.fromEntries(rows.map((r) => [r.provider, r.requests])), LIVE_COUNTS);
     assert.equal(byProvider["brave-search"].avg_latency_ms, 100);
@@ -162,9 +161,9 @@ test("flag on: getSearchProviderStats keeps live + keyless providers and drops g
   });
 });
 
-test("flag on: getSearchProviderCounts keeps live + keyless providers, ordered by count", () => {
-  withFlag("true", () => {
-    const rows = mod.getSearchProviderCounts();
+test("flag on: getSearchProviderCounts keeps live + keyless providers, ordered by count", async () => {
+  await withFlag("true", async () => {
+    const rows = await mod.getSearchProviderCounts();
     assert.deepEqual(Object.fromEntries(rows.map((r) => [r.provider, r.cnt])), LIVE_COUNTS);
     for (let i = 1; i < rows.length; i++) {
       assert.ok(rows[i - 1].cnt >= rows[i].cnt, "ordered by cnt desc");
@@ -172,9 +171,9 @@ test("flag on: getSearchProviderCounts keeps live + keyless providers, ordered b
   });
 });
 
-test("flag on: getRecentSearchLogs keeps keyless traffic and drops ghost rows", () => {
-  withFlag("true", () => {
-    const providers = mod.getRecentSearchLogs().map((r) => r.provider);
+test("flag on: getRecentSearchLogs keeps keyless traffic and drops ghost rows", async () => {
+  await withFlag("true", async () => {
+    const providers = (await mod.getRecentSearchLogs()).map((r) => r.provider);
     assert.equal(providers.length, 7);
     for (const ghost of ["tavily-search", "-", null]) {
       assert.ok(!providers.includes(ghost as string), `${String(ghost)} excluded`);
@@ -185,10 +184,13 @@ test("flag on: getRecentSearchLogs keeps keyless traffic and drops ghost rows", 
   });
 });
 
-test("flag on: aggregate totals agree with the per-provider breakdown", () => {
-  withFlag("true", () => {
-    const stats = mod.getSearchAggregateStats(todayStartIso());
-    const breakdownTotal = mod.getSearchProviderCounts().reduce((sum, r) => sum + r.cnt, 0);
+test("flag on: aggregate totals agree with the per-provider breakdown", async () => {
+  await withFlag("true", async () => {
+    const stats = await mod.getSearchAggregateStats(todayStartIso());
+    const breakdownTotal = (await mod.getSearchProviderCounts()).reduce(
+      (sum, r) => sum + r.cnt,
+      0
+    );
     assert.equal(stats.total, breakdownTotal);
     assert.equal(stats.total, 7);
     assert.equal(stats.today, 7);

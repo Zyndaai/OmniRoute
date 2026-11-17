@@ -45,9 +45,9 @@ const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-reg
   "manage",
 ]);
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -83,8 +83,8 @@ function routeParams(id: string): { params: Promise<{ id: string }> } {
   return { params: Promise.resolve({ id }) };
 }
 
-function seedRegisteredKey(name: string): string {
-  const issued = registeredKeysDb.issueRegisteredKey({
+async function seedRegisteredKey(name: string): Promise<string> {
+  const issued = await registeredKeysDb.issueRegisteredKey({
     name,
     provider: "openai",
     accountId: "account-a",
@@ -93,8 +93,8 @@ function seedRegisteredKey(name: string): string {
   return issued.id;
 }
 
-function revokedAtOf(id: string): string | null {
-  const key = registeredKeysDb.getRegisteredKey(id);
+async function revokedAtOf(id: string): Promise<string | null> {
+  const key = await registeredKeysDb.getRegisteredKey(id);
   assert.ok(key, `registered key ${id} must still exist`);
   return key.revokedAt;
 }
@@ -167,8 +167,8 @@ async function assertRefusedWithoutSideEffect(
   expectedStatus: 401 | 403,
   secret?: string
 ): Promise<void> {
-  const id = seedRegisteredKey(`${surface.name} ${expectedStatus}`);
-  const totalBefore = registeredKeysDb.listRegisteredKeys().length;
+  const id = await seedRegisteredKey(`${surface.name} ${expectedStatus}`);
+  const totalBefore = (await registeredKeysDb.listRegisteredKeys()).length;
 
   const response = await surface.invoke(make, id);
   const body = await response.json();
@@ -177,25 +177,25 @@ async function assertRefusedWithoutSideEffect(
   assert.equal(response.status, expectedStatus, `${surface.name} must answer ${expectedStatus}`);
   assert.ok(!serialized.includes("at /"), "error body must not leak a stack trace");
   if (secret) assert.ok(!serialized.includes(secret), "error body must not echo the credential");
-  assert.equal(revokedAtOf(id), null, "a refused call must not revoke the key");
+  assert.equal(await revokedAtOf(id), null, "a refused call must not revoke the key");
   assert.equal(
-    registeredKeysDb.listRegisteredKeys().length,
+    (await registeredKeysDb.listRegisteredKeys()).length,
     totalBefore,
     "a refused call must not issue a key"
   );
 }
 
 async function assertAllowed(surface: Surface, make: RequestFactory): Promise<void> {
-  const id = seedRegisteredKey(`${surface.name} allowed`);
+  const id = await seedRegisteredKey(`${surface.name} allowed`);
   const response = await surface.invoke(make, id);
   const body = await response.json();
 
   assert.equal(response.status, surface.okStatus, JSON.stringify(body));
   assert.deepEqual(Object.keys(body).sort(), [...surface.okKeys].sort());
   if (surface.revokes) {
-    assert.ok(revokedAtOf(id), "the allowed revoke must mark the key revoked");
+    assert.ok(await revokedAtOf(id), "the allowed revoke must mark the key revoked");
   } else {
-    assert.equal(revokedAtOf(id), null);
+    assert.equal(await revokedAtOf(id), null);
   }
 }
 
@@ -205,7 +205,7 @@ for (const surface of SURFACES) {
   });
 
   test(`${surface.name}: a read-scoped API key is refused with 403`, async () => {
-    const id = seedRegisteredKey(`${surface.name} read 403 body`);
+    const id = await seedRegisteredKey(`${surface.name} read 403 body`);
     const response = await surface.invoke(plainRequest(bearer(readKey.key)), id);
     const body = (await response.json()) as {
       error?: { message?: string; type?: string };
@@ -215,7 +215,7 @@ for (const surface of SURFACES) {
     assert.equal(body.error?.type, "invalid_request");
     assert.match(body.error?.message ?? "", /manage/i);
     assert.equal(typeof body.requestId, "string", "403 goes through createErrorResponse()");
-    assert.equal(revokedAtOf(id), null, "a read key must not be able to revoke");
+    assert.equal(await revokedAtOf(id), null, "a read key must not be able to revoke");
 
     await assertRefusedWithoutSideEffect(
       surface,

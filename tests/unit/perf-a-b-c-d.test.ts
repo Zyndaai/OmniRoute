@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { logProxyEvent, flushProxyLogsSync } from "../../src/lib/proxyLogger.ts";
 import { shouldStripCloudCodeThinking } from "../../open-sse/services/cloudCodeThinking.ts";
 
-test("Part A: async proxy log batching queues entries without synchronous failure", () => {
+test("Part A: async proxy log batching queues entries without synchronous failure", async () => {
   const sampleLog = {
     status: "success",
     provider: "test-provider",
@@ -15,9 +15,7 @@ test("Part A: async proxy log batching queues entries without synchronous failur
   assert.equal(typeof logged.id, "string");
 
   // Ensure flush completes without throwing
-  assert.doesNotThrow(() => {
-    flushProxyLogsSync();
-  });
+  await assert.doesNotReject(flushProxyLogsSync());
 });
 
 test("Part D: pre-compiled regex in cloudCodeThinking model normalization", () => {

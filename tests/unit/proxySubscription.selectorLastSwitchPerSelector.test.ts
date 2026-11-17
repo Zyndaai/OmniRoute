@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Per-selector last-switch trace: two selectors of one subscription keep
 // their own entry (member, time, cause) instead of overwriting a single
@@ -22,8 +23,8 @@ const sub = await import("../../src/lib/proxySubscription/index.ts");
 const service = await import("../../src/lib/proxySubscription/subscriptionService.ts");
 const { parseSelectorTag } = await import("../../src/lib/proxySubscription/selectorEndpoint.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   trigger.__resetSelectorTriggerForTesting();
@@ -95,33 +96,32 @@ function registryKeyFor(host: string, port: number): string {
   return `socks5://@${host}:${port}`;
 }
 
-function rowById(id: string): Record<string, unknown> {
-  return core
-    .getDbInstance()
-    .prepare("SELECT * FROM proxy_subscriptions WHERE id = ?")
-    .get(id) as Record<string, unknown>;
+async function rowById(id: string): Promise<Record<string, unknown>> {
+  return (await getTestBackend().queryOne<Record<string, unknown>>(
+    "SELECT * FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  )) as Record<string, unknown>;
 }
 
-function bySelectorOf(
-  id: string
-): Record<
+async function bySelectorOf(id: string): Promise<Record<
   string,
   { at: string; result: string; member: string | null; kind: string | null } | null
-> | null {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT selector_last_switch_by_selector FROM proxy_subscriptions WHERE id = ?")
-    .get(id) as { selector_last_switch_by_selector?: unknown } | undefined;
+> | null> {
+  const row = await getTestBackend().queryOne<{ selector_last_switch_by_selector?: unknown }>(
+    "SELECT selector_last_switch_by_selector FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  );
+  // jsonb column: the driver returns the parsed object (text is accepted too).
   const raw = row?.selector_last_switch_by_selector;
-  if (typeof raw !== "string" || !raw) return null;
-  return JSON.parse(raw) as Record<
+  if (!raw) return null;
+  return (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<
     string,
     { at: string; result: string; member: string | null; kind: string | null } | null
   >;
 }
 
 test("two selectors of one subscription keep their own entry", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a", "group-b"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -148,7 +148,7 @@ test("two selectors of one subscription keep their own entry", async () => {
       kind: "slow",
     });
     assert.equal(second.switched, true, JSON.stringify(second));
-    const stored = bySelectorOf(id);
+    const stored = await bySelectorOf(id);
     assert.ok(stored && typeof stored === "object", "per-selector column holds an object");
     assert.ok(stored["group-a"], "group-a keeps its entry");
     assert.ok(stored["group-b"], "group-b keeps its entry");
@@ -158,7 +158,7 @@ test("two selectors of one subscription keep their own entry", async () => {
     assert.equal(stored["group-b"]?.kind, "slow");
     assert.ok(stored["group-a"]?.at && stored["group-b"]?.at, "each entry has its own time");
     // The summary columns still carry the latest switch across selectors.
-    const row = rowById(id);
+    const row = await rowById(id);
     assert.equal(row.selector_last_switch_result, "ok");
     assert.equal(row.selector_last_switch_member, "node-2");
   } finally {
@@ -169,7 +169,7 @@ test("two selectors of one subscription keep their own entry", async () => {
 });
 
 test("throttled repeat on one selector leaves the neighbor entry intact", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a", "group-b"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -201,7 +201,7 @@ test("throttled repeat on one selector leaves the neighbor entry intact", async 
     });
     assert.equal(throttled.switched, false);
     assert.equal(throttled.reason, "throttled");
-    const stored = bySelectorOf(id);
+    const stored = await bySelectorOf(id);
     assert.equal(stored?.["group-a"]?.result, "throttled");
     assert.equal(stored?.["group-b"]?.result, "ok");
     assert.equal(stored?.["group-b"]?.member, "node-2");
@@ -216,7 +216,7 @@ test("throttled repeat on one selector leaves the neighbor entry intact", async 
 });
 
 test("selector removed from the lines disappears from the state", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a", "group-b"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -267,7 +267,7 @@ test("selector removed from the lines disappears from the state", async () => {
 });
 
 test("single-selector subscription reads the same as the summary", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -304,7 +304,7 @@ test("single-selector subscription reads the same as the summary", async () => {
 });
 
 test("two near-simultaneous switches on two selectors keep both keys", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a", "group-b"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -333,7 +333,7 @@ test("two near-simultaneous switches on two selectors keep both keys", async () 
     ]);
     assert.equal(first.switched, true, JSON.stringify(first));
     assert.equal(second.switched, true, JSON.stringify(second));
-    const stored = bySelectorOf(id);
+    const stored = await bySelectorOf(id);
     assert.ok(stored?.["group-a"], "group-a keeps its entry");
     assert.ok(stored?.["group-b"], "group-b keeps its entry");
   } finally {
@@ -344,7 +344,7 @@ test("two near-simultaneous switches on two selectors keep both keys", async () 
 });
 
 test("entries stay bounded to the current line tags", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore(["group-a"]);
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -403,8 +403,8 @@ test("screen tag parsing matches the production line parser", () => {
   assert.deepEqual(fromProduction, ["group-a", "group-b"]);
 });
 
-test.after(() => {
+test.after(async () => {
   proxyHealth.__setProxyHealthTcpCheckForTesting(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

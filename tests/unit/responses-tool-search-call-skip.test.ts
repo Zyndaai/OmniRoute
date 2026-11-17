@@ -12,7 +12,7 @@ import { translateRequest } from "../../open-sse/translator/index.js";
  * `input:[{type:"tool_search_call", ...}]` in a follow-up round, every
  * subsequent /v1/responses returns 400 until the user manually clears history.
  */
-test("tool_search_call input item is silently skipped (not 400)", () => {
+test("tool_search_call input item is silently skipped (not 400)", async () => {
   const body = {
     model: "test-model",
     input: [
@@ -22,8 +22,8 @@ test("tool_search_call input item is silently skipped (not 400)", () => {
     stream: false,
   };
   let result;
-  assert.doesNotThrow(() => {
-    result = translateRequest("openai-responses", "openai", "test-model", body, false);
+  await assert.doesNotReject(async () => {
+    result = await translateRequest("openai-responses", "openai", "test-model", body, false);
   }, "tool_search_call must not throw");
   assert.ok(result && typeof result === "object");
   // message remains, not dropped
@@ -34,7 +34,7 @@ test("tool_search_call input item is silently skipped (not 400)", () => {
   assert.equal(messages[0].role, "user");
 });
 
-test("tool_search_result input item is silently skipped", () => {
+test("tool_search_result input item is silently skipped", async () => {
   const body = {
     model: "test-model",
     input: [
@@ -48,8 +48,8 @@ test("tool_search_result input item is silently skipped", () => {
     stream: false,
   };
   let result;
-  assert.doesNotThrow(() => {
-    result = translateRequest("openai-responses", "openai", "test-model", body, false);
+  await assert.doesNotReject(async () => {
+    result = await translateRequest("openai-responses", "openai", "test-model", body, false);
   }, "tool_search_result must not throw");
   const messages = (result as { messages?: unknown }).messages as
     Array<{ role?: string }> | undefined;
@@ -58,7 +58,7 @@ test("tool_search_result input item is silently skipped", () => {
   assert.equal(messages[0].role, "user");
 });
 
-test("web_search_call replay is skipped while its function result is preserved", () => {
+test("web_search_call replay is skipped while its function result is preserved", async () => {
   const body = {
     model: "test-model",
     input: [
@@ -88,8 +88,8 @@ test("web_search_call replay is skipped while its function result is preserved",
     stream: false,
   };
   let result;
-  assert.doesNotThrow(() => {
-    result = translateRequest("openai-responses", "openai", "test-model", body, false);
+  await assert.doesNotReject(async () => {
+    result = await translateRequest("openai-responses", "openai", "test-model", body, false);
   }, "web_search_call replay must not throw");
   const messages = (
     result as { messages?: Array<{ role?: string; tool_calls?: unknown; content?: unknown }> }
@@ -103,7 +103,7 @@ test("web_search_call replay is skipped while its function result is preserved",
   assert.equal(messages[2].content, body.input[2].output);
 });
 
-test("multiple tool_search_call items interspersed with messages are skipped in order", () => {
+test("multiple tool_search_call items interspersed with messages are skipped in order", async () => {
   const body = {
     model: "test-model",
     input: [
@@ -116,8 +116,8 @@ test("multiple tool_search_call items interspersed with messages are skipped in 
     stream: false,
   };
   let result;
-  assert.doesNotThrow(() => {
-    result = translateRequest("openai-responses", "openai", "test-model", body, false);
+  await assert.doesNotReject(async () => {
+    result = await translateRequest("openai-responses", "openai", "test-model", body, false);
   });
   const messages = (result as { messages?: unknown }).messages as
     Array<{ role?: string; content?: unknown }> | undefined;

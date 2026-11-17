@@ -17,7 +17,7 @@ import fs from "node:fs";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-xai-oauth-usage-"));
 process.env.DATA_DIR = TMP;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { getMonthlyProviderTokensForConnection } = await import("../../src/lib/usage/usageStats.ts");
 const { __testing, USAGE_FETCHER_PROVIDERS, getUsageForProvider } =
   await import("../../open-sse/services/usage.ts");
@@ -45,40 +45,38 @@ function billingResponse(creditUsagePercent: number, endIso?: string) {
   );
 }
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   tokensIn: number,
   tokensOut: number,
   timestamp: string
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, connectionId, tokensIn, tokensOut, timestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, "timestamp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, connectionId, tokensIn, tokensOut, timestamp]
+  );
 }
 
 describe("xAI OAuth usage dispatch", () => {
   before(async () => {
-    // Async boot (chatcore / sql.js path) so wrong-arch better-sqlite3 still works.
-    await core.ensureDbInitialized();
     const now = new Date();
     const inWindow = now.toISOString();
     const outOfWindow = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)
     ).toISOString();
     // in-window usage for conn-oauth: 1.2M + 0.3M
-    insertUsage("conn-oauth", "xai-oauth", 1_200_000, 0, inWindow);
-    insertUsage("conn-oauth", "xai-oauth", 0, 300_000, inWindow);
+    await insertUsage("conn-oauth", "xai-oauth", 1_200_000, 0, inWindow);
+    await insertUsage("conn-oauth", "xai-oauth", 0, 300_000, inWindow);
     // alias-stored rows (fallback also probes "xao")
-    insertUsage("conn-alias", "xao", 4_000_000, 500_000, inWindow);
+    await insertUsage("conn-alias", "xao", 4_000_000, 500_000, inWindow);
     // out-of-window usage must NOT count toward the current aggregate
-    insertUsage("conn-oauth", "xai-oauth", 9_000_000, 9_000_000, outOfWindow);
+    await insertUsage("conn-oauth", "xai-oauth", 9_000_000, 9_000_000, outOfWindow);
     // a different connection must not bleed in
-    insertUsage("conn-other", "xai-oauth", 7_000_000, 0, inWindow);
+    await insertUsage("conn-other", "xai-oauth", 7_000_000, 0, inWindow);
     // a different provider on the same connection must not bleed in
-    insertUsage("conn-oauth", "xai", 8_000_000, 0, inWindow);
+    await insertUsage("conn-oauth", "xai", 8_000_000, 0, inWindow);
   });
 
   afterEach(() => {
@@ -88,9 +86,9 @@ describe("xAI OAuth usage dispatch", () => {
     invalidateXaiOauthQuotaCache("conn-live");
   });
 
-  after(() => {
+  after(async () => {
     globalThis.fetch = originalFetch;
-    core.resetDbInstance();
+    await resetTestDb();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {
@@ -109,14 +107,17 @@ describe("xAI OAuth usage dispatch", () => {
     );
   });
 
-  it("aggregates only in-window tokens for the given provider+connection", () => {
+  it("aggregates only in-window tokens for the given provider+connection", async () => {
     // 1.2M + 0.3M = 1.5M; excludes out-of-window, conn-other, and xai rows.
-    assert.equal(getMonthlyProviderTokensForConnection("xai-oauth", "conn-oauth"), 1_500_000);
-    assert.equal(getMonthlyProviderTokensForConnection("xao", "conn-alias"), 4_500_000);
+    assert.equal(
+      await getMonthlyProviderTokensForConnection("xai-oauth", "conn-oauth"),
+      1_500_000
+    );
+    assert.equal(await getMonthlyProviderTokensForConnection("xao", "conn-alias"), 4_500_000);
   });
 
-  it("returns 0 for an unknown connection (fail-open, no bleed)", () => {
-    assert.equal(getMonthlyProviderTokensForConnection("xai-oauth", "conn-none"), 0);
+  it("returns 0 for an unknown connection (fail-open, no bleed)", async () => {
+    assert.equal(await getMonthlyProviderTokensForConnection("xai-oauth", "conn-none"), 0);
   });
 
   it("getXaiOauthUsage live path returns weekly quota from billing percent", async () => {

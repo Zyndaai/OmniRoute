@@ -60,7 +60,7 @@ for (const provider of ["antigravity", "agy"])
         ],
       };
       try {
-        setProviderLimitsCache(id, toProviderLimitsCacheEntry(usage, "synthetic"));
+        await setProviderLimitsCache(id, toProviderLimitsCacheEntry(usage, "synthetic"));
         getQuotaCacheState().cache.delete(id);
         clearAllModelLockouts();
         const response = await GET();
@@ -103,7 +103,7 @@ for (const provider of ["antigravity", "agy"])
       } finally {
         clearAllModelLockouts();
         getQuotaCacheState().cache.delete(id);
-        deleteProviderLimitsCache(id);
+        await deleteProviderLimitsCache(id);
         await deleteProviderConnection(id);
       }
     });

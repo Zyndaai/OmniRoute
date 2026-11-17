@@ -6,8 +6,8 @@ import test from "node:test";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-output-14337-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const models = await import("../../src/lib/db/models.ts");
 const providers = await import("../../src/lib/db/providers.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
@@ -19,17 +19,17 @@ const { enforceOutputTokenBudget } =
   await import("../../open-sse/handlers/chatCore/outputTokenBudget.ts");
 const originalFetch = globalThis.fetch;
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
   globalThis.fetch = async () => {
     throw new Error("Unexpected external request");
   };
 });
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 const request = (body: Record<string, unknown>, method = "PUT") =>
@@ -45,15 +45,15 @@ test("synced models save an output override consumed by runtime without creating
   const response = await put(4096);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).maxOutputTokenOverride, 4096);
-  assert.equal(overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"), 4096);
-  assert.equal(overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_token"), null);
-  assert.equal(getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), 4096);
+  assert.equal(await overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"), 4096);
+  assert.equal(await overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_token"), null);
+  assert.equal(await getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), 4096);
   const capped = enforceOutputTokenBudget(
     { max_tokens: 16000, max_completion_tokens: 16000, max_output_tokens: 16000 },
     100,
     128000,
     0,
-    getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" })
+    await getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" })
   );
   assert.equal(capped.ok, true);
   if (capped.ok)
@@ -68,11 +68,11 @@ test("synced models save an output override consumed by runtime without creating
 test("GET returns provider-scoped output overrides for synced and custom rows", async () => {
   const staleRow = { id: "custom-14337", name: "Custom", maxOutputTokenOverride: 99999 };
   await models.replaceCustomModels("openai", [staleRow]);
-  contextOverrides.setModelContextOverride("openai", "custom-14337", 128000, "manual");
-  overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 4096);
-  overrides.setModelCapabilityOverride("openai/custom-14337", "max_output_tokens", 2048);
-  overrides.setModelCapabilityOverride("anthropic/other", "max_output_tokens", 1024);
-  overrides.setModelCapabilityOverride("openai/gpt-4o", "max_input_tokens", 64000);
+  await contextOverrides.setModelContextOverride("openai", "custom-14337", 128000, "manual");
+  await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 4096);
+  await overrides.setModelCapabilityOverride("openai/custom-14337", "max_output_tokens", 2048);
+  await overrides.setModelCapabilityOverride("anthropic/other", "max_output_tokens", 1024);
+  await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_input_tokens", 64000);
   const response = await route.GET(
     new Request("http://localhost/api/provider-models?provider=openai")
   );
@@ -96,13 +96,13 @@ test("GET returns provider-scoped output overrides for synced and custom rows", 
 });
 
 test("clearing the override restores the runtime catalog default", async () => {
-  const original = getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" });
-  overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 1234);
+  const original = await getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" });
+  await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 1234);
   const response = await put(null);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).maxOutputTokenOverride, null);
-  assert.equal(overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"), null);
-  assert.equal(getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), original);
+  assert.equal(await overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"), null);
+  assert.equal(await getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), original);
 });
 
 test("re-sync preserves an operator output override", async () => {
@@ -110,15 +110,15 @@ test("re-sync preserves an operator output override", async () => {
   await models.replaceSyncedAvailableModelsForConnection("openai", "synthetic-sync", [
     { id: "gpt-4o", name: "Changed upstream name", outputTokenLimit: 99999 },
   ]);
-  assert.equal(getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), 4096);
+  assert.equal(await getExplicitModelOutputCap({ provider: "openai", model: "gpt-4o" }), 4096);
 });
 
 test("invalid values cannot overwrite an existing output override", async () => {
-  overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 2048);
+  await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 2048);
   for (const invalid of [0, -1, 1.5, "1024", true]) {
     assert.equal((await put(invalid)).status, 400, `Reject ${JSON.stringify(invalid)}`);
     assert.equal(
-      overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"),
+      await overrides.getModelCapabilityOverride("openai", "gpt-4o", "max_output_tokens"),
       2048
     );
   }
@@ -127,7 +127,7 @@ test("invalid values cannot overwrite an existing output override", async () => 
 test("unknown providers leave no output override behind", async () => {
   assert.equal((await put(2048, "not-a-provider-14337")).status, 400);
   assert.equal(
-    overrides.getModelCapabilityOverride("not-a-provider-14337", "gpt-4o", "max_output_tokens"),
+    await overrides.getModelCapabilityOverride("not-a-provider-14337", "gpt-4o", "max_output_tokens"),
     null
   );
 });

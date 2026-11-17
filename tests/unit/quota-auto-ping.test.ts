@@ -29,8 +29,8 @@ const { isModelSelectable } = await import("../../open-sse/services/modelLifecyc
 const { splitCodexReasoningSuffix } =
   await import("../../open-sse/executors/codex/reasoningSuffix.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
 });
 
 // A ping only counts once the Responses stream carries `response.completed`.

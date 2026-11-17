@@ -27,7 +27,8 @@ const costRules = await import("../../src/domain/costRules.ts");
 const keyQuotaDb = await import("../../src/lib/db/keyQuota.ts");
 const keyQuota = await import("../../src/domain/keyQuota.ts");
 
-const KEY = "key-quota-unpriced";
+// api_key_quota_limits references api_keys, so the key row is created before the tests run.
+let KEY = "";
 const CTX = costRules.buildCostCtx(
   "openai",
   "gpt-unpriced",
@@ -37,13 +38,24 @@ const CTX = costRules.buildCostCtx(
 );
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function giveMonthlyQuota(limitUsd: number | null, extra: Record<string, number | null> = {}) {
-  keyQuotaDb.clearKeyQuotaLimits(KEY);
-  keyQuotaDb.upsertKeyQuotaLimits(KEY, { monthlyAmountUsd: limitUsd, ...extra });
+async function giveMonthlyQuota(limitUsd: number | null, extra: Record<string, number | null> = {}) {
+  await keyQuotaDb.clearKeyQuotaLimits(KEY);
+  await keyQuotaDb.upsertKeyQuotaLimits(KEY, { monthlyAmountUsd: limitUsd, ...extra });
 }
 
-function chargeUnpriced() {
+// recordChatCallCost fires the unpriced marker write without awaiting it (chatCore
+// never blocks on it), so wait until the marker lands before asserting on the quota.
+async function waitForUnpricedMarker(expected: boolean) {
+  for (let i = 0; i < 100; i++) {
+    const set = (await keyQuotaDb.loadUnpricedQuotaMonthStart(KEY)) !== null;
+    if (set === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+async function chargeUnpriced() {
   costRules.recordChatCallCost({ id: KEY }, 0, CTX, true, true);
+  await waitForUnpricedMarker(true);
 }
 
 function monthStartMs(nowMs = Date.now()) {
@@ -51,90 +63,96 @@ function monthStartMs(nowMs = Date.now()) {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
 }
 
-test.beforeEach(() => {
-  keyQuotaDb.clearKeyQuotaLimits(KEY);
-  costRules.resetCostData();
+test.before(async () => {
+  const apiKeys = await import("../../src/lib/db/apiKeys.ts");
+  const created = await apiKeys.createApiKey("quota-unpriced", "machine-quota-unpriced");
+  KEY = created.id;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await keyQuotaDb.clearKeyQuotaLimits(KEY);
+  await costRules.resetCostData();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("an unpriced metered charge closes the monthly quota for the rest of the month", () => {
-  giveMonthlyQuota(1);
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
+test("an unpriced metered charge closes the monthly quota for the rest of the month", async () => {
+  await giveMonthlyQuota(1);
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
 
-  chargeUnpriced();
+  await chargeUnpriced();
 
-  const verdict = keyQuota.checkKeyQuota(KEY);
+  const verdict = await keyQuota.checkKeyQuota(KEY);
   assert.equal(verdict.allowed, false);
   assert.equal(verdict.dimension, "monthly");
   assert.match(String(verdict.reason), /without a price/i);
   assert.equal(verdict.status?.counters.monthlyAmountUsd, 0, "no fabricated spend is recorded");
 });
 
-test("the streaming charge site (recordUnpricedBudgetUsage) closes the monthly quota too", () => {
-  giveMonthlyQuota(1);
-  costRules.recordUnpricedBudgetUsage(KEY, { provider: "openai", model: "gpt-unpriced" });
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, false);
+test("the streaming charge site (recordUnpricedBudgetUsage) closes the monthly quota too", async () => {
+  await giveMonthlyQuota(1);
+  await costRules.recordUnpricedBudgetUsage(KEY, { provider: "openai", model: "gpt-unpriced" });
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, false);
 });
 
-test("a priced charge of $0 (a genuinely free model) leaves the monthly quota open", () => {
-  giveMonthlyQuota(1);
+test("a priced charge of $0 (a genuinely free model) leaves the monthly quota open", async () => {
+  await giveMonthlyQuota(1);
   costRules.recordChatCallCost({ id: KEY }, 0, CTX, true, false);
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
 });
 
-test("USAGE_LIMIT_IGNORE_UNPRICED=true counts unpriced usage as $0 for the monthly quota", () => {
+test("USAGE_LIMIT_IGNORE_UNPRICED=true counts unpriced usage as $0 for the monthly quota", async () => {
   const previous = process.env.USAGE_LIMIT_IGNORE_UNPRICED;
   process.env.USAGE_LIMIT_IGNORE_UNPRICED = "true";
   try {
-    giveMonthlyQuota(1);
-    chargeUnpriced();
-    assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
+    await giveMonthlyQuota(1);
+    await chargeUnpriced();
+    assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
   } finally {
     if (previous === undefined) delete process.env.USAGE_LIMIT_IGNORE_UNPRICED;
     else process.env.USAGE_LIMIT_IGNORE_UNPRICED = previous;
   }
 });
 
-test("a key without a monthly cap is not affected (rpm-only quota, no quota at all)", () => {
-  chargeUnpriced();
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
-  assert.equal(keyQuota.loadUnpricedQuotaMonthStart(KEY), null, "nothing is stored");
+test("a key without a monthly cap is not affected (rpm-only quota, no quota at all)", async () => {
+  await chargeUnpriced();
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
+  assert.equal(await keyQuota.loadUnpricedQuotaMonthStart(KEY), null, "nothing is stored");
 
-  giveMonthlyQuota(null, { rpmLimit: 1000 });
-  chargeUnpriced();
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
+  await giveMonthlyQuota(null, { rpmLimit: 1000 });
+  await chargeUnpriced();
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
 });
 
-test("the closure is stored with its month, so a restart keeps it and a new month clears it", () => {
-  giveMonthlyQuota(1);
-  chargeUnpriced();
-  assert.equal(keyQuota.loadUnpricedQuotaMonthStart(KEY), monthStartMs());
+test("the closure is stored with its month, so a restart keeps it and a new month clears it", async () => {
+  await giveMonthlyQuota(1);
+  await chargeUnpriced();
+  assert.equal(await keyQuota.loadUnpricedQuotaMonthStart(KEY), monthStartMs());
 
   const nextMonth = monthStartMs() + 32 * DAY_MS;
-  assert.equal(keyQuota.checkKeyQuota(KEY, { now: () => nextMonth }).allowed, true);
+  assert.equal((await keyQuota.checkKeyQuota(KEY, { now: () => nextMonth })).allowed, true);
 });
 
-test("saving the quota again reopens it, and clearing the quota forgets the closure", () => {
-  giveMonthlyQuota(1);
-  chargeUnpriced();
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, false);
+test("saving the quota again reopens it, and clearing the quota forgets the closure", async () => {
+  await giveMonthlyQuota(1);
+  await chargeUnpriced();
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, false);
 
-  keyQuotaDb.upsertKeyQuotaLimits(KEY, { monthlyAmountUsd: 1 });
-  assert.equal(keyQuota.checkKeyQuota(KEY).allowed, true);
+  await keyQuotaDb.upsertKeyQuotaLimits(KEY, { monthlyAmountUsd: 1 });
+  assert.equal((await keyQuota.checkKeyQuota(KEY)).allowed, true);
 
-  chargeUnpriced();
-  keyQuotaDb.clearKeyQuotaLimits(KEY);
-  assert.equal(keyQuota.loadUnpricedQuotaMonthStart(KEY), null);
+  await chargeUnpriced();
+  await keyQuotaDb.clearKeyQuotaLimits(KEY);
+  assert.equal(await keyQuota.loadUnpricedQuotaMonthStart(KEY), null);
 });
 
-test("priced spend over the cap still reports the spend, not the unpriced reason", () => {
-  giveMonthlyQuota(1);
-  chargeUnpriced();
-  const verdict = keyQuota.checkKeyQuota(KEY, { monthTotalUsd: 5 });
+test("priced spend over the cap still reports the spend, not the unpriced reason", async () => {
+  await giveMonthlyQuota(1);
+  await chargeUnpriced();
+  const verdict = await keyQuota.checkKeyQuota(KEY, { monthTotalUsd: 5 });
   assert.equal(verdict.allowed, false);
   assert.match(String(verdict.reason), /quota exceeded/i);
 });

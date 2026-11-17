@@ -31,6 +31,7 @@ const syncTokensRoute = await import("../../src/app/api/sync/tokens/route.ts");
 const syncBundleRoute = await import("../../src/app/api/sync/bundle/route.ts");
 const { SESSIONS_VALID_AFTER_SETTING } =
   await import("../../src/shared/utils/dashboardSessionToken.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const DAY_MS = 86_400_000;
 
@@ -39,21 +40,21 @@ type IssueBody = {
   syncToken?: { issuedBy: string | null; syncApiKeyId: string | null; expiresAt: string };
 };
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   await settingsDb.updateSettings({ requireLogin: true, password: "" });
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
@@ -104,7 +105,7 @@ test("a manage-scoped API key alone cannot issue a sync token", async () => {
 });
 
 test("a CLI access token (which a manage key can mint) cannot issue a sync token", async () => {
-  const { secret } = accessTokensDb.createAccessToken({ name: "remote-cli", scope: "admin" });
+  const { secret } = await accessTokensDb.createAccessToken({ name: "remote-cli", scope: "admin" });
 
   const response = await syncTokensRoute.POST(
     bearerRequest("http://localhost/api/sync/tokens", secret, { name: "exfil" })

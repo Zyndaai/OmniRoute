@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-probe-testall-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { runSingleModelTest } = await import("../../src/lib/api/modelTestRunner.ts");
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
@@ -28,28 +28,19 @@ test.beforeEach(() => {
 
 test.after(() => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function readConnectionRow(connId: string) {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => {
-      get: (id: string) =>
-        | {
-            is_active: unknown;
-            test_status: unknown;
-            rate_limited_until: unknown;
-            last_error: unknown;
-          }
-        | undefined;
-    };
-  };
-  return db
-    .prepare(
-      "SELECT is_active, test_status, rate_limited_until, last_error FROM provider_connections WHERE id = ?"
-    )
-    .get(connId);
+async function readConnectionRow(connId: string) {
+  return getTestBackend().queryOne<{
+    is_active: boolean;
+    test_status: string | null;
+    rate_limited_until: unknown;
+    last_error: string | null;
+  }>(
+    "SELECT is_active, test_status, rate_limited_until, last_error FROM provider_connections WHERE id = $1",
+    [connId]
+  );
 }
 
 async function createConnection(): Promise<string> {
@@ -88,12 +79,12 @@ async function mockUpstream(status: number, message: string): Promise<void> {
     });
 }
 
-const ASSERT_ISOLATED = (connId: string) => {
-  const row = readConnectionRow(connId);
-  assert.equal(row?.is_active, 1, "connection stays active after a probe failure");
+const ASSERT_ISOLATED = async (connId: string) => {
+  const row = await readConnectionRow(connId);
+  assert.equal(row?.is_active, true, "connection stays active after a probe failure");
   assert.notEqual(row?.test_status, "banned", "no terminal banned status from a probe");
   assert.notEqual(row?.test_status, "deactivated", "no deactivated status from a probe");
-  assert.equal(row?.rate_limited_until, null, "no cooldown persisted by a probe");
+  assert.equal(row?.rate_limited_until ?? null, null, "no cooldown persisted by a probe");
   assert.ok(row?.last_error, "probe failure is recorded for visibility");
 };
 
@@ -108,7 +99,7 @@ test("test-all FORBIDDEN failure (Sentinel) does not deactivate the connection",
     timeoutMs: 10_000,
   });
   assert.equal(result.status, "error");
-  ASSERT_ISOLATED(connId);
+  await ASSERT_ISOLATED(connId);
 });
 
 test("test-all ACCOUNT_DEACTIVATED failure does not deactivate the connection", async () => {
@@ -122,7 +113,7 @@ test("test-all ACCOUNT_DEACTIVATED failure does not deactivate the connection", 
     timeoutMs: 10_000,
   });
   assert.equal(result.status, "error");
-  ASSERT_ISOLATED(connId);
+  await ASSERT_ISOLATED(connId);
 });
 
 test("queued (rate-limited) test-all failure stays isolated", async () => {
@@ -150,7 +141,7 @@ test("queued (rate-limited) test-all failure stays isolated", async () => {
     connectionId: connId,
     timeoutMs: 10_000,
   });
-  ASSERT_ISOLATED(connId);
+  await ASSERT_ISOLATED(connId);
 });
 
 test("RESTORE: probe with opt-in probeCanDisable=true deactivates like real traffic", async () => {
@@ -167,8 +158,8 @@ test("RESTORE: probe with opt-in probeCanDisable=true deactivates like real traf
       timeoutMs: 10_000,
     });
     assert.equal(result.status, "error");
-    const row = readConnectionRow(connId);
-    assert.equal(row?.is_active, 0, "opt-in restores historical behavior: probe deactivates");
+    const row = await readConnectionRow(connId);
+    assert.equal(row?.is_active, false, "opt-in restores historical behavior: probe deactivates");
     assert.equal(row?.test_status, "banned", "terminal banned status restored for probe");
   } finally {
     await settingsDb.updateSettings({ probeCanDisable: false });

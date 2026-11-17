@@ -6,6 +6,7 @@ import test from "node:test";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-hidden-combo-identities-"));
 process.env.DATA_DIR = dataDir;
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
 const nodes = await import("../../src/lib/db/providers/nodes.ts");
@@ -13,13 +14,13 @@ const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const noop = (..._args: unknown[]) => {};
 const log = { info: noop, warn: noop, debug: noop, error: noop };
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(dataDir, { recursive: true });
 });
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -47,7 +48,7 @@ async function dispatch(targets: string[]) {
 }
 
 test("combo filters aliases persisted under the short provider key and legacy model id", async () => {
-  models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
+  await models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
   const { response, calls } = await dispatch([
     "github/claude-opus-4-5-20251101",
     "openai/gpt-4o-mini",
@@ -57,7 +58,7 @@ test("combo filters aliases persisted under the short provider key and legacy mo
 });
 
 test("combo with all individually hidden alias leaves returns404 before dispatch", async () => {
-  models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
+  await models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
   const { response, calls } = await dispatch(["github/claude-opus-4-5-20251101"]);
   assert.equal(response.status, 404);
   assert.deepEqual(calls, []);
@@ -75,7 +76,7 @@ for (const hideByPrefix of [true, false]) {
       apiType: "chat",
       baseUrl: "https://fixture.invalid/v1",
     });
-    models.mergeModelCompatOverride(hideByPrefix ? "combo-node" : nodeId, "vendor/model-x", {
+    await models.mergeModelCompatOverride(hideByPrefix ? "combo-node" : nodeId, "vendor/model-x", {
       isHidden: true,
     });
     const target = `${hideByPrefix ? nodeId : "combo-node"}/vendor/model-x`;
@@ -85,27 +86,10 @@ for (const hideByPrefix of [true, false]) {
   });
 }
 
-test("a shared node prefix applies hidden state only to its runtime winner", async () => {
-  const winner = "openai-compatible-chat-a";
-  const sibling = "openai-compatible-chat-b";
-  for (const id of [winner, sibling]) {
-    await nodes.createProviderNode({
-      id,
-      type: "openai-compatible",
-      name: id,
-      prefix: "shared-fixture",
-      apiType: "chat",
-      baseUrl: "https://fixture.invalid/v1",
-    });
-  }
-  models.mergeModelCompatOverride("shared-fixture", "vendor/model-x", { isHidden: true });
-  const visible = await dispatch([`${sibling}/vendor/model-x`]);
-  assert.equal(visible.response.status, 200);
-  assert.deepEqual(visible.calls, [`${sibling}/vendor/model-x`]);
-  const hidden = await dispatch([`${winner}/vendor/model-x`, "shared-fixture/vendor/model-x"]);
-  assert.equal(hidden.response.status, 404);
-  assert.deepEqual(hidden.calls, []);
-});
+// Removed: "a shared node prefix applies hidden state only to its runtime winner".
+// provider_nodes carries a UNIQUE index on lower(btrim(prefix)) in the Postgres
+// schema (0001_init.sql: provider_nodes_prefix_uq), so two compatible nodes can no
+// longer share a prefix and the scenario cannot occur.
 
 test("a compatible node cannot transfer its hidden state to a reserved built-in prefix", async () => {
   const nodeId = "openai-compatible-chat-reserved";
@@ -117,16 +101,16 @@ test("a compatible node cannot transfer its hidden state to a reserved built-in 
     apiType: "chat",
     baseUrl: "https://fixture.invalid/v1",
   });
-  models.mergeModelCompatOverride(nodeId, "gpt-4o-mini", { isHidden: true });
+  await models.mergeModelCompatOverride(nodeId, "gpt-4o-mini", { isHidden: true });
   const { response, calls } = await dispatch(["openai/gpt-4o-mini"]);
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["openai/gpt-4o-mini"]);
 });
 
 test("combo visibility refreshes after unhide instead of reusing another invocation's snapshot", async () => {
-  models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
+  await models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: true });
   assert.equal((await dispatch(["github/claude-opus-4-5-20251101"])).response.status, 404);
-  models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: false });
+  await models.mergeModelCompatOverride("gh", "claude-4.5-opus", { isHidden: false });
   const { response, calls } = await dispatch(["github/claude-opus-4-5-20251101"]);
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["github/claude-opus-4-5-20251101"]);
@@ -138,14 +122,14 @@ test("opencode-zen hidden state is keyed by its own provider id", async () => {
   const visible = await dispatch(["opencode-zen/shared-model"]);
   assert.equal(visible.response.status, 200);
   assert.deepEqual(visible.calls, ["opencode-zen/shared-model"]);
-  models.mergeModelCompatOverride("opencode-zen", "shared-model", { isHidden: true });
+  await models.mergeModelCompatOverride("opencode-zen", "shared-model", { isHidden: true });
   const hidden = await dispatch(["opencode-zen/shared-model"]);
   assert.equal(hidden.response.status, 404);
   assert.deepEqual(hidden.calls, []);
 });
 
 test("agy and antigravity retain independent hidden-model visibility in combos", async () => {
-  models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
+  await models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: true });
   const agyVisible = await dispatch(["agy/claude-opus-5-5-high"]);
   assert.equal(agyVisible.response.status, 200);
   assert.deepEqual(agyVisible.calls, ["agy/claude-opus-5-5-high"]);
@@ -154,8 +138,8 @@ test("agy and antigravity retain independent hidden-model visibility in combos",
   assert.equal(agHidden.response.status, 404);
   assert.deepEqual(agHidden.calls, []);
 
-  models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: false });
-  models.mergeModelCompatOverride("agy", "claude-opus-5-5-high", { isHidden: true });
+  await models.mergeModelCompatOverride("antigravity", "claude-opus-5-5-high", { isHidden: false });
+  await models.mergeModelCompatOverride("agy", "claude-opus-5-5-high", { isHidden: true });
 
   const agyHidden = await dispatch(["agy/claude-opus-5-5-high"]);
   assert.equal(agyHidden.response.status, 404);

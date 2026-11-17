@@ -17,19 +17,23 @@ async function withFlag<T>(
 ): Promise<T> {
   const { setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("../../src/lib/db/featureFlags.ts");
+  const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
   const prevEnv = new Map([GUARD_KEY, ...OTHER_KEYS].map((key) => [key, process.env[key]]));
   for (const key of OTHER_KEYS) {
     delete process.env[key];
-    removeFeatureFlagOverride(key);
+    await removeFeatureFlagOverride(key);
   }
   if (env === undefined) delete process.env[GUARD_KEY];
   else process.env[GUARD_KEY] = env;
-  if (dbOverride === undefined) removeFeatureFlagOverride(GUARD_KEY);
-  else setFeatureFlagOverride(GUARD_KEY, dbOverride);
+  if (dbOverride === undefined) await removeFeatureFlagOverride(GUARD_KEY);
+  else await setFeatureFlagOverride(GUARD_KEY, dbOverride);
+  // Sync readers see the in-process snapshot; the dashboard route refreshes it after a write.
+  await refreshFeatureFlagSnapshot();
   try {
     return await fn();
   } finally {
-    removeFeatureFlagOverride(GUARD_KEY);
+    await removeFeatureFlagOverride(GUARD_KEY);
+    await refreshFeatureFlagSnapshot();
     for (const [key, value] of prevEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -91,5 +95,5 @@ test("with the SSRF Guard unset everywhere, private URLs stay closed", async () 
 // The DB overrides above open the SQLite singleton; release it so the runner can exit.
 test.after(async () => {
   const { resetDbInstance } = await import("../../src/lib/db/core.ts");
-  resetDbInstance();
+  await resetDbInstance();
 });

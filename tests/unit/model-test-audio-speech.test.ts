@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-speech-probe-"));
 process.env.DATA_DIR = dataDir;
@@ -13,9 +14,8 @@ const {
   runSingleModelTest,
 } = await import("../../src/lib/api/modelTestRunner.ts");
 const providers = await import("../../src/lib/db/providers.ts");
-const core = await import("../../src/lib/db/core.ts");
-test.after(() => {
-  core.closeDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

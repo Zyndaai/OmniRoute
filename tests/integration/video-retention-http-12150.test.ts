@@ -19,7 +19,6 @@ Object.assign(process.env, {
   APP_LOG_TO_FILE: "true",
   APP_LOG_LEVEL: "debug",
   APP_LOG_FILE_PATH: path.join(dataDir, "logs", "app.log"),
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   OMNIROUTE_LOG_REQUEST_SHAPE: "0",
 });
 const nativeFetch = globalThis.fetch;
@@ -35,6 +34,9 @@ globalThis.fetch = (...args) => upstream(...args);
 // Installed Undici and native fetch may use different dispatcher registries.
 // Deny raw sockets before application imports, then allow only the fixture.
 let allowedPort = 0;
+// The database is a TCP peer now; the guard must let the pool reach it (and nothing else).
+const pgUrl = new URL(process.env.OMNIROUTE_POSTGRES_URL ?? "postgres://127.0.0.1:5432/");
+const pgTarget = { host: pgUrl.hostname, port: Number(pgUrl.port || 5432) };
 Socket.prototype.connect = function (...args: unknown[]) {
   const normalized = Array.isArray(args[0]) ? args[0] : args;
   const first = normalized[0];
@@ -43,7 +45,9 @@ Socket.prototype.connect = function (...args: unknown[]) {
   const port = Number(options?.port ?? first);
   assert(
     // Node gives an IPC path precedence over TCP host/port when both are supplied.
-    options?.path === undefined && allowedPort > 0 && host === "127.0.0.1" && port === allowedPort,
+    options?.path === undefined &&
+      ((allowedPort > 0 && host === "127.0.0.1" && port === allowedPort) ||
+        (host === pgTarget.host && port === pgTarget.port)),
     "retention fixture blocks sockets outside its HTTP server"
   );
   return Reflect.apply(originalConnect, this, args);
@@ -76,14 +80,13 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
     bootstrapSocket.destroy();
   }
   const core = await import("../../src/lib/db/core.ts");
+  const { getTestBackend } = await import("../helpers/postgres.ts");
   const providers = await import("../../src/lib/db/providers.ts");
   const keys = await import("../../src/lib/db/apiKeys.ts");
   const settings = await import("../../src/lib/db/settings.ts");
   const readCache = await import("../../src/lib/db/readCache.ts");
   const logs = await import("../../src/lib/usage/callLogs.ts");
   const pending = await import("../../src/lib/usage/usageHistory.ts");
-  const memory = await import("../../src/lib/memory/store.ts");
-  const memorySettings = await import("../../src/lib/memory/settings.ts");
   const semantic = await import("../../src/lib/semanticCache.ts");
   const manager = await import("../../open-sse/services/cache/semanticCacheManager.ts");
   const idempotency = await import("../../src/lib/idempotencyLayer.ts");
@@ -152,8 +155,6 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
     await settings.updateSettings({
       semanticCacheEnabled: true,
       semanticCacheVectorEnabled: true,
-      memoryEnabled: true,
-      memoryMaxTokens: 2000,
       call_log_pipeline_enabled: true,
       modalityBridgeVideoEnabled: true,
       modalityBridgeVideoModel: "openai/gpt-4.1-mini",
@@ -164,7 +165,6 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
       .getSemanticCacheManager()
       .setEmbeddingGenerator(async () => ({ embedding: [1, 0, 0], inputTokens: 1 }));
     readCache.invalidateDbCache();
-    memorySettings.invalidateMemorySettingsCache();
     registry.registerDefaultGuardrails();
     registry.guardrailRegistry.register(
       new VideoBridgeGuardrail({
@@ -196,9 +196,9 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
 
   t.beforeEach(async () => {
     idempotency.clearIdempotency();
-    semantic.clearCache();
+    await semantic.clearCache();
     await manager.getSemanticCacheManager().clear();
-    reasoning.clearReasoningCacheAll();
+    await reasoning.clearReasoningCacheAll();
   });
 
   cleanupApplication = async () => {
@@ -213,7 +213,7 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
     const proxyLogs = await import("../../src/lib/proxyLogger.ts");
     proxyLogs.flushProxyLogsSync();
     pressureFixture?.dispose();
-    core.closeDbInstance({ checkpointMode: null });
+    await core.resetDbInstance();
     const finalApplicationLog = fs.readFileSync(path.join(dataDir, "logs", "app.log"), "utf8");
     assert(finalApplicationLog.includes("video-bridge pre-call"), "final debug log must exist");
     assert(
@@ -320,30 +320,28 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
     const detail = await latestLog(retainedCorrelationId!);
     assert(detail, "completed log must exist");
     assert(!JSON.stringify(detail).includes(sentinel), "completed log retained transcript");
-    const row = core
-      .getDbInstance()
-      .prepare(
-        "SELECT video_content_removed, artifact_relpath, response_id FROM call_logs WHERE id = ?"
-      )
-      .get(detail.id) as {
+    const row = (await getTestBackend().queryOne(
+      "SELECT video_content_removed::int AS video_content_removed, artifact_relpath, detail_state, response_id FROM call_logs WHERE id = $1",
+      [detail.id]
+    )) as {
       video_content_removed: number;
       artifact_relpath: string;
+      detail_state: string;
       response_id: string | null;
     };
     assert.equal(row.video_content_removed, 1);
-    if (row.artifact_relpath) {
+    if (row.artifact_relpath && row.detail_state === "ready") {
       const artifact = JSON.parse(
         fs.readFileSync(path.join(dataDir, "call_logs", row.artifact_relpath), "utf8")
       );
       assert(!JSON.stringify(artifact).includes(sentinel));
       assert(!artifact.pipeline, "observed detailed pipeline must be omitted");
     }
-    assert.equal(semantic.getCacheStats().dbEntries, 0);
-    assert.equal(semantic.getCacheStats().memoryEntries, 0);
+    assert.equal((await semantic.getCacheStats()).dbEntries, 0);
+    assert.equal((await semantic.getCacheStats()).memoryEntries, 0);
     assert.equal((await manager.getSemanticCacheManager().getStats()).entries, 0);
     assert.equal((await idempotency.getIdempotencyStats()).activeKeys, 0);
-    assert.equal((await memory.listMemories({ apiKeyId: key.id })).total, 0);
-    assert.equal(reasoning.getReasoningCacheServiceStats().totalEntries, 0);
+    assert.equal((await reasoning.getReasoningCacheServiceStats()).totalEntries, 0);
     const applicationLog = await eventually(() => {
       const file = path.join(dataDir, "logs", "app.log");
       return fs.existsSync(file) && fs.readFileSync(file, "utf8").includes("video-bridge pre-call")
@@ -485,12 +483,11 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
       const detail = await latestLog(correlationId);
       assert(detail, "rejected log must exist");
       assert(!JSON.stringify(detail).includes(sentinel), "rejected log retained raw transcript");
-      assert.equal((await memory.listMemories({ apiKeyId: restricted.id })).total, 0);
     }
   );
 
   await t.test(
-    "HTTP ordinary turn proves cache, idempotency, Memory and reasoning stores are enabled",
+    "HTTP ordinary turn proves cache, idempotency and reasoning stores are enabled",
     async () => {
       const ordinary = "I prefer warm fruit tea and quiet music.";
       const requestBody = {
@@ -517,14 +514,13 @@ test("retention HTTP route matrix", { timeout: 300_000 }, async (t) => {
         body: JSON.stringify(requestBody),
       });
       assert.equal(response.status, 200, await response.text());
-      await eventually(async () => (await memory.listMemories({ apiKeyId: key.id })).total > 0);
-      assert(semantic.getCacheStats().dbEntries > 0);
-      assert(semantic.getCacheStats().memoryEntries > 0);
+      assert((await semantic.getCacheStats()).dbEntries > 0);
+      assert((await semantic.getCacheStats()).memoryEntries > 0);
       await eventually(
         async () => (await manager.getSemanticCacheManager().getStats()).entries > 0
       );
       assert((await idempotency.getIdempotencyStats()).activeKeys > 0);
-      assert(reasoning.getReasoningCacheServiceStats().totalEntries > 0);
+      assert((await reasoning.getReasoningCacheServiceStats()).totalEntries > 0);
       const repeated = await httpFetch(server.url + "/v1/chat/completions", {
         method: "POST",
         headers: requestHeaders,

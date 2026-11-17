@@ -18,6 +18,8 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const comboRoute = await import("../../src/app/api/combos/[id]/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
 function getRequest(id: string) {
   return comboRoute.GET(new Request(`http://localhost/api/combos/${id}`), {
@@ -43,8 +45,8 @@ async function createPinnedCombo(name: string, connectionId: string) {
   return combo;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -84,8 +86,11 @@ test("GET falls back to empty connectionLabels when the account lookup fails", a
   const combo = await createPinnedCombo("labels-get-failure", connection.id as string);
 
   // Make the label query throw: the combo row itself is still readable.
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE provider_connections RENAME TO provider_connections_hidden_17393");
+  const backend = getTestBackend();
+  await backend.execute(
+    "ALTER TABLE provider_connections RENAME TO provider_connections_hidden_17393"
+  );
+  invalidateDbCache();
   try {
     const response = await getRequest(combo.id);
     assert.equal(response.status, 200, "a failed label lookup must not become a 500");
@@ -96,6 +101,9 @@ test("GET falls back to empty connectionLabels when the account lookup fails", a
     assert.equal(body.id, combo.id);
     assert.deepEqual(body.connectionLabels, {});
   } finally {
-    db.exec("ALTER TABLE provider_connections_hidden_17393 RENAME TO provider_connections");
+    await backend.execute(
+      "ALTER TABLE provider_connections_hidden_17393 RENAME TO provider_connections"
+    );
+    invalidateDbCache();
   }
 });

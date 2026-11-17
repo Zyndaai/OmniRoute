@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,30 +10,42 @@ import path from "node:path";
 // the default 'always' shadow the boolean — silently flipping `preserveSystemPrompt=false` installs
 // from "compress unless cached" (whenNoCache) to "always preserve". The read path must instead
 // derive the mode from the boolean when no mode row exists.
-//
-// core.ts freezes DATA_DIR/SQLITE_FILE into module consts at first import, so the temp DATA_DIR is
-// set BEFORE any import and the db file is shared across tests. Each test isolates by wiping the
-// `compression` namespace and busting the module-level TTL cache via resetDbInstance() (which hands
-// out a NEW db object, so the cache — keyed by db ref — misses).
 const TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-preserve-mode-"));
 process.env.DATA_DIR = TEMP_DIR;
 
-async function freshCompressionDb() {
-  const { getDbInstance, resetDbInstance } = await import("../../../src/lib/db/core.ts");
-  const db = getDbInstance(); // runs migrations on first call
-  db.prepare("DELETE FROM key_value WHERE namespace = 'compression'").run();
-  return { db, resetDbInstance };
+const { ensureDbInitialized, resetDbInstance } = await import("../../../src/lib/db/core.ts");
+const { getCompressionSettings, updateCompressionSettings } =
+  await import("../../../src/lib/db/compression.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
+
+// `valueJson` is JSON text stored in the jsonb config row. The settings read keeps a 5s
+// in-process cache that raw writes do not clear; an empty update clears it.
+async function seedRow(key: string, valueJson: string) {
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('compression', $1, $2::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, valueJson]
+  );
+  await updateCompressionSettings({});
 }
 
 async function readSettings() {
-  const { getCompressionSettings } = await import("../../../src/lib/db/compression.ts");
   return getCompressionSettings();
 }
 
-test.after(async () => {
+before(async () => {
+  await ensureDbInitialized();
+});
+
+beforeEach(async () => {
+  await resetTestDb();
+  // resetTestDb does not clear the settings module's 5s cache; an empty update does.
+  await updateCompressionSettings({});
+});
+
+after(async () => {
   try {
-    const { resetDbInstance } = await import("../../../src/lib/db/core.ts");
-    resetDbInstance();
+    await resetDbInstance();
   } catch {
     /* core never loaded */
   }
@@ -45,11 +57,7 @@ test.after(async () => {
 });
 
 test("legacy preserveSystemPrompt=false (no mode row) derives whenNoCache", async () => {
-  const { db, resetDbInstance } = await freshCompressionDb();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('compression','preserveSystemPrompt','false')"
-  ).run();
-  resetDbInstance(); // new db object => TTL cache miss on the next read
+  await seedRow("preserveSystemPrompt", "false");
 
   const cfg = await readSettings();
   assert.equal(
@@ -69,23 +77,14 @@ test("legacy preserveSystemPrompt=false (no mode row) derives whenNoCache", asyn
 });
 
 test("fresh install (no override rows) defaults to always", async () => {
-  const { resetDbInstance } = await freshCompressionDb(); // wipes all compression rows
-  resetDbInstance();
-
   const cfg = await readSettings();
   assert.equal(cfg.preserveSystemPromptMode, "always", "fresh default mode is always");
   assert.equal(cfg.preserveSystemPrompt, true, "fresh default boolean is true");
 });
 
 test("an explicit mode row wins over the legacy boolean", async () => {
-  const { db, resetDbInstance } = await freshCompressionDb();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('compression','preserveSystemPrompt','false')"
-  ).run();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('compression','preserveSystemPromptMode','\"never\"')"
-  ).run();
-  resetDbInstance();
+  await seedRow("preserveSystemPrompt", "false");
+  await seedRow("preserveSystemPromptMode", '"never"');
 
   const cfg = await readSettings();
   assert.equal(cfg.preserveSystemPromptMode, "never", "an explicit stored mode row wins");

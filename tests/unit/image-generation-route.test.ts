@@ -10,6 +10,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "image-route-test-api
 process.env.GROK_SUBSCRIPTION_IMAGES_ENABLED = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -76,9 +77,7 @@ async function resetStorage() {
   globalThis.fetch = originalFetch;
   setPinnedFetchTestOverride(undefined);
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   // #6303 moved this route onto the shared unified catalog (getUnifiedModelsResponse),
   // which #6408 wrapped in a 1.5s TTL response cache keyed only by (prefix, isCodex
   // client, apiKey) — NOT by DB state. Without clearing it between test cases, a test
@@ -121,11 +120,11 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   setPinnedFetchTestOverride(undefined);
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -710,10 +709,13 @@ test("v1 image generation POST resolves proxy and executes with proxy context wh
 test("v1 image generation POST executes directly when proxy resolution fails gracefully", async () => {
   const connection = await seedConnection("openai", { apiKey: "image-proxy-fail-key" });
 
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('proxyConfig', 'keys', 'corrupt-json')"
-  ).run();
+  // A corrupt proxyConfig payload: jsonb cannot hold invalid JSON, so store a JSON value of the
+  // wrong shape. Proxy resolution must still fall back to a direct request.
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('proxyConfig', 'keys', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify("corrupt-json")]
+  );
 
   globalThis.fetch = async (url) => {
     const stringUrl = String(url);

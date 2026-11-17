@@ -51,8 +51,8 @@ const { FREE_MODEL_BUDGETS, computeFreeModelTotals } =
   await import("../../open-sse/config/freeModelCatalog.ts");
 const { getRadarCatalog, baselineToMergedEntries } = await import("../../src/lib/radar/index.ts");
 
-function resetState() {
-  core.resetDbInstance();
+async function resetState() {
+  await core.resetDbInstance();
   try {
     if (fs.existsSync(TEST_DATA_DIR)) {
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -62,7 +62,7 @@ function resetState() {
   }
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.RADAR_ENABLED;
-  clearAllFeatureFlagOverrides();
+  await clearAllFeatureFlagOverrides();
 }
 
 function mockGetRequest(url: string): Request {
@@ -79,7 +79,7 @@ function mockPostRequest(url: string, body?: unknown): Request {
 
 test("Radar inertia — flag off means zero behavioral delta", async (t) => {
   await t.test("all three /api/radar/* routes return 404 when the flag is off", async () => {
-    resetState();
+    await resetState();
 
     const { GET: catalogGet } = await import("../../src/app/api/radar/catalog/route.ts");
     const { POST: syncPost } = await import("../../src/app/api/radar/sync/route.ts");
@@ -113,8 +113,8 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
     );
   });
 
-  await t.test("RADAR_ENABLED resolves to 'false' with no DB override", () => {
-    resetState();
+  await t.test("RADAR_ENABLED resolves to 'false' with no DB override", async () => {
+    await resetState();
 
     assert.equal(
       isFeatureFlagEnabled("RADAR_ENABLED"),
@@ -122,7 +122,7 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
       "RADAR_ENABLED must resolve to disabled by default"
     );
 
-    const resolved = resolveAllFeatureFlags().find((f) => f.key === "RADAR_ENABLED");
+    const resolved = (await resolveAllFeatureFlags()).find((f) => f.key === "RADAR_ENABLED");
     assert.ok(resolved, "RADAR_ENABLED must be a registered feature flag definition");
     assert.equal(
       resolved!.effectiveValue,
@@ -138,11 +138,11 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
 
   await t.test(
     "getRadarCatalog() returns exactly the baseline — same count, all origin:baseline, cache never read",
-    () => {
-      resetState();
+    async () => {
+      await resetState();
 
       let cacheReadCount = 0;
-      const result = getRadarCatalog({
+      const result = await getRadarCatalog({
         getCache: () => {
           cacheReadCount += 1;
           throw new Error("cache must not be read when the flag is off");
@@ -190,7 +190,7 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
 
   await t.test(
     "computeFreeModelTotals() is unchanged with the Radar module imported alongside it",
-    () => {
+    async () => {
       // Radar é importado no escopo de módulo acima (getRadarCatalog,
       // baselineToMergedEntries). Se o Radar mutasse FREE_MODEL_BUDGETS ou
       // qualquer estado compartilhado do catálogo, os totais deixariam de
@@ -235,7 +235,7 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
       );
 
       // Re-running getRadarCatalog() (flag off) must not perturb the totals either.
-      getRadarCatalog();
+      await getRadarCatalog();
       const totalsAfter = computeFreeModelTotals();
       assert.deepEqual(
         totalsAfter,
@@ -246,8 +246,8 @@ test("Radar inertia — flag off means zero behavioral delta", async (t) => {
   );
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   delete process.env.RADAR_ENABLED;
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // A failed or invalid source must serve the persisted last_nodes instead of
 // emptying the pool. Tests use real 127.0.0.1 servers; loopback fetch targets
@@ -16,14 +17,14 @@ const core = await import("../../src/lib/db/core.ts");
 const proxies = await import("../../src/lib/db/proxies.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -38,16 +39,14 @@ const LAST_NODES = [
   },
 ];
 
-function seedOkSubscription(id: string, url: string) {
+async function seedOkSubscription(id: string, url: string) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_subscriptions
-        (id, name, url, enabled, mode, rule_providers, update_interval_minutes, status, error, last_nodes, last_error_at, consecutive_failures, created_at, updated_at)
-       VALUES (?, ?, ?, 1, 'global', NULL, 60, 'ok', NULL, ?, NULL, 0, ?, ?)`
-    )
-    .run(id, `sub-${id}`, url, JSON.stringify(LAST_NODES), now, now);
+  await getTestBackend().execute(
+    `INSERT INTO proxy_subscriptions
+      (id, name, url, enabled, mode, rule_providers, update_interval_minutes, status, error, last_nodes, last_error_at, consecutive_failures, created_at, updated_at)
+     VALUES ($1, $2, $3, true, 'global', NULL, 60, 'ok', NULL, $4::jsonb, NULL, 0, $5, $6)`,
+    [id, `sub-${id}`, url, JSON.stringify(LAST_NODES), now, now]
+  );
 }
 
 async function seedPool(id: string) {
@@ -62,11 +61,11 @@ async function seedPool(id: string) {
   });
 }
 
-function poolSize(id: string): number {
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ?")
-    .all(id) as Array<{ id: string }>;
+async function poolSize(id: string): Promise<number> {
+  const rows = await getTestBackend().query<{ id: string }>(
+    "SELECT id FROM proxy_registry WHERE subscription_id = $1",
+    [id]
+  );
   return rows.length;
 }
 
@@ -134,9 +133,9 @@ test("unrecognized content is refused, every recognized format passes", async ()
 // ─────────────────── Fetch failure serves last-good ───────────────────
 
 test("fetch failure keeps status error, serves last_nodes, pool untouched", async () => {
-  reset();
+  await reset();
   const url = await deadUrl();
-  seedOkSubscription("t1", url);
+  await seedOkSubscription("t1", url);
   await seedPool("t1");
   try {
     const res = await sub.syncSubscription("t1");
@@ -147,19 +146,19 @@ test("fetch failure keeps status error, serves last_nodes, pool untouched", asyn
     assert.ok(row);
     assert.deepEqual(row.lastNodes, LAST_NODES);
     assert.equal(row.consecutiveFailures, 1);
-    assert.equal(poolSize("t1"), 1);
+    assert.equal(await poolSize("t1"), 1);
   } finally {
-    reset();
+    await reset();
   }
 });
 
 // ─────────────────── Invalid content refused before sync ───────────────────
 
 test("invalid content is refused before sync, pool and last_nodes intact", async () => {
-  reset();
+  await reset();
   const server = await startBodyServer("not a subscription at all !!!");
   try {
-    seedOkSubscription("t2", server.url);
+    await seedOkSubscription("t2", server.url);
     await seedPool("t2");
     const res = await sub.syncSubscription("t2");
     assert.equal(res.status, "error");
@@ -169,30 +168,30 @@ test("invalid content is refused before sync, pool and last_nodes intact", async
     assert.ok(row);
     assert.ok((row.error ?? "").includes("NO_USABLE_NODES"));
     assert.deepEqual(row.lastNodes, LAST_NODES);
-    assert.equal(poolSize("t2"), 1);
+    assert.equal(await poolSize("t2"), 1);
   } finally {
     await server.close();
-    reset();
+    await reset();
   }
 });
 
 // ─────────────────── Consecutive-failure counter, pool intact ───────────────────
 
 test("repeated invalid syncs bump the counter, pool stays intact", async () => {
-  reset();
+  await reset();
   const server = await startBodyServer("still not a subscription !!!");
   try {
-    seedOkSubscription("t3", server.url);
+    await seedOkSubscription("t3", server.url);
     await seedPool("t3");
     await sub.syncSubscription("t3");
     assert.equal((await sub.getSubscriptionById("t3"))?.consecutiveFailures, 1);
-    assert.equal(poolSize("t3"), 1);
+    assert.equal(await poolSize("t3"), 1);
     await sub.syncSubscription("t3");
     assert.equal((await sub.getSubscriptionById("t3"))?.consecutiveFailures, 2);
-    assert.equal(poolSize("t3"), 1);
+    assert.equal(await poolSize("t3"), 1);
     assert.deepEqual((await sub.getSubscriptionById("t3"))?.lastNodes, LAST_NODES);
   } finally {
     await server.close();
-    reset();
+    await reset();
   }
 });

@@ -44,51 +44,52 @@ const target = (modelStr: string) => ({
 });
 const ids = (targets: ReturnType<typeof target>[]) => targets.map((t) => t.modelStr);
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetAllComboMetrics();
-  resetAllCircuitBreakers();
+  await resetAllCircuitBreakers();
   resetAllSemaphores();
 });
-test.after(() => {
+test.after(async () => {
   resetAllComboMetrics();
-  resetAllCircuitBreakers();
+  await resetAllCircuitBreakers();
   resetAllSemaphores();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (previousDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = previousDataDir;
 });
 
-test("#17289 WorkBuddy's exact DeepSeek Flash aliases have scoped vision evidence", () => {
+test("#17289 WorkBuddy's exact DeepSeek Flash aliases have scoped vision evidence", async () => {
   for (const id of ["workbuddy/global:deepseek-v4.1-flash", "workbuddy/cn:deepseek-v4.1-flash"]) {
-    assert.equal(getResolvedModelCapabilities(id).supportsVision, true, id);
+    assert.equal((await getResolvedModelCapabilities(id)).supportsVision, true, id);
   }
   assert.notEqual(
-    getResolvedModelCapabilities("workbuddy/global:unrelated-unknown-model-17289").supportsVision,
+    (await getResolvedModelCapabilities("workbuddy/global:unrelated-unknown-model-17289"))
+      .supportsVision,
     true
   );
   assert.notEqual(
-    getResolvedModelCapabilities("codearts/deepseek-v4.1-flash").supportsVision,
+    (await getResolvedModelCapabilities("codearts/deepseek-v4.1-flash")).supportsVision,
     true,
     "WorkBuddy evidence must not be globalized to a different gateway"
   );
 });
 
-test("#17289 confirmed vision takes precedence over unknown; explicit false stays blocked", () => {
+test("#17289 confirmed vision takes precedence over unknown; explicit false stays blocked", async () => {
   const known = target("workbuddy/global:deepseek-v4.1-flash");
   const unknown = target("workbuddy/unknown-model-17289");
   const blind = target("cmd/gpt-5.3-codex");
   assert.equal(deriveRequestCompatibilityRequirements(request).requiresVision, true);
-  assert.equal(getResolvedModelCapabilities(unknown.modelStr).supportsVision, null);
-  assert.equal(getResolvedModelCapabilities(blind.modelStr).supportsVision, false);
+  assert.equal((await getResolvedModelCapabilities(unknown.modelStr)).supportsVision, null);
+  assert.equal((await getResolvedModelCapabilities(blind.modelStr)).supportsVision, false);
   assert.deepEqual(
-    ids(filterTargetsByRequestCompatibility([unknown, blind, known], request, log)),
+    ids(await filterTargetsByRequestCompatibility([unknown, blind, known], request, log)),
     [known.modelStr, unknown.modelStr]
   );
-  assert.deepEqual(ids(filterTargetsByRequestCompatibility([unknown, blind], request, log)), [
+  assert.deepEqual(ids(await filterTargetsByRequestCompatibility([unknown, blind], request, log)), [
     unknown.modelStr,
   ]);
-  assert.deepEqual(ids(filterTargetsByRequestCompatibility([blind], request, log)), []);
+  assert.deepEqual(ids(await filterTargetsByRequestCompatibility([blind], request, log)), []);
 });
 
 test("#17289 priority dispatch reaches an unknown target if no confirmed target exists", async () => {
@@ -125,9 +126,9 @@ test("#17289 round-robin rotates within the confirmed tier; unknown stays last r
   // A different provider than the confirmed one: a quota/outage on one provider
   // skips its siblings for the rest of the request (#1731), which would mask the fallback.
   const unknownOtherProvider = "groq/llama-3.1-8b-instant";
-  assert.equal(getResolvedModelCapabilities(confirmed).supportsVision, true);
-  assert.equal(getResolvedModelCapabilities(unknown).supportsVision, null);
-  assert.equal(getResolvedModelCapabilities(unknownOtherProvider).supportsVision, null);
+  assert.equal((await getResolvedModelCapabilities(confirmed)).supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities(unknown)).supportsVision, null);
+  assert.equal((await getResolvedModelCapabilities(unknownOtherProvider)).supportsVision, null);
   const run = async (name: string, models: string[], failing: Set<string>) => {
     const calls: string[] = [];
     const combo = { name, strategy: "round-robin", models, config: { maxRetries: 0 } };
@@ -206,7 +207,7 @@ test("#17289: unknown-vision fallback reports actionable upstream attachment rej
     const attempted: string[] = [];
     const model = "workbuddy/unconfirmed-upstream-17289";
     assert.equal(
-      getResolvedModelCapabilities(model).supportsVision,
+      (await getResolvedModelCapabilities(model)).supportsVision,
       null,
       "fixture must have an unknown-vision model"
     );
@@ -259,7 +260,7 @@ test("#17289: unknown-vision fallback reports actionable upstream attachment rej
 test("#17289: an empty upstream 404 identifies the attempted model in combo diagnostics", async () => {
   const model = "workbuddy/unconfirmed-404-17289";
   assert.equal(
-    getResolvedModelCapabilities(model).supportsVision,
+    (await getResolvedModelCapabilities(model)).supportsVision,
     null,
     "fixture must have an unknown-vision model"
   );
@@ -293,12 +294,12 @@ test("#17289: mixed multi-model vision fallback preserves both upstream failure 
   const confirmed = "mistral/pixtral-12b-latest";
   const unknown = "workbuddy/unconfirmed-mixed-errors-17289";
   assert.equal(
-    getResolvedModelCapabilities(confirmed).supportsVision,
+    (await getResolvedModelCapabilities(confirmed)).supportsVision,
     true,
     "fixture must have a confirmed vision model"
   );
   assert.equal(
-    getResolvedModelCapabilities(unknown).supportsVision,
+    (await getResolvedModelCapabilities(unknown)).supportsVision,
     null,
     "fixture must have an unknown-vision model"
   );

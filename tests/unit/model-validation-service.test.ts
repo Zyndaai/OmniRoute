@@ -10,7 +10,7 @@ import { updateSettings } from "../../src/lib/db/settings.ts";
 import { upsertSessionAccountAffinity } from "../../src/lib/db/sessionAccountAffinity.ts";
 import { POST } from "../../src/app/api/provider-models/validate-and-add/route.ts";
 import { getCustomModels } from "../../src/lib/db/models.ts";
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 import { createApiKey } from "../../src/lib/db/apiKeys.ts";
 import {
   acquireExclusiveConnectionLease,
@@ -215,7 +215,7 @@ test("plugins activated during dispatch cannot run or produce a receipt", async 
 });
 
 test("persisted active plugins are rejected before lazy plugin loading", async () => {
-  insertPlugin({
+  await insertPlugin({
     id: "validation-persisted",
     name: "validation-persisted",
     version: "1.0.0",
@@ -236,31 +236,37 @@ test("persisted active plugins are rejected before lazy plugin loading", async (
       false
     );
   } finally {
-    deletePlugin("validation-persisted");
+    await deletePlugin("validation-persisted");
   }
 });
 
-test("enabled compression is never resolved by strict validation; exactly three native sends remain", async (context) => {
-  const db = getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('compression', 'enabled', 'true')"
-  ).run();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('compression', 'defaultMode', '\"ultra\"')"
-  ).run();
+test("enabled compression is never resolved by strict validation; exactly three native sends remain", async () => {
+  const backend = getTestBackend();
+  await backend.execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES
+       ('compression', 'enabled', 'true'::jsonb),
+       ('compression', 'defaultMode', '"ultra"'::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`
+  );
+  // Count the config reads of the compression namespace; the validation path must issue none.
+  const counted = backend as unknown as Record<
+    "query" | "queryOne",
+    (sql: string, ...rest: unknown[]) => Promise<unknown>
+  >;
+  const originals = { query: counted.query, queryOne: counted.queryOne };
   let compressionReads = 0;
-  const prepare = db.prepare.bind(db);
-  const spy = context.mock.method(db, "prepare", (sql: string) => {
-    const statement = prepare(sql);
-    if (sql === "SELECT key, value FROM key_value WHERE namespace = ?") {
-      const all = statement.all.bind(statement);
-      context.mock.method(statement, "all", (...parameters: unknown[]) => {
-        if (parameters[0] === "compression") compressionReads++;
-        return all(...parameters);
-      });
-    }
-    return statement;
-  });
+  const countRead = (sql: string, params: unknown[] | undefined) => {
+    if (/FROM config_entries/.test(String(sql)) && params?.[0] === "compression")
+      compressionReads++;
+  };
+  counted.query = function (sql: string, ...rest: unknown[]) {
+    countRead(sql, rest[0] as unknown[] | undefined);
+    return originals.query.call(backend, sql, ...rest);
+  };
+  counted.queryOne = function (sql: string, ...rest: unknown[]) {
+    countRead(sql, rest[0] as unknown[] | undefined);
+    return originals.queryOne.call(backend, sql, ...rest);
+  };
   try {
     const input = await fixture("compression-isolated-proof");
     const result = await validateAndAddModel(input, new AbortController().signal);
@@ -268,16 +274,17 @@ test("enabled compression is never resolved by strict validation; exactly three 
     assert.equal(compressionReads, 0, "compression settings must not be resolved or prewarmed");
     assert.equal(executor.calls.length, 3);
   } finally {
-    spy.mock.restore();
-    db.prepare(
-      "DELETE FROM key_value WHERE namespace = 'compression' AND key IN ('enabled', 'defaultMode')"
-    ).run();
+    counted.query = originals.query;
+    counted.queryOne = originals.queryOne;
+    await backend.execute(
+      "DELETE FROM config_entries WHERE namespace = 'compression' AND key IN ('enabled', 'defaultMode')"
+    );
   }
 });
 
 test("three fake dispatcher proofs precede persistence and return an exact receipt", async () => {
   const sibling = await fixture("sibling");
-  upsertSessionAccountAffinity(
+  await upsertSessionAccountAffinity(
     "unrelated-session",
     "openai",
     sibling.connectionId,
@@ -363,7 +370,7 @@ test("an ACTIVE exclusive lease prevents validation before dispatch or persisten
   const input = await fixture("active-managed-proof");
   const leaseOwnerId = `vlo_${"A".repeat(43)}`;
   const apiKeyId = "validation-active-owner";
-  const claimed = acquireExclusiveConnectionLease({
+  const claimed = await acquireExclusiveConnectionLease({
     leaseOwnerId,
     apiKeyId,
     provider: input.provider,
@@ -381,7 +388,7 @@ test("an ACTIVE exclusive lease prevents validation before dispatch or persisten
       false
     );
   } finally {
-    releaseExclusiveConnectionLease({
+    await releaseExclusiveConnectionLease({
       leaseOwnerId,
       apiKeyId,
       generation: claimed.lease.generation,
@@ -395,7 +402,7 @@ test("lease acquired during the first proof prevents subsequent sends and persis
   const apiKeyId = "validation-late-owner";
   let generation: number;
   executor.onDispatch = async () => {
-    const claimed = acquireExclusiveConnectionLease({
+    const claimed = await acquireExclusiveConnectionLease({
       leaseOwnerId,
       apiKeyId,
       provider: input.provider,
@@ -415,7 +422,7 @@ test("lease acquired during the first proof prevents subsequent sends and persis
       false
     );
   } finally {
-    if (generation) releaseExclusiveConnectionLease({ leaseOwnerId, apiKeyId, generation });
+    if (generation) await releaseExclusiveConnectionLease({ leaseOwnerId, apiKeyId, generation });
   }
 });
 

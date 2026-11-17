@@ -24,10 +24,12 @@ const catalogUtils =
   await import("../../src/app/(dashboard)/dashboard/models/modelCatalogUtils.ts");
 const visibilityUtils =
   await import("../../src/app/(dashboard)/dashboard/models/catalogVisibility.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
@@ -38,7 +40,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -83,7 +85,7 @@ async function seedClaude() {
 test("includeHidden=1 keeps a hidden model, tagged hidden, with the stored key to unhide", async () => {
   await seedClaude();
   // Hidden on the provider page whose route param was the alias "cc".
-  mergeModelCompatOverride("cc", "claude-opus-5", { isHidden: true, modality: "chat" });
+  await mergeModelCompatOverride("cc", "claude-opus-5", { isHidden: true, modality: "chat" });
 
   const withHidden = await fetchManagementCatalog("?includeHidden=1");
   const hiddenRow = withHidden.find((model) => model.id === "cc/claude-opus-5");

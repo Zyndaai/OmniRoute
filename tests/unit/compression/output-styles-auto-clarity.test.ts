@@ -61,12 +61,12 @@ async function styleInstructionReachesUpstream(
       strategy: "priority",
       models: ["openai/gpt-4o-mini"],
     });
-    const compressionCombo = compressionCombosDb.createCompressionCombo({
+    const compressionCombo = await compressionCombosDb.createCompressionCombo({
       pipeline: [{ engine: "caveman", intensity: "lite" }],
       outputMode: true,
     });
     assert.equal(
-      compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
+      await compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
       true
     );
   }

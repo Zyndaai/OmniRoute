@@ -11,18 +11,18 @@ import assert from "node:assert/strict";
 
 const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
-const { buildGeminiThoughtSignatureKey, storeGeminiThoughtSignature } =
+const { buildGeminiThoughtSignatureKey, storeGeminiThoughtSignature, getGeminiThoughtSignature } =
   await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 
 type Part = Record<string, unknown>;
 
 const PNG = { inlineData: { mimeType: "image/png", data: "iVBORw0K" } };
 
-function convert(ns: string, userContent: unknown[], { signed = true } = {}) {
+async function convert(ns: string, userContent: unknown[], { signed = true } = {}) {
   if (signed) {
-    storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_img"), "SIG_IMG");
+    await storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_img"), "SIG_IMG");
   }
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [
@@ -36,7 +36,16 @@ function convert(ns: string, userContent: unknown[], { signed = true } = {}) {
       ],
     },
     false,
-    { _signatureNamespace: ns }
+    {
+      _signatureNamespace: ns,
+      // The request translator is synchronous; the signature store is read ahead of it.
+      _thoughtSignatures: new Map([
+        [
+          buildGeminiThoughtSignatureKey(ns, "tu_img"),
+          await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_img")),
+        ],
+      ]),
+    }
   );
   return result.contents.flatMap((c) => c.parts as Part[]);
 }
@@ -50,8 +59,8 @@ const imageResult = (text?: string) => ({
   ],
 });
 
-test("a tool_result image becomes inlineData, not base64 text", () => {
-  const parts = convert("tool-image-signed", [imageResult("a.png (1x1)")]);
+test("a tool_result image becomes inlineData, not base64 text", async () => {
+  const parts = await convert("tool-image-signed", [imageResult("a.png (1x1)")]);
 
   assert.deepEqual(parts.slice(-2), [
     {
@@ -61,8 +70,8 @@ test("a tool_result image becomes inlineData, not base64 text", () => {
   ]);
 });
 
-test("text that follows an image tool_result is folded into the response; the image still follows it", () => {
-  const parts = convert("tool-image-trailing-text", [
+test("text that follows an image tool_result is folded into the response; the image still follows it", async () => {
+  const parts = await convert("tool-image-trailing-text", [
     imageResult(),
     { type: "text", text: "<system-reminder>keep going</system-reminder>" },
   ]);
@@ -89,8 +98,8 @@ test("text that follows an image tool_result is folded into the response; the im
   );
 });
 
-test("signature-less history keeps the image out of the context text", () => {
-  const parts = convert("tool-image-unsigned", [imageResult("a.png (1x1)")], { signed: false });
+test("signature-less history keeps the image out of the context text", async () => {
+  const parts = await convert("tool-image-unsigned", [imageResult("a.png (1x1)")], { signed: false });
 
   assert.ok(!JSON.stringify(parts.filter((p) => p.text)).includes("iVBORw0K"));
   assert.deepEqual(parts.at(-1), PNG);

@@ -50,8 +50,8 @@ before(async () => {
   await updateSettings({ requireLogin: false });
 });
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -75,9 +75,9 @@ function seedFile(apiKeyId: string, label: string) {
   });
 }
 
-function seedBatch(apiKeyId: string, label: string) {
-  const file = seedFile(apiKeyId, `${label}-input`);
-  const batch = createBatch({
+async function seedBatch(apiKeyId: string, label: string) {
+  const file = await seedFile(apiKeyId, `${label}-input`);
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -117,7 +117,7 @@ async function getBatchVia(headers: Headers, id: string) {
 describe("#13882 — /api/files management sibling ownership scoping", () => {
   it("anonymous caller (requireLogin=false, no credentials) cannot list a foreign file", async () => {
     const victim = await createApiKey("13882-files-victim-a", "machine-13882-files-a", []);
-    const victimFile = seedFile(victim.id, "anon-list-victim");
+    const victimFile = await seedFile(victim.id, "anon-list-victim");
 
     const { res, body } = await listFilesVia({});
     const leaked = res.status === 200 && (body.files?.some((f) => f.id === victimFile.id) ?? false);
@@ -127,7 +127,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
   it("a foreign API key cannot list another key's file", async () => {
     const owner = await createApiKey("13882-files-owner-b", "machine-13882-files-ob", []);
     const foreign = await createApiKey("13882-files-foreign-b", "machine-13882-files-fb", []);
-    const ownerFile = seedFile(owner.id, "foreign-list-victim");
+    const ownerFile = await seedFile(owner.id, "foreign-list-victim");
 
     const { res, body } = await listFilesVia({ Authorization: `Bearer ${foreign.key}` });
     assert.strictEqual(res.status, 200);
@@ -140,7 +140,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
 
   it("the owning API key can still list its own file", async () => {
     const owner = await createApiKey("13882-files-owner-c", "machine-13882-files-oc", []);
-    const ownedFile = seedFile(owner.id, "owner-list-self");
+    const ownedFile = await seedFile(owner.id, "owner-list-self");
 
     const { res, body } = await listFilesVia({ Authorization: `Bearer ${owner.key}` });
     assert.strictEqual(res.status, 200);
@@ -149,7 +149,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
 
   it("a dashboard session (instance operator) still sees every tenant's file", async () => {
     const someKey = await createApiKey("13882-files-owner-d", "machine-13882-files-od", []);
-    const someFile = seedFile(someKey.id, "session-list-visible");
+    const someFile = await seedFile(someKey.id, "session-list-visible");
 
     const { res, body } = await listFilesVia({ cookie: await sessionCookie() });
     assert.strictEqual(res.status, 200);
@@ -158,7 +158,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
 
   it("anonymous caller cannot download a foreign file's content", async () => {
     const victim = await createApiKey("13882-files-victim-e", "machine-13882-files-ve", []);
-    const victimFile = seedFile(victim.id, "anon-content-victim");
+    const victimFile = await seedFile(victim.id, "anon-content-victim");
 
     const res = await getFileContentVia({}, victimFile.id);
     assert.notStrictEqual(res.status, 200, "anonymous caller must not download a foreign file");
@@ -167,7 +167,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
   it("a foreign API key cannot download another key's file content", async () => {
     const owner = await createApiKey("13882-files-owner-f", "machine-13882-files-of", []);
     const foreign = await createApiKey("13882-files-foreign-f", "machine-13882-files-ff", []);
-    const ownerFile = seedFile(owner.id, "foreign-content-victim");
+    const ownerFile = await seedFile(owner.id, "foreign-content-victim");
 
     const res = await getFileContentVia({ Authorization: `Bearer ${foreign.key}` }, ownerFile.id);
     assert.notStrictEqual(res.status, 200, "a foreign key must not download another key's file");
@@ -175,7 +175,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
 
   it("the owning API key can still download its own file content", async () => {
     const owner = await createApiKey("13882-files-owner-g", "machine-13882-files-og", []);
-    const ownedFile = seedFile(owner.id, "owner-content-self");
+    const ownedFile = await seedFile(owner.id, "owner-content-self");
 
     const res = await getFileContentVia({ Authorization: `Bearer ${owner.key}` }, ownedFile.id);
     assert.strictEqual(res.status, 200);
@@ -185,7 +185,7 @@ describe("#13882 — /api/files management sibling ownership scoping", () => {
 describe("#13882 — /api/batches management sibling ownership scoping", () => {
   it("anonymous caller (requireLogin=false, no credentials) cannot list a foreign batch", async () => {
     const victim = await createApiKey("13882-batches-victim-a", "machine-13882-batches-a", []);
-    const { batch: victimBatch } = seedBatch(victim.id, "anon-list-victim");
+    const { batch: victimBatch } = await seedBatch(victim.id, "anon-list-victim");
 
     const { res, body } = await listBatchesVia({});
     const leaked =
@@ -196,7 +196,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
   it("a foreign API key cannot list another key's batch", async () => {
     const owner = await createApiKey("13882-batches-owner-b", "machine-13882-batches-ob", []);
     const foreign = await createApiKey("13882-batches-foreign-b", "machine-13882-batches-fb", []);
-    const { batch: ownerBatch } = seedBatch(owner.id, "foreign-list-victim");
+    const { batch: ownerBatch } = await seedBatch(owner.id, "foreign-list-victim");
 
     const { res, body } = await listBatchesVia({ Authorization: `Bearer ${foreign.key}` });
     assert.strictEqual(res.status, 200);
@@ -209,7 +209,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
 
   it("the owning API key can still list its own batch", async () => {
     const owner = await createApiKey("13882-batches-owner-c", "machine-13882-batches-oc", []);
-    const { batch: ownedBatch } = seedBatch(owner.id, "owner-list-self");
+    const { batch: ownedBatch } = await seedBatch(owner.id, "owner-list-self");
 
     const { res, body } = await listBatchesVia({ Authorization: `Bearer ${owner.key}` });
     assert.strictEqual(res.status, 200);
@@ -218,7 +218,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
 
   it("a dashboard session (instance operator) still sees every tenant's batch", async () => {
     const someKey = await createApiKey("13882-batches-owner-d", "machine-13882-batches-od", []);
-    const { batch: someBatch } = seedBatch(someKey.id, "session-list-visible");
+    const { batch: someBatch } = await seedBatch(someKey.id, "session-list-visible");
 
     const { res, body } = await listBatchesVia({ cookie: await sessionCookie() });
     assert.strictEqual(res.status, 200);
@@ -227,7 +227,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
 
   it("anonymous caller cannot read a foreign batch's metadata", async () => {
     const victim = await createApiKey("13882-batches-victim-e", "machine-13882-batches-ve", []);
-    const { batch: victimBatch } = seedBatch(victim.id, "anon-getid-victim");
+    const { batch: victimBatch } = await seedBatch(victim.id, "anon-getid-victim");
 
     const res = await getBatchVia({}, victimBatch.id);
     assert.notStrictEqual(res.status, 200, "anonymous caller must not read a foreign batch");
@@ -236,7 +236,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
   it("a foreign API key cannot read another key's batch metadata", async () => {
     const owner = await createApiKey("13882-batches-owner-f", "machine-13882-batches-of", []);
     const foreign = await createApiKey("13882-batches-foreign-f", "machine-13882-batches-ff", []);
-    const { batch: ownerBatch } = seedBatch(owner.id, "foreign-getid-victim");
+    const { batch: ownerBatch } = await seedBatch(owner.id, "foreign-getid-victim");
 
     const res = await getBatchVia({ Authorization: `Bearer ${foreign.key}` }, ownerBatch.id);
     assert.notStrictEqual(res.status, 200, "a foreign key must not read another key's batch");
@@ -244,7 +244,7 @@ describe("#13882 — /api/batches management sibling ownership scoping", () => {
 
   it("the owning API key can still read its own batch metadata", async () => {
     const owner = await createApiKey("13882-batches-owner-g", "machine-13882-batches-og", []);
-    const { batch: ownedBatch } = seedBatch(owner.id, "owner-getid-self");
+    const { batch: ownedBatch } = await seedBatch(owner.id, "owner-getid-self");
 
     const res = await getBatchVia({ Authorization: `Bearer ${owner.key}` }, ownedBatch.id);
     assert.strictEqual(res.status, 200);

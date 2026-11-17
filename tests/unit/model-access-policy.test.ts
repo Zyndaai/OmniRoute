@@ -22,7 +22,7 @@ test.after(async () => {
     if (initializedSqlite) {
       // Close a leaked handle before cleanup if a future import adds a DB dependency.
       const { resetDbInstance } = await import("../../src/lib/db/core.ts");
-      resetDbInstance();
+      await resetDbInstance();
     }
   } finally {
     if (previousDataDir === undefined) delete process.env.DATA_DIR;

@@ -21,13 +21,16 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-13876-enf-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "quota-13876-enforce-secret";
 
 const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const plansDb = await import("../../src/lib/db/providerPlans.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -38,11 +41,21 @@ test("multi-connection pool: a cap set on the primary connection's plan is enfor
 
   const PROVIDER = "quota-13876-enforce-test-provider"; // not in the built-in catalog on purpose
 
-  poolsDb.createPool({
+  // Pool and plan rows reference provider connections and the API key by foreign key.
+  for (const id of ["conn-primary-2", "conn-secondary-2"]) {
+    await getTestBackend().execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [id, PROVIDER]
+    );
+  }
+  const key = await apiKeysDb.createApiKey("quota-13876-enforce-key", "machine-13876-enforce");
+  const apiKeyId = key.id as string;
+
+  await poolsDb.createPool({
     connectionId: "conn-primary-2",
     connectionIds: ["conn-primary-2", "conn-secondary-2"],
     name: "Repro Pool #13876 (enforce)",
-    allocations: [{ apiKeyId: "key-shared-2", weight: 100, policy: "hard" }],
+    allocations: [{ apiKeyId, weight: 100, policy: "hard" }],
   });
 
   // The operator sets a small daily token cap via the wizard — only the
@@ -50,7 +63,7 @@ test("multi-connection pool: a cap set on the primary connection's plan is enfor
   // connections, so the effective (global) limit is limit × accountCount —
   // set the per-account limit small enough that a single request still
   // saturates the whole pool.
-  plansDb.upsertPlan(
+  await plansDb.upsertPlan(
     "conn-primary-2",
     PROVIDER,
     [{ unit: "tokens", window: "daily", limit: 100 }],
@@ -60,7 +73,7 @@ test("multi-connection pool: a cap set on the primary connection's plan is enfor
   // A request served via the secondary connection consumes past the
   // effective (accountCount-multiplied) cap of 200 tokens.
   await recordConsumption({
-    apiKeyId: "key-shared-2",
+    apiKeyId,
     connectionId: "conn-secondary-2",
     provider: PROVIDER,
     cost: { tokens: 1500, usd: 0, requests: 1 },
@@ -71,7 +84,7 @@ test("multi-connection pool: a cap set on the primary connection's plan is enfor
   // plan — matching what the dashboard (which reads via pool.connectionId)
   // shows as consumed.
   const decision = await enforceQuotaShare({
-    apiKeyId: "key-shared-2",
+    apiKeyId,
     connectionId: "conn-secondary-2",
     provider: PROVIDER,
   });

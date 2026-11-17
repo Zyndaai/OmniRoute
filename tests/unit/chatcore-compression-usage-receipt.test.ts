@@ -24,13 +24,13 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("attaches the usage receipt only after pendingWrite resolves", async () => {
-  insertCompressionAnalyticsRow({
+  await insertCompressionAnalyticsRow({
     timestamp: new Date().toISOString(),
     mode: "test",
     original_tokens: 100,
@@ -56,7 +56,7 @@ test("attaches the usage receipt only after pendingWrite resolves", async () => 
   await tick(80);
   assert.equal(pendingResolved, true, "pendingWrite should have resolved first");
 
-  const summary = getCompressionAnalyticsSummary();
+  const summary = await getCompressionAnalyticsSummary();
   assert.equal(summary.realUsage.requestsWithReceipts, 1);
   assert.equal(summary.realUsage.promptTokens, 10);
   assert.equal(summary.realUsage.completionTokens, 5);
@@ -70,6 +70,6 @@ test("swallows the no-matching-row case without throwing or recording a receipt"
     })
   );
   await tick(40);
-  const summary = getCompressionAnalyticsSummary();
+  const summary = await getCompressionAnalyticsSummary();
   assert.equal(summary.realUsage.requestsWithReceipts, 1);
 });

@@ -39,8 +39,8 @@ test("#11773 cerebras catalog rows are one-time signup credits, not a hard-stop 
   }
 });
 
-test("#11773 cerebras is not classified as the free routing tier", () => {
-  clearTierCache();
+test("#11773 cerebras is not classified as the free routing tier", async () => {
+  await clearTierCache();
   const result = classifyTier("cerebras", "zai-glm-4.7");
   assert.notEqual(result.tier, PROVIDER_TIER.FREE);
 });

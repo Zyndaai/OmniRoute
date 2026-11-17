@@ -21,8 +21,8 @@ const caps: Record<string, { supportsVision: boolean | null; reasoning: boolean 
 };
 const resolve = (m: string) => caps[m] ?? { supportsVision: null, reasoning: false };
 
-test("#3979 default projection is unchanged — no capabilities field (preserves #2300)", () => {
-  const out = projectCombo({
+test("#3979 default projection is unchanged — no capabilities field (preserves #2300)", async () => {
+  const out = await projectCombo({
     name: "c",
     strategy: "priority",
     models: [{ kind: "model", model: "openai/gpt-5" }],
@@ -30,8 +30,8 @@ test("#3979 default projection is unchanged — no capabilities field (preserves
   assert.equal("capabilities" in (out ?? {}), false);
 });
 
-test("#3979 combo where ALL members are multimodal + reasoning advertises both", () => {
-  const out = projectCombo(
+test("#3979 combo where ALL members are multimodal + reasoning advertises both", async () => {
+  const out = await projectCombo(
     {
       name: "c",
       strategy: "priority",
@@ -46,8 +46,8 @@ test("#3979 combo where ALL members are multimodal + reasoning advertises both",
   assert.deepEqual(out?.capabilities, { multimodal: true, reasoning: true, caching: true });
 });
 
-test("#3979 one non-vision member drops multimodal but keeps reasoning", () => {
-  const result = computeComboCapabilities(
+test("#3979 one non-vision member drops multimodal but keeps reasoning", async () => {
+  const result = await computeComboCapabilities(
     {
       models: [
         { kind: "model", model: "openai/gpt-5" },
@@ -59,16 +59,16 @@ test("#3979 one non-vision member drops multimodal but keeps reasoning", () => {
   assert.deepEqual(result, { multimodal: false, reasoning: true, caching: false });
 });
 
-test("#3979 a non-reasoning, non-vision member drops both", () => {
-  const result = computeComboCapabilities(
+test("#3979 a non-reasoning, non-vision member drops both", async () => {
+  const result = await computeComboCapabilities(
     { models: [{ kind: "model", model: "meta/llama-text" }] },
     resolve
   );
   assert.deepEqual(result, { multimodal: false, reasoning: false, caching: false });
 });
 
-test("#3979 a nested combo-ref is unprovable → drops multimodal/reasoning", () => {
-  const result = computeComboCapabilities(
+test("#3979 a nested combo-ref is unprovable → drops multimodal/reasoning", async () => {
+  const result = await computeComboCapabilities(
     {
       models: [
         { kind: "model", model: "openai/gpt-5" },
@@ -81,12 +81,12 @@ test("#3979 a nested combo-ref is unprovable → drops multimodal/reasoning", ()
   assert.equal(result.reasoning, false);
 });
 
-test("#3979 caching reflects the combo's explicit context_cache_protection only", () => {
-  const on = computeComboCapabilities(
+test("#3979 caching reflects the combo's explicit context_cache_protection only", async () => {
+  const on = await computeComboCapabilities(
     { context_cache_protection: true, models: [{ kind: "model", model: "openai/gpt-5" }] },
     resolve
   );
-  const off = computeComboCapabilities(
+  const off = await computeComboCapabilities(
     { models: [{ kind: "model", model: "openai/gpt-5" }] },
     resolve
   );
@@ -94,8 +94,8 @@ test("#3979 caching reflects the combo's explicit context_cache_protection only"
   assert.equal(off.caching, false);
 });
 
-test("#3979 unknown-capability model (null) is not advertised as multimodal", () => {
-  const result = computeComboCapabilities(
+test("#3979 unknown-capability model (null) is not advertised as multimodal", async () => {
+  const result = await computeComboCapabilities(
     { models: [{ kind: "model", model: "vendor/uncatalogued" }] },
     resolve
   );

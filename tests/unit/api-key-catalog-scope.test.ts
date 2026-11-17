@@ -24,18 +24,18 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const { API_KEY_COLUMN_FALLBACKS } = await import("../../src/lib/db/apiKeyColumnFallbacks.ts");
 const { parseCatalogScope } = await import("../../src/lib/db/apiKeys/rowParsers.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
 
 const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf8");
 
 test("R1: the column defaults to 'all' and constrains its values", () => {
-  const column = API_KEY_COLUMN_FALLBACKS.find((c: { name: string }) => c.name === "catalog_scope");
-  assert.ok(column, "api_keys must gain a catalog_scope column");
-  assert.match(column.definition, /NOT NULL DEFAULT 'all'/, "default must be 'all'");
+  const schemaSql = read("src/lib/db/backends/postgres/migrations/0001_init.sql");
+  const line = schemaSql.split("\n").find((l) => /^\s*catalog_scope\s/.test(l));
+  assert.ok(line, "api_keys must gain a catalog_scope column");
+  assert.match(line, /NOT NULL DEFAULT 'all'/, "default must be 'all'");
   assert.match(
-    column.definition,
+    line,
     /CHECK \(catalog_scope IN \('all', 'combos', 'models'\)\)/,
     "the column must reject values outside the enum"
   );

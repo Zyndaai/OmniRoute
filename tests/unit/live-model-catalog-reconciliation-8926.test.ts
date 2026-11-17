@@ -11,6 +11,8 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "live-catalog-8926-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { addCustomModel, replaceSyncedAvailableModelsForConnection } =
   await import("../../src/lib/db/models.ts");
 const { getActiveSyncedCatalog, getAllActiveSyncedModels } =
@@ -27,20 +29,24 @@ const LIVE_MODEL = "gpt-5.6-sol";
 // Present in both Copilot static catalogs, but absent from this connection's live discovery.
 const PHANTOM_MODEL = "claude-opus-4.8-fast";
 
-function seedProviderCatalog(
+async function seedProviderCatalog(
   providerId: string,
   connectionId: string,
   modelIds: string[],
   isActive = true
 ) {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
 
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
+  await db().execute(
+    `INSERT INTO provider_connections
        (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(connectionId, providerId, isActive ? 1 : 0, now, now);
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET
+       provider = EXCLUDED.provider,
+       is_active = EXCLUDED.is_active,
+       updated_at = EXCLUDED.updated_at`,
+    [connectionId, providerId, isActive, now, now]
+  );
 
   return replaceSyncedAvailableModelsForConnection(
     providerId,
@@ -58,7 +64,7 @@ function seedActiveLiveCatalog() {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
@@ -70,8 +76,8 @@ test.beforeEach(async () => {
   await seedActiveLiveCatalog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -411,7 +411,7 @@ test("Gemini stream: stores thoughtSignature when signature-only part precedes f
     .delta.tool_calls[0];
   assert.equal(toolCall.id, "call_split_1");
   assert.equal(state.pendingThoughtSignature, null);
-  assert.equal(resolveGeminiThoughtSignature("conn-antigravity-1:call_split_1"), "sig-split-1");
+  assert.equal(await resolveGeminiThoughtSignature("conn-antigravity-1:call_split_1"), "sig-split-1");
 });
 
 test("Gemini stream: converts textual Tool call block to structured tool_calls", () => {

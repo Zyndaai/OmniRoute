@@ -20,22 +20,22 @@ import path from "path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-8656-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Import db core first to allow reset
 const core = await import("../../src/lib/db/core.ts");
 const { upsertAgentBridgeState } = await import("../../src/lib/db/agentBridgeState.ts");
 const { setMappings } = await import("../../src/lib/db/agentBridgeMappings.ts");
 const { replaceUserBypassPatterns } = await import("../../src/lib/db/agentBridgeBypass.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
 test.after(() => {
@@ -51,7 +51,7 @@ test.after(() => {
 test("GET /state: returns agentStates array with dns_enabled from DB (#8656)", async () => {
   // Arrange: simulate the user clicking "Start DNS" for claude-code, which
   // writes dns_enabled=true to the DB via agents/[id]/dns/route.ts:72
-  upsertAgentBridgeState({ agent_id: "claude-code", dns_enabled: true });
+  await upsertAgentBridgeState({ agent_id: "claude-code", dns_enabled: true });
 
   // Dynamic import to bypass module cache after DB reset
   const { GET } = await import(
@@ -82,7 +82,7 @@ test("GET /state: returns agentStates array with dns_enabled from DB (#8656)", a
 
 test("GET /state: returns mappings object keyed by agentId (#8656)", async () => {
   // Arrange: simulate the setup wizard configuring model mappings for claude-code
-  setMappings("claude-code", [{ source: "claude-sonnet-4", target: "openai/gpt-4o" }]);
+  await setMappings("claude-code", [{ source: "claude-sonnet-4", target: "openai/gpt-4o" }]);
 
   const { GET } = await import(
     "../../src/app/api/tools/agent-bridge/state/route.ts?t=" + Date.now()
@@ -102,7 +102,7 @@ test("GET /state: returns mappings object keyed by agentId (#8656)", async () =>
 
 test("GET /state: returns bypassPatterns array (#8656)", async () => {
   // Arrange: simulate the user configuring custom bypass patterns
-  replaceUserBypassPatterns(["*.internal", "localhost"]);
+  await replaceUserBypassPatterns(["*.internal", "localhost"]);
 
   const { GET } = await import(
     "../../src/app/api/tools/agent-bridge/state/route.ts?t=" + Date.now()
@@ -169,7 +169,7 @@ test("GET /state: maintains backward compat (server + agents keys) (#8656)", asy
 
 test("GET /state: agentStates entries have expected shape (#8656)", async () => {
   // Arrange: set all fields for antigravity to ensure they're mapped through
-  upsertAgentBridgeState({
+  await upsertAgentBridgeState({
     agent_id: "antigravity",
     dns_enabled: true,
     cert_trusted: false,

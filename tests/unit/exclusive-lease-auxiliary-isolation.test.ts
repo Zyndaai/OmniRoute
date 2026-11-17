@@ -3,10 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lease-auxiliary-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "exclusive-lease-auxiliary-test-secret";
 
 let externalCalls = 0;
@@ -49,7 +49,7 @@ async function markLeaseOnly(connectionId: string): Promise<void> {
 }
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -61,9 +61,9 @@ async function resetStorage(): Promise<void> {
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -88,7 +88,7 @@ test("translator send accepts a FREE lease-capable connection and attempts provi
 
 test("translator send excludes an ACTIVE leased connection before provider fetch", async () => {
   const connection = await seedConnection("translator-active-lease");
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -135,7 +135,7 @@ test("translator request preview materializes a FREE lease-capable credential", 
 
 test("translator request preview never materializes an ACTIVE leased credential", async () => {
   const connection = await seedConnection("translator-preview-active-lease");
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -174,7 +174,7 @@ test("browser-login start accepts FREE lease-capable connection past isolation c
 
 test("browser-login start rejects ACTIVE leased connections before Docker or provider access", async () => {
   const connection = await seedConnection("vnc-active-lease-start");
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -207,7 +207,7 @@ test("forced model tests accept FREE lease-capable connections and attempt model
 
 test("forced model tests reject ACTIVE leased connections before any model dispatch", async () => {
   const connection = await seedConnection("model-test-active-lease");
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -227,7 +227,7 @@ test("forced model tests reject ACTIVE leased connections before any model dispa
 
 test("browser-login harvest rejects ACTIVE leased connections before credential mutation", async () => {
   const connection = await seedConnection("vnc-active-lease");
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -286,7 +286,7 @@ test("usage refresh allows FREE lease-reserved connection and queries provider q
 test("usage refresh allows ACTIVE leased connection and queries provider quota", async () => {
   const connection = await seedConnection("deepseek-active-lease", "deepseek");
   await markLeaseOnly(connection.id);
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "deepseek",
@@ -337,7 +337,7 @@ test("syncAllProviderLimits refreshes all active supported connections regardles
   await markLeaseOnly(freeConn.id);
   await markLeaseOnly(activeConn.id);
 
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "deepseek",

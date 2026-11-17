@@ -19,9 +19,11 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const bypassDb = await import("../../src/lib/db/agentBridgeBypass.ts");
 const manager = await import("../../src/mitm/manager.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -45,12 +47,12 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("writeBypassJson — creates mitm/ dir and writes JSON file", () => {
-  manager.writeBypassJson(["custom.example.com"]);
+test("writeBypassJson — creates mitm/ dir and writes JSON file", async () => {
+  await manager.writeBypassJson(["custom.example.com"]);
   const file = path.join(TEST_DATA_DIR, "mitm", "bypass.json");
   assert.ok(fs.existsSync(file), "bypass.json must exist after write");
   const payload = JSON.parse(fs.readFileSync(file, "utf-8"));
@@ -59,35 +61,35 @@ test("writeBypassJson — creates mitm/ dir and writes JSON file", () => {
   assert.deepEqual(payload.patterns, ["custom.example.com"]);
 });
 
-test("writeBypassJson — empty array writes empty patterns", () => {
-  manager.writeBypassJson([]);
+test("writeBypassJson — empty array writes empty patterns", async () => {
+  await manager.writeBypassJson([]);
   const file = path.join(TEST_DATA_DIR, "mitm", "bypass.json");
   const payload = JSON.parse(fs.readFileSync(file, "utf-8"));
   assert.deepEqual(payload.patterns, []);
 });
 
-test("writeBypassJson — pulls from DB when no patterns argument passed", () => {
+test("writeBypassJson — pulls from DB when no patterns argument passed", async () => {
   // Seed user patterns via the DB module.
-  bypassDb.replaceUserBypassPatterns(["*.from-db.example.com", "literal.com"]);
-  manager.writeBypassJson();
+  await bypassDb.replaceUserBypassPatterns(["*.from-db.example.com", "literal.com"]);
+  await manager.writeBypassJson();
   const file = path.join(TEST_DATA_DIR, "mitm", "bypass.json");
   const payload = JSON.parse(fs.readFileSync(file, "utf-8"));
   assert.deepEqual(payload.patterns.sort(), ["*.from-db.example.com", "literal.com"].sort());
 });
 
-test("writeBypassJson — does NOT write default patterns (those live in server.cjs)", () => {
+test("writeBypassJson — does NOT write default patterns (those live in server.cjs)", async () => {
   // Seed defaults via the DB module — these should NOT appear in the JSON.
-  bypassDb.seedDefaultBypassPatterns(["*.bank.test", "*.gov.test", "okta.com", "auth0.com"]);
-  manager.writeBypassJson();
+  await bypassDb.seedDefaultBypassPatterns(["*.bank.test", "*.gov.test", "okta.com", "auth0.com"]);
+  await manager.writeBypassJson();
   const file = path.join(TEST_DATA_DIR, "mitm", "bypass.json");
   const payload = JSON.parse(fs.readFileSync(file, "utf-8"));
   // No user patterns were set → user-only output is empty.
   assert.deepEqual(payload.patterns, []);
 });
 
-test("writeBypassJson — JSON is well-formed and overwrites previous file", () => {
-  manager.writeBypassJson(["first.com"]);
-  manager.writeBypassJson(["second.com", "third.com"]);
+test("writeBypassJson — JSON is well-formed and overwrites previous file", async () => {
+  await manager.writeBypassJson(["first.com"]);
+  await manager.writeBypassJson(["second.com", "third.com"]);
   const file = path.join(TEST_DATA_DIR, "mitm", "bypass.json");
   const payload = JSON.parse(fs.readFileSync(file, "utf-8"));
   assert.deepEqual(payload.patterns, ["second.com", "third.com"]);

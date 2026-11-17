@@ -21,20 +21,14 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const { syncQuotaCombos } = await import("../../src/lib/quota/quotaCombos.ts");
 const { quotaModelName } = await import("../../src/lib/quota/quotaModelNaming.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-  if (fs.existsSync(TEST_DATA_DIR))
-    fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -49,7 +43,7 @@ test("syncQuotaCombos generates qtSd/ combos for custom models added to a provid
     apiKey: "sk-codex-test",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "Codex Quota Pool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "Codex Quota Pool" });
 
   // Add custom model
   await modelsDb.addCustomModel(provider, customModelId, "GPT-6 Astra");
@@ -76,7 +70,7 @@ test("syncQuotaCombos generates qtSd/ combos for synced models added to a connec
     apiKey: "sk-openrouter-test",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "OpenRouter Pool" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "OpenRouter Pool" });
 
   // Add synced model for this connection
   await modelsDb.replaceSyncedAvailableModelsForConnection(provider, connId, [
@@ -123,7 +117,7 @@ test("synced models target only the connection that reported them", async () => 
   await modelsDb.replaceSyncedAvailableModelsForConnection(provider, outside, [
     { id: "outside-only" },
   ]);
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: first,
     connectionIds: [first, second],
     name: "Scoped models",
@@ -149,7 +143,7 @@ test("synced models target only the connection that reported them", async () => 
 test("removing the last custom model prunes a provider without registry models", async () => {
   const provider = "quota-test-provider";
   const connectionId = await createTestConnection(provider, "custom");
-  poolsDb.createPool({ connectionId, name: "Custom models" });
+  await poolsDb.createPool({ connectionId, name: "Custom models" });
   await modelsDb.addCustomModel(provider, "custom-only");
   const name = quotaModelName("GroupDemo", provider, "custom-only");
   await waitForCombo(name, true);
@@ -161,7 +155,7 @@ for (const operation of ["remove", "delete-connection", "prune"] as const) {
   test(`${operation} automatically removes stale synced quota models`, async () => {
     const provider = "glm";
     const connectionId = await createTestConnection(provider, operation);
-    poolsDb.createPool({ connectionId, name: "Synced models" });
+    await poolsDb.createPool({ connectionId, name: "Synced models" });
     await modelsDb.replaceSyncedAvailableModelsForConnection(provider, connectionId, [
       { id: "synced-only" },
     ]);

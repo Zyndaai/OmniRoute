@@ -7,8 +7,8 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-pricing-sync-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const pricingSync = await import("../../src/lib/pricingSync.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 const originalWarn = console.warn;
@@ -32,7 +32,7 @@ function buildLiteLLMFixture() {
 
 async function resetStorage() {
   pricingSync.stopPeriodicSync();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -44,11 +44,10 @@ test.beforeEach(async () => {
   delete process.env.PRICING_SYNC_ENABLED;
 });
 
-test.after(async () => {
+test.after(() => {
   pricingSync.stopPeriodicSync();
   globalThis.fetch = originalFetch;
   console.warn = originalWarn;
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -71,29 +70,18 @@ test("fetchLiteLLMPricing parses JSON and rejects invalid payloads", async () =>
   await assert.rejects(() => pricingSync.fetchLiteLLMPricing(), /LiteLLM returned invalid JSON/);
 });
 
-test("synced pricing round-trips through SQLite and skips corrupted rows", () => {
-  pricingSync.saveSyncedPricing({
+test("synced pricing round-trips through the database", async () => {
+  await pricingSync.saveSyncedPricing({
     openai: {
       "gpt-4o": { input: 2.5, output: 10 },
     },
   });
 
-  const db = core.getDbInstance();
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES ('pricing_synced', ?, ?)").run(
-    "broken-provider",
-    "{"
-  );
-
-  const warnings = [];
-  console.warn = (message) => warnings.push(String(message));
-
-  const synced = pricingSync.getSyncedPricing();
+  const synced = await pricingSync.getSyncedPricing();
   assert.deepEqual(synced.openai["gpt-4o"], { input: 2.5, output: 10 });
-  assert.equal(synced["broken-provider"], undefined);
-  assert.equal(warnings.length, 1);
 
-  pricingSync.clearSyncedPricing();
-  assert.deepEqual(pricingSync.getSyncedPricing(), {});
+  await pricingSync.clearSyncedPricing();
+  assert.deepEqual(await pricingSync.getSyncedPricing(), {});
 });
 
 test("syncPricingFromSources rejects unsupported sources", async () => {
@@ -121,7 +109,7 @@ test("syncPricingFromSources supports dry runs with warnings without persisting 
   assert.equal(result.success, true);
   assert.ok(result.data.openai);
   assert.deepEqual(result.warnings, ["Unknown sources ignored: bogus-source"]);
-  assert.deepEqual(pricingSync.getSyncedPricing(), {});
+  assert.deepEqual(await pricingSync.getSyncedPricing(), {});
 });
 
 test("syncPricingFromSources persists data and updates sync status", async () => {
@@ -136,8 +124,8 @@ test("syncPricingFromSources persists data and updates sync status", async () =>
     dryRun: false,
   });
 
-  const synced = pricingSync.getSyncedPricing();
-  const status = pricingSync.getSyncStatus();
+  const synced = await pricingSync.getSyncedPricing();
+  const status = await pricingSync.getSyncStatus();
 
   assert.equal(result.success, true);
   assert.ok(synced.openai["gpt-4o"]);
@@ -155,7 +143,7 @@ test("startPeriodicSync, stopPeriodicSync, and initPricingSync manage the timer 
   pricingSync.startPeriodicSync(25);
   await new Promise((resolve) => setTimeout(resolve, 10));
 
-  let status = pricingSync.getSyncStatus();
+  let status = await pricingSync.getSyncStatus();
   assert.equal(status.intervalMs, 25);
   assert.equal(status.lastSyncModelCount, 4);
 
@@ -165,7 +153,7 @@ test("startPeriodicSync, stopPeriodicSync, and initPricingSync manage the timer 
   await pricingSync.initPricingSync();
   await new Promise((resolve) => setTimeout(resolve, 10));
 
-  status = pricingSync.getSyncStatus();
+  status = await pricingSync.getSyncStatus();
   assert.equal(status.enabled, true);
   assert.equal(status.lastSyncModelCount, 4);
   pricingSync.stopPeriodicSync();

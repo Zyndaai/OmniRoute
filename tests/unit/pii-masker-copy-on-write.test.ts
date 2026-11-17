@@ -36,7 +36,7 @@ function buildBody() {
 
 test("PII masker guardrail", async (t) => {
   await t.test("does not clone or modify the payload when request masking is off", async () => {
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
     const body = buildBody();
     const result = await guardrail.preCall(body, CONTEXT);
     assert.equal(result.block, false);

@@ -53,8 +53,8 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -208,8 +208,8 @@ test("a dashboard session can still use the routes", async () => {
 });
 
 test("an admin access token can use the routes and a read access token cannot", async () => {
-  const admin = createAccessToken({ name: "oauth-admin", scope: "admin" });
-  const read = createAccessToken({ name: "oauth-read", scope: "read" });
+  const admin = await createAccessToken({ name: "oauth-admin", scope: "admin" });
+  const read = await createAccessToken({ name: "oauth-read", scope: "read" });
   assert.equal((await callImportToken({ authorization: `Bearer ${admin.secret}` })).status, 200);
   assert.equal((await callImportToken({ authorization: `Bearer ${read.secret}` })).status, 403);
 });

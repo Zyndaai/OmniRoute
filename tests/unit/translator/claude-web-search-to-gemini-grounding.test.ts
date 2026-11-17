@@ -37,8 +37,8 @@ const READ_TOOL = {
   },
 };
 
-function translateToAntigravity(body: unknown): Envelope {
-  return translateRequest(
+async function translateToAntigravity(body: unknown): Promise<Envelope> {
+  return (await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.ANTIGRAVITY,
     "gemini-3.8-flash",
@@ -46,23 +46,23 @@ function translateToAntigravity(body: unknown): Envelope {
     true,
     { projectId: "proj-search" },
     "antigravity"
-  ) as Envelope;
+  )) as Envelope;
 }
 
-test("CLAUDE -> ANTIGRAVITY maps the dated web_search server tool to googleSearch grounding", () => {
-  const result = translateToAntigravity(antigravityBody("gemini-3.8-flash", [WEB_SEARCH_20250305]));
+test("CLAUDE -> ANTIGRAVITY maps the dated web_search server tool to googleSearch grounding", async () => {
+  const result = await translateToAntigravity(antigravityBody("gemini-3.8-flash", [WEB_SEARCH_20250305]));
 
   assert.deepEqual(result.request?.tools, [{ googleSearch: {} }]);
 });
 
-test("CLAUDE -> ANTIGRAVITY handles the web_search_20260209 dated variant", () => {
-  const result = translateToAntigravity(antigravityBody("gemini-3.8-flash", [WEB_SEARCH_20260209]));
+test("CLAUDE -> ANTIGRAVITY handles the web_search_20260209 dated variant", async () => {
+  const result = await translateToAntigravity(antigravityBody("gemini-3.8-flash", [WEB_SEARCH_20260209]));
 
   assert.deepEqual(result.request?.tools, [{ googleSearch: {} }]);
 });
 
-test("CLAUDE -> GEMINI (direct translator) maps the dated web_search server tool to googleSearch", () => {
-  const result = translateRequest(
+test("CLAUDE -> GEMINI (direct translator) maps the dated web_search server tool to googleSearch", async () => {
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.GEMINI,
     "gemini-3.8-flash",
@@ -76,8 +76,8 @@ test("CLAUDE -> GEMINI (direct translator) maps the dated web_search server tool
   assert.deepEqual(result.tools, [{ googleSearch: {} }]);
 });
 
-test("CLAUDE -> ANTIGRAVITY keeps a normal Claude function tool as a functionDeclaration (no grounding)", () => {
-  const result = translateToAntigravity(antigravityBody("gemini-3.8-flash", [READ_TOOL]));
+test("CLAUDE -> ANTIGRAVITY keeps a normal Claude function tool as a functionDeclaration (no grounding)", async () => {
+  const result = await translateToAntigravity(antigravityBody("gemini-3.8-flash", [READ_TOOL]));
 
   const tools = result.request?.tools as Array<{ functionDeclarations?: Array<{ name: string }> }>;
   const declared = (tools ?? []).flatMap((tool) =>
@@ -91,8 +91,8 @@ test("CLAUDE -> ANTIGRAVITY keeps a normal Claude function tool as a functionDec
   );
 });
 
-test("CLAUDE -> ANTIGRAVITY mixed case keeps the custom tools and does NOT enable grounding", () => {
-  const result = translateToAntigravity(
+test("CLAUDE -> ANTIGRAVITY mixed case keeps the custom tools and does NOT enable grounding", async () => {
+  const result = await translateToAntigravity(
     antigravityBody("gemini-3.8-flash", [READ_TOOL, WEB_SEARCH_20250305])
   );
 
@@ -122,8 +122,8 @@ test("CLAUDE -> ANTIGRAVITY mixed case keeps the custom tools and does NOT enabl
   );
 });
 
-test("CLAUDE -> GEMINI (direct) mixed case keeps the custom tools and does NOT enable grounding", () => {
-  const result = translateRequest(
+test("CLAUDE -> GEMINI (direct) mixed case keeps the custom tools and does NOT enable grounding", async () => {
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.GEMINI,
     "gemini-3.8-flash",
@@ -152,8 +152,8 @@ test("CLAUDE -> GEMINI (direct) mixed case keeps the custom tools and does NOT e
   );
 });
 
-test("CLAUDE -> OPENAI_RESPONSES still converts the server tool to the native web_search tool", () => {
-  const result = translateRequest(
+test("CLAUDE -> OPENAI_RESPONSES still converts the server tool to the native web_search tool", async () => {
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5",
@@ -166,10 +166,10 @@ test("CLAUDE -> OPENAI_RESPONSES still converts the server tool to the native we
   assert.deepEqual(result.tools, [{ type: "web_search" }]);
 });
 
-test("CLAUDE -> OPENAI_RESPONSES converts natively even when the server tool is mixed", () => {
+test("CLAUDE -> OPENAI_RESPONSES converts natively even when the server tool is mixed", async () => {
   // The sole-tool restriction is Gemini/Antigravity-only: the Responses API has no
   // built-in-vs-functionDeclarations conflict, so its behavior is unchanged.
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5",
@@ -194,8 +194,8 @@ test("CLAUDE -> OPENAI_RESPONSES converts natively even when the server tool is 
   );
 });
 
-test("CLAUDE -> OPENAI (chat completions) is untouched: the server tool stays a plain function", () => {
-  const result = translateRequest(
+test("CLAUDE -> OPENAI (chat completions) is untouched: the server tool stays a plain function", async () => {
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "gpt-5",

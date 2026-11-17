@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-13067-route-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "deprecated-provider-route-secret";
 delete process.env.INITIAL_PASSWORD;
 
@@ -25,25 +24,10 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const code = (error as { code?: string } | undefined)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   await settingsDb.updateSettings({ requireLogin: false });
   delete process.env.INITIAL_PASSWORD;
 }
@@ -53,7 +37,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -200,7 +184,7 @@ test("POST gemini-cli with two leftover rows returns deleted:2", async () => {
   assert.equal(remaining.length, 1);
   assert.equal(remaining[0]?.provider, "gemini");
 
-  const audits = compliance.getAuditLog({ action: "provider.credentials.revoked" });
+  const audits = await compliance.getAuditLog({ action: "provider.credentials.revoked" });
   assert.ok(audits.length >= 1);
   const details = JSON.stringify(audits[0]?.details ?? audits[0]?.metadata ?? {});
   assert.match(details, /deprecated_provider_purge/);

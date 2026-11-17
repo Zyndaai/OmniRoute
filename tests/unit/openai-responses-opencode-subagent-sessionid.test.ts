@@ -93,14 +93,14 @@ function collectArgs(chunks) {
   return { raw, finishReason, parsed: raw ? JSON.parse(raw) : null };
 }
 
-test("RED: translateRequest OpenAI→Responses widens optional default-less sessionID", () => {
+test("RED: translateRequest OpenAI→Responses widens optional default-less sessionID", async () => {
   const body = {
     model: "gpt-5.1-codex",
     messages: [{ role: "user", content: "hi" }],
     tools: [structuredClone(SUBAGENT_TOOL_CHAT)],
   };
 
-  const toResponses = translateRequest(
+  const toResponses = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -114,14 +114,14 @@ test("RED: translateRequest OpenAI→Responses widens optional default-less sess
   assert.deepEqual(params.required, ["agent", "description", "prompt"]);
 });
 
-test("RED: same-format Responses applies string omission without flattening native tools", () => {
+test("RED: same-format Responses applies string omission without flattening native tools", async () => {
   const body = {
     model: "gpt-5.1-codex",
     input: [{ role: "user", content: "hi" }],
     tools: [structuredClone(SUBAGENT_TOOL_RESPONSES), structuredClone(NATIVE_CUSTOM_TOOL)],
   };
 
-  const sameFormat = translateRequest(
+  const sameFormat = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -136,13 +136,13 @@ test("RED: same-format Responses applies string omission without flattening nati
   assert.equal(custom.parameters, undefined);
 });
 
-test("characterization: non-Responses target leaves sessionID unchanged", () => {
+test("characterization: non-Responses target leaves sessionID unchanged", async () => {
   const body = {
     model: "claude-3-7-sonnet",
     messages: [{ role: "user", content: "hi" }],
     tools: [structuredClone(SUBAGENT_TOOL_CHAT)],
   };
-  const toClaude = translateRequest(
+  const toClaude = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "claude-3-7-sonnet",
@@ -178,7 +178,7 @@ test("characterization: required string stays non-nullable; unmarked required nu
   assert.equal(requiredNull.sessionID, null);
 });
 
-test("characterization: optional string with default stays unsentinelled through translateRequest", () => {
+test("characterization: optional string with default stays unsentinelled through translateRequest", async () => {
   const body = {
     model: "gpt-5.1-codex",
     messages: [{ role: "user", content: "hi" }],
@@ -199,7 +199,7 @@ test("characterization: optional string with default stays unsentinelled through
       },
     ],
   };
-  const toResponses = translateRequest(
+  const toResponses = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",

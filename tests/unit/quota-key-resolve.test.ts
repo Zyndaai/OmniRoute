@@ -22,39 +22,39 @@ const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { resolveQuotaKeyScope } = await import("../../src/lib/quota/quotaKey.ts");
+const { deleteProviderConnection } = await import("../../src/lib/db/providers/deletion.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Test lifecycle helpers
 // ---------------------------------------------------------------------------
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const err = error as NodeJS.ErrnoException;
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
+
+/**
+ * A pool whose only connection no longer exists. Pools reference provider connections by
+ * foreign key, so the connection is created, the pool attached to it, and the connection
+ * then deleted: the pool-connection link cascades away and the pool is left orphaned.
+ */
+async function createOrphanPool(name: string): Promise<{ id: string }> {
+  const conn = await providersDb.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: `${name}-conn`,
+    apiKey: `sk-${name}`,
+  });
+  const connectionId = (conn as Record<string, unknown>).id as string;
+  const pool = await poolsDb.createPool({ connectionId, name });
+  await deleteProviderConnection(connectionId);
+  return pool;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -92,7 +92,7 @@ test("resolveQuotaKeyScope: valid pool returns its connectionId, provider, and g
   assert.ok(connId, "connection should have an id");
 
   // Seed a pool referencing that connection (defaults to group-demo)
-  const pool = poolsDb.createPool({ connectionId: connId, name: "Test Pool A2" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "Test Pool A2" });
 
   const scope = await resolveQuotaKeyScope([pool.id]);
 
@@ -120,8 +120,8 @@ test("resolveQuotaKeyScope: multiple pools same provider deduplicates providers"
   const id2 = (conn2 as Record<string, unknown>).id as string;
 
   // Both pools default to group-demo
-  const pool1 = poolsDb.createPool({ connectionId: id1, name: "Pool Anthro 1" });
-  const pool2 = poolsDb.createPool({ connectionId: id2, name: "Pool Anthro 2" });
+  const pool1 = await poolsDb.createPool({ connectionId: id1, name: "Pool Anthro 1" });
+  const pool2 = await poolsDb.createPool({ connectionId: id2, name: "Pool Anthro 2" });
 
   const scope = await resolveQuotaKeyScope([pool1.id, pool2.id]);
 
@@ -153,8 +153,8 @@ test("resolveQuotaKeyScope: multiple pools different providers (same group-demo)
   const idB = (connB as Record<string, unknown>).id as string;
 
   // Both pools in group-demo (default)
-  const poolA = poolsDb.createPool({ connectionId: idA, name: "Pool OAI" });
-  const poolB = poolsDb.createPool({ connectionId: idB, name: "Pool GEM" });
+  const poolA = await poolsDb.createPool({ connectionId: idA, name: "Pool OAI" });
+  const poolB = await poolsDb.createPool({ connectionId: idB, name: "Pool GEM" });
 
   const scope = await resolveQuotaKeyScope([poolA.id, poolB.id]);
 
@@ -169,12 +169,9 @@ test("resolveQuotaKeyScope: multiple pools different providers (same group-demo)
   assert.deepEqual(scope.poolSlugs, ["groupdemo"]);
 });
 
-test("resolveQuotaKeyScope: pool referencing non-existent connectionId is skipped gracefully", async () => {
-  // Create a pool with a fictitious connectionId (no matching row in provider_connections)
-  const pool = poolsDb.createPool({
-    connectionId: "conn-does-not-exist",
-    name: "Orphan Pool",
-  });
+test("resolveQuotaKeyScope: pool referencing a removed connection is skipped gracefully", async () => {
+  // A pool whose connection row no longer exists contributes nothing.
+  const pool = await createOrphanPool("Orphan Pool");
 
   const scope = await resolveQuotaKeyScope([pool.id]);
   assert.deepEqual(scope, { connectionIds: [], providers: [], poolSlugs: [] });
@@ -188,7 +185,7 @@ test("resolveQuotaKeyScope: mix of valid and invalid pool ids — only valid con
     apiKey: "sk-mix",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "Pool Mix" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "Pool Mix" });
 
   const scope = await resolveQuotaKeyScope(["no-such-pool-id", pool.id, "another-ghost"]);
 

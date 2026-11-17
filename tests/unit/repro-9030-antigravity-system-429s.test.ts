@@ -23,8 +23,8 @@ type PartsArray = Array<{ text?: string; functionCall?: unknown; functionRespons
  * systemInstruction contains ONLY ANTIGRAVITY_DEFAULT_SYSTEM, and the client's
  * system text is in contents[0].
  */
-test("OpenAI -> Antigravity: client system message must NOT be in systemInstruction with default (#9030)", () => {
-  const result = openaiToAntigravityRequest(
+test("OpenAI -> Antigravity: client system message must NOT be in systemInstruction with default (#9030)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -62,8 +62,8 @@ test("OpenAI -> Antigravity: client system message must NOT be in systemInstruct
   );
 });
 
-test("OpenAI -> Antigravity: systemInstruction with only ANTIGRAVITY_DEFAULT_SYSTEM when no client system (#9030)", () => {
-  const result = openaiToAntigravityRequest(
+test("OpenAI -> Antigravity: systemInstruction with only ANTIGRAVITY_DEFAULT_SYSTEM when no client system (#9030)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -87,8 +87,8 @@ test("OpenAI -> Antigravity: systemInstruction with only ANTIGRAVITY_DEFAULT_SYS
   );
 });
 
-test("OpenAI -> Antigravity: multiple system messages all moved to first user content (#9030)", () => {
-  const result = openaiToAntigravityRequest(
+test("OpenAI -> Antigravity: multiple system messages all moved to first user content (#9030)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-flash",
     {
       messages: [

@@ -14,14 +14,13 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const { safeResolveProxy } = await import("../../src/sse/handlers/chatHelpers.ts");
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) delete process.env.INITIAL_PASSWORD;
   else process.env.INITIAL_PASSWORD = ORIGINAL_INITIAL_PASSWORD;
 });
 
 test("#6272: resolveProxyForConnection('noauth', ...) honors a provider-level proxy assigned to 'uncloseai'", async () => {
-  core.getDbInstance();
   const proxy = { type: "http", host: "127.0.0.1", port: 8888 };
 
   // Reporter's second symptom: "same thing happen when i set the proxy directly
@@ -41,7 +40,6 @@ test("#6272: resolveProxyForConnection('noauth', ...) honors a provider-level pr
 });
 
 test("control: resolveProxyForConnection('noauth', ...) still honors the GLOBAL proxy when no no-auth provider proxy is set", async () => {
-  core.getDbInstance();
   await settingsDb.deleteProxyForLevel("provider", "uncloseai");
   const proxy = { type: "http", host: "10.0.0.1", port: 9999 };
   await settingsDb.setProxyForLevel("global", null, proxy);
@@ -52,7 +50,6 @@ test("control: resolveProxyForConnection('noauth', ...) still honors the GLOBAL 
 });
 
 test("resolveProxyForConnection keeps provider-level no-auth proxies isolated", async () => {
-  core.getDbInstance();
   await settingsDb.deleteProxyForLevel("global", null);
   await settingsDb.setProxyForLevel("provider", "uncloseai", {
     type: "http",
@@ -73,7 +70,6 @@ test("resolveProxyForConnection keeps provider-level no-auth proxies isolated", 
 });
 
 test("safeResolveProxy keeps the synthetic no-auth connection provider-specific", async () => {
-  core.getDbInstance();
   await settingsDb.setProxyForLevel("provider", "uncloseai", {
     type: "http",
     host: "127.0.0.4",

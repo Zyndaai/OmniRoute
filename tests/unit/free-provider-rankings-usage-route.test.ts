@@ -20,13 +20,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const route = await import("../../src/app/api/free-provider-rankings/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 function get(query: string): NextRequest {
   return new Request(`http://localhost/api/free-provider-rankings${query}`) as NextRequest;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -53,16 +54,21 @@ test("route: every documented window is accepted", async () => {
  * call_logs", not "this particular function was not called".
  */
 function countCallLogQueries(): { stop: () => number } {
-  const db = core.getDbInstance() as { prepare: (sql: string) => unknown };
-  const original = db.prepare.bind(db);
+  const backend = getTestBackend();
+  const methods = ["query", "queryOne", "execute"] as const;
+  const originals = methods.map((name) => backend[name].bind(backend));
   let hits = 0;
-  db.prepare = (sql: string) => {
-    if (/from\s+call_logs/i.test(sql)) hits += 1;
-    return original(sql);
-  };
+  methods.forEach((name, index) => {
+    (backend as any)[name] = (sql: string, params?: readonly unknown[]) => {
+      if (/from\s+call_logs/i.test(sql)) hits += 1;
+      return (originals[index] as any)(sql, params);
+    };
+  });
   return {
     stop: () => {
-      db.prepare = original;
+      methods.forEach((name, index) => {
+        (backend as any)[name] = originals[index];
+      });
       return hits;
     },
   };

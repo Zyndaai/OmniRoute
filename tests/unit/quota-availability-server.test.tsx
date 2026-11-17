@@ -28,11 +28,21 @@ vi.mock("@/lib/db/core", async () => ({
       (await import("node:os")).tmpdir(),
       "omniroute-availability-test"
     ),
-  getDbInstance: vi.fn(() => ({
-    prepare: (sql: string) => {
+}));
+// Every SQL statement must be a SELECT: reads return empty results, writes are forbidden.
+vi.mock("@/lib/db/pg", async (original) => ({
+  ...(await original<typeof import("@/lib/db/pg")>()),
+  db: vi.fn(() => ({
+    query: vi.fn(async (sql: string) => {
       if (!/^\s*SELECT\b/i.test(sql)) guard.blocked(`DB write: ${sql}`)();
-      return { get: () => undefined, all: () => [], run: guard.blocked("statement.run") };
-    },
+      return [];
+    }),
+    queryOne: vi.fn(async (sql: string) => {
+      if (!/^\s*SELECT\b/i.test(sql)) guard.blocked(`DB write: ${sql}`)();
+      return null;
+    }),
+    execute: guard.blocked("statement.execute"),
+    transaction: guard.blocked("statement.transaction"),
   })),
 }));
 vi.mock("@/lib/db/providers", () => ({

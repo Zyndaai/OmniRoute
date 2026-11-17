@@ -31,9 +31,10 @@ const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 const core = await import("../../src/lib/db/core.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const connectRoute = await import("../../src/app/api/cli/connect/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.INITIAL_PASSWORD = "CHANGEME";
@@ -43,10 +44,10 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   if (ORIGINAL_STAMP_TOKEN === undefined) delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   else process.env.OMNIROUTE_PEER_STAMP_TOKEN = ORIGINAL_STAMP_TOKEN;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) {
     delete process.env.INITIAL_PASSWORD;
@@ -87,7 +88,7 @@ test("a public-IP cli/connect with the well-known default password is refused an
   assert.equal(body.token, undefined, "no access token may be minted for the blocked attempt");
   assert.ok(!String(body.error ?? "").includes("at /"), "no stack trace in the error body");
 
-  const [entry] = compliance.getAuditLog({
+  const [entry] = await compliance.getAuditLog({
     action: "cli.connect.insecure_default_blocked",
     limit: 1,
   });

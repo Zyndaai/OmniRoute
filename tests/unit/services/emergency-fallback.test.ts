@@ -5,12 +5,11 @@ import os from "node:os";
 import path from "node:path";
 
 const previousDataDir = process.env.DATA_DIR;
-const previousDisableSqliteAutoBackup = process.env.DISABLE_SQLITE_AUTO_BACKUP;
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-emergency-fallback-"));
 process.env.DATA_DIR = tmpDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 const { setFeatureFlagOverride, removeFeatureFlagOverride } =
   await import("../../../src/lib/db/featureFlags.ts");
 const {
@@ -25,6 +24,9 @@ const { resolveEmergencyFallbackDecision, resetEmergencyFallbackWarnForTest } =
 const { getActiveSyncedCatalog } =
   await import("../../../src/lib/db/models/activeSyncedCatalog.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../../src/lib/db/models.ts");
+// Flag reads are synchronous against an in-process snapshot of the DB overrides, so tests
+// that change an override must reload that snapshot (the same call the dashboard path makes).
+const { refreshFeatureFlagSnapshot } = await import("../../../src/shared/utils/featureFlags.ts");
 
 function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) {
@@ -34,10 +36,9 @@ function restoreEnv(name: string, value: string | undefined) {
   }
 }
 
-function resetTestState() {
-  core.resetDbInstance();
-  fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(tmpDir, { recursive: true });
+async function resetTestState() {
+  await resetTestDb();
+  await refreshFeatureFlagSnapshot();
   delete process.env.OMNIROUTE_EMERGENCY_FALLBACK;
   resetEmergencyFallbackEnvCache();
   setEmergencyFallbackFeatureFlagResolverForTest(null);
@@ -49,13 +50,14 @@ const FALLBACK_MODEL = EMERGENCY_FALLBACK_CONFIG.model;
 const FALLBACK_CONNECTION = "emergency-fallback-live-catalog";
 
 async function seedLiveCatalog(modelIds: string[]) {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections
        (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(FALLBACK_CONNECTION, FALLBACK_PROVIDER, 1, now, now);
+     VALUES ($1, $2, true, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = true, updated_at = EXCLUDED.updated_at`,
+    [FALLBACK_CONNECTION, FALLBACK_PROVIDER, now, now]
+  );
   await replaceSyncedAvailableModelsForConnection(
     FALLBACK_PROVIDER,
     FALLBACK_CONNECTION,
@@ -67,8 +69,8 @@ function freshScope(): object {
   return {};
 }
 
-test.beforeEach(() => {
-  resetTestState();
+test.beforeEach(async () => {
+  await resetTestState();
 });
 
 test.afterEach(() => {
@@ -78,14 +80,13 @@ test.afterEach(() => {
   delete process.env.OMNIROUTE_EMERGENCY_FALLBACK;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreEnv("DATA_DIR", previousDataDir);
-  restoreEnv("DISABLE_SQLITE_AUTO_BACKUP", previousDisableSqliteAutoBackup);
 });
 
-function withEnv(value: string | undefined, fn: () => void) {
+async function withEnv(value: string | undefined, fn: () => void | Promise<void>) {
   const previous = process.env.OMNIROUTE_EMERGENCY_FALLBACK;
   if (value === undefined) {
     delete process.env.OMNIROUTE_EMERGENCY_FALLBACK;
@@ -94,26 +95,28 @@ function withEnv(value: string | undefined, fn: () => void) {
   }
   resetEmergencyFallbackEnvCache();
   try {
-    fn();
+    await fn();
   } finally {
     restoreEnv("OMNIROUTE_EMERGENCY_FALLBACK", previous);
     resetEmergencyFallbackEnvCache();
   }
 }
 
-function withFeatureFlagOverride(value: string, fn: () => void) {
+async function withFeatureFlagOverride(value: string, fn: () => void | Promise<void>) {
   try {
-    setFeatureFlagOverride("OMNIROUTE_EMERGENCY_FALLBACK", value);
+    await setFeatureFlagOverride("OMNIROUTE_EMERGENCY_FALLBACK", value);
+    await refreshFeatureFlagSnapshot();
     resetEmergencyFallbackEnvCache();
-    fn();
+    await fn();
   } finally {
-    removeFeatureFlagOverride("OMNIROUTE_EMERGENCY_FALLBACK");
+    await removeFeatureFlagOverride("OMNIROUTE_EMERGENCY_FALLBACK");
+    await refreshFeatureFlagSnapshot();
     resetEmergencyFallbackEnvCache();
   }
 }
 
-test("emergency fallback stays enabled when the env switch is unset (default behavior)", () => {
-  withEnv(undefined, () => {
+test("emergency fallback stays enabled when the env switch is unset (default behavior)", async () => {
+  await withEnv(undefined, () => {
     assert.equal(isEmergencyFallbackEnvEnabled(), true);
     const decision = shouldUseFallback(402, "", false);
     assert.equal(decision.shouldFallback, true);
@@ -124,15 +127,15 @@ test("emergency fallback stays enabled when the env switch is unset (default beh
   });
 });
 
-test("budget keywords trigger fallback when the env switch is unset", () => {
-  withEnv(undefined, () => {
+test("budget keywords trigger fallback when the env switch is unset", async () => {
+  await withEnv(undefined, () => {
     const decision = shouldUseFallback(429, "All accounts quota exceeded", false);
     assert.equal(decision.shouldFallback, true);
   });
 });
 
-test("OMNIROUTE_EMERGENCY_FALLBACK=false disables the 402 redirect", () => {
-  withEnv("false", () => {
+test("OMNIROUTE_EMERGENCY_FALLBACK=false disables the 402 redirect", async () => {
+  await withEnv("false", () => {
     assert.equal(isEmergencyFallbackEnvEnabled(), false);
     const decision = shouldUseFallback(402, "", false);
     assert.equal(decision.shouldFallback, false);
@@ -140,17 +143,17 @@ test("OMNIROUTE_EMERGENCY_FALLBACK=false disables the 402 redirect", () => {
   });
 });
 
-test("OMNIROUTE_EMERGENCY_FALLBACK=0 disables the budget-keyword redirect", () => {
-  withEnv("0", () => {
+test("OMNIROUTE_EMERGENCY_FALLBACK=0 disables the budget-keyword redirect", async () => {
+  await withEnv("0", () => {
     const decision = shouldUseFallback(429, "quota exceeded for account", false);
     assert.equal(decision.shouldFallback, false);
     assert.match(decision.reason, /OMNIROUTE_EMERGENCY_FALLBACK/);
   });
 });
 
-test("DB feature flag override can disable an env-enabled fallback", () => {
-  withEnv("true", () => {
-    withFeatureFlagOverride("false", () => {
+test("DB feature flag override can disable an env-enabled fallback", async () => {
+  await withEnv("true", async () => {
+    await withFeatureFlagOverride("false", () => {
       const decision = shouldUseFallback(402, "", false);
       assert.equal(isEmergencyFallbackEnvEnabled(), false);
       assert.equal(decision.shouldFallback, false);
@@ -159,9 +162,9 @@ test("DB feature flag override can disable an env-enabled fallback", () => {
   });
 });
 
-test("DB feature flag override can enable an env-disabled fallback", () => {
-  withEnv("false", () => {
-    withFeatureFlagOverride("true", () => {
+test("DB feature flag override can enable an env-disabled fallback", async () => {
+  await withEnv("false", async () => {
+    await withFeatureFlagOverride("true", () => {
       const decision = shouldUseFallback(402, "", false);
       assert.equal(isEmergencyFallbackEnvEnabled(), true);
       assert.equal(decision.shouldFallback, true);
@@ -169,8 +172,8 @@ test("DB feature flag override can enable an env-disabled fallback", () => {
   });
 });
 
-test("raw env fallback is used when feature flag resolution throws", () => {
-  withEnv("0", () => {
+test("raw env fallback is used when feature flag resolution throws", async () => {
+  await withEnv("0", () => {
     const warnings: unknown[][] = [];
     const previousWarn = console.warn;
     console.warn = (...args: unknown[]) => {
@@ -193,15 +196,15 @@ test("raw env fallback is used when feature flag resolution throws", () => {
   });
 });
 
-test("explicit truthy values keep the fallback enabled", () => {
-  withEnv("true", () => {
+test("explicit truthy values keep the fallback enabled", async () => {
+  await withEnv("true", () => {
     assert.equal(isEmergencyFallbackEnvEnabled(), true);
     assert.equal(shouldUseFallback(402, "", false).shouldFallback, true);
   });
 });
 
-test("env switch does not override config.enabled=false", () => {
-  withEnv("true", () => {
+test("env switch does not override config.enabled=false", async () => {
+  await withEnv("true", () => {
     const decision = shouldUseFallback(402, "", false, {
       ...EMERGENCY_FALLBACK_CONFIG,
       enabled: false,
@@ -210,8 +213,8 @@ test("env switch does not override config.enabled=false", () => {
   });
 });
 
-test("tool-bearing requests are still skipped regardless of env switch", () => {
-  withEnv(undefined, () => {
+test("tool-bearing requests are still skipped regardless of env switch", async () => {
+  await withEnv(undefined, () => {
     const decision = shouldUseFallback(402, "", true);
     assert.equal(decision.shouldFallback, false);
     assert.match(decision.reason, /tools/);

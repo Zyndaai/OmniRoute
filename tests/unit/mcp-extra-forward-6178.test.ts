@@ -63,7 +63,7 @@ test("static tool loops forward `extra` so stdio callers keep their scope/identi
   const verbatim = "VERBATIM-CCR-BLOCK-6178: the original content the caller stored.";
   const hash = storeBlock(verbatim, principal);
 
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const retrieve = getRegisteredHandler(server, "omniroute_ccr_retrieve");
 
   // Simulate a stdio tool call: no HTTP AsyncLocalStorage principal, but the MCP
@@ -92,7 +92,7 @@ test("static tool loops forward `extra` so stdio callers keep their scope/identi
   );
 });
 
-test.after(() => {
+test.after(async () => {
   resetCcrStore();
-  resetDbInstance();
+  await resetDbInstance();
 });

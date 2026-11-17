@@ -17,7 +17,6 @@ Object.assign(process.env, {
   API_KEY_SECRET: "raw-video-fixture-only-secret-12430",
   JWT_SECRET: "raw-video-fixture-only-jwt-12430",
   REQUIRE_API_KEY: "true",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   APP_LOG_TO_FILE: "false",
 });
 const originalFetch = globalThis.fetch;
@@ -27,6 +26,9 @@ const networkGuard = new MockAgent();
 networkGuard.disableNetConnect();
 setGlobalDispatcher(networkGuard);
 let allowedPort = 0;
+// The database is a TCP peer now; the guard must let the pool reach it (and nothing else).
+const pgUrl = new URL(process.env.OMNIROUTE_POSTGRES_URL ?? "postgres://127.0.0.1:5432/");
+const pgTarget = { host: pgUrl.hostname, port: Number(pgUrl.port || 5432) };
 Socket.prototype.connect = function (...args: unknown[]) {
   const normalized = Array.isArray(args[0]) ? args[0] : args;
   const first = normalized[0];
@@ -34,7 +36,8 @@ Socket.prototype.connect = function (...args: unknown[]) {
   const host = options?.host ?? normalized[1];
   const port = Number(options?.port ?? first);
   assert(
-    host === "127.0.0.1" && port === allowedPort && allowedPort > 0,
+    (host === "127.0.0.1" && port === allowedPort && allowedPort > 0) ||
+      (host === pgTarget.host && port === pgTarget.port),
     "raw video fixture blocks sockets outside its HTTP server"
   );
   return Reflect.apply(originalConnect, this, args);
@@ -46,6 +49,7 @@ globalThis.fetch = (...args) => upstream(...args);
 
 test("raw video transcript retention through HTTP and SQLite", { timeout: 120_000 }, async (t) => {
   const core = await import("../../src/lib/db/core.ts");
+  const { getTestBackend } = await import("../helpers/postgres.ts");
   const providers = await import("../../src/lib/db/providers.ts");
   const keys = await import("../../src/lib/db/apiKeys.ts");
   const settings = await import("../../src/lib/db/settings.ts");
@@ -68,7 +72,7 @@ test("raw video transcript retention through HTTP and SQLite", { timeout: 120_00
     await logs.closeCallLogSaves(10_000);
     await server?.close();
     pressureFixture.dispose();
-    core.closeDbInstance({ checkpointMode: null });
+    await core.resetDbInstance();
     globalThis.fetch = originalFetch;
     setGlobalDispatcher(originalDispatcher);
     await networkGuard.close();
@@ -225,11 +229,15 @@ test("raw video transcript retention through HTTP and SQLite", { timeout: 120_00
       return rows[0]?.id ? logs.getCallLogById(rows[0].id) : null;
     });
     assert(detail);
-    const row = core
-      .getDbInstance()
-      .prepare("SELECT video_content_removed, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(detail.id) as { video_content_removed: number; artifact_relpath: string | null };
-    const artifact = row.artifact_relpath
+    const row = (await getTestBackend().queryOne(
+      "SELECT video_content_removed::int AS video_content_removed, artifact_relpath, detail_state FROM call_logs WHERE id = $1",
+      [detail.id]
+    )) as {
+      video_content_removed: number;
+      artifact_relpath: string | null;
+      detail_state: string;
+    };
+    const artifact = row.artifact_relpath && row.detail_state === "ready"
       ? fs.readFileSync(path.join(dataDir, "call_logs", row.artifact_relpath), "utf8")
       : "";
     return {

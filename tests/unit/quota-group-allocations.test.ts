@@ -19,7 +19,7 @@
  *     qtSd model (groupSlug match), and DENIED a model from a different group.
  *  6. Propagation to 3+ pools — pool A, B, C in same group all receive the rows.
  *
- * DB harness: DATA_DIR → tmpdir, resetDbInstance() before each test.
+ * DB harness: resetTestDb() before each test (Postgres, fresh rows per test).
  * Real async store (getQuotaStore()) — no sync mock injection (avoids the
  * masking bug from A1/A2 where a sync mock hid missing await).
  */
@@ -45,46 +45,20 @@ const { enforceQuotaShare } = await import("../../src/lib/quota/enforce.ts");
 const { resolveQuotaKeyScope } = await import("../../src/lib/quota/quotaKey.ts");
 const { isQuotaModelName, parseQuotaModelName, quotaModelName, quotaGroupSlug } =
   await import("../../src/lib/quota/quotaModelNaming.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-async function resetStorage() {
-  core.resetDbInstance();
-  if (typeof (apiKeysDb as Record<string, unknown>).resetApiKeyState === "function") {
-    (apiKeysDb as Record<string, unknown>).resetApiKeyState as () => void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (apiKeysDb as any).resetApiKeyState();
-  }
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const err = error as NodeJS.ErrnoException;
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
+  (apiKeysDb as unknown as { resetApiKeyState: () => void }).resetApiKeyState();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
-  if (typeof (apiKeysDb as Record<string, unknown>).resetApiKeyState === "function") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (apiKeysDb as any).resetApiKeyState();
-  }
+  await core.resetDbInstance();
+  (apiKeysDb as unknown as { resetApiKeyState: () => void }).resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -92,7 +66,7 @@ test.after(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Create a provider connection synchronously (wraps async createProviderConnection). */
+/** Create a provider connection (wraps async createProviderConnection). */
 async function mkConn(provider: string, name: string): Promise<string> {
   const conn = await providersDb.createProviderConnection({
     provider,
@@ -103,9 +77,15 @@ async function mkConn(provider: string, name: string): Promise<string> {
   return (conn as Record<string, unknown>).id as string;
 }
 
+/** Create a real API key row (allocations reference api_keys) and return its id. */
+async function mkKey(name: string): Promise<string> {
+  const key = await apiKeysDb.createApiKey(name, `machine-${name}`);
+  return key.id as string;
+}
+
 /** Get allocations for a pool (via getPool). */
-function getAllocs(poolId: string): poolsDb.PoolAllocation[] {
-  const p = poolsDb.getPool(poolId);
+async function getAllocs(poolId: string): Promise<poolsDb.PoolAllocation[]> {
+  const p = await poolsDb.getPool(poolId);
   return p ? p.allocations : [];
 }
 
@@ -114,27 +94,36 @@ function getAllocs(poolId: string): poolsDb.PoolAllocation[] {
 // ---------------------------------------------------------------------------
 
 test("upsertAllocations: saving allocations on pool A propagates to pool B (same group)", async () => {
-  const groupG = groupsDb.createGroup("GroupAlloc1");
+  const groupG = await groupsDb.createGroup("GroupAlloc1");
+  const k1 = await mkKey("k1-alloc1");
 
   const connA = await mkConn("openrouter", "conn-alloc-a1");
   const connB = await mkConn("baidu", "conn-alloc-b1");
 
-  const poolA = poolsDb.createPool({ connectionId: connA, name: "Pool A1", groupId: groupG.id });
-  const poolB = poolsDb.createPool({ connectionId: connB, name: "Pool B1", groupId: groupG.id });
+  const poolA = await poolsDb.createPool({
+    connectionId: connA,
+    name: "Pool A1",
+    groupId: groupG.id,
+  });
+  const poolB = await poolsDb.createPool({
+    connectionId: connB,
+    name: "Pool B1",
+    groupId: groupG.id,
+  });
 
   // Save allocations on pool A only
-  poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: "k1", weight: 50, policy: "hard" }]);
+  await poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: k1, weight: 50, policy: "hard" }]);
 
   // Pool A should have the row
-  const allocsA = getAllocs(poolA.id);
+  const allocsA = await getAllocs(poolA.id);
   assert.equal(allocsA.length, 1, "pool A should have 1 allocation");
-  assert.equal(allocsA[0].apiKeyId, "k1");
+  assert.equal(allocsA[0].apiKeyId, k1);
   assert.equal(allocsA[0].weight, 50);
 
   // Pool B should also have the SAME row (propagation)
-  const allocsB = getAllocs(poolB.id);
+  const allocsB = await getAllocs(poolB.id);
   assert.equal(allocsB.length, 1, "pool B should have 1 propagated allocation");
-  assert.equal(allocsB[0].apiKeyId, "k1", "propagated row should have same apiKeyId");
+  assert.equal(allocsB[0].apiKeyId, k1, "propagated row should have same apiKeyId");
   assert.equal(allocsB[0].weight, 50, "propagated row should have same weight");
   assert.equal(allocsB[0].policy, "hard", "propagated row should have same policy");
 });
@@ -144,32 +133,42 @@ test("upsertAllocations: saving allocations on pool A propagates to pool B (same
 // ---------------------------------------------------------------------------
 
 test("upsertAllocations: re-upsert replaces propagated rows (idempotent)", async () => {
-  const groupG = groupsDb.createGroup("GroupAlloc2");
+  const groupG = await groupsDb.createGroup("GroupAlloc2");
+  const k1 = await mkKey("k1-alloc2");
+  const k2 = await mkKey("k2-alloc2");
 
   const connA = await mkConn("openrouter", "conn-alloc-a2");
   const connB = await mkConn("baidu", "conn-alloc-b2");
 
-  const poolA = poolsDb.createPool({ connectionId: connA, name: "Pool A2", groupId: groupG.id });
-  const poolB = poolsDb.createPool({ connectionId: connB, name: "Pool B2", groupId: groupG.id });
+  const poolA = await poolsDb.createPool({
+    connectionId: connA,
+    name: "Pool A2",
+    groupId: groupG.id,
+  });
+  const poolB = await poolsDb.createPool({
+    connectionId: connB,
+    name: "Pool B2",
+    groupId: groupG.id,
+  });
 
   // First upsert
-  poolsDb.upsertAllocations(poolA.id, [
-    { apiKeyId: "k1", weight: 50, policy: "hard" },
-    { apiKeyId: "k2", weight: 50, policy: "soft" },
+  await poolsDb.upsertAllocations(poolA.id, [
+    { apiKeyId: k1, weight: 50, policy: "hard" },
+    { apiKeyId: k2, weight: 50, policy: "soft" },
   ]);
 
   // Re-upsert with different weights
-  poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: "k1", weight: 70, policy: "hard" }]);
+  await poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: k1, weight: 70, policy: "hard" }]);
 
   // Both pools should have exactly 1 row (not 2+1)
-  const allocsA = getAllocs(poolA.id);
+  const allocsA = await getAllocs(poolA.id);
   assert.equal(allocsA.length, 1, "pool A: replace, not append");
   assert.equal(allocsA[0].weight, 70, "pool A: new weight");
 
-  const allocsB = getAllocs(poolB.id);
+  const allocsB = await getAllocs(poolB.id);
   assert.equal(allocsB.length, 1, "pool B: same replacement via propagation");
   assert.equal(allocsB[0].weight, 70, "pool B: new weight propagated");
-  assert.equal(allocsB[0].apiKeyId, "k1", "pool B: only k1 remains");
+  assert.equal(allocsB[0].apiKeyId, k1, "pool B: only k1 remains");
 });
 
 // ---------------------------------------------------------------------------
@@ -179,65 +178,67 @@ test("upsertAllocations: re-upsert replaces propagated rows (idempotent)", async
 test("upsertAllocations: single-pool group — only that pool is written", async () => {
   // poolZ is in its own group (created in group-demo by default via groupId omission,
   // but we want an isolated group here)
-  const groupSingle = groupsDb.createGroup("GroupSingle3");
+  const groupSingle = await groupsDb.createGroup("GroupSingle3");
+  const k3 = await mkKey("k3-alloc3");
 
   const connZ = await mkConn("openrouter", "conn-alloc-z3");
   // Also create another pool in a DIFFERENT group to ensure no cross-group leakage
-  const groupOther = groupsDb.createGroup("GroupOther3");
+  const groupOther = await groupsDb.createGroup("GroupOther3");
   const connO = await mkConn("baidu", "conn-alloc-o3");
 
-  const poolZ = poolsDb.createPool({
+  const poolZ = await poolsDb.createPool({
     connectionId: connZ,
     name: "Pool Z3",
     groupId: groupSingle.id,
   });
-  const poolO = poolsDb.createPool({
+  const poolO = await poolsDb.createPool({
     connectionId: connO,
     name: "Pool O3",
     groupId: groupOther.id,
   });
 
-  poolsDb.upsertAllocations(poolZ.id, [{ apiKeyId: "k3", weight: 100, policy: "hard" }]);
+  await poolsDb.upsertAllocations(poolZ.id, [{ apiKeyId: k3, weight: 100, policy: "hard" }]);
 
   // poolZ should have the row
-  assert.equal(getAllocs(poolZ.id).length, 1, "poolZ should have 1 allocation");
+  assert.equal((await getAllocs(poolZ.id)).length, 1, "poolZ should have 1 allocation");
 
   // poolO (different group) should have NO rows
   assert.equal(
-    getAllocs(poolO.id).length,
+    (await getAllocs(poolO.id)).length,
     0,
     "poolO (different group) must not receive propagated rows"
   );
 });
 
 // ---------------------------------------------------------------------------
-// Test 4 — enforceQuotaShare: key allocated via pool A can call pool B's connection
+// Test 4 — enforceQuotaShare: key k1 allocated via pool A can call pool B's connection
 // ---------------------------------------------------------------------------
 
 test("enforceQuotaShare: key k1 allocated via pool A is enforced when calling pool B's connection", async () => {
-  const groupG = groupsDb.createGroup("GroupEnforce4");
+  const groupG = await groupsDb.createGroup("GroupEnforce4");
+  const k1 = await mkKey("k1-enforce4");
 
   const connA = await mkConn("openrouter", "conn-enforce-a4");
   const connB = await mkConn("baidu", "conn-enforce-b4");
 
-  const poolA = poolsDb.createPool({
+  const poolA = await poolsDb.createPool({
     connectionId: connA,
     name: "Pool EnforceA4",
     groupId: groupG.id,
   });
-  const poolB = poolsDb.createPool({
+  const poolB = await poolsDb.createPool({
     connectionId: connB,
     name: "Pool EnforceB4",
     groupId: groupG.id,
   });
 
   // Allocate k1 via pool A — propagation should write to pool B as well
-  poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: "k1", weight: 50, policy: "hard" }]);
+  await poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: k1, weight: 50, policy: "hard" }]);
 
   // Verify propagation happened (sanity)
-  const allocsB = getAllocs(poolB.id);
+  const allocsB = await getAllocs(poolB.id);
   assert.equal(allocsB.length, 1, "pool B must have the propagated allocation before enforce");
-  assert.equal(allocsB[0].apiKeyId, "k1");
+  assert.equal(allocsB[0].apiKeyId, k1);
 
   // enforceQuotaShare for k1 calling pool B's connection
   // With no plan dimensions configured for connB/baidu, resolvePlan returns no
@@ -249,7 +250,7 @@ test("enforceQuotaShare: key k1 allocated via pool A is enforced when calling po
   // we use the real store and assert the call resolves without error.
   // The store path requires real async I/O — we await it properly (no sync mock).
   const result = await enforceQuotaShare({
-    apiKeyId: "k1",
+    apiKeyId: k1,
     connectionId: connB,
     provider: "baidu",
     estimatedCost: {},
@@ -274,33 +275,34 @@ test("enforceQuotaShare: key k1 allocated via pool A is enforced when calling po
 test("apiKeyPolicy groupSlug check: key in group G allowed for B's qtSd model, denied for other group", async () => {
   // This test validates the apiKeyPolicy Check 3 + resolveQuotaKeyScope interaction.
   // We build the scope directly (no HTTP request needed) and confirm the logic.
-  const groupG = groupsDb.createGroup("GroupPolicy5");
+  const groupG = await groupsDb.createGroup("GroupPolicy5");
+  const k5 = await mkKey("k5-policy5");
 
   const connA = await mkConn("openrouter", "conn-policy-a5");
   const connB = await mkConn("baidu", "conn-policy-b5");
 
-  const poolA = poolsDb.createPool({
+  const poolA = await poolsDb.createPool({
     connectionId: connA,
     name: "Pool PolicyA5",
     groupId: groupG.id,
   });
-  const poolB = poolsDb.createPool({
+  const poolB = await poolsDb.createPool({
     connectionId: connB,
     name: "Pool PolicyB5",
     groupId: groupG.id,
   });
 
   // Also create a different group with its own pool
-  const groupH = groupsDb.createGroup("GroupPolicyH5");
+  const groupH = await groupsDb.createGroup("GroupPolicyH5");
   const connH = await mkConn("openrouter", "conn-policy-h5");
-  const poolH = poolsDb.createPool({
+  const poolH = await poolsDb.createPool({
     connectionId: connH,
     name: "Pool PolicyH5",
     groupId: groupH.id,
   });
 
   // Key is allocated to pool A only (allowedQuotas=[poolA.id])
-  poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: "k5", weight: 50, policy: "hard" }]);
+  await poolsDb.upsertAllocations(poolA.id, [{ apiKeyId: k5, weight: 50, policy: "hard" }]);
 
   // Resolve the key's scope
   const scope = await resolveQuotaKeyScope([poolA.id]);
@@ -350,20 +352,34 @@ test("apiKeyPolicy groupSlug check: key in group G allowed for B's qtSd model, d
 // ---------------------------------------------------------------------------
 
 test("upsertAllocations: propagates to all 3 pools in the same group", async () => {
-  const groupG = groupsDb.createGroup("GroupTriple6");
+  const groupG = await groupsDb.createGroup("GroupTriple6");
+  const k6a = await mkKey("k6a-triple6");
+  const k6b = await mkKey("k6b-triple6");
 
   const connA = await mkConn("openrouter", "conn-triple-a6");
   const connB = await mkConn("baidu", "conn-triple-b6");
   const connC = await mkConn("kimi", "conn-triple-c6");
 
-  const poolA = poolsDb.createPool({ connectionId: connA, name: "Triple A6", groupId: groupG.id });
-  const poolB = poolsDb.createPool({ connectionId: connB, name: "Triple B6", groupId: groupG.id });
-  const poolC = poolsDb.createPool({ connectionId: connC, name: "Triple C6", groupId: groupG.id });
+  const poolA = await poolsDb.createPool({
+    connectionId: connA,
+    name: "Triple A6",
+    groupId: groupG.id,
+  });
+  const poolB = await poolsDb.createPool({
+    connectionId: connB,
+    name: "Triple B6",
+    groupId: groupG.id,
+  });
+  const poolC = await poolsDb.createPool({
+    connectionId: connC,
+    name: "Triple C6",
+    groupId: groupG.id,
+  });
 
   // Save allocations on pool A — should propagate to B and C
-  poolsDb.upsertAllocations(poolA.id, [
-    { apiKeyId: "k6a", weight: 40, policy: "hard" },
-    { apiKeyId: "k6b", weight: 60, policy: "soft" },
+  await poolsDb.upsertAllocations(poolA.id, [
+    { apiKeyId: k6a, weight: 40, policy: "hard" },
+    { apiKeyId: k6b, weight: 60, policy: "soft" },
   ]);
 
   for (const [label, pid] of [
@@ -371,14 +387,14 @@ test("upsertAllocations: propagates to all 3 pools in the same group", async () 
     ["B", poolB.id],
     ["C", poolC.id],
   ] as [string, string][]) {
-    const allocs = getAllocs(pid);
+    const allocs = await getAllocs(pid);
     assert.equal(allocs.length, 2, `pool ${label} should have 2 allocations`);
-    const k6a = allocs.find((a) => a.apiKeyId === "k6a");
-    const k6b = allocs.find((a) => a.apiKeyId === "k6b");
-    assert.ok(k6a, `pool ${label} should have allocation for k6a`);
-    assert.ok(k6b, `pool ${label} should have allocation for k6b`);
-    assert.equal(k6a!.weight, 40, `pool ${label}: k6a weight should be 40`);
-    assert.equal(k6b!.weight, 60, `pool ${label}: k6b weight should be 60`);
-    assert.equal(k6b!.policy, "soft", `pool ${label}: k6b policy should be soft`);
+    const rowA = allocs.find((a) => a.apiKeyId === k6a);
+    const rowB = allocs.find((a) => a.apiKeyId === k6b);
+    assert.ok(rowA, `pool ${label} should have allocation for k6a`);
+    assert.ok(rowB, `pool ${label} should have allocation for k6b`);
+    assert.equal(rowA!.weight, 40, `pool ${label}: k6a weight should be 40`);
+    assert.equal(rowB!.weight, 60, `pool ${label}: k6b weight should be 60`);
+    assert.equal(rowB!.policy, "soft", `pool ${label}: k6b policy should be soft`);
   }
 });

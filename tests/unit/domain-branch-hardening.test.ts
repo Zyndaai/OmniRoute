@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-domain-ha
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const fallbackPolicy = await import("../../src/domain/fallbackPolicy.ts");
 const lockoutPolicy = await import("../../src/domain/lockoutPolicy.ts");
@@ -25,28 +26,11 @@ function isoFromNow(offsetMs) {
 }
 
 async function resetStorage() {
-  costRules.resetCostData();
-  fallbackPolicy.resetAllFallbacks();
+  await resetTestDb();
+  await costRules.resetCostData();
+  await fallbackPolicy.resetAllFallbacks();
   providerExpiration.resetExpirations();
   quotaCache.stopBackgroundRefresh();
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
@@ -59,10 +43,10 @@ test.after(async () => {
   Date.now = originalDateNow;
   Math.random = originalMathRandom;
   quotaCache.stopBackgroundRefresh();
-  costRules.resetCostData();
-  fallbackPolicy.resetAllFallbacks();
+  await costRules.resetCostData();
+  await fallbackPolicy.resetAllFallbacks();
   providerExpiration.resetExpirations();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -391,7 +375,7 @@ test("quotaCache covers empty quotas, invalid dates and fallback percentage norm
   );
 });
 
-test("policyEngine evaluates lockout, budget, fallback chains and policy class actions", () => {
+test("policyEngine evaluates lockout, budget, fallback chains and policy class actions", async () => {
   const lockConfig = {
     maxAttempts: 1,
     lockoutDurationMs: 500,
@@ -400,31 +384,31 @@ test("policyEngine evaluates lockout, budget, fallback chains and policy class a
   let now = 50_000;
   Date.now = () => now;
 
-  lockoutPolicy.recordFailedAttempt("10.0.0.1", lockConfig);
-  const locked = policyEngineModule.evaluateRequest({
+  await lockoutPolicy.recordFailedAttempt("10.0.0.1", lockConfig);
+  const locked = await policyEngineModule.evaluateRequest({
     model: "claude-sonnet",
     clientIp: "10.0.0.1",
   });
   assert.equal(locked.allowed, false);
   assert.equal(locked.policyPhase, "lockout");
 
-  lockoutPolicy.recordSuccess("10.0.0.1");
+  await lockoutPolicy.recordSuccess("10.0.0.1");
   Date.now = originalDateNow;
-  costRules.setBudget("key-budget", { dailyLimitUsd: 5, warningThreshold: 0.5 });
+  await costRules.setBudget("key-budget", { dailyLimitUsd: 5, warningThreshold: 0.5 });
   costRules.recordCost("key-budget", 6);
 
-  const overBudget = policyEngineModule.evaluateRequest({
+  const overBudget = await policyEngineModule.evaluateRequest({
     model: "claude-sonnet",
     apiKeyId: "key-budget",
   });
   assert.equal(overBudget.allowed, false);
   assert.equal(overBudget.policyPhase, "budget");
 
-  fallbackPolicy.registerFallback("claude-sonnet", [
+  await fallbackPolicy.registerFallback("claude-sonnet", [
     { provider: "vertex", priority: 2 },
     { provider: "bedrock", priority: 3 },
   ]);
-  const passed = policyEngineModule.evaluateRequest({
+  const passed = await policyEngineModule.evaluateRequest({
     model: "claude-sonnet",
     apiKeyId: "missing-key",
   });
@@ -434,7 +418,7 @@ test("policyEngine evaluates lockout, budget, fallback chains and policy class a
     { provider: "bedrock", priority: 3, enabled: true },
   ]);
 
-  const firstAllowed = policyEngineModule.evaluateFirstAllowed(["claude-sonnet", "gpt-4o"], {
+  const firstAllowed = await policyEngineModule.evaluateFirstAllowed(["claude-sonnet", "gpt-4o"], {
     clientIp: "10.0.0.2",
   });
   assert.equal(firstAllowed.model, "claude-sonnet");

@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cap-snapshot-9199-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -21,7 +22,6 @@ const originalContextLengthEnv = new Map(
 );
 for (const key of originalContextLengthEnv.keys()) delete process.env[key];
 
-const core = await import("../../src/lib/db/core.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const capabilityOverrides = await import("../../src/lib/db/modelCapabilityOverrides.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
@@ -31,8 +31,8 @@ const model = await import("../../open-sse/services/model.ts");
 const { MODEL_SPECS } = await import("../../src/shared/constants/modelSpecs.ts");
 const { REGISTRY } = await import("../../open-sse/config/providerRegistry.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   for (const key of Object.keys(process.env)) {
     if (key.startsWith("CONTEXT_LENGTH_")) delete process.env[key];
   }
@@ -44,13 +44,12 @@ test.after(() => {
   }
 });
 
-function seedFixture() {
-  core.resetDbInstance();
+async function seedFixture() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
 
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     // Direct provider/model hit used by ordinary + snapshot paths.
     "parity-provider": {
       "parity-model": {
@@ -98,7 +97,7 @@ function seedFixture() {
   });
 
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await capabilityOverrides.setModelCapabilityOverride(
       "parity-provider/parity-model",
       "max_output_tokens",
       99999
@@ -106,26 +105,30 @@ function seedFixture() {
     true
   );
   // Malformed capability override row must be filtered from list/bulk maps.
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO model_capability_overrides " +
-        "(provider, model_id, override_key, override_value, refreshed_at) " +
-        "VALUES (?, ?, ?, ?, datetime('now'))"
-    )
-    .run("parity-provider", "parity-model-bad", "max_output_tokens", "not-a-number");
+  await getTestBackend().execute(
+    `INSERT INTO model_capability_overrides (provider, model_id, override_key, override_value)
+     VALUES ($1, $2, $3, $4::jsonb)`,
+    ["parity-provider", "parity-model-bad", "max_output_tokens", JSON.stringify("not-a-number")]
+  );
 
-  // Collision pairs that a delimiter-composed key would merge: (a, b\0c) vs (a\0b, c).
+  // Collision pairs that a delimiter-composed key would merge: (a, b<sep>c) vs (a<sep>b, c).
+  // Postgres text cannot hold a NUL byte, so the separator is \u0001.
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride("a/b\u0000c", "max_output_tokens", 10101),
+    await capabilityOverrides.setModelCapabilityOverride("a/b\u0001c", "max_output_tokens", 10101),
     true
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride("a\u0000b/c", "max_output_tokens", 20202),
+    await capabilityOverrides.setModelCapabilityOverride("a\u0001b/c", "max_output_tokens", 20202),
     true
   );
-  assert.equal(contextOverrides.setModelContextOverride("a", "b\u0000c", 30303, "manual"), true);
-  assert.equal(contextOverrides.setModelContextOverride("a\u0000b", "c", 40404, "manual"), true);
+  assert.equal(
+    await contextOverrides.setModelContextOverride("a", "b\u0001c", 30303, "manual"),
+    true
+  );
+  assert.equal(
+    await contextOverrides.setModelContextOverride("a\u0001b", "c", 40404, "manual"),
+    true
+  );
 
   // Real provider-model alias from open-sse/services/model.ts PROVIDER_MODEL_ALIASES.
   // Override is stored only under the raw alias id, not the canonical model.
@@ -134,7 +137,7 @@ function seedFixture() {
   assert.equal(aliasCanonical.model, "claude-opus-4-5-20251101");
   assert.notEqual(aliasCanonical.model, "claude-4.5-opus");
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await capabilityOverrides.setModelCapabilityOverride(
       "github/claude-4.5-opus",
       "max_output_tokens",
       77777
@@ -142,7 +145,7 @@ function seedFixture() {
     true
   );
   assert.equal(
-    capabilityOverrides.getModelCapabilityOverride(
+    await capabilityOverrides.getModelCapabilityOverride(
       "github",
       "claude-opus-4-5-20251101",
       "max_output_tokens"
@@ -152,28 +155,34 @@ function seedFixture() {
   );
 
   assert.equal(
-    contextOverrides.setModelContextOverride("parity-provider", "parity-model", 555555, "manual"),
+    await contextOverrides.setModelContextOverride(
+      "parity-provider",
+      "parity-model",
+      555555,
+      "manual"
+    ),
     true
   );
 }
 
-function insertRawCapability(provider: string, modelId: string): void {
-  modelsDevSync.ensureCapabilitiesTable();
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO model_capabilities " +
-        "(provider, model_id, tool_call, reasoning, attachment, structured_output, temperature, " +
-        "modalities_input, modalities_output, knowledge_cutoff, release_date, last_updated, " +
-        "status, family, open_weights, limit_context, limit_input, limit_output, interleaved_field, last_synced) " +
-        "VALUES (?, ?, 1, 1, 0, NULL, 1, '[]', '[]', NULL, NULL, NULL, NULL, NULL, NULL, 111111, 100000, 2222, NULL, datetime('now'))"
-    )
-    .run(provider, modelId);
+async function insertRawCapability(provider: string, modelId: string): Promise<void> {
+  await getTestBackend().execute(
+    `INSERT INTO model_capabilities
+       (provider, model_id, tool_call, reasoning, attachment, structured_output, temperature,
+        modalities_input, modalities_output, knowledge_cutoff, release_date, last_updated,
+        status, family, open_weights, limit_context, limit_input, limit_output, interleaved_field,
+        last_synced)
+     VALUES ($1, $2, true, true, false, NULL, true, '[]'::jsonb, '[]'::jsonb, NULL, NULL, NULL,
+        NULL, NULL, NULL, 111111, 100000, 2222, NULL, now())
+     ON CONFLICT (provider, model_id) DO UPDATE SET limit_context = EXCLUDED.limit_context,
+        limit_input = EXCLUDED.limit_input, limit_output = EXCLUDED.limit_output`,
+    [provider, modelId]
+  );
 }
 
-function pickParityFields(
-  resolved: ReturnType<typeof modelCapabilities.getResolvedModelCapabilities>
-) {
+type ResolvedCaps = Awaited<ReturnType<typeof modelCapabilities.getResolvedModelCapabilities>>;
+
+function pickParityFields(resolved: ResolvedCaps) {
   return {
     provider: resolved.provider,
     model: resolved.model,
@@ -192,17 +201,17 @@ function pickParityFields(
   };
 }
 
-function assertOrdinarySnapshotParity(
+async function assertOrdinarySnapshotParity(
   provider: string,
   modelId: string,
   snapshot: modelCapabilities.ModelCapabilityResolutionSnapshot,
   label: string
 ) {
-  const ordinaryCaps = modelCapabilities.getResolvedModelCapabilities({
+  const ordinaryCaps = await modelCapabilities.getResolvedModelCapabilities({
     provider,
     model: modelId,
   });
-  const snapshotCaps = modelCapabilities.getResolvedModelCapabilities(
+  const snapshotCaps = await modelCapabilities.getResolvedModelCapabilities(
     { provider, model: modelId },
     snapshot
   );
@@ -212,35 +221,38 @@ function assertOrdinarySnapshotParity(
     `${label}: getResolvedModelCapabilities parity`
   );
 
-  const ordinaryLimit = contextManager.getTokenLimit(provider, modelId);
-  const snapshotLimit = contextManager.getTokenLimit(provider, modelId, snapshot);
+  const ordinaryLimit = await contextManager.getTokenLimit(provider, modelId);
+  const snapshotLimit = await contextManager.getTokenLimit(provider, modelId, snapshot);
   assert.equal(
     snapshotLimit,
     ordinaryLimit,
     `${label}: getTokenLimit parity (got ${snapshotLimit}, want ${ordinaryLimit})`
   );
 
-  const ordinaryContext = modelCapabilities.getModelContextLimit(provider, modelId);
-  const snapshotContext = modelCapabilities.getModelContextLimit(provider, modelId, snapshot);
+  const ordinaryContext = await modelCapabilities.getModelContextLimit(provider, modelId);
+  const snapshotContext = await modelCapabilities.getModelContextLimit(
+    provider,
+    modelId,
+    snapshot
+  );
   assert.equal(snapshotContext, ordinaryContext, `${label}: getModelContextLimit parity`);
 }
 
-test("#9199 bulk capability rows treat prototype-shaped keys as data", () => {
-  core.resetDbInstance();
+test("#9199 bulk capability rows treat prototype-shaped keys as data", async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
 
-  insertRawCapability("__proto__", "polluted-model");
-  insertRawCapability("prototype-provider", "__proto__");
+  await insertRawCapability("__proto__", "polluted-model");
+  await insertRawCapability("prototype-provider", "__proto__");
   assert.equal(Object.hasOwn(Object.prototype, "polluted-model"), false);
 
-  const ordinary = modelsDevSync.getSyncedCapability("__proto__", "polluted-model");
+  const ordinary = await modelsDevSync.getSyncedCapability("__proto__", "polluted-model");
   assert.equal(ordinary?.limit_context, 111111, "ordinary point lookup must support the row");
   assert.equal(Object.hasOwn(Object.prototype, "polluted-model"), false);
 
   try {
-    const bulk = modelsDevSync.loadAllSyncedCapabilitiesUncached();
+    const bulk = await modelsDevSync.loadAllSyncedCapabilitiesUncached();
     assert.equal(Object.hasOwn(bulk, "__proto__"), true);
     assert.equal(bulk["__proto__"]?.["polluted-model"]?.limit_output, 2222);
     assert.equal(Object.hasOwn(bulk["prototype-provider"], "__proto__"), true);
@@ -251,118 +263,110 @@ test("#9199 bulk capability rows treat prototype-shaped keys as data", () => {
   }
 });
 
-test("#9199 uncached bulk load does not mutate models.dev all-row cache", () => {
-  seedFixture();
+test("#9199 uncached bulk load does not mutate models.dev all-row cache", async () => {
+  await seedFixture();
   // clearModelsDevCapabilities leaves cachedCapabilitiesLoadedAll=true with {}.
-  modelsDevSync.clearModelsDevCapabilities();
-  assert.equal(modelsDevSync.getSyncedCapability("parity-provider", "parity-model"), null);
+  await modelsDevSync.clearModelsDevCapabilities();
+  assert.equal(
+    await modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
+    null
+  );
 
   // Insert behind the module-global cache via raw SQL.
-  const db = core.getDbInstance();
-  insertRawCapability("parity-provider", "parity-model");
+  await insertRawCapability("parity-provider", "parity-model");
 
   // Ordinary path still sees the empty module cache.
-  assert.equal(modelsDevSync.getSyncedCapability("parity-provider", "parity-model"), null);
+  assert.equal(
+    await modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
+    null
+  );
 
-  const bulk = modelsDevSync.loadAllSyncedCapabilitiesUncached();
+  const bulk = await modelsDevSync.loadAllSyncedCapabilitiesUncached();
   assert.equal(bulk["parity-provider"]?.["parity-model"]?.limit_context, 111111);
 
   // Uncached bulk must not publish into the module-global cache.
   assert.equal(
-    modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
+    await modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
     null,
     "loadAllSyncedCapabilitiesUncached must not flip cachedCapabilitiesLoadedAll data"
   );
 
-  const originalPrepare = db.prepare;
-  const callPrepare = originalPrepare.bind(db);
+  // Count the statements that snapshot creation issues against the three source tables.
+  // The read cache is invalidated first so the measured call is a cold read.
+  const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
+  invalidateDbCache("model-capabilities");
+  const backend = getTestBackend() as unknown as Record<
+    "query" | "queryOne" | "execute",
+    (sql: string, ...rest: unknown[]) => Promise<unknown>
+  >;
   const counts = { synced: 0, capabilityOverrides: 0, contextOverrides: 0 };
-  (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
+  const originals = {
+    query: backend.query,
+    queryOne: backend.queryOne,
+    execute: backend.execute,
+  };
+  const countSql = (sql: string) => {
     const normalized = String(sql).replace(/\s+/g, " ").trim();
     if (normalized.includes("FROM model_capabilities")) counts.synced++;
     if (normalized.includes("FROM model_capability_overrides")) counts.capabilityOverrides++;
     if (normalized.includes("FROM model_context_overrides")) counts.contextOverrides++;
-    return callPrepare(sql);
-  }) as typeof db.prepare;
+  };
+  for (const name of ["query", "queryOne", "execute"] as const) {
+    const original = originals[name];
+    backend[name] = function (sql: string, ...rest: unknown[]) {
+      countSql(sql);
+      return original.call(backend, sql, ...rest);
+    };
+  }
 
   try {
-    const snapshot = modelCapabilities.createModelCapabilityResolutionSnapshot();
+    const snapshot = await modelCapabilities.createModelCapabilityResolutionSnapshot();
     assert.equal(snapshot.synced["parity-provider"]?.["parity-model"]?.limit_output, 2222);
   } finally {
-    (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
+    backend.query = originals.query;
+    backend.queryOne = originals.queryOne;
+    backend.execute = originals.execute;
   }
 
   assert.deepEqual(counts, { synced: 1, capabilityOverrides: 1, contextOverrides: 1 });
   assert.equal(
-    modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
+    await modelsDevSync.getSyncedCapability("parity-provider", "parity-model"),
     null,
     "snapshot creation must remain build-local"
   );
 });
 
-// This subtest stores map keys containing an embedded NUL byte ("\u0000") to
-// verify the nested-map keying keeps delimiter-colliding pairs distinct. That
-// requires the SQLite driver to preserve NUL bytes inside TEXT values.
-// better-sqlite3 (the driver shipped and run in production/CI) preserves them.
-// node:sqlite — the fallback this repo drops to when better-sqlite3's native
-// module can't load (e.g. a sandbox missing the required GLIBC) — truncates a
-// TEXT value at the first NUL byte (C-string semantics), so "a\u0000b" round-
-// trips as "a". That is a hard limitation of the node:sqlite binding, not a
-// defect in the code under test, and it only affects this NUL-byte edge case.
-// Probe the active driver once and skip with a clear reason when NUL bytes are
-// not preserved, so the test still runs and guards the behavior on CI.
-function nulBytesArePreservedByDriver(): boolean {
-  try {
-    const db = core.getDbInstance();
-    db.exec("CREATE TABLE IF NOT EXISTS __nul_probe (k TEXT)");
-    db.prepare("DELETE FROM __nul_probe").run();
-    db.prepare("INSERT INTO __nul_probe (k) VALUES (?)").run("a\u0000b");
-    const row = db.prepare("SELECT k FROM __nul_probe").get() as { k: string } | undefined;
-    return row?.k === "a\u0000b";
-  } catch {
-    return false;
-  }
-}
-
-test("#9199 nested override maps keep delimiter-colliding pairs distinct", (t) => {
-  if (!nulBytesArePreservedByDriver()) {
-    t.skip(
-      "Active SQLite driver truncates TEXT at embedded NUL bytes (node:sqlite " +
-        "fallback); better-sqlite3 in CI preserves them. Known driver limitation, " +
-        "not a code defect."
-    );
-    return;
-  }
-  seedFixture();
-  const snapshot = modelCapabilities.createModelCapabilityResolutionSnapshot();
+test("#9199 nested override maps keep delimiter-colliding pairs distinct", async () => {
+  await seedFixture();
+  const snapshot = await modelCapabilities.createModelCapabilityResolutionSnapshot();
 
   // Delimiter-composed keys would merge these pairs; nested maps must not.
-  assert.equal(snapshot.maxTokenOverrides.get("a")?.get("b\u0000c"), 10101);
-  assert.equal(snapshot.maxTokenOverrides.get("a\u0000b")?.get("c"), 20202);
+  assert.equal(snapshot.maxTokenOverrides.get("a")?.get("b\u0001c"), 10101);
+  assert.equal(snapshot.maxTokenOverrides.get("a\u0001b")?.get("c"), 20202);
   assert.notEqual(
-    snapshot.maxTokenOverrides.get("a")?.get("b\u0000c"),
-    snapshot.maxTokenOverrides.get("a\u0000b")?.get("c")
+    snapshot.maxTokenOverrides.get("a")?.get("b\u0001c"),
+    snapshot.maxTokenOverrides.get("a\u0001b")?.get("c")
   );
 
-  assert.equal(snapshot.contextOverrides.get("a")?.get("b\u0000c"), 30303);
-  assert.equal(snapshot.contextOverrides.get("a\u0000b")?.get("c"), 40404);
+  assert.equal(snapshot.contextOverrides.get("a")?.get("b\u0001c"), 30303);
+  assert.equal(snapshot.contextOverrides.get("a\u0001b")?.get("c"), 40404);
   assert.notEqual(
-    snapshot.contextOverrides.get("a")?.get("b\u0000c"),
-    snapshot.contextOverrides.get("a\u0000b")?.get("c")
+    snapshot.contextOverrides.get("a")?.get("b\u0001c"),
+    snapshot.contextOverrides.get("a\u0001b")?.get("c")
   );
 
   assert.equal(
-    capabilityOverrides.getModelCapabilityOverride(
+    await capabilityOverrides.getModelCapabilityOverride(
       "a",
-      "b\u0000c",
+      "b\u0001c",
       "max_output_tokens",
       snapshot.maxTokenOverrides
     ),
     10101
   );
   assert.equal(
-    capabilityOverrides.getModelCapabilityOverride(
-      "a\u0000b",
+    await capabilityOverrides.getModelCapabilityOverride(
+      "a\u0001b",
       "c",
       "max_output_tokens",
       snapshot.maxTokenOverrides
@@ -370,34 +374,47 @@ test("#9199 nested override maps keep delimiter-colliding pairs distinct", (t) =
     20202
   );
   assert.equal(
-    contextOverrides.getModelContextOverride("a", "b\u0000c", snapshot.contextOverrides),
+    await contextOverrides.getModelContextOverride("a", "b\u0001c", snapshot.contextOverrides),
     30303
   );
   assert.equal(
-    contextOverrides.getModelContextOverride("a\u0000b", "c", snapshot.contextOverrides),
+    await contextOverrides.getModelContextOverride("a\u0001b", "c", snapshot.contextOverrides),
     40404
   );
 
-  assertOrdinarySnapshotParity("a", "b\u0000c", snapshot, "collision pair (a, b\\0c)");
-  assertOrdinarySnapshotParity("a\u0000b", "c", snapshot, "collision pair (a\\0b, c)");
+  await assertOrdinarySnapshotParity("a", "b\u0001c", snapshot, "collision pair (a, b\\u0001c)");
+  await assertOrdinarySnapshotParity(
+    "a\u0001b",
+    "c",
+    snapshot,
+    "collision pair (a\\u0001b, c)"
+  );
 
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: "a", model: "b\u0000c" }, snapshot)
-      .maxOutputTokens,
+    (
+      await modelCapabilities.getResolvedModelCapabilities(
+        { provider: "a", model: "b\u0001c" },
+        snapshot
+      )
+    ).maxOutputTokens,
     10101
   );
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: "a\u0000b", model: "c" }, snapshot)
-      .maxOutputTokens,
+    (
+      await modelCapabilities.getResolvedModelCapabilities(
+        { provider: "a\u0001b", model: "c" },
+        snapshot
+      )
+    ).maxOutputTokens,
     20202
   );
-  assert.equal(modelCapabilities.getModelContextLimit("a", "b\u0000c", snapshot), 30303);
-  assert.equal(modelCapabilities.getModelContextLimit("a\u0000b", "c", snapshot), 40404);
+  assert.equal(await modelCapabilities.getModelContextLimit("a", "b\u0001c", snapshot), 30303);
+  assert.equal(await modelCapabilities.getModelContextLimit("a\u0001b", "c", snapshot), 40404);
 });
 
-test("#9199 snapshot-backed resolution matches ordinary resolvers across resolution paths", () => {
-  seedFixture();
-  const snapshot = modelCapabilities.createModelCapabilityResolutionSnapshot();
+test("#9199 snapshot-backed resolution matches ordinary resolvers across resolution paths", async () => {
+  await seedFixture();
+  const snapshot = await modelCapabilities.createModelCapabilityResolutionSnapshot();
 
   // Static MODEL_SPECS pin (not seeded in models.dev / overrides).
   const staticSpec = MODEL_SPECS["gpt-4o-mini"];
@@ -419,7 +436,7 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
     "gitlab-duo must keep a real provider-registry defaultContextLength"
   );
   assert.equal(
-    modelCapabilities.getModelContextLimit(defaultContextProvider, defaultContextModel),
+    await modelCapabilities.getModelContextLimit(defaultContextProvider, defaultContextModel),
     null,
     "default-context path requires no resolved per-model contextWindow"
   );
@@ -429,7 +446,7 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
   const heuristicModel = "custom-claude-lab";
   assert.equal(REGISTRY[heuristicProvider], undefined);
   assert.equal(
-    modelCapabilities.getModelContextLimit(heuristicProvider, heuristicModel),
+    await modelCapabilities.getModelContextLimit(heuristicProvider, heuristicModel),
     null,
     "heuristic path requires no resolved per-model contextWindow"
   );
@@ -466,33 +483,37 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
   ];
 
   for (const entry of cases) {
-    assertOrdinarySnapshotParity(entry.provider, entry.model, snapshot, entry.label);
+    await assertOrdinarySnapshotParity(entry.provider, entry.model, snapshot, entry.label);
   }
 
   // Explicit override/precedence pins so the test is not only structural.
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities(
-      { provider: "parity-provider", model: "parity-model" },
-      snapshot
+    (
+      await modelCapabilities.getResolvedModelCapabilities(
+        { provider: "parity-provider", model: "parity-model" },
+        snapshot
+      )
     ).maxOutputTokens,
     99999,
     "max_token override must win over synced limit_output"
   );
   assert.equal(
-    modelCapabilities.getModelContextLimit("parity-provider", "parity-model", snapshot),
+    await modelCapabilities.getModelContextLimit("parity-provider", "parity-model", snapshot),
     555555,
     "context override must win over synced limit_context / resolved contextWindow"
   );
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities(
-      { provider: "opencode", model: "zen-only-model" },
-      snapshot
+    (
+      await modelCapabilities.getResolvedModelCapabilities(
+        { provider: "opencode", model: "zen-only-model" },
+        snapshot
+      )
     ).contextWindow,
     333333,
     "canonical opencode must resolve capabilities stored under opencode-zen"
   );
 
-  const aliasResolved = modelCapabilities.getResolvedModelCapabilities(
+  const aliasResolved = await modelCapabilities.getResolvedModelCapabilities(
     { provider: "github", model: "claude-4.5-opus" },
     snapshot
   );
@@ -503,7 +524,7 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
     77777,
     "max_token override stored only under rawModel must still apply after alias resolution"
   );
-  const canonicalOnly = modelCapabilities.getResolvedModelCapabilities(
+  const canonicalOnly = await modelCapabilities.getResolvedModelCapabilities(
     { provider: "github", model: "claude-opus-4-5-20251101" },
     snapshot
   );
@@ -516,7 +537,7 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
   );
 
   // Registry-backed pins: glm-5-turbo is absent from MODEL_SPECS.
-  const registryResolved = modelCapabilities.getResolvedModelCapabilities(
+  const registryResolved = await modelCapabilities.getResolvedModelCapabilities(
     { provider: "glm", model: "glm-5-turbo" },
     snapshot
   );
@@ -524,39 +545,35 @@ test("#9199 snapshot-backed resolution matches ordinary resolvers across resolut
   assert.equal(registryResolved.maxOutputTokens, 131072);
 
   // Static MODEL_SPECS pin without a provider registry hit for this missing provider.
-  assert.equal(
-    modelCapabilities.getResolvedModelCapabilities(
-      { provider: "missing-provider", model: "gpt-4o-mini" },
-      snapshot
-    ).maxOutputTokens,
-    staticSpec.maxOutputTokens
+  const missingResolved = await modelCapabilities.getResolvedModelCapabilities(
+    { provider: "missing-provider", model: "gpt-4o-mini" },
+    snapshot
   );
-  assert.equal(
-    modelCapabilities.getResolvedModelCapabilities(
-      { provider: "missing-provider", model: "gpt-4o-mini" },
-      snapshot
-    ).contextWindow,
-    staticSpec.contextWindow
-  );
+  assert.equal(missingResolved.maxOutputTokens, staticSpec.maxOutputTokens);
+  assert.equal(missingResolved.contextWindow, staticSpec.contextWindow);
 
   // Provider defaultContextLength path (getTokenLimit step 3).
   assert.equal(
-    contextManager.getTokenLimit(defaultContextProvider, defaultContextModel, snapshot),
+    await contextManager.getTokenLimit(defaultContextProvider, defaultContextModel, snapshot),
     128000
   );
 
   // Model-name heuristic path (getTokenLimit step 4 → DEFAULT_LIMITS.claude).
-  assert.equal(contextManager.getTokenLimit(heuristicProvider, heuristicModel, snapshot), 200000);
+  assert.equal(
+    await contextManager.getTokenLimit(heuristicProvider, heuristicModel, snapshot),
+    200000
+  );
 
   // Missing path remains a pure default/fallback, not a catalog hit.
-  assert.equal(
-    modelCapabilities.getResolvedModelCapabilities(
-      { provider: "missing-provider", model: "missing-model" },
-      snapshot
-    ).contextWindow,
-    null
+  const missingModelResolved = await modelCapabilities.getResolvedModelCapabilities(
+    { provider: "missing-provider", model: "missing-model" },
+    snapshot
   );
-  assert.equal(contextManager.getTokenLimit("missing-provider", "missing-model", snapshot), 128000);
+  assert.equal(missingModelResolved.contextWindow, null);
+  assert.equal(
+    await contextManager.getTokenLimit("missing-provider", "missing-model", snapshot),
+    128000
+  );
 
   assert.equal(
     snapshot.maxTokenOverrides.get("parity-provider")?.has("parity-model-bad") ?? false,

@@ -8,17 +8,20 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lkgp-12326-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
-const comboRepo = await import("../../src/lib/db/repositories/sqliteComboRepository.ts");
+const comboRepo = await import("../../src/lib/db/repositories/comboRepository.ts");
 const lkgpDb = await import("../../src/lib/db/settings/lkgp.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  // resetTestDb empties every table and clears read caches; the data dir cleanup
+  // below only covers file artifacts.
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -56,8 +59,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

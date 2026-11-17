@@ -20,7 +20,7 @@
  *     controlled via real fixture files, exactly as in
  *     tests/unit/cursor-token-extractor.test.ts.
  */
-import { describe, it, beforeEach, afterEach } from "../_helpers/posixOnly.ts";
+import { describe, it, before, beforeEach, afterEach } from "../_helpers/posixOnly.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -341,6 +341,13 @@ describe("renewCursorConnection", () => {
   let binaryPath: string;
   let logPath: string;
 
+  // better-sqlite3 loads its native binary on first use, keyed by process.platform. The
+  // beforeEach below spoofs darwin, so warm the binding up first (see cursor-token-extractor).
+  before(async () => {
+    const Database = (await import("better-sqlite3")).default;
+    new Database(":memory:").close();
+  });
+
   beforeEach(() => {
     originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
@@ -368,13 +375,13 @@ describe("renewCursorConnection", () => {
   });
 
   async function writeIdeToken(accessToken: string, machineId?: string): Promise<void> {
-    const { openDatabaseAsync } = await import("@/lib/db/adapters/driverFactory");
+    const Database = (await import("better-sqlite3")).default;
     const dbPath = path.join(
       tmpHome,
       "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
     );
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    const seed = await openDatabaseAsync(dbPath);
+    const seed = new Database(dbPath);
     seed.exec("CREATE TABLE itemTable (key TEXT PRIMARY KEY, value TEXT)");
     seed
       .prepare("INSERT INTO itemTable (key, value) VALUES (?, ?)")
@@ -394,12 +401,12 @@ describe("renewCursorConnection", () => {
   }
 
   async function updateIdeToken(accessToken: string): Promise<void> {
-    const { openDatabaseAsync } = await import("@/lib/db/adapters/driverFactory");
+    const Database = (await import("better-sqlite3")).default;
     const dbPath = path.join(
       tmpHome,
       "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
     );
-    const db = await openDatabaseAsync(dbPath);
+    const db = new Database(dbPath);
     db.prepare("INSERT OR REPLACE INTO itemTable (key, value) VALUES (?, ?)").run(
       "cursorAuth/accessToken",
       accessToken

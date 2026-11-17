@@ -18,13 +18,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { before } from "node:test";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-operator-disable-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "operator-disable-test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const VALIDATION_BASE_URL = "https://proxy.operator-disable.example.com/v1";
 const originalFetch = globalThis.fetch;
@@ -42,13 +41,13 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 const providerByIdRoute = await import("../../src/app/api/providers/[id]/route.ts");
 const { testSingleConnection } = await import("../../src/app/api/providers/[id]/test/route.ts");
-const { OPERATOR_DISABLED_AT_KEY, isOperatorDisabled } = await import(
-  "../../src/lib/providers/operatorDisable.ts"
-);
+const { OPERATOR_DISABLED_AT_KEY, isOperatorDisabled } =
+  await import("../../src/lib/providers/operatorDisable.ts");
 
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
   const text = await response.text();
@@ -101,20 +100,31 @@ async function setActive(connectionId: string, isActive: boolean): Promise<void>
   assert.equal(response.status, 200, `PUT isActive failed: ${await response.text()}`);
 }
 
-function readRow(connectionId: string): { isActive: number; psd: Record<string, unknown> } {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT is_active, provider_specific_data FROM provider_connections WHERE id = ?")
-    .get(connectionId) as { is_active: number; provider_specific_data: string | null };
+// Returns isActive as 1/0 (the shape these assertions were written against).
+async function readRow(
+  connectionId: string
+): Promise<{ isActive: number; psd: Record<string, unknown> }> {
+  const row = await getTestBackend().queryOne<{
+    is_active: boolean;
+    provider_specific_data: Record<string, unknown> | string | null;
+  }>("SELECT is_active, provider_specific_data FROM provider_connections WHERE id = $1", [
+    connectionId,
+  ]);
+  const psd = row?.provider_specific_data;
   return {
-    isActive: row.is_active,
-    psd: row.provider_specific_data ? JSON.parse(row.provider_specific_data) : {},
+    isActive: row?.is_active ? 1 : 0,
+    psd: typeof psd === "string" ? JSON.parse(psd) : (psd ?? {}),
   };
 }
 
-test.after(() => {
+before(async () => {
+  await core.ensureDbInitialized();
+  await resetTestDb();
+});
+
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -135,25 +145,25 @@ test("a passing test does not re-enable a connection the operator switched off",
   // Never activated: the first passing test still activates it (#11446).
   const first = await testSingleConnection(connectionId);
   assert.equal(first.valid, true, `expected a passing test, got ${JSON.stringify(first)}`);
-  assert.equal(readRow(connectionId).isActive, 1, "first passing test must activate");
+  assert.equal((await readRow(connectionId)).isActive, 1, "first passing test must activate");
 
   // Operator switches it off on purpose.
   await setActive(connectionId, false);
-  assert.equal(readRow(connectionId).isActive, 0);
-  assert.equal(typeof readRow(connectionId).psd[OPERATOR_DISABLED_AT_KEY], "string");
+  assert.equal((await readRow(connectionId)).isActive, 0);
+  assert.equal(typeof (await readRow(connectionId)).psd[OPERATOR_DISABLED_AT_KEY], "string");
 
   // Re-testing must not turn it back on.
   const second = await testSingleConnection(connectionId);
   assert.equal(second.valid, true, `expected a passing test, got ${JSON.stringify(second)}`);
   assert.equal(
-    readRow(connectionId).isActive,
+    (await readRow(connectionId)).isActive,
     0,
     "a passing test must leave an operator-disabled connection disabled"
   );
 
   // Explicit operator re-enable clears the marker.
   await setActive(connectionId, true);
-  const reenabled = readRow(connectionId);
+  const reenabled = await readRow(connectionId);
   assert.equal(reenabled.isActive, 1);
   assert.equal(OPERATOR_DISABLED_AT_KEY in reenabled.psd, false);
 });
@@ -162,7 +172,7 @@ test("bulk deactivation is also respected by a later passing test", async () => 
   const nodeId = await createCompatibleNode("opdisable-bulk");
   const connectionId = await createConnection(nodeId, "Operator Disable Bulk");
   await testSingleConnection(connectionId);
-  assert.equal(readRow(connectionId).isActive, 1);
+  assert.equal((await readRow(connectionId)).isActive, 1);
 
   const response = await providersRoute.PATCH(
     await makeManagementSessionRequest("http://localhost/api/providers", {
@@ -171,39 +181,39 @@ test("bulk deactivation is also respected by a later passing test", async () => 
     })
   );
   assert.equal(response.status, 200, `bulk PATCH failed: ${await response.text()}`);
-  assert.equal(readRow(connectionId).isActive, 0);
+  assert.equal((await readRow(connectionId)).isActive, 0);
 
   const result = await testSingleConnection(connectionId);
   assert.equal(result.valid, true);
   assert.equal(
-    readRow(connectionId).isActive,
+    (await readRow(connectionId)).isActive,
     0,
     "a passing test must leave a bulk-disabled connection disabled"
   );
 });
 
 test("a skipped (unverifiable) test does not re-enable an operator-disabled connection", async () => {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO provider_connections
      (id, provider, auth_type, name, api_key, is_active, test_status,
       provider_specific_data, created_at, updated_at)
-     VALUES (?, ?, 'apikey', ?, ?, 0, 'active', ?, ?, ?)`
-  ).run(
-    "operator-disabled-skip-connection",
-    "totally-unregistered-test-provider-opdisable",
-    "Operator Disable Skip",
-    "sk-operator-disable-skip",
-    JSON.stringify({ [OPERATOR_DISABLED_AT_KEY]: now }),
-    now,
-    now
+     VALUES ($1, $2, 'apikey', $3, $4, false, 'active', $5::jsonb, $6, $7)`,
+    [
+      "operator-disabled-skip-connection",
+      "totally-unregistered-test-provider-opdisable",
+      "Operator Disable Skip",
+      "sk-operator-disable-skip",
+      JSON.stringify({ [OPERATOR_DISABLED_AT_KEY]: now }),
+      now,
+      now,
+    ]
   );
 
   const result = await testSingleConnection("operator-disabled-skip-connection");
   assert.equal(result.skipped, true, `expected a skipped test, got ${JSON.stringify(result)}`);
   assert.equal(
-    readRow("operator-disabled-skip-connection").isActive,
+    (await readRow("operator-disabled-skip-connection")).isActive,
     0,
     "an unverifiable test must leave an operator-disabled connection disabled"
   );
@@ -222,14 +232,14 @@ test("an operator disable during an in-flight probe is not undone when the probe
   try {
     const nodeId = await createCompatibleNode("opdisable-inflight");
     const connectionId = await createConnection(nodeId, "Operator Disable In-Flight");
-    assert.equal(readRow(connectionId).isActive, 0, "a new connection starts inactive");
+    assert.equal((await readRow(connectionId)).isActive, 0, "a new connection starts inactive");
 
     const inFlight = testSingleConnection(connectionId);
     // Let the test read its snapshot and reach the gated probe.
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     await setActive(connectionId, false);
-    assert.equal(typeof readRow(connectionId).psd[OPERATOR_DISABLED_AT_KEY], "string");
+    assert.equal(typeof (await readRow(connectionId)).psd[OPERATOR_DISABLED_AT_KEY], "string");
 
     releaseProbe();
     const result = await inFlight;
@@ -237,7 +247,7 @@ test("an operator disable during an in-flight probe is not undone when the probe
     // The create route's background auto-test was held by the same gate.
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    const row = readRow(connectionId);
+    const row = await readRow(connectionId);
     assert.equal(row.isActive, 0, "an in-flight passing probe must not undo an operator disable");
     assert.equal(typeof row.psd[OPERATOR_DISABLED_AT_KEY], "string");
   } finally {

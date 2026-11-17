@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-codex-quota-hydrate-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -19,7 +20,7 @@ function futureIso(ms = 60_000) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   quotaCache.__clearForTests();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -30,7 +31,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -55,7 +56,7 @@ test("Codex selection ignores hydrated Spark-only exhaustion for normal Codex mo
     ["gpt_5_3_codex_spark_weekly", 0, 1, futureIso(240_000)],
   ] as const;
   for (const [windowKey, remaining, exhausted, resetAt] of snapshots) {
-    quotaSnapshotsDb.saveQuotaSnapshot({
+    await quotaSnapshotsDb.saveQuotaSnapshot({
       provider: "codex",
       connection_id: connectionId,
       window_key: windowKey,

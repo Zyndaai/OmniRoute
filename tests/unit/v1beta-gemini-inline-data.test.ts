@@ -159,7 +159,7 @@ test("text-only contents keep a plain string content", () => {
   ]);
 });
 
-test("the image reaches a Gemini upstream as inlineData after translation", () => {
+test("the image reaches a Gemini upstream as inlineData after translation", async () => {
   const body = convertGeminiToInternal(
     {
       contents: [
@@ -172,7 +172,7 @@ test("the image reaches a Gemini upstream as inlineData after translation", () =
     "gemini/gemini-2.5-flash",
     false
   );
-  const upstream = translateRequest(
+  const upstream = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.GEMINI,
     "gemini-2.5-flash",

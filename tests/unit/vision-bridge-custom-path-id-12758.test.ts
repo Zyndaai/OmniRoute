@@ -19,7 +19,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-12758-vis
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "custom-vision-12758-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { addCustomModel, getCustomModelVisionOverride } = await import("../../src/lib/db/models.ts");
 const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
 const { VisionBridgeGuardrail } = await import("../../src/lib/guardrails/visionBridge.ts");
@@ -71,26 +71,25 @@ function imagePayload(model: string): Record<string, unknown> {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await seedVisionCustomModel();
 });
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#12758 custom vision override matches all three advertised id forms", () => {
+test("#12758 custom vision override matches all three advertised id forms", async () => {
   assert.equal(
-    getCustomModelVisionOverride(CONNECTION_ID, CUSTOM_MODEL_ID),
+    await getCustomModelVisionOverride(CONNECTION_ID, CUSTOM_MODEL_ID),
     true,
     "exact connection-id lookup is the control"
   );
 
   assert.equal(
-    getCustomModelVisionOverride("vllm", CUSTOM_MODEL_ID, undefined, {
+    await getCustomModelVisionOverride("vllm", CUSTOM_MODEL_ID, undefined, {
       lookupKey: ADVERTISED_ALIAS,
     }),
     true,
@@ -98,7 +97,7 @@ test("#12758 custom vision override matches all three advertised id forms", () =
   );
 
   assert.equal(
-    getCustomModelVisionOverride("orcarouter", "Qwen3.8-27B-Uncensored-NVFP4", undefined, {
+    await getCustomModelVisionOverride("orcarouter", "Qwen3.8-27B-Uncensored-NVFP4", undefined, {
       lookupKey: CUSTOM_MODEL_ID,
     }),
     true,
@@ -107,8 +106,8 @@ test("#12758 custom vision override matches all three advertised id forms", () =
 });
 
 for (const form of ID_FORMS) {
-  test(`#12758 capabilities.supportsVision is true for ${form.name}`, () => {
-    const caps = getResolvedModelCapabilities(form.model);
+  test(`#12758 capabilities.supportsVision is true for ${form.name}`, async () => {
+    const caps = await getResolvedModelCapabilities(form.model);
     assert.equal(
       caps.supportsVision,
       true,
@@ -165,19 +164,19 @@ test("#12758 explicit supportsVision:false still wins on the advertised alias", 
   );
   const advertised = `vllm/${textOnlyId}`;
   assert.equal(
-    getCustomModelVisionOverride("vllm", textOnlyId, undefined, { lookupKey: advertised }),
+    await getCustomModelVisionOverride("vllm", textOnlyId, undefined, { lookupKey: advertised }),
     false
   );
-  assert.equal(getResolvedModelCapabilities(advertised).supportsVision, false);
+  assert.equal((await getResolvedModelCapabilities(advertised)).supportsVision, false);
 });
 
-test("#12758 bare registry id does not inherit an unrelated custom vision flag", () => {
+test("#12758 bare registry id does not inherit an unrelated custom vision flag", async () => {
   assert.equal(
-    getCustomModelVisionOverride("", "gpt-4o", undefined, { lookupKey: "gpt-4o" }),
+    await getCustomModelVisionOverride("", "gpt-4o", undefined, { lookupKey: "gpt-4o" }),
     null,
     "empty-provider gpt-4o must not scan customModels"
   );
-  assert.equal(getResolvedModelCapabilities("gpt-4o").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("gpt-4o")).supportsVision, true);
 });
 
 test("#12758 a leaf stored id does not suffix-steal openai/gpt-4o", async () => {
@@ -193,7 +192,7 @@ test("#12758 a leaf stored id does not suffix-steal openai/gpt-4o", async () => 
     true
   );
   assert.equal(
-    getCustomModelVisionOverride("openai", "gpt-4o", undefined, { lookupKey: "openai/gpt-4o" }),
+    await getCustomModelVisionOverride("openai", "gpt-4o", undefined, { lookupKey: "openai/gpt-4o" }),
     null,
     "leaf '4o' must not match lookupKey openai/gpt-4o"
   );

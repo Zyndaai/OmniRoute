@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-plans-crud-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -25,6 +26,7 @@ process.env.API_KEY_SECRET = "test-quota-plans-secret";
 const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
+const { createProviderConnection } = await import("@/lib/db/providers");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const plansRoute = await import("../../src/app/api/quota/plans/route.ts");
 const planIdRoute = await import("../../src/app/api/quota/plans/[connectionId]/route.ts");
@@ -34,19 +36,30 @@ async function enableManagementAuth() {
   await localDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-function resetDb() {
-  core.resetDbInstance();
+// provider_plans.connection_id references provider_connections, so a manual override needs a real connection.
+async function newConnectionId(label: string): Promise<string> {
+  const conn = (await createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: label,
+    apiKey: "sk-synthetic-plan-connection",
+  })) as { id: string };
+  return conn.id;
+}
+
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetDb();
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -77,9 +90,10 @@ test("GET /api/quota/plans returns catalog providers (codex, kimi, etc.)", async
 });
 
 test("GET /api/quota/plans includes DB override plans", async () => {
+  const connectionId = await newConnectionId("plan-override-list");
   // First add a manual override
   const putReq = await makeManagementSessionRequest(
-    "http://localhost/api/quota/plans/conn-override-1",
+    `http://localhost/api/quota/plans/${connectionId}`,
     {
       method: "PUT",
       body: {
@@ -87,7 +101,8 @@ test("GET /api/quota/plans includes DB override plans", async () => {
       },
     }
   );
-  await planIdRoute.PUT(putReq, { params: Promise.resolve({ connectionId: "conn-override-1" }) });
+  const putRes = await planIdRoute.PUT(putReq, { params: Promise.resolve({ connectionId }) });
+  assert.equal(putRes.status, 200);
 
   // List should include the override
   const listReq = await makeManagementSessionRequest("http://localhost/api/quota/plans");
@@ -95,7 +110,7 @@ test("GET /api/quota/plans includes DB override plans", async () => {
   const body = (await listRes.json()) as {
     plans: Array<{ connectionId: string | null; source: string }>;
   };
-  const override = body.plans.find((p) => p.connectionId === "conn-override-1");
+  const override = body.plans.find((p) => p.connectionId === connectionId);
   assert.ok(override, "Override plan should appear in list");
   assert.equal(override?.source, "manual");
 });
@@ -118,7 +133,7 @@ test("GET /api/quota/plans/[connectionId] returns catalog plan when no override"
 });
 
 test("GET /api/quota/plans/[connectionId] returns DB override when present", async () => {
-  const connectionId = "conn-with-override";
+  const connectionId = await newConnectionId("plan-with-override");
   // Create override
   const putReq = await makeManagementSessionRequest(
     `http://localhost/api/quota/plans/${connectionId}`,
@@ -177,7 +192,7 @@ test("PUT /api/quota/plans/[connectionId] with invalid body → 400", async () =
 });
 
 test("PUT /api/quota/plans/[connectionId] with valid body → source=manual + audit event", async () => {
-  const connectionId = "conn-put-test";
+  const connectionId = await newConnectionId("plan-put");
   const req = await makeManagementSessionRequest(
     `http://localhost/api/quota/plans/${connectionId}`,
     {
@@ -193,7 +208,7 @@ test("PUT /api/quota/plans/[connectionId] with valid body → source=manual + au
   assert.equal(body.plan.source, "manual");
 
   // Audit event
-  const logs = compliance.getAuditLog({ action: "quota.plan.updated", limit: 10 });
+  const logs = await compliance.getAuditLog({ action: "quota.plan.updated", limit: 10 });
   const events = Array.isArray(logs) ? logs : [];
   const evt = events.find(
     (e) =>
@@ -210,7 +225,7 @@ test("PUT /api/quota/plans/[connectionId] with valid body → source=manual + au
 // ---------------------------------------------------------------------------
 
 test("DELETE /api/quota/plans/[connectionId] clears override → 204; GET reverts to auto", async () => {
-  const connectionId = "conn-delete-plan";
+  const connectionId = await newConnectionId("plan-delete");
   // Create override
   const putReq = await makeManagementSessionRequest(
     `http://localhost/api/quota/plans/${connectionId}`,
@@ -242,7 +257,7 @@ test("DELETE /api/quota/plans/[connectionId] clears override → 204; GET revert
   assert.ok(["auto", "manual"].includes(body.plan.source));
 
   // B26: DELETE must emit logAuditEvent with quota.plan.updated + metadata.reverted=true
-  const logs = compliance.getAuditLog({ action: "quota.plan.updated", limit: 20 });
+  const logs = await compliance.getAuditLog({ action: "quota.plan.updated", limit: 20 });
   const events = Array.isArray(logs) ? logs : [];
   const deleteEvt = events.find(
     (e) =>

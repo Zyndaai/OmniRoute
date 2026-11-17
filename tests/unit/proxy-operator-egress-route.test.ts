@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // The operator-egress push route: an authenticated operator pushes dated observed
 // addresses per pool member. These tests pin the auth-first order (401 wins over 404
@@ -22,8 +23,8 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const store = await import("../../src/lib/db/proxyOperatorEgress.ts");
 const { POST } = await import("../../src/app/api/settings/proxies/operator-egress/route.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -71,12 +72,11 @@ async function knownMember(host: string, port: number): Promise<void> {
   await proxiesDb.createProxy({ name: `op-egress ${host}:${port}`, type: "http", host, port });
 }
 
-function operatorRowCount(): number {
-  return (
-    core.getDbInstance().prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress").get() as {
-      n: number;
-    }
-  ).n;
+async function operatorRowCount(): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM proxy_operator_egress"
+  );
+  return Number(row?.n ?? 0);
 }
 
 test("auth comes first: no auth answers 401 even with the flag off", async () => {
@@ -95,7 +95,7 @@ test("flag off with auth answers 404 and touches nothing", async () => {
     })
   );
   assert.equal(response.status, 404);
-  assert.equal(operatorRowCount(), 0);
+  assert.equal(await operatorRowCount(), 0);
 });
 
 test("flag on without auth answers 401", async () => {
@@ -247,6 +247,6 @@ test("happy path: three addresses for one member are stored", async () => {
     refusalsIgnored: 0,
   });
   const now = Date.now();
-  const read = store.readOperatorEgressForMember("203.0.113.1", 8080, now);
+  const read = await store.readOperatorEgressForMember("203.0.113.1", 8080, now);
   assert.equal(read.addresses.size, 3);
 });

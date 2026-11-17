@@ -83,15 +83,15 @@ test("uncloseai declares a provider-level window that survives a roster rotation
   assert.equal(getRegistryEntry("uncloseai")?.defaultContextLength, 65536);
 });
 
-test("any uncloseai model id — rotated or not yet seen — resolves to the 65536 window", () => {
+test("any uncloseai model id — rotated or not yet seen — resolves to the 65536 window", async () => {
   for (const id of [LIVE_MODEL, ...DEAD_MODELS, "some/future-model-not-in-registry"]) {
-    const resolved = resolveTokenLimit("uncloseai", id);
+    const resolved = await resolveTokenLimit("uncloseai", id);
     assert.equal(resolved.limit, 65536, `${id} must resolve to the real window`);
     assert.equal(resolved.specific, true, `${id} must not fall through to the generic default`);
   }
 });
 
-test("the observed overflow (33537 input + 32000 max_tokens) is clamped to fit 65536", () => {
+test("the observed overflow (33537 input + 32000 max_tokens) is clamped to fit 65536", async () => {
   const input = 33537;
   // The retired id, not the live one: the live id still resolves through its own
   // `models[]` contextLength, so only a rotated id reaches the provider-level
@@ -100,7 +100,7 @@ test("the observed overflow (33537 input + 32000 max_tokens) is clamped to fit 6
   const budget = enforceOutputTokenBudget(
     { max_tokens: 32000 },
     input,
-    resolveTokenLimit("uncloseai", rotatedId).limit
+    (await resolveTokenLimit("uncloseai", rotatedId)).limit
   );
   assert.equal(budget.ok, true);
   if (budget.ok !== true) return;

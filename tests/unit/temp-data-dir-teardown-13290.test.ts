@@ -6,8 +6,8 @@ import path from "node:path";
 
 import { createTempDataDir, cleanupTempDataDir } from "../_setup/tempDataDir.ts";
 
-// #13290 — teardown that removes a temp DATA_DIR must close the SQLite handle
-// first, or Windows refuses to remove the directory (EPERM).
+// #13290 — teardown that removes a temp DATA_DIR must not throw or leave the
+// directory behind. (The SQLite-handle case is gone: the database is PostgreSQL now.)
 
 test("createTempDataDir points DATA_DIR at a fresh directory", () => {
   const previous = process.env.DATA_DIR;
@@ -17,31 +17,6 @@ test("createTempDataDir points DATA_DIR at a fresh directory", () => {
     assert.ok(fs.existsSync(dir), "directory must exist");
   } finally {
     void cleanup();
-    process.env.DATA_DIR = previous;
-  }
-});
-
-test("cleanup removes the directory after the database has been opened", async () => {
-  const previous = process.env.DATA_DIR;
-  const { dir, cleanup } = createTempDataDir("omniroute-tempdatadir-db-");
-
-  try {
-    // Open the DB so a real SQLite handle exists inside the directory. This is the
-    // exact shape that fails with EPERM when teardown skips the close.
-    const core = await import("../../src/lib/db/core.ts");
-    await core.ensureDbInitialized();
-    core.getDbInstance();
-
-    const sidecars = fs.readdirSync(dir).filter((f) => f.startsWith("storage.sqlite"));
-    assert.ok(
-      sidecars.length > 0,
-      "the database must actually be open for this test to mean anything"
-    );
-
-    await cleanup();
-
-    assert.equal(fs.existsSync(dir), false, "cleanup must remove the directory");
-  } finally {
     process.env.DATA_DIR = previous;
   }
 });

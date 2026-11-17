@@ -67,8 +67,8 @@ const visionOnly = (model: string) => ({
   reasoning: false,
 });
 
-test("#14232 combo-ref targets are expanded for capability computation", () => {
-  const caps = computeComboCapabilities(
+test("#14232 combo-ref targets are expanded for capability computation", async () => {
+  const caps = await computeComboCapabilities(
     COMBOS[2] as unknown as Record<string, unknown>,
     visionOnly,
     COMBOS as unknown as Record<string, unknown>[]
@@ -78,8 +78,8 @@ test("#14232 combo-ref targets are expanded for capability computation", () => {
   assert.equal(caps.multimodal, true);
 });
 
-test("#14232 the weakest nested member still caps the combo", () => {
-  const caps = computeComboCapabilities(
+test("#14232 the weakest nested member still caps the combo", async () => {
+  const caps = await computeComboCapabilities(
     COMBOS[3] as unknown as Record<string, unknown>,
     visionOnly,
     COMBOS as unknown as Record<string, unknown>[]
@@ -87,8 +87,8 @@ test("#14232 the weakest nested member still caps the combo", () => {
   assert.equal(caps.multimodal, false);
 });
 
-test("#14232 a dangling combo-ref stays conservative", () => {
-  const caps = computeComboCapabilities(
+test("#14232 a dangling combo-ref stays conservative", async () => {
+  const caps = await computeComboCapabilities(
     COMBOS[4] as unknown as Record<string, unknown>,
     visionOnly,
     COMBOS as unknown as Record<string, unknown>[]
@@ -97,8 +97,8 @@ test("#14232 a dangling combo-ref stays conservative", () => {
   assert.equal(caps.reasoning, false);
 });
 
-test("#14232 a self-referencing combo does not hang and stays honest", () => {
-  const caps = computeComboCapabilities(
+test("#14232 a self-referencing combo does not hang and stays honest", async () => {
+  const caps = await computeComboCapabilities(
     COMBOS[5] as unknown as Record<string, unknown>,
     visionOnly,
     COMBOS as unknown as Record<string, unknown>[]
@@ -107,16 +107,16 @@ test("#14232 a self-referencing combo does not hang and stays honest", () => {
   assert.equal(caps.multimodal, true);
 });
 
-test("#14232 legacy callers without a collection keep the conservative result", () => {
-  const caps = computeComboCapabilities(
+test("#14232 legacy callers without a collection keep the conservative result", async () => {
+  const caps = await computeComboCapabilities(
     COMBOS[2] as unknown as Record<string, unknown>,
     visionOnly
   );
   assert.equal(caps.multimodal, false);
 });
 
-test("#14232 projectCombo forwards the collection to the capability pass", () => {
-  const projected = projectCombo(COMBOS[2] as unknown as Record<string, unknown>, {
+test("#14232 projectCombo forwards the collection to the capability pass", async () => {
+  const projected = await projectCombo(COMBOS[2] as unknown as Record<string, unknown>, {
     includeCapabilities: true,
     resolveCapabilities: visionOnly,
     allCombos: COMBOS as unknown as Record<string, unknown>[],

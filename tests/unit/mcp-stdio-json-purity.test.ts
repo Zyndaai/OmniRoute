@@ -1,13 +1,3 @@
-// ENVIRONMENT NOTE (sandbox better-sqlite3 / glibc limitation, not a code defect):
-// This test constructs or exercises a real better-sqlite3-backed SQLite database.
-// better-sqlite3 is a native addon; production and CI load it normally, but some
-// sandboxes/dev boxes ship a system glibc older than the prebuilt binary requires
-// ("GLIBC_2.29 not found"), so the native module fails to dlopen and any test that
-// reaches better-sqlite3 directly (or asserts stdout that the load-failure warning
-// would pollute) fails HERE while passing in CI. This is a known environment
-// limitation, not a defect in the code under test: the OmniRoute runtime itself
-// cascades to node:sqlite/sql.js when better-sqlite3 is unavailable. See
-// tests/unit/_helpers/betterSqlite3Availability.ts for a guard helper.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -85,11 +75,9 @@ describe("omniroute --mcp stdio transport", () => {
     const initResponse = stdoutLines.map((line) => JSON.parse(line)).find((msg) => msg.id === 1);
     assert.ok(initResponse, "expected an initialize response with id 1 on stdout");
     assert.equal(initResponse.jsonrpc, "2.0");
-
-    // The DB init logging must still happen — just on stderr, not stdout.
-    assert.ok(
-      stderr.includes("[DB]"),
-      "expected DB init logging on stderr (proves it was redirected, not silently dropped)"
-    );
+    // The former "[DB]" stderr assertion was dropped: it relied on SQLite's cache_size log line,
+    // and the Postgres init on a template-cloned database logs nothing, so there is no marker left
+    // to prove the redirect. stdout purity above is the property under test.
+    void stderr;
   });
 });

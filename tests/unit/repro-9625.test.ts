@@ -1,17 +1,11 @@
 /**
  * Issue #9625 — domain_cost_history cleanup cutoff unit mismatch.
  *
- * cleanupDomainCostHistory() computes the cutoff in epoch seconds
- * (Math.floor(Date.now() / 1000)) but the timestamp column stores
- * epoch milliseconds (Date.now()), as inserted by saveCostEntry().
- *
- * This test seeds data using the same format as the production code
- * (milliseconds), then asserts that cleanupDomainCostHistory() correctly
- * deletes rows older than the retention window.
- *
- * Before the fix, the cutoff in seconds was ~1000× smaller than the
- * stored timestamps, so the DELETE WHERE timestamp < cutoff would
- * never match old rows — the cleanup was effectively a no-op.
+ * cleanupDomainCostHistory() used to compute its cutoff in epoch seconds
+ * (Math.floor(Date.now() / 1000)) while the timestamp column held epoch
+ * milliseconds. On PostgreSQL the column is timestamptz, so the unit mismatch
+ * cannot recur: both sides are real timestamps. This test seeds rows the way
+ * production writes them and asserts the retention sweep deletes the old ones.
  */
 
 import test from "node:test";
@@ -24,44 +18,44 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-9625-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { cleanupDomainCostHistory } = await import("../../src/lib/db/cleanup.ts");
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+
+test.before(async () => {
+  await resetTestDb();
+});
 
 test.after(() => {
-  resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const DAY_MS = 86_400_000; // milliseconds
 
-test("#9625 cleanupDomainCostHistory: cutoff in ms matches production timestamps", async () => {
-  const db = getDbInstance()!;
-  const now = Date.now(); // milliseconds — same as saveCostEntry() default
+test("#9625 cleanupDomainCostHistory: cutoff matches production timestamps", async () => {
+  const backend = getTestBackend();
+  const now = Date.now();
+  const insert = (cost: number, ageDays: number) =>
+    backend.execute(
+      `INSERT INTO domain_cost_history (api_key_id, cost, "timestamp") VALUES ($1, $2, $3)`,
+      ["key1", cost, new Date(now - ageDays * DAY_MS).toISOString()]
+    );
 
-  const insert = db.prepare(
-    "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES (?, ?, ?)"
-  );
-
-  // Seed data using millisecond timestamps (production format).
   // 3 old rows: 40 days ago (should be deleted)
+  await insert(1.0, 40);
+  await insert(2.0, 40);
+  await insert(3.0, 40);
   // 2 recent rows: 5 days ago (should be kept)
-  insert.run("key1", 1.0, now - 40 * DAY_MS);
-  insert.run("key1", 2.0, now - 40 * DAY_MS);
-  insert.run("key1", 3.0, now - 40 * DAY_MS);
-  insert.run("key1", 4.0, now - 5 * DAY_MS);
-  insert.run("key1", 5.0, now - 5 * DAY_MS);
+  await insert(4.0, 5);
+  await insert(5.0, 5);
 
   const result = await cleanupDomainCostHistory();
 
-  // Before the fix, cutoff was in seconds (~1.7e9) while timestamps
-  // are in milliseconds (~1.7e12). The comparison `WHERE ts < 1.7e9`
-  // would never match rows with ts ~1.7e12, so nothing was deleted.
   assert.strictEqual(result.deleted, 3, "Should delete 3 old rows (40 days old)");
   assert.strictEqual(result.errors, 0);
 
-  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM domain_cost_history").get() as {
-    cnt: number;
-  };
-  assert.strictEqual(remaining.cnt, 2, "Should keep 2 recent rows (5 days old)");
+  const remaining = await backend.queryOne<{ cnt: number }>(
+    "SELECT COUNT(*)::int AS cnt FROM domain_cost_history"
+  );
+  assert.strictEqual(remaining?.cnt, 2, "Should keep 2 recent rows (5 days old)");
 });
 
 test("#9625 unit mismatch: seconds cutoff would NOT match ms timestamps", () => {

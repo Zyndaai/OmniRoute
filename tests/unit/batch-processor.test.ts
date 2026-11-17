@@ -12,6 +12,7 @@ process.env.API_KEY_SECRET = "test-secret";
 
 // We import these as modules to allow mocking
 const core = await import("@/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { createFile, getFileContent } = await import("@/lib/db/files");
 const {
   createBatch,
@@ -48,14 +49,8 @@ async function reset() {
   // Restore all mocks
   mock.restoreAll();
 
-  // Close DB connection to release file handles and clear singleton
-  core.closeDbInstance();
-
-  // Clean up the temp DB directory
-  if (fs.existsSync(TEST_DATA_DIR)) {
-    fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  // Empty the database (per-process isolated PostgreSQL) so each test starts clean
+  await resetTestDb();
 
   delete process.env.OMNIROUTE_API_KEY;
   delete process.env.ROUTER_API_KEY;
@@ -69,6 +64,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await reset();
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -414,7 +410,7 @@ test("processPendingBatches should recover checkpointed stale batches without re
   assert.strictEqual(updated?.requestCountsCompleted, 2);
   assert.ok(updated?.outputFileId, "recovered batch should emit an output file");
 
-  const output = localDb.getFileContent(updated!.outputFileId!);
+  const output = await localDb.getFileContent(updated!.outputFileId!);
   assert.ok(output, "output file content should exist");
   const outputRows = output
     .toString()
@@ -469,7 +465,7 @@ test("processPendingBatches should not replay interrupted checkpoint items", asy
   assert.strictEqual(updated?.requestCountsFailed, 1);
   assert.ok(updated?.errorFileId, "interrupted item should be emitted as an error row");
 
-  const errorOutput = localDb.getFileContent(updated!.errorFileId!);
+  const errorOutput = await localDb.getFileContent(updated!.errorFileId!);
   assert.ok(errorOutput, "error file content should exist");
   assert.match(errorOutput.toString(), /not replayed to avoid duplicate provider work/);
 });
@@ -554,9 +550,9 @@ test("processPendingBatches should respect BATCH_MAX_CONCURRENT (default 1)", as
   await batchProcessor.processPendingBatches();
 
   const statuses = [
-    localDb.getBatch(batchA.id)?.status,
-    localDb.getBatch(batchB.id)?.status,
-    localDb.getBatch(batchC.id)?.status,
+    (await localDb.getBatch(batchA.id))?.status,
+    (await localDb.getBatch(batchB.id))?.status,
+    (await localDb.getBatch(batchC.id))?.status,
   ];
 
   const inProgressCount = statuses.filter((s) => s === "in_progress").length;

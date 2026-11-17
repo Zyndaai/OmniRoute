@@ -14,6 +14,8 @@ const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { withReasoningRuleContext } = await import("../../open-sse/utils/reasoningRuleContext.ts");
 const { getReasoningControlEndpointFingerprint } =
   await import("../../open-sse/utils/reasoningControl.ts");
+const { ensureFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
+const { refreshParamFilterSnapshot } = await import("../../open-sse/translator/paramSupport.ts");
 const { setParamFilterConfig, deleteParamFilterConfig } =
   await import("../../src/lib/db/paramFilters.ts");
 const { MODEL_SPECS } = await import("../../src/shared/constants/modelSpecs.ts");
@@ -24,10 +26,11 @@ const { applyOutputStyles } =
 
 before(async () => {
   await coreDb.ensureDbInitialized();
+  await ensureFeatureFlagSnapshot();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -36,12 +39,12 @@ const templateControlCredentials = {
   providerSpecificData: { reasoningControl: "chat-template" },
 };
 
-function translateReasoning(
+async function translateReasoning(
   sourceFormat: string,
   targetFormat: string,
   body: Record<string, unknown>
 ) {
-  return translateRequest(
+  return await translateRequest(
     sourceFormat,
     targetFormat,
     "arbitrary-local-model",
@@ -421,11 +424,12 @@ test("chat-template reasoning control rejects malformed native kwargs for an exp
 });
 
 test("chat-template reasoning control fails when a target filter removes every native off switch", async () => {
-  setParamFilterConfig(templateControlProvider, {
+  await setParamFilterConfig(templateControlProvider, {
     block: ["chat_template_kwargs"],
     allow: [],
     autoLearn: false,
   });
+  await refreshParamFilterSnapshot();
   try {
     await assert.rejects(
       prepareUpstreamBody({
@@ -446,7 +450,8 @@ test("chat-template reasoning control fails when a target filter removes every n
       }
     );
   } finally {
-    deleteParamFilterConfig(templateControlProvider);
+    await deleteParamFilterConfig(templateControlProvider);
+    await refreshParamFilterSnapshot();
   }
 });
 
@@ -495,7 +500,7 @@ for (const scenario of [
 }
 
 test("Claude disabled thinking reaches chat-template dispatch as native off switches", async () => {
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "arbitrary-local-model",
@@ -524,45 +529,49 @@ test("Claude disabled thinking reaches chat-template dispatch as native off swit
   });
 });
 
-test("reasoning.enabled false crosses shared OpenAI and Claude translation as explicit none", () => {
+test("reasoning.enabled false crosses shared OpenAI and Claude translation as explicit none", async () => {
   const source = {
     model: "arbitrary-local-model",
     messages: [{ role: "user", content: "classify" }],
     reasoning: { enabled: false, summary: "auto" },
   };
   const before = structuredClone(source);
-  const openai = translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, source);
+  const openai = await translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, source);
   assert.equal(openai.reasoning_effort, "none");
   assert.deepEqual(openai.reasoning, { summary: "auto", effort: "none" });
   assert.deepEqual(source, before);
   assert.deepEqual(
-    translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, structuredClone(openai)),
+    await translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, structuredClone(openai)),
     openai
   );
 
-  const responses = translateReasoning(
+  const responses = await translateReasoning(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     structuredClone(source)
   );
   assert.deepEqual(responses.reasoning, { summary: "auto", effort: "none" });
 
-  const claude = translateReasoning(FORMATS.CLAUDE, FORMATS.OPENAI, structuredClone(source));
+  const claude = await translateReasoning(
+    FORMATS.CLAUDE,
+    FORMATS.OPENAI,
+    structuredClone(source)
+  );
   assert.equal(claude.reasoning_effort, "none");
 
-  const claudeOverride = translateReasoning(FORMATS.CLAUDE, FORMATS.OPENAI, {
+  const claudeOverride = await translateReasoning(FORMATS.CLAUDE, FORMATS.OPENAI, {
     ...structuredClone(source),
     output_config: { effort: "high" },
   });
   assert.equal(claudeOverride.reasoning_effort, "high");
 
-  const thinkingOverride = translateReasoning(FORMATS.CLAUDE, FORMATS.OPENAI, {
+  const thinkingOverride = await translateReasoning(FORMATS.CLAUDE, FORMATS.OPENAI, {
     ...structuredClone(source),
     thinking: { type: "enabled", budget_tokens: 2048 },
   });
   assert.equal(thinkingOverride.reasoning_effort, "medium");
 
-  const forced = translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
+  const forced = await translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
     ...structuredClone(source),
     _omnirouteReasoningRule: {
       id: "force-high",
@@ -576,7 +585,7 @@ test("reasoning.enabled false crosses shared OpenAI and Claude translation as ex
 });
 
 test("reasoning.enabled false reaches chat-template dispatch as native off switches", async () => {
-  const translated = translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
+  const translated = await translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
     messages: [{ role: "user", content: "classify" }],
     reasoning: { enabled: false },
   });
@@ -596,7 +605,7 @@ test("reasoning.enabled false reaches chat-template dispatch as native off switc
   });
 
   const nativeOverride = await prepareUpstreamBody({
-    translatedBody: translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
+    translatedBody: await translateReasoning(FORMATS.OPENAI, FORMATS.OPENAI, {
       messages: [{ role: "user", content: "classify" }],
       reasoning: { enabled: false },
       chat_template_kwargs: { enable_thinking: true, custom_flag: "kept" },
@@ -629,7 +638,7 @@ test("output-style injection preserves Claude disabled thinking through dispatch
   assert.equal(styled.applied, true);
   assert.equal(styled.body.messages?.at(-1)?.role, "system");
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     targetModel,

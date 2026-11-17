@@ -410,6 +410,76 @@ test(
   }
 );
 
+// --- stale keep-alive socket retry ----------------------------------------------------------
+
+/** Global fetch stub whose first call fails with `firstError`; later calls succeed. */
+function stubFlakyFetch(firstError: unknown) {
+  const real = globalThis.fetch;
+  const dispatchers: unknown[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: { dispatcher?: unknown }) => {
+    dispatchers.push(init?.dispatcher);
+    if (dispatchers.length === 1) throw firstError;
+    return new Response("retried", { status: 200 });
+  }) as typeof fetch;
+  return {
+    dispatchers,
+    restore: () => {
+      globalThis.fetch = real;
+    },
+  };
+}
+
+const staleSocket = Object.assign(new TypeError("fetch failed"), {
+  cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+});
+
+test("a stale pooled guarded socket is retried once on a fresh guarded dispatcher", async () => {
+  const stub = stubFlakyFetch(staleSocket);
+  try {
+    await withEnv({}, async () => {
+      const res = await dispatchGuarded(
+        "openai",
+        OPERATOR.providerSpecificData.baseUrl,
+        { method: "POST", body: JSON.stringify({ a: 1 }) },
+        OPERATOR
+      );
+      assert.equal(await res.text(), "retried");
+    });
+  } finally {
+    stub.restore();
+  }
+  assert.equal(stub.dispatchers.length, 2);
+  assert.ok(stub.dispatchers[0] && stub.dispatchers[1], "both attempts ride a guarded dispatcher");
+  assert.notEqual(stub.dispatchers[0], stub.dispatchers[1], "the retry uses the fresh-socket one");
+});
+
+test("no retry for a guard refusal, a streamed body or an aborted request", async () => {
+  const blocked = Object.assign(new TypeError("fetch failed"), {
+    cause: Object.assign(new Error("blocked"), { code: CONNECT_GUARD_BLOCKED_CODE }),
+  });
+  const cases: Array<{ error: unknown; init: RequestInit }> = [
+    { error: blocked, init: {} },
+    {
+      error: staleSocket,
+      init: { method: "POST", body: new ReadableStream(), duplex: "half" } as RequestInit,
+    },
+    { error: staleSocket, init: { signal: AbortSignal.abort() } },
+  ];
+  for (const { error, init } of cases) {
+    const stub = stubFlakyFetch(error);
+    try {
+      await withEnv({}, async () => {
+        await assert.rejects(() =>
+          dispatchGuarded("openai", OPERATOR.providerSpecificData.baseUrl, init, OPERATOR)
+        );
+      });
+    } finally {
+      stub.restore();
+    }
+    assert.equal(stub.dispatchers.length, 1);
+  }
+});
+
 test("guarded dispatcher passes modern handlers and HTTP2 options through unchanged", () => {
   const originalDispatch = Agent.prototype.dispatch;
   const handler: Dispatcher.DispatchHandler = { onRequestStart() {} };

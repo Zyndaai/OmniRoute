@@ -49,7 +49,7 @@ afterEach(() => {
   __test_resetLearnedReasoningEffortCaps();
 });
 after(async () => {
-  resetDbInstance();
+  await resetDbInstance();
   await mockAgent.close();
   setGlobalDispatcher(originalDispatcher);
   socketGuard.mock.restore();

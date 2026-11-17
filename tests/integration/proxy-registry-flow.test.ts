@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-registry-flow-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -22,13 +23,13 @@ const proxyHealthRoute = await import("../../src/app/api/settings/proxies/health
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -179,7 +180,7 @@ test("integration: proxy registry full flow works and enforces safe delete", asy
   // #11182 made SQLite persistence a background batch (1s timer / 100-entry
   // threshold); the health aggregate reads the table, so drain the queue first
   // instead of racing the timer.
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 
   const healthRes = await proxyHealthRoute.GET(
     new Request("http://localhost/api/settings/proxies/health?hours=24")

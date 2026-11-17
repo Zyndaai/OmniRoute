@@ -9,13 +9,13 @@ const TEST_DATA_DIR = fs.mkdtempSync(
 );
 
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_DISABLE_CREDENTIAL_HEALTH_CHECK = "true";
 
 const originalFetch = globalThis.fetch;
 const { __test_resetCredentialHealthCache, getCredentialHealth, setCredentialHealth } =
   await import("../../src/lib/credentialHealth/cache.ts");
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 
 const { validateOpenAILikeProvider } =
@@ -47,11 +47,37 @@ function mockUnsupportedValidationSurface() {
   return () => calls;
 }
 
-test.after(() => {
+type HealthRow = {
+  test_status: string;
+  last_tested: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  error_code: string | null;
+};
+
+async function readHealthRow(id: string): Promise<HealthRow | null> {
+  return getTestBackend().queryOne<HealthRow>(
+    `SELECT
+       test_status,
+       last_tested,
+       last_error,
+       last_error_at,
+       error_code
+     FROM provider_connections
+     WHERE id = $1`,
+    [id]
+  );
+}
+
+test.before(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
   __test_resetCredentialHealthCache();
   credentialHealthScheduler.stopCredentialHealthCheck();
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
 
   fs.rmSync(TEST_DATA_DIR, {
     recursive: true,
@@ -89,9 +115,7 @@ test("404/405 OpenAI-like probe surface is explicitly unsupported, not an auth f
 test("unsupported provider verification is neutral and does not poison stored connection health", async () => {
   const getCalls = mockUnsupportedValidationSurface();
 
-  const db = core.getDbInstance();
-
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO provider_connections
        (
          id,
@@ -106,34 +130,18 @@ test("unsupported provider verification is neutral and does not poison stored co
          updated_at
        )
      VALUES
-       (?, ?, 'apikey', ?, ?, 1, 'active', 60, ?, ?)`
-  ).run(
-    "unsupported-probe-test",
-    "openai",
-    "unsupported probe test",
-    "synthetic-test-key",
-    new Date().toISOString(),
-    new Date().toISOString()
+       ($1, $2, 'apikey', $3, $4, true, 'active', 60, $5, $6)`,
+    [
+      "unsupported-probe-test",
+      "openai",
+      "unsupported probe test",
+      "synthetic-test-key",
+      new Date().toISOString(),
+      new Date().toISOString(),
+    ]
   );
 
-  const before = db
-    .prepare(
-      `SELECT
-         test_status,
-         last_tested,
-         last_error,
-         last_error_at,
-         error_code
-       FROM provider_connections
-       WHERE id = ?`
-    )
-    .get("unsupported-probe-test") as {
-    test_status: string;
-    last_tested: string | null;
-    last_error: string | null;
-    last_error_at: string | null;
-    error_code: string | null;
-  };
+  const before = (await readHealthRow("unsupported-probe-test")) as HealthRow;
 
   assert.equal(before.test_status, "active");
   assert.equal(before.last_tested, null);
@@ -165,24 +173,7 @@ test("unsupported provider verification is neutral and does not poison stored co
 
   assert.equal(result.diagnosis?.code, "unsupported");
 
-  const after = db
-    .prepare(
-      `SELECT
-         test_status,
-         last_tested,
-         last_error,
-         last_error_at,
-         error_code
-       FROM provider_connections
-       WHERE id = ?`
-    )
-    .get("unsupported-probe-test") as {
-    test_status: string;
-    last_tested: string | null;
-    last_error: string | null;
-    last_error_at: string | null;
-    error_code: string | null;
-  };
+  const after = await readHealthRow("unsupported-probe-test");
 
   assert.deepEqual(
     after,
@@ -202,18 +193,7 @@ test("unsupported provider verification is neutral and does not poison stored co
     "unsupported validation must honor the connection's 60-minute health-check interval"
   );
 
-  const afterSweep = db
-    .prepare(
-      `SELECT
-         test_status,
-         last_tested,
-         last_error,
-         last_error_at,
-         error_code
-       FROM provider_connections
-       WHERE id = ?`
-    )
-    .get("unsupported-probe-test");
+  const afterSweep = await readHealthRow("unsupported-probe-test");
 
   assert.deepEqual(
     afterSweep,

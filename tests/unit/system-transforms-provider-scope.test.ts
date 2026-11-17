@@ -200,6 +200,6 @@ test("chatCore applies the per-provider pipeline on the pre-translation body", (
   );
 
   const callSite = chatCore.indexOf("applyProviderSystemTransforms(");
-  const translateCall = chatCore.indexOf("translatedBody = translateRequest(", callSite);
+  const translateCall = chatCore.indexOf("translatedBody = await translateRequest(", callSite);
   assert.ok(callSite > -1 && translateCall > callSite, "call site must precede translateRequest");
 });

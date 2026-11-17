@@ -40,14 +40,14 @@ function stubFetch(seen: { proxyUrl: string | null | undefined }[], gate?: () =>
   }) as typeof fetch;
 }
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("#7350 handleRerank routes the upstream call through the connection's pinned proxy", async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   const conn = await providersDb.createProviderConnection({
     provider: "voyage",
     authType: "apikey",
@@ -99,7 +99,7 @@ test("#7350 handleRerank routes the upstream call through the connection's pinne
 });
 
 test("#7350 an unresolvable connectionId degrades to a direct call instead of failing the request", async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   const seen: { proxyUrl: string | null | undefined }[] = [];
   stubFetch(seen);
 
@@ -120,7 +120,7 @@ test("#7350 an unresolvable connectionId degrades to a direct call instead of fa
 });
 
 test("#7350 omitting connectionId keeps the previous direct-egress behavior", async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   const seen: { proxyUrl: string | null | undefined }[] = [];
   stubFetch(seen);
 

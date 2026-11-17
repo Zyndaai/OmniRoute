@@ -82,8 +82,8 @@ function responsesInput(args: unknown) {
   };
 }
 
-function translatedToolArgs(args: unknown): unknown {
-  const result = translateRequest(
+async function translatedToolArgs(args: unknown): Promise<unknown> {
+  const result = (await translateRequest(
     "openai-responses",
     "openai",
     "gpt-4o",
@@ -91,20 +91,20 @@ function translatedToolArgs(args: unknown): unknown {
     false,
     {},
     "openai"
-  ) as { messages: Array<{ tool_calls?: Array<{ function: { arguments: unknown } }> }> };
+  )) as { messages: Array<{ tool_calls?: Array<{ function: { arguments: unknown } }> }> };
   const assistant = result.messages.find((m) => Array.isArray(m.tool_calls));
   assert.ok(assistant, "assistant tool call message present");
   return assistant.tool_calls[0].function.arguments;
 }
 
-test("Responses→Chat: malformed / empty function_call arguments coerced to '{}'", () => {
-  assert.equal(translatedToolArgs('{"city":'), "{}");
-  assert.equal(translatedToolArgs(""), "{}");
+test("Responses→Chat: malformed / empty function_call arguments coerced to '{}'", async () => {
+  assert.equal(await translatedToolArgs('{"city":'), "{}");
+  assert.equal(await translatedToolArgs(""), "{}");
 });
 
-test("Responses→Chat: valid JSON preserved, object serialized", () => {
-  assert.equal(translatedToolArgs('{"city":"NYC"}'), '{"city":"NYC"}');
-  assert.equal(translatedToolArgs({ city: "SF" }), '{"city":"SF"}');
+test("Responses→Chat: valid JSON preserved, object serialized", async () => {
+  assert.equal(await translatedToolArgs('{"city":"NYC"}'), '{"city":"NYC"}');
+  assert.equal(await translatedToolArgs({ city: "SF" }), '{"city":"SF"}');
 });
 
 function chatBody(args: unknown, extra: Record<string, unknown> = {}) {
@@ -125,8 +125,8 @@ function chatBody(args: unknown, extra: Record<string, unknown> = {}) {
   };
 }
 
-function responsesFunctionCalls(body: unknown): Array<{ arguments: unknown }> {
-  const result = translateRequest(
+async function responsesFunctionCalls(body: unknown): Promise<Array<{ arguments: unknown }>> {
+  const result = (await translateRequest(
     "openai",
     "openai-responses",
     "gpt-4o",
@@ -134,22 +134,22 @@ function responsesFunctionCalls(body: unknown): Array<{ arguments: unknown }> {
     false,
     {},
     "openai"
-  ) as { input: Array<{ type: string; arguments?: unknown }> };
+  )) as { input: Array<{ type: string; arguments?: unknown }> };
   return result.input.filter((item) => item.type === "function_call");
 }
 
-test("Chat→Responses: empty tool-call arguments become '{}'", () => {
-  const calls = responsesFunctionCalls(chatBody(""));
+test("Chat→Responses: empty tool-call arguments become '{}'", async () => {
+  const calls = await responsesFunctionCalls(chatBody(""));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].arguments, "{}");
 });
 
-test("Chat→Responses: valid tool-call arguments preserved", () => {
-  const calls = responsesFunctionCalls(chatBody('{"city":"NYC"}'));
+test("Chat→Responses: valid tool-call arguments preserved", async () => {
+  const calls = await responsesFunctionCalls(chatBody('{"city":"NYC"}'));
   assert.equal(calls[0].arguments, '{"city":"NYC"}');
 });
 
-test("Chat→Responses: deprecated function_call with object arguments is serialized", () => {
+test("Chat→Responses: deprecated function_call with object arguments is serialized", async () => {
   const body = {
     model: "gpt-4o",
     messages: [
@@ -161,7 +161,7 @@ test("Chat→Responses: deprecated function_call with object arguments is serial
       },
     ],
   };
-  const calls = responsesFunctionCalls(body);
+  const calls = await responsesFunctionCalls(body);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].arguments, '{"city":"SF"}');
 });

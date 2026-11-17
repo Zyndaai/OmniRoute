@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // The pool egress observation has its own route so that a failure there can never break
 // GET /api/settings/proxies/pool. These tests pin its shape, its null-on-failure contract,
@@ -20,22 +21,22 @@ const observation = await import("../../src/lib/proxyPoolEgressObservation.ts");
 const { GET } = await import("../../src/app/api/settings/proxies/pool/egress-observation/route.ts");
 const poolRoute = await import("../../src/app/api/settings/proxies/pool/route.ts");
 
-function resetStorage() {
+async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
   process.env.PROXY_POOL_EGRESS_OBSERVATION = "true";
   observation.resetPoolEgressObservationCache();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_POOL_EGRESS_OBSERVATION;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -54,13 +55,11 @@ async function pooledProxyWithTraffic() {
     port: 21001,
   });
   await proxiesDb.addProxyToScopePool("provider", "openai", proxy.id);
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_logs (id, timestamp, status, proxy_type, proxy_host, proxy_port, level, connection_id, egress_ip)
-       VALUES (?, ?, 'success', 'http', '10.9.1.1', 21001, 'provider', 'c1', '203.0.113.1')`
-    )
-    .run(randomUUID(), new Date(Date.now() - 60_000).toISOString());
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, proxy_type, proxy_host, proxy_port, level, connection_id, egress_ip)
+     VALUES ($1, $2, 'success', 'http', '10.9.1.1', 21001, 'provider', 'c1', '203.0.113.1')`,
+    [randomUUID(), new Date(Date.now() - 60_000).toISOString()]
+  );
 }
 
 test("the four original keys are never removed or renamed", async () => {
@@ -125,14 +124,14 @@ test("returns zeros for an empty pool and leaves the pool route untouched", asyn
 
 test("returns null with status 200 when the read fails", async () => {
   await pooledProxyWithTraffic();
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
   try {
     const response = await GET(request(OBSERVATION_PATH, { scope: "provider", scopeId: "openai" }));
     assert.equal(response.status, 200);
     assert.equal(await response.json(), null);
   } finally {
-    db.exec("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
+    await backend.execute("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
   }
 });
 

@@ -18,6 +18,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-calllogs-
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.CALL_LOG_RETENTION_DAYS = "3650";
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 
@@ -31,32 +33,36 @@ type SeedRow = {
   request_type?: string | null;
 };
 
-function insertCallLog(row: SeedRow) {
-  const db = core.getDbInstance();
-  db.prepare(
+async function insertCallLog(row: SeedRow) {
+  await getTestBackend().execute(
     `
     INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, provider, source_format, request_type, detail_state
+      id, "timestamp", method, path, status, model, provider, source_format, request_type, detail_state
     )
     VALUES (
-      @id, @timestamp, 'POST', @path, 200, @model, @provider, @source_format, @request_type, 'none'
+      $1, $2, 'POST', $3, 200, $4, $5, $6, $7, 'none'
     )
-  `
-  ).run({
-    source_format: row.source_format ?? null,
-    request_type: row.request_type ?? null,
-    ...row,
-  });
+  `,
+    [
+      row.id,
+      row.timestamp,
+      row.path,
+      row.model,
+      row.provider,
+      row.source_format ?? null,
+      row.request_type ?? null,
+    ]
+  );
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -65,14 +71,14 @@ test("excludeTests keeps only /v1 and /api/v1 inference rows, drops all backend/
   const iso = (i: number) => new Date(base + i * 1000).toISOString();
 
   // Two REAL provider inference rows — the only rows the feed should keep.
-  insertCallLog({
+  await insertCallLog({
     id: "real-v1",
     timestamp: iso(4),
     path: "/v1/chat/completions",
     model: "openai/gpt-4.1",
     provider: "openai",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "real-api-v1",
     timestamp: iso(3),
     path: "/api/v1/chat/completions",
@@ -81,7 +87,7 @@ test("excludeTests keeps only /v1 and /api/v1 inference rows, drops all backend/
   });
 
   // Backend/management NOISE — must never appear in the feed.
-  insertCallLog({
+  await insertCallLog({
     id: "noise-model-sync",
     timestamp: iso(2),
     path: "/api/providers/openai/models",
@@ -90,7 +96,7 @@ test("excludeTests keeps only /v1 and /api/v1 inference rows, drops all backend/
     source_format: "-",
     request_type: "model-sync",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "noise-connection-test",
     timestamp: iso(1),
     path: "/api/providers/test",
@@ -111,14 +117,14 @@ test("excludeTests keeps only /v1 and /api/v1 inference rows, drops all backend/
 
 test("without excludeTests every row is returned (allowlist is opt-in)", async () => {
   const base = Date.parse("2026-02-01T00:00:00.000Z");
-  insertCallLog({
+  await insertCallLog({
     id: "real",
     timestamp: new Date(base).toISOString(),
     path: "/v1/chat/completions",
     model: "openai/gpt-4.1",
     provider: "openai",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "sync",
     timestamp: new Date(base + 1000).toISOString(),
     path: "/api/providers/openai/models",

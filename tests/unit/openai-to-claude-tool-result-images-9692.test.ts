@@ -83,8 +83,8 @@ test("normalizeToolResultImages rewrites nested image_url inside tool_result con
   ]);
 });
 
-test("#9692: role=tool image_url content becomes a Claude image block, not a raw image_url", () => {
-  const translated = openaiToClaudeRequest(
+test("#9692: role=tool image_url content becomes a Claude image block, not a raw image_url", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-4",
     {
       messages: [
@@ -134,8 +134,8 @@ test("#9692: role=tool image_url content becomes a Claude image block, not a raw
   });
 });
 
-test("#9692: mixed text + image_url in a tool result keeps text and converts the image", () => {
-  const translated = openaiToClaudeRequest(
+test("#9692: mixed text + image_url in a tool result keeps text and converts the image", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-4",
     {
       messages: [
@@ -175,8 +175,8 @@ test("#9692: mixed text + image_url in a tool result keeps text and converts the
   ]);
 });
 
-test("#9692: nested tool_result image_url on a user message is converted the same way", () => {
-  const translated = openaiToClaudeRequest(
+test("#9692: nested tool_result image_url on a user message is converted the same way", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-4",
     {
       messages: [

@@ -110,8 +110,8 @@ test("tool sanitization: coerces schemas and descriptions in tool arrays", () =>
   assert.equal(tools[0].function.parameters.properties.count.minimum, 1);
 });
 
-test("translateRequest sanitizes tools before Claude output", () => {
-  const translated = translateRequest(
+test("translateRequest sanitizes tools before Claude output", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "claude-sonnet-4-6",
@@ -143,8 +143,8 @@ test("translateRequest sanitizes tools before Claude output", () => {
   assert.equal(translated.tools[0].input_schema.properties.count.maximum, 9);
 });
 
-test("translateRequest sanitizes OpenAI tool payloads on passthrough", () => {
-  const translated = translateRequest(
+test("translateRequest sanitizes OpenAI tool payloads on passthrough", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "gpt-5.2",
@@ -195,9 +195,9 @@ test("tool sanitization: injects empty reasoning_content only for DeepSeek tool-
   assert.equal(openaiMessages[1].reasoning_content, undefined);
 });
 
-test("translateRequest omits reasoning_content for DeepSeek assistant tool calls on cache miss", () => {
-  clearModelsDevCapabilities();
-  saveModelsDevCapabilities({
+test("translateRequest omits reasoning_content for DeepSeek assistant tool calls on cache miss", async () => {
+  await clearModelsDevCapabilities();
+  await saveModelsDevCapabilities({
     deepseek: {
       "deepseek-v4-flash": buildCapability({
         interleaved_field: "reasoning_content",
@@ -207,7 +207,7 @@ test("translateRequest omits reasoning_content for DeepSeek assistant tool calls
     },
   });
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "deepseek-v4-flash",
@@ -233,5 +233,5 @@ test("translateRequest omits reasoning_content for DeepSeek assistant tool calls
   // the placeholder and re-poisoned cache + history). On a cache miss the field is now
   // omitted; DeepSeek's 400 is specific to an empty string, not an absent field.
   assert.equal(translated.messages[1].reasoning_content, undefined);
-  clearModelsDevCapabilities();
+  await clearModelsDevCapabilities();
 });

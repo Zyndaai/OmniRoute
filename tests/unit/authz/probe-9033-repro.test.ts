@@ -5,38 +5,29 @@
 // Bonus: ipFilterModeSchema rejects "whitelist-priority" that the UI offers and checkIP implements
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
 import { NextRequest } from "next/server";
 import { wrapRequestListenerWithPeerStamp } from "../../../scripts/dev/peer-stamp.mjs";
 
-const TEST_DATA_DIR = path.join(process.env.DATA_DIR!, "probe-9033-repro");
-// NOTE: Not reassigning process.env.DATA_DIR at module scope because
-// node --test spawns test files as worker threads sharing process.env.
-// A module-level DATA_DIR override would leak to ALL concurrently running
-// workers, causing them to share the same SQLite file and race on it (#9541).
-// isolateDataDir.ts (--import) already set DATA_DIR to a unique temp dir per
-// process; we use a subdirectory within it instead.
+// Each test file gets its own PostgreSQL database (tests/_setup/isolatePostgres.ts); tests
+// inside the file start from resetTestDb().
 
 process.env.JWT_SECRET = "test-secret-9033";
 
 const core = await import("../../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 const ipFilter = await import("../../../open-sse/services/ipFilter.ts");
 const pipeline = await import("../../../src/server/authz/pipeline.ts");
 
 const ORIGINAL_STAMP_TOKEN = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_STAMP_TOKEN === undefined) delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   else process.env.OMNIROUTE_PEER_STAMP_TOKEN = ORIGINAL_STAMP_TOKEN;
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+test.beforeEach(async () => {
+  await resetTestDb();
   ipFilter.resetIPFilter();
   delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
 });
@@ -51,8 +42,8 @@ function makeRequest(extraHeaders: Record<string, string> = {}) {
 
 test("D1: blacklisted IP is blocked on a DIRECT connection (trusted peer stamp, no XFF)", async () => {
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = "stamp-tok";
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   // Simulate a direct connection: the peer stamp says the client is BLOCKED,
   // and there is no x-forwarded-for header (direct connection, not via proxy).
@@ -69,22 +60,31 @@ test("D2: persisted config written after first load is honored WITHOUT restart",
   // The ipFilter module instance (already loaded) must re-read it.
   // First, load the module once (simulates initial load from a previous request).
   ipFilter.resetIPFilter();
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
-  assert.equal(ipFilter.checkIP(BLOCKED).allowed, false, "blacklist must be active after config");
-
-  // Now simulate a "settings route" write: write directly to the DB key_value table
-  // with a DIFFERENT config (e.g. empty blacklist, effectively "allow all").
-  const db = core.getDbInstance();
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "ipFilter",
-    "config",
-    JSON.stringify({ enabled: true, mode: "blacklist", blacklist: [], whitelist: [] })
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
+  assert.equal(
+    (await ipFilter.checkIP(BLOCKED)).allowed,
+    false,
+    "blacklist must be active after config"
   );
 
-  // Without a restart, the ipFilter instance must re-read from DB on next checkIP call.
+  // Now simulate a "settings route" write: write directly to the config_entries table
+  // with a DIFFERENT config (e.g. empty blacklist, effectively "allow all").
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [
+      "ipFilter",
+      "config",
+      JSON.stringify({ enabled: true, mode: "blacklist", blacklist: [], whitelist: [] }),
+    ]
+  );
+
+  // Without a restart, the ipFilter instance must re-read from DB on a later checkIP call.
+  // Reads are cached for LOAD_TTL_MS (1s, open-sse/services/ipFilter.ts), so wait it out.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
   // The BLOCKED IP should NOT be blocked anymore because the DB config has empty blacklist.
-  const result = ipFilter.checkIP(BLOCKED);
+  const result = await ipFilter.checkIP(BLOCKED);
   assert.equal(
     result.allowed,
     true,
@@ -94,8 +94,8 @@ test("D2: persisted config written after first load is honored WITHOUT restart",
 
 test("D3: behind reverse proxy (peer stamp=loopback + via-proxy marker + XFF=blacklisted IP) still blocks", async () => {
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = "stamp-tok";
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   // Behind a reverse proxy: the peer IP is the proxy hop (127.0.0.1),
   // the via-proxy marker is set, and the real client IP is in x-forwarded-for.
@@ -117,8 +117,8 @@ test("D3: behind reverse proxy (peer stamp=loopback + via-proxy marker + XFF=bla
 
 test("D4: behind Cloudflare (cf-connecting-ip + via-proxy marker, no XFF) blocks the client IP", async () => {
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = "stamp-tok";
-  ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
-  ipFilter.addToBlacklist(BLOCKED);
+  await ipFilter.configureIPFilter({ enabled: true, mode: "blacklist" });
+  await ipFilter.addToBlacklist(BLOCKED);
 
   // Simulate the real custom-server path: the request arrives at the Node HTTP
   // server, stampPeerIp runs first, then the request (with stamped headers) is

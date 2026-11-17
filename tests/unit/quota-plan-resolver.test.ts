@@ -20,33 +20,22 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 // Import modules
 const core = await import("../../src/lib/db/core.ts");
 const providerPlansDb = await import("../../src/lib/db/providerPlans.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: unknown) {
-      const e = err as { code?: string };
-      if ((e?.code === "EBUSY" || e?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+/** Plans reference provider connections by foreign key; seed the connection row. */
+async function seedConnection(connectionId: string, provider: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    [connectionId, provider]
+  );
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -55,14 +44,15 @@ test("planResolver: DB plan present → returns DB plan (source=manual)", async 
   const { resolvePlan } = await import("../../src/lib/quota/planResolver.ts");
 
   // Seed a DB override
-  providerPlansDb.upsertPlan(
+  await seedConnection("conn-123", "openai");
+  await providerPlansDb.upsertPlan(
     "conn-123",
     "openai",
     [{ unit: "tokens", window: "hourly", limit: 10_000 }],
     "manual"
   );
 
-  const plan = resolvePlan("conn-123", "openai");
+  const plan = await resolvePlan("conn-123", "openai");
   assert.equal(plan.source, "manual");
   assert.equal(plan.provider, "openai");
   assert.ok(plan.dimensions.length > 0);
@@ -73,7 +63,7 @@ test("planResolver: DB plan present → returns DB plan (source=manual)", async 
 test("planResolver: DB absent + known provider (codex) → catalog plan (source=auto)", async () => {
   const { resolvePlan } = await import("../../src/lib/quota/planResolver.ts");
 
-  const plan = resolvePlan("conn-no-override", "codex");
+  const plan = await resolvePlan("conn-no-override", "codex");
   assert.equal(plan.source, "auto");
   assert.equal(plan.provider, "codex");
   assert.ok(plan.dimensions.length > 0);
@@ -86,7 +76,7 @@ test("planResolver: DB absent + known provider (codex) → catalog plan (source=
 test("planResolver: DB absent + unknown provider → empty plan (source=manual)", async () => {
   const { resolvePlan } = await import("../../src/lib/quota/planResolver.ts");
 
-  const plan = resolvePlan("conn-unknown", "unknown_provider_xyz");
+  const plan = await resolvePlan("conn-unknown", "unknown_provider_xyz");
   assert.equal(plan.source, "manual");
   assert.equal(plan.provider, "unknown_provider_xyz");
   assert.equal(plan.dimensions.length, 0);
@@ -98,14 +88,15 @@ test("planResolver: DB plan overrides catalog for same provider", async () => {
   const { resolvePlan } = await import("../../src/lib/quota/planResolver.ts");
 
   // codex is in catalog, but we add a DB override
-  providerPlansDb.upsertPlan(
+  await seedConnection("conn-codex-override", "codex");
+  await providerPlansDb.upsertPlan(
     "conn-codex-override",
     "codex",
     [{ unit: "requests", window: "daily", limit: 999 }],
     "manual"
   );
 
-  const plan = resolvePlan("conn-codex-override", "codex");
+  const plan = await resolvePlan("conn-codex-override", "codex");
   assert.equal(plan.source, "manual");
   // Should return DB override, not catalog
   assert.equal(plan.dimensions[0].unit, "requests");
@@ -117,7 +108,7 @@ test("planResolver: runtimeSignals parameter is accepted without error", async (
   const { resolvePlan } = await import("../../src/lib/quota/planResolver.ts");
 
   // Should not throw even with headers provided
-  const plan = resolvePlan("conn-signals", "kimi", {
+  const plan = await resolvePlan("conn-signals", "kimi", {
     headers: { "x-ratelimit-remaining-requests": "1234" },
   });
   assert.ok(plan);

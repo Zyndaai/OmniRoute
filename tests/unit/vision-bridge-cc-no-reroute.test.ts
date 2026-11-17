@@ -86,7 +86,7 @@ function imagePayload(model: string) {
 
 // ── Sanity: capabilities must resolve first ─────────────────────────────────
 
-test("CC-VB-SANITY: getResolvedModelCapabilities reports vision for CC vision models", () => {
+test("CC-VB-SANITY: getResolvedModelCapabilities reports vision for CC vision models", async () => {
   for (const modelId of [
     "command-code/gpt-5.5",
     "command-code/gpt-5.4",
@@ -98,13 +98,13 @@ test("CC-VB-SANITY: getResolvedModelCapabilities reports vision for CC vision mo
     "command-code/moonshotai/Kimi-K2.5",
     "command-code/Qwen/Qwen3.6-Plus",
   ]) {
-    const caps = getResolvedModelCapabilities(modelId);
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.supportsVision, true, `${modelId} must have supportsVision: true`);
   }
 });
 
-test("CC-VB-SANITY: text-only cmd/gpt-5.3-codex resolves as non-vision (#10703)", () => {
-  const caps = getResolvedModelCapabilities("command-code/gpt-5.3-codex");
+test("CC-VB-SANITY: text-only cmd/gpt-5.3-codex resolves as non-vision (#10703)", async () => {
+  const caps = await getResolvedModelCapabilities("command-code/gpt-5.3-codex");
   assert.equal(
     caps.supportsVision,
     false,
@@ -217,7 +217,7 @@ test("CC-VB-07: cmd/gpt-5.3-codex reroutes instead of passing through (#10703)",
   const result = await guardrail.preCall(payload, createContext({ model }));
 
   assert.strictEqual(result.block, false, `${model}: must not block`);
-  const caps = getResolvedModelCapabilities(model);
+  const caps = await getResolvedModelCapabilities(model);
   assert.equal(caps.supportsVision, false, `${model}: must be flagged text-only (#10703)`);
   assert.ok(
     result.modifiedPayload !== undefined || visionCallCount > 0,
@@ -236,7 +236,7 @@ test("CC-VB-REGRESSION: text-only deepseek-v4-pro via command-code still trigger
   );
 
   assert.strictEqual(result.block, false);
-  const caps = getResolvedModelCapabilities("command-code/deepseek/deepseek-v4-pro");
+  const caps = await getResolvedModelCapabilities("command-code/deepseek/deepseek-v4-pro");
   if (caps.supportsVision !== true) {
     assert.ok(
       result.modifiedPayload !== undefined || visionCallCount > 0,

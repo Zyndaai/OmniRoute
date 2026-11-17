@@ -31,56 +31,51 @@ import path from "node:path";
 // ── Single isolated DATA_DIR (same reset pattern as db-quota-pools.test.ts) ───
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-model-cap-hotpath-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "model-cap-hotpath-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { createPool, upsertAllocations } = await import("../../src/lib/db/quotaPools.ts");
 const { setModelCap } = await import("../../src/lib/db/quotaModelCaps.ts");
 const { enforceQuotaShare } = await import("../../src/lib/quota/enforce.ts");
 const { resetQuotaStoreSingleton } = await import("../../src/lib/quota/storeFactory.ts");
 const { scheduleQuotaShareConsumption } =
   await import("../../open-sse/handlers/chatCore/quotaShareConsumption.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
-const CONN_ID = "conn-model-cap-hotpath";
 const PROVIDER = "kimi"; // kimi has {unit:"requests", window:"hourly", limit:1500} in planRegistry
-const KEY_A = "key-model-cap-hotpath-a";
 const MODEL_M = "kimi-k2";
 const MODEL_M2 = "kimi-k2-lite";
 const CAP_N = 3; // requests
 
-async function resetStorage() {
-  resetQuotaStoreSingleton();
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+// Real connection and API key rows: pools and allocations reference them by foreign key.
+let CONN_ID = "";
+let KEY_A = "";
 
 test.beforeEach(async () => {
-  await resetStorage();
+  resetQuotaStoreSingleton();
+  await resetTestDb();
+  const conn = await providersDb.createProviderConnection({
+    provider: PROVIDER,
+    authType: "apikey",
+    name: "model-cap-hotpath-conn",
+    apiKey: "sk-model-cap-hotpath",
+  });
+  CONN_ID = (conn as Record<string, unknown>).id as string;
+  const key = await apiKeysDb.createApiKey("model-cap-hotpath-key", "machine-model-cap-hotpath");
+  KEY_A = key.id as string;
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function makePool() {
-  const pool = createPool({ connectionId: CONN_ID, name: "Model Cap Hotpath Pool" });
-  upsertAllocations(pool.id, [{ apiKeyId: KEY_A, weight: 100, policy: "hard" }]);
+async function makePool() {
+  const pool = await createPool({ connectionId: CONN_ID, name: "Model Cap Hotpath Pool" });
+  await upsertAllocations(pool.id, [{ apiKeyId: KEY_A, weight: 100, policy: "hard" }]);
   return pool;
 }
 
@@ -92,8 +87,8 @@ function makePool() {
  * The hook is deliberately fire-and-forget: it hands recordConsumption to
  * setImmediate and never exposes the resulting promise, so there is nothing here
  * to await. A macrotask tick gets the setImmediate callback to fire, but
- * recordConsumption then awaits the store singleton and two SQLite writes of its
- * own. Callers must poll for the recorded state instead of assuming a fixed
+ * recordConsumption then awaits the store singleton and its own database writes.
+ * Callers must poll for the recorded state instead of assuming a fixed
  * delay covers those.
  */
 async function consumeViaHotPath(model: string, requests: number) {
@@ -143,8 +138,8 @@ async function enforceUntil(
 // End-to-end: cap blocks via the hot-path hook (proves `model` is plumbed)
 // ---------------------------------------------------------------------------
 test("hot-path: model cap blocks after N consumptions driven through scheduleQuotaShareConsumption", async () => {
-  const pool = makePool();
-  setModelCap({
+  const pool = await makePool();
+  await setModelCap({
     poolId: pool.id,
     apiKeyId: KEY_A,
     model: MODEL_M,
@@ -188,8 +183,8 @@ test("hot-path: model cap blocks after N consumptions driven through scheduleQuo
 // (If a caller forgets to pass model, the cap simply does not fire — fail-open.)
 // ---------------------------------------------------------------------------
 test("hot-path: enforce WITHOUT model never triggers model-cap block (fail-safe)", async () => {
-  const pool = makePool();
-  setModelCap({
+  const pool = await makePool();
+  await setModelCap({
     poolId: pool.id,
     apiKeyId: KEY_A,
     model: MODEL_M,

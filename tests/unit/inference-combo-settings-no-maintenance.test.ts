@@ -6,9 +6,9 @@ import path from "node:path";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-settings-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createCombo } = await import("../../src/lib/db/combos.ts");
 const { createProviderNode, createProviderConnection } =
   await import("../../src/lib/db/providers.ts");
@@ -22,7 +22,8 @@ const originalFetch = globalThis.fetch;
 test.before(async () => {
   for (const [prefix, apiType] of [
     ["scanembed", "embeddings"],
-    ["scanrank", "rerank"],
+    // "rerank" is a model format, not a provider_nodes.api_type (the Postgres CHECK allows chat, embeddings, audio-*, images-*).
+    ["scanrank", "chat"],
     ["scanaudio", "audio-transcriptions"],
   ]) {
     await createProviderNode({
@@ -50,7 +51,7 @@ test.before(async () => {
 test.after(async () => {
   await waitForCallLogSaves(5000);
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -108,18 +109,25 @@ for (const example of cases) {
           : { text: "ok" };
       return Response.json(result);
     };
-    const db = core.getDbInstance();
-    const originalPrepare = db.prepare;
-    const originalPragma = db.pragma;
+    // Database diagnostics on PostgreSQL: size/stat probes and maintenance statements.
+    const backend = getTestBackend();
+    const maintenanceRe =
+      /pg_database_size|pg_total_relation_size|pg_relation_size|\bpg_stat_|\bVACUUM\b|\bREINDEX\b|\bANALYZE\b/i;
+    const originals = {
+      query: backend.query,
+      queryOne: backend.queryOne,
+      execute: backend.execute,
+    };
     const maintenance: string[] = [];
-    db.prepare = (sql) => {
-      if (/\bdbstat\b|SELECT COUNT\(\*\) as count FROM/i.test(sql)) maintenance.push(sql);
-      return originalPrepare.call(db, sql);
-    };
-    db.pragma = (sql, options) => {
-      if (/quick_check|integrity_check/i.test(sql)) maintenance.push(sql);
-      return originalPragma.call(db, sql, options);
-    };
+    const spy =
+      (name: "query" | "queryOne" | "execute") =>
+      (sql: string, params?: unknown[]) => {
+        if (maintenanceRe.test(sql)) maintenance.push(sql);
+        return (originals[name] as (s: string, p?: unknown[]) => unknown).call(backend, sql, params);
+      };
+    backend.query = spy("query") as typeof backend.query;
+    backend.queryOne = spy("queryOne") as typeof backend.queryOne;
+    backend.execute = spy("execute") as typeof backend.execute;
     try {
       const response = await example.run();
       assert.equal(response.status, 200, await response.text());
@@ -133,8 +141,9 @@ for (const example of cases) {
         `unexpected maintenance: ${maintenance.slice(0, 3).join("; ")}`
       );
     } finally {
-      db.prepare = originalPrepare;
-      db.pragma = originalPragma;
+      backend.query = originals.query;
+      backend.queryOne = originals.queryOne;
+      backend.execute = originals.execute;
       globalThis.fetch = originalFetch;
     }
   });

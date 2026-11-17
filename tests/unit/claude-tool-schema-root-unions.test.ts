@@ -243,12 +243,12 @@ describe("openaiToClaudeRequest — tool input_schema", () => {
     max_tokens: 32,
   };
 
-  it("flattens a root union before the request reaches Anthropic", () => {
-    const result = openaiToClaudeRequest(
+  it("flattens a root union before the request reaches Anthropic", async () => {
+    const result = (await openaiToClaudeRequest(
       "claude-opus-5",
       { ...baseBody, tools: [toolWithRootUnion] },
       false
-    ) as AnyRecord;
+    )) as AnyRecord;
 
     const tool = (result.tools as AnyRecord[])[0];
     const schema = tool.input_schema as AnyRecord;
@@ -257,8 +257,8 @@ describe("openaiToClaudeRequest — tool input_schema", () => {
     assert.deepEqual(schema.required, ["act"]);
   });
 
-  it("leaves a nested union and an ordinary schema untouched", () => {
-    const result = openaiToClaudeRequest(
+  it("leaves a nested union and an ordinary schema untouched", async () => {
+    const result = (await openaiToClaudeRequest(
       "claude-opus-5",
       {
         ...baseBody,
@@ -277,7 +277,7 @@ describe("openaiToClaudeRequest — tool input_schema", () => {
         ],
       },
       false
-    ) as AnyRecord;
+    )) as AnyRecord;
 
     const schema = (result.tools as AnyRecord[])[0].input_schema as AnyRecord;
     assert.deepEqual(schema.properties, {

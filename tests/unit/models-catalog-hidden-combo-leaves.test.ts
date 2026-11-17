@@ -14,6 +14,7 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 type CatalogModel = {
   id: string;
@@ -52,29 +53,30 @@ async function getCatalogData(): Promise<CatalogModel[]> {
   return body.data;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 });
 
-test.after(() => {
-  modelsDevSync.saveModelsDevCapabilities({});
-  core.resetDbInstance();
+test.after(async () => {
+  await modelsDevSync.saveModelsDevCapabilities({});
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("v1 models catalog keeps partially hidden combos and derives metadata from visible targets", async () => {
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "catalog-hidden-leaf": capability(1000, 100),
       "catalog-visible-leaf": capability(8000, 800),
     },
   });
-  modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-leaf", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-leaf", { isHidden: true });
   await combosDb.createCombo({
     name: "partially-hidden-router",
     strategy: "priority",
@@ -89,8 +91,8 @@ test("v1 models catalog keeps partially hidden combos and derives metadata from 
 });
 
 test("v1 models catalog omits combos when every resolved target is hidden", async () => {
-  modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-alpha", { isHidden: true });
-  modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-beta", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-alpha", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "catalog-hidden-beta", { isHidden: true });
   await combosDb.createCombo({
     name: "fully-hidden-router",
     strategy: "priority",
@@ -106,15 +108,15 @@ test("v1 models catalog omits combos when every resolved target is hidden", asyn
 });
 
 test("v1 models catalog applies hidden leaf filtering through nested combos", async () => {
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "nested-hidden-leaf": capability(2000, 200),
       "nested-visible-leaf": capability(16000, 1600),
       "nested-hidden-only": capability(4000, 400),
     },
   });
-  modelsDb.mergeModelCompatOverride("openai", "nested-hidden-leaf", { isHidden: true });
-  modelsDb.mergeModelCompatOverride("openai", "nested-hidden-only", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "nested-hidden-leaf", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "nested-hidden-only", { isHidden: true });
   await combosDb.createCombo({
     name: "partially-hidden-child",
     strategy: "priority",
@@ -153,7 +155,7 @@ test("v1 models catalog applies hidden leaf filtering through nested combos", as
 });
 
 test("v1 models catalog canonicalizes aliases before deciding that a combo is fully hidden", async () => {
-  modelsDb.mergeModelCompatOverride("github", "claude-opus-4-5-20251101", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("github", "claude-opus-4-5-20251101", { isHidden: true });
   await combosDb.createCombo({
     name: "hidden-alias-router",
     strategy: "priority",
@@ -169,7 +171,7 @@ test("v1 models catalog canonicalizes aliases before deciding that a combo is fu
 });
 
 test("v1 models catalog preserves explicit providers for slashful model ids", async () => {
-  modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
   await combosDb.createCombo({
     name: "hidden-slashful-router",
     strategy: "priority",

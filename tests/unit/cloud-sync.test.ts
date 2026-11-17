@@ -26,6 +26,7 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const cloudRoute = await import("../../src/app/api/sync/cloud/route.ts");
 const { makeManagementSessionRequest } = await import("../helpers/managementSession.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { cloudSyncActionSchema } = await import("../../src/shared/validation/schemas/cloud.ts");
 
 function createAbortError(message = "aborted") {
@@ -40,9 +41,7 @@ async function loadCloudSync(label) {
 
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   globalThis.fetch = ORIGINAL_FETCH;
   delete process.env.CLOUD_URL;
   delete process.env.NEXT_PUBLIC_CLOUD_URL;
@@ -55,9 +54,9 @@ test.beforeEach(async () => {
   await settingsDb.updateSettings({ cloudEnabled: true });
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   globalThis.fetch = ORIGINAL_FETCH;
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -262,15 +261,15 @@ test("cloudSync syncs data upstream and refreshes only locally stale provider to
   });
   await apiKeysDb.createApiKey("machine key", "machine-1");
 
-  const db = coreDb.getDbInstance();
-  db.prepare("UPDATE provider_connections SET updated_at = ? WHERE id = ?").run(
+  const backend = getTestBackend();
+  await backend.execute("UPDATE provider_connections SET updated_at = $1 WHERE id = $2", [
     "2026-01-01T00:00:00.000Z",
-    stale.id
-  );
-  db.prepare("UPDATE provider_connections SET updated_at = ? WHERE id = ?").run(
+    stale.id,
+  ]);
+  await backend.execute("UPDATE provider_connections SET updated_at = $1 WHERE id = $2", [
     "2026-03-01T00:00:00.000Z",
-    fresh.id
-  );
+    fresh.id,
+  ]);
 
   let postedBody = null;
   globalThis.fetch = async (_url, options) => {

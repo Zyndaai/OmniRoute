@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CALL_LOG_SETTLE_TIMEOUT_MS } from "../helpers/callLogSettle.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-client-session-id-test-"));
 process.env.DATA_DIR = testDataDir;
@@ -24,8 +25,8 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -168,10 +169,11 @@ test("persistAttemptLogs stores the client session id even when no-log is on (me
   const deadline = Date.now() + CALL_LOG_SETTLE_TIMEOUT_MS;
   let row: Record<string, unknown> | undefined;
   while (Date.now() < deadline && !row) {
-    row = coreDb
-      .getDbInstance()
-      .prepare("SELECT session_tag, client_session_id FROM call_logs WHERE correlation_id = ?")
-      .get(id) as Record<string, unknown> | undefined;
+    row =
+      (await getTestBackend().queryOne<Record<string, unknown>>(
+        "SELECT session_tag, client_session_id FROM call_logs WHERE correlation_id = $1",
+        [id]
+      )) ?? undefined;
     if (!row) await new Promise((r) => setTimeout(r, 20));
   }
   assert.ok(row);
@@ -191,17 +193,17 @@ test("saveCallLog without clientSessionId writes NULL (other call-log writers ar
     duration: 1,
     tokens: { in: 1, out: 0 },
   });
-  const row = coreDb
-    .getDbInstance()
-    .prepare("SELECT client_session_id FROM call_logs WHERE id = ?")
-    .get(id) as Record<string, unknown>;
+  const row = await getTestBackend().queryOne<Record<string, unknown>>(
+    "SELECT client_session_id FROM call_logs WHERE id = $1",
+    [id]
+  );
   assert.ok(row);
   assert.equal(row.client_session_id, null);
 });
 
-test("an index on client_session_id exists for per-session lookups", () => {
-  const indexes = coreDb.getDbInstance().prepare("PRAGMA index_list(call_logs)").all() as Array<{
-    name: string;
-  }>;
-  assert.ok(indexes.some((ix) => ix.name === "idx_cl_client_session_id"));
+test("an index on client_session_id exists for per-session lookups", async () => {
+  const indexes = await getTestBackend().query<{ indexdef: string }>(
+    "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'call_logs'"
+  );
+  assert.ok(indexes.some((ix) => /\(client_session_id\b/.test(ix.indexdef)));
 });

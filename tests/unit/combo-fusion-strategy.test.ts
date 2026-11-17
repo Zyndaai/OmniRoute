@@ -226,7 +226,7 @@ test("fusion: honors an explicit judgeModel even with a single surviving panel a
 });
 
 test("fusion: preserves explicit providers when filtering structured panel targets", async () => {
-  modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
   const seen: string[] = [];
 
   const res = await handleComboChat({
@@ -288,8 +288,8 @@ test("fusion: dispatches visible structured panel targets with their provider id
 });
 
 test("fusion: never dispatches hidden panel members or a hidden explicit judge", async () => {
-  modelsDb.mergeModelCompatOverride("p", "hidden-panel", { isHidden: true });
-  modelsDb.mergeModelCompatOverride("p", "hidden-judge", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("p", "hidden-panel", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("p", "hidden-judge", { isHidden: true });
   const seen: string[] = [];
 
   const res = await handleComboChat({

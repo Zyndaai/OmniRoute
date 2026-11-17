@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,6 +15,7 @@ const providersDb = await import("../../../src/lib/db/providers.ts");
 const readCacheDb = await import("../../../src/lib/db/readCache.ts");
 const compressionDb = await import("../../../src/lib/db/compression.ts");
 const compressionCombosDb = await import("../../../src/lib/db/compressionCombos.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { handleChatCore } = await import("../../../open-sse/handlers/chatCore.ts");
 const { resetAllCircuitBreakers } = await import("../../../src/shared/utils/circuitBreaker.ts");
 
@@ -28,20 +29,24 @@ async function resetStorage() {
   resetAllCircuitBreakers();
   readCacheDb.invalidateDbCache();
   await new Promise((resolve) => setTimeout(resolve, 20));
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(async () => {
+before(async () => {
+  await core.ensureDbInitialized();
+});
+
+beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(async () => {
+after(async () => {
   globalThis.fetch = originalFetch;
   // chatCore writes the call log after the response resolves; let it land before closing.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  core.closeDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -129,7 +134,7 @@ test("a request without a compression header runs the seeded default combo's saf
 
 test("a request without a compression header drops lossy steps added to the default combo", async () => {
   await storeLegacyStackedSettings();
-  const edited = compressionCombosDb.setEngineInDefaultCombo("rtk", true);
+  const edited = await compressionCombosDb.setEngineInDefaultCombo("rtk", true);
   assert.ok(
     edited?.pipeline.some((step) => step.engine === "rtk"),
     "rtk should join the combo"
@@ -143,7 +148,7 @@ test("a request without a compression header drops lossy steps added to the defa
 
 test("allow-lossy still runs the lossy steps of an edited default combo", async () => {
   await storeLegacyStackedSettings();
-  compressionCombosDb.setEngineInDefaultCombo("rtk", true);
+  await compressionCombosDb.setEngineInDefaultCombo("rtk", true);
 
   const { toolContent, debugLines } = await sendRepeatedToolOutput("allow-lossy");
 
@@ -153,7 +158,7 @@ test("allow-lossy still runs the lossy steps of an edited default combo", async 
 
 test("a named combo chosen by the compression header is not replaced by the default combo", async () => {
   await storeLegacyStackedSettings();
-  compressionCombosDb.createCompressionCombo({
+  await compressionCombosDb.createCompressionCombo({
     name: "RTK only",
     pipeline: [{ engine: "rtk", intensity: "standard" }],
   });

@@ -11,7 +11,7 @@
  * costs no extra DB read per request.
  */
 import { getActiveSyncedCatalog } from "@/lib/db/models/activeSyncedCatalog";
-import { getComboByName } from "@/lib/db/combos";
+import { getCachedComboByName } from "@/lib/db/readCache";
 import {
   isTrustedEndpointCapabilitySource,
   normalizeModelSupportedEndpoints,
@@ -104,7 +104,7 @@ export async function getRequestedModelEndpointMismatch(
     const rejection = getModelEndpointMismatchMessage(fullModelId, model, requested);
     if (!rejection) return null;
     // An exact stored combo wins over a provider-shaped name collision.
-    if (await getComboByName(fullModelId)) return null;
+    if (await getCachedComboByName(fullModelId)) return null;
     return rejection;
   } catch {
     // A catalog/combo read failure must never turn into a client 400: fail open

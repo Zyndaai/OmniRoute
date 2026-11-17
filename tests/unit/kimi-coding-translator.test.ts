@@ -10,8 +10,8 @@ type KimiClaudeRequest = {
   messages: Array<{ content: Array<Record<string, unknown>> }>;
 };
 
-test("OpenAI to Kimi Anthropic maps effort without inventing a token budget", () => {
-  const translated = translateRequest(
+test("OpenAI to Kimi Anthropic maps effort without inventing a token budget", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "kimi-for-coding",
@@ -49,8 +49,8 @@ test("OpenAI to Kimi Anthropic maps effort without inventing a token budget", ()
   });
 });
 
-test("Kimi Anthropic preserves an explicit empty thinking block", () => {
-  const translated = translateRequest(
+test("Kimi Anthropic preserves an explicit empty thinking block", async () => {
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.CLAUDE,
     "kimi-for-coding",
@@ -80,8 +80,8 @@ test("Kimi Anthropic preserves an explicit empty thinking block", () => {
   });
 });
 
-test("Responses history preserves Kimi reasoning before a tool call", () => {
-  const translated = translateRequest(
+test("Responses history preserves Kimi reasoning before a tool call", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -130,8 +130,8 @@ test("Responses history preserves Kimi reasoning before a tool call", () => {
   });
 });
 
-test("Responses history preserves Kimi reasoning on completed assistant turns", () => {
-  const translated = translateRequest(
+test("Responses history preserves Kimi reasoning on completed assistant turns", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -171,8 +171,8 @@ test("Responses history preserves Kimi reasoning on completed assistant turns", 
   ]);
 });
 
-test("Responses history preserves Kimi reasoning before a custom tool call", () => {
-  const translated = translateRequest(
+test("Responses history preserves Kimi reasoning before a custom tool call", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -208,8 +208,8 @@ test("Responses history preserves Kimi reasoning before a custom tool call", () 
   });
 });
 
-test("Responses history does not carry reasoning across a user boundary", () => {
-  const translated = translateRequest(
+test("Responses history does not carry reasoning across a user boundary", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "k3-256k",

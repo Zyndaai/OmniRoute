@@ -46,7 +46,7 @@ describe("suffixComposition :free tier (#4517)", () => {
     });
   });
 
-  it("buildAutoCandidateFilter keeps noAuth free providers", () => {
+  it("buildAutoCandidateFilter keeps noAuth free providers", async () => {
     // Regression: noAuth providers are free, but the pre-fix `freeProviders`
     // list omitted them, so the filter rejected their candidates even though
     // they ARE free upstream.
@@ -54,29 +54,29 @@ describe("suffixComposition :free tier (#4517)", () => {
     assert.notEqual(filter, null);
 
     assert.equal(
-      filter!({ provider: "uncloseai", model: "Lorbus/Qwen3.6-27B-int4-AutoRound" }),
+      await filter!({ provider: "uncloseai", model: "Lorbus/Qwen3.6-27B-int4-AutoRound" }),
       true
     );
-    assert.equal(filter!({ provider: "duckduckgo-web", model: "gpt-4o-mini" }), true);
+    assert.equal(await filter!({ provider: "duckduckgo-web", model: "gpt-4o-mini" }), true);
   });
 
-  it("buildAutoCandidateFilter keeps legacy free providers", () => {
+  it("buildAutoCandidateFilter keeps legacy free providers", async () => {
     // Don't break the existing list — kiro, qoder, groq, etc. must still pass.
     const filter = buildAutoCandidateFilter("coding", "free");
-    assert.equal(filter!({ provider: "kiro", model: "claude-sonnet-4-5" }), true);
-    assert.equal(filter!({ provider: "groq", model: "llama-3.3-70b" }), true);
-    assert.equal(filter!({ provider: "qoder", model: "qwen3-coder-plus" }), true);
+    assert.equal(await filter!({ provider: "kiro", model: "claude-sonnet-4-5" }), true);
+    assert.equal(await filter!({ provider: "groq", model: "llama-3.3-70b" }), true);
+    assert.equal(await filter!({ provider: "qoder", model: "qwen3-coder-plus" }), true);
   });
 
-  it("buildAutoCandidateFilter rejects paid models under :free", () => {
+  it("buildAutoCandidateFilter rejects paid models under :free", async () => {
     // The bug: opencode-go/glm-5.1 was being picked because the filter
     // fell back to the full pool when no free candidate was found.
     // After the fix, glm-5.1 must be rejected by the :free filter.
     const filter = buildAutoCandidateFilter("coding", "free");
-    assert.equal(filter!({ provider: "opencode-go", model: "glm-5.1" }), false);
-    assert.equal(filter!({ provider: "openai", model: "gpt-4o" }), false);
-    assert.equal(filter!({ provider: "anthropic", model: "claude-sonnet-4-6" }), false);
-    assert.equal(filter!({ provider: "deepseek", model: "deepseek-chat" }), false);
+    assert.equal(await filter!({ provider: "opencode-go", model: "glm-5.1" }), false);
+    assert.equal(await filter!({ provider: "openai", model: "gpt-4o" }), false);
+    assert.equal(await filter!({ provider: "anthropic", model: "claude-sonnet-4-6" }), false);
+    assert.equal(await filter!({ provider: "deepseek", model: "deepseek-chat" }), false);
   });
 
   it("buildAutoCandidateFilter returns null for category-only (no tier)", () => {
@@ -85,15 +85,15 @@ describe("suffixComposition :free tier (#4517)", () => {
     assert.equal(filter, null);
   });
 
-  it("buildAutoCandidateFilter keeps free candidates alongside capability checks", () => {
+  it("buildAutoCandidateFilter keeps free candidates alongside capability checks", async () => {
     // The category and tier checks are AND-combined. For "coding:free" the
     // category check is a pass-through (no vision/reasoning filter), so
     // any free model should be kept.
     const filter = buildAutoCandidateFilter("coding", "free");
-    assert.equal(filter!({ provider: "duckduckgo-web", model: "gpt-4o-mini" }), true);
+    assert.equal(await filter!({ provider: "duckduckgo-web", model: "gpt-4o-mini" }), true);
     // The "reasoning" category also pairs with ":free" and keeps free models.
     const reasoningFilter = buildAutoCandidateFilter("reasoning", "free");
     // A reasoning-capable model on a free provider should pass the reasoning check.
-    assert.equal(reasoningFilter!({ provider: "kiro", model: "claude-sonnet-4-5" }), true);
+    assert.equal(await reasoningFilter!({ provider: "kiro", model: "claude-sonnet-4-5" }), true);
   });
 });

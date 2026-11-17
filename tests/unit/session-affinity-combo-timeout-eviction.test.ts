@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-timeout-affinity-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -42,21 +43,21 @@ function abortedWith(reason: unknown): AbortSignal {
 
 const timedOutSignal = () => abortedWith(new Error(abortReasons.COMBO_PER_MODEL_TIMEOUT_REASON));
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("evicts the pin when the combo per-model timeout abandons the pinned account", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
+test("evicts the pin when the combo per-model timeout abandons the pinned account", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
 
-  const evicted = pin.evictSessionAffinityOnComboTimeout({
+  const evicted = await pin.evictSessionAffinityOnComboTimeout({
     sessionKey: SESSION,
     provider: PROVIDER,
     connectionId: STALLED,
@@ -65,16 +66,16 @@ test("evicts the pin when the combo per-model timeout abandons the pinned accoun
 
   assert.equal(evicted, true, "a timed-out pinned account must lose its pin");
   assert.equal(
-    affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL),
+    await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL),
     null,
     "the next request must be free to pick another account"
   );
 });
 
-test("leaves the pin intact on a client disconnect", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
+test("leaves the pin intact on a client disconnect", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
 
-  const evicted = pin.evictSessionAffinityOnComboTimeout({
+  const evicted = await pin.evictSessionAffinityOnComboTimeout({
     sessionKey: SESSION,
     provider: PROVIDER,
     connectionId: STALLED,
@@ -83,16 +84,16 @@ test("leaves the pin intact on a client disconnect", () => {
 
   assert.equal(evicted, false, "a client hanging up says nothing about account health");
   assert.equal(
-    affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
     STALLED,
     "pin must survive so the session keeps its prompt-cache locality"
   );
 });
 
-test("leaves the pin intact when a hedged sibling cancelled this target", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
+test("leaves the pin intact when a hedged sibling cancelled this target", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
 
-  const evicted = pin.evictSessionAffinityOnComboTimeout({
+  const evicted = await pin.evictSessionAffinityOnComboTimeout({
     sessionKey: SESSION,
     provider: PROVIDER,
     connectionId: STALLED,
@@ -100,13 +101,16 @@ test("leaves the pin intact when a hedged sibling cancelled this target", () => 
   });
 
   assert.equal(evicted, false, "losing a hedge race is not an account failure");
-  assert.equal(affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId, STALLED);
+  assert.equal(
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
+    STALLED
+  );
 });
 
-test("leaves the pin intact when the dispatch was never aborted", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
+test("leaves the pin intact when the dispatch was never aborted", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, STALLED, Date.now(), TTL);
 
-  const evicted = pin.evictSessionAffinityOnComboTimeout({
+  const evicted = await pin.evictSessionAffinityOnComboTimeout({
     sessionKey: SESSION,
     provider: PROVIDER,
     connectionId: STALLED,
@@ -114,13 +118,16 @@ test("leaves the pin intact when the dispatch was never aborted", () => {
   });
 
   assert.equal(evicted, false);
-  assert.equal(affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId, STALLED);
+  assert.equal(
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
+    STALLED
+  );
 });
 
-test("never evicts a pin that points at a different (healthy) account", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, HEALTHY, Date.now(), TTL);
+test("never evicts a pin that points at a different (healthy) account", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, HEALTHY, Date.now(), TTL);
 
-  const evicted = pin.evictSessionAffinityOnComboTimeout({
+  const evicted = await pin.evictSessionAffinityOnComboTimeout({
     sessionKey: SESSION,
     provider: PROVIDER,
     connectionId: STALLED,
@@ -128,13 +135,16 @@ test("never evicts a pin that points at a different (healthy) account", () => {
   });
 
   assert.equal(evicted, false, "connection-matched guard must hold");
-  assert.equal(affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId, HEALTHY);
+  assert.equal(
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
+    HEALTHY
+  );
 });
 
-test("no-ops without a session key or connection id", () => {
+test("no-ops without a session key or connection id", async () => {
   const signal = timedOutSignal();
   assert.equal(
-    pin.evictSessionAffinityOnComboTimeout({
+    await pin.evictSessionAffinityOnComboTimeout({
       sessionKey: null,
       provider: PROVIDER,
       connectionId: STALLED,
@@ -143,7 +153,7 @@ test("no-ops without a session key or connection id", () => {
     false
   );
   assert.equal(
-    pin.evictSessionAffinityOnComboTimeout({
+    await pin.evictSessionAffinityOnComboTimeout({
       sessionKey: SESSION,
       provider: PROVIDER,
       connectionId: null,

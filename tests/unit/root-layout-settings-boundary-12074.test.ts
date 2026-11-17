@@ -10,20 +10,33 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 const core = await import("../../src/lib/db/core.ts");
 const { getRootLayoutSettings } = await import("../../src/lib/db/rootLayoutSettings.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage(): void {
-  core.resetDbInstance();
+async function resetStorage(): Promise<void> {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+async function setSettingValue(key: string, value: unknown): Promise<void> {
+  const backend = getTestBackend();
+  await backend.execute(
+    "DELETE FROM config_entries WHERE namespace = 'settings' AND key = $1",
+    [key]
+  );
+  await backend.execute(
+    "INSERT INTO config_entries (namespace, key, value) VALUES ('settings', $1, $2::jsonb)",
+    [key, JSON.stringify(value)]
+  );
+}
+
+test.beforeEach(async () => {
+  await resetStorage();
   delete process.env.INITIAL_PASSWORD;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 
   if (ORIGINAL_INITIAL_PASSWORD === undefined) {
@@ -39,28 +52,17 @@ test("root layout imports the read-only settings leaf", () => {
     path.join(process.cwd(), "src/lib/db/rootLayoutSettings.ts"),
     "utf8"
   );
-  const coreSource = fs.readFileSync(path.join(process.cwd(), "src/lib/db/core.ts"), "utf8");
-  const singletonSource = fs.readFileSync(
-    path.join(process.cwd(), "src/lib/db/singleton.ts"),
-    "utf8"
-  );
 
   assert.match(
     layoutSource,
     /import \{ getRootLayoutSettings \} from "@\/lib\/db\/rootLayoutSettings";/
   );
   assert.doesNotMatch(layoutSource, /@\/lib\/db\/settings/);
-  assert.match(leafSource, /from "\.\/singleton"/);
-  assert.doesNotMatch(
-    leafSource,
-    /db\/settings|\.\/core|runtimeSettings|tokenHealth|providerModels/
-  );
+  assert.doesNotMatch(leafSource, /db\/settings|runtimeSettings|tokenHealth|providerModels/);
   assert.doesNotMatch(leafSource, /\b(?:INSERT|UPDATE|DELETE|REPLACE)\b/i);
-  assert.match(coreSource, /from "\.\/singleton"/);
-  assert.doesNotMatch(singletonSource, /db\/settings|\.\/core|readCache|runtimeSettings/);
 });
 
-test("root layout settings reader does not initialize the database", async () => {
+test("root layout settings reader does not initialize onboarding on a fresh database", async () => {
   process.env.INITIAL_PASSWORD = "must-not-trigger-startup";
 
   assert.deepEqual(await getRootLayoutSettings(), {
@@ -68,19 +70,18 @@ test("root layout settings reader does not initialize the database", async () =>
     customFaviconUrl: "",
     customFaviconBase64: "",
   });
-  assert.equal(fs.existsSync(path.join(TEST_DATA_DIR, "storage.sqlite")), false);
+
+  const onboardingRows = await getTestBackend().query(
+    "SELECT key FROM config_entries WHERE namespace = 'settings' AND key IN ('setupComplete', 'requireLogin')"
+  );
+  assert.deepEqual(onboardingRows, []);
 });
 
 test("root layout settings reader returns only the persisted metadata fields", async () => {
-  const db = core.getDbInstance();
-  const insert = db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('settings', ?, ?)"
-  );
-
-  insert.run("instanceName", JSON.stringify("Route Lab"));
-  insert.run("customFaviconUrl", JSON.stringify("https://example.com/favicon.png"));
-  insert.run("customFaviconBase64", JSON.stringify("data:image/png;base64,AA=="));
-  insert.run("proxyEnabled", JSON.stringify(false));
+  await setSettingValue("instanceName", "Route Lab");
+  await setSettingValue("customFaviconUrl", "https://example.com/favicon.png");
+  await setSettingValue("customFaviconBase64", "data:image/png;base64,AA==");
+  await setSettingValue("proxyEnabled", false);
 
   assert.deepEqual(await getRootLayoutSettings(), {
     instanceName: "Route Lab",
@@ -91,10 +92,8 @@ test("root layout settings reader returns only the persisted metadata fields", a
 
 test("root layout settings reader is read-only and falls back safely", async () => {
   process.env.INITIAL_PASSWORD = "must-not-trigger-onboarding";
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('settings', 'instanceName', ?)"
-  ).run("not-json");
+  // A non-string stored value is not a usable instance name: the reader must fall back.
+  await setSettingValue("instanceName", 42);
 
   assert.deepEqual(await getRootLayoutSettings(), {
     instanceName: "OmniRoute",
@@ -102,10 +101,8 @@ test("root layout settings reader is read-only and falls back safely", async () 
     customFaviconBase64: "",
   });
 
-  const onboardingRows = db
-    .prepare(
-      "SELECT key FROM key_value WHERE namespace = 'settings' AND key IN ('setupComplete', 'requireLogin')"
-    )
-    .all();
+  const onboardingRows = await getTestBackend().query(
+    "SELECT key FROM config_entries WHERE namespace = 'settings' AND key IN ('setupComplete', 'requireLogin')"
+  );
   assert.deepEqual(onboardingRows, []);
 });

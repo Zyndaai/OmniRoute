@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createManagementSessionToken } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-log-export-routes-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -88,14 +89,13 @@ async function createDestination(overrides: Record<string, unknown> = {}) {
   return { response, body: (await response.json()) as ApiBody };
 }
 
-test.beforeEach(() => {
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -192,7 +192,7 @@ test("PUT_destination_PlaceholderSecret_KeepsTheStoredCredential", async () => {
 
   const secrets = await import("../../src/lib/logExport/secrets.ts");
   const destinationsDb = await import("../../src/lib/db/logExportDestinations.ts");
-  const stored = destinationsDb.getLogExportDestination(id)!;
+  const stored = (await destinationsDb.getLogExportDestination(id))!;
   assert.equal(
     secrets.decryptDestinationConfig("bigquery", stored.config).serviceAccountJson,
     SERVICE_ACCOUNT_JSON

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Per-member egress lines live behind their own route so that a failure there can never
 // break GET /api/settings/proxies/pool. These tests pin its shape ({ windowHours,
@@ -23,24 +24,24 @@ const observation = await import("../../src/lib/proxyPoolEgressObservation.ts");
 const { GET } = await import("../../src/app/api/settings/proxies/pool/member-egress/route.ts");
 const poolRoute = await import("../../src/app/api/settings/proxies/pool/route.ts");
 
-function resetStorage() {
+async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
   process.env.PROXY_POOL_EGRESS_OBSERVATION = "true";
   observation.resetPoolMemberEgressObservationCache();
   observation.resetPoolEgressObservationCache();
-  proxyLogger.clearProxyLogs();
-  core.resetDbInstance();
+  await proxyLogger.clearProxyLogs();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_POOL_EGRESS_OBSERVATION;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -51,7 +52,7 @@ function request(base: string, query: Record<string, string>): Request {
 
 const MEMBER_PATH = "/api/settings/proxies/pool/member-egress";
 
-function logEgress(host: string, port: number, egressIp: string | null) {
+async function logEgress(host: string, port: number, egressIp: string | null) {
   proxyLogger.logProxyEvent({
     status: "success",
     provider: "opencode",
@@ -59,7 +60,7 @@ function logEgress(host: string, port: number, egressIp: string | null) {
     proxy: { type: "http", host, port },
     egressIp,
   });
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 }
 
 async function pooledProxy(name: string, host: string, port: number, scopeId: string) {
@@ -71,7 +72,7 @@ async function pooledProxy(name: string, host: string, port: number, scopeId: st
 test("maps two members sharing one entry point through the same log row", async () => {
   await pooledProxy("member-a", "10.8.1.1", 22001, "openai");
   await pooledProxy("member-b", "10.8.1.1", 22001, "openai");
-  logEgress("10.8.1.1", 22001, "203.0.113.50");
+  await logEgress("10.8.1.1", 22001, "203.0.113.50");
   const response = await GET(request(MEMBER_PATH, { scope: "provider", scopeId: "openai" }));
   assert.equal(response.status, 200);
   const body = (await response.json()) as {
@@ -100,13 +101,11 @@ test("reports a member with no traffic as a null member instead of hiding it", a
 
 test("excludes stale rows older than the window", async () => {
   await pooledProxy("stale", "10.8.3.3", 22003, "openai");
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_logs (id, timestamp, status, proxy_type, proxy_host, proxy_port, level, connection_id, egress_ip)
-       VALUES (?, ?, 'success', 'http', '10.8.3.3', 22003, 'provider', 'conn-old', '203.0.113.9')`
-    )
-    .run(randomUUID(), new Date(Date.now() - 48 * 3600_000).toISOString());
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, proxy_type, proxy_host, proxy_port, level, connection_id, egress_ip)
+     VALUES ($1, $2, 'success', 'http', '10.8.3.3', 22003, 'provider', 'conn-old', '203.0.113.9')`,
+    [randomUUID(), new Date(Date.now() - 48 * 3600_000).toISOString()]
+  );
   const response = await GET(request(MEMBER_PATH, { scope: "provider", scopeId: "openai" }));
   assert.equal(response.status, 200);
   const body = (await response.json()) as {
@@ -122,7 +121,7 @@ test("notes the shared-entrypoint bound: a gateway row feeds every member behind
   // per entry point, not per member, so gateway members cannot be told apart here.
   await pooledProxy("gw-a", "10.8.4.4", 22004, "openai");
   await pooledProxy("gw-b", "10.8.4.4", 22004, "openai");
-  logEgress("10.8.4.4", 22004, "203.0.113.60");
+  await logEgress("10.8.4.4", 22004, "203.0.113.60");
   const response = await GET(request(MEMBER_PATH, { scope: "provider", scopeId: "openai" }));
   const body = (await response.json()) as {
     members: Array<{ egressIp: string | null }>;
@@ -132,7 +131,7 @@ test("notes the shared-entrypoint bound: a gateway row feeds every member behind
 
 test("leaves GET /pool untouched and returns null when the flag is off", async () => {
   await pooledProxy("member", "10.8.5.5", 22005, "openai");
-  logEgress("10.8.5.5", 22005, "203.0.113.70");
+  await logEgress("10.8.5.5", 22005, "203.0.113.70");
   const pool = await poolRoute.GET(
     request("/api/settings/proxies/pool", { scope: "provider", scopeId: "openai" })
   );
@@ -149,13 +148,13 @@ test("leaves GET /pool untouched and returns null when the flag is off", async (
 
 test("returns null with status 200 when the read fails", async () => {
   await pooledProxy("member", "10.8.6.6", 22006, "openai");
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
   try {
     const response = await GET(request(MEMBER_PATH, { scope: "provider", scopeId: "openai" }));
     assert.equal(response.status, 200);
     assert.equal(await response.json(), null);
   } finally {
-    db.exec("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
+    await backend.execute("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
   }
 });

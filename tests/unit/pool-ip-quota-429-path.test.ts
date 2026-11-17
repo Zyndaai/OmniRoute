@@ -17,6 +17,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const memory = await import("../../open-sse/utils/proxyRefusalMemory.ts");
@@ -42,16 +43,16 @@ test.before(async () => {
 test.after(async () => {
   delete process.env.PROXY_SKIP_RECENTLY_FAILED;
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  proxyLogger.clearProxyLogs();
-  core.resetDbInstance();
+  await proxyLogger.clearProxyLogs();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   memory.__resetProxyRefusalMemoryForTesting();
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  proxyLogger.clearProxyLogs();
-  core.resetDbInstance();
+  await proxyLogger.clearProxyLogs();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });

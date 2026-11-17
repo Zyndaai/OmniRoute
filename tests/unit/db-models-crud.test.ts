@@ -1,43 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-models-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
-});
-
-test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb();
 });
 
 test("model aliases can be created, listed and deleted", async () => {
@@ -134,7 +102,7 @@ test("replaceCustomModels preserves compat fields and respects the empty-list gu
 
 test("removing a custom model also removes its compat override", async () => {
   await modelsDb.addCustomModel("anthropic", "claude-3-haiku", "Claude 3 Haiku");
-  modelsDb.mergeModelCompatOverride("anthropic", "claude-3-haiku", {
+  await modelsDb.mergeModelCompatOverride("anthropic", "claude-3-haiku", {
     normalizeToolCallId: true,
     isHidden: true,
   });
@@ -142,10 +110,18 @@ test("removing a custom model also removes its compat override", async () => {
   assert.equal(await modelsDb.removeCustomModel("anthropic", "claude-3-haiku"), true);
   assert.equal(await modelsDb.removeCustomModel("anthropic", "claude-3-haiku"), false);
   assert.deepEqual(await modelsDb.getCustomModels("anthropic"), []);
-  assert.deepEqual(modelsDb.getModelCompatOverrides("anthropic"), []);
+  assert.deepEqual(await modelsDb.getModelCompatOverrides("anthropic"), []);
 });
 
 test("synced available models are unioned across connections and cleaned per connection", async () => {
+  // connection_model_sync references provider_connections: a sync for a connection that
+  // does not exist is dropped by design, so the two connections must exist first.
+  for (const connectionId of ["conn-a", "conn-b"]) {
+    await getTestBackend().execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [connectionId, "openai"]
+    );
+  }
   await modelsDb.replaceSyncedAvailableModelsForConnection("openai", "conn-a", [
     { id: "gpt-4.1", name: "GPT-4.1", source: "imported" },
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", source: "imported" },
@@ -166,7 +142,7 @@ test("synced available models are unioned across connections and cleaned per con
 });
 
 test("compat overrides expose per-protocol getters and removable extra headers", async () => {
-  modelsDb.mergeModelCompatOverride("openai", "gpt-4.1", {
+  await modelsDb.mergeModelCompatOverride("openai", "gpt-4.1", {
     normalizeToolCallId: true,
     preserveOpenAIDeveloperRole: false,
     isHidden: true,
@@ -185,20 +161,23 @@ test("compat overrides expose per-protocol getters and removable extra headers",
     },
   });
 
-  assert.equal(modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1"), true);
-  assert.equal(modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1", "openai"), false);
-  assert.equal(modelsDb.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4.1"), false);
-  assert.equal(modelsDb.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4.1", "openai"), true);
-  assert.equal(modelsDb.getModelIsHidden("openai", "gpt-4.1"), true);
-  assert.deepEqual(modelsDb.getModelUpstreamExtraHeaders("openai", "gpt-4.1", "openai"), {
+  assert.equal(await modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1"), true);
+  assert.equal(await modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1", "openai"), false);
+  assert.equal(await modelsDb.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4.1"), false);
+  assert.equal(
+    await modelsDb.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4.1", "openai"),
+    true
+  );
+  assert.equal(await modelsDb.getModelIsHidden("openai", "gpt-4.1"), true);
+  assert.deepEqual(await modelsDb.getModelUpstreamExtraHeaders("openai", "gpt-4.1", "openai"), {
     "X-Top": "1",
     "X-Proto": "yes",
   });
 
-  modelsDb.removeModelCompatOverride("openai", "gpt-4.1");
+  await modelsDb.removeModelCompatOverride("openai", "gpt-4.1");
 
-  assert.equal(modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1"), false);
-  assert.deepEqual(modelsDb.getModelCompatOverrides("openai"), []);
+  assert.equal(await modelsDb.getModelNormalizeToolCallId("openai", "gpt-4.1"), false);
+  assert.deepEqual(await modelsDb.getModelCompatOverrides("openai"), []);
 });
 
 test("sanitizeUpstreamHeadersMap keeps only safe trimmed headers", () => {
@@ -216,8 +195,8 @@ test("sanitizeUpstreamHeadersMap keeps only safe trimmed headers", () => {
   });
 });
 
-test("compat overrides ignore invalid protocol keys and can be fully removed again", () => {
-  modelsDb.mergeModelCompatOverride("openai", "gpt-4.1-mini", {
+test("compat overrides ignore invalid protocol keys and can be fully removed again", async () => {
+  await modelsDb.mergeModelCompatOverride("openai", "gpt-4.1-mini", {
     normalizeToolCallId: true,
     preserveOpenAIDeveloperRole: true,
     isHidden: true,
@@ -235,13 +214,13 @@ test("compat overrides ignore invalid protocol keys and can be fully removed aga
     },
   });
 
-  let overrides = modelsDb.getModelCompatOverrides("openai");
+  let overrides = await modelsDb.getModelCompatOverrides("openai");
 
   assert.equal(overrides.length, 1);
   assert.equal(overrides[0].compatByProtocol.invalid, undefined);
   assert.deepEqual(overrides[0].upstreamHeaders, { "X-Test": "enabled" });
 
-  modelsDb.mergeModelCompatOverride("openai", "gpt-4.1-mini", {
+  await modelsDb.mergeModelCompatOverride("openai", "gpt-4.1-mini", {
     normalizeToolCallId: false,
     preserveOpenAIDeveloperRole: null,
     isHidden: null,
@@ -253,7 +232,7 @@ test("compat overrides ignore invalid protocol keys and can be fully removed aga
     },
   });
 
-  overrides = modelsDb.getModelCompatOverrides("openai");
+  overrides = await modelsDb.getModelCompatOverrides("openai");
 
   assert.deepEqual(overrides, [
     {
@@ -286,7 +265,7 @@ test("compat getters fall back to override rows when custom model storage is mal
     },
   });
 
-  modelsDb.mergeModelCompatOverride("anthropic", "claude-edge", {
+  await modelsDb.mergeModelCompatOverride("anthropic", "claude-edge", {
     normalizeToolCallId: true,
     preserveOpenAIDeveloperRole: false,
     isHidden: true,
@@ -304,22 +283,29 @@ test("compat getters fall back to override rows when custom model storage is mal
     },
   });
 
-  const db = core.getDbInstance();
-  db.prepare("UPDATE key_value SET value = ? WHERE namespace = 'customModels' AND key = ?").run(
-    "{not-json",
-    "anthropic"
+  // custom_models is a jsonb column now, so the malformed storage state is a
+  // valid JSON value of the wrong shape (a string instead of the expected array).
+  await getTestBackend().execute(
+    "UPDATE provider_model_catalog SET custom_models = $1::jsonb WHERE provider = $2",
+    [JSON.stringify("not-an-array"), "anthropic"]
   );
 
-  assert.equal(modelsDb.getModelNormalizeToolCallId("anthropic", "claude-edge", "openai"), false);
   assert.equal(
-    modelsDb.getModelPreserveOpenAIDeveloperRole("anthropic", "claude-edge", "openai"),
+    await modelsDb.getModelNormalizeToolCallId("anthropic", "claude-edge", "openai"),
+    false
+  );
+  assert.equal(
+    await modelsDb.getModelPreserveOpenAIDeveloperRole("anthropic", "claude-edge", "openai"),
     true
   );
-  assert.equal(modelsDb.getModelIsHidden("anthropic", "claude-edge"), true);
-  assert.deepEqual(modelsDb.getModelUpstreamExtraHeaders("anthropic", "claude-edge", "openai"), {
-    "X-Compat": "fallback",
-    "X-Compat-Proto": "fallback-proto",
-  });
+  assert.equal(await modelsDb.getModelIsHidden("anthropic", "claude-edge"), true);
+  assert.deepEqual(
+    await modelsDb.getModelUpstreamExtraHeaders("anthropic", "claude-edge", "openai"),
+    {
+      "X-Compat": "fallback",
+      "X-Compat-Proto": "fallback-proto",
+    }
+  );
 });
 
 test("missing alias helpers return empty results for unknown tools and providers", async () => {

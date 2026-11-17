@@ -106,8 +106,8 @@ function assistantContents(turns) {
 
 // --- Characterization: shapes that already work must keep working ----------
 
-test("kiro #8903: consecutive tool messages answer every parallel tool call", () => {
-  const payload = build([
+test("kiro #8903: consecutive tool messages answer every parallel tool call", async () => {
+  const payload = await build([
     { role: "user", content: "list files then read one" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: "a.txt\nb.txt" },
@@ -120,8 +120,8 @@ test("kiro #8903: consecutive tool messages answer every parallel tool call", ()
   assert.deepEqual(answered.sort(), ["call_A", "call_B"]);
 });
 
-test("kiro #8903: three parallel tool calls are all answered", () => {
-  const payload = build([
+test("kiro #8903: three parallel tool calls are all answered", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     {
       role: "assistant",
@@ -143,8 +143,8 @@ test("kiro #8903: three parallel tool calls are all answered", () => {
   assert.deepEqual(answered.sort(), ["c1", "c2", "c3"]);
 });
 
-test("kiro #8903: two sequential rounds of parallel tool calls are all answered", () => {
-  const payload = build([
+test("kiro #8903: two sequential rounds of parallel tool calls are all answered", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: "r1" },
@@ -163,8 +163,8 @@ test("kiro #8903: two sequential rounds of parallel tool calls are all answered"
   assert.deepEqual(answered.sort(), ["call_A", "call_B", "call_C"]);
 });
 
-test("kiro #8903: transcript ending on tool results still answers every tool call", () => {
-  const payload = build([
+test("kiro #8903: transcript ending on tool results still answers every tool call", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: "r1" },
@@ -176,8 +176,8 @@ test("kiro #8903: transcript ending on tool results still answers every tool cal
   assert.deepEqual(answered.sort(), ["call_A", "call_B"]);
 });
 
-test("kiro #8903: structured array tool content is answered for every tool call", () => {
-  const payload = build([
+test("kiro #8903: structured array tool content is answered for every tool call", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: [{ type: "text", text: "r1" }] },
@@ -192,8 +192,8 @@ test("kiro #8903: structured array tool content is answered for every tool call"
 
 // --- RED: interleaved assistant text drops the trailing tool result --------
 
-test("kiro #8903: assistant text between tool results does not drop a tool result", () => {
-  const payload = build([
+test("kiro #8903: assistant text between tool results does not drop a tool result", async () => {
+  const payload = await build([
     { role: "user", content: "list files then read one" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: "a.txt\nb.txt" },
@@ -213,8 +213,8 @@ test("kiro #8903: assistant text between tool results does not drop a tool resul
 
 // --- Content + order: grouping must not be paid for with lost assistant text -
 
-test("kiro #8903 probe A: a final text-only assistant reply survives a tool result", () => {
-  const payload = build([
+test("kiro #8903 probe A: a final text-only assistant reply survives a tool result", async () => {
+  const payload = await build([
     { role: "user", content: "what is the weather" },
     {
       role: "assistant",
@@ -238,8 +238,8 @@ test("kiro #8903 probe A: a final text-only assistant reply survives a tool resu
   assert.ok(replyIdx > resultIdx, "the assistant reply must come after the tool result turn");
 });
 
-test("kiro #8903 probe C: a mid-conversation assistant answer survives a later user turn", () => {
-  const payload = build([
+test("kiro #8903 probe C: a mid-conversation assistant answer survives a later user turn", async () => {
+  const payload = await build([
     { role: "user", content: "q1" },
     {
       role: "assistant",
@@ -266,8 +266,8 @@ test("kiro #8903 probe C: a mid-conversation assistant answer survives a later u
   );
 });
 
-test("kiro #8903 probe B: deferred assistant text survives AND the tool batch stays grouped", () => {
-  const payload = build([
+test("kiro #8903 probe B: deferred assistant text survives AND the tool batch stays grouped", async () => {
+  const payload = await build([
     { role: "user", content: "check two things" },
     PARALLEL_TOOL_CALLS,
     { role: "tool", tool_call_id: "call_A", content: "res A" },
@@ -308,8 +308,8 @@ test("kiro #8903 probe B: deferred assistant text survives AND the tool batch st
   );
 });
 
-test("kiro #8903: assistant text is preserved on an ordinary non-tool transcript", () => {
-  const payload = build([
+test("kiro #8903: assistant text is preserved on an ordinary non-tool transcript", async () => {
+  const payload = await build([
     { role: "user", content: "hi" },
     { role: "assistant", content: "PLAIN_REPLY" },
     { role: "user", content: "again" },

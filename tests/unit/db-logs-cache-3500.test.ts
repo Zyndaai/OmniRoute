@@ -2,49 +2,41 @@
  * #3500: semantic_cache / proxy_logs SQL extracted into db modules
  * (Hard Rule #5, slice 4).
  *
- * Seeds an in-memory temp SQLite DB for each table and asserts each new db
- * function returns the correct rows / counts. DB handles are released in
- * test.after to prevent Node native test runner from hanging
- * (CLAUDE.md PII/Stream Learnings #3).
+ * Seeds the Postgres test database for each table and asserts each db
+ * function returns the correct rows / counts. Each test file gets its own
+ * database (tests/_setup/isolatePostgres.ts), and resetTestDb() empties it
+ * before the cases run.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-logs-cache-3500-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const semanticCache = await import("../../src/lib/db/semanticCache.ts");
 const proxyLogs = await import("../../src/lib/db/proxyLogs.ts");
 
 // ---------------------------------------------------------------------------
-// Helpers — semantic_cache seeding
+// Helpers — semantic_cache seeding (signature is the primary key)
 // ---------------------------------------------------------------------------
 
-function insertSemanticCache(row: {
-  id: string;
+async function insertSemanticCache(row: {
   signature: string;
   model: string;
   hit_count?: number;
   tokens_saved?: number;
 }) {
-  const db = core.getDbInstance();
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO semantic_cache
-      (id, signature, model, prompt_hash, response, tokens_saved, hit_count, created_at, expires_at)
+      (signature, model, prompt_hash, response, tokens_saved, hit_count, created_at, expires_at)
      VALUES
-      (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+1 hour'))`
-  ).run(
-    row.id,
-    row.signature,
-    row.model,
-    "hash_" + row.id,
-    "{}",
-    row.tokens_saved ?? 0,
-    row.hit_count ?? 0
+      ($1, $2, $3, $4, $5, $6, now(), now() + interval '1 hour')`,
+    [
+      row.signature,
+      row.model,
+      "hash_" + row.signature,
+      "{}",
+      row.tokens_saved ?? 0,
+      row.hit_count ?? 0,
+    ]
   );
 }
 
@@ -52,36 +44,31 @@ function insertSemanticCache(row: {
 // Helpers — proxy_logs seeding
 // ---------------------------------------------------------------------------
 
-function insertProxyLog(row: { id: string; timestamp: string; provider?: string }) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO proxy_logs (id, timestamp, provider, status, proxy_type) VALUES (?, ?, ?, ?, ?)`
-  ).run(row.id, row.timestamp, row.provider ?? "openai", "ok", "http");
+async function insertProxyLog(row: { id: string; timestamp: string; provider?: string }) {
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, proxy_type, provider) VALUES ($1, $2, $3, $4, $5)`,
+    [row.id, row.timestamp, "ok", "http", row.provider ?? "openai"]
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-test.before(() => {
-  core.resetDbInstance();
-});
-
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.before(async () => {
+  await resetTestDb();
 });
 
 // ===========================================================================
 // semanticCache — listSemanticCacheEntries
 // ===========================================================================
 
-test("#3500 listSemanticCacheEntries — returns entries with pagination", () => {
-  insertSemanticCache({ id: "sc-1", signature: "sig-alpha", model: "gpt-4", hit_count: 5 });
-  insertSemanticCache({ id: "sc-2", signature: "sig-beta", model: "claude-3", hit_count: 2 });
-  insertSemanticCache({ id: "sc-3", signature: "sig-gamma", model: "gpt-4", hit_count: 1 });
+test("#3500 listSemanticCacheEntries — returns entries with pagination", async () => {
+  await insertSemanticCache({ signature: "sig-alpha", model: "gpt-4", hit_count: 5 });
+  await insertSemanticCache({ signature: "sig-beta", model: "claude-3", hit_count: 2 });
+  await insertSemanticCache({ signature: "sig-gamma", model: "gpt-4", hit_count: 1 });
 
-  const result = semanticCache.listSemanticCacheEntries({
+  const result = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 10,
     search: "",
@@ -102,8 +89,8 @@ test("#3500 listSemanticCacheEntries — returns entries with pagination", () =>
   }
 });
 
-test("#3500 listSemanticCacheEntries — search filter narrows results", () => {
-  const result = semanticCache.listSemanticCacheEntries({
+test("#3500 listSemanticCacheEntries — search filter narrows results", async () => {
+  const result = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 10,
     search: "sig-alpha",
@@ -119,8 +106,8 @@ test("#3500 listSemanticCacheEntries — search filter narrows results", () => {
   );
 });
 
-test("#3500 listSemanticCacheEntries — model filter works", () => {
-  const result = semanticCache.listSemanticCacheEntries({
+test("#3500 listSemanticCacheEntries — model filter works", async () => {
+  const result = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 10,
     search: "",
@@ -135,8 +122,8 @@ test("#3500 listSemanticCacheEntries — model filter works", () => {
   }
 });
 
-test("#3500 listSemanticCacheEntries — pagination offset works", () => {
-  const p1 = semanticCache.listSemanticCacheEntries({
+test("#3500 listSemanticCacheEntries — pagination offset works", async () => {
+  const p1 = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 2,
     search: "",
@@ -144,7 +131,7 @@ test("#3500 listSemanticCacheEntries — pagination offset works", () => {
     sortBy: "created_at",
     sortOrder: "asc",
   });
-  const p2 = semanticCache.listSemanticCacheEntries({
+  const p2 = await semanticCache.listSemanticCacheEntries({
     page: 2,
     limit: 2,
     search: "",
@@ -166,11 +153,11 @@ test("#3500 listSemanticCacheEntries — pagination offset works", () => {
 // semanticCache — deleteSemanticCacheBySignature
 // ===========================================================================
 
-test("#3500 deleteSemanticCacheBySignature — deletes exactly the matching entry", () => {
-  insertSemanticCache({ id: "sc-del-sig", signature: "sig-to-delete", model: "gpt-4" });
+test("#3500 deleteSemanticCacheBySignature — deletes exactly the matching entry", async () => {
+  await insertSemanticCache({ signature: "sig-to-delete", model: "gpt-4" });
 
   // Verify it exists first
-  const before = semanticCache.listSemanticCacheEntries({
+  const before = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 100,
     search: "sig-to-delete",
@@ -180,10 +167,10 @@ test("#3500 deleteSemanticCacheBySignature — deletes exactly the matching entr
   });
   assert.ok(before.total >= 1, "entry exists before delete");
 
-  const result = semanticCache.deleteSemanticCacheBySignature("sig-to-delete");
+  const result = await semanticCache.deleteSemanticCacheBySignature("sig-to-delete");
   assert.equal(result.deleted, 1);
 
-  const after = semanticCache.listSemanticCacheEntries({
+  const after = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 100,
     search: "sig-to-delete",
@@ -198,11 +185,11 @@ test("#3500 deleteSemanticCacheBySignature — deletes exactly the matching entr
 // semanticCache — deleteSemanticCacheByModel
 // ===========================================================================
 
-test("#3500 deleteSemanticCacheByModel — deletes all entries for the given model", () => {
-  insertSemanticCache({ id: "sc-m1", signature: "sig-model-a-1", model: "model-to-purge" });
-  insertSemanticCache({ id: "sc-m2", signature: "sig-model-a-2", model: "model-to-purge" });
+test("#3500 deleteSemanticCacheByModel — deletes all entries for the given model", async () => {
+  await insertSemanticCache({ signature: "sig-model-a-1", model: "model-to-purge" });
+  await insertSemanticCache({ signature: "sig-model-a-2", model: "model-to-purge" });
 
-  const before = semanticCache.listSemanticCacheEntries({
+  const before = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 100,
     search: "",
@@ -212,10 +199,10 @@ test("#3500 deleteSemanticCacheByModel — deletes all entries for the given mod
   });
   assert.ok(before.total >= 2, "2 entries before delete");
 
-  const result = semanticCache.deleteSemanticCacheByModel("model-to-purge");
+  const result = await semanticCache.deleteSemanticCacheByModel("model-to-purge");
   assert.ok(result.deleted >= 2, `deleted >= 2, got ${result.deleted}`);
 
-  const after = semanticCache.listSemanticCacheEntries({
+  const after = await semanticCache.listSemanticCacheEntries({
     page: 1,
     limit: 100,
     search: "",
@@ -230,23 +217,23 @@ test("#3500 deleteSemanticCacheByModel — deletes all entries for the given mod
 // proxyLogs — exportProxyLogsSince
 // ===========================================================================
 
-test("#3500 exportProxyLogsSince — returns rows with timestamp >= since", () => {
+test("#3500 exportProxyLogsSince — returns rows with timestamp >= since", async () => {
   const base = new Date("2025-01-15T10:00:00.000Z");
   const old = new Date("2025-01-14T10:00:00.000Z");
 
-  insertProxyLog({
+  await insertProxyLog({
     id: "pl-new-1",
     timestamp: new Date("2025-01-15T11:00:00.000Z").toISOString(),
     provider: "openai",
   });
-  insertProxyLog({
+  await insertProxyLog({
     id: "pl-new-2",
     timestamp: new Date("2025-01-15T12:00:00.000Z").toISOString(),
     provider: "anthropic",
   });
-  insertProxyLog({ id: "pl-old-1", timestamp: old.toISOString(), provider: "openai" }); // outside window
+  await insertProxyLog({ id: "pl-old-1", timestamp: old.toISOString(), provider: "openai" }); // outside window
 
-  const rows = proxyLogs.exportProxyLogsSince(base.toISOString());
+  const rows = await proxyLogs.exportProxyLogsSince(base.toISOString());
 
   assert.ok(Array.isArray(rows), "result is array");
   const ids = rows.map((r) => (r as { id: string }).id);
@@ -255,8 +242,10 @@ test("#3500 exportProxyLogsSince — returns rows with timestamp >= since", () =
   assert.ok(!ids.includes("pl-old-1"), "pl-old-1 excluded (before since)");
 });
 
-test("#3500 exportProxyLogsSince — results are ordered descending by timestamp", () => {
-  const rows = proxyLogs.exportProxyLogsSince(new Date("2025-01-01T00:00:00.000Z").toISOString());
+test("#3500 exportProxyLogsSince — results are ordered descending by timestamp", async () => {
+  const rows = await proxyLogs.exportProxyLogsSince(
+    new Date("2025-01-01T00:00:00.000Z").toISOString()
+  );
   assert.ok(rows.length >= 2, "at least 2 rows");
 
   // Verify descending order
@@ -267,8 +256,8 @@ test("#3500 exportProxyLogsSince — results are ordered descending by timestamp
   }
 });
 
-test("#3500 exportProxyLogsSince — returns empty array when no rows match", () => {
+test("#3500 exportProxyLogsSince — returns empty array when no rows match", async () => {
   const future = new Date(Date.now() + 86_400_000 * 365).toISOString();
-  const rows = proxyLogs.exportProxyLogsSince(future);
+  const rows = await proxyLogs.exportProxyLogsSince(future);
   assert.deepEqual(rows, []);
 });

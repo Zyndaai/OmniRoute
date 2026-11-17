@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // With PROXY_SKIP_RECENTLY_FAILED on, pool selection skips members that just failed, for
 // every rotation strategy. The per-connection resolution used by the chat path
@@ -19,24 +20,25 @@ const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const memory = await import("../../open-sse/utils/proxyRefusalMemory.ts");
 const flagsDb = await import("../../src/lib/db/featureFlags.ts");
+const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
 
-function resetStorage() {
+async function resetStorage() {
   memory.__resetProxyRefusalMemoryForTesting();
   // Opt in for every test; the flag-off tests remove it explicitly.
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_SKIP_RECENTLY_FAILED;
   memory.__resetProxyRefusalMemoryForTesting();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -75,13 +77,26 @@ async function picks(count: number) {
   return hosts;
 }
 
-function rotationRow() {
-  return core
-    .getDbInstance()
-    .prepare(
-      "SELECT cursor, rotated_at FROM proxy_scope_rotation WHERE scope = 'provider' AND scope_id IS 'openai'"
-    )
-    .get() as { cursor: number; rotated_at: string | null };
+async function rotationRow(): Promise<{ cursor: number; rotated_at: string | null }> {
+  const row = await getTestBackend().queryOne<{ cursor: number; rotated_at: string | null }>(
+    `SELECT "cursor", rotated_at FROM proxy_scope_rotation WHERE scope = 'provider' AND scope_id = 'openai'`
+  );
+  return { cursor: Number(row?.cursor), rotated_at: row?.rotated_at ?? null };
+}
+
+async function setCursor(scope: string, scopeId: string, cursor: number) {
+  await getTestBackend().execute(
+    `UPDATE proxy_scope_rotation SET "cursor" = $3 WHERE scope = $1 AND scope_id = $2`,
+    [scope, scopeId, cursor]
+  );
+}
+
+async function cursorOf(scope: string, scopeId: string): Promise<number> {
+  const row = await getTestBackend().queryOne<{ cursor: number }>(
+    `SELECT "cursor" FROM proxy_scope_rotation WHERE scope = $1 AND scope_id = $2`,
+    [scope, scopeId]
+  );
+  return Number(row?.cursor);
 }
 
 test("round-robin skips a member set aside: A, C, A, C", async () => {
@@ -93,15 +108,10 @@ test("round-robin skips a member set aside: A, C, A, C", async () => {
 test("round-robin wraps past the last member and advances beyond the one served", async () => {
   const [a, b, c] = await pool(3);
   await pick();
-  core
-    .getDbInstance()
-    .prepare(
-      "UPDATE proxy_scope_rotation SET cursor = 2 WHERE scope = 'provider' AND scope_id IS 'openai'"
-    )
-    .run();
+  await setCursor("provider", "openai", 2);
   setAside(c);
   assert.equal(await pick(), a.host);
-  assert.equal(rotationRow().cursor, 4);
+  assert.equal((await rotationRow()).cursor, 4);
   assert.equal(await pick(), b.host);
 });
 
@@ -111,14 +121,14 @@ test("sticky moves to the next eligible member without writing the rotation row"
     stickyWindowMinutes: 30,
   });
   const held = await pick();
-  const before = rotationRow();
+  const before = await rotationRow();
   const heldMember = [b, c].find((m) => m.host === held) ?? null;
   assert.ok(heldMember, `sticky first pick should be B or C, got ${held}`);
   setAside(heldMember);
 
   const next = await pick();
   assert.notEqual(next, held);
-  assert.deepEqual(rotationRow(), before);
+  assert.deepEqual(await rotationRow(), before);
 });
 
 test("random never draws a member set aside", async () => {
@@ -152,18 +162,20 @@ test("with the flag opted out a member set aside is still served in turn", async
     await picks(3),
     members.map((m) => m.host)
   );
-  assert.equal(rotationRow().cursor, 3);
+  assert.equal((await rotationRow()).cursor, 3);
 });
 
 test("a DB override turning the flag off wins over the environment", async () => {
   const members = await pool(3);
   setAside(members[1]);
-  flagsDb.setFeatureFlagOverride("PROXY_SKIP_RECENTLY_FAILED", "false");
+  await flagsDb.setFeatureFlagOverride("PROXY_SKIP_RECENTLY_FAILED", "false");
+  await refreshFeatureFlagSnapshot();
   assert.deepEqual(
     await picks(3),
     members.map((m) => m.host)
   );
-  flagsDb.setFeatureFlagOverride("PROXY_SKIP_RECENTLY_FAILED", "true");
+  await flagsDb.setFeatureFlagOverride("PROXY_SKIP_RECENTLY_FAILED", "true");
+  await refreshFeatureFlagSnapshot();
   delete process.env.PROXY_SKIP_RECENTLY_FAILED;
   assert.deepEqual(await picks(2), [members[0].host, members[2].host]);
 });
@@ -206,29 +218,21 @@ test("with every member set aside, chat-path resolution keeps rotating like the 
   // Round-robin advances its persisted cursor on each cascade run, so the cursor counts
   // how many times the registry pool was actually queried for this connection.
   const [a, b] = await pool(2, "account", "conn-all");
-  const cursor = () =>
-    (
-      core
-        .getDbInstance()
-        .prepare(
-          "SELECT cursor FROM proxy_scope_rotation WHERE scope = 'account' AND scope_id IS 'conn-all'"
-        )
-        .get() as { cursor: number }
-    ).cursor;
+  const cursor = () => cursorOf("account", "conn-all");
 
   const first = await settingsDb.resolveProxyForConnection("conn-all");
   assert.equal((first as { proxy: { host: string } }).proxy.host, a.host);
-  assert.equal(cursor(), 1);
+  assert.equal(await cursor(), 1);
 
   setAside(a);
   setAside(b);
   const second = await settingsDb.resolveProxyForConnection("conn-all");
   assert.equal((second as { proxy: { host: string } }).proxy.host, b.host);
-  assert.equal(cursor(), 2);
+  assert.equal(await cursor(), 2);
 
   const third = await settingsDb.resolveProxyForConnection("conn-all");
   assert.equal((third as { proxy: { host: string } }).proxy.host, a.host);
-  assert.equal(cursor(), 3);
+  assert.equal(await cursor(), 3);
 });
 
 test("a legacy single-proxy level stays cached even when its proxy is set aside", async () => {

@@ -15,7 +15,6 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-aut
 const TEST_PLUGIN_DIR = path.join(TEST_DATA_DIR, "plugins");
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_PLUGINS_DIR = TEST_PLUGIN_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.REQUIRE_API_KEY = "false";
 process.env.DASHBOARD_PASSWORD = "";
 process.env.INITIAL_PASSWORD = "";
@@ -24,7 +23,7 @@ delete process.env.JWT_SECRET;
 delete process.env.QUOTA_STORE_DRIVER;
 delete process.env.QUOTA_STORE_REDIS_URL;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -34,9 +33,9 @@ const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   globalThis.fetch = originalFetch;
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, {
     recursive: true,
     force: true,
@@ -50,11 +49,11 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, {
     recursive: true,
     force: true,

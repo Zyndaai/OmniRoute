@@ -11,6 +11,7 @@ import {
   upsertWarmupState,
 } from "../../../../src/lib/db/connectionRuntimeState.ts";
 import { resetDbInstance } from "../../../../src/lib/db/core.ts";
+import { resetTestDb } from "../../../helpers/postgres.ts";
 
 function makeMockRedis() {
   const store = new Map<string, Map<string, string>>();
@@ -122,8 +123,7 @@ test("get: returns empty-state for unknown connection", async () => {
   assert.equal(await store.get("nope"), null);
 });
 
-test("recordResult(success) clears forbidden flag in SQLite backup", async () => {
-  // Use isolated temp DB (same pattern as connectionRuntimeState.test.ts)
+test("recordResult(success) clears forbidden flag in the runtime-state backup", async () => {
   const providersDb = await import("../../../../src/lib/db/providers.ts");
   const conn = await providersDb.createProviderConnection({
     provider: "claude",
@@ -135,7 +135,7 @@ test("recordResult(success) clears forbidden flag in SQLite backup", async () =>
     isActive: false,
   });
   const connId = conn!.id;
-  // Seed: simulate forbidden state in SQLite backup
+  // Seed: simulate forbidden state in the runtime-state backup
   await upsertWarmupState(connId, {
     lastWarmupAt: new Date().toISOString(),
     lastResult: "forbidden",
@@ -143,36 +143,35 @@ test("recordResult(success) clears forbidden flag in SQLite backup", async () =>
   });
   const mock = makeMockRedis();
   const store = new RedisCircuitBreakerStore(mock.redis);
-  // Set forbidden in Redis (also writes SQLite backup via markForbidden)
+  // Set forbidden in Redis (also writes the runtime-state backup via markForbidden)
   await store.recordResult(connId, {
     success: false,
     tokensUsed: 0,
     durationMs: 1,
     failureKind: "forbidden",
   });
-  // Now record success — should clear forbidden in SQLite backup
+  // Now record success — should clear forbidden in the runtime-state backup
   await store.recordResult(connId, { success: true, tokensUsed: 4, durationMs: 5 });
-  // Verify SQLite backup final state (not just "called")
-  const sqliteState = getConnectionRuntimeState(connId);
+  // Verify the runtime-state backup final state (not just "called")
+  const backupState = await getConnectionRuntimeState(connId);
   assert.equal(
-    sqliteState?.lastWarmupResult,
+    backupState?.lastWarmupResult,
     "success",
-    "SQLite backup last_warmup_result must be 'success' after successful warmup, not stuck at 'forbidden'"
+    "runtime-state backup last_warmup_result must be 'success' after successful warmup, not stuck at 'forbidden'"
   );
 });
 
 test.beforeEach(async () => {
-  // Isolate each test in its own temp DB to avoid FK/setup bleed
+  // Each test starts from an empty database (tables emptied, seed rows restored).
   const fs = await import("node:fs");
   const os = await import("node:os");
   const path = await import("node:path");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-redis-cb-"));
   process.env.DATA_DIR = tmp;
   process.env.NODE_ENV = "test";
-  process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-  resetDbInstance();
+  await resetTestDb();
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
 });

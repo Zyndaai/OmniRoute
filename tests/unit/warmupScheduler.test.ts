@@ -18,14 +18,14 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-warmup-orch-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "warmup-exclusive-lease-test-secret";
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -62,6 +62,15 @@ function installMockFetch(
   };
 }
 
+// Postgres round trips are async, so a fixed sleep can end before the first ping lands:
+// poll until the mock has seen the expected number of calls (bounded).
+async function waitForCalls(calls: unknown[], count: number, timeoutMs = 5000) {
+  const startedAt = Date.now();
+  while (calls.length < count && Date.now() - startedAt < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 test.beforeEach(async () => {
   await resetStorage();
   delete process.env.OMNIROUTE_WARMUP_ENABLED;
@@ -75,8 +84,8 @@ test.beforeEach(async () => {
   __resetWarmupState();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -255,7 +264,7 @@ test("integration: message rotation — different content across sequential ping
   process.env.OMNIROUTE_WARMUP_CRON = "*/1 * * * *";
   // First ping.
   startWarmupScheduler();
-  await new Promise((r) => setTimeout(r, 30));
+  await waitForCalls(mock.calls, 1);
   stopWarmupScheduler();
   // Reset module-level message counter is not exported; instead verify content is one of the rotation set.
   const firstBody = JSON.parse(mock.calls[0].init?.body as string);
@@ -263,7 +272,7 @@ test("integration: message rotation — different content across sequential ping
 
   // Second ping (new scheduler instance, same counter continues) — content should differ eventually.
   startWarmupScheduler();
-  await new Promise((r) => setTimeout(r, 30));
+  await waitForCalls(mock.calls, 2);
   stopWarmupScheduler();
   mock.restore();
 
@@ -300,7 +309,7 @@ test("integration: 403 → forbidden persisted, no further fetch for that connec
   mock.restore();
 
   assert.equal(mock.calls.length, 1, "exactly one fetch on 403");
-  const state = crs.getConnectionRuntimeState(conn.id);
+  const state = await crs.getConnectionRuntimeState(conn.id);
   assert.equal(state?.lastWarmupResult, "forbidden", "forbidden must be persisted to SQLite");
 
   delete process.env.OMNIROUTE_WARMUP_ENABLED;
@@ -339,7 +348,7 @@ test("integration: 429 → rate_limit with Retry-After parsed", async () => {
   mock.restore();
 
   assert.equal(mock.calls.length, 1, "exactly one fetch on 429");
-  const state = crs.getConnectionRuntimeState(conn.id);
+  const state = await crs.getConnectionRuntimeState(conn.id);
   // until should be ~120s out (Retry-After), not the default 5min backoff.
   assert.ok(state?.warmupCircuitUntil, "until should be set");
   const untilMs = new Date(state.warmupCircuitUntil!).getTime() - Date.now();

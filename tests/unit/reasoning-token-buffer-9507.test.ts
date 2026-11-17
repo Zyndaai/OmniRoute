@@ -20,13 +20,13 @@ const core = await import("../../src/lib/db/core.ts");
 const { resolveReasoningBufferedMaxTokens } =
   await import("../../open-sse/services/reasoningTokenBuffer.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#9507 reasoning buffer does NOT enlarge a Claude opus-5 client budget upward", () => {
-  const result = resolveReasoningBufferedMaxTokens("anthropic/claude-opus-5", 64000);
+test("#9507 reasoning buffer does NOT enlarge a Claude opus-5 client budget upward", async () => {
+  const result = await resolveReasoningBufferedMaxTokens("anthropic/claude-opus-5", 64000);
   assert.equal(
     result,
     64000,
@@ -34,9 +34,9 @@ test("#9507 reasoning buffer does NOT enlarge a Claude opus-5 client budget upwa
   );
 });
 
-test("#9507 reasoning buffer does NOT enlarge a Claude sonnet-5 client budget upward", () => {
+test("#9507 reasoning buffer does NOT enlarge a Claude sonnet-5 client budget upward", async () => {
   const client = 32000;
-  const result = resolveReasoningBufferedMaxTokens("anthropic/claude-sonnet-5", client);
+  const result = await resolveReasoningBufferedMaxTokens("anthropic/claude-sonnet-5", client);
   assert.ok(
     result === null || result <= client,
     `client max_tokens=${client} must not be enlarged, got ${result}`

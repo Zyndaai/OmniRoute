@@ -24,17 +24,18 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "ag38-15659-test-secr
 const core = await import("../../src/lib/db/core.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "antigravity";
 const CONNECTION_ID = "ag-15659-test-connection";
 
 async function seedLiveCatalog(ids: string[]): Promise<void> {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run(CONNECTION_ID, PROVIDER, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active)
+     VALUES ($1, $2, true)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = true`,
+    [CONNECTION_ID, PROVIDER]
+  );
   await replaceSyncedAvailableModelsForConnection(
     PROVIDER,
     CONNECTION_ID,
@@ -42,14 +43,12 @@ async function seedLiveCatalog(ids: string[]): Promise<void> {
   );
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

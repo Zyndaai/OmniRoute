@@ -36,18 +36,18 @@ const { computeComboContextLength } = await import("../../src/lib/combos/comboCo
 const { setModelContextOverride, removeModelContextOverride } =
   await import("../../src/lib/db/modelContextOverrides.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("computeComboContextLength resolves a registry-known, prefixed member (glm/glm-5.2) to its real context window", () => {
+test("computeComboContextLength resolves a registry-known, prefixed member (glm/glm-5.2) to its real context window", async () => {
   const combo = {
     name: "prefix-resolution-probe-single",
     models: ["glm/glm-5.2"],
   };
 
-  const result = computeComboContextLength(combo, []);
+  const result = await computeComboContextLength(combo, []);
 
   assert.equal(
     result,
@@ -58,14 +58,14 @@ test("computeComboContextLength resolves a registry-known, prefixed member (glm/
   );
 });
 
-test("computeComboContextLength takes the minimum across multiple prefixed, registry-known members", () => {
+test("computeComboContextLength takes the minimum across multiple prefixed, registry-known members", async () => {
   const combo = {
     name: "prefix-resolution-probe-multi",
     // glm-4.5 (128,000) is the smaller of the two known windows.
     models: ["glm/glm-5.2", "glm/glm-4.5"],
   };
 
-  const result = computeComboContextLength(combo, []);
+  const result = await computeComboContextLength(combo, []);
 
   assert.equal(
     result,
@@ -75,16 +75,16 @@ test("computeComboContextLength takes the minimum across multiple prefixed, regi
   );
 });
 
-test("computeComboContextLength honors a larger persisted Codex GPT-5.6 window", () => {
+test("computeComboContextLength honors a larger persisted Codex GPT-5.6 window", async () => {
   const modelId = "gpt-5.6-terra";
-  assert.equal(setModelContextOverride("codex", modelId, 500000, "manual"), true);
+  assert.equal(await setModelContextOverride("codex", modelId, 500000, "manual"), true);
   try {
     assert.equal(
-      computeComboContextLength({ models: [`codex/${modelId}`] }, []),
+      await computeComboContextLength({ models: [`codex/${modelId}`] }, []),
       500000,
       "the combo aggregate must use the effective override instead of the Codex registry default"
     );
   } finally {
-    removeModelContextOverride("codex", modelId);
+    await removeModelContextOverride("codex", modelId);
   }
 });

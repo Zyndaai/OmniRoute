@@ -24,7 +24,6 @@ const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const settingsRoute = await import("../../src/app/api/settings/route.ts");
-const importJsonRoute = await import("../../src/app/api/settings/import-json/route.ts");
 const managementPassword = await import("../../src/lib/auth/managementPassword.ts");
 const securitySettings = await import("../../src/shared/constants/securityImpactingSettings.ts");
 const { updateSettingsSchema } = await import("../../src/shared/validation/settingsSchemas.ts");
@@ -53,7 +52,7 @@ const SEEDED_OIDC = {
 };
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.INITIAL_PASSWORD;
@@ -84,8 +83,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) {
     delete process.env.INITIAL_PASSWORD;
@@ -147,24 +146,3 @@ test("every oidc* key PATCH /api/settings accepts is guarded by the re-auth gate
   }
 });
 
-test("import-json does not write the OIDC identity keys", async () => {
-  await settingsDb.updateSettings({ requireLogin: false, ...SEEDED_OIDC });
-  const before = (await settingsDb.getSettings()) as Record<string, unknown>;
-
-  const response = await importJsonRoute.POST(
-    new Request("http://localhost:20128/api/settings/import-json", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        settings: { ...OIDC_IDENTITY_CHANGES, oidcReauthBenignKey: "kept" },
-      }),
-    })
-  );
-  assert.equal(response.status, 200, await response.clone().text());
-
-  const after = (await settingsDb.getSettings()) as Record<string, unknown>;
-  assert.equal(after.oidcReauthBenignKey, "kept");
-  for (const key of Object.keys(OIDC_IDENTITY_CHANGES)) {
-    assert.deepEqual(after[key], before[key], key);
-  }
-});

@@ -18,7 +18,8 @@ const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
 const { geminiToClaudeResponse } =
   await import("../../open-sse/translator/response/gemini-to-claude.ts");
-const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { translateRequest, prefetchThoughtSignatures } =
+  await import("../../open-sse/translator/index.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const {
   buildGeminiThoughtSignatureKey,
@@ -28,11 +29,11 @@ const {
   clearGeminiThoughtSignatures,
 } = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 
-test.beforeEach(() => {
-  clearGeminiThoughtSignatures();
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatures();
 });
 
-test("gemini→claude stores thoughtSignature keyed by connection + tool_use id (#8979)", () => {
+test("gemini→claude stores thoughtSignature keyed by connection + tool_use id (#8979)", async () => {
   const ns = "conn-8979-store";
   const toolId = "toolu_8979_read";
   const signature = "SIG_8979_FROM_GEMINI";
@@ -64,13 +65,13 @@ test("gemini→claude stores thoughtSignature keyed by connection + tool_use id 
   );
 
   assert.equal(
-    getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId)),
+    await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId)),
     signature,
     "direct Gemini→Claude path must persist thoughtSignature for the follow-up turn"
   );
 });
 
-test("gemini→claude stores thoughtSignature from a preceding standalone part (#8979)", () => {
+test("gemini→claude stores thoughtSignature from a preceding standalone part (#8979)", async () => {
   const ns = "conn-8979-pending";
   const toolId = "toolu_8979_pending";
   const signature = "SIG_8979_PENDING_PART";
@@ -101,19 +102,19 @@ test("gemini→claude stores thoughtSignature from a preceding standalone part (
   );
 
   assert.equal(
-    getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId)),
+    await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId)),
     signature,
     "standalone thoughtSignature part must be bound to the following functionCall"
   );
 });
 
-test("claude→gemini re-attaches cached thoughtSignature on tool_use history (#8979)", () => {
+test("claude→gemini re-attaches cached thoughtSignature on tool_use history (#8979)", async () => {
   const ns = "conn-8979-reattach";
   const toolId = "toolu_8979_reattach";
   const signature = "SIG_8979_REATTACH";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId), signature);
+  await storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId), signature);
 
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-3.6-flash",
     {
       messages: [
@@ -141,7 +142,17 @@ test("claude→gemini re-attaches cached thoughtSignature on tool_use history (#
       ],
     },
     false,
-    { _signatureNamespace: ns }
+    {
+      _signatureNamespace: ns,
+      // The request translator is synchronous; the signature store is read ahead of it
+      // (see prefetchThoughtSignatures in translator/index.ts).
+      _thoughtSignatures: new Map([
+        [
+          buildGeminiThoughtSignatureKey(ns, toolId),
+          await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, toolId)),
+        ],
+      ]),
+    }
   ) as {
     contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
   };
@@ -165,8 +176,8 @@ test("claude→gemini re-attaches cached thoughtSignature on tool_use history (#
   );
 });
 
-test("claude→gemini omits unsigned functionCall and uses context fallback (#8979 / #3688 parity)", () => {
-  const result = claudeToGeminiRequest(
+test("claude→gemini omits unsigned functionCall and uses context fallback (#8979 / #3688 parity)", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3.6-flash",
     {
       messages: [
@@ -217,13 +228,13 @@ test("claude→gemini omits unsigned functionCall and uses context fallback (#89
   assert.ok(body.includes("file contents"), "context block must keep tool result content");
 });
 
-test("translateRequest threads signatureNamespace on direct CLAUDE→GEMINI path (#8979)", () => {
+test("translateRequest threads signatureNamespace on direct CLAUDE→GEMINI path (#8979)", async () => {
   const ns = "conn-8979-direct-ns";
   const toolId = "toolu_8979_direct";
   const signature = "SIG_8979_DIRECT_NS";
   // The streaming writer scopes the namespace by model family (#4136), so seed the
   // cache the same way a gemini-3.6-flash response would have.
-  storeGeminiThoughtSignature(
+  await storeGeminiThoughtSignature(
     buildGeminiThoughtSignatureKey(
       scopeGeminiThoughtSignatureNamespace(ns, "gemini-3.6-flash"),
       toolId
@@ -231,11 +242,7 @@ test("translateRequest threads signatureNamespace on direct CLAUDE→GEMINI path
     signature
   );
 
-  const result = translateRequest(
-    FORMATS.CLAUDE,
-    FORMATS.GEMINI,
-    "gemini-3.6-flash",
-    {
+  const claudeBody = {
       messages: [
         {
           role: "assistant",
@@ -253,12 +260,25 @@ test("translateRequest threads signatureNamespace on direct CLAUDE→GEMINI path
           content: [{ type: "tool_result", tool_use_id: toolId, content: "ok" }],
         },
       ],
-    },
+  };
+  // The translator is synchronous; the signature store is read ahead of it, as the
+  // production caller does via prefetchThoughtSignatures.
+  const thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.GEMINI,
+    "gemini-3.6-flash",
+    claudeBody,
+    ns
+  );
+  const result = await translateRequest(
+    FORMATS.CLAUDE,
+    FORMATS.GEMINI,
+    "gemini-3.6-flash",
+    claudeBody,
     false,
     null,
     "gemini",
     null,
-    { signatureNamespace: ns }
+    { signatureNamespace: ns, thoughtSignatures }
   ) as { contents: Array<{ parts: Array<Record<string, unknown>> }> };
 
   const body = JSON.stringify(result);

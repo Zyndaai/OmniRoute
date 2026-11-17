@@ -17,9 +17,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const usageAnalytics = await import("../../src/lib/db/usageAnalytics.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
@@ -29,8 +30,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -63,7 +64,7 @@ test("saveRequestUsage persists endpoint and getEndpointUsageRows groups by endp
     endpoint: "/v1/messages",
   });
 
-  const rows = usageAnalytics.getEndpointUsageRows();
+  const rows = await usageAnalytics.getEndpointUsageRows();
   const byKey = new Map(rows.map((r) => [`${r.endpoint}|${r.provider}|${r.model}`, r]));
 
   const chat = byKey.get("/v1/chat/completions|openai|gpt-4o-mini");
@@ -89,7 +90,7 @@ test("getEndpointUsageRows folds NULL endpoint into 'unknown' bucket (backward c
     timestamp: new Date().toISOString(),
   });
 
-  const rows = usageAnalytics.getEndpointUsageRows();
+  const rows = await usageAnalytics.getEndpointUsageRows();
   const unknown = rows.find((r) => r.endpoint === "unknown");
   assert.ok(unknown, "NULL endpoint should fold into 'unknown'");
   assert.equal(unknown.requests, 1);
@@ -118,7 +119,7 @@ test("getEndpointUsageRows honors sinceIso filter", async () => {
   });
 
   const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const rows = usageAnalytics.getEndpointUsageRows({ sinceIso });
+  const rows = await usageAnalytics.getEndpointUsageRows({ sinceIso });
   const chat = rows.find((r) => r.endpoint === "/v1/chat/completions");
   assert.ok(chat);
   assert.equal(chat.requests, 1, "only the recent row should be counted");

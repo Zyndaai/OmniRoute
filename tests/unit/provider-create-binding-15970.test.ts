@@ -42,12 +42,13 @@ test.after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-async function makeNode(type = "openai-compatible-chat") {
+async function makeNode(type = "openai-compatible-chat", prefix = "fixture") {
   return nodes.createProviderNode({
     id: `${type}-${randomUUID()}`,
-    type,
+    // provider_nodes.type is CHECKed to the two base types; the id carries the derived type.
+    type: type.startsWith("anthropic-compatible") ? "anthropic-compatible" : "openai-compatible",
     name: "Fixture node",
-    prefix: "fixture",
+    prefix,
     apiType: "chat",
     baseUrl: "https://first.invalid/v1",
     chatPath: "/chat/completions",
@@ -176,7 +177,8 @@ test("concrete node id retains the dashboard's node-owned endpoint precedence", 
 
 test("ambiguous bare type still returns404 without creating a connection", async () => {
   await makeNode();
-  await makeNode();
+  // provider_nodes.prefix is unique (case-insensitive), so the second node needs its own.
+  await makeNode("openai-compatible-chat", "fixture-two");
   assert.equal((await post("openai-compatible-chat")).status, 404);
   assert.equal((await connections.getProviderConnections()).length, 0);
 });

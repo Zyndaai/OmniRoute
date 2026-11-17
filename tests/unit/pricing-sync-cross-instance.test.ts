@@ -40,7 +40,7 @@ function buildLiteLLMFixture() {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -64,7 +64,7 @@ test("manual sync history remains visible without advertising a disabled future 
   // genuinely fresh module scope that never called syncPricingFromSources
   // itself, and whose own `syncTimer`/`lastSyncTime` module vars are unset.
   const pricingSyncB = await import("../../src/lib/pricingSync.ts?instance=B");
-  const status = pricingSyncB.getSyncStatus();
+  const status = await pricingSyncB.getSyncStatus();
 
   assert.equal(
     status.lastSyncModelCount,
@@ -81,12 +81,12 @@ test("manual sync history remains visible without advertising a disabled future 
   );
 
   process.env.PRICING_SYNC_ENABLED = "false";
-  const explicitlyDisabledStatus = pricingSyncB.getSyncStatus();
+  const explicitlyDisabledStatus = await pricingSyncB.getSyncStatus();
   assert.equal(explicitlyDisabledStatus.enabled, false);
   assert.equal(explicitlyDisabledStatus.nextSync, null);
 
   process.env.PRICING_SYNC_ENABLED = "true";
-  const enabledStatus = pricingSyncB.getSyncStatus();
+  const enabledStatus = await pricingSyncB.getSyncStatus();
   assert.equal(enabledStatus.enabled, true);
   assert.notEqual(enabledStatus.nextSync, null);
   delete process.env.PRICING_SYNC_ENABLED;

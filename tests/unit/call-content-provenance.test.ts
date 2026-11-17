@@ -1,36 +1,43 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetDbInstance } from "../../src/lib/db/core.ts";
 import { getCallLogById, saveCallLog } from "../../src/lib/usage/callLogs.ts";
 import { createStructuredSSECollector } from "../../open-sse/utils/streamPayloadCollector.ts";
 import { FORMATS } from "../../open-sse/translator/formats.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
 });
 
-function rowFor(id: string) {
-  return getDbInstance()
-    .prepare("SELECT has_content, usage_provenance FROM call_logs WHERE id = ?")
-    .get(id) as { has_content: number | null; usage_provenance: string | null };
+// has_content is a boolean column; the assertions below keep the 1 / 0 / null vocabulary.
+async function rowFor(id: string) {
+  const row = await getTestBackend().queryOne<{
+    has_content: boolean | null;
+    usage_provenance: string | null;
+  }>("SELECT has_content, usage_provenance FROM call_logs WHERE id = $1", [id]);
+  assert.ok(row, `call_logs row ${id} must exist`);
+  return {
+    has_content: row.has_content === null ? null : row.has_content ? 1 : 0,
+    usage_provenance: row.usage_provenance,
+  };
 }
 
-function cleanup(ids: string[]) {
-  const stmt = getDbInstance().prepare("DELETE FROM call_logs WHERE id = ?");
-  for (const id of ids) stmt.run(id);
+async function cleanup(ids: string[]) {
+  for (const id of ids) {
+    await getTestBackend().execute("DELETE FROM call_logs WHERE id = $1", [id]);
+  }
 }
 
-test("migration exposes nullable has_content and usage_provenance columns", () => {
-  const columns = getDbInstance().prepare("PRAGMA table_info(call_logs)").all() as {
-    name: string;
-    notnull: number;
-    dflt_value: unknown;
-  }[];
-  const byName = new Map(columns.map((c) => [c.name, c]));
+test("schema exposes nullable has_content and usage_provenance columns", async () => {
+  const columns = await getTestBackend().query<{ column_name: string; is_nullable: string }>(
+    "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+  );
+  const byName = new Map(columns.map((c) => [c.column_name, c]));
   assert.ok(byName.has("has_content"), "call_logs should have has_content column");
   assert.ok(byName.has("usage_provenance"), "call_logs should have usage_provenance column");
-  assert.equal(byName.get("has_content")?.notnull, 0);
-  assert.equal(byName.get("usage_provenance")?.notnull, 0);
+  assert.equal(byName.get("has_content")?.is_nullable, "YES");
+  assert.equal(byName.get("usage_provenance")?.is_nullable, "YES");
 });
 
 test("2xx with text and provider usage is content with reported provenance", async () => {
@@ -42,11 +49,11 @@ test("2xx with text and provider usage is content with reported provenance", asy
     clientResponse: { choices: [{ message: { content: "hello" } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.has_content, 1);
     assert.equal(row.usage_provenance, "reported");
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -59,11 +66,11 @@ test("2xx empty with provider usage is no content with reported provenance", asy
     clientResponse: { choices: [{ message: { content: null } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.has_content, 0);
     assert.equal(row.usage_provenance, "reported");
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -76,11 +83,11 @@ test("2xx with content but silent provider is content with absent provenance", a
     clientResponse: { choices: [{ message: { content: "hello" } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.has_content, 1);
     assert.equal(row.usage_provenance, "absent");
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -94,11 +101,11 @@ test("2xx with threaded usage estimate is content with estimated provenance", as
     clientResponse: { choices: [{ message: { content: "hello" } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.has_content, 1);
     assert.equal(row.usage_provenance, "estimated");
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -113,10 +120,10 @@ test("2xx with rebuilt estimated tokens keeps estimated provenance", async () =>
     clientResponse: { choices: [{ message: { content: "hello" } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.usage_provenance, "estimated");
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -129,9 +136,9 @@ test("2xx reasoning alone is no content", async () => {
     clientResponse: { choices: [{ message: { reasoning_content: "thinking" } }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -146,9 +153,9 @@ test("2xx tool calls alone count as content", async () => {
     },
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -162,9 +169,9 @@ test("non-text route leaves content unmeasured", async () => {
     clientResponse: { audio: "aGVsbG8=" },
   });
   try {
-    assert.equal(rowFor(id).has_content, null);
+    assert.equal((await rowFor(id)).has_content, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -177,11 +184,11 @@ test("failure leaves both columns null", async () => {
     clientResponse: { choices: [{ message: { content: "hello" } }] },
   });
   try {
-    const row = rowFor(id);
+    const row = await rowFor(id);
     assert.equal(row.has_content, null);
     assert.equal(row.usage_provenance, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -194,9 +201,9 @@ test("2xx Responses tool_call item alone counts as content", async () => {
     clientResponse: { output: [{ type: "function_call", name: "f", arguments: "{}" }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -209,9 +216,9 @@ test("2xx Claude tool_use block alone counts as content", async () => {
     clientResponse: { content: [{ type: "tool_use", id: "t1", name: "f", input: {} }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -224,9 +231,9 @@ test("2xx Responses blank text block alone is no content", async () => {
     clientResponse: { output: [{ type: "message", content: [{ type: "text", text: "   " }] }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -239,9 +246,9 @@ test("2xx Claude text block counts as content", async () => {
     clientResponse: { content: [{ type: "text", text: "hello" }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -254,9 +261,9 @@ test("2xx Claude blank text block alone is no content", async () => {
     clientResponse: { content: [{ type: "text", text: "   " }] },
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -285,9 +292,9 @@ test("streamed envelope with text summary counts as content", async () => {
     clientResponse,
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -318,9 +325,9 @@ test("streamed envelope with tool call summary counts as content", async () => {
     clientResponse,
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -339,9 +346,9 @@ test("streamed envelope with empty summary counts as no content", async () => {
     clientResponse: claudeCollector.build(claudeCollector.getSummary(), { includeEvents: false }),
   });
   try {
-    assert.equal(rowFor(claudeId).has_content, 0);
+    assert.equal((await rowFor(claudeId)).has_content, 0);
   } finally {
-    cleanup([claudeId]);
+    await cleanup([claudeId]);
   }
 
   const responsesId = "ccp-stream-empty-responses";
@@ -356,9 +363,9 @@ test("streamed envelope with empty summary counts as no content", async () => {
     },
   });
   try {
-    assert.equal(rowFor(responsesId).has_content, 0);
+    assert.equal((await rowFor(responsesId)).has_content, 0);
   } finally {
-    cleanup([responsesId]);
+    await cleanup([responsesId]);
   }
 
   const chatId = "ccp-stream-empty-chat";
@@ -370,9 +377,9 @@ test("streamed envelope with empty summary counts as no content", async () => {
     clientResponse: { _streamed: true, summary: { choices: [] } },
   });
   try {
-    assert.equal(rowFor(chatId).has_content, 0);
+    assert.equal((await rowFor(chatId)).has_content, 0);
   } finally {
-    cleanup([chatId]);
+    await cleanup([chatId]);
   }
 });
 
@@ -386,9 +393,9 @@ test("streamed envelope without summary stays unmeasured", async () => {
     clientResponse: { _streamed: true, _format: "sse-json", _eventCount: 0 },
   });
   try {
-    assert.equal(rowFor(id).has_content, null);
+    assert.equal((await rowFor(id)).has_content, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -406,9 +413,9 @@ test("streamed envelope with truncated text summary stays unmeasured", async () 
     },
   });
   try {
-    assert.equal(rowFor(id).has_content, null);
+    assert.equal((await rowFor(id)).has_content, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -430,9 +437,9 @@ test("streamed envelope with reasoning-only summary counts as no content", async
     clientResponse,
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -453,9 +460,9 @@ test("streamed envelope with media-only summary stays unmeasured", async () => {
     },
   });
   try {
-    assert.equal(rowFor(id).has_content, null);
+    assert.equal((await rowFor(id)).has_content, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -486,9 +493,9 @@ test("streamed envelope whose summary carries the streamed marker counts as cont
     clientResponse: collector.build(summary, { includeEvents: false }),
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -510,9 +517,9 @@ test("streamed envelope whose summary carries the streamed marker without visibl
     clientResponse: collector.build(summary, { includeEvents: false }),
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -526,9 +533,9 @@ test("streamed envelope with an unknown summary shape stays unmeasured", async (
     clientResponse: { _streamed: true, summary: { _streamed: true, unknown: "shape" } },
   });
   try {
-    assert.equal(rowFor(id).has_content, null);
+    assert.equal((await rowFor(id)).has_content, null);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -555,6 +562,6 @@ test("log detail exposes an empty reply apart from missing metering", async () =
     assert.equal(silent?.hasContent, 1);
     assert.equal(silent?.usageProvenance, "absent");
   } finally {
-    cleanup([emptyId, silentId]);
+    await cleanup([emptyId, silentId]);
   }
 });

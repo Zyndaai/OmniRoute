@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-chatgpt-w
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb, getTestBackend } = await import("../helpers/postgres.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerNodesDb = await import("../../src/lib/db/providers/nodes.ts");
@@ -30,10 +31,7 @@ function isRetiredError(error: unknown): boolean {
 }
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
+  await resetTestDb();
   modelAliasResolver.invalidateAliasCache();
 }
 
@@ -46,9 +44,9 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -64,6 +62,8 @@ test("retired legacy ChatGPT Web prefixes cannot shadow compatible nodes", async
     });
 
     await assert.rejects(() => getModelInfo(`${prefix}/gpt-5.5`), isRetiredError);
+    // provider_nodes_prefix_uq is case-insensitive: free the prefix for the next variant.
+    await providerNodesDb.deleteProviderNode(`openai-compatible-retired-chatgpt-web-${index}`);
   }
 
   const cleanRoom = await getModelInfo("chatgpt-web/gpt-5-5-thinking");
@@ -100,23 +100,20 @@ test("legacy alias writes return the durable ChatGPT Web tombstone", async () =>
   }
 });
 
-test("credential selection rejects the retired alias even if a writer bypasses migration triggers", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_insert;
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_update;
-  `);
+test("credential selection rejects the retired alias even if a writer bypasses the domain module", async () => {
+  const db = getTestBackend();
 
   for (const provider of ["cgpt-web"]) {
-    db.prepare(
+    await db.execute(
       "INSERT INTO provider_connections " +
         "(id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at) " +
-        "VALUES (?, ?, 'apikey', ?, ?, 1, 'active', datetime('now'), datetime('now'))"
-    ).run(
-      `${provider}-bypassed-trigger`,
-      provider,
-      `${provider} bypassed trigger`,
-      `sk-${provider}-bypassed-trigger`
+        "VALUES ($1, $2, 'apikey', $3, $4, true, 'active', now(), now())",
+      [
+        `${provider}-bypassed-trigger`,
+        provider,
+        `${provider} bypassed trigger`,
+        `sk-${provider}-bypassed-trigger`,
+      ]
     );
 
     const credentials = await auth.getProviderCredentials(provider);

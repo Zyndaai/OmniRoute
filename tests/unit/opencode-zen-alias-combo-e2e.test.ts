@@ -113,21 +113,21 @@ const REAL_OPENCODE_DATA = {
 before(async () => {
   // Seed the DB exactly the way the previous sync wrote it: under the
   // historical "opencode-zen" alias, NOT under "opencode".
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     "opencode-zen": REAL_OPENCODE_DATA,
   });
 });
 
 after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────
 
 describe("opencode-zen ↔ opencode alias fix (end-to-end)", () => {
-  it("getCanonicalModelMetadata({provider:'opencode', model:'big-pickle'}) returns full metadata", () => {
-    const md = registry.getCanonicalModelMetadata({
+  it("getCanonicalModelMetadata({provider:'opencode', model:'big-pickle'}) returns full metadata", async () => {
+    const md = await registry.getCanonicalModelMetadata({
       provider: "opencode",
       model: "big-pickle",
     });
@@ -144,7 +144,7 @@ describe("opencode-zen ↔ opencode alias fix (end-to-end)", () => {
     assert.equal(md?.metadata.source.syncedCapability, true);
   });
 
-  it("combo of 4 opencode/* targets computes context_length = min(known) = 200000", () => {
+  it("combo of 4 opencode/* targets computes context_length = min(known) = 200000", async () => {
     // Simulate the "Opencode FREE Omni" combo: 4 targets, all under
     // provider "opencode". The min of the 4 known contexts (200k, 400k,
     // 200k, 200k) is 200000 — NOT 128000, NOT null.
@@ -161,7 +161,7 @@ describe("opencode-zen ↔ opencode alias fix (end-to-end)", () => {
     //   3. min of known contextLength values
     const contexts: number[] = [];
     for (const target of targets) {
-      const md = registry.getCanonicalModelMetadata({
+      const md = await registry.getCanonicalModelMetadata({
         provider: target.providerId,
         model: target.modelId,
       });
@@ -180,14 +180,14 @@ describe("opencode-zen ↔ opencode alias fix (end-to-end)", () => {
     assert.equal(minContext, 200000, "min of 200k, 400k, 200k, 200k = 200k");
   });
 
-  it("direct lookup under 'opencode-zen' still works (regression)", () => {
-    const cap = modelsDevSync.getSyncedCapability("opencode-zen", "big-pickle");
+  it("direct lookup under 'opencode-zen' still works (regression)", async () => {
+    const cap = await modelsDevSync.getSyncedCapability("opencode-zen", "big-pickle");
     assert.ok(cap);
     assert.equal(cap?.limit_context, 200000);
   });
 
-  it("unknown model still returns null (regression)", () => {
-    const cap = modelsDevSync.getSyncedCapability("opencode", "nonexistent-model");
+  it("unknown model still returns null (regression)", async () => {
+    const cap = await modelsDevSync.getSyncedCapability("opencode", "nonexistent-model");
     assert.equal(cap, null);
   });
 });

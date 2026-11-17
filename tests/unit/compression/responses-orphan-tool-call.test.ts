@@ -97,7 +97,7 @@ function buildToolTurnBody(
   return { input };
 }
 
-test("#8946: compaction drops orphan custom_tool_call / local_shell_call / apply_patch_call with vanished outputs", () => {
+test("#8946: compaction drops orphan custom_tool_call / local_shell_call / apply_patch_call with vanished outputs", async () => {
   // Build many turns: user messages carry enough text to survive Layer-1
   // trim_tools (which only trims role:"tool" content) so the aggregate
   // token count still exceeds the compact target after trimming, forcing
@@ -113,7 +113,7 @@ test("#8946: compaction drops orphan custom_tool_call / local_shell_call / apply
   const before = estimateTokens(adapter.body.messages as Record<string, unknown>[]);
   const target = Math.max(5_000, Math.floor(before * 0.5));
 
-  const result = compressContext(adapter.body as Record<string, unknown>, {
+  const result = await compressContext(adapter.body as Record<string, unknown>, {
     provider: "codex",
     model: "gpt-5.6-terra",
     maxTokens: target,

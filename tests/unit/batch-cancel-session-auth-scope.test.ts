@@ -44,15 +44,19 @@ const { createFile } = await import("../../src/lib/db/files.ts");
 const { createBatch } = await import("../../src/lib/db/batches.ts");
 const { canAccessOwnedRecord } = await import("../../src/app/api/v1/_helpers/apiKeyScope.ts");
 
-function seedBatch(apiKeyId: string | null, status: "validating" | "in_progress", tag: string) {
-  const file = createFile({
+async function seedBatch(
+  apiKeyId: string | null,
+  status: "validating" | "in_progress",
+  tag: string
+) {
+  const file = await createFile({
     bytes: 10,
     filename: `cancel-scope-${tag}.jsonl`,
     purpose: "batch",
     content: Buffer.from("{}"),
     apiKeyId,
   });
-  return createBatch({
+  return await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -61,14 +65,14 @@ function seedBatch(apiKeyId: string | null, status: "validating" | "in_progress"
   });
 }
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("cancel route ownership scoping", () => {
-  it("session auth (dashboard) may cancel a batch owned by an API key", () => {
-    const batch = seedBatch("env-key", "in_progress", "a1");
+  it("session auth (dashboard) may cancel a batch owned by an API key", async () => {
+    const batch = await seedBatch("env-key", "in_progress", "a1");
 
     // Exactly the check cancel/route.ts now runs: `!canAccessOwnedRecord(scope, batch.apiKeyId)`
     const allowed = canAccessOwnedRecord({ isSessionAuth: true, apiKeyId: null }, batch.apiKeyId);
@@ -76,8 +80,8 @@ describe("cancel route ownership scoping", () => {
     assert.equal(allowed, true, "the operator's dashboard must be able to cancel any batch");
   });
 
-  it("an unrelated API key may not cancel someone else's batch", () => {
-    const batch = seedBatch("env-key", "validating", "a2");
+  it("an unrelated API key may not cancel someone else's batch", async () => {
+    const batch = await seedBatch("env-key", "validating", "a2");
 
     const allowed = canAccessOwnedRecord(
       { isSessionAuth: false, apiKeyId: "other-key" },
@@ -87,8 +91,8 @@ describe("cancel route ownership scoping", () => {
     assert.equal(allowed, false, "a foreign API key must not be able to cancel this batch");
   });
 
-  it("the owning API key may cancel its own batch", () => {
-    const batch = seedBatch("key-owns-this", "validating", "a3");
+  it("the owning API key may cancel its own batch", async () => {
+    const batch = await seedBatch("key-owns-this", "validating", "a3");
 
     const allowed = canAccessOwnedRecord(
       { isSessionAuth: false, apiKeyId: "key-owns-this" },
@@ -98,8 +102,8 @@ describe("cancel route ownership scoping", () => {
     assert.equal(allowed, true, "the owning API key must be able to cancel its own batch");
   });
 
-  it("the original buggy inline check would have rejected the session-auth caller", () => {
-    const batch = seedBatch("env-key", "in_progress", "a4");
+  it("the original buggy inline check would have rejected the session-auth caller", async () => {
+    const batch = await seedBatch("env-key", "in_progress", "a4");
 
     // This is the exact predicate cancel/route.ts used to run before the fix.
     const apiKeyId: string | null = null; // session auth

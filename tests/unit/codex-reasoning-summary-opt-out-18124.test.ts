@@ -29,8 +29,8 @@ function chatBody(effort = "medium") {
   };
 }
 
-function translateChatToResponses(model: string, provider: string) {
-  return translateRequest(
+async function translateChatToResponses(model: string, provider: string) {
+  return (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     model,
@@ -38,24 +38,24 @@ function translateChatToResponses(model: string, provider: string) {
     true,
     null,
     provider
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
 }
 
-function chatToCodexWire(model: string): WireBody {
-  const translated = translateChatToResponses(model, "codex");
+async function chatToCodexWire(model: string): Promise<WireBody> {
+  const translated = await translateChatToResponses(model, "codex");
   return new CodexExecutor().transformRequest(model, translated, true, CTX) as WireBody;
 }
 
-test("#18124 Chat-translated gpt-6.1-sol reaches the Codex wire with effort only", () => {
-  const wire = chatToCodexWire("gpt-6.1-sol");
+test("#18124 Chat-translated gpt-6.1-sol reaches the Codex wire with effort only", async () => {
+  const wire = await chatToCodexWire("gpt-6.1-sol");
   assert.equal(wire.reasoning?.effort, "medium");
   assert.equal("summary" in (wire.reasoning ?? {}), false, "executor must not re-add summary");
   assert.equal(wire.include, undefined, "executor must not re-add the encrypted_content include");
   assert.equal(MARKER in wire, false, "internal marker must never reach the wire");
 });
 
-test("#18124 Chat-translated models outside the list keep the defaulted summary and include", () => {
-  const wire = chatToCodexWire("gpt-5.5");
+test("#18124 Chat-translated models outside the list keep the defaulted summary and include", async () => {
+  const wire = await chatToCodexWire("gpt-5.5");
   assert.equal(wire.reasoning?.summary, "auto");
   assert.deepEqual(wire.include, ["reasoning.encrypted_content"]);
   assert.equal(MARKER in wire, false);
@@ -77,15 +77,15 @@ test("#18124 native Responses gpt-6.1-sol (no translator marker) keeps summary a
   assert.deepEqual(wire.include, ["reasoning.encrypted_content"]);
 });
 
-test("#18124 the opt-out marker is dropped for non-Codex Responses targets", () => {
-  const translated = translateChatToResponses("gpt-6.1-sol", "openai");
+test("#18124 the opt-out marker is dropped for non-Codex Responses targets", async () => {
+  const translated = await translateChatToResponses("gpt-6.1-sol", "openai");
   assert.equal(MARKER in translated, false, "marker must not leak to other providers' upstreams");
   assert.equal(translated.include, undefined);
   assert.equal("summary" in ((translated.reasoning as Record<string, unknown>) ?? {}), false);
 });
 
-test("#18124 an explicit summary from a Chat client still reaches the Codex wire", () => {
-  const translated = translateRequest(
+test("#18124 an explicit summary from a Chat client still reaches the Codex wire", async () => {
+  const translated = (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-6.1-sol",
@@ -96,7 +96,7 @@ test("#18124 an explicit summary from a Chat client still reaches the Codex wire
     true,
     null,
     "codex"
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
   const wire = new CodexExecutor().transformRequest(
     "gpt-6.1-sol",
     translated,

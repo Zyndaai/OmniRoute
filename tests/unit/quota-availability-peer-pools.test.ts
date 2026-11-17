@@ -29,9 +29,9 @@ const q = (remainingPercentage: number, hours = 1) => ({
 });
 const policy = { enabled: true, defaultThresholdPercent: 2, providerWindowDefaults: {} };
 registerQuotaFetcher("antigravity", fetchGenericQuota);
-function view(usage: NonNullable<HealthData["raw"]>, id = "peer-pools") {
+async function view(usage: NonNullable<HealthData["raw"]>, id = "peer-pools") {
   const connection = { id, provider: "antigravity", isActive: true };
-  const verdict = buildConnectionQuotaAvailability(connection, usage, policy);
+  const verdict = await buildConnectionQuotaAvailability(connection, usage, policy);
   const account = buildHealthAccount(connection, { raw: usage }, {}, now, {
     availability: verdict,
     availabilityObservedAt: now,
@@ -39,7 +39,7 @@ function view(usage: NonNullable<HealthData["raw"]>, id = "peer-pools") {
   return { verdict, account, display: displayAccount(account, now) };
 }
 
-test("a healthy exact model keeps its peer pool usable in either model order", () => {
+test("a healthy exact model keeps its peer pool usable in either model order", async () => {
   const connection = { id: "exact-model-alternatives", provider: "antigravity", isActive: true };
   const usage = {
     fetchedAt: at(0),
@@ -76,8 +76,8 @@ test("a healthy exact model keeps its peer pool usable in either model order", (
       ).proceed,
       true
     );
-    const forward = view(usage, connection.id);
-    const reversed = view(
+    const forward = await view(usage, connection.id);
+    const reversed = await view(
       {
         ...usage,
         quotaGroups: [{ id: "gemini", models: [...usage.quotaGroups[0].models].reverse() }],
@@ -98,7 +98,7 @@ test("a healthy exact model keeps its peer pool usable in either model order", (
   }
 });
 
-test("a pool with all exact models exhausted is blocked in either model order", () => {
+test("a pool with all exact models exhausted is blocked in either model order", async () => {
   const usage = {
     fetchedAt: at(0),
     quotas: {
@@ -109,8 +109,8 @@ test("a pool with all exact models exhausted is blocked in either model order", 
     },
     quotaGroups: [{ id: "gemini", models: ["gemini-3-pro-high", "gemini-3-flash"] }],
   };
-  const forward = view(usage);
-  const reversed = view({
+  const forward = await view(usage);
+  const reversed = await view({
     ...usage,
     quotaGroups: [{ id: "gemini", models: [...usage.quotaGroups[0].models].reverse() }],
   });
@@ -120,7 +120,7 @@ test("a pool with all exact models exhausted is blocked in either model order", 
   assert.equal(forward.display.recoverAt, at(1));
 });
 
-test("account recovery uses the first peer pool while pool cards keep their own deadlines", () => {
+test("account recovery uses the first peer pool while pool cards keep their own deadlines", async () => {
   const usage = {
     fetchedAt: at(0),
     quotas: {
@@ -134,7 +134,7 @@ test("account recovery uses the first peer pool while pool cards keep their own 
       { id: "claude_gpt", models: ["claude-sonnet-4-5"] },
     ],
   };
-  const { verdict, account, display } = view(usage);
+  const { verdict, account, display } = await view(usage);
   assert.equal(verdict.account.usable, false);
   assert.equal(display.recoverAt, at(1));
   assert.equal(display.kind, "cd5");
@@ -142,13 +142,13 @@ test("account recovery uses the first peer pool while pool cards keep their own 
   assert.equal(displayPool(account, "gemini", now).recoverAt, at(1));
   assert.equal(displayPool(account, "claude_gpt", now).kind, "cdw");
   assert.equal(displayPool(account, "claude_gpt", now).recoverAt, at(144));
-  const reversed = view({ ...usage, quotaGroups: [...usage.quotaGroups].reverse() });
+  const reversed = await view({ ...usage, quotaGroups: [...usage.quotaGroups].reverse() });
   assert.equal(reversed.display.recoverAt, display.recoverAt);
   assert.equal(reversed.display.kind, display.kind);
 });
 
-test("each peer pool must clear all of its blocking windows before it can recover", () => {
-  const { account, display } = view({
+test("each peer pool must clear all of its blocking windows before it can recover", async () => {
+  const { account, display } = await view({
     fetchedAt: at(0),
     quotas: {
       gemini_session: q(0),
@@ -166,8 +166,8 @@ test("each peer pool must clear all of its blocking windows before it can recove
   assert.equal(displayPool(account, "gemini", now).recoverAt, at(144));
 });
 
-test("an unknown peer deadline does not hide another pool's known recovery", () => {
-  const { account, display } = view({
+test("an unknown peer deadline does not hide another pool's known recovery", async () => {
+  const { account, display } = await view({
     fetchedAt: at(0),
     quotas: {
       gemini_session: q(0),

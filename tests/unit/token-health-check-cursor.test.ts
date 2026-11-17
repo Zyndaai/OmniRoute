@@ -34,9 +34,11 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const tokenHealthCheck = await import("../../src/lib/tokenHealthCheck.ts");
 const tokenHealthCheckCursor = await import("../../src/lib/tokenHealthCheckCursor.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -59,7 +61,7 @@ async function resetStorage() {
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -140,13 +142,15 @@ async function withCursorEnv<T>(fn: (env: CursorEnv) => Promise<T>): Promise<T> 
     tmpHome,
     logPath,
     async writeIdeToken(accessToken, machineId) {
-      const { openDatabaseAsync } = await import("../../src/lib/db/adapters/driverFactory.ts");
+      // Cursor's own state.vscdb is a foreign SQLite file read by tokenExtractor.ts through
+      // better-sqlite3 directly, so the fixture writer uses the same driver (not OmniRoute's DB).
+      const { default: Database } = await import("better-sqlite3");
       const dbPath = path.join(
         tmpHome,
         "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
       );
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      const seed = await openDatabaseAsync(dbPath);
+      const seed = new Database(dbPath);
       seed.exec("CREATE TABLE itemTable (key TEXT PRIMARY KEY, value TEXT)");
       seed
         .prepare("INSERT INTO itemTable (key, value) VALUES (?, ?)")

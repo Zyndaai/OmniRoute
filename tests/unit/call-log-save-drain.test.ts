@@ -4,10 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { useDecollidedMigrationsDir } from "./helpers/decollidedMigrationsDir.ts";
 import { CALL_LOG_SETTLE_TIMEOUT_MS } from "../helpers/callLogSettle.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
-useDecollidedMigrationsDir();
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-call-log-drain-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
@@ -17,7 +16,7 @@ const artifactWriter = await import("../../src/lib/usage/callLogArtifactWriter.t
 
 test.after(async () => {
   await artifactWriter.closeCallLogArtifactWriter();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -38,18 +37,16 @@ test("call-log drain waits for artifact metadata and summary commit", async () =
   // only fails a genuinely stuck drain (see CALL_LOG_SETTLE_TIMEOUT_MS).
   assert.equal(await callLogs.waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
 
-  const row = core
-    .getDbInstance()
-    .prepare(
-      `SELECT detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256
-       FROM call_logs WHERE id = ?`
-    )
-    .get(id) as {
+  const row = (await getTestBackend().queryOne<{
     detail_state: string;
     artifact_relpath: string | null;
     artifact_size_bytes: number | null;
     artifact_sha256: string | null;
-  };
+  }>(
+    `SELECT detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256
+       FROM call_logs WHERE id = $1`,
+    [id]
+  ))!;
 
   assert.equal(row.detail_state, "ready");
   assert.ok(row.artifact_relpath);
@@ -72,20 +69,23 @@ test("forced close settles tracked saves before rejecting late saves", async () 
   await callLogs.closeCallLogSaves(0);
   await pending;
 
-  const row = core
-    .getDbInstance()
-    .prepare(
-      `SELECT detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256
-       FROM call_logs WHERE id = ?`
-    )
-    .get(pendingId) as {
+  const row = (await getTestBackend().queryOne<{
     detail_state: string;
     artifact_relpath: string | null;
     artifact_size_bytes: number | null;
     artifact_sha256: string | null;
-  };
+  }>(
+    `SELECT detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256
+       FROM call_logs WHERE id = $1`,
+    [pendingId]
+  ))!;
   assert.equal(row.detail_state, "missing");
-  assert.equal(row.artifact_relpath, null);
+  // artifact_relpath is a pure function of (timestamp, id) and is stored at INSERT
+  // (docs/architecture/postgres-schema-mapping.md); a failed write leaves it set but
+  // never publishes a file, size or checksum.
+  if (row.artifact_relpath) {
+    assert.equal(fs.existsSync(path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath)), false);
+  }
   assert.equal(row.artifact_size_bytes, null);
   assert.equal(row.artifact_sha256, null);
 
@@ -96,9 +96,9 @@ test("forced close settles tracked saves before rejecting late saves", async () 
     model: "test-model",
     provider: "test-provider",
   });
-  const lateCount = core
-    .getDbInstance()
-    .prepare("SELECT COUNT(*) AS count FROM call_logs WHERE id = ?")
-    .get("drain-late-save") as { count: number };
-  assert.equal(lateCount.count, 0);
+  const lateCount = await getTestBackend().queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM call_logs WHERE id = $1",
+    ["drain-late-save"]
+  );
+  assert.equal(Number(lateCount?.count), 0);
 });

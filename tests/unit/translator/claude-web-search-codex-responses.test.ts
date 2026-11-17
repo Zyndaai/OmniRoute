@@ -39,7 +39,7 @@ function claudeWebSearchBody(extraTools: unknown[] = []) {
 const { extractResponsesWebSearchEvidence } =
   await import("../../../open-sse/translator/response/openai-responses/pureHelpers.ts");
 
-test("bypass predicate: true for codex + CLAUDE -> OPENAI_RESPONSES with the sole server tool", () => {
+test("bypass predicate: true for codex + CLAUDE -> OPENAI_RESPONSES with the sole server tool", async () => {
   assert.equal(
     supportsNativeWebSearchFallbackBypass({
       provider: "codex",
@@ -52,7 +52,7 @@ test("bypass predicate: true for codex + CLAUDE -> OPENAI_RESPONSES with the sol
   );
 });
 
-test("bypass predicate: false for codex + CLAUDE -> OPENAI_RESPONSES when the server tool is NOT the sole tool", () => {
+test("bypass predicate: false for codex + CLAUDE -> OPENAI_RESPONSES when the server tool is NOT the sole tool", async () => {
   assert.equal(
     supportsNativeWebSearchFallbackBypass({
       provider: "codex",
@@ -65,7 +65,7 @@ test("bypass predicate: false for codex + CLAUDE -> OPENAI_RESPONSES when the se
   );
 });
 
-test("bypass predicate: false for other Responses providers (chatgpt-web-codex, codex-app-server, openai)", () => {
+test("bypass predicate: false for other Responses providers (chatgpt-web-codex, codex-app-server, openai)", async () => {
   for (const provider of ["chatgpt-web-codex", "codex-app-server", "openai", null, undefined]) {
     assert.equal(
       supportsNativeWebSearchFallbackBypass({
@@ -81,7 +81,7 @@ test("bypass predicate: false for other Responses providers (chatgpt-web-codex, 
   }
 });
 
-test("bypass predicate: false when the source is not Claude (OpenAI-format client keeps the fallback)", () => {
+test("bypass predicate: false when the source is not Claude (OpenAI-format client keeps the fallback)", async () => {
   assert.equal(
     supportsNativeWebSearchFallbackBypass({
       provider: "codex",
@@ -96,7 +96,7 @@ test("bypass predicate: false when the source is not Claude (OpenAI-format clien
 
 // ── 2. Request: end-to-end body + translated upstream tools ───────────────
 
-test("codex + sole server tool: body left native and upstream tools carry {type:web_search}", () => {
+test("codex + sole server tool: body left native and upstream tools carry {type:web_search}", async () => {
   const input = claudeWebSearchBody();
   const { body, fallback } = prepareWebSearchFallbackBody(input, {
     provider: "codex",
@@ -109,7 +109,7 @@ test("codex + sole server tool: body left native and upstream tools carry {type:
   assert.equal(fallback.convertedToolCount, 0);
   assert.deepEqual(body, input, "native server tool must be forwarded untouched");
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",
@@ -123,7 +123,7 @@ test("codex + sole server tool: body left native and upstream tools carry {type:
 
 // ── 3. Mixed requests keep the pre-existing behavior ──────────────────────
 
-test("mixed tools on codex: existing fallback conversion is unchanged", () => {
+test("mixed tools on codex: existing fallback conversion is unchanged", async () => {
   const custom = {
     name: "get_weather",
     description: "weather",
@@ -157,7 +157,7 @@ test("mixed tools on codex: existing fallback conversion is unchanged", () => {
 
   // End-to-end: after the CLAUDE -> OPENAI_RESPONSES translation the injected
   // tool reaches the upstream as the flat Responses function tool.
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.5",
@@ -186,7 +186,7 @@ test("mixed tools on codex: existing fallback conversion is unchanged", () => {
 
 // ── 4. interceptSearchOverride still wins ─────────────────────────────────
 
-test("interceptSearchOverride=true forces the fallback even for the sole-tool codex shape", () => {
+test("interceptSearchOverride=true forces the fallback even for the sole-tool codex shape", async () => {
   assert.equal(
     supportsNativeWebSearchFallbackBypass({
       provider: "codex",
@@ -212,7 +212,7 @@ test("interceptSearchOverride=true forces the fallback even for the sole-tool co
 
 // ── Response: the pure per-chunk extractor ────────────────────────────────
 
-test("extractor: output_item.added web_search_call yields the call with no items yet", () => {
+test("extractor: output_item.added web_search_call yields the call with no items yet", async () => {
   const evidence = extractResponsesWebSearchEvidence({
     type: "response.output_item.added",
     item: { type: "web_search_call", id: "ws_1", status: "in_progress" },
@@ -221,7 +221,7 @@ test("extractor: output_item.added web_search_call yields the call with no items
   assert.deepEqual(evidence.citations, []);
 });
 
-test("extractor: output_item.done web_search_call yields query + action.sources", () => {
+test("extractor: output_item.done web_search_call yields query + action.sources", async () => {
   const evidence = extractResponsesWebSearchEvidence({
     type: "response.output_item.done",
     item: {
@@ -238,7 +238,7 @@ test("extractor: output_item.done web_search_call yields query + action.sources"
   });
 });
 
-test("extractor: an incomplete web_search_call is not evidence", () => {
+test("extractor: an incomplete web_search_call is not evidence", async () => {
   const evidence = extractResponsesWebSearchEvidence({
     type: "response.output_item.done",
     item: { type: "web_search_call", id: "ws_1", status: "in_progress" },
@@ -249,7 +249,7 @@ test("extractor: an incomplete web_search_call is not evidence", () => {
   assert.equal(evidence.revokeCallId, "ws_1");
 });
 
-test("extractor: annotation.added yields url_citation hits and ignores other annotations", () => {
+test("extractor: annotation.added yields url_citation hits and ignores other annotations", async () => {
   assert.deepEqual(
     extractResponsesWebSearchEvidence({
       type: "response.output_text.annotation.added",
@@ -266,7 +266,7 @@ test("extractor: annotation.added yields url_citation hits and ignores other ann
   );
 });
 
-test("extractor: response.completed snapshot fallback reads output[] calls + citations", () => {
+test("extractor: response.completed snapshot fallback reads output[] calls + citations", async () => {
   const evidence = extractResponsesWebSearchEvidence({
     type: "response.completed",
     response: {
@@ -294,7 +294,7 @@ test("extractor: response.completed snapshot fallback reads output[] calls + cit
   assert.deepEqual(evidence.citations, [{ url: "https://c/2" }]);
 });
 
-test("extractor: unrelated events yield an empty result", () => {
+test("extractor: unrelated events yield an empty result", async () => {
   assert.deepEqual(
     extractResponsesWebSearchEvidence({ type: "response.output_text.delta", delta: "x" }),
     {
@@ -412,7 +412,7 @@ function blockIndexes(events: Array<Record<string, unknown>>) {
 
 // ── 5. Response: web_search_call + text + url_citation ────────────────────
 
-test("responses web_search_call + url_citation become server_tool_use then web_search_tool_result", () => {
+test("responses web_search_call + url_citation become server_tool_use then web_search_tool_result", async () => {
   const events = feed(
     responsesStream({
       call: webSearchCall("claude code websearch", [{ url: "https://a.example/1", title: "A" }]),
@@ -477,7 +477,7 @@ test("responses web_search_call + url_citation become server_tool_use then web_s
 
 // ── 6. Dedupe + title fallback + citations-only + no results ──────────────
 
-test("results dedupe by url and fall back to the url as title", () => {
+test("results dedupe by url and fall back to the url as title", async () => {
   const events = feed(
     responsesStream({
       call: webSearchCall("q", [
@@ -514,7 +514,7 @@ test("results dedupe by url and fall back to the url as title", () => {
   ]);
 });
 
-test("web_search_call without sources falls back to the citations, deduplicated", () => {
+test("web_search_call without sources falls back to the citations, deduplicated", async () => {
   const events = feed(
     responsesStream({
       call: webSearchCall("q"),
@@ -551,7 +551,7 @@ test("web_search_call without sources falls back to the citations, deduplicated"
 // Event sequence captured from a real Codex (gpt-6-luna) web_search stream, ids
 // replaced: the done call carries `action: { type: "search", query, queries }`
 // with NO `sources`, so the hits arrive only as url_citation annotations.
-test("captured Codex stream: citation-only web_search_call becomes the Claude block pair", () => {
+test("captured Codex stream: citation-only web_search_call becomes the Claude block pair", async () => {
   const url = "https://nodejs.org/en/blog/release?utm_source=openai";
   const query = "site:nodejs.org/en/blog/release latest Node.js release stable current LTS";
   const citation = { type: "url_citation", start_index: 46, end_index: 114, title: "Node.js", url };
@@ -636,7 +636,7 @@ test("captured Codex stream: citation-only web_search_call becomes the Claude bl
   ]);
 });
 
-test("web_search_call with no hits at all still emits the pair with an empty content list", () => {
+test("web_search_call with no hits at all still emits the pair with an empty content list", async () => {
   const events = feed(responsesStream({ call: webSearchCall("q") }));
   const resultStart = events.find(
     (event) =>
@@ -649,7 +649,7 @@ test("web_search_call with no hits at all still emits the pair with an empty con
 
 // ── 7. Regression guards ──────────────────────────────────────────────────
 
-test("regression: a Responses stream with no web_search_call produces the base event sequence", () => {
+test("regression: a Responses stream with no web_search_call produces the base event sequence", async () => {
   const events = feed(responsesStream({ text: "just text" }));
   assert.deepEqual(
     events.map((event) => event.type),
@@ -672,7 +672,7 @@ test("regression: a Responses stream with no web_search_call produces the base e
   );
 });
 
-test("regression: an OpenAI Chat client stream WITH web_search_call is unchanged", () => {
+test("regression: an OpenAI Chat client stream WITH web_search_call is unchanged", async () => {
   const state = initState(FORMATS.OPENAI_RESPONSES);
   const events = responsesStream({
     call: webSearchCall("q", [{ url: "https://a.example/1", title: "A" }]),
@@ -703,7 +703,7 @@ test("regression: an OpenAI Chat client stream WITH web_search_call is unchanged
 
 // ── 8. A failed web search must not produce a search block pair ───────────
 
-test("a web_search_call that failed (done status != completed) emits no search block pair", () => {
+test("a web_search_call that failed (done status != completed) emits no search block pair", async () => {
   const events = feed(
     responsesStream({
       // `output_item.added` announces ws_1, then the `done` reports it failed:

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// The MCP server (open-sse/mcp-server/server.ts) registers the memory, skill,
-// and compression tool collections with:
+// The MCP server (open-sse/mcp-server/server.ts) registers the skill, compression
+// and pool tool collections with:
 //
 //   Object.values(<collection>).forEach((toolDef) => {
 //     server.registerTool(toolDef.name, { description, inputSchema }, ...);
@@ -19,7 +19,6 @@ import assert from "node:assert/strict";
 // runtime.
 
 // Dynamic imports for ESM + tsx compatibility (mirrors agentSkillTools-mcp.test.ts)
-const { memoryTools } = await import("../../open-sse/mcp-server/tools/memoryTools.ts");
 const { skillTools } = await import("../../open-sse/mcp-server/tools/skillTools.ts");
 const { compressionTools } = await import("../../open-sse/mcp-server/tools/compressionTools.ts");
 const { poolTools } = await import("../../open-sse/mcp-server/tools/poolTools.ts");
@@ -33,7 +32,6 @@ type McpToolDef = {
 };
 
 const COLLECTIONS: Record<string, Record<string, McpToolDef>> = {
-  memoryTools: memoryTools as unknown as Record<string, McpToolDef>,
   skillTools: skillTools as unknown as Record<string, McpToolDef>,
   compressionTools: compressionTools as unknown as Record<string, McpToolDef>,
   poolTools: poolTools as unknown as Record<string, McpToolDef>,

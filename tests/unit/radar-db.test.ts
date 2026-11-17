@@ -2,7 +2,7 @@
  * tests/unit/radar-db.test.ts
  *
  * TDD regression guard for the Radar client local DB module:
- * - radar_feed_cache: single-row signed feed cache
+ * - radar_cache (kind = 'feed'): single-row signed feed cache
  * - radar_settings: opt-in + encrypted supporter key
  *
  * Covers: empty state, round-trip, upsert replacement, encryption at rest,
@@ -13,35 +13,19 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-// Isolate DB state in a temp directory
+// Isolate the data directory (the database itself is isolated per process by isolatePostgres.ts)
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-radar-db-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 // Enable encryption so we can verify at-rest encryption of supporter key
 process.env.STORAGE_ENCRYPTION_KEY = "test-encryption-key-for-radar-db-tests-32b!";
 
-const core = await import("../../src/lib/db/core.ts");
 const radar = await import("../../src/lib/db/radar.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
+  await resetTestDb();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
@@ -50,23 +34,20 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.STORAGE_ENCRYPTION_KEY;
 });
 
 // ---------------------------------------------------------------------------
-// radar_feed_cache
+// radar_cache (kind = 'feed')
 // ---------------------------------------------------------------------------
 
-test("getRadarCache returns null when no cache exists", () => {
-  const db = core.getDbInstance();
-  const result = radar.getRadarCache();
+test("getRadarCache returns null when no cache exists", async () => {
+  const result = await radar.getRadarCache();
   assert.equal(result, null, "empty cache must return null");
 });
 
-test("setRadarCache then getRadarCache round-trips exactly", () => {
-  const db = core.getDbInstance();
+test("setRadarCache then getRadarCache round-trips exactly", async () => {
   const feed = {
     version: "2026-08-03T00:00:00Z",
     tier: "community",
@@ -74,8 +55,8 @@ test("setRadarCache then getRadarCache round-trips exactly", () => {
     signature: "ed25519:abc123def456",
   };
 
-  radar.setRadarCache(feed);
-  const result = radar.getRadarCache();
+  await radar.setRadarCache(feed);
+  const result = await radar.getRadarCache();
 
   assert.ok(result, "cache must not be null after set");
   assert.equal(result.version, feed.version, "version must round-trip");
@@ -85,39 +66,40 @@ test("setRadarCache then getRadarCache round-trips exactly", () => {
   assert.ok(result.fetchedAt, "fetchedAt must be set");
 });
 
-test("second setRadarCache REPLACES the row (still single row)", () => {
-  const db = core.getDbInstance();
+test("second setRadarCache REPLACES the row (still single row)", async () => {
+  const backend = getTestBackend();
 
-  radar.setRadarCache({
+  await radar.setRadarCache({
     version: "v1",
     tier: "community",
     payload: '{"old":true}',
     signature: "sig-old",
   });
 
-  radar.setRadarCache({
+  await radar.setRadarCache({
     version: "v2",
     tier: "live",
     payload: '{"new":true}',
     signature: "sig-new",
   });
 
-  const result = radar.getRadarCache();
+  const result = await radar.getRadarCache();
   assert.ok(result);
   assert.equal(result.version, "v2", "must have the second version");
   assert.equal(result.tier, "live", "must have the second tier");
   assert.equal(result.payload, '{"new":true}', "must have the second payload");
 
-  // Verify only one row exists
-  const count = db.prepare("SELECT COUNT(*) AS c FROM radar_feed_cache").get() as { c: number };
-  assert.equal(count.c, 1, "must have exactly one row");
+  // Verify only one feed row exists
+  const count = await backend.queryOne<{ c: number }>(
+    "SELECT COUNT(*)::int AS c FROM radar_cache WHERE kind = 'feed'"
+  );
+  assert.equal(count?.c, 1, "must have exactly one feed row");
 });
 
-test("setRadarCache uses fetchedAt when provided", () => {
-  const db = core.getDbInstance();
+test("setRadarCache uses fetchedAt when provided", async () => {
   const fixed = "2026-08-03T12:00:00.000Z";
 
-  radar.setRadarCache({
+  await radar.setRadarCache({
     version: "v1",
     tier: "community",
     payload: "{}",
@@ -125,52 +107,50 @@ test("setRadarCache uses fetchedAt when provided", () => {
     fetchedAt: fixed,
   });
 
-  const result = radar.getRadarCache();
+  const result = await radar.getRadarCache();
   assert.ok(result);
-  assert.equal(result.fetchedAt, fixed, "must use the provided fetchedAt");
+  assert.equal(
+    new Date(result.fetchedAt).getTime(),
+    Date.parse(fixed),
+    "must use the provided fetchedAt"
+  );
 });
 
 // ---------------------------------------------------------------------------
 // radar_settings
 // ---------------------------------------------------------------------------
 
-test("getRadarSettings defaults: optIn false, key null", () => {
-  const db = core.getDbInstance();
-  const settings = radar.getRadarSettings();
+test("getRadarSettings defaults: optIn false, key null", async () => {
+  const settings = await radar.getRadarSettings();
 
   assert.equal(settings.optIn, false, "default optIn must be false");
   assert.equal(settings.supporterKey, null, "default supporterKey must be null");
   assert.ok(settings.updatedAt, "updatedAt must be set on first read");
 });
 
-test("setRadarOptIn(true) persists", () => {
-  const db = core.getDbInstance();
-
-  radar.setRadarOptIn(true);
-  const settings = radar.getRadarSettings();
+test("setRadarOptIn(true) persists", async () => {
+  await radar.setRadarOptIn(true);
+  const settings = await radar.getRadarSettings();
   assert.equal(settings.optIn, true, "optIn must be true after setRadarOptIn(true)");
 
-  radar.setRadarOptIn(false);
-  const settings2 = radar.getRadarSettings();
+  await radar.setRadarOptIn(false);
+  const settings2 = await radar.getRadarSettings();
   assert.equal(settings2.optIn, false, "optIn must be false after setRadarOptIn(false)");
 });
 
-test("setRadarKey encrypts at rest and getRadarSettings decrypts", () => {
-  const db = core.getDbInstance();
+test("setRadarKey encrypts at rest and getRadarSettings decrypts", async () => {
+  const backend = getTestBackend();
   const clearKey = "omr_" + "a".repeat(40);
 
-  radar.setRadarKey(clearKey);
-  const settings = radar.getRadarSettings();
+  await radar.setRadarKey(clearKey);
+  const settings = await radar.getRadarSettings();
 
   assert.equal(settings.supporterKey, clearKey, "getRadarSettings must return the clear key");
 
   // Direct DB query to prove encryption at rest
-  interface SettingsRow {
-    supporter_key_encrypted: string | null;
-  }
-  const row = db
-    .prepare("SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1")
-    .get() as SettingsRow;
+  const row = await backend.queryOne<{ supporter_key_encrypted: string | null }>(
+    "SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1"
+  );
   assert.ok(row, "radar_settings row must exist");
   assert.ok(
     row.supporter_key_encrypted !== clearKey,
@@ -182,62 +162,63 @@ test("setRadarKey encrypts at rest and getRadarSettings decrypts", () => {
   );
 });
 
-test("setRadarKey(null) clears the key", () => {
-  const db = core.getDbInstance();
+test("setRadarKey(null) clears the key", async () => {
+  const backend = getTestBackend();
 
-  radar.setRadarKey("omr_" + "b".repeat(40));
-  assert.ok(radar.getRadarSettings().supporterKey, "key must be set");
+  await radar.setRadarKey("omr_" + "b".repeat(40));
+  assert.ok((await radar.getRadarSettings()).supporterKey, "key must be set");
 
-  radar.setRadarKey(null);
-  const settings = radar.getRadarSettings();
+  await radar.setRadarKey(null);
+  const settings = await radar.getRadarSettings();
   assert.equal(settings.supporterKey, null, "key must be null after clearing");
 
   // Direct DB check
-  const cleared = db
-    .prepare("SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1")
-    .get() as { supporter_key_encrypted: string | null };
-  assert.equal(cleared.supporter_key_encrypted, null, "DB value must be null");
+  const cleared = await backend.queryOne<{ supporter_key_encrypted: string | null }>(
+    "SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1"
+  );
+  assert.equal(cleared?.supporter_key_encrypted, null, "DB value must be null");
 });
 
-test("changing the supporter key invalidates the entitlement-sensitive referrals cache", () => {
-  radar.setRadarCache({
+test("changing the supporter key invalidates the entitlement-sensitive referrals cache", async () => {
+  await radar.setRadarCache({
     version: "2026.08.07.1",
     tier: "live",
     payload: '{"models":[]}',
     signature: "catalog-live-signature",
   });
-  radar.setRadarReferralsCache({
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-07T12:00:00.000Z",
     tier: "live",
     payload: '{"referrals":{"fixed":[],"campaigns":[{"provider":"groq"}]}}',
     signature: "live-signature",
   });
-  assert.ok(radar.getRadarReferralsCache(), "precondition: live referrals cache exists");
-  assert.ok(radar.getRadarCache(), "precondition: live catalog cache exists");
+  assert.ok(await radar.getRadarReferralsCache(), "precondition: live referrals cache exists");
+  assert.ok(await radar.getRadarCache(), "precondition: live catalog cache exists");
 
-  radar.setRadarKey("omr_" + "d".repeat(40));
+  await radar.setRadarKey("omr_" + "d".repeat(40));
 
   assert.equal(
-    radar.getRadarReferralsCache(),
+    await radar.getRadarReferralsCache(),
     null,
     "a new key must force the next referrals read to resolve entitlement server-side"
   );
   assert.equal(
-    radar.getRadarCache(),
+    await radar.getRadarCache(),
     null,
     "a new key must force the next catalog sync to resolve entitlement server-side"
   );
 });
 
-test("setRadarKey uses existing AES-256-GCM encryption from encryption.ts", () => {
-  const db = core.getDbInstance();
+test("setRadarKey uses existing AES-256-GCM encryption from encryption.ts", async () => {
+  const backend = getTestBackend();
   const clearKey = "omr_" + "c".repeat(40);
 
-  radar.setRadarKey(clearKey);
+  await radar.setRadarKey(clearKey);
 
-  const encRow = db
-    .prepare("SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1")
-    .get() as { supporter_key_encrypted: string };
+  const encRow = await backend.queryOne<{ supporter_key_encrypted: string }>(
+    "SELECT supporter_key_encrypted FROM radar_settings WHERE id = 1"
+  );
+  assert.ok(encRow);
 
   // Verify it uses the enc:v1: format (same as provider credentials)
   assert.ok(
@@ -252,16 +233,16 @@ test("setRadarKey uses existing AES-256-GCM encryption from encryption.ts", () =
 });
 
 // ---------------------------------------------------------------------------
-// radar_referrals_cache (migration 142) -- standalone `GET /v1/referrals/latest`
-// cache, separate from radar_feed_cache (the catalog feed).
+// radar_cache (kind = 'referrals') -- standalone `GET /v1/referrals/latest`
+// cache, separate from the catalog feed (kind = 'feed').
 // ---------------------------------------------------------------------------
 
-test("getRadarReferralsCache returns null when no cache exists", () => {
-  const result = radar.getRadarReferralsCache();
+test("getRadarReferralsCache returns null when no cache exists", async () => {
+  const result = await radar.getRadarReferralsCache();
   assert.equal(result, null, "empty referrals cache must return null");
 });
 
-test("setRadarReferralsCache then getRadarReferralsCache round-trips exactly", () => {
+test("setRadarReferralsCache then getRadarReferralsCache round-trips exactly", async () => {
   const entry = {
     generatedAt: "2026-08-07T12:00:00.000Z",
     tier: "live",
@@ -269,8 +250,8 @@ test("setRadarReferralsCache then getRadarReferralsCache round-trips exactly", (
     signature: "ed25519:referrals-sig-abc",
   };
 
-  radar.setRadarReferralsCache(entry);
-  const result = radar.getRadarReferralsCache();
+  await radar.setRadarReferralsCache(entry);
+  const result = await radar.getRadarReferralsCache();
 
   assert.ok(result, "referrals cache must not be null after set");
   assert.equal(result.generatedAt, entry.generatedAt, "generatedAt must round-trip");
@@ -280,39 +261,43 @@ test("setRadarReferralsCache then getRadarReferralsCache round-trips exactly", (
   assert.ok(result.fetchedAt, "fetchedAt must be set");
 });
 
-test("second setRadarReferralsCache REPLACES the row (still single row)", () => {
-  const db = core.getDbInstance();
+test("second setRadarReferralsCache REPLACES the row (still single row)", async () => {
+  const backend = getTestBackend();
 
-  radar.setRadarReferralsCache({
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-07T10:00:00.000Z",
     tier: "community",
     payload: '{"old":true}',
     signature: "sig-old",
   });
 
-  radar.setRadarReferralsCache({
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-07T12:00:00.000Z",
     tier: "live",
     payload: '{"new":true}',
     signature: "sig-new",
   });
 
-  const result = radar.getRadarReferralsCache();
+  const result = await radar.getRadarReferralsCache();
   assert.ok(result);
-  assert.equal(result.generatedAt, "2026-08-07T12:00:00.000Z", "must have the second generatedAt");
+  assert.equal(
+    new Date(result.generatedAt).toISOString(),
+    "2026-08-07T12:00:00.000Z",
+    "must have the second generatedAt"
+  );
   assert.equal(result.tier, "live", "must have the second tier");
   assert.equal(result.payload, '{"new":true}', "must have the second payload");
 
-  const count = db.prepare("SELECT COUNT(*) AS c FROM radar_referrals_cache").get() as {
-    c: number;
-  };
-  assert.equal(count.c, 1, "must have exactly one row");
+  const count = await backend.queryOne<{ c: number }>(
+    "SELECT COUNT(*)::int AS c FROM radar_cache WHERE kind = 'referrals'"
+  );
+  assert.equal(count?.c, 1, "must have exactly one referrals row");
 });
 
-test("setRadarReferralsCache uses fetchedAt when provided", () => {
+test("setRadarReferralsCache uses fetchedAt when provided", async () => {
   const fixed = "2026-08-07T12:00:00.000Z";
 
-  radar.setRadarReferralsCache({
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-07T12:00:00.000Z",
     tier: "community",
     payload: "{}",
@@ -320,27 +305,31 @@ test("setRadarReferralsCache uses fetchedAt when provided", () => {
     fetchedAt: fixed,
   });
 
-  const result = radar.getRadarReferralsCache();
+  const result = await radar.getRadarReferralsCache();
   assert.ok(result);
-  assert.equal(result.fetchedAt, fixed, "must use the provided fetchedAt");
+  assert.equal(
+    new Date(result.fetchedAt).getTime(),
+    Date.parse(fixed),
+    "must use the provided fetchedAt"
+  );
 });
 
-test("radar_referrals_cache is independent of radar_feed_cache (separate tables)", () => {
-  radar.setRadarCache({
+test("referrals cache is independent of the catalog feed cache (separate kinds)", async () => {
+  await radar.setRadarCache({
     version: "2026.08.01.1",
     tier: "community",
     payload: '{"catalog":true}',
     signature: "catalog-sig",
   });
-  radar.setRadarReferralsCache({
+  await radar.setRadarReferralsCache({
     generatedAt: "2026-08-07T12:00:00.000Z",
     tier: "live",
     payload: '{"referrals":true}',
     signature: "referrals-sig",
   });
 
-  const catalogCache = radar.getRadarCache();
-  const referralsCache = radar.getRadarReferralsCache();
+  const catalogCache = await radar.getRadarCache();
+  const referralsCache = await radar.getRadarReferralsCache();
 
   assert.equal(catalogCache?.payload, '{"catalog":true}');
   assert.equal(referralsCache?.payload, '{"referrals":true}');

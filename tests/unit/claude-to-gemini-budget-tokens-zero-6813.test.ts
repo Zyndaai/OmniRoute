@@ -9,8 +9,8 @@ const { claudeToGeminiRequest } = await import(
 // check (`body.thinking.budget_tokens`) that silently dropped `budget_tokens: 0`
 // (dynamic thinking). The value must be preserved as `thinkingBudget: 0`.
 
-test("Claude -> Gemini preserves thinking.budget_tokens: 0 (dynamic thinking) (#6813)", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini preserves thinking.budget_tokens: 0 (dynamic thinking) (#6813)", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -25,8 +25,8 @@ test("Claude -> Gemini preserves thinking.budget_tokens: 0 (dynamic thinking) (#
   });
 });
 
-test("Claude -> Gemini prefers a positive thinking.budget_tokens over budget 0 semantics", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini prefers a positive thinking.budget_tokens over budget 0 semantics", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],

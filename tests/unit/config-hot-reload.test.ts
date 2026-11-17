@@ -10,7 +10,7 @@ process.env.OMNIROUTE_CONFIG_HOT_RELOAD_MS = "100";
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
-const { getDbInstance } = core;
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const runtimeSettings = await import("../../src/lib/config/runtimeSettings.ts");
 const { applyRuntimeSettings, resetRuntimeSettingsStateForTests } = runtimeSettings;
 const { startRuntimeConfigHotReload, stopRuntimeConfigHotReloadForTests } =
@@ -44,7 +44,8 @@ async function resetStorage() {
     detectionPatterns: getDefaultDetectionPatterns(),
   });
   invalidateCacheControlSettingsCache();
-  core.resetDbInstance();
+  await core.ensureDbInitialized();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -180,13 +181,18 @@ test("hot-reload watcher picks up external sqlite changes via polling fallback",
   });
   startRuntimeConfigHotReload({ pollIntervalMs: 100 });
 
-  const db = getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'cliCompatProviders', ?)"
-  ).run(JSON.stringify(["github", "openai"]));
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'antigravitySignatureCacheMode', ?)"
-  ).run(JSON.stringify("bypass-strict"));
+  // External writes straight to the config store (jsonb values), as another process would do.
+  const backend = getTestBackend();
+  await backend.execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('settings', 'cliCompatProviders', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify(["github", "openai"])]
+  );
+  await backend.execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('settings', 'antigravitySignatureCacheMode', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify("bypass-strict")]
+  );
 
   await waitFor(
     () =>

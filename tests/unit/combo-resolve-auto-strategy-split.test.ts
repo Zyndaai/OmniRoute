@@ -9,12 +9,12 @@ import { scoreAutoTargets } from "@omniroute/open-sse/services/combo/autoStrateg
 import { DEFAULT_WEIGHTS } from "@omniroute/open-sse/services/autoCombo/scoring.ts";
 import { buildComplexityRoutingHint } from "@omniroute/open-sse/services/autoCombo/complexityRouter.ts";
 import { setTierConfig } from "@omniroute/open-sse/services/tierResolver.ts";
-import { resetDbInstance } from "@/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
-// resolveAutoStrategyOrder loads the LKGP via the DB singleton (dynamic import);
+// resolveAutoStrategyOrder loads the LKGP via the DB pool (dynamic import);
 // release the handle so the node:test runner does not hang on teardown (learning #3).
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetTestDb();
 });
 
 // Split guard for Block J Task 2 (coupled slice): the `if (strategy === "auto")`
@@ -328,7 +328,7 @@ test("per-request X-OmniRoute-Mode override changes the EFFECTIVE weights used f
 // neutral 0.5 a null hint (the pre-fix, gate-off state) would produce.
 test("scoreAutoTargets: the always-on complexity hint (#13386) moves tierAffinity off the null-hint neutral baseline", async () => {
   const freeProvider = "regression-free-provider-13386";
-  setTierConfig({
+  await setTierConfig({
     providerOverrides: [{ provider: freeProvider, tier: "free" }],
   });
   try {
@@ -351,7 +351,7 @@ test("scoreAutoTargets: the always-on complexity hint (#13386) moves tierAffinit
       },
     ] as never;
 
-    const withoutHint = scoreAutoTargets(t, candidates, "default", DEFAULT_WEIGHTS, null);
+    const withoutHint = await scoreAutoTargets(t, candidates, "default", DEFAULT_WEIGHTS, null);
     assert.equal(
       withoutHint[0].factors.tierAffinity,
       0.5,
@@ -368,13 +368,13 @@ test("scoreAutoTargets: the always-on complexity hint (#13386) moves tierAffinit
       "expected a non-null hint for a trivial prompt — buildComplexityRoutingHint takes no config param, so it cannot be gated"
     );
 
-    const withHint = scoreAutoTargets(t, candidates, "default", DEFAULT_WEIGHTS, hint);
+    const withHint = await scoreAutoTargets(t, candidates, "default", DEFAULT_WEIGHTS, hint);
     assert.equal(
       withHint[0].factors.tierAffinity,
       1.0,
       "a free-tier candidate under a trivial-prompt hint must score full tier affinity"
     );
   } finally {
-    setTierConfig(null);
+    await setTierConfig(null);
   }
 });

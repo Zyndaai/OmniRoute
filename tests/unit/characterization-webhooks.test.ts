@@ -29,7 +29,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-char-webh
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const dispatcher = await import("../../src/lib/webhookDispatcher.ts");
 const eventDescriptions = await import("../../src/lib/webhooks/eventDescriptions.ts");
 const slack = await import("../../src/lib/webhooks/integrations/slack.ts");
@@ -58,7 +58,7 @@ const BASE = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
 test.after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -204,14 +204,21 @@ test("encrypt/decryptMetadata: round trip; null / garbage → null", () => {
 
 test("dispatchEvent: routes by subscription and kind, records deliveries and status", async () => {
   reset();
-  const custom = webhooksDb.createWebhook({
+  const custom = await webhooksDb.createWebhook({
     url: `${BASE}/custom`,
     events: ["test.ping"],
     secret: "whsec_char",
   });
-  const otherEvent = webhooksDb.createWebhook({ url: `${BASE}/other`, events: ["request.failed"] });
-  const slackHook = webhooksDb.createWebhook({ url: `${BASE}/slack`, kind: "slack" }); // events ["*"]
-  const tg = webhooksDb.createWebhook({ url: "-100123", events: ["test.ping"], kind: "telegram" });
+  const otherEvent = await webhooksDb.createWebhook({
+    url: `${BASE}/other`,
+    events: ["request.failed"],
+  });
+  const slackHook = await webhooksDb.createWebhook({ url: `${BASE}/slack`, kind: "slack" }); // events ["*"]
+  const tg = await webhooksDb.createWebhook({
+    url: "-100123",
+    events: ["test.ping"],
+    kind: "telegram",
+  });
 
   await dispatcher.dispatchEvent("test.ping", { model: "m1" });
 
@@ -229,33 +236,41 @@ test("dispatchEvent: routes by subscription and kind, records deliveries and sta
   assert.equal(slackHit.headers["x-webhook-signature"], undefined, "slack is not HMAC-wrapped");
   assert.match(JSON.parse(slackHit.body).text, /Test Ping\* on `m1`/);
 
-  const summary = (id: string) =>
-    deliveriesDb.getDeliveries(id, 10).map((d) => [d.event_type, d.status, d.http_status, d.error]);
-  assert.deepEqual(summary(custom.id), [["test.ping", "success", 200, null]]);
-  assert.deepEqual(summary(slackHook.id), [["test.ping", "success", 200, null]]);
-  assert.deepEqual(summary(otherEvent.id), []);
-  assert.deepEqual(summary(tg.id), [
+  const summary = async (id: string) =>
+    (await deliveriesDb.getDeliveries(id, 10)).map((d) => [
+      d.event_type,
+      d.status,
+      d.http_status,
+      d.error,
+    ]);
+  assert.deepEqual(await summary(custom.id), [["test.ping", "success", 200, null]]);
+  assert.deepEqual(await summary(slackHook.id), [["test.ping", "success", 200, null]]);
+  assert.deepEqual(await summary(otherEvent.id), []);
+  assert.deepEqual(await summary(tg.id), [
     ["test.ping", "failed", null, "Missing Telegram botToken in metadata"],
   ]);
 
-  assert.equal(webhooksDb.getWebhook(custom.id)?.last_status, 200);
-  assert.equal(webhooksDb.getWebhook(custom.id)?.failure_count, 0);
-  assert.equal(webhooksDb.getWebhook(tg.id)?.failure_count, 1);
-  assert.equal(webhooksDb.getWebhook(tg.id)?.last_status, 0);
+  assert.equal((await webhooksDb.getWebhook(custom.id))?.last_status, 200);
+  assert.equal((await webhooksDb.getWebhook(custom.id))?.failure_count, 0);
+  assert.equal((await webhooksDb.getWebhook(tg.id))?.failure_count, 1);
+  assert.equal((await webhooksDb.getWebhook(tg.id))?.last_status, 0);
 
-  for (const wh of [custom, otherEvent, slackHook, tg]) webhooksDb.deleteWebhook(wh.id);
+  for (const wh of [custom, otherEvent, slackHook, tg]) await webhooksDb.deleteWebhook(wh.id);
 });
 
 test("dispatchEvent: a webhook reaching 10 consecutive failures is auto-disabled", async () => {
   reset();
-  const wh = webhooksDb.createWebhook({ url: `${BASE}/failing`, events: ["request.failed"] });
-  for (let i = 0; i < 9; i++) webhooksDb.recordWebhookDelivery(wh.id, 0, false);
+  const wh = await webhooksDb.createWebhook({
+    url: `${BASE}/failing`,
+    events: ["request.failed"],
+  });
+  for (let i = 0; i < 9; i++) await webhooksDb.recordWebhookDelivery(wh.id, 0, false);
   statusQueue.push(400);
   await dispatcher.dispatchEvent("request.failed", {});
-  const after = webhooksDb.getWebhook(wh.id);
+  const after = await webhooksDb.getWebhook(wh.id);
   assert.equal(after?.failure_count, 10);
   assert.equal(after?.enabled, false);
-  webhooksDb.deleteWebhook(wh.id);
+  await webhooksDb.deleteWebhook(wh.id);
 });
 
 test("notifyWebhookEvent: fire-and-forget — returns undefined synchronously, never throws", async () => {

@@ -7,7 +7,6 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-kimi-billing-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.STORAGE_ENCRYPTION_KEY = "kimi-coding-billing-test-key-32-bytes-minimum";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const { getUsageForProvider } = await import("../../open-sse/services/usage.ts");
@@ -15,6 +14,7 @@ const providerLimitsDb = await import("../../src/lib/db/providerLimits.ts");
 const { mergeProviderLimitsCacheEntry, toProviderLimitsCacheEntry } =
   await import("../../src/lib/usage/providerLimitsCache.ts");
 const { KIMI_CODE_ADDITIONAL_CREDITS_URL } = await import("../../src/shared/utils/kimiBilling.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 const originalFetch = globalThis.fetch;
 
@@ -80,9 +80,9 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -409,7 +409,12 @@ test("Kimi usage failures do not expose or synthesize billing", async () => {
   assert.equal(JSON.stringify(usage).includes("sk-kimi-secret"), false);
 });
 
-test("Provider Limits sanitizes and persists only the public Kimi billing contract", () => {
+test("Provider Limits sanitizes and persists only the public Kimi billing contract", async () => {
+  // connection_limits_cache references provider_connections, so the connection row comes first.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider, auth_type, is_active) VALUES ($1, $2, $3, true) ON CONFLICT (id) DO NOTHING",
+    ["kimi-connection", "kimi-coding-apikey", "apikey"]
+  );
   const rawBilling = {
     currency: "cny",
     extraCreditsMinorUnits: 0,
@@ -438,13 +443,13 @@ test("Provider Limits sanitizes and persists only the public Kimi billing contra
   });
   assert.equal(JSON.stringify(cacheEntry).includes("secret"), false);
 
-  const stored = providerLimitsDb.setProviderLimitsCache("kimi-connection", {
+  const stored = await providerLimitsDb.setProviderLimitsCache("kimi-connection", {
     ...cacheEntry,
     billing: rawBilling as unknown as NonNullable<typeof cacheEntry.billing>,
   });
   assert.deepEqual(stored.billing, cacheEntry.billing);
   assert.deepEqual(
-    providerLimitsDb.getProviderLimitsCache("kimi-connection")?.billing,
+    (await providerLimitsDb.getProviderLimitsCache("kimi-connection"))?.billing,
     stored.billing
   );
   assert.equal(JSON.stringify(stored).includes("secret"), false);

@@ -9,7 +9,6 @@ import ts from "typescript";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-affinity-agy-parity-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.REDIS_URL;
 delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 const core = await import("../../src/lib/db/core.ts");
@@ -67,21 +66,21 @@ function run(block: string, key: string) {
       eviction.evictSessionAccountAffinityForConnectionAsync,
   });
 }
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 for (const branch of ["isAntigravityStreamReadinessFailure", "isAntigravityPreResponseTimeout"]) {
   test(`default-off parity: ${branch} retains byte-identical base pin`, async () => {
     const key = `${branch}`;
-    local.upsert(key, "antigravity", "failed-A", 1_000_000, 60_000);
-    const seeded = local.getSerialized(key, "antigravity");
+    await local.upsert(key, "antigravity", "failed-A", 1_000_000, 60_000);
+    const seeded = await local.getSerialized(key, "antigravity");
     await run(baseBlock, key);
-    const baseRow = local.getSerialized(key, "antigravity");
+    const baseRow = await local.getSerialized(key, "antigravity");
     assert.equal(baseRow, seeded, "base's two-argument TTL-gated read is a no-op");
     const headBlock = affinityBlock(branch);
     await run(headBlock, key);
-    assert.equal(local.getSerialized(key, "antigravity"), baseRow);
+    assert.equal(await local.getSerialized(key, "antigravity"), baseRow);
     assert.equal(headBlock, baseBlock, "both drivers must retain the exact base block");
   });
 }

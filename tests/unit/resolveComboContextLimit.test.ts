@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveComboContextLimit } from "../../open-sse/services/contextManager.ts";
 
-test("resolveComboContextLimit handles array of combo target objects ({ name, models }) in comboTargetLimits", () => {
-  const result = resolveComboContextLimit({
+test("resolveComboContextLimit handles array of combo target objects ({ name, models }) in comboTargetLimits", async () => {
+  const result = await resolveComboContextLimit({
     provider: "unknown_provider",
     model: "unknown_model",
     comboTargetLimits: [
@@ -18,4 +18,3 @@ test("resolveComboContextLimit handles array of combo target objects ({ name, mo
   assert.ok(result.limit > 0);
   assert.equal(result.source, "fallback");
 });
-

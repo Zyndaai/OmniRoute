@@ -19,6 +19,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "catalog-9147-test-se
 process.env.CATALOG_BUILD_TIMEOUT_MS = "120000";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 
@@ -26,36 +27,33 @@ const CONNECTION_COUNT = 60;
 const MODELS_PER_CONNECTION = 12; // ~720 synced models total
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
 async function seedCatalogScaleDataset() {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  const insertConn = db.prepare(
-    `INSERT INTO provider_connections (id, provider, auth_type, name, priority, is_active, api_key, created_at, updated_at)
-     VALUES (?, 'openai-compatible', 'apikey', ?, ?, 1, ?, ?, ?)`
-  );
-  const insertModels = db.prepare(
-    `INSERT INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)`
-  );
-  const seedTx = db.transaction(() => {
+  await getTestBackend().transaction(async (tx) => {
     for (let i = 0; i < CONNECTION_COUNT; i++) {
       const id = `probe-conn-${i}`;
-      insertConn.run(id, `probe-connection-${i}`, i, `sk-probe-${i}`, now, now);
+      await tx.execute(
+        `INSERT INTO provider_connections (id, provider, auth_type, name, priority, is_active, api_key, created_at, updated_at)
+         VALUES ($1, 'openai-compatible', 'apikey', $2, $3, true, $4, $5, $5)`,
+        [id, `probe-connection-${i}`, i, `sk-probe-${i}`, now]
+      );
       const models = Array.from({ length: MODELS_PER_CONNECTION }, (_, m) => ({
         id: `probe-model-${i}-${m}`,
         name: `Probe Model ${i}-${m}`,
         contextLength: 128000,
       }));
-      insertModels.run(`openai-compatible:${id}`, JSON.stringify(models));
+      await tx.execute(
+        `INSERT INTO connection_model_sync (connection_id, provider, models)
+         VALUES ($1, 'openai-compatible', $2::jsonb)`,
+        [id, JSON.stringify(models)]
+      );
     }
   });
-  seedTx();
 }
 
 test.beforeEach(async () => {
@@ -63,7 +61,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

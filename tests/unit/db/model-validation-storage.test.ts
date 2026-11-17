@@ -26,9 +26,9 @@ test("validated model commit fails closed if the selected connection changes", a
     allowInference: true as const,
     apiFormat: "chat-completions" as const,
   };
-  const snapshot = createValidationSnapshot(input);
+  const snapshot = await createValidationSnapshot(input);
   await updateProviderConnection(connection.id, { isActive: false });
-  assert.throws(
+  await assert.rejects(
     () => commitValidatedModel(snapshot, input, { id: "fake-receipt" }),
     /changed|unavailable/
   );
@@ -51,19 +51,22 @@ test("commit reads back metadata and refuses duplicate insertion or expired evid
     allowInference: true as const,
     apiFormat: "chat-completions" as const,
   };
-  const snapshot = createValidationSnapshot(input);
-  assert.throws(
+  const snapshot = await createValidationSnapshot(input);
+  await assert.rejects(
     () => commitValidatedModel({ ...snapshot, startedAt: Date.now() - 90_001 }, input, {}),
     /changed|unavailable/
   );
-  const saved = commitValidatedModel(snapshot, input, { id: "proof-receipt", status: "passed" });
+  const saved = await commitValidatedModel(snapshot, input, {
+    id: "proof-receipt",
+    status: "passed",
+  });
   assert.equal(saved.inputTokenLimit, 32000);
   assert.equal(saved.name, "Saved proof");
   assert.equal(
     (await getCustomModels("openai")).find((model) => model.id === input.modelId)?.validation.id,
     "proof-receipt"
   );
-  assert.throws(() => commitValidatedModel(snapshot, input, {}), /already exists/);
+  await assert.rejects(() => commitValidatedModel(snapshot, input, {}), /already exists/);
 });
 
 test("plugin configuration mutation invalidates transactional evidence", async () => {
@@ -80,8 +83,8 @@ test("plugin configuration mutation invalidates transactional evidence", async (
     allowInference: true as const,
     apiFormat: "chat-completions" as const,
   };
-  const snapshot = createValidationSnapshot(input);
-  insertPlugin({
+  const snapshot = await createValidationSnapshot(input);
+  await insertPlugin({
     id: "changed-plugin",
     name: "changed-plugin",
     version: "1.0.0",
@@ -91,12 +94,12 @@ test("plugin configuration mutation invalidates transactional evidence", async (
     status: "inactive",
   });
   try {
-    assert.throws(() => commitValidatedModel(snapshot, input, {}), /changed|unavailable/);
+    await assert.rejects(() => commitValidatedModel(snapshot, input, {}), /changed|unavailable/);
     assert.equal(
       (await getCustomModels("openai")).some((model) => model.id === input.modelId),
       false
     );
   } finally {
-    deletePlugin("changed-plugin");
+    await deletePlugin("changed-plugin");
   }
 });

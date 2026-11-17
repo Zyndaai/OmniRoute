@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { mock } from "node:test";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 import {
   buildExclusiveDashboardSessions,
@@ -11,7 +12,6 @@ import {
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-session-observability-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "ab".repeat(32);
 
 const core = await import("../../src/lib/db/core.ts");
@@ -30,18 +30,22 @@ function at(offsetMs: number): string {
   return new Date(BASE_TIME + offsetMs).toISOString();
 }
 
-function projectOfficialOccupancy(connectionIds: string[], now: string) {
-  const occupancy = leases.getExclusiveLeaseOccupancy(connectionIds, now);
+async function projectOfficialOccupancy(connectionIds: string[], now: string) {
+  const occupancy = await leases.getExclusiveLeaseOccupancy(connectionIds, now);
   return buildExclusiveDashboardSessions(new Set(occupancy.keys()), {}, []);
 }
+
+test.beforeEach(async () => {
+  await resetTestDb();
+});
 
 test.afterEach(() => {
   sessionManager.clearSessions();
   usageHistory.clearPendingRequests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -139,9 +143,14 @@ test("lease projection is a minimum privacy-safe observability payload", () => {
   }
 });
 
-test("official SQLite lease lifecycle remains visible through idle renew, release, and expiry", async () => {
+test("official lease lifecycle remains visible through idle renew, release, and expiry", async () => {
   const connectionA = "11111111-1111-4111-8111-111111111111";
   const connectionB = "22222222-2222-4222-8222-222222222222";
+  // Leases reference provider_connections (foreign key), so both connections must exist.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, 'codex'), ($2, 'codex') ON CONFLICT (id) DO NOTHING",
+    [connectionA, connectionB]
+  );
   const managedKey = await apiKeys.createApiKey(
     "Lifecycle managed key",
     "0123456789abcdef",
@@ -152,7 +161,7 @@ test("official SQLite lease lifecycle remains visible through idle renew, releas
   assert.equal(managed.has(connectionA), true);
   assert.equal(managed.has(connectionB), true);
 
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER_A,
     apiKeyId: managedKey.id,
     provider: "codex",
@@ -162,10 +171,10 @@ test("official SQLite lease lifecycle remains visible through idle renew, releas
   });
   assert.equal(acquired.kind, "ACQUIRED");
   if (acquired.kind !== "ACQUIRED") return;
-  assert.equal(projectOfficialOccupancy([connectionA], at(30_000)).length, 1);
-  assert.equal(projectOfficialOccupancy([connectionA], at(30_000))[0].active, false);
+  assert.equal((await projectOfficialOccupancy([connectionA], at(30_000))).length, 1);
+  assert.equal((await projectOfficialOccupancy([connectionA], at(30_000)))[0].active, false);
 
-  const renewed = leases.renewExclusiveConnectionLease({
+  const renewed = await leases.renewExclusiveConnectionLease({
     leaseOwnerId: OWNER_A,
     generation: acquired.lease.generation,
     apiKeyId: managedKey.id,
@@ -175,40 +184,46 @@ test("official SQLite lease lifecycle remains visible through idle renew, releas
   assert.equal(renewed.kind, "RENEWED");
   if (renewed.kind !== "RENEWED") return;
   assert.equal(renewed.lease.generation, acquired.lease.generation);
-  assert.equal(projectOfficialOccupancy([connectionA], at(150_000)).length, 1);
+  assert.equal((await projectOfficialOccupancy([connectionA], at(150_000))).length, 1);
   assert.equal(
-    leases.assertExclusiveConnectionLeaseFence({
-      leaseOwnerId: OWNER_A,
-      generation: acquired.lease.generation,
-      apiKeyId: managedKey.id,
-      connectionId: connectionA,
-      now: at(150_000),
-    }).kind,
+    (
+      await leases.assertExclusiveConnectionLeaseFence({
+        leaseOwnerId: OWNER_A,
+        generation: acquired.lease.generation,
+        apiKeyId: managedKey.id,
+        connectionId: connectionA,
+        now: at(150_000),
+      })
+    ).kind,
     "VALID"
   );
   assert.equal(
-    leases.releaseExclusiveConnectionLease({
-      leaseOwnerId: OWNER_A,
-      generation: acquired.lease.generation + 1,
-      apiKeyId: managedKey.id,
-      now: at(151_000),
-    }).kind,
+    (
+      await leases.releaseExclusiveConnectionLease({
+        leaseOwnerId: OWNER_A,
+        generation: acquired.lease.generation + 1,
+        apiKeyId: managedKey.id,
+        now: at(151_000),
+      })
+    ).kind,
     "STALE"
   );
-  assert.equal(projectOfficialOccupancy([connectionA], at(152_000)).length, 1);
+  assert.equal((await projectOfficialOccupancy([connectionA], at(152_000))).length, 1);
 
   assert.equal(
-    leases.releaseExclusiveConnectionLease({
-      leaseOwnerId: OWNER_A,
-      generation: acquired.lease.generation,
-      apiKeyId: managedKey.id,
-      now: at(153_000),
-    }).kind,
+    (
+      await leases.releaseExclusiveConnectionLease({
+        leaseOwnerId: OWNER_A,
+        generation: acquired.lease.generation,
+        apiKeyId: managedKey.id,
+        now: at(153_000),
+      })
+    ).kind,
     "RELEASED"
   );
-  assert.equal(projectOfficialOccupancy([connectionA], at(154_000)).length, 0);
+  assert.equal((await projectOfficialOccupancy([connectionA], at(154_000))).length, 0);
 
-  const expiring = leases.acquireExclusiveConnectionLease({
+  const expiring = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER_B,
     apiKeyId: managedKey.id,
     provider: "codex",
@@ -218,11 +233,11 @@ test("official SQLite lease lifecycle remains visible through idle renew, releas
   });
   assert.equal(expiring.kind, "ACQUIRED");
   if (expiring.kind !== "ACQUIRED") return;
-  assert.equal(projectOfficialOccupancy([connectionB], at(200_500)).length, 1);
-  assert.equal(leases.reconcileExpiredExclusiveConnectionLeases(at(202_000)), 1);
-  assert.equal(projectOfficialOccupancy([connectionB], at(202_000)).length, 0);
+  assert.equal((await projectOfficialOccupancy([connectionB], at(200_500))).length, 1);
+  assert.equal(await leases.reconcileExpiredExclusiveConnectionLeases(at(202_000)), 1);
+  assert.equal((await projectOfficialOccupancy([connectionB], at(202_000))).length, 0);
 
-  const reacquired = leases.acquireExclusiveConnectionLease({
+  const reacquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER_B,
     apiKeyId: managedKey.id,
     provider: "codex",
@@ -233,22 +248,26 @@ test("official SQLite lease lifecycle remains visible through idle renew, releas
   if (reacquired.kind !== "ACQUIRED") return;
   assert.equal(reacquired.lease.generation, expiring.lease.generation + 1);
   assert.equal(
-    leases.assertExclusiveConnectionLeaseFence({
-      leaseOwnerId: OWNER_B,
-      generation: expiring.lease.generation,
-      apiKeyId: managedKey.id,
-      connectionId: connectionB,
-      now: at(204_000),
-    }).kind,
+    (
+      await leases.assertExclusiveConnectionLeaseFence({
+        leaseOwnerId: OWNER_B,
+        generation: expiring.lease.generation,
+        apiKeyId: managedKey.id,
+        connectionId: connectionB,
+        now: at(204_000),
+      })
+    ).kind,
     "STALE"
   );
   assert.equal(
-    leases.releaseExclusiveConnectionLease({
-      leaseOwnerId: OWNER_B,
-      generation: reacquired.lease.generation,
-      apiKeyId: managedKey.id,
-      now: at(205_000),
-    }).kind,
+    (
+      await leases.releaseExclusiveConnectionLease({
+        leaseOwnerId: OWNER_B,
+        generation: reacquired.lease.generation,
+        apiKeyId: managedKey.id,
+        now: at(205_000),
+      })
+    ).kind,
     "RELEASED"
   );
 });
@@ -266,7 +285,7 @@ test("sessions API keeps legacy fields additive and decorates only in-flight lea
     ["lease:exclusive"],
     { allowedConnections: [connection.id] }
   );
-  const acquired = leases.acquireExclusiveConnectionLease({
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: "vlo_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
     apiKeyId: managedKey.id,
     provider: "codex",
@@ -302,11 +321,13 @@ test("sessions API keeps legacy fields additive and decorates only in-flight lea
   usageHistory.trackPendingRequest("gpt-5.6-sol", "codex", connection.id, false);
 
   assert.equal(
-    leases.releaseExclusiveConnectionLease({
-      leaseOwnerId: "vlo_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-      generation: acquired.lease.generation,
-      apiKeyId: managedKey.id,
-    }).kind,
+    (
+      await leases.releaseExclusiveConnectionLease({
+        leaseOwnerId: "vlo_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        generation: acquired.lease.generation,
+        apiKeyId: managedKey.id,
+      })
+    ).kind,
     "RELEASED"
   );
   const releasedBody = (await (await sessionsRoute.GET()).json()) as {
@@ -334,12 +355,27 @@ test("sessions API deduplicates projection warnings per contiguous outage", asyn
   sessionManager.touchSession("legacy-fallback", "legacy-connection");
   sessionManager.registerKeySession("legacy-key", "legacy-fallback");
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
+  // Every database call fails while the outage flag is set. The route makes no database calls
+  // outside the lease projection, so this is the projection failing (the old prepare() mock).
+  const backend = getTestBackend();
   let projectionFails = true;
-  const prepareMock = mock.method(db, "prepare", (sql: string) => {
+  const failing = () => {
     if (projectionFails) throw new Error(JSON.stringify(secretFailure));
-    return originalPrepare(sql);
+  };
+  const originalQuery = backend.query.bind(backend);
+  const originalQueryOne = backend.queryOne.bind(backend);
+  const originalExecute = backend.execute.bind(backend);
+  const queryMock = mock.method(backend, "query", async (sql: string, params?: unknown[]) => {
+    failing();
+    return originalQuery(sql, params as any);
+  });
+  const queryOneMock = mock.method(backend, "queryOne", async (sql: string, params?: unknown[]) => {
+    failing();
+    return originalQueryOne(sql, params as any);
+  });
+  const executeMock = mock.method(backend, "execute", async (sql: string, params?: unknown[]) => {
+    failing();
+    return originalExecute(sql, params as any);
   });
   const warnings: unknown[][] = [];
   const warnMock = mock.method(console, "warn", (...args: unknown[]) => {
@@ -392,7 +428,9 @@ test("sessions API deduplicates projection warnings per contiguous outage", asyn
     }
   } finally {
     warnMock.mock.restore();
-    prepareMock.mock.restore();
+    executeMock.mock.restore();
+    queryOneMock.mock.restore();
+    queryMock.mock.restore();
     nowMock.mock.restore();
   }
 });

@@ -13,7 +13,8 @@ import {
   setProviderLimitsCacheBatch,
   deleteProviderLimitsCache,
 } from "../../src/lib/db/providerLimits.ts";
-import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
+import { createProviderConnection } from "../../src/lib/db/providers.ts";
 import {
   buildHealthAccount,
   type HealthQuota,
@@ -24,7 +25,9 @@ import {
 } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/availabilityDisplay.ts";
 
 const policy = { enabled: true, defaultThresholdPercent: 2, providerWindowDefaults: {} };
-after(() => resetDbInstance());
+after(async () => {
+  await resetTestDb();
+});
 
 for (const flagName of ["limit_reached", "limitReached"]) {
   for (const reached of [true, false]) {
@@ -40,12 +43,20 @@ for (const flagName of ["limit_reached", "limitReached"]) {
           },
         ],
       };
-      const connection = { id: "synthetic-spark-limit", provider: "codex", isActive: true };
+      // The limits cache row has a foreign key to provider_connections: store the fixture connection.
+      const stored = await createProviderConnection({
+        provider: "codex",
+        authType: "oauth",
+        name: "Synthetic spark limit",
+        accessToken: "synthetic-access-token",
+        isActive: true,
+      });
+      const connection = { id: stored.id, provider: "codex", isActive: true };
       setCodexUsageFetchForTests(async () => Response.json(wire));
       try {
         const usage = await getCodexUsage("synthetic-token");
         const entry = toProviderLimitsCacheEntry(usage, "manual", new Date(now).toISOString());
-        const verdict = buildConnectionQuotaAvailability(connection, entry, policy);
+        const verdict = await buildConnectionQuotaAvailability(connection, entry, policy);
         const routing = evaluateQuotaCutoff(
           parseCodexUsageResponse(wire, "gpt-5.3-codex-spark"),
           undefined,
@@ -79,30 +90,33 @@ for (const flagName of ["limit_reached", "limitReached"]) {
         assert.equal(countDisplay([display]).ok, 1);
         assert.equal(entry.sparkLimitReached, reached);
         assert.equal(entry.limitReached, false);
-        setProviderLimitsCache(connection.id, entry);
-        assert.equal(getProviderLimitsCache(connection.id)?.sparkLimitReached, reached);
-        setProviderLimitsCacheBatch([{ connectionId: connection.id, entry }]);
-        assert.equal(getAllProviderLimitsCache()[connection.id]?.sparkLimitReached, reached);
-        const cached = getProviderLimitsCache(connection.id)!;
+        await setProviderLimitsCache(connection.id, entry);
+        assert.equal((await getProviderLimitsCache(connection.id))?.sparkLimitReached, reached);
+        await setProviderLimitsCacheBatch([{ connectionId: connection.id, entry }]);
+        assert.equal(
+          (await getAllProviderLimitsCache())[connection.id]?.sparkLimitReached,
+          reached
+        );
+        const cached = (await getProviderLimitsCache(connection.id))!;
         assert.equal(
           convertCachedUsageToQuotaInfo("codex", cached, "gpt-5.3-codex-spark")?.limitReached,
           reached
         );
         assert.equal(
-          buildConnectionQuotaAvailability(connection, cached, policy).scopes.find(
+          (await buildConnectionQuotaAvailability(connection, cached, policy)).scopes.find(
             (s) => s.id === "spark"
           )?.decision.usable,
           !reached
         );
       } finally {
         setCodexUsageFetchForTests(null);
-        deleteProviderLimitsCache(connection.id);
+        await deleteProviderLimitsCache(connection.id);
       }
     });
   }
 }
 
-test("a legacy cache without a Spark flag treats healthy Spark windows as unrestricted", () => {
+test("a legacy cache without a Spark flag treats healthy Spark windows as unrestricted", async () => {
   const now = Date.now();
   const window = { remainingPercentage: 80, resetAt: new Date(now + 3600000).toISOString() };
   const entry = toProviderLimitsCacheEntry(
@@ -115,11 +129,11 @@ test("a legacy cache without a Spark flag treats healthy Spark windows as unrest
     false
   );
   assert.equal(
-    buildConnectionQuotaAvailability(
+    (await buildConnectionQuotaAvailability(
       { id: "synthetic-legacy-spark", provider: "codex" },
       entry,
       policy
-    ).scopes.find((s) => s.id === "spark")?.decision.usable,
+    )).scopes.find((s) => s.id === "spark")?.decision.usable,
     true
   );
 });

@@ -31,11 +31,12 @@ const ipUtils = await import("../../src/lib/ipUtils.ts");
 const core = await import("../../src/lib/db/core.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const loginRoute = await import("../../src/app/api/auth/login/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const originalGetCookieStore = loginRoute.authRouteInternals.getCookieStore;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.INITIAL_PASSWORD = "correct-secret-8336";
@@ -50,8 +51,8 @@ test.afterEach(() => {
   loginRoute.authRouteInternals.getCookieStore = originalGetCookieStore;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) {
     delete process.env.INITIAL_PASSWORD;
@@ -97,7 +98,7 @@ test("auth.login.failed from a loopback IP is flagged internalOrigin", async () 
   const response = await postWrongPassword("127.0.0.1");
   assert.equal(response.status, 401);
 
-  const [entry] = compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
+  const [entry] = await compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
   assert.ok(entry, "expected an auth.login.failed audit entry");
   assert.equal(entry.ip_address, "127.0.0.1");
   const metadata = entry.metadata as Record<string, unknown>;
@@ -110,7 +111,7 @@ test("auth.login.failed from a public IP is NOT flagged internalOrigin", async (
   const response = await postWrongPassword("203.0.113.77");
   assert.equal(response.status, 401);
 
-  const [entry] = compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
+  const [entry] = await compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
   assert.ok(entry, "expected an auth.login.failed audit entry");
   assert.equal(entry.ip_address, "203.0.113.77");
   const metadata = entry.metadata as Record<string, unknown>;

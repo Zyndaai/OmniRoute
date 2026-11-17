@@ -17,8 +17,8 @@ const { getExactCustomModelVisionOverride } =
 const { getComboVisionBridgeDecision, VisionBridgeGuardrail } =
   await import("../../src/lib/guardrails/visionBridge.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
@@ -51,7 +51,7 @@ test("#16801: public prefix with internal compatible node preserves native visio
     models: [{ kind: "model", providerId: nodeId, model: "v16801/test-vision", weight: 1 }],
   });
 
-  assert.equal(getResolvedModelCapabilities("v16801/test-vision").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("v16801/test-vision")).supportsVision, true);
   assert.equal(await getComboVisionBridgeDecision("vision-16801"), "skip");
 });
 
@@ -101,13 +101,13 @@ test("#16801: a public vision model from another node must not bless an internal
     {},
     true
   );
-  assert.equal(getResolvedModelCapabilities("other16801/vision-only").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("other16801/vision-only")).supportsVision, true);
   assert.equal(
-    getExactCustomModelVisionOverride(sourceNode, "other16801/vision-only"),
+    await getExactCustomModelVisionOverride(sourceNode, "other16801/vision-only"),
     null,
     "foreign node custom metadata is not evidence about the source provider"
   );
-  assert.equal(getExactCustomModelVisionOverride(otherNode, "vision-only"), true);
+  assert.equal(await getExactCustomModelVisionOverride(otherNode, "vision-only"), true);
   await combos.createCombo({
     name: "cross-node-vision-16801",
     strategy: "priority",
@@ -160,7 +160,8 @@ test("#16801: raw provider-relative model IDs containing slashes retain their ex
     false
   );
   assert.equal(
-    getResolvedModelCapabilities({ provider: nodeId, model: "vendor/sight-16801" }).supportsVision,
+    (await getResolvedModelCapabilities({ provider: nodeId, model: "vendor/sight-16801" }))
+      .supportsVision,
     true,
     "the owned raw slash ID is known vision-capable without a public prefix"
   );
@@ -191,10 +192,10 @@ test("#16801: raw provider-relative model IDs containing slashes retain their ex
   assert.equal(await getComboVisionBridgeDecision("raw-path-text-16801"), "no-vision");
   assert.equal(await getComboVisionBridgeDecision("mixed-raw-path-16801"), "process");
   assert.equal(await getComboVisionBridgeDecision("nested-raw-path-16801"), "skip");
-  assert.equal(getExactCustomModelVisionOverride(nodeId, "vendor/sight-16801"), true);
-  assert.equal(getExactCustomModelVisionOverride(nodeId, "vendor/blind-16801"), false);
+  assert.equal(await getExactCustomModelVisionOverride(nodeId, "vendor/sight-16801"), true);
+  assert.equal(await getExactCustomModelVisionOverride(nodeId, "vendor/blind-16801"), false);
   assert.equal(
-    getExactCustomModelVisionOverride("openai-compatible-chat-absent-16801", "vendor/sight-16801"),
+    await getExactCustomModelVisionOverride("openai-compatible-chat-absent-16801", "vendor/sight-16801"),
     null,
     "a matching model ID from a different provider must not leak to this node"
   );
@@ -301,7 +302,6 @@ test("#16801: Anthropic-compatible/CC nodes keep owned and rejected vision evide
     type: "anthropic-compatible",
     prefix: "ccown16801",
     name: "Anthropic vision node",
-    apiType: "messages",
     baseUrl: "http://127.0.0.1:9/v1",
   });
   await providers.createProviderNode({
@@ -309,7 +309,6 @@ test("#16801: Anthropic-compatible/CC nodes keep owned and rejected vision evide
     type: "anthropic-compatible",
     prefix: "ccother16801",
     name: "Anthropic foreign node",
-    apiType: "messages",
     baseUrl: "http://127.0.0.1:9/v1",
   });
   await models.addCustomModel(
@@ -397,7 +396,7 @@ test("#16801: same public model leaf from a foreign node must not authorize imag
     models: [{ kind: "model", providerId: owner, model: "my16801/ghost-vision-16801", weight: 1 }],
   });
   assert.equal(
-    getExactCustomModelVisionOverride(owner, "ghost-vision-16801"),
+    await getExactCustomModelVisionOverride(owner, "ghost-vision-16801"),
     null,
     "the source node has no explicit vision evidence for this model"
   );
@@ -405,7 +404,7 @@ test("#16801: same public model leaf from a foreign node must not authorize imag
 });
 
 test("#16801: builtin providers keep their original capability verdict", async () => {
-  assert.equal(getResolvedModelCapabilities("openai/gpt-4o").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("openai/gpt-4o")).supportsVision, true);
   await combos.createCombo({
     name: "builtin-vision-control-16801",
     strategy: "priority",

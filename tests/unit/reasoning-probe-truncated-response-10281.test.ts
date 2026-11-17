@@ -55,8 +55,8 @@ function capabilityEntry(limitContext: unknown, overrides: Record<string, unknow
   };
 }
 
-test.before(() => {
-  saveModelsDevCapabilities({
+test.before(async () => {
+  await saveModelsDevCapabilities({
     zhipu: {
       // A thinking-capable model: probe detection + buffer logic both engage.
       "glm-5.2": capabilityEntry(200000, { reasoning: true, limit_output: 65536 }),
@@ -66,23 +66,23 @@ test.before(() => {
   });
 });
 
-test.after(() => {
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+test.after(async () => {
+  await clearModelsDevCapabilities();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#10281 isTinyBudgetReasoningProbe detects tiny explicit budgets on reasoning models", () => {
+test("#10281 isTinyBudgetReasoningProbe detects tiny explicit budgets on reasoning models", async () => {
   const thinking = "zhipu/glm-5.2";
   // Claude Code's `/model` probe (max_tokens: 1) is a tiny-budget reasoning probe.
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 1 } }),
+    await isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 1 } }),
     true,
     "max_tokens=1 on a reasoning model is a probe"
   );
   // Just below the trigger threshold is still a probe.
   assert.equal(
-    isTinyBudgetReasoningProbe({
+    await isTinyBudgetReasoningProbe({
       model: thinking,
       body: { max_tokens: REASONING_BUFFER_MIN_TRIGGER - 1 },
     }),
@@ -91,7 +91,7 @@ test("#10281 isTinyBudgetReasoningProbe detects tiny explicit budgets on reasoni
   );
   // At/above the threshold it is a genuine budget, not a probe.
   assert.equal(
-    isTinyBudgetReasoningProbe({
+    await isTinyBudgetReasoningProbe({
       model: thinking,
       body: { max_tokens: REASONING_BUFFER_MIN_TRIGGER },
     }),
@@ -99,30 +99,30 @@ test("#10281 isTinyBudgetReasoningProbe detects tiny explicit budgets on reasoni
     "budgets at REASONING_BUFFER_MIN_TRIGGER are not probes"
   );
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 512 } }),
+    await isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 512 } }),
     false,
     "genuine budgets are not probes"
   );
   // OpenAI Responses format field is honoured.
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: thinking, body: { max_completion_tokens: 1 } }),
+    await isTinyBudgetReasoningProbe({ model: thinking, body: { max_completion_tokens: 1 } }),
     true,
     "max_completion_tokens=1 is a probe"
   );
   // Missing / non-positive budgets are not probes.
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: thinking, body: {} }),
+    await isTinyBudgetReasoningProbe({ model: thinking, body: {} }),
     false,
     "no budget is not a probe"
   );
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 0 } }),
+    await isTinyBudgetReasoningProbe({ model: thinking, body: { max_tokens: 0 } }),
     false,
     "non-positive budget is not a probe"
   );
   // Non-reasoning models never probe-special-case.
   assert.equal(
-    isTinyBudgetReasoningProbe({ model: "zhipu/glm-5.2-flash", body: { max_tokens: 1 } }),
+    await isTinyBudgetReasoningProbe({ model: "zhipu/glm-5.2-flash", body: { max_tokens: 1 } }),
     false,
     "non-reasoning models are not probes"
   );

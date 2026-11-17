@@ -19,7 +19,7 @@ describe("evalRunner — errored case scoring (#13137)", () => {
     resetSuites();
   });
 
-  it("fails a case whose call errored even when the error text matches the pattern", () => {
+  it("fails a case whose call errored even when the error text matches the pattern", async () => {
     registerSuite({
       id: "test-errored-case",
       name: "Errored case",
@@ -42,7 +42,7 @@ describe("evalRunner — errored case scoring (#13137)", () => {
     const failure =
       "Unable to determine provider for model 'codex'. Use a provider/model prefix " +
       "(e.g. openai/codex) or ensure the model is added as a combo entry.";
-    const run = runSuite(
+    const run = await runSuite(
       "test-errored-case",
       { "errored-01": `[ERROR] ${failure}` },
       { "errored-01": { durationMs: 3, error: failure } }
@@ -59,7 +59,7 @@ describe("evalRunner — errored case scoring (#13137)", () => {
     assert.equal(run.summary.passRate, 0);
   });
 
-  it("still scores a matching case as passed when the call succeeded", () => {
+  it("still scores a matching case as passed when the call succeeded", async () => {
     registerSuite({
       id: "test-healthy-case",
       name: "Healthy case",
@@ -74,7 +74,7 @@ describe("evalRunner — errored case scoring (#13137)", () => {
       ],
     });
 
-    const run = runSuite(
+    const run = await runSuite(
       "test-healthy-case",
       { "healthy-01": "Wrap the read in a try/catch block." },
       { "healthy-01": { durationMs: 120 } }

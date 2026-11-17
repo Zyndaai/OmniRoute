@@ -38,37 +38,46 @@ function target(provider: string, modelStr: string): ResolvedComboTarget {
   };
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
 
-test("prompt194: codex/gpt-6-astra remains admitted for image requests", () => {
+test("prompt194: codex/gpt-6-astra remains admitted for image requests", async () => {
   const astra = target("codex", "codex/gpt-6-astra");
   assert.equal(
-    getResolvedModelCapabilities({ provider: "codex", model: astra.modelStr }).supportsVision,
+    (await getResolvedModelCapabilities({ provider: "codex", model: astra.modelStr }))
+      .supportsVision,
     true
   );
-  assert.equal(isVisionIncompatibleTarget(astra, visionRequirements), false);
+  assert.equal(await isVisionIncompatibleTarget(astra, visionRequirements), false);
 });
 
-test("prompt194: unknown and explicit non-vision targets remain fail-closed", () => {
+test("prompt194: unknown and explicit non-vision targets remain fail-closed", async () => {
   const unknown = target("unknown-provider", "unknown-model");
   const nonVision = target("cnl", "deepseek/deepseek-v4-pro");
 
   assert.equal(
-    getResolvedModelCapabilities({ provider: unknown.providerId, model: unknown.modelStr })
-      .supportsVision,
+    (
+      await getResolvedModelCapabilities({
+        provider: unknown.providerId,
+        model: unknown.modelStr,
+      })
+    ).supportsVision,
     null
   );
-  assert.equal(isVisionIncompatibleTarget(unknown, visionRequirements), true);
+  assert.equal(await isVisionIncompatibleTarget(unknown, visionRequirements), true);
 
   assert.equal(
-    getResolvedModelCapabilities({ provider: nonVision.providerId, model: nonVision.modelStr })
-      .supportsVision,
+    (
+      await getResolvedModelCapabilities({
+        provider: nonVision.providerId,
+        model: nonVision.modelStr,
+      })
+    ).supportsVision,
     false
   );
-  assert.equal(isVisionIncompatibleTarget(nonVision, visionRequirements), true);
+  assert.equal(await isVisionIncompatibleTarget(nonVision, visionRequirements), true);
 });

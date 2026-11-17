@@ -26,6 +26,7 @@ const { connectionCircuitBreakerName } =
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const {
   isOAuthInvalidToken,
@@ -610,7 +611,7 @@ test("recordModelLockoutFailure uses provider profile cooldowns, backoff, and re
 // and `tests/unit/breaker-status-set-single-source-15159.test.ts` now guards both that
 // set and this file's local copy against drift. Do NOT restore a 429-inclusive set here.
 
-test("recordProviderFailure tracks failures and triggers cooldown after threshold", () => {
+test("recordProviderFailure tracks failures and triggers cooldown after threshold", async () => {
   const originalNow = Date.now;
   let now = 1_700_000_000_000;
   Date.now = () => now;
@@ -642,7 +643,7 @@ test("recordProviderFailure tracks failures and triggers cooldown after threshol
     assert.ok(remaining <= 10 * 60 * 1000); // 10 minutes max
 
     // Check getProvidersInCooldown returns the provider
-    const inCooldown = getProvidersInCooldown();
+    const inCooldown = await getProvidersInCooldown();
     assert.ok(inCooldown.some((p) => p.provider === provider));
     assert.equal(inCooldown.find((p) => p.provider === provider)?.failureCount, threshold);
 
@@ -651,7 +652,7 @@ test("recordProviderFailure tracks failures and triggers cooldown after threshol
     assert.equal(isProviderInCooldown(provider), false);
     assert.equal(getProviderCooldownRemainingMs(provider), null);
     assert.equal(
-      getProvidersInCooldown().some((p) => p.provider === provider),
+      (await getProvidersInCooldown()).some((p) => p.provider === provider),
       false
     );
   } finally {
@@ -1629,7 +1630,7 @@ test("isAccountDeactivated matches a custom signal after setCustomBannedSignals"
 // of this file, BEFORE the accountFallback.ts import — see the comment there.
 
 async function resetStorage10460() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR_10460, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR_10460, { recursive: true });
   // The in-memory model-lock map outlives the DB reset, and an unpinned combo
@@ -1649,8 +1650,8 @@ async function seedConn10460(provider: string): Promise<string> {
   return (conn as Record<string, unknown>).id as string;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR_10460, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

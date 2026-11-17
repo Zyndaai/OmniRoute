@@ -62,9 +62,9 @@ test.before(() => {
     ],
   });
 });
-test.after(() => {
+test.after(async () => {
   setTierConfig(originalTierConfig);
-  resetDbInstance();
+  await resetDbInstance();
 });
 
 for (const strategy of ["score", "rules"]) {
@@ -129,12 +129,12 @@ for (const strategy of ["score", "rules"]) {
 test("default engine honors complexity and keeps null hints neutral", async () => {
   const manifestHint = await buildComplexityRoutingHint(targets, simpleBody, log);
   assert.ok(manifestHint);
-  const selected = selectProvider({ ...config, manifestHint }, candidates, "default");
+  const selected = await selectProvider({ ...config, manifestHint }, candidates, "default");
   assert.equal(selected.provider, providers[1]);
   assert.equal(selected.factors.tierAffinity, 1);
 
   for (const hint of [undefined, null]) {
-    const neutral = selectProvider({ ...config, manifestHint: hint }, candidates, "default");
+    const neutral = await selectProvider({ ...config, manifestHint: hint }, candidates, "default");
     assert.equal(neutral.factors.tierAffinity, 0.5);
   }
 });

@@ -1,7 +1,7 @@
 import { describe, it, beforeAll } from "vitest";
 import assert from "node:assert/strict";
 
-import { getDbInstance } from "../../../src/lib/db/core.ts";
+import { getTestBackend, resetTestDb } from "../../helpers/postgres.ts";
 import {
   getModelsDevTierFitness,
   getModelsDevTierFitnessWithSource,
@@ -19,40 +19,36 @@ import {
 //      is a real entry in it.
 //   2. Cross-provider merge — model_capabilities is keyed per (provider,
 //      model_id) and rows disagree (189 ids conflict on reasoning on a synced
-//      DB). The former last-write-wins loop made tier depend on SQLite's row
+//      DB). The former last-write-wins loop made tier depend on the database's row
 //      order. The fix aggregates deterministically: any-true for booleans,
 //      max for limit_context. Both insertion orders below must agree.
 //   3. Variant inheritance — models.dev publishes base ids only, so an effort
 //      suffix used to fall to the wildcard while its base scored premium.
 
-function ensureTable(): void {
-  const db = getDbInstance();
-  db.exec(`CREATE TABLE IF NOT EXISTS model_capabilities (
-    provider TEXT NOT NULL DEFAULT '',
-    model_id TEXT NOT NULL,
-    tool_call INTEGER,
-    reasoning INTEGER,
-    limit_context INTEGER
-  )`);
-}
-
-function seed(provider: string, modelId: string, caps: {
-  tool_call?: number | null;
-  reasoning?: number | null;
-  limit_context?: number | null;
-}): void {
-  const db = getDbInstance();
-  db.prepare(
-    "DELETE FROM model_capabilities WHERE provider = ? AND model_id = ?"
-  ).run(provider, modelId);
-  db.prepare(
+async function seed(
+  provider: string,
+  modelId: string,
+  caps: {
+    tool_call?: number | null;
+    reasoning?: number | null;
+    limit_context?: number | null;
+  }
+): Promise<void> {
+  const db = getTestBackend();
+  await db.execute("DELETE FROM model_capabilities WHERE provider = $1 AND model_id = $2", [
+    provider,
+    modelId,
+  ]);
+  const toBool = (v: number | null | undefined) => (v === null || v === undefined ? null : v === 1);
+  await db.execute(
     `INSERT INTO model_capabilities (provider, model_id, tool_call, reasoning, limit_context)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, modelId, caps.tool_call ?? null, caps.reasoning ?? null, caps.limit_context ?? null);
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, modelId, toBool(caps.tool_call), toBool(caps.reasoning), caps.limit_context ?? null]
+  );
 }
 
-beforeAll(() => {
-  ensureTable();
+beforeAll(async () => {
+  await resetTestDb();
   // Force both module caches to re-read after our seeds.
   invalidateCapabilitiesCache();
 });
@@ -61,51 +57,51 @@ describe("models_dev_tier lifecycle veto (#11508)", () => {
   // `gpt-5.2-codex` is present in config/quality/model-lifecycle.json with
   // status "retired", and models.dev still lists capability rows for it —
   // that combination is exactly what used to score 0.92.
-  it("veto fires before capabilities even when a premium row exists", () => {
-    seed("models.dev", "gpt-5.2-codex", {
+  it("veto fires before capabilities even when a premium row exists", async () => {
+    await seed("models.dev", "gpt-5.2-codex", {
       reasoning: 1,
       tool_call: 1,
       limit_context: 400000,
     });
     invalidateCapabilitiesCache();
 
-    assert.equal(getModelsDevTierFitness("gpt-5.2-codex", "coding"), null);
-    assert.equal(getModelsDevTierFitnessWithSource("gpt-5.2-codex", "coding"), null);
+    assert.equal(await getModelsDevTierFitness("gpt-5.2-codex", "coding"), null);
+    assert.equal(await getModelsDevTierFitnessWithSource("gpt-5.2-codex", "coding"), null);
   });
 
-  it("leaves non-retired ids untouched by the veto", () => {
-    seed("models.dev", "gpt-5.6-sol", {
+  it("leaves non-retired ids untouched by the veto", async () => {
+    await seed("models.dev", "gpt-5.6-sol", {
       reasoning: 1,
       tool_call: 1,
       limit_context: 400000,
     });
     invalidateCapabilitiesCache();
 
-    assert.equal(getModelsDevTierFitness("gpt-5.6-sol", "coding"), 0.92);
+    assert.equal(await getModelsDevTierFitness("gpt-5.6-sol", "coding"), 0.92);
   });
 });
 
 describe("models_dev_tier cross-provider aggregation (#11508)", () => {
-  it("any-true booleans and max context win regardless of insertion order", () => {
+  it("any-true booleans and max context win regardless of insertion order", async () => {
     // Order A: disagreeing false-row arrives last (old code → budget/fast).
-    seed("provider-a", "deepseek-v4-flash", {
+    await seed("provider-a", "deepseek-v4-flash", {
       reasoning: 1,
       tool_call: 1,
       limit_context: 128000,
     });
-    seed("provider-b", "deepseek-v4-flash", {
+    await seed("provider-b", "deepseek-v4-flash", {
       reasoning: 0,
       tool_call: 0,
       limit_context: 64000,
     });
 
     // Order B: same disagreement, opposite arrival order.
-    seed("provider-b", "deepseek-v4-flash-alt-order", {
+    await seed("provider-b", "deepseek-v4-flash-alt-order", {
       reasoning: 0,
       tool_call: 0,
       limit_context: 64000,
     });
-    seed("provider-a", "deepseek-v4-flash-alt-order", {
+    await seed("provider-a", "deepseek-v4-flash-alt-order", {
       reasoning: 1,
       tool_call: 1,
       limit_context: 128000,
@@ -113,19 +109,19 @@ describe("models_dev_tier cross-provider aggregation (#11508)", () => {
 
     invalidateCapabilitiesCache();
 
-    const a = getModelsDevTierFitness("deepseek-v4-flash", "coding");
-    const b = getModelsDevTierFitness("deepseek-v4-flash-alt-order", "coding");
+    const a = await getModelsDevTierFitness("deepseek-v4-flash", "coding");
+    const b = await getModelsDevTierFitness("deepseek-v4-flash-alt-order", "coding");
     assert.equal(a, b, "tier must not depend on row order");
     assert.equal(a, 0.92, "reasoning=true from any provider → premium");
   });
 
-  it("null capabilities never masquerade as false", () => {
-    seed("provider-a", "mystery-model-nullcaps", {
+  it("null capabilities never masquerade as false", async () => {
+    await seed("provider-a", "mystery-model-nullcaps", {
       reasoning: null,
       tool_call: null,
       limit_context: null,
     });
-    seed("provider-b", "mystery-model-nullcaps", {
+    await seed("provider-b", "mystery-model-nullcaps", {
       reasoning: 1,
       tool_call: 1,
       limit_context: 200000,
@@ -133,18 +129,18 @@ describe("models_dev_tier cross-provider aggregation (#11508)", () => {
     invalidateCapabilitiesCache();
 
     // Old last-write-wins could land on the null row and derive "budget".
-    assert.equal(getModelsDevTierFitness("mystery-model-nullcaps", "coding"), 0.92);
+    assert.equal(await getModelsDevTierFitness("mystery-model-nullcaps", "coding"), 0.92);
   });
 });
 
 describe("models_dev_tier variant inheritance (#11508)", () => {
-  it("reports models_dev_tier:inherited through the WithSource surface when the catalog resolves a base", () => {
+  it("reports models_dev_tier:inherited through the WithSource surface when the catalog resolves a base", async () => {
     // Whether resolveScoresAs can strip a given suffix depends on the model
     // registry in this environment, so assert the contract rather than a
     // specific id: whenever a source is produced for an id that itself has no
     // capability row but whose resolved base does, the source carries the
     // :inherited marker; ids with their own rows never do.
-    const own = getModelsDevTierFitnessWithSource("gpt-5.6-sol", "coding");
+    const own = await getModelsDevTierFitnessWithSource("gpt-5.6-sol", "coding");
     if (own !== null) {
       assert.equal(own.source, "models_dev_tier");
     }

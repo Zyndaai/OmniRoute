@@ -1,5 +1,5 @@
 /**
- * #16836: credential metadata must be encrypted in real SQLite rows while
+ * #16836: credential metadata must be encrypted in real database rows while
  * provider reads and mutation responses continue to expose usable plaintext.
  */
 import assert from "node:assert/strict";
@@ -12,26 +12,30 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-secrets-1
 const envSnapshot = {
   DATA_DIR: process.env.DATA_DIR,
   STORAGE_ENCRYPTION_KEY: process.env.STORAGE_ENCRYPTION_KEY,
-  DISABLE_SQLITE_AUTO_BACKUP: process.env.DISABLE_SQLITE_AUTO_BACKUP,
 };
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.STORAGE_ENCRYPTION_KEY = "provider-specific-secrets-db-16836-test-key";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const connections = await import("../../src/lib/db/providers.ts");
 
-function readStoredProviderMetadata(id: string): Record<string, unknown> {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT provider_specific_data FROM provider_connections WHERE id = ?")
-    .get(id) as { provider_specific_data: string | null } | undefined;
+async function readStoredProviderMetadata(id: string): Promise<Record<string, unknown>> {
+  const row = await getTestBackend().queryOne<{ provider_specific_data: unknown }>(
+    "SELECT provider_specific_data FROM provider_connections WHERE id = $1",
+    [id]
+  );
   assert.ok(row?.provider_specific_data, "connection metadata must exist on disk");
-  return JSON.parse(row.provider_specific_data) as Record<string, unknown>;
+  const raw = row.provider_specific_data;
+  return (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, unknown>;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(envSnapshot)) {
     if (value === undefined) delete process.env[key];
@@ -51,7 +55,7 @@ test("#16836 SQLite encrypts metadata secrets without breaking reads and updates
   const id = typeof created?.id === "string" ? created.id : "";
   assert.ok(id, "provider connection was created");
 
-  const stored = readStoredProviderMetadata(id);
+  const stored = await readStoredProviderMetadata(id);
   assert.match(String(stored.consoleApiKey), /^enc:v1:/);
   assert.ok(!JSON.stringify(stored).includes(initialSecret));
   assert.equal(stored.workspaceId, "ws-16836");
@@ -77,15 +81,15 @@ test("#16836 SQLite encrypts metadata secrets without breaking reads and updates
     (updated.providerSpecificData as Record<string, unknown>).consoleApiKey,
     initialSecret
   );
-  assert.equal(readStoredProviderMetadata(id).consoleApiKey, stored.consoleApiKey);
+  assert.equal((await readStoredProviderMetadata(id)).consoleApiKey, stored.consoleApiKey);
 
   // Existing databases may contain plaintext console credentials. Reading and
   // editing any other field should transparently migrate them on the next write.
   const legacySecret = "legacy-console-secret-16836-db";
-  core
-    .getDbInstance()
-    .prepare("UPDATE provider_connections SET provider_specific_data = ? WHERE id = ?")
-    .run(JSON.stringify({ consoleApiKey: legacySecret, workspaceId: "ws-16836" }), id);
+  await getTestBackend().execute(
+    "UPDATE provider_connections SET provider_specific_data = $1::jsonb WHERE id = $2",
+    [JSON.stringify({ consoleApiKey: legacySecret, workspaceId: "ws-16836" }), id]
+  );
   const legacyRead = await connections.getProviderConnectionById(id);
   assert.equal(
     (legacyRead?.providerSpecificData as Record<string, unknown>).consoleApiKey,
@@ -96,7 +100,7 @@ test("#16836 SQLite encrypts metadata secrets without breaking reads and updates
     (migrated?.providerSpecificData as Record<string, unknown>).consoleApiKey,
     legacySecret
   );
-  const migratedOnDisk = readStoredProviderMetadata(id);
+  const migratedOnDisk = await readStoredProviderMetadata(id);
   assert.match(String(migratedOnDisk.consoleApiKey), /^enc:v1:/);
   assert.ok(!JSON.stringify(migratedOnDisk).includes(legacySecret));
   assert.equal(migratedOnDisk.workspaceId, "ws-16836");
@@ -120,7 +124,7 @@ test("#16836 Qwen and Volcengine cookies are encrypted through connection CRUD",
     });
     const id = typeof connection?.id === "string" ? connection.id : "";
     assert.ok(id, `${provider}: create should return a connection`);
-    const stored = readStoredProviderMetadata(id);
+    const stored = await readStoredProviderMetadata(id);
     assert.match(String(stored[field]), /^enc:v1:/, provider);
     assert.ok(!JSON.stringify(stored).includes(secret), provider);
     assert.equal(stored.workspaceId, "visible-identity");
@@ -131,7 +135,7 @@ test("#16836 Qwen and Volcengine cookies are encrypted through connection CRUD",
       name: `Updated console cookie ${provider}`,
     });
     assert.equal((updated?.providerSpecificData as Record<string, unknown>)[field], secret);
-    assert.equal(readStoredProviderMetadata(id)[field], stored[field]);
+    assert.equal((await readStoredProviderMetadata(id))[field], stored[field]);
 
     const lazy = (await connections.getProviderConnections({ provider })).find(
       (item) => item.id === id
@@ -154,7 +158,7 @@ test("#16836 cookie-session dedup compares plaintext despite encrypted metadata"
       providerSpecificData: { [field]: sameCookie },
     });
     assert.ok(first?.id, `${provider}: initial connection must be created`);
-    assert.match(String(readStoredProviderMetadata(String(first.id))[field]), /^enc:v1:/);
+    assert.match(String((await readStoredProviderMetadata(String(first.id)))[field]), /^enc:v1:/);
 
     // AES-GCM uses a different nonce per encryption, so comparing the newly
     // imported plaintext with a stored ciphertext always misses the same user.
@@ -193,7 +197,7 @@ test("#16836 Ollama Cloud quota cookies survive encrypted SQLite CRUD", async ()
   });
   const id = String(created?.id || "");
   assert.ok(id);
-  const stored = readStoredProviderMetadata(id);
+  const stored = await readStoredProviderMetadata(id);
   for (const [field, plaintext] of Object.entries(secrets)) {
     assert.match(String(stored[field]), /^enc:v1:/, field);
     assert.ok(!JSON.stringify(stored).includes(plaintext), field);
@@ -207,9 +211,10 @@ test("#16836 Ollama Cloud quota cookies survive encrypted SQLite CRUD", async ()
   const updated = await connections.updateProviderConnection(id, {
     name: "Ollama quota cookie updated",
   });
+  const storedAfterUpdate = await readStoredProviderMetadata(id);
   for (const [field, plaintext] of Object.entries(secrets)) {
     assert.equal((updated?.providerSpecificData as Record<string, unknown>)[field], plaintext);
-    assert.equal(readStoredProviderMetadata(id)[field], stored[field]);
+    assert.equal(storedAfterUpdate[field], stored[field]);
   }
   const lazy = (await connections.getProviderConnections({ provider: "ollama-cloud" })).find(
     (item) => item.id === id
@@ -248,7 +253,7 @@ test("#16836 nested access/session credentials remain opaque on disk", async () 
   const id = String(connection?.id || "");
   assert.ok(id);
 
-  const stored = readStoredProviderMetadata(id);
+  const stored = await readStoredProviderMetadata(id);
   for (const [field, plaintext] of Object.entries(secrets)) {
     assert.match(String(stored[field]), /^enc:v1:/, field);
     assert.ok(!JSON.stringify(stored).includes(plaintext), field);
@@ -262,11 +267,12 @@ test("#16836 nested access/session credentials remain opaque on disk", async () 
     (entry) => entry.id === id
   );
   assert.ok(lazy);
+  const storedAfterUpdate = await readStoredProviderMetadata(id);
   for (const [field, plaintext] of Object.entries(secrets)) {
     assert.equal((loaded?.providerSpecificData as Record<string, unknown>)[field], plaintext);
     assert.equal((updated?.providerSpecificData as Record<string, unknown>)[field], plaintext);
     assert.equal((lazy.providerSpecificData as Record<string, unknown>)[field], plaintext);
-    assert.equal(readStoredProviderMetadata(id)[field], stored[field]);
+    assert.equal(storedAfterUpdate[field], stored[field]);
   }
 });
 
@@ -280,7 +286,7 @@ test("#16836 imported authCookie sessions still deduplicate after encryption", a
   });
   const firstId = String(first?.id || "");
   assert.ok(firstId);
-  assert.match(String(readStoredProviderMetadata(firstId).authCookie), /^enc:v1:/);
+  assert.match(String((await readStoredProviderMetadata(firstId)).authCookie), /^enc:v1:/);
 
   const same = await connections.createProviderConnection({
     provider: "hyperagent",
@@ -319,8 +325,8 @@ test("#16836 does not conflate different cookie sessions with the same base URL"
     assert.ok(first?.id && second?.id, provider);
     assert.notEqual(first.id, second.id, `${provider}: distinct cookies must never merge`);
 
-    const storedFirst = readStoredProviderMetadata(String(first.id));
-    const storedSecond = readStoredProviderMetadata(String(second.id));
+    const storedFirst = await readStoredProviderMetadata(String(first.id));
+    const storedSecond = await readStoredProviderMetadata(String(second.id));
     assert.match(String(storedFirst[field]), /^enc:v1:/);
     assert.match(String(storedSecond[field]), /^enc:v1:/);
     assert.equal(storedFirst.baseUrl, baseUrl);

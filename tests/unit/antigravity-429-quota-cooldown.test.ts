@@ -39,9 +39,9 @@ import {
   resolveAntigravityBodyRetryHint,
 } from "../../open-sse/executors/antigravity.ts";
 
-test.after(() => {
+test.after(async () => {
   clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -103,7 +103,7 @@ test("markConnectionQuotaExhausted persists 24h cooldown; isConnectionRateLimite
   const connId = (conn as any).id;
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "should start as not rate-limited"
   );
@@ -111,7 +111,7 @@ test("markConnectionQuotaExhausted persists 24h cooldown; isConnectionRateLimite
   markConnectionQuotaExhausted(connId, FULL_QUOTA_COOLDOWN_MS);
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     true,
     "should be rate-limited after marking quota exhausted"
   );
@@ -126,9 +126,9 @@ test("markConnectionQuotaExhausted: expired cooldown does not block the connecti
   const connId = (conn as any).id;
 
   // Set cooldown in the past — simulates expired cooldown
-  providersDb.setConnectionRateLimitUntil(connId, Date.now() - 1);
+  await providersDb.setConnectionRateLimitUntil(connId, Date.now() - 1);
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "expired cooldown should not block"
   );

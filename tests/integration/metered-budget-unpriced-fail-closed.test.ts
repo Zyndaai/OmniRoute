@@ -35,7 +35,7 @@ function chatBody(model: string, stream = false) {
 
 async function keyWithDailyBudget(limitUsd: number) {
   const key = await seedApiKey({ name: "budgeted" });
-  costRules.setBudget(key.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
+  await costRules.setBudget(key.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
   return key;
 }
 
@@ -59,11 +59,11 @@ async function errorCode(response: Response): Promise<unknown> {
 test.beforeEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = 0;
   await resetStorage();
-  costRules.resetCostData();
+  await costRules.resetCostData();
 });
 test.afterEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = h.originalRetryDelayMs;
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await resetStorage();
 });
 test.after(async () => {
@@ -100,7 +100,10 @@ test("U2: a completed streaming call to an unpriced metered model closes the dol
   await first.text();
 
   // The streaming charge is settled after the stream completes (fire-and-forget).
-  const closed = await h.waitFor(() => costRules.checkBudget(key.id).allowed === false, 5000);
+  const closed = await h.waitFor(
+    async () => (await costRules.checkBudget(key.id)).allowed === false,
+    5000
+  );
   assert.ok(closed, "the budget must close once the unpriced stream has completed");
 
   const second = await handleChat(
@@ -120,7 +123,7 @@ test("U3: priced traffic under the limit keeps flowing (control)", async () => {
     assert.equal(r.status, 200, await r.clone().text());
   }
   assert.deepEqual(h.providersSeen(), ["openai", "openai"]);
-  assert.equal(costRules.checkBudget(key.id).allowed, true);
+  assert.equal((await costRules.checkBudget(key.id)).allowed, true);
 });
 
 test("U4: USAGE_LIMIT_IGNORE_UNPRICED=true counts unpriced usage as $0, as it does for the usage limit", async () => {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-registry-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -19,14 +20,14 @@ const { createProxyRegistrySchema, updateProxyRegistrySchema } =
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -320,12 +321,7 @@ test("resolveProxyForConnection uses apiKey proxy before account-level proxy", a
   // Enable per-key proxy globally (master gate) and on the connection itself
   // (#8385: the global toggle is a true AND-override, not an independent
   // opt-in path — both must be on for the api-key-level proxy to apply).
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'perKeyProxyEnabled', 'true')"
-    )
-    .run();
+  await settingsDb.updateSettings({ perKeyProxyEnabled: true });
   await providersDb.updateProviderConnection(connId, { perKeyProxyEnabled: true });
 
   const apiKeyProxy = await proxiesDb.createProxy({

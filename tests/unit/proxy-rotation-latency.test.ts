@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-latency-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -16,7 +17,7 @@ const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -34,26 +35,25 @@ async function makeProxy(host: string, port: number) {
   return proxy!;
 }
 
-function insertLog(
-  db: ReturnType<typeof core.getDbInstance>,
+async function insertLog(
   host: string,
   port: number,
   latencyMs: number,
   timestampIso: string
-) {
-  db.prepare(
-    "INSERT INTO proxy_logs (id, timestamp, proxy_host, proxy_port, latency_ms) VALUES (?, ?, ?, ?, ?)"
-  ).run(`log-${Date.now()}-${Math.random()}`, timestampIso, host, port, latencyMs);
+): Promise<void> {
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, "timestamp", proxy_host, proxy_port, latency_ms) VALUES ($1, $2, $3, $4, $5)`,
+    [`log-${Date.now()}-${Math.random()}`, timestampIso, host, port, latencyMs]
+  );
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("latency strategy chooses proxy with lowest average latency within the window", async () => {
   await resetStorage();
-  const db = core.getDbInstance();
 
   const p1 = await makeProxy("10.0.0.1", 8081);
   const p2 = await makeProxy("10.0.0.2", 8082);
@@ -67,12 +67,12 @@ test("latency strategy chooses proxy with lowest average latency within the wind
   const insideWindow = new Date(now - 2 * 60 * 60 * 1000).toISOString();
 
   // p1 average latency: (100 + 150) / 2 = 125ms
-  insertLog(db, "10.0.0.1", 8081, 100, insideWindow);
-  insertLog(db, "10.0.0.1", 8081, 150, insideWindow);
+  await insertLog("10.0.0.1", 8081, 100, insideWindow);
+  await insertLog("10.0.0.1", 8081, 150, insideWindow);
 
   // p2 average latency: (200 + 300) / 2 = 250ms
-  insertLog(db, "10.0.0.2", 8082, 200, insideWindow);
-  insertLog(db, "10.0.0.2", 8082, 300, insideWindow);
+  await insertLog("10.0.0.2", 8082, 200, insideWindow);
+  await insertLog("10.0.0.2", 8082, 300, insideWindow);
 
   const resolved = await proxiesDb.resolveProxyForScopeFromRegistry("provider", "openai");
   assert.ok(resolved);
@@ -85,7 +85,6 @@ test("latency strategy chooses proxy with lowest average latency within the wind
 
 test("latency strategy prioritizes untested proxies (no logs)", async () => {
   await resetStorage();
-  const db = core.getDbInstance();
 
   const p1 = await makeProxy("10.0.0.1", 8081);
   const p2 = await makeProxy("10.0.0.2", 8082); // untested
@@ -96,7 +95,7 @@ test("latency strategy prioritizes untested proxies (no logs)", async () => {
 
   // Insert log for p1 only
   const insideWindow = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  insertLog(db, "10.0.0.1", 8081, 50, insideWindow);
+  await insertLog("10.0.0.1", 8081, 50, insideWindow);
 
   const resolved = await proxiesDb.resolveProxyForScopeFromRegistry("provider", "openai");
   assert.ok(resolved);
@@ -109,7 +108,6 @@ test("latency strategy prioritizes untested proxies (no logs)", async () => {
 
 test("latency strategy ignores logs outside the configured time window", async () => {
   await resetStorage();
-  const db = core.getDbInstance();
 
   const p1 = await makeProxy("10.0.0.1", 8081);
   const p2 = await makeProxy("10.0.0.2", 8082);
@@ -122,11 +120,11 @@ test("latency strategy ignores logs outside the configured time window", async (
 
   // p1 has 300ms latency log inside 6h window (e.g. 2 hours ago)
   const insideWindow = new Date(now - 2 * 60 * 60 * 1000).toISOString();
-  insertLog(db, "10.0.0.1", 8081, 300, insideWindow);
+  await insertLog("10.0.0.1", 8081, 300, insideWindow);
 
   // p2 has 50ms latency log but OUTSIDE 6h window (e.g. 8 hours ago)
   const outsideWindow = new Date(now - 8 * 60 * 60 * 1000).toISOString();
-  insertLog(db, "10.0.0.2", 8082, 50, outsideWindow);
+  await insertLog("10.0.0.2", 8082, 50, outsideWindow);
 
   // Since p2's log is outside the 6h window, p2 is considered untested within the window.
   // Untested proxies are prioritized (score -1) over tested ones (score 300).

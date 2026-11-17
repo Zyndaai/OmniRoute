@@ -528,10 +528,10 @@ const VALID_FEED_JSON = JSON.stringify({
 // Accessor: flag off => baseline passthrough, no cache read
 // ---------------------------------------------------------------------------
 
-test("getRadarCatalog: flag off returns baseline and does NOT read cache", () => {
+test("getRadarCatalog: flag off returns baseline and does NOT read cache", async () => {
   let cacheRead = false;
 
-  const result = getRadarCatalog({
+  const result = await getRadarCatalog({
     getFlag: () => false,
     getCache: () => {
       cacheRead = true;
@@ -549,8 +549,8 @@ test("getRadarCatalog: flag off returns baseline and does NOT read cache", () =>
 // Accessor: no cache => baseline
 // ---------------------------------------------------------------------------
 
-test("getRadarCatalog: no cache returns baseline", () => {
-  const result = getRadarCatalog({
+test("getRadarCatalog: no cache returns baseline", async () => {
+  const result = await getRadarCatalog({
     getFlag: () => true,
     getCache: () => null,
     baseline: makeBaseline(),
@@ -565,8 +565,8 @@ test("getRadarCatalog: no cache returns baseline", () => {
 // Accessor: corrupt cached payload => baseline (defensive), no throw
 // ---------------------------------------------------------------------------
 
-test("getRadarCatalog: corrupt payload returns baseline without throwing", () => {
-  const result = getRadarCatalog({
+test("getRadarCatalog: corrupt payload returns baseline without throwing", async () => {
+  const result = await getRadarCatalog({
     getFlag: () => true,
     getCache: () => ({
       version: "2026.08.01.1",
@@ -586,8 +586,8 @@ test("getRadarCatalog: corrupt payload returns baseline without throwing", () =>
 // Accessor: valid cache => applyFeed output + meta
 // ---------------------------------------------------------------------------
 
-test("getRadarCatalog: valid cache returns merged entries with meta", () => {
-  const result = getRadarCatalog({
+test("getRadarCatalog: valid cache returns merged entries with meta", async () => {
+  const result = await getRadarCatalog({
     getFlag: () => true,
     getLocalState: () => ({ localOverrides: new Map(), tombstones: new Set() }),
     getCache: () => ({
@@ -622,7 +622,7 @@ test("getRadarCatalog: valid cache returns merged entries with meta", () => {
 // Accessor: schema-valid but wrong feed name => falls back to baseline
 // ---------------------------------------------------------------------------
 
-test("getRadarCatalog: wrong feed literal falls back to baseline", () => {
+test("getRadarCatalog: wrong feed literal falls back to baseline", async () => {
   const badPayload = JSON.stringify({
     feed: "wrong-feed-name",
     schemaVersion: 1,
@@ -636,7 +636,7 @@ test("getRadarCatalog: wrong feed literal falls back to baseline", () => {
     totals: { dedupedTokensPerMonth: 0, modelCount: 0, poolCount: 0 },
   });
 
-  const result = getRadarCatalog({
+  const result = await getRadarCatalog({
     getFlag: () => true,
     getCache: () => ({
       version: "2026.08.01.1",

@@ -26,20 +26,14 @@ const { syncQuotaCombos } = await import("../../src/lib/quota/quotaCombos.ts");
 const { quotaModelName } = await import("../../src/lib/quota/quotaModelNaming.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const { REGISTRY } = await import("../../open-sse/config/providerRegistry.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-  if (fs.existsSync(TEST_DATA_DIR))
-    fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -60,7 +54,7 @@ test("syncQuotaCombos generates qtSd/ combos for a CLI provider (codex) via REGI
     apiKey: "sk-codex",
   });
   const connId = (conn as Record<string, unknown>).id as string;
-  const pool = poolsDb.createPool({ connectionId: connId, name: "Codex Quota" });
+  const pool = await poolsDb.createPool({ connectionId: connId, name: "Codex Quota" });
 
   await syncQuotaCombos(pool.id);
 

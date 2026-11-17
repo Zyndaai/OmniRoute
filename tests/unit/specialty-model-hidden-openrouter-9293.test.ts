@@ -31,9 +31,10 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const { mergeModelCompatOverride, getModelIsHidden } = await import("@/lib/db/models");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -45,7 +46,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -65,24 +66,28 @@ test("#9293 hidden OpenRouter specialty models are excluded from /v1/models cata
 
   // Confirm the hidden flag is not set yet
   assert.equal(
-    getModelIsHidden("openrouter", "google/chirp-3"),
+    await getModelIsHidden("openrouter", "google/chirp-3"),
     false,
     "chirp-3 is initially visible"
   );
   assert.equal(
-    getModelIsHidden("openrouter", "black-forest-labs/flux.2-pro"),
+    await getModelIsHidden("openrouter", "black-forest-labs/flux.2-pro"),
     false,
     "flux.2-pro is initially visible"
   );
 
   // Hide two OpenRouter specialty models: one audio, one image
-  mergeModelCompatOverride("openrouter", "google/chirp-3", { isHidden: true });
-  mergeModelCompatOverride("openrouter", "black-forest-labs/flux.2-pro", { isHidden: true });
+  await mergeModelCompatOverride("openrouter", "google/chirp-3", { isHidden: true });
+  await mergeModelCompatOverride("openrouter", "black-forest-labs/flux.2-pro", { isHidden: true });
 
   // Confirm the hidden flags are stored correctly
-  assert.equal(getModelIsHidden("openrouter", "google/chirp-3"), true, "chirp-3 is now hidden");
   assert.equal(
-    getModelIsHidden("openrouter", "black-forest-labs/flux.2-pro"),
+    await getModelIsHidden("openrouter", "google/chirp-3"),
+    true,
+    "chirp-3 is now hidden"
+  );
+  assert.equal(
+    await getModelIsHidden("openrouter", "black-forest-labs/flux.2-pro"),
     true,
     "flux.2-pro is now hidden"
   );

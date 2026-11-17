@@ -710,10 +710,10 @@ test("fallbackToolCallId returns the right id shape with and without an index", 
   assert.match(zeroIndex, /^call_0_\d+$/, "index 0 must use the indexed form, not the bare form");
 });
 
-test("translateRequest replays cached reasoning-only messages when interleaved field is reasoning_content", () => {
-  clearReasoningCacheAll();
-  clearModelsDevCapabilities();
-  saveModelsDevCapabilities({
+test("translateRequest replays cached reasoning-only messages when interleaved field is reasoning_content", async () => {
+  await clearReasoningCacheAll();
+  await clearModelsDevCapabilities();
+  await saveModelsDevCapabilities({
     deepseek: {
       "deepseek-v4-flash": buildCapability({
         interleaved_field: "reasoning_content",
@@ -734,7 +734,7 @@ test("translateRequest replays cached reasoning-only messages when interleaved f
     "cached reasoning only"
   );
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "deepseek-v4-flash",
@@ -747,13 +747,13 @@ test("translateRequest replays cached reasoning-only messages when interleaved f
   );
 
   assert.equal(result.messages[1].reasoning_content, "cached reasoning only");
-  assert.equal(getReasoningCacheServiceStats().replays, 1);
-  clearModelsDevCapabilities();
-  clearReasoningCacheAll();
+  assert.equal((await getReasoningCacheServiceStats()).replays, 1);
+  await clearModelsDevCapabilities();
+  await clearReasoningCacheAll();
 });
 
-test("translateRequest does not replay reasoning-only messages for non-DeepSeek models", () => {
-  clearReasoningCacheAll();
+test("translateRequest does not replay reasoning-only messages for non-DeepSeek models", async () => {
+  await clearReasoningCacheAll();
   const scope = "api-key:test:session:helper-kimi";
   const messages = [
     { role: "user", content: "solve this" },
@@ -766,7 +766,7 @@ test("translateRequest does not replay reasoning-only messages for non-DeepSeek 
     "cached kimi reasoning"
   );
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "kimi-k2.6",
@@ -779,12 +779,12 @@ test("translateRequest does not replay reasoning-only messages for non-DeepSeek 
   );
 
   assert.equal(result.messages[1].reasoning_content, undefined);
-  assert.equal(getReasoningCacheServiceStats().replays, 0);
-  clearReasoningCacheAll();
+  assert.equal((await getReasoningCacheServiceStats()).replays, 0);
+  await clearReasoningCacheAll();
 });
 
-test("translateRequest replays cached reasoning before Kimi Coding's empty fallback", () => {
-  clearReasoningCacheAll();
+test("translateRequest replays cached reasoning before Kimi Coding's empty fallback", async () => {
+  await clearReasoningCacheAll();
   cacheReasoningByKey(
     "toolu_kimi_claude",
     "kimi-coding-apikey",
@@ -794,7 +794,7 @@ test("translateRequest replays cached reasoning before Kimi Coding's empty fallb
 
   // Claude-format request: assistant has tool_use in content[] but NO thinking block
   // This simulates the scenario that causes infinite loops
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -834,14 +834,14 @@ test("translateRequest replays cached reasoning before Kimi Coding's empty fallb
   const toolUseIdx = assistantMsg.content.findIndex((b) => b?.type === "tool_use");
   assert.ok(thinkingIdx < toolUseIdx, "thinking block should be before tool_use");
 
-  assert.equal(getReasoningCacheServiceStats().replays, 1);
-  clearReasoningCacheAll();
+  assert.equal((await getReasoningCacheServiceStats()).replays, 1);
+  await clearReasoningCacheAll();
 });
 
-test("translateRequest uses an empty Kimi Coding thinking marker on cache miss", () => {
-  clearReasoningCacheAll();
+test("translateRequest uses an empty Kimi Coding thinking marker on cache miss", async () => {
+  await clearReasoningCacheAll();
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -869,11 +869,11 @@ test("translateRequest uses an empty Kimi Coding thinking marker on cache miss",
   assert.ok(thinkingBlock, "thinking block should be injected on cache miss");
   assert.equal(thinkingBlock.thinking, "");
 
-  clearReasoningCacheAll();
+  await clearReasoningCacheAll();
 });
 
-test("translateRequest does NOT inject duplicate thinking for Claude-format messages with existing thinking block", () => {
-  clearReasoningCacheAll();
+test("translateRequest does NOT inject duplicate thinking for Claude-format messages with existing thinking block", async () => {
+  await clearReasoningCacheAll();
   cacheReasoningByKey(
     "toolu_existing",
     "kimi-coding-apikey",
@@ -881,7 +881,7 @@ test("translateRequest does NOT inject duplicate thinking for Claude-format mess
     "cached thinking must not replace client thinking"
   );
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -915,20 +915,20 @@ test("translateRequest does NOT inject duplicate thinking for Claude-format mess
     "I already have this",
     "original thinking should be preserved"
   );
-  assert.equal(getReasoningCacheServiceStats().replays, 0);
+  assert.equal((await getReasoningCacheServiceStats()).replays, 0);
 
-  clearReasoningCacheAll();
+  await clearReasoningCacheAll();
 });
 
-test("translateRequest replays cached reasoning when the client's Claude-format thinking block has no signature", () => {
+test("translateRequest replays cached reasoning when the client's Claude-format thinking block has no signature", async () => {
   // #12105: an unsigned thinking block cannot be replayed to Claude, so the request
   // translator drops it instead of stamping a fabricated signature. For Kimi Coding the
   // tool_use turn still needs a thinking precursor, and the reasoning cache (keyed by the
   // tool_use id) is the authentic source — it must be re-hydrated exactly once.
-  clearReasoningCacheAll();
+  await clearReasoningCacheAll();
   cacheReasoningByKey("toolu_unsigned", "kimi-coding-apikey", "k3-256k", "cached thinking");
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "k3-256k",
@@ -968,7 +968,7 @@ test("translateRequest replays cached reasoning when the client's Claude-format 
   const thinkingIdx = assistantMsg.content.indexOf(thinkingBlocks[0]);
   const toolUseIdx = assistantMsg.content.findIndex((b) => b?.type === "tool_use");
   assert.ok(thinkingIdx < toolUseIdx, "thinking block should be before tool_use");
-  assert.equal(getReasoningCacheServiceStats().replays, 1);
+  assert.equal((await getReasoningCacheServiceStats()).replays, 1);
 
-  clearReasoningCacheAll();
+  await clearReasoningCacheAll();
 });

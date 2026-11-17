@@ -15,6 +15,7 @@
 
 import { db } from "./pg";
 import { aggregateLedgerThisMonth } from "./costLedger";
+import { invalidateApiKeyPolicyCache, loadApiKeyPolicyConfig } from "./readCache";
 import { toNumber } from "@/shared/utils/numeric";
 
 // ---------------------------------------------------------------------------
@@ -114,18 +115,21 @@ function rowToLimits(row: unknown): KeyQuotaLimits {
 }
 
 /**
- * Load quota limits for a key. Returns all-null limits when no row exists.
+ * Load quota limits for a key. Returns all-null limits when no row exists. Read on every
+ * request, so cached per key (see loadApiKeyPolicyConfig); the writers below invalidate it.
  */
 export async function getKeyQuotaLimits(apiKeyId: string): Promise<KeyQuotaLimits> {
   if (!apiKeyId) return { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
-  const row = await db().queryOne(
-    `SELECT api_key_id, tpm_limit, rpm_limit, monthly_amount_usd
-     FROM api_key_quota_limits WHERE api_key_id = $1`,
-    [apiKeyId]
-  );
-  return row
-    ? rowToLimits(row)
-    : { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
+  return loadApiKeyPolicyConfig(`key-quota:${apiKeyId}`, async () => {
+    const row = await db().queryOne(
+      `SELECT api_key_id, tpm_limit, rpm_limit, monthly_amount_usd
+       FROM api_key_quota_limits WHERE api_key_id = $1`,
+      [apiKeyId]
+    );
+    return row
+      ? rowToLimits(row)
+      : { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
+  });
 }
 
 export interface UpsertKeyQuotaLimitsInput {
@@ -169,6 +173,7 @@ export async function upsertKeyQuotaLimits(
       input.monthlyAmountUsd !== undefined,
     ]
   );
+  invalidateApiKeyPolicyCache();
   return rowToLimits(row);
 }
 
@@ -181,6 +186,7 @@ export async function clearKeyQuotaLimits(apiKeyId: string): Promise<void> {
       [apiKeyId, DIMENSION_TPM, DIMENSION_RPM]
     );
   });
+  invalidateApiKeyPolicyCache();
 }
 
 // ---------------------------------------------------------------------------

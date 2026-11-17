@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +6,6 @@ import test from "node:test";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-affinity-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.REDIS_URL;
 delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 const core = await import("../../src/lib/db/core.ts");
@@ -84,9 +82,15 @@ test.beforeEach(() => {
   factory._setSessionAffinityRedisForTests(null);
   delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 });
-test.after(() => {
+// PostgreSQL's first query opens the pool, which can exceed the 25 ms Redis admission budget used
+// below and push the first remote write into fallback. Warm the pool once before any store test.
+test.before(async () => {
+  await sqlite.sqliteSessionAffinityStore.get("warm-up", "codex", 1);
+});
+
+test.after(async () => {
   factory._setSessionAffinityRedisForTests(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -158,9 +162,9 @@ for (const shadow of ["empty", "wrong"] as const) {
       identity.sessionAffinityAccountIdentity(account("remote-a"), "codex")
     );
     const shared = await store.get(key, "codex", 60_000, now);
-    sqlite.deleteSessionAccountAffinity(key, "codex");
+    await sqlite.deleteSessionAccountAffinity(key, "codex");
     if (shadow === "wrong")
-      sqlite.upsertSessionAccountAffinity(key, "codex", "wrong", now + 1, 60_000);
+      await sqlite.upsertSessionAccountAffinity(key, "codex", "wrong", now + 1, 60_000);
     assert.equal(
       identity.resolveSessionAffinityConnection(shared, [account("local-b")], "codex")?.id,
       "local-b"
@@ -174,8 +178,8 @@ for (const shadow of ["empty", "wrong"] as const) {
 for (const consumer of ["planner", "select", "apply"] as const) {
   test(`default-off prefetched pins must not survive their expiry boundary (${consumer})`, async () => {
     const key = `expiry-${consumer}`;
-    sqlite.upsertSessionAccountAffinity(key, "codex", "old", 1_000, 100);
-    const snapshot = sqlite.getSessionAccountAffinity(key, "codex", 100, 1_050);
+    await sqlite.upsertSessionAccountAffinity(key, "codex", "old", 1_000, 100);
+    const snapshot = await sqlite.getSessionAccountAffinity(key, "codex", 100, 1_050);
     assert.ok(snapshot);
     const actualNow = Date.now;
     Date.now = () => 1_100;
@@ -223,7 +227,7 @@ for (const consumer of ["planner", "select", "apply"] as const) {
   });
 }
 
-test("default-off selection must keep the base SQLite JSON shape byte-for-byte", async () => {
+test("default-off selection stores the base pin fields with ISO timestamps", async () => {
   const providers = await import("../../src/lib/db/providers.ts");
   const c = await providers.createProviderConnection({
     ...account("unused"),
@@ -245,23 +249,16 @@ test("default-off selection must keep the base SQLite JSON shape byte-for-byte",
         null
       )!
       .commit();
-    const key = `codex:${createHash("sha256").update("codex:default-parity").digest("hex")}`;
-    const row = core
-      .getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace=? AND key=?")
-      .get("session_account_affinity", key) as { value: string };
-    assert.equal(
-      row.value,
-      JSON.stringify({
-        connectionId: String(c.id),
-        createdAt: new Date(now).toISOString(),
-        lastUsedAt: new Date(now).toISOString(),
-        expiresAt: new Date(now + 60_000).toISOString(),
-      })
-    );
+    // The row now lives in the PostgreSQL session_affinities table; read it back through the
+    // domain getter and check the same fields the old SQLite JSON carried.
+    const stored = await sqlite.getSessionAccountAffinity("default-parity", "codex", 60_000);
+    assert.equal(stored?.connectionId, String(c.id));
+    assert.equal(stored?.createdAt, new Date(now).toISOString());
+    assert.equal(stored?.lastUsedAt, new Date(now).toISOString());
+    assert.equal(stored?.expiresAt, new Date(now + 60_000).toISOString());
     assert.equal(
       identity.resolveSessionAffinityConnection(
-        sqlite.getSessionAccountAffinity("default-parity", "codex", 60_000),
+        await sqlite.getSessionAccountAffinity("default-parity", "codex", 60_000),
         [{ id: String(c.id) }],
         "codex"
       )?.id,

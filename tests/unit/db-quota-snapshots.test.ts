@@ -1,32 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-quota-snapshots-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 
-async function resetStorage() {
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+// quota_snapshots rows reference provider_connections (foreign key), so the connection ids used
+// below are seeded before each test.
+const CONNECTION_IDS = ["conn-1", "conn-2", "conn-a", "old-conn"];
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
+  const backend = getTestBackend();
+  for (const id of CONNECTION_IDS) {
+    await backend.execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, 'openai') ON CONFLICT (id) DO NOTHING",
+      [id]
+    );
+  }
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
-
-test("quotaSnapshots save and query rows with provider and connection filters", () => {
-  quotaSnapshotsDb.saveQuotaSnapshot({
+test("quotaSnapshots save and query rows with provider and connection filters", async () => {
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "conn-1",
     window_key: "hourly",
@@ -36,7 +31,7 @@ test("quotaSnapshots save and query rows with provider and connection filters", 
     window_duration_ms: 3600000,
     raw_data: JSON.stringify({ source: "first" }),
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "anthropic",
     connection_id: "conn-2",
     window_key: "daily",
@@ -47,7 +42,7 @@ test("quotaSnapshots save and query rows with provider and connection filters", 
     raw_data: JSON.stringify({ source: "second" }),
   });
 
-  const openaiRows = quotaSnapshotsDb.getQuotaSnapshots({
+  const openaiRows = await quotaSnapshotsDb.getQuotaSnapshots({
     provider: "openai",
     connectionId: "conn-1",
     since: "2000-01-01T00:00:00.000Z",
@@ -58,8 +53,8 @@ test("quotaSnapshots save and query rows with provider and connection filters", 
   assert.equal(openaiRows[0].connectionId, "conn-1");
 });
 
-test("quotaSnapshots aggregates by provider or connection and rejects invalid buckets", () => {
-  quotaSnapshotsDb.saveQuotaSnapshot({
+test("quotaSnapshots aggregates by provider or connection and rejects invalid buckets", async () => {
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "conn-a",
     window_key: "hourly",
@@ -69,7 +64,7 @@ test("quotaSnapshots aggregates by provider or connection and rejects invalid bu
     window_duration_ms: 3600000,
     raw_data: "{}",
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "conn-a",
     window_key: "hourly",
@@ -80,12 +75,12 @@ test("quotaSnapshots aggregates by provider or connection and rejects invalid bu
     raw_data: "{}",
   });
 
-  const providerAgg = quotaSnapshotsDb.getAggregatedSnapshots({
+  const providerAgg = await quotaSnapshotsDb.getAggregatedSnapshots({
     provider: "openai",
     since: "2000-01-01T00:00:00.000Z",
     bucketMinutes: 60,
   });
-  const connectionAgg = quotaSnapshotsDb.getAggregatedSnapshots({
+  const connectionAgg = await quotaSnapshotsDb.getAggregatedSnapshots({
     since: "2000-01-01T00:00:00.000Z",
     bucketMinutes: 60,
     aggregateBy: "connection",
@@ -95,7 +90,7 @@ test("quotaSnapshots aggregates by provider or connection and rejects invalid bu
   assert.equal(providerAgg[0].remainingPct, 60);
   assert.equal(connectionAgg[0].provider, "openai:conn-a");
 
-  assert.throws(
+  await assert.rejects(
     () =>
       quotaSnapshotsDb.getAggregatedSnapshots({
         since: "2000-01-01T00:00:00.000Z",
@@ -105,52 +100,55 @@ test("quotaSnapshots aggregates by provider or connection and rejects invalid bu
   );
 });
 
-test("quotaSnapshots cleanup removes old rows and throttles repeated execution", () => {
-  const db = coreDb.getDbInstance();
-  db.prepare(
-    `
-    INSERT INTO quota_snapshots
-    (provider, connection_id, window_key, remaining_percentage, is_exhausted, next_reset_at, window_duration_ms, raw_data, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    "openai",
-    "old-conn",
-    "hourly",
-    20,
-    1,
-    "2000-01-01T01:00:00.000Z",
-    3600000,
-    "{}",
-    "2000-01-01T00:00:00.000Z"
+test("quotaSnapshots cleanup removes old rows and throttles repeated execution", async () => {
+  await getTestBackend().execute(
+    `INSERT INTO quota_snapshots
+     (provider, connection_id, window_key, remaining_percentage, is_exhausted, next_reset_at, window_duration_ms, raw_data, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
+    [
+      "openai",
+      "old-conn",
+      "hourly",
+      20,
+      true,
+      "2000-01-01T01:00:00.000Z",
+      3600000,
+      "{}",
+      "2000-01-01T00:00:00.000Z",
+    ]
   );
 
-  const deleted = quotaSnapshotsDb.cleanupOldSnapshots(1);
-  const throttled = quotaSnapshotsDb.cleanupOldSnapshots(1);
+  const deleted = await quotaSnapshotsDb.cleanupOldSnapshots(1);
+  const throttled = await quotaSnapshotsDb.cleanupOldSnapshots(1);
 
   assert.equal(deleted, 1);
   assert.equal(throttled, 0);
 });
 
-test("quotaSnapshots aggregation returns one row per bucket with the tightest window", () => {
-  const db = coreDb.getDbInstance();
-  const insert = db.prepare(
-    `INSERT INTO quota_snapshots
-     (provider, connection_id, window_key, remaining_percentage, is_exhausted, next_reset_at, window_duration_ms, raw_data, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const row = (windowKey: string, remaining: number, exhausted: number, createdAt: string) =>
-    insert.run("claude", "conn-1", windowKey, remaining, exhausted, null, null, "{}", createdAt);
+test("quotaSnapshots aggregation returns one row per bucket with the tightest window", async () => {
+  const backend = getTestBackend();
+  const row = (
+    windowKey: string,
+    remaining: number,
+    exhausted: boolean,
+    createdAt: string
+  ) =>
+    backend.execute(
+      `INSERT INTO quota_snapshots
+       (provider, connection_id, window_key, remaining_percentage, is_exhausted, next_reset_at, window_duration_ms, raw_data, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
+      ["claude", "conn-1", windowKey, remaining, exhausted, null, null, "{}", createdAt]
+    );
 
   // 10:00 bucket: the 5h session is almost full but the weekly window is exhausted.
-  row("session (5h)", 97, 0, "2026-01-01T10:05:00.000Z");
-  row("weekly (7d)", 20, 0, "2026-01-01T10:10:00.000Z");
-  row("weekly (7d)", 0, 1, "2026-01-01T10:40:00.000Z");
+  await row("session (5h)", 97, false, "2026-01-01T10:05:00.000Z");
+  await row("weekly (7d)", 20, false, "2026-01-01T10:10:00.000Z");
+  await row("weekly (7d)", 0, true, "2026-01-01T10:40:00.000Z");
   // 11:00 bucket: both windows have headroom, the weekly one is still the tightest.
-  row("session (5h)", 90, 0, "2026-01-01T11:05:00.000Z");
-  row("weekly (7d)", 40, 0, "2026-01-01T11:10:00.000Z");
+  await row("session (5h)", 90, false, "2026-01-01T11:05:00.000Z");
+  await row("weekly (7d)", 40, false, "2026-01-01T11:10:00.000Z");
 
-  const byProvider = quotaSnapshotsDb.getAggregatedSnapshots({
+  const byProvider = await quotaSnapshotsDb.getAggregatedSnapshots({
     since: "2000-01-01T00:00:00.000Z",
     bucketMinutes: 60,
   });
@@ -168,7 +166,7 @@ test("quotaSnapshots aggregation returns one row per bucket with the tightest wi
   assert.equal(byProvider[1].isExhausted, false);
   assert.equal(byProvider[1].windowKey, "weekly (7d)");
 
-  const byConnection = quotaSnapshotsDb.getAggregatedSnapshots({
+  const byConnection = await quotaSnapshotsDb.getAggregatedSnapshots({
     since: "2000-01-01T00:00:00.000Z",
     bucketMinutes: 60,
     aggregateBy: "connection",

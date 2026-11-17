@@ -1,26 +1,15 @@
-// ENVIRONMENT NOTE (sandbox better-sqlite3 / glibc limitation, not a code defect):
-// This test constructs or exercises a real better-sqlite3-backed SQLite database.
-// better-sqlite3 is a native addon; production and CI load it normally, but some
-// sandboxes/dev boxes ship a system glibc older than the prebuilt binary requires
-// ("GLIBC_2.29 not found"), so the native module fails to dlopen and any test that
-// reaches better-sqlite3 directly (or asserts stdout that the load-failure warning
-// would pollute) fails HERE while passing in CI. This is a known environment
-// limitation, not a defect in the code under test: the OmniRoute runtime itself
-// cascades to node:sqlite/sql.js when better-sqlite3 is unavailable. See
-// tests/unit/_helpers/betterSqlite3Availability.ts for a guard helper.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
+import { resetTestDb } from "../helpers/postgres.ts";
 
-const isWindows = process.platform === "win32";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-fixes-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
-const backupDb = await import("../../src/lib/db/backup.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -54,26 +43,11 @@ async function withEnv(name, value, fn) {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: any) {
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((r) => setTimeout(r, 100 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -116,69 +90,24 @@ test("token refresh dedupe key avoids collision for same-prefix tokens", async (
   }
 });
 
-test(
-  "restoreDbBackup clears stale sqlite sidecars before reopen",
-  { skip: isWindows },
-  async () => {
-    await resetStorage();
-
-    const db = core.getDbInstance();
-    const now = new Date().toISOString();
-    db.prepare(
-      "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run("restore-test-conn", "openai", "apikey", "restore-test", 1, now, now);
-
-    const backupId = "db_2000-01-01T00-00-00-000Z_manual.sqlite";
-    const backupPath = path.join(core.DB_BACKUPS_DIR, backupId);
-    fs.mkdirSync(core.DB_BACKUPS_DIR, { recursive: true });
-    await db.backup(backupPath);
-
-    core.resetDbInstance();
-    fs.writeFileSync(`${core.SQLITE_FILE}-wal`, "STALE-WAL-MARKER");
-    fs.writeFileSync(`${core.SQLITE_FILE}-shm`, "STALE-SHM-MARKER");
-    fs.writeFileSync(`${core.SQLITE_FILE}-journal`, "STALE-JOURNAL-MARKER");
-
-    await backupDb.restoreDbBackup(backupId);
-
-    for (const suffix of ["-wal", "-shm", "-journal"]) {
-      const sidecarPath = `${core.SQLITE_FILE}${suffix}`;
-      if (!fs.existsSync(sidecarPath)) continue;
-      const text = fs.readFileSync(sidecarPath, "utf8");
-      assert.equal(text.includes("STALE-"), false, `sidecar ${suffix} still contains stale marker`);
-    }
-
-    const reopenedDb = core.getDbInstance();
-    const row = reopenedDb
-      .prepare("SELECT COUNT(*) AS cnt FROM provider_connections WHERE id = ?")
-      .get("restore-test-conn");
-    assert.equal((row as any).cnt, 1);
-  }
-);
-
-test("closeDbInstance checkpoints WAL changes into the primary SQLite file", async () => {
+test("provider connection persists rateLimitProtection across reopen", async () => {
   await resetStorage();
 
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("checkpoint-test-conn", "openai", "apikey", "checkpoint-test", 1, now, now);
+  const created = await providersDb.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "rl-test",
+    apiKey: "sk-test",
+  });
 
-  core.closeDbInstance();
+  await providersDb.updateProviderConnection((created as any).id, { rateLimitProtection: true });
 
-  const snapshotPath = path.join(TEST_DATA_DIR, "storage-snapshot.sqlite");
-  fs.copyFileSync(core.SQLITE_FILE, snapshotPath);
+  const firstRead = await providersDb.getProviderConnectionById((created as any).id);
+  assert.equal(firstRead.rateLimitProtection, true);
 
-  const Database = (await import("better-sqlite3")).default;
-  const snapshotDb = new Database(snapshotPath, { readonly: true });
-  try {
-    const row = snapshotDb
-      .prepare("SELECT name FROM provider_connections WHERE id = ?")
-      .get("checkpoint-test-conn");
-    (assert as any).equal((row as any).name, "checkpoint-test");
-  } finally {
-    snapshotDb.close();
-  }
+  await core.resetDbInstance();
+  const secondRead = await providersDb.getProviderConnectionById((created as any).id);
+  assert.equal(secondRead.rateLimitProtection, true);
 });
 
 test("shutdown route uses SIGTERM for graceful shutdown", async () => {
@@ -227,128 +156,6 @@ test("restart route uses SIGTERM for graceful restart", async () => {
     process.kill = originalKill;
     globalThis.setTimeout = originalSetTimeout;
   }
-});
-
-test("unlinkFileWithRetry retries EBUSY/EPERM and eventually succeeds", async () => {
-  const target = path.join(TEST_DATA_DIR, "retry-target.tmp");
-  fs.writeFileSync(target, "retry-me");
-
-  const originalExistsSync = fs.existsSync;
-  const originalUnlinkSync = fs.unlinkSync;
-  const seenCodes = [];
-  let attempts = 0;
-
-  fs.existsSync = (filePath) => {
-    if (filePath === target) return attempts < 3 || originalExistsSync(filePath);
-    return originalExistsSync(filePath);
-  };
-
-  fs.unlinkSync = (filePath) => {
-    if (filePath === target) {
-      attempts++;
-      if (attempts === 1) {
-        const err = new Error("busy");
-        err.code = "EBUSY";
-        seenCodes.push(err.code);
-        throw err;
-      }
-      if (attempts === 2) {
-        const err = new Error("perm");
-        err.code = "EPERM";
-        seenCodes.push(err.code);
-        throw err;
-      }
-    }
-    return originalUnlinkSync(filePath);
-  };
-
-  try {
-    await backupDb.unlinkFileWithRetry(target, { maxAttempts: 5, baseDelayMs: 1 });
-    assert.equal(attempts, 3);
-    assert.deepEqual(seenCodes, ["EBUSY", "EPERM"]);
-    assert.equal(fs.existsSync(target), false);
-  } finally {
-    fs.existsSync = originalExistsSync;
-    fs.unlinkSync = originalUnlinkSync;
-    if (originalExistsSync(target)) originalUnlinkSync(target);
-  }
-});
-
-test("provider connection persists rateLimitProtection across reopen", async () => {
-  await resetStorage();
-
-  const created = await providersDb.createProviderConnection({
-    provider: "openai",
-    authType: "apikey",
-    name: "rl-test",
-    apiKey: "sk-test",
-  });
-
-  await providersDb.updateProviderConnection((created as any).id, { rateLimitProtection: true });
-
-  const firstRead = await providersDb.getProviderConnectionById((created as any).id);
-  assert.equal(firstRead.rateLimitProtection, true);
-
-  core.resetDbInstance();
-  const secondRead = await providersDb.getProviderConnectionById((created as any).id);
-  assert.equal(secondRead.rateLimitProtection, true);
-});
-
-test('provider connection migration adds "group" column for existing databases', async () => {
-  await resetStorage();
-
-  const sqlitePath = core.SQLITE_FILE;
-  core.resetDbInstance();
-
-  const Database = (await import("better-sqlite3")).default;
-  const db = new Database(sqlitePath);
-  db.exec(`
-    CREATE TABLE provider_connections (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      auth_type TEXT,
-      name TEXT,
-      email TEXT,
-      priority INTEGER DEFAULT 0,
-      is_active INTEGER DEFAULT 1,
-      access_token TEXT,
-      refresh_token TEXT,
-      expires_at TEXT,
-      token_expires_at TEXT,
-      scope TEXT,
-      project_id TEXT,
-      test_status TEXT,
-      error_code TEXT,
-      last_error TEXT,
-      last_error_at TEXT,
-      last_error_type TEXT,
-      last_error_source TEXT,
-      backoff_level INTEGER DEFAULT 0,
-      rate_limited_until TEXT,
-      health_check_interval INTEGER,
-      last_health_check_at TEXT,
-      last_tested TEXT,
-      api_key TEXT,
-      id_token TEXT,
-      provider_specific_data TEXT,
-      expires_in INTEGER,
-      display_name TEXT,
-      global_priority INTEGER,
-      default_model TEXT,
-      token_type TEXT,
-      consecutive_use_count INTEGER DEFAULT 0,
-      rate_limit_protection INTEGER DEFAULT 0,
-      last_used_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `);
-  db.close();
-
-  const reopened = core.getDbInstance();
-  const columns = reopened.prepare("PRAGMA table_info(provider_connections)").all();
-  const names = new Set(columns.map((column) => (column as any).name));
-  assert.equal(names.has("group"), true);
 });
 
 test("resolveProxyForConnection applies combo proxy for object/string model entries", async () => {

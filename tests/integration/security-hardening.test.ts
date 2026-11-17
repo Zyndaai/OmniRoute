@@ -248,7 +248,6 @@ test("T06 route payload validation uses validateBody in critical endpoints", () 
     "src/app/api/sync/cloud/route.ts",
     "src/app/api/combos/[id]/route.ts",
     "src/app/api/combos/test/route.ts",
-    "src/app/api/db-backups/route.ts",
     "src/app/api/evals/route.ts",
     "src/app/api/keys/[id]/route.ts",
     "src/app/api/models/alias/route.ts",

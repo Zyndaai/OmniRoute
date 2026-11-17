@@ -29,7 +29,7 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const { POST } = await import("../../src/app/api/providers/[id]/refresh-cursor/route.ts");
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -106,13 +106,15 @@ async function withCursorEnv<T>(fn: (env: CursorEnv) => Promise<T>): Promise<T> 
     tmpHome,
     logPath,
     async writeIdeToken(accessToken, machineId) {
-      const { openDatabaseAsync } = await import("../../src/lib/db/adapters/driverFactory.ts");
+      // Cursor's own state.vscdb is an external SQLite file, not OmniRoute's database,
+      // so it is seeded with better-sqlite3 directly (as src/lib/cursor/tokenExtractor.ts reads it).
+      const { default: Database } = await import("better-sqlite3");
       const dbPath = path.join(
         tmpHome,
         "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
       );
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-      const seed = await openDatabaseAsync(dbPath);
+      const seed = new Database(dbPath);
       seed.exec("CREATE TABLE itemTable (key TEXT PRIMARY KEY, value TEXT)");
       seed
         .prepare("INSERT INTO itemTable (key, value) VALUES (?, ?)")

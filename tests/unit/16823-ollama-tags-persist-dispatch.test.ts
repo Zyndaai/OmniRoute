@@ -60,7 +60,7 @@ test("tags parser, normalization and database reopen preserve all 23 native IDs"
     normalizeDiscoveredModels(parsed, "ollama-cloud").map((m) => m.id),
     TAG_IDS
   );
-  core.closeDbInstance();
+  await core.resetDbInstance();
   const cached = await getCachedDiscoveredModels("ollama-cloud", connectionId);
   assert.deepEqual(cached.map((m) => m.id).sort(), [...TAG_IDS].sort());
   const catalog = await getActiveSyncedCatalog("ollama-cloud");

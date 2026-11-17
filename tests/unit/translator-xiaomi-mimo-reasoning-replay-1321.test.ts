@@ -13,7 +13,7 @@ const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 // plain turns was gated by a DeepSeek-only predicate, so a multi-turn text
 // conversation whose reasoning_content the client stripped was forwarded
 // without the field and rejected with 400.
-test("translateRequest replays reasoning_content on plain xiaomi-mimo assistant turns (9router#1321)", () => {
+test("translateRequest replays reasoning_content on plain xiaomi-mimo assistant turns (9router#1321)", async () => {
   const body = {
     model: "mimo-v2.5-pro",
     messages: [
@@ -24,7 +24,7 @@ test("translateRequest replays reasoning_content on plain xiaomi-mimo assistant 
     ],
   };
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "mimo-v2.5-pro",
@@ -49,7 +49,7 @@ test("translateRequest replays reasoning_content on plain xiaomi-mimo assistant 
 // silently re-broke MiMo. The placeholder is now provider-scoped, so both halves
 // need pinning: widening the scope back to DeepSeek re-opens #9573, narrowing it
 // away from MiMo re-opens 9router#1321.
-test("the reasoning_content placeholder stays scoped: MiMo keeps it, DeepSeek does not (#9573 vs 9router#1321)", () => {
+test("the reasoning_content placeholder stays scoped: MiMo keeps it, DeepSeek does not (#9573 vs 9router#1321)", async () => {
   const plainHistory = () => ({
     messages: [
       { role: "user", content: "hi" },
@@ -59,7 +59,7 @@ test("the reasoning_content placeholder stays scoped: MiMo keeps it, DeepSeek do
     ],
   });
 
-  const mimo = translateRequest(
+  const mimo = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "mimo-v2.5-pro",
@@ -76,7 +76,7 @@ test("the reasoning_content placeholder stays scoped: MiMo keeps it, DeepSeek do
     "MiMo 400s on an absent reasoning_content — the placeholder must survive the cache miss"
   );
 
-  const deepseek = translateRequest(
+  const deepseek = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "deepseek-v4-flash",

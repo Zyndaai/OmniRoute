@@ -7,22 +7,22 @@ describe("Provider-scoped aliases (#9068)", () => {
 
   it("getProviderAliases returns empty map for new provider", async () => {
     const { getProviderAliases } = await import("@/lib/db/models/aliases");
-    const aliases = getProviderAliases(providerId);
+    const aliases = await getProviderAliases(providerId);
     equal(typeof aliases, "object");
     equal(Object.keys(aliases).length, 0);
   });
 
   it("setProviderAlias stores and retrieves an alias", async () => {
     const { setProviderAlias, getProviderAliases } = await import("@/lib/db/models/aliases");
-    setProviderAlias(providerId, "fast", "gpt-4o-mini");
-    const aliases = getProviderAliases(providerId);
+    await setProviderAlias(providerId, "fast", "gpt-4o-mini");
+    const aliases = await getProviderAliases(providerId);
     equal(aliases["fast"], "gpt-4o-mini");
   });
 
   it("removeProviderAlias removes a specific alias", async () => {
     const { removeProviderAlias, getProviderAliases } = await import("@/lib/db/models/aliases");
-    removeProviderAlias(providerId, "fast");
-    const aliases = getProviderAliases(providerId);
+    await removeProviderAlias(providerId, "fast");
+    const aliases = await getProviderAliases(providerId);
     equal(Object.keys(aliases).length, 0);
   });
 
@@ -30,16 +30,16 @@ describe("Provider-scoped aliases (#9068)", () => {
     const { setProviderAlias, getProviderAliases, removeProviderAlias } = await import(
       "@/lib/db/models/aliases"
     );
-    setProviderAlias(providerId, "fast", "gpt-4o-mini");
-    setProviderAlias(providerId, "best", "gpt-4o");
-    setProviderAlias(providerId, "cheap", "gpt-4o-mini");
-    const aliases = getProviderAliases(providerId);
+    await setProviderAlias(providerId, "fast", "gpt-4o-mini");
+    await setProviderAlias(providerId, "best", "gpt-4o");
+    await setProviderAlias(providerId, "cheap", "gpt-4o-mini");
+    const aliases = await getProviderAliases(providerId);
     equal(aliases["fast"], "gpt-4o-mini");
     equal(aliases["best"], "gpt-4o");
     equal(aliases["cheap"], "gpt-4o-mini");
     // Cleanup
-    removeProviderAlias(providerId, "fast");
-    removeProviderAlias(providerId, "best");
-    removeProviderAlias(providerId, "cheap");
+    await removeProviderAlias(providerId, "fast");
+    await removeProviderAlias(providerId, "best");
+    await removeProviderAlias(providerId, "cheap");
   });
 });

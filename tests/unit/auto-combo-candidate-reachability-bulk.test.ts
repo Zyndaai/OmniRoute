@@ -9,15 +9,14 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const overridesDb = await import("../../src/lib/db/autoCandidateOverrides.ts");
 const candidateHandler = await import("../../open-sse/handlers/autoComboCandidates.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
@@ -28,7 +27,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -48,10 +47,10 @@ test("candidate inspection performs one narrow bulk state read and one breaker r
     accessToken: "also-must-never-be-read-or-returned",
     tokenExpiresAt,
   });
-  core
-    .getDbInstance()
-    .prepare("UPDATE provider_connections SET rate_limited_until = ?, test_status = ? WHERE id = ?")
-    .run(new Date(Date.now() + 60_000).toISOString(), "unavailable", cooled.id);
+  await providersDb.updateProviderConnection(cooled.id as string, {
+    rateLimitedUntil: new Date(Date.now() + 60_000).toISOString(),
+    testStatus: "unavailable",
+  });
   await overridesDb.setExcluded("inspector-key", "auto", available.id, true);
 
   let stateReads = 0;

@@ -19,13 +19,19 @@ const { setModelIsHidden, getModelIsHidden, getHiddenModelsByProvider } = await 
   "../../src/lib/db/models.ts"
 );
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { codexProvider } = await import(
   "../../open-sse/config/providers/registry/codex/index.ts"
 );
 const { IMAGE_PROVIDERS } = await import("../../open-sse/config/imageRegistry.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.beforeEach(async () => {
+  await resetDbInstance();
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -36,11 +42,11 @@ test("#12172: codex chat and image registries collide on the same model id (prem
   assert.ok(imageModel, "codex image registry must define gpt-5.6-sol (premise check)");
 });
 
-test("#12172: hiding the codex CHAT model gpt-5.6-sol must not suppress the codex IMAGE model", () => {
-  setModelIsHidden("codex", "gpt-5.6-sol", true, "chat");
+test("#12172: hiding the codex CHAT model gpt-5.6-sol must not suppress the codex IMAGE model", async () => {
+  await setModelIsHidden("codex", "gpt-5.6-sol", true, "chat");
 
-  const chatHidden = getHiddenModelsByProvider("chat").get("codex");
-  const imageHidden = getHiddenModelsByProvider("images").get("codex");
+  const chatHidden = (await getHiddenModelsByProvider("chat")).get("codex");
+  const imageHidden = (await getHiddenModelsByProvider("images")).get("codex");
 
   assert.equal(chatHidden?.has("gpt-5.6-sol"), true, "chat model must be hidden after the toggle");
   assert.equal(
@@ -49,34 +55,40 @@ test("#12172: hiding the codex CHAT model gpt-5.6-sol must not suppress the code
     "BUG #12172: hiding the chat model must not also hide the identically-ID'd image model"
   );
 
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-sol", "chat"), true);
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-sol", "images"), false);
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-sol", "chat"), true);
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-sol", "images"), false);
 });
 
-test("#12172: unhiding one modality does not affect the other", () => {
-  setModelIsHidden("codex", "gpt-5.6-terra", true, "chat");
-  setModelIsHidden("codex", "gpt-5.6-terra", true, "images");
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-terra", "chat"), true);
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-terra", "images"), true);
+test("#12172: unhiding one modality does not affect the other", async () => {
+  await setModelIsHidden("codex", "gpt-5.6-terra", true, "chat");
+  await setModelIsHidden("codex", "gpt-5.6-terra", true, "images");
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-terra", "chat"), true);
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-terra", "images"), true);
 
-  setModelIsHidden("codex", "gpt-5.6-terra", false, "chat");
+  await setModelIsHidden("codex", "gpt-5.6-terra", false, "chat");
   assert.equal(
-    getModelIsHidden("codex", "gpt-5.6-terra", "chat"),
+    await getModelIsHidden("codex", "gpt-5.6-terra", "chat"),
     false,
     "chat toggle must not be affected by the images toggle"
   );
   assert.equal(
-    getModelIsHidden("codex", "gpt-5.6-terra", "images"),
+    await getModelIsHidden("codex", "gpt-5.6-terra", "images"),
     true,
     "images toggle must remain hidden after unhiding chat only"
   );
 });
 
-test("#12172: a legacy (no-modality) hide keeps suppressing every modality — backward compatible", () => {
-  setModelIsHidden("codex", "gpt-5.6-luna", true);
+test("#12172: a legacy (no-modality) hide keeps suppressing every modality — backward compatible", async () => {
+  await setModelIsHidden("codex", "gpt-5.6-luna", true);
 
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-luna", "chat"), true);
-  assert.equal(getModelIsHidden("codex", "gpt-5.6-luna", "images"), true);
-  assert.equal(getHiddenModelsByProvider("chat").get("codex")?.has("gpt-5.6-luna"), true);
-  assert.equal(getHiddenModelsByProvider("images").get("codex")?.has("gpt-5.6-luna"), true);
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-luna", "chat"), true);
+  assert.equal(await getModelIsHidden("codex", "gpt-5.6-luna", "images"), true);
+  assert.equal(
+    (await getHiddenModelsByProvider("chat")).get("codex")?.has("gpt-5.6-luna"),
+    true
+  );
+  assert.equal(
+    (await getHiddenModelsByProvider("images")).get("codex")?.has("gpt-5.6-luna"),
+    true
+  );
 });

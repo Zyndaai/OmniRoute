@@ -53,7 +53,7 @@ test("injectionGuard logging: guard without a logger logs blocks to console (mid
     // Mirrors the 13 middleware-only callsites: createInjectionGuard()/withInjectionGuard()
     // with no options.logger.
     const guard = createInjectionGuard({ mode: "block" });
-    const decision = guard(ATTACK_BODY);
+    const decision = await guard(ATTACK_BODY);
 
     assert.equal(decision.blocked, true);
     assert.ok(
@@ -70,7 +70,7 @@ test("injectionGuard logging: guard without a logger logs high-severity flags in
     const warnMock = t.mock.method(console, "warn", () => {});
 
     const guard = createInjectionGuard({ mode: "warn" });
-    const decision = guard(ATTACK_BODY);
+    const decision = await guard(ATTACK_BODY);
 
     assert.equal(decision.blocked, false);
     assert.equal(decision.result.flagged, true);
@@ -91,7 +91,7 @@ test("injectionGuard logging: explicit logger: null keeps double-evaluated chat-
     // Mirrors the chat-family callsites (#11936): the guardrail registry re-evaluates
     // with a pino logger, so the middleware pass opts out of the duplicate line.
     const guard = createInjectionGuard({ mode: "block", logger: null });
-    const decision = guard(ATTACK_BODY);
+    const decision = await guard(ATTACK_BODY);
 
     assert.equal(decision.blocked, true, "silence must not weaken the block itself");
     assert.equal(warnMock.mock.callCount(), 0, "explicit null logger must stay silent");
@@ -109,7 +109,7 @@ test("injectionGuard logging: a caller-supplied logger wins and console stays qu
     };
 
     const guard = createInjectionGuard({ mode: "block", logger });
-    const decision = guard(ATTACK_BODY);
+    const decision = await guard(ATTACK_BODY);
 
     assert.equal(decision.blocked, true);
     assert.ok(warnings.length >= 1, "the supplied logger must receive the block log");

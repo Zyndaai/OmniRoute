@@ -84,14 +84,14 @@ function collectFunctionCallAndResponseIds(envelope: GeminiEnvelope) {
   return { functionCallIds, functionResponseIds };
 }
 
-test("#7752: openaiToAntigravityRequest strips an orphan functionCall (no functionResponse) for a Claude-branded Antigravity model", () => {
+test("#7752: openaiToAntigravityRequest strips an orphan functionCall (no functionResponse) for a Claude-branded Antigravity model", async () => {
   const body = buildOpenCodeStyleBody();
-  const envelope = openaiToAntigravityRequest(
+  const envelope = (await openaiToAntigravityRequest(
     "agy/claude-opus-4-6-thinking",
     body,
     true,
     null
-  ) as GeminiEnvelope;
+  )) as GeminiEnvelope;
 
   const { functionCallIds, functionResponseIds } = collectFunctionCallAndResponseIds(envelope);
 
@@ -105,7 +105,7 @@ test("#7752: openaiToAntigravityRequest strips an orphan functionCall (no functi
   );
 });
 
-test("#7752: a still-in-flight trailing tool_call (no tool_result yet, at the very end of history) is NOT stripped", () => {
+test("#7752: a still-in-flight trailing tool_call (no tool_result yet, at the very end of history) is NOT stripped", async () => {
   const body = {
     model: "agy/claude-opus-4-6-thinking",
     stream: true,
@@ -125,13 +125,13 @@ test("#7752: a still-in-flight trailing tool_call (no tool_result yet, at the ve
       },
     ],
   };
-  const envelope = openaiToAntigravityRequest(
+  const envelope = (await openaiToAntigravityRequest(
     "agy/claude-opus-4-6-thinking",
     body,
     true,
     null
-  ) as GeminiEnvelope;
-  const { functionCallIds } = collectFunctionCallAndResponseIds(envelope);
+  )) as GeminiEnvelope;
+  const { functionCallIds } =collectFunctionCallAndResponseIds(envelope);
   assert.ok(
     functionCallIds.has("toolu_vrtx_pending"),
     "a trailing in-flight tool_call must survive — it has not been orphaned yet"

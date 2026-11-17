@@ -13,17 +13,17 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-unpriced-policy-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "unpriced-policy-test-secret";
 delete process.env.UNPRICED_USAGE_BUDGET_POLICY;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const featureFlagsDb = await import("../../src/lib/db/featureFlags.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { enforceApiKeyPolicy } = await import("../../src/shared/utils/apiKeyPolicy.ts");
-const { getUnpricedUsageBudgetPolicy } = await import("../../src/shared/utils/featureFlags.ts");
+const { getUnpricedUsageBudgetPolicy, refreshFeatureFlagSnapshot } =
+  await import("../../src/shared/utils/featureFlags.ts");
 const { getUnpricedUsageReport } = await import("../../src/lib/usage/unpricedUsage.ts");
 const { getApiKeyUsageLimitStatus, buildApiKeyUsageLimitRejection } =
   await import("../../src/lib/usage/apiKeyUsageLimits.ts");
@@ -33,20 +33,27 @@ const UNPRICED_PROVIDER = "grok-cli";
 const UNPRICED_MODEL = "grok-composer-2.5-fast";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   usageHistory.clearPendingRequests();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  featureFlagsDb.clearAllFeatureFlagOverrides();
+  await featureFlagsDb.clearAllFeatureFlagOverrides();
+  await refreshFeatureFlagSnapshot();
+}
+
+/** Writes a flag override and reloads the synchronous snapshot the policy reads from. */
+async function setFlag(key: string, value: string) {
+  await featureFlagsDb.setFeatureFlagOverride(key, value);
+  await refreshFeatureFlagSnapshot();
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -117,7 +124,7 @@ test("default policy is fail_closed and names the unpriced model instead of a mi
 
 test("count_as_zero lets the key through while priced spend is under the limit", async () => {
   const created = await makeMeteredKeyWithUnpricedUsage();
-  featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
+  await setFlag("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
   assert.equal(getUnpricedUsageBudgetPolicy(), "count_as_zero");
 
   const result = await enforceApiKeyPolicy(chatRequest(created.key), "openai/gpt-4o");
@@ -127,7 +134,7 @@ test("count_as_zero lets the key through while priced spend is under the limit",
 
 test("upstream unpriced opt-out also drives enforcement and the administrator report", async () => {
   const created = await makeMeteredKeyWithUnpricedUsage();
-  featureFlagsDb.setFeatureFlagOverride("USAGE_LIMIT_IGNORE_UNPRICED", "true");
+  await setFlag("USAGE_LIMIT_IGNORE_UNPRICED", "true");
 
   assert.equal(getUnpricedUsageBudgetPolicy(), "count_as_zero");
   assert.equal((await getUnpricedUsageReport()).policy, "count_as_zero");
@@ -144,8 +151,8 @@ test("upstream unpriced opt-out also drives enforcement and the administrator re
 
 test("an explicit enum policy overrides the upstream boolean opt-out", async () => {
   const created = await makeMeteredKeyWithUnpricedUsage();
-  featureFlagsDb.setFeatureFlagOverride("USAGE_LIMIT_IGNORE_UNPRICED", "true");
-  featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", "fail_closed");
+  await setFlag("USAGE_LIMIT_IGNORE_UNPRICED", "true");
+  await setFlag("UNPRICED_USAGE_BUDGET_POLICY", "fail_closed");
 
   assert.equal(getUnpricedUsageBudgetPolicy(), "fail_closed");
   const result = await enforceApiKeyPolicy(chatRequest(created.key), "openai/gpt-4o");
@@ -153,12 +160,12 @@ test("an explicit enum policy overrides the upstream boolean opt-out", async () 
   assert.equal((await getUnpricedUsageReport()).policy, "fail_closed");
 });
 
-test("an invalid explicit enum cannot fall through to the upstream opt-out", () => {
-  featureFlagsDb.setFeatureFlagOverride("USAGE_LIMIT_IGNORE_UNPRICED", "true");
+test("an invalid explicit enum cannot fall through to the upstream opt-out", async () => {
+  await setFlag("USAGE_LIMIT_IGNORE_UNPRICED", "true");
   process.env.UNPRICED_USAGE_BUDGET_POLICY = "invalid-policy";
   try {
     assert.equal(getUnpricedUsageBudgetPolicy(), "fail_closed");
-    featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
+    await setFlag("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
     assert.equal(
       getUnpricedUsageBudgetPolicy(),
       "count_as_zero",
@@ -169,24 +176,30 @@ test("an invalid explicit enum cannot fall through to the upstream opt-out", () 
   }
 });
 
-test("the upstream opt-out fails closed when the flag store is unreadable", () => {
-  featureFlagsDb.setFeatureFlagOverride("USAGE_LIMIT_IGNORE_UNPRICED", "true");
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_offline");
-  featureFlagsDb.clearFeatureFlagOverrideCache();
+/** Makes config_entries unreadable for the duration of `fn` (the flag and pricing stores). */
+async function withConfigEntriesUnreadable<T>(fn: () => Promise<T>): Promise<T> {
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE config_entries RENAME TO config_entries_offline");
   try {
-    assert.equal(getUnpricedUsageBudgetPolicy(), "fail_closed");
+    return await fn();
   } finally {
-    db.exec("ALTER TABLE key_value_offline RENAME TO key_value");
-    featureFlagsDb.clearFeatureFlagOverrideCache();
+    await backend.execute("ALTER TABLE config_entries_offline RENAME TO config_entries");
   }
+}
+
+test("the upstream opt-out fails closed when the flag store is unreadable", async () => {
+  await setFlag("USAGE_LIMIT_IGNORE_UNPRICED", "true");
+  await withConfigEntriesUnreadable(async () => {
+    await refreshFeatureFlagSnapshot();
+    assert.equal(getUnpricedUsageBudgetPolicy(), "fail_closed");
+  });
 });
 
 test("count_as_zero still enforces the limit on priced spend", async () => {
   const created = await makeMeteredKeyWithUnpricedUsage();
   await apiKeysDb.updateApiKeyPermissions(created.id, { weeklyUsageLimitUsd: 0.5 });
   apiKeysDb.clearApiKeyCaches();
-  featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
+  await setFlag("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
 
   const result = await enforceApiKeyPolicy(chatRequest(created.key), "openai/gpt-4o");
 
@@ -199,11 +212,11 @@ for (const policy of ["fail_closed", "count_as_zero"] as const) {
   test(`${policy} counts search ledger spend alongside priced and unpriced chat usage`, async () => {
     const created = await makeMeteredKeyWithUnpricedUsage();
     const { recordLedgerEntry } = await import("../../src/lib/db/costLedger.ts");
-    featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", policy);
+    await setFlag("UNPRICED_USAGE_BUDGET_POLICY", policy);
     // Chat already contributes $1 through usage_history. Search contributes
     // another $2, including a charged failed request; neither policy waives it.
     for (const success of [true, false]) {
-      recordLedgerEntry({
+      await recordLedgerEntry({
         apiKeyId: created.id,
         provider: "searxng-search",
         model: "search",
@@ -212,7 +225,7 @@ for (const policy of ["fail_closed", "count_as_zero"] as const) {
         success,
       });
     }
-    recordLedgerEntry({
+    await recordLedgerEntry({
       apiKeyId: created.id,
       provider: "openai",
       model: "gpt-4o",
@@ -330,7 +343,7 @@ test("two priced windows do not promise recovery at the earlier daily reset", as
     weeklyUsageLimitUsd: 0.5,
   });
   apiKeysDb.clearApiKeyCaches();
-  featureFlagsDb.setFeatureFlagOverride("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
+  await setFlag("UNPRICED_USAGE_BUDGET_POLICY", "count_as_zero");
 
   const status = await getApiKeyUsageLimitStatus({
     id: created.id,
@@ -360,11 +373,11 @@ test("two priced windows do not promise recovery at the earlier daily reset", as
 test("count_as_zero still fails closed when a cost lookup throws, and says so", async () => {
   const created = await makeMeteredKeyWithUnpricedUsage();
   // A real pricing-store failure: drop the cached pricing and make the pricing
-  // namespace unreadable, so calculateCostDetailed's own catch path runs. This
+  // table unreadable, so calculateCostDetailed's own catch path runs. This
   // is not "no price configured" — the true spend is unknown — so relaxing
   // unpriced usage must not relax it, and the message must not blame pricing rows.
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_offline");
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE model_pricing RENAME TO model_pricing_offline");
   readCache.invalidateDbCache("pricing", undefined, { skipModelCatalog: true });
   try {
     const status = await getApiKeyUsageLimitStatus(
@@ -391,7 +404,7 @@ test("count_as_zero still fails closed when a cost lookup throws, and says so", 
     assert.doesNotMatch(message, /no configured price/);
     assert.doesNotMatch(message, /usage quota \(/);
   } finally {
-    db.exec("ALTER TABLE key_value_offline RENAME TO key_value");
+    await backend.execute("ALTER TABLE model_pricing_offline RENAME TO model_pricing");
     readCache.invalidateDbCache("pricing", undefined, { skipModelCatalog: true });
   }
 });

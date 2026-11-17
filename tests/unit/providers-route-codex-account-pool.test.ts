@@ -10,15 +10,15 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-codex-pro
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.ALLOW_API_KEY_REVEAL = "false";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 
-test.after(() => {
+test.after(async () => {
   quotaCache.__clearForTests();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -55,7 +55,7 @@ test("GET keeps one parent row and projects raw Codex state without exposing cre
   });
 
   const { setProviderLimitsCache } = await import("../../src/lib/db/providerLimits.ts");
-  setProviderLimitsCache(codex.id, {
+  await setProviderLimitsCache(codex.id, {
     quotas: { session: { used: 25, total: 100 }, weekly: { used: 60, total: 100 } },
     plan: null,
     message: null,

@@ -101,6 +101,7 @@ if (typeof mock.module === "function") {
       serverPath: "/fake/server.js",
       env: {},
       maxRestarts: 0,
+      onCrashCallback: () => {},
     });
 
     spawnExecutable = undefined;

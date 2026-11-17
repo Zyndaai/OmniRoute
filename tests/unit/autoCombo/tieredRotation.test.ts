@@ -21,9 +21,9 @@ import { resetDiversity } from "../../../open-sse/services/autoCombo/providerDiv
 // This file tests rotation logic, not intelligence scoring — the DB shouldn't be
 // initialized during these unit tests, and the stub makes them fast and isolated.
 vi.mock("../../../src/lib/db/modelIntelligence.ts", () => ({
-  getModelIntelligenceBySource: vi.fn(() => null),
-  setUserFitnessOverrideEntry: vi.fn(),
-  deleteUserFitnessOverrideEntry: vi.fn(),
+  getModelIntelligenceBySource: vi.fn(async () => null),
+  setUserFitnessOverrideEntry: vi.fn(async () => undefined),
+  deleteUserFitnessOverrideEntry: vi.fn(async () => undefined),
 }));
 
 function makeCandidate(overrides: Partial<ProviderCandidate>): ProviderCandidate {
@@ -53,11 +53,35 @@ function makeConfig(name: string): AutoComboConfig {
   };
 }
 
-// #15106: the first getTaskFitness() call in a worker pays the lazy, synchronous
-// model-intelligence DB init. Pay it here, under its own generous budget, so the
-// 5s per-test timeout measures the test and not first-call setup under parallel load.
-beforeAll(() => {
-  getTaskFitness("warmup-model", "coding");
+// getTaskFitness is async now (model-intelligence DB reads). calculateFactors and scorePool
+// take a synchronous lookup, so the fitness values for every model these tests use are
+// resolved once up front and served from a map.
+const FITNESS_MODELS = [
+  "unknown-model",
+  "warmup-model",
+  "llama-70b",
+  "claude-sonnet",
+  "llama-3.1-70b",
+  "gpt-4o",
+  "claude-opus",
+  "gemini-ultra",
+  "mistral-large",
+  "cheap-model",
+  "only-model",
+  "m",
+  "free-model",
+];
+const fitnessCache = new Map<string, number>();
+const syncTaskFitness = (model: string, taskType: string): number =>
+  fitnessCache.get(`${model}|${taskType}`) ?? 0.5;
+
+// #15106: the first getTaskFitness() call in a worker pays the lazy DB init. Pay it here,
+// under its own generous budget, so the 5s per-test timeout measures the test and not
+// first-call setup under parallel load.
+beforeAll(async () => {
+  for (const model of FITNESS_MODELS) {
+    fitnessCache.set(`${model}|coding`, await getTaskFitness(model, "coding"));
+  }
 }, 30_000);
 
 describe("Connection Density Factor", () => {
@@ -76,8 +100,8 @@ describe("Connection Density Factor", () => {
     });
     const pool = [multiConn, singleConn];
 
-    const multiFactors = calculateFactors(multiConn, pool, "coding", getTaskFitness);
-    const singleFactors = calculateFactors(singleConn, pool, "coding", getTaskFitness);
+    const multiFactors = calculateFactors(multiConn, pool, "coding", syncTaskFitness);
+    const singleFactors = calculateFactors(singleConn, pool, "coding", syncTaskFitness);
     const multiScore = calculateScore(multiFactors, DEFAULT_WEIGHTS);
     const singleScore = calculateScore(singleFactors, DEFAULT_WEIGHTS);
 
@@ -92,7 +116,7 @@ describe("Connection Density Factor", () => {
     const densities = sizes.map((s) => {
       const c = make(s);
       const pool = [c];
-      return calculateFactors(c, pool, "coding", getTaskFitness).connectionDensity;
+      return calculateFactors(c, pool, "coding", syncTaskFitness).connectionDensity;
     });
 
     expect(densities[0]).toBeCloseTo(0.0, 5);
@@ -106,7 +130,7 @@ describe("Connection Density Factor", () => {
   it("missing connectionPoolSize defaults to 1 (backward compat)", () => {
     const candidate = makeCandidate({ provider: "x" });
     const pool = [candidate];
-    const factors = calculateFactors(candidate, pool, "coding", getTaskFitness);
+    const factors = calculateFactors(candidate, pool, "coding", syncTaskFitness);
     expect(factors.connectionDensity).toBe(0.0);
   });
 
@@ -121,7 +145,7 @@ describe("Tiered Rotation in selectProvider", () => {
     resetDiversity();
   });
 
-  it("smart combo rotates within top tier across many requests", () => {
+  it("smart combo rotates within top tier across many requests", async () => {
     const topA = makeCandidate({ provider: "openai", model: "gpt-4o", quotaRemaining: 95 });
     const topB = makeCandidate({ provider: "anthropic", model: "claude-opus", quotaRemaining: 90 });
     const topC = makeCandidate({ provider: "google", model: "gemini-ultra", quotaRemaining: 88 });
@@ -131,14 +155,14 @@ describe("Tiered Rotation in selectProvider", () => {
     const config = makeConfig("smart");
     const seen = new Set<string>();
     for (let i = 0; i < 50; i++) {
-      const result = selectProvider(config, pool, "coding");
+      const result = await selectProvider(config, pool, "coding");
       seen.add(`${result.provider}/${result.model}`);
     }
     expect(seen.size).toBeGreaterThanOrEqual(2);
     expect(seen.has("openai/gpt-4o") || seen.has("anthropic/claude-opus")).toBe(true);
   });
 
-  it("cheap combo pulls from rest tier (lower scores) more often than smart", () => {
+  it("cheap combo pulls from rest tier (lower scores) more often than smart", async () => {
     const top = makeCandidate({ provider: "openai", model: "gpt-4o", quotaRemaining: 100 });
     const rest = makeCandidate({
       provider: "cheap-provider",
@@ -152,17 +176,17 @@ describe("Tiered Rotation in selectProvider", () => {
     const config = makeConfig("cheap");
     const counts: Record<string, number> = {};
     for (let i = 0; i < 200; i++) {
-      const result = selectProvider(config, pool, "coding");
+      const result = await selectProvider(config, pool, "coding");
       counts[result.provider] = (counts[result.provider] ?? 0) + 1;
     }
     expect(counts["cheap-provider"]).toBeGreaterThan(0);
   });
 
-  it("single-candidate pool always returns the same candidate", () => {
+  it("single-candidate pool always returns the same candidate", async () => {
     const only = makeCandidate({ provider: "only", model: "only-model" });
     const config = makeConfig("smart");
     for (let i = 0; i < 10; i++) {
-      const result = selectProvider(config, [only], "coding");
+      const result = await selectProvider(config, [only], "coding");
       expect(result.provider).toBe("only");
       expect(result.model).toBe("only-model");
     }
@@ -184,17 +208,17 @@ describe("scorePool with connectionDensity", () => {
       quotaRemaining: 100,
     });
     const pool = [cerebras, anthropic];
-    const scored = scorePool(pool, "coding", DEFAULT_WEIGHTS, getTaskFitness);
+    const scored: ScoredProvider[] = scorePool(pool, "coding", DEFAULT_WEIGHTS, syncTaskFitness);
     expect(scored[0].provider).toBe("cerebras");
   });
 });
 
 describe("Per-Connection Rotation", () => {
-  // 200 synchronous selectProvider() calls over a 43-connection pool are CPU-bound and can
+  // 200 selectProvider() calls over a 43-connection pool are CPU-bound and can
   // exceed 20s under the full Vitest worker load on the validation VPS, while the isolated
   // file remains green. The assertion is unchanged; only the execution budget is widened.
   // Refs #9985.
-  it("rotates across all 43 Cerebras connection IDs, not just one", () => {
+  it("rotates across all 43 Cerebras connection IDs, not just one", async () => {
     const cerebrasCandidates: ProviderCandidate[] = Array.from({ length: 43 }, (_, i) =>
       makeCandidate({
         provider: "cerebras",
@@ -206,13 +230,13 @@ describe("Per-Connection Rotation", () => {
 
     const seenConnections = new Set<string>();
     for (let i = 0; i < 200; i++) {
-      const result = selectProvider(config, cerebrasCandidates, "coding");
+      const result = await selectProvider(config, cerebrasCandidates, "coding");
       if (result.connectionId) seenConnections.add(result.connectionId);
     }
     expect(seenConnections.size).toBeGreaterThanOrEqual(10);
   }, 60000);
 
-  it("different combos maintain independent round-robin state", () => {
+  it("different combos maintain independent round-robin state", async () => {
     const candidates: ProviderCandidate[] = Array.from({ length: 5 }, (_, i) =>
       makeCandidate({ provider: "p", model: "m", connectionId: `c-${i}` })
     );
@@ -220,20 +244,20 @@ describe("Per-Connection Rotation", () => {
     const fastConfig = makeConfig("fast-B");
 
     for (let i = 0; i < 5; i++) {
-      selectProvider(smartConfig, candidates, "coding");
+      await selectProvider(smartConfig, candidates, "coding");
     }
     const smartResults: string[] = [];
     for (let i = 0; i < 5; i++) {
-      const r = selectProvider(smartConfig, candidates, "coding");
+      const r = await selectProvider(smartConfig, candidates, "coding");
       if (r.connectionId) smartResults.push(r.connectionId);
     }
 
     for (let i = 0; i < 5; i++) {
-      selectProvider(fastConfig, candidates, "coding");
+      await selectProvider(fastConfig, candidates, "coding");
     }
     const fastResults: string[] = [];
     for (let i = 0; i < 5; i++) {
-      const r = selectProvider(fastConfig, candidates, "coding");
+      const r = await selectProvider(fastConfig, candidates, "coding");
       if (r.connectionId) fastResults.push(r.connectionId);
     }
 
@@ -243,14 +267,14 @@ describe("Per-Connection Rotation", () => {
     expect(new Set(fastResults).size).toBeGreaterThan(1);
   });
 
-  it("tied-score candidates from same provider+model are all reachable", () => {
+  it("tied-score candidates from same provider+model are all reachable", async () => {
     const candidates: ProviderCandidate[] = Array.from({ length: 5 }, (_, i) =>
       makeCandidate({ provider: "free", model: "free-model", connectionId: `key-${i}` })
     );
     const config = makeConfig("smart");
     const visited = new Set<string>();
     for (let i = 0; i < 20; i++) {
-      const result = selectProvider(config, candidates, "coding");
+      const result = await selectProvider(config, candidates, "coding");
       if (result.connectionId) visited.add(result.connectionId);
     }
     expect(visited.size).toBeGreaterThan(1);

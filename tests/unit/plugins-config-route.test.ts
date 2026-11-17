@@ -70,14 +70,14 @@ function validateConfig(
 
 // ── Lifecycle ──
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {}
@@ -94,8 +94,8 @@ const testSchema: Record<string, ConfigField> = {
 
 // ── DB operations (same as route GET/PUT) ──
 
-test("GET: returns config and schema for existing plugin", () => {
-  dbPlugins.insertPlugin({
+test("GET: returns config and schema for existing plugin", async () => {
+  await dbPlugins.insertPlugin({
     id: "test-1",
     name: "config-get-test",
     version: "1.0.0",
@@ -106,7 +106,7 @@ test("GET: returns config and schema for existing plugin", () => {
     configSchema: testSchema,
   });
 
-  const plugin = dbPlugins.getPluginByName("config-get-test");
+  const plugin = await dbPlugins.getPluginByName("config-get-test");
   assert.ok(plugin);
 
   const config = JSON.parse(plugin!.config || "{}");
@@ -117,13 +117,13 @@ test("GET: returns config and schema for existing plugin", () => {
   assert.equal(configSchema.maxRetries.min, 1);
 });
 
-test("GET: returns null for nonexistent plugin", () => {
-  const plugin = dbPlugins.getPluginByName("no-such-plugin");
+test("GET: returns null for nonexistent plugin", async () => {
+  const plugin = await dbPlugins.getPluginByName("no-such-plugin");
   assert.equal(plugin, null);
 });
 
-test("PUT: updates config via updatePluginConfig", () => {
-  dbPlugins.insertPlugin({
+test("PUT: updates config via updatePluginConfig", async () => {
+  await dbPlugins.insertPlugin({
     id: "test-2",
     name: "config-put-test",
     version: "1.0.0",
@@ -134,18 +134,18 @@ test("PUT: updates config via updatePluginConfig", () => {
     configSchema: testSchema,
   });
 
-  const success = dbPlugins.updatePluginConfig("config-put-test", {
+  const success = await dbPlugins.updatePluginConfig("config-put-test", {
     apiUrl: "https://new.api.com",
   });
   assert.ok(success);
 
-  const plugin = dbPlugins.getPluginByName("config-put-test");
+  const plugin = await dbPlugins.getPluginByName("config-put-test");
   const config = JSON.parse(plugin!.config);
   assert.equal(config.apiUrl, "https://new.api.com");
 });
 
-test("PUT: returns false for nonexistent plugin", () => {
-  const success = dbPlugins.updatePluginConfig("ghost", { key: "value" });
+test("PUT: returns false for nonexistent plugin", async () => {
+  const success = await dbPlugins.updatePluginConfig("ghost", { key: "value" });
   assert.equal(success, false);
 });
 

@@ -1,103 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const serial = { concurrency: false };
+// The case-mapping helpers (toSnakeCase, toCamelCase, objToSnake, rowToCamel, cleanNulls)
+// are pure functions re-exported by src/lib/db/core.ts. The SQLite pragma helpers
+// (autoVacuum, page/cache size, vacuum, driver info) were removed with the PostgreSQL move
+// and are no longer tested here.
 
-function makeTempDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
-
-function removePath(targetPath: string) {
-  fs.rmSync(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-}
-
-const originalEnv = {
-  DATA_DIR: process.env.DATA_DIR,
-  NEXT_PHASE: process.env.NEXT_PHASE,
-};
-
-function restoreEnv() {
-  for (const [key, value] of Object.entries(originalEnv)) {
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-}
-
-function cleanupGlobalDb() {
-  try {
-    if ((globalThis as any).__omnirouteDb?.open) {
-      (globalThis as any).__omnirouteDb.close();
-    }
-  } catch {}
-  delete (globalThis as any).__omnirouteDb;
-}
-
-async function importFresh(modulePath: string) {
-  const url = pathToFileURL(path.resolve(modulePath)).href;
-  return import(`${url}?test=${Date.now()}-${Math.random().toString(16).slice(2)}`);
-}
-
-async function withEnv(overrides: Record<string, string | undefined>, fn: () => Promise<void>) {
-  const snapshot: Record<string, string | undefined> = {};
-  for (const key of Object.keys(overrides)) {
-    snapshot[key] = process.env[key];
-    const value = overrides[key];
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of Object.entries(snapshot)) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  }
-}
-
-// ──────────────── Pure Utility Functions ────────────────
-
-test("toSnakeCase converts camelCase to snake_case", () => {
-  // Import once at module level for pure functions
-  // We use a lazy import pattern
-});
-
-// We'll use a single import for the module
-let core: any;
-
-test.before(async () => {
-  const dataDir = makeTempDir("omniroute-db-core-utils-");
-  try {
-    await withEnv({ DATA_DIR: dataDir }, async () => {
-      core = await importFresh("src/lib/db/core.ts");
-      // Initialize DB so DB functions work too
-      core.getDbInstance();
-    });
-  } catch {
-    removePath(dataDir);
-  }
-});
-
-test.after(() => {
-  try {
-    core?.resetDbInstance();
-  } catch {}
-  cleanupGlobalDb();
-  restoreEnv();
-});
+const core = await import("../../src/lib/db/core.ts");
 
 // ─── toSnakeCase ───────────────────────────────────────
 
@@ -261,70 +170,6 @@ test("cleanNulls: empty object returns empty object", () => {
 
 test("cleanNulls: all null/undefined returns empty object", () => {
   assert.deepEqual(core.cleanNulls({ a: null, b: undefined }), {});
-});
-
-// ─── getDriverInfo ─────────────────────────────────────
-
-test("getDriverInfo returns null (setDriverInfo never called)", () => {
-  // setDriverInfo() exists but is never called in core.ts, so getDriverInfo
-  // always returns null until/unless a caller invokes setDriverInfo().
-  assert.equal(core.getDriverInfo(), null);
-});
-
-// ─── DB Functions (autoVacuum, pageSize, cacheSize) ───
-
-test("setAutoVacuum and getAutoVacuumMode round-trip", serial, () => {
-  // Get current
-  const originalMode = core.getAutoVacuumMode();
-
-  // Set to NONE first
-  core.setAutoVacuum("NONE");
-  assert.equal(core.getAutoVacuumMode(), "NONE");
-
-  // Set to FULL
-  core.setAutoVacuum("FULL");
-  assert.equal(core.getAutoVacuumMode(), "FULL");
-
-  // Set to INCREMENTAL
-  core.setAutoVacuum("INCREMENTAL");
-  assert.equal(core.getAutoVacuumMode(), "INCREMENTAL");
-
-  // Restore original
-  core.setAutoVacuum(originalMode);
-  assert.equal(core.getAutoVacuumMode(), originalMode);
-});
-
-test("setAutoVacuum same mode is idempotent", serial, () => {
-  const mode = core.getAutoVacuumMode();
-  // Calling again with same mode should not throw
-  core.setAutoVacuum(mode);
-  assert.equal(core.getAutoVacuumMode(), mode);
-});
-
-test("runManualVacuum succeeds", serial, () => {
-  const result = core.runManualVacuum();
-  assert.equal(result.success, true);
-  assert.equal(typeof result.duration, "number");
-  assert.ok(result.duration >= 0);
-  assert.equal(result.error, undefined);
-});
-
-test("setPageSize round-trip", serial, () => {
-  // Capture current page_size so we can restore it
-  // We'll set to a known value, verify, then set back
-  // Note: page_size can only be set if the DB is empty or after VACUUM
-  // The implementation calls VACUUM after setting, which is safe
-  const testPageSize = 4096;
-  core.setPageSize(testPageSize);
-  // We can't read it back directly via exported function, but it shouldn't throw
-  // Verify by running it again (idempotent)
-  core.setPageSize(testPageSize);
-});
-
-test("setCacheSize round-trip", serial, () => {
-  core.setCacheSize(16384);
-  // Verify idempotent
-  core.setCacheSize(16384);
 });
 
 // ─── Edge Cases ────────────────────────────────────────

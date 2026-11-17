@@ -1,8 +1,8 @@
 /**
  * Unit tests for src/lib/db/modelIntelligence.ts
  *
- * Uses the project's own DB infrastructure (core.ts getDbInstance)
- * with a temp DATA_DIR. Follows the Node.js native test runner pattern.
+ * Uses the process's PostgreSQL test database (tests/_setup/isolatePostgres.ts) and a
+ * temp DATA_DIR. Follows the Node.js native test runner pattern.
  */
 
 import { describe, it, beforeEach } from "node:test";
@@ -10,15 +10,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-mi-test-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const mi = await import("../../src/lib/db/modelIntelligence.ts");
 
-function resetStorage(): void {
-  core.resetDbInstance();
+async function resetStorage(): Promise<void> {
+  await resetTestDb();
   try {
     if (fs.existsSync(TEST_DATA_DIR)) {
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -29,7 +29,7 @@ function resetStorage(): void {
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-function insertEntry(
+async function insertEntry(
   model: string,
   source: string,
   category: string,
@@ -39,32 +39,27 @@ function insertEntry(
     confidence?: string | null;
     expiresAt?: string | null;
   } = {}
-): void {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT OR REPLACE INTO model_intelligence
-     (model, source, category, score, elo_raw, confidence, synced_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
-  ).run(
+): Promise<void> {
+  await mi.upsertModelIntelligence({
     model,
     source,
     category,
     score,
-    opts.eloRaw ?? null,
-    opts.confidence ?? null,
-    opts.expiresAt ?? null
-  );
+    eloRaw: opts.eloRaw ?? null,
+    confidence: opts.confidence ?? null,
+    expiresAt: opts.expiresAt ?? null,
+  });
 }
 
 // ─── Tests ───────────────────────────────────────────────
 
 describe("upsertModelIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("inserts a new entry", () => {
-    mi.upsertModelIntelligence({
+  it("inserts a new entry", async () => {
+    await mi.upsertModelIntelligence({
       model: "claude-sonnet",
       source: "arena_elo",
       category: "coding",
@@ -74,7 +69,7 @@ describe("upsertModelIntelligence", () => {
       expiresAt: null,
     });
 
-    const entry = mi.getModelIntelligenceBySource("claude-sonnet", "arena_elo", "coding");
+    const entry = await mi.getModelIntelligenceBySource("claude-sonnet", "arena_elo", "coding");
     assert.ok(entry, "Row should exist after upsert");
     assert.strictEqual(entry.model, "claude-sonnet");
     assert.strictEqual(entry.source, "arena_elo");
@@ -85,10 +80,10 @@ describe("upsertModelIntelligence", () => {
     assert.ok(entry.syncedAt, "synced_at should be auto-populated");
   });
 
-  it("updates an existing entry (INSERT OR REPLACE)", () => {
-    insertEntry("gpt-4o", "arena_elo", "coding", 0.85);
+  it("updates an existing entry (upsert replaces the row)", async () => {
+    await insertEntry("gpt-4o", "arena_elo", "coding", 0.85);
 
-    mi.upsertModelIntelligence({
+    await mi.upsertModelIntelligence({
       model: "gpt-4o",
       source: "arena_elo",
       category: "coding",
@@ -98,7 +93,7 @@ describe("upsertModelIntelligence", () => {
       expiresAt: null,
     });
 
-    const entry = mi.getModelIntelligenceBySource("gpt-4o", "arena_elo", "coding");
+    const entry = await mi.getModelIntelligenceBySource("gpt-4o", "arena_elo", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.score, 0.9);
     assert.strictEqual(entry.eloRaw, 1400);
@@ -106,230 +101,234 @@ describe("upsertModelIntelligence", () => {
 });
 
 describe("getModelIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("returns user_override when all three sources exist (highest priority)", () => {
-    insertEntry("claude-sonnet", "models_dev_tier", "coding", 0.75);
-    insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
-    insertEntry("claude-sonnet", "user_override", "coding", 0.99);
+  it("returns user_override when all three sources exist (highest priority)", async () => {
+    await insertEntry("claude-sonnet", "models_dev_tier", "coding", 0.75);
+    await insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
+    await insertEntry("claude-sonnet", "user_override", "coding", 0.99);
 
-    const entry = mi.getModelIntelligence("claude-sonnet", "coding");
+    const entry = await mi.getModelIntelligence("claude-sonnet", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.source, "user_override");
     assert.strictEqual(entry.score, 0.99);
   });
 
-  it("returns arena_elo when no user_override exists", () => {
-    insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
-    insertEntry("gpt-4o", "models_dev_tier", "coding", 0.7);
+  it("returns arena_elo when no user_override exists", async () => {
+    await insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
+    await insertEntry("gpt-4o", "models_dev_tier", "coding", 0.7);
 
-    const entry = mi.getModelIntelligence("gpt-4o", "coding");
+    const entry = await mi.getModelIntelligence("gpt-4o", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.source, "arena_elo");
     assert.strictEqual(entry.score, 0.87);
   });
 
-  it("returns models_dev_tier when only that source exists", () => {
-    insertEntry("llama-4", "models_dev_tier", "coding", 0.65);
+  it("returns models_dev_tier when only that source exists", async () => {
+    await insertEntry("llama-4", "models_dev_tier", "coding", 0.65);
 
-    const entry = mi.getModelIntelligence("llama-4", "coding");
+    const entry = await mi.getModelIntelligence("llama-4", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.source, "models_dev_tier");
     assert.strictEqual(entry.score, 0.65);
   });
 
-  it("returns null when no entry exists", () => {
-    const entry = mi.getModelIntelligence("nonexistent-model", "coding");
+  it("returns null when no entry exists", async () => {
+    const entry = await mi.getModelIntelligence("nonexistent-model", "coding");
     assert.strictEqual(entry, null);
   });
 
-  it("skips expired entries and falls through to next source", () => {
-    insertEntry("gemini-pro", "arena_elo", "coding", 0.82, {
+  it("skips expired entries and falls through to next source", async () => {
+    await insertEntry("gemini-pro", "arena_elo", "coding", 0.82, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
-    insertEntry("gemini-pro", "models_dev_tier", "coding", 0.7);
+    await insertEntry("gemini-pro", "models_dev_tier", "coding", 0.7);
 
-    const entry = mi.getModelIntelligence("gemini-pro", "coding");
+    const entry = await mi.getModelIntelligence("gemini-pro", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.source, "models_dev_tier");
   });
 
-  it("returns null when all entries for a model+category are expired", () => {
-    insertEntry("expired-model", "arena_elo", "coding", 0.8, {
+  it("returns null when all entries for a model+category are expired", async () => {
+    await insertEntry("expired-model", "arena_elo", "coding", 0.8, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
 
-    const entry = mi.getModelIntelligence("expired-model", "coding");
+    const entry = await mi.getModelIntelligence("expired-model", "coding");
     assert.strictEqual(entry, null);
   });
 
-  it("model names require exact match (case-sensitive in DB)", () => {
-    insertEntry("Claude-Sonnet", "arena_elo", "coding", 0.9);
+  it("model names require exact match (case-sensitive in DB)", async () => {
+    await insertEntry("Claude-Sonnet", "arena_elo", "coding", 0.9);
 
-    const exact = mi.getModelIntelligence("Claude-Sonnet", "coding");
+    const exact = await mi.getModelIntelligence("Claude-Sonnet", "coding");
     assert.ok(exact);
 
-    const different = mi.getModelIntelligence("claude-sonnet", "coding");
+    const different = await mi.getModelIntelligence("claude-sonnet", "coding");
     assert.strictEqual(different, null);
   });
 });
 
 describe("getModelIntelligenceBySource", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("returns a specific source entry", () => {
-    insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
-    insertEntry("claude-sonnet", "user_override", "coding", 0.99);
+  it("returns a specific source entry", async () => {
+    await insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
+    await insertEntry("claude-sonnet", "user_override", "coding", 0.99);
 
-    const entry = mi.getModelIntelligenceBySource("claude-sonnet", "arena_elo", "coding");
+    const entry = await mi.getModelIntelligenceBySource("claude-sonnet", "arena_elo", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.source, "arena_elo");
     assert.strictEqual(entry.score, 0.88);
   });
 
-  it("returns null when the specific source does not exist", () => {
-    insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
+  it("returns null when the specific source does not exist", async () => {
+    await insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
 
-    const entry = mi.getModelIntelligenceBySource("claude-sonnet", "user_override", "coding");
+    const entry = await mi.getModelIntelligenceBySource(
+      "claude-sonnet",
+      "user_override",
+      "coding"
+    );
     assert.strictEqual(entry, null);
   });
 
-  it("returns null when no entries exist at all", () => {
-    const entry = mi.getModelIntelligenceBySource("nonexistent", "arena_elo", "coding");
+  it("returns null when no entries exist at all", async () => {
+    const entry = await mi.getModelIntelligenceBySource("nonexistent", "arena_elo", "coding");
     assert.strictEqual(entry, null);
   });
 });
 
 describe("deleteModelIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("deletes an entry and returns true", () => {
-    insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
+  it("deletes an entry and returns true", async () => {
+    await insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
 
-    const deleted = mi.deleteModelIntelligence("gpt-4o", "arena_elo", "coding");
+    const deleted = await mi.deleteModelIntelligence("gpt-4o", "arena_elo", "coding");
     assert.strictEqual(deleted, true);
 
-    const entry = mi.getModelIntelligenceBySource("gpt-4o", "arena_elo", "coding");
+    const entry = await mi.getModelIntelligenceBySource("gpt-4o", "arena_elo", "coding");
     assert.strictEqual(entry, null);
   });
 
-  it("returns false when entry does not exist", () => {
-    const deleted = mi.deleteModelIntelligence("nonexistent", "arena_elo", "coding");
+  it("returns false when entry does not exist", async () => {
+    const deleted = await mi.deleteModelIntelligence("nonexistent", "arena_elo", "coding");
     assert.strictEqual(deleted, false);
   });
 });
 
 describe("deleteExpiredIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("deletes only expired entries leaving valid ones", () => {
-    insertEntry("old-model", "arena_elo", "coding", 0.7, {
+  it("deletes only expired entries leaving valid ones", async () => {
+    await insertEntry("old-model", "arena_elo", "coding", 0.7, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
-    insertEntry("fresh-model", "arena_elo", "coding", 0.9, {
+    await insertEntry("fresh-model", "arena_elo", "coding", 0.9, {
       expiresAt: "2099-12-31T23:59:59Z",
     });
-    insertEntry("permanent-model", "user_override", "coding", 0.95);
+    await insertEntry("permanent-model", "user_override", "coding", 0.95);
 
-    const deleted = mi.deleteExpiredIntelligence();
+    const deleted = await mi.deleteExpiredIntelligence();
     assert.strictEqual(deleted, 1);
 
-    const remaining = mi.listModelIntelligence();
+    const remaining = await mi.listModelIntelligence();
     assert.strictEqual(remaining.length, 2);
   });
 
-  it("deletes expired entries for a specific source only", () => {
-    insertEntry("old-arena", "arena_elo", "coding", 0.7, {
+  it("deletes expired entries for a specific source only", async () => {
+    await insertEntry("old-arena", "arena_elo", "coding", 0.7, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
-    insertEntry("old-tier", "models_dev_tier", "coding", 0.5, {
+    await insertEntry("old-tier", "models_dev_tier", "coding", 0.5, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
 
-    const deleted = mi.deleteExpiredIntelligence("arena_elo");
+    const deleted = await mi.deleteExpiredIntelligence("arena_elo");
     assert.strictEqual(deleted, 1);
 
-    const remaining = mi.listModelIntelligence();
+    const remaining = await mi.listModelIntelligence();
     assert.strictEqual(remaining.length, 1);
     assert.strictEqual(remaining[0].source, "models_dev_tier");
   });
 
-  it("returns 0 when no expired entries exist", () => {
-    insertEntry("fresh-model", "arena_elo", "coding", 0.9, {
+  it("returns 0 when no expired entries exist", async () => {
+    await insertEntry("fresh-model", "arena_elo", "coding", 0.9, {
       expiresAt: "2099-12-31T23:59:59Z",
     });
 
-    const deleted = mi.deleteExpiredIntelligence();
+    const deleted = await mi.deleteExpiredIntelligence();
     assert.strictEqual(deleted, 0);
   });
 });
 
 describe("listModelIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("lists all entries when no filters provided", () => {
-    insertEntry("model-a", "arena_elo", "coding", 0.8);
-    insertEntry("model-b", "arena_elo", "review", 0.75);
-    insertEntry("model-c", "user_override", "coding", 0.95);
+  it("lists all entries when no filters provided", async () => {
+    await insertEntry("model-a", "arena_elo", "coding", 0.8);
+    await insertEntry("model-b", "arena_elo", "review", 0.75);
+    await insertEntry("model-c", "user_override", "coding", 0.95);
 
-    const entries = mi.listModelIntelligence();
+    const entries = await mi.listModelIntelligence();
     assert.strictEqual(entries.length, 3);
   });
 
-  it("filters by source", () => {
-    insertEntry("model-a", "arena_elo", "coding", 0.8);
-    insertEntry("model-b", "user_override", "coding", 0.95);
-    insertEntry("model-c", "models_dev_tier", "coding", 0.6);
+  it("filters by source", async () => {
+    await insertEntry("model-a", "arena_elo", "coding", 0.8);
+    await insertEntry("model-b", "user_override", "coding", 0.95);
+    await insertEntry("model-c", "models_dev_tier", "coding", 0.6);
 
-    const entries = mi.listModelIntelligence({ source: "arena_elo" });
+    const entries = await mi.listModelIntelligence({ source: "arena_elo" });
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].source, "arena_elo");
   });
 
-  it("filters by category", () => {
-    insertEntry("model-a", "arena_elo", "coding", 0.8);
-    insertEntry("model-b", "arena_elo", "review", 0.75);
-    insertEntry("model-c", "arena_elo", "documentation", 0.7);
+  it("filters by category", async () => {
+    await insertEntry("model-a", "arena_elo", "coding", 0.8);
+    await insertEntry("model-b", "arena_elo", "review", 0.75);
+    await insertEntry("model-c", "arena_elo", "documentation", 0.7);
 
-    const entries = mi.listModelIntelligence({ category: "review" });
+    const entries = await mi.listModelIntelligence({ category: "review" });
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].category, "review");
   });
 
-  it("filters by both source and category", () => {
-    insertEntry("model-a", "arena_elo", "coding", 0.8);
-    insertEntry("model-b", "arena_elo", "review", 0.75);
-    insertEntry("model-c", "user_override", "coding", 0.95);
+  it("filters by both source and category", async () => {
+    await insertEntry("model-a", "arena_elo", "coding", 0.8);
+    await insertEntry("model-b", "arena_elo", "review", 0.75);
+    await insertEntry("model-c", "user_override", "coding", 0.95);
 
-    const entries = mi.listModelIntelligence({ source: "arena_elo", category: "coding" });
+    const entries = await mi.listModelIntelligence({ source: "arena_elo", category: "coding" });
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].model, "model-a");
   });
 
-  it("returns empty array for empty table", () => {
-    const entries = mi.listModelIntelligence();
+  it("returns empty array for empty table", async () => {
+    const entries = await mi.listModelIntelligence();
     assert.ok(Array.isArray(entries));
     assert.strictEqual(entries.length, 0);
   });
 });
 
 describe("bulkUpsertModelIntelligence", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("bulk inserts multiple entries", () => {
-    const count = mi.bulkUpsertModelIntelligence([
+  it("bulk inserts multiple entries", async () => {
+    const count = await mi.bulkUpsertModelIntelligence([
       {
         model: "model-a",
         source: "arena_elo",
@@ -360,19 +359,19 @@ describe("bulkUpsertModelIntelligence", () => {
     ]);
 
     assert.strictEqual(count, 3);
-    const entries = mi.listModelIntelligence();
+    const entries = await mi.listModelIntelligence();
     assert.strictEqual(entries.length, 3);
   });
 
-  it("returns 0 for empty input array", () => {
-    const count = mi.bulkUpsertModelIntelligence([]);
+  it("returns 0 for empty input array", async () => {
+    const count = await mi.bulkUpsertModelIntelligence([]);
     assert.strictEqual(count, 0);
   });
 
-  it("replaces existing entries on conflict (INSERT OR REPLACE)", () => {
-    insertEntry("model-a", "arena_elo", "coding", 0.7);
+  it("replaces existing entries on conflict (upsert)", async () => {
+    await insertEntry("model-a", "arena_elo", "coding", 0.7);
 
-    mi.bulkUpsertModelIntelligence([
+    await mi.bulkUpsertModelIntelligence([
       {
         model: "model-a",
         source: "arena_elo",
@@ -384,7 +383,7 @@ describe("bulkUpsertModelIntelligence", () => {
       },
     ]);
 
-    const entry = mi.getModelIntelligenceBySource("model-a", "arena_elo", "coding");
+    const entry = await mi.getModelIntelligenceBySource("model-a", "arena_elo", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.score, 0.9);
     assert.strictEqual(entry.eloRaw, 1450);
@@ -392,57 +391,57 @@ describe("bulkUpsertModelIntelligence", () => {
 });
 
 describe("getResolvedTaskFitness", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("returns user_override score when all sources exist", () => {
-    insertEntry("claude-sonnet", "models_dev_tier", "coding", 0.75);
-    insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
-    insertEntry("claude-sonnet", "user_override", "coding", 0.99);
+  it("returns user_override score when all sources exist", async () => {
+    await insertEntry("claude-sonnet", "models_dev_tier", "coding", 0.75);
+    await insertEntry("claude-sonnet", "arena_elo", "coding", 0.88);
+    await insertEntry("claude-sonnet", "user_override", "coding", 0.99);
 
-    const score = mi.getResolvedTaskFitness("claude-sonnet", "coding");
+    const score = await mi.getResolvedTaskFitness("claude-sonnet", "coding");
     assert.strictEqual(score, 0.99);
   });
 
-  it("returns arena_elo score when no user_override exists", () => {
-    insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
-    insertEntry("gpt-4o", "models_dev_tier", "coding", 0.7);
+  it("returns arena_elo score when no user_override exists", async () => {
+    await insertEntry("gpt-4o", "arena_elo", "coding", 0.87);
+    await insertEntry("gpt-4o", "models_dev_tier", "coding", 0.7);
 
-    const score = mi.getResolvedTaskFitness("gpt-4o", "coding");
+    const score = await mi.getResolvedTaskFitness("gpt-4o", "coding");
     assert.strictEqual(score, 0.87);
   });
 
-  it("returns models_dev_tier score when only that source exists", () => {
-    insertEntry("llama-4", "models_dev_tier", "coding", 0.65);
+  it("returns models_dev_tier score when only that source exists", async () => {
+    await insertEntry("llama-4", "models_dev_tier", "coding", 0.65);
 
-    const score = mi.getResolvedTaskFitness("llama-4", "coding");
+    const score = await mi.getResolvedTaskFitness("llama-4", "coding");
     assert.strictEqual(score, 0.65);
   });
 
-  it("returns null when nothing exists", () => {
-    const score = mi.getResolvedTaskFitness("nonexistent", "coding");
+  it("returns null when nothing exists", async () => {
+    const score = await mi.getResolvedTaskFitness("nonexistent", "coding");
     assert.strictEqual(score, null);
   });
 
-  it("skips expired entries in the resolution chain", () => {
-    insertEntry("gemini-pro", "arena_elo", "coding", 0.82, {
+  it("skips expired entries in the resolution chain", async () => {
+    await insertEntry("gemini-pro", "arena_elo", "coding", 0.82, {
       expiresAt: "2000-01-01T00:00:00Z",
     });
-    insertEntry("gemini-pro", "models_dev_tier", "coding", 0.7);
+    await insertEntry("gemini-pro", "models_dev_tier", "coding", 0.7);
 
-    const score = mi.getResolvedTaskFitness("gemini-pro", "coding");
+    const score = await mi.getResolvedTaskFitness("gemini-pro", "coding");
     assert.strictEqual(score, 0.7);
   });
 });
 
 describe("edge cases", () => {
-  beforeEach(() => {
-    resetStorage();
+  beforeEach(async () => {
+    await resetStorage();
   });
 
-  it("score values are stored and retrieved with float precision", () => {
-    mi.upsertModelIntelligence({
+  it("score values are stored and retrieved with float precision", async () => {
+    await mi.upsertModelIntelligence({
       model: "precise-model",
       source: "arena_elo",
       category: "coding",
@@ -452,13 +451,13 @@ describe("edge cases", () => {
       expiresAt: null,
     });
 
-    const entry = mi.getModelIntelligence("precise-model", "coding");
+    const entry = await mi.getModelIntelligence("precise-model", "coding");
     assert.ok(entry);
     assert.ok(Math.abs(entry.score - 0.1234) < 0.0001);
   });
 
-  it("null eloRaw and confidence are handled correctly", () => {
-    mi.upsertModelIntelligence({
+  it("null eloRaw and confidence are handled correctly", async () => {
+    await mi.upsertModelIntelligence({
       model: "minimal-model",
       source: "models_dev_tier",
       category: "default",
@@ -468,14 +467,14 @@ describe("edge cases", () => {
       expiresAt: null,
     });
 
-    const entry = mi.getModelIntelligence("minimal-model", "default");
+    const entry = await mi.getModelIntelligence("minimal-model", "default");
     assert.ok(entry);
     assert.strictEqual(entry.eloRaw, null);
     assert.strictEqual(entry.confidence, null);
   });
 
-  it("NULL expires_at means never expires", () => {
-    mi.upsertModelIntelligence({
+  it("NULL expires_at means never expires", async () => {
+    await mi.upsertModelIntelligence({
       model: "permanent-model",
       source: "user_override",
       category: "coding",
@@ -485,7 +484,7 @@ describe("edge cases", () => {
       expiresAt: null,
     });
 
-    const entry = mi.getModelIntelligence("permanent-model", "coding");
+    const entry = await mi.getModelIntelligence("permanent-model", "coding");
     assert.ok(entry);
     assert.strictEqual(entry.expiresAt, null);
     assert.strictEqual(entry.score, 0.95);

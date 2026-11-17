@@ -22,7 +22,7 @@ const originalFetch = globalThis.fetch;
 const originalEnvContext = process.env[ENV_CONTEXT_LIMIT];
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -37,7 +37,7 @@ test.before(async () => {
     defaultMode: "off",
   });
 
-  setModelCapabilityOverride(`${TEST_PROVIDER}/${TEST_MODEL}`, "max_input_tokens", 4000);
+  await setModelCapabilityOverride(`${TEST_PROVIDER}/${TEST_MODEL}`, "max_input_tokens", 4000);
 
   globalThis.fetch = async () =>
     new Response(
@@ -70,7 +70,7 @@ test.after(async () => {
     process.env[ENV_CONTEXT_LIMIT] = originalEnvContext;
   }
   await new Promise((r) => setTimeout(r, 200));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

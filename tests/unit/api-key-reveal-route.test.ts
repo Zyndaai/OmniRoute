@@ -9,8 +9,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-api-key-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const featureFlagsDb = await import("../../src/lib/db/featureFlags.ts");
+const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
 const listRoute = await import("../../src/app/api/keys/route.ts");
 const revealRoute = await import("../../src/app/api/keys/[id]/reveal/route.ts");
 
@@ -19,10 +21,9 @@ const MACHINE_ID = "1234567890abcdef";
 async function resetStorage() {
   delete process.env.ALLOW_API_KEY_REVEAL;
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
+  await refreshFeatureFlagSnapshot();
   apiKeysDb.resetApiKeyState();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 function maskKey(key) {
@@ -35,7 +36,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   delete process.env.ALLOW_API_KEY_REVEAL;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -75,15 +76,9 @@ test("GET /api/keys falls back to default pagination for invalid query params", 
 test("GET /api/keys returns 500 when key loading fails unexpectedly", async () => {
   await apiKeysDb.createApiKey("Primary Key", MACHINE_ID);
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql, ...args) => {
-    if (typeof sql === "string" && sql.includes("SELECT * FROM api_keys")) {
-      throw new Error("db exploded");
-    }
-    return originalPrepare(sql, ...args);
-  };
+  // Real database failure: the table the listing reads is briefly gone.
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE api_keys RENAME TO api_keys_unavailable");
   apiKeysDb.resetApiKeyState();
 
   try {
@@ -93,7 +88,7 @@ test("GET /api/keys returns 500 when key loading fails unexpectedly", async () =
     assert.equal(response.status, 500);
     assert.equal(body.error, "Failed to fetch keys");
   } finally {
-    db.prepare = originalPrepare;
+    await backend.execute("ALTER TABLE api_keys_unavailable RENAME TO api_keys");
     apiKeysDb.resetApiKeyState();
   }
 });
@@ -126,7 +121,9 @@ test("GET /api/keys/[id]/reveal returns the full key when reveal is enabled", as
 });
 
 test("GET /api/keys/[id]/reveal honors the ALLOW_API_KEY_REVEAL feature flag override", async () => {
-  featureFlagsDb.setFeatureFlagOverride("ALLOW_API_KEY_REVEAL", "true");
+  await featureFlagsDb.setFeatureFlagOverride("ALLOW_API_KEY_REVEAL", "true");
+  // Flag reads are synchronous and served from a snapshot: reload it after the write.
+  await refreshFeatureFlagSnapshot();
   const created = await apiKeysDb.createApiKey("Primary Key", MACHINE_ID);
   const request = new Request(`http://localhost/api/keys/${created.id}/reveal`);
 
@@ -157,7 +154,12 @@ test("GET /api/keys/[id]/reveal returns 500 when params resolution fails", async
   const request = new Request("http://localhost/api/keys/broken/reveal");
 
   const response = await revealRoute.GET(request, {
-    params: Promise.reject(new Error("params exploded")),
+    // A thenable that rejects only when awaited: a pre-built rejected Promise would be reported
+    // as an unhandled rejection while the route's (now database-backed) auth check is pending.
+    params: {
+      then: (_resolve: unknown, reject: (error: Error) => void) =>
+        reject(new Error("params exploded")),
+    } as unknown as Promise<{ id: string }>,
   });
   const body = (await response.json()) as any;
 

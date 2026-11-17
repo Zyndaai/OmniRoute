@@ -1,14 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-read-cache-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
@@ -17,48 +13,24 @@ async function importFresh(modulePath) {
   return import(`${url}?test=${Date.now()}-${Math.random().toString(16).slice(2)}`);
 }
 
-async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
-});
-
-test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb();
 });
 
 test("getCachedSettings returns cached data until TTL expires or cache is invalidated", async () => {
   const readCache = await importFresh("src/lib/db/readCache.ts");
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
+  const writeSetting = (key: string, value: unknown) =>
+    backend.execute(
+      `INSERT INTO config_entries (namespace, key, value) VALUES ('settings', $1, $2::jsonb)
+       ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+      [key, JSON.stringify(value)]
+    );
 
   await settingsDb.updateSettings({ label: "initial" });
   assert.equal((await readCache.getCachedSettings()).label, "initial");
 
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "settings",
-    "label",
-    JSON.stringify("stale-write")
-  );
+  await writeSetting("label", "stale-write");
 
   assert.equal((await readCache.getCachedSettings()).label, "initial");
 
@@ -70,11 +42,7 @@ test("getCachedSettings returns cached data until TTL expires or cache is invali
     Date.now = originalNow;
   }
 
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "settings",
-    "label",
-    JSON.stringify("after-invalidate")
-  );
+  await writeSetting("label", "after-invalidate");
   readCache.invalidateDbCache("settings");
 
   assert.equal((await readCache.getCachedSettings()).label, "after-invalidate");
@@ -82,24 +50,18 @@ test("getCachedSettings returns cached data until TTL expires or cache is invali
 
 test("getCachedPricing caches results and refreshes after invalidation", async () => {
   const readCache = await importFresh("src/lib/db/readCache.ts");
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing",
-    "cache-provider",
-    JSON.stringify({
-      "model-a": { prompt: 1 },
-    })
+  await backend.execute(
+    "INSERT INTO model_pricing (source, provider, models) VALUES ('user', $1, $2::jsonb)",
+    ["cache-provider", JSON.stringify({ "model-a": { prompt: 1 } })]
   );
 
   assert.equal((await readCache.getCachedPricing())["cache-provider"]["model-a"].prompt, 1);
 
-  db.prepare("UPDATE key_value SET value = ? WHERE namespace = ? AND key = ?").run(
-    JSON.stringify({
-      "model-a": { prompt: 9 },
-    }),
-    "pricing",
-    "cache-provider"
+  await backend.execute(
+    "UPDATE model_pricing SET models = $1::jsonb WHERE source = 'user' AND provider = $2",
+    [JSON.stringify({ "model-a": { prompt: 9 } }), "cache-provider"]
   );
 
   assert.equal((await readCache.getCachedPricing())["cache-provider"]["model-a"].prompt, 1);
@@ -111,7 +73,6 @@ test("getCachedPricing caches results and refreshes after invalidation", async (
 
 test("getCachedProviderConnections caches only the unfiltered query", async () => {
   const readCache = await import("../../src/lib/db/readCache.ts");
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
 
   await providersDb.createProviderConnection({
@@ -122,13 +83,12 @@ test("getCachedProviderConnections caches only the unfiltered query", async () =
   });
   const firstRead = await readCache.getCachedProviderConnections();
 
-  db.prepare(
-    `
-    INSERT INTO provider_connections (
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (
       id, provider, auth_type, name, is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run("direct-insert", "openai", "apikey", "Secondary", 1, now, now);
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    ["direct-insert", "openai", "apikey", "Secondary", true, now, now]
+  );
 
   const cachedAll = await readCache.getCachedProviderConnections();
   const filtered = await readCache.getCachedProviderConnections({ provider: "openai" });
@@ -152,7 +112,7 @@ test("resetDbInstance invalidates provider connection read caches", async () => 
 
   assert.equal((await providersDb.getProviderConnections()).length, 1);
 
-  await resetStorage();
+  await resetTestDb();
 
   assert.equal((await providersDb.getProviderConnections()).length, 0);
 });
@@ -186,7 +146,6 @@ test("createProviderConnection upsert invalidates the provider connection read c
 
 test("cached LKGP values refresh only after the specific key is invalidated", async () => {
   const readCache = await importFresh("src/lib/db/readCache.ts");
-  const db = core.getDbInstance();
   const comboName = `combo-${Date.now()}`;
   const modelId = `model-${Date.now()}`;
   const lkgpKey = `${comboName}:${modelId}`;
@@ -194,10 +153,10 @@ test("cached LKGP values refresh only after the specific key is invalidated", as
   await settingsDb.setLKGP(comboName, modelId, "openai");
   assert.deepEqual(await readCache.getCachedLKGP(comboName, modelId), { provider: "openai" });
 
-  db.prepare("UPDATE key_value SET value = ? WHERE namespace = 'lkgp' AND key = ?").run(
-    JSON.stringify("anthropic"),
-    lkgpKey
-  );
+  await getTestBackend().execute("UPDATE lkgp_pins SET provider = $1 WHERE pin_key = $2", [
+    "anthropic",
+    lkgpKey,
+  ]);
 
   assert.deepEqual(await readCache.getCachedLKGP(comboName, modelId), { provider: "openai" });
 
@@ -207,8 +166,6 @@ test("cached LKGP values refresh only after the specific key is invalidated", as
 });
 
 test("staleness regression: getProviderConnections returns fresh data after connection deleted", async () => {
-  const readCache = await importFresh("src/lib/db/readCache.ts");
-
   const conn = await providersDb.createProviderConnection({
     provider: "openai",
     authType: "apikey",
@@ -227,8 +184,6 @@ test("staleness regression: getProviderConnections returns fresh data after conn
 });
 
 test("staleness regression: getProviderConnections returns fresh data after deleteProviderConnectionsByProvider", async () => {
-  const readCache = await importFresh("src/lib/db/readCache.ts");
-
   await providersDb.createProviderConnection({
     provider: "test-stale-batch",
     authType: "apikey",
@@ -247,7 +202,6 @@ test("staleness regression: getProviderConnections returns fresh data after dele
 
 test("getCachedProviderConnectionById caches result and invalidates on connections write", async () => {
   const readCache = await importFresh("src/lib/db/readCache.ts");
-  const db = core.getDbInstance();
 
   await providersDb.createProviderConnection({
     provider: "anthropic",
@@ -263,7 +217,10 @@ test("getCachedProviderConnectionById caches result and invalidates on connectio
   assert.ok(firstRead);
   assert.equal(firstRead.name, "Cached Conn");
 
-  db.prepare("UPDATE provider_connections SET name = ? WHERE id = ?").run("Stale", id);
+  await getTestBackend().execute("UPDATE provider_connections SET name = $1 WHERE id = $2", [
+    "Stale",
+    id,
+  ]);
 
   const cachedRead = await readCache.getCachedProviderConnectionById(id);
   assert.equal(cachedRead.name, "Cached Conn");
@@ -278,12 +235,12 @@ test("getCachedProviderConnectionById caches result and invalidates on connectio
 test("getCachedProviderNodes caches results and invalidates on nodes write", async () => {
   const readCache = await importFresh("src/lib/db/readCache.ts");
   const nodesDb = await importFresh("src/lib/db/providers/nodes.ts");
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
 
+  // provider_nodes.type is restricted to the compatible node types in the PostgreSQL schema.
   await nodesDb.createProviderNode({
     id: "node-cache-test",
-    type: "openai",
+    type: "openai-compatible",
     name: "Cached Node",
     baseUrl: "https://cached.example.com",
     createdAt: now,
@@ -295,9 +252,17 @@ test("getCachedProviderNodes caches results and invalidates on nodes write", asy
   assert.equal(matching.length, 1);
   assert.equal(matching[0].name, "Cached Node");
 
-  db.prepare(
-    "INSERT INTO provider_nodes (id, type, name, base_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run("node-direct-test", "openai", "Direct Insert Node", "https://direct.example.com", now, now);
+  await getTestBackend().execute(
+    "INSERT INTO provider_nodes (id, type, name, base_url, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    [
+      "node-direct-test",
+      "openai-compatible",
+      "Direct Insert Node",
+      "https://direct.example.com",
+      now,
+      now,
+    ]
+  );
 
   const cachedNodes = await readCache.getCachedProviderNodes();
   const matchingCached = cachedNodes.filter((n) => n.id === "node-direct-test");

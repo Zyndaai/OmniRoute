@@ -8,8 +8,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-provider-
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const providerMetricsRoute = await import("../../src/app/api/provider-metrics/route.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 type ProviderMetricsResponse = {
   metrics: Record<
@@ -31,18 +31,17 @@ type ProviderMetricsResponse = {
   };
 };
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -52,29 +51,41 @@ test.after(() => {
   }
 });
 
-function seedProviderConnection(provider: string) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-  ).run(`conn-${provider}`, provider, new Date().toISOString(), new Date().toISOString());
+async function seedProviderConnection(provider: string) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, $3, $4)`,
+    [`conn-${provider}`, provider, new Date().toISOString(), new Date().toISOString()]
+  );
+}
+
+async function insertCallLog(
+  id: string,
+  timestamp: string,
+  provider: string,
+  status: number,
+  duration: number,
+  errorSummary: string | null
+) {
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", provider, status, duration, error_summary)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, timestamp, provider, status, duration, errorSummary]
+  );
 }
 
 test("GET /api/provider-metrics includes provider recency and error topology", async () => {
-  const db = core.getDbInstance();
-  seedProviderConnection("openai");
-  seedProviderConnection("anthropic");
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("openai-success", "2026-05-22T10:00:00.000Z", "openai", 200, 120, null);
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("anthropic-success", "2026-05-22T10:05:00.000Z", "anthropic", 200, 240, null);
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("openai-error", "2026-05-22T10:10:00.000Z", "openai", 500, 80, "upstream error");
+  await seedProviderConnection("openai");
+  await seedProviderConnection("anthropic");
+  await insertCallLog("openai-success", "2026-05-22T10:00:00.000Z", "openai", 200, 120, null);
+  await insertCallLog(
+    "anthropic-success",
+    "2026-05-22T10:05:00.000Z",
+    "anthropic",
+    200,
+    240,
+    null
+  );
+  await insertCallLog("openai-error", "2026-05-22T10:10:00.000Z", "openai", 500, 80, "upstream error");
 
   const response = await providerMetricsRoute.GET();
   const body = (await response.json()) as ProviderMetricsResponse;
@@ -99,21 +110,11 @@ test("GET /api/provider-metrics errorProvider must NOT flag a provider whose mos
   //          providerB never errored.
   // Bug (pre-fix): errorProvider = "providerA" because lastErrorAt > 0.
   // Fix (post-fix): errorProvider = "" because lastStatus for providerA is 200.
-  const db = core.getDbInstance();
-  seedProviderConnection("providerA");
-  seedProviderConnection("providerB");
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("a-old-error", "2026-01-01T00:00:00.000Z", "providerA", 500, 100, "old error");
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("a-recent-ok", "2026-06-01T00:00:00.000Z", "providerA", 200, 80, null);
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, status, duration, error_summary)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run("b-ok", "2026-05-01T00:00:00.000Z", "providerB", 200, 60, null);
+  await seedProviderConnection("providerA");
+  await seedProviderConnection("providerB");
+  await insertCallLog("a-old-error", "2026-01-01T00:00:00.000Z", "providerA", 500, 100, "old error");
+  await insertCallLog("a-recent-ok", "2026-06-01T00:00:00.000Z", "providerA", 200, 80, null);
+  await insertCallLog("b-ok", "2026-05-01T00:00:00.000Z", "providerB", 200, 60, null);
 
   const response = await providerMetricsRoute.GET();
   const body = (await response.json()) as ProviderMetricsResponse;
@@ -134,14 +135,23 @@ test("GET /api/provider-metrics errorProvider must NOT flag a provider whose mos
 });
 
 test("GET /api/provider-metrics returns sanitized 500 when metrics cannot be loaded", async () => {
-  const db = core.getDbInstance();
-  db.close();
+  // The metrics query fails (simulated by making the process database backend reject queries).
+  const backend = getTestBackend();
+  const originalQuery = backend.query.bind(backend);
+  backend.query = (async () => {
+    throw new Error('relation "call_logs" is unavailable (simulated)');
+  }) as typeof backend.query;
 
-  const response = await providerMetricsRoute.GET();
+  let response: Response;
+  try {
+    response = await providerMetricsRoute.GET();
+  } finally {
+    backend.query = originalQuery as typeof backend.query;
+  }
   const body = await response.json();
 
   assert.equal(response.status, 500);
   assert.equal(body.error?.message, "Failed to load provider metrics");
   assert.equal(body.error?.message.includes("at /"), false);
-  assert.equal(JSON.stringify(body).includes("SqliteError"), false);
+  assert.equal(JSON.stringify(body).includes("relation"), false);
 });

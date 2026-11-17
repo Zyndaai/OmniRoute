@@ -10,12 +10,15 @@ const { claudeToGeminiRequest } =
 const { AntigravityExecutor } = await import("../../open-sse/executors/antigravity.ts");
 const {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
   clearGeminiThoughtSignatures,
 } = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const { prefetchThoughtSignatures } = await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
-test.beforeEach(() => {
-  clearGeminiThoughtSignatures();
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatures();
 });
 
 type UnknownRecord = Record<string, unknown>;
@@ -33,7 +36,7 @@ function findFunctionResponsePart(contents: UnknownRecord[]): UnknownRecord | un
   return undefined;
 }
 
-test("sanitizeFunctionResponseData renames $ref and $-prefixed keys in nested structures while preserving primitives and normal keys", () => {
+test("sanitizeFunctionResponseData renames $ref and $-prefixed keys in nested structures while preserving primitives and normal keys", async () => {
   assert.equal(sanitizeFunctionResponseData(null), null);
   assert.equal(sanitizeFunctionResponseData(undefined), undefined);
   assert.equal(sanitizeFunctionResponseData("plain text"), "plain text");
@@ -91,8 +94,8 @@ test("sanitizeFunctionResponseData renames $ref and $-prefixed keys in nested st
   assert.deepEqual(sanitizeFunctionResponseData(input), expected);
 });
 
-test("openaiToCloudCodeGeminiRequest converts tool message containing schema $ref into functionResponse with _ref", () => {
-  const result = openaiToCloudCodeGeminiRequest(
+test("openaiToCloudCodeGeminiRequest converts tool message containing schema $ref into functionResponse with _ref", async () => {
+  const result = await openaiToCloudCodeGeminiRequest(
     "gemini-3.8-flash",
     {
       messages: [
@@ -133,13 +136,12 @@ test("openaiToCloudCodeGeminiRequest converts tool message containing schema $re
   });
 });
 
-test("claudeToGeminiRequest converts tool_result containing schema $ref into functionResponse with _ref", () => {
+test("claudeToGeminiRequest converts tool_result containing schema $ref into functionResponse with _ref", async () => {
   const ns = "test-ns-ref-sanitization";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_ref_1"), "SIG_REF_1");
+  const scopedNs = scopeGeminiThoughtSignatureNamespace(ns, "gemini-2.5-pro") as string;
+  await storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(scopedNs, "tu_ref_1"), "SIG_REF_1");
 
-  const result = claudeToGeminiRequest(
-    "gemini-2.5-pro",
-    {
+  const claudeBody = {
       messages: [
         { role: "user", content: [{ type: "text", text: "fetch openapi schema" }] },
         {
@@ -165,10 +167,17 @@ test("claudeToGeminiRequest converts tool_result containing schema $ref into fun
           ],
         },
       ],
-    },
-    false,
-    { _signatureNamespace: ns } as never
-  );
+  };
+  // The translators read only the prefetched signatures (see translator/index.ts).
+  const result = await claudeToGeminiRequest("gemini-2.5-pro", claudeBody, false, {
+    _signatureNamespace: scopedNs,
+    _thoughtSignatures: await prefetchThoughtSignatures(
+      FORMATS.GEMINI,
+      "gemini-2.5-pro",
+      claudeBody,
+      ns
+    ),
+  } as never);
 
   const contents = (result as { contents: UnknownRecord[] }).contents;
   assert.ok(Array.isArray(contents), "expected contents array");
@@ -231,7 +240,7 @@ test("AntigravityExecutor.transformRequest sanitizes functionResponse.response c
   });
 });
 
-test("sanitizeFunctionResponseData stops recursion at depth > 20", () => {
+test("sanitizeFunctionResponseData stops recursion at depth > 20", async () => {
   let deeplyNested: Record<string, unknown> = { $ref: "level-deep" };
   for (let i = 0; i < 25; i++) {
     deeplyNested = { next: deeplyNested };
@@ -253,7 +262,7 @@ test("sanitizeFunctionResponseData stops recursion at depth > 20", () => {
   assert.equal(foundUnsanitized, true, "expected depth guard to halt sanitization past depth 20");
 });
 
-test("sanitizeGeminiPartFunctionResponse handles part with/without functionResponse cleanly", () => {
+test("sanitizeGeminiPartFunctionResponse handles part with/without functionResponse cleanly", async () => {
   const textPart = { text: "hello" };
   assert.equal(sanitizeGeminiPartFunctionResponse(textPart), textPart);
 
@@ -279,7 +288,7 @@ test("sanitizeGeminiPartFunctionResponse handles part with/without functionRespo
   });
 });
 
-test("sanitizeFunctionResponseData never clobbers an existing _-prefixed key when renaming", () => {
+test("sanitizeFunctionResponseData never clobbers an existing _-prefixed key when renaming", async () => {
   const out = sanitizeFunctionResponseData({
     _ref: "kept-original",
     $ref: "#/definitions/Item",

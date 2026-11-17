@@ -20,23 +20,27 @@ test.afterEach(() => {
   delete process.env[CURSOR_GROK_47_DROP_MAX_EFFORT_FLAG];
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-function contextWindow(model: string) {
-  return getResolvedModelCapabilities({ provider: "cursor", model }, { persistedOverrides: false })
-    .contextWindow;
+async function contextWindow(model: string) {
+  return (
+    await getResolvedModelCapabilities(
+      { provider: "cursor", model },
+      { persistedOverrides: false }
+    )
+  ).contextWindow;
 }
 
-test("#17386 bare cursor grok-4.7 resolves to the 256k standard window, not the 200k provider default", () => {
-  assert.equal(contextWindow("grok-4.7"), GROK_47_CONTEXTS["256k"]);
+test("#17386 bare cursor grok-4.7 resolves to the 256k standard window, not the 200k provider default", async () => {
+  assert.equal(await contextWindow("grok-4.7"), GROK_47_CONTEXTS["256k"]);
 });
 
-test("#17386 the explicit context variants keep their own windows", () => {
-  assert.equal(contextWindow("cursor-grok-4.7-low-256k"), GROK_47_CONTEXTS["256k"]);
-  assert.equal(contextWindow("cursor-grok-4.7-high-500k"), GROK_47_CONTEXTS["500k"]);
+test("#17386 the explicit context variants keep their own windows", async () => {
+  assert.equal(await contextWindow("cursor-grok-4.7-low-256k"), GROK_47_CONTEXTS["256k"]);
+  assert.equal(await contextWindow("cursor-grok-4.7-high-500k"), GROK_47_CONTEXTS["500k"]);
 });
 
 test("#17386 flag OFF (default): a Grok 4.7 request still forwards max effort", () => {

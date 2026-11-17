@@ -11,7 +11,6 @@ const MOCK_OPENWA_VERSION = "4.76.0";
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Prepend fake bin dir to PATH so our fake `npm` is found by runNpm
 const originalPath = process.env.PATH ?? "";
@@ -52,11 +51,14 @@ execSync("which npm", { env: process.env });
 
 // DB bootstrap (must be before openwa import due to db/core eager init)
 const core = await import("../../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('openwa', 'not_installed', 8323, 0, 0, 0)`
-).run();
+const { upsertVersionManagerTool } = await import("../../../../src/lib/db/versionManager.ts");
+await upsertVersionManagerTool({
+  tool: "openwa",
+  status: "not_installed",
+  port: 8323,
+  autoStart: false,
+  autoUpdate: false,
+});
 
 const {
   install,
@@ -68,9 +70,9 @@ const {
   OPENWA_INSTALL_DIR,
 } = await import("../../../../src/lib/services/installers/openwa.ts");
 
-test.after(() => {
+test.after(async () => {
   process.env.PATH = originalPath;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.rmSync(FAKE_BIN_DIR, { recursive: true, force: true });
 });

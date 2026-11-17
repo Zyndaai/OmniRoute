@@ -30,9 +30,9 @@ const V26_VISION = [
 ];
 
 for (const id of V26_VISION) {
-  test(`#${id} resolves supportsVision=true`, () => {
+  test(`#${id} resolves supportsVision=true`, async () => {
     assert.equal(isVisionModelId(id), true, `isVisionModelId(${id})`);
-    const caps = getResolvedModelCapabilities(id);
+    const caps = await getResolvedModelCapabilities(id);
     assert.equal(caps.supportsVision, true, `getResolvedModelCapabilities(${id}).supportsVision`);
   });
 }
@@ -54,23 +54,26 @@ const STILL_TEXT_ONLY = [
 ];
 
 for (const id of STILL_TEXT_ONLY) {
-  test(`#${id} stays non-vision (no false positive)`, () => {
+  test(`#${id} stays non-vision (no false positive)`, async () => {
     assert.equal(isVisionModelId(id), false, `isVisionModelId(${id})`);
   });
 }
 
-test("resolved capabilities keep the earlier-generation pro verdicts", () => {
+test("resolved capabilities keep the earlier-generation pro verdicts", async () => {
   assert.notEqual(
-    getResolvedModelCapabilities("opencode-go/mimo-v2.5-pro").supportsVision,
+    (await getResolvedModelCapabilities("opencode-go/mimo-v2.5-pro")).supportsVision,
     true,
     "mimo-v2.5-pro is text-only per Xiaomi docs"
   );
   assert.notEqual(
-    getResolvedModelCapabilities("command-code/xiaomi/mimo-v2-pro").supportsVision,
+    (await getResolvedModelCapabilities("command-code/xiaomi/mimo-v2-pro")).supportsVision,
     true,
     "mimo-v2-pro is text-only per Xiaomi docs"
   );
   // And the multimodal base siblings from earlier generations are untouched.
-  assert.equal(getResolvedModelCapabilities("opencode-go/mimo-v2.5").supportsVision, true);
-  assert.equal(getResolvedModelCapabilities("mimo-v2-omni").supportsVision, true);
+  assert.equal(
+    (await getResolvedModelCapabilities("opencode-go/mimo-v2.5")).supportsVision,
+    true
+  );
+  assert.equal((await getResolvedModelCapabilities("mimo-v2-omni")).supportsVision, true);
 });

@@ -78,7 +78,7 @@ test("openaiToOpenAIResponsesRequest: preserves all items when no orphans", () =
   assert.equal(outputs.length, 1, "valid function_call_output should be preserved");
 });
 
-test("openaiToClaudeRequest: filters orphaned tool_result blocks", () => {
+test("openaiToClaudeRequest: filters orphaned tool_result blocks", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -91,7 +91,7 @@ test("openaiToClaudeRequest: filters orphaned tool_result blocks", () => {
       { role: "tool", tool_call_id: "tu_valid_1", content: "file contents" },
     ],
   };
-  const result = openaiToClaudeRequest("claude-3", body, true);
+  const result = await openaiToClaudeRequest("claude-3", body, true);
   const toolResults = [];
   for (const msg of result.messages) {
     if (Array.isArray(msg.content)) {
@@ -104,7 +104,7 @@ test("openaiToClaudeRequest: filters orphaned tool_result blocks", () => {
   assert.equal(toolResults[0].tool_use_id, "tu_valid_1");
 });
 
-test("openaiToClaudeRequest: removes empty user messages after orphan filtering", () => {
+test("openaiToClaudeRequest: removes empty user messages after orphan filtering", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -113,7 +113,7 @@ test("openaiToClaudeRequest: removes empty user messages after orphan filtering"
       { role: "assistant", content: "I can help" },
     ],
   };
-  const result = openaiToClaudeRequest("claude-3", body, true);
+  const result = await openaiToClaudeRequest("claude-3", body, true);
   for (const msg of result.messages) {
     if (msg.role === "user" && Array.isArray(msg.content)) {
       assert.ok(msg.content.length > 0, "user message should not have empty content");
@@ -121,7 +121,7 @@ test("openaiToClaudeRequest: removes empty user messages after orphan filtering"
   }
 });
 
-test("openaiToClaudeRequest: removes empty assistant messages", () => {
+test("openaiToClaudeRequest: removes empty assistant messages", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -133,7 +133,7 @@ test("openaiToClaudeRequest: removes empty assistant messages", () => {
       { role: "assistant", content: "actual response" },
     ],
   };
-  const result = openaiToClaudeRequest("claude-3", body, true);
+  const result = await openaiToClaudeRequest("claude-3", body, true);
   for (const msg of result.messages) {
     if (msg.role === "assistant" && Array.isArray(msg.content)) {
       assert.ok(msg.content.length > 0, "assistant message should not have empty content");
@@ -141,7 +141,7 @@ test("openaiToClaudeRequest: removes empty assistant messages", () => {
   }
 });
 
-test("openaiToClaudeRequest: preserves valid tool pairs unchanged", () => {
+test("openaiToClaudeRequest: preserves valid tool pairs unchanged", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -158,7 +158,7 @@ test("openaiToClaudeRequest: preserves valid tool pairs unchanged", () => {
       { role: "tool", tool_call_id: "tu_2", content: "written" },
     ],
   };
-  const result = openaiToClaudeRequest("claude-3", body, true);
+  const result = await openaiToClaudeRequest("claude-3", body, true);
   const toolResults = [];
   for (const msg of result.messages) {
     if (Array.isArray(msg.content)) {

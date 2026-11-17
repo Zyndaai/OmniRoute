@@ -12,30 +12,41 @@ const readCache = await import("../../src/lib/db/readCache.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const mappingsDb = await import("../../src/lib/db/modelComboMappings.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-const SETTINGS_READ = "SELECT key, value FROM key_value WHERE namespace = 'settings'";
-const COMBO_BY_NAME_READ =
-  "SELECT id, data, sort_order, context_cache_protection FROM combos WHERE name = ?";
-const MAPPING_RESOLVE_READ = /FROM model_combo_mappings m/;
+// Reads are counted on the process backend (the same object every db module uses).
+const SETTINGS_READ = (sql: string, params: unknown[]) =>
+  /FROM config_entries WHERE namespace = \$1 ORDER BY key/.test(sql) && params[0] === "settings";
+const COMBO_BY_NAME_READ = (sql: string) => /FROM combos WHERE lower\(name\)/.test(sql);
+const MAPPING_RESOLVE_READ = (sql: string) => /FROM model_combo_mappings m/.test(sql);
 
-function countReads(db: ReturnType<typeof core.getDbInstance>, sql: string | RegExp) {
-  const original = db.prepare.bind(db);
+type ReadSpy = { counter: { reads: number }; restore: () => void };
+
+function countReads(matches: (sql: string, params: unknown[]) => boolean): ReadSpy {
+  const backend = getTestBackend();
+  const originalQuery = backend.query.bind(backend);
+  const originalQueryOne = backend.queryOne.bind(backend);
   const counter = { reads: 0 };
-  db.prepare = ((candidate: string) => {
-    const matches = typeof sql === "string" ? candidate === sql : sql.test(candidate);
-    if (matches) counter.reads++;
-    return original(candidate);
-  }) as typeof db.prepare;
+  backend.query = ((sql: string, params?: unknown[]) => {
+    if (matches(sql, params ?? [])) counter.reads++;
+    return originalQuery(sql, params);
+  }) as typeof backend.query;
+  backend.queryOne = ((sql: string, params?: unknown[]) => {
+    if (matches(sql, params ?? [])) counter.reads++;
+    return originalQueryOne(sql, params);
+  }) as typeof backend.queryOne;
   return {
     counter,
     restore: () => {
-      db.prepare = original;
+      backend.query = originalQuery as typeof backend.query;
+      backend.queryOne = originalQueryOne as typeof backend.queryOne;
     },
   };
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -45,8 +56,8 @@ test.beforeEach(async () => {
   readCache.invalidateDbCache();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -60,10 +71,9 @@ async function createCombo(name: string, model: string) {
 }
 
 test("getCachedSettings serves repeat reads from one query and refreshes on updateSettings", async () => {
-  const db = core.getDbInstance();
   await settingsDb.updateSettings({ perfCacheLabel: "one" });
 
-  const spy = countReads(db, SETTINGS_READ);
+  const spy = countReads(SETTINGS_READ);
   try {
     const first = await readCache.getCachedSettings();
     const second = await readCache.getCachedSettings();
@@ -76,7 +86,7 @@ test("getCachedSettings serves repeat reads from one query and refreshes on upda
 
   await settingsDb.updateSettings({ perfCacheLabel: "two" });
 
-  const afterWrite = countReads(db, SETTINGS_READ);
+  const afterWrite = countReads(SETTINGS_READ);
   try {
     const fresh = await readCache.getCachedSettings();
     assert.equal(afterWrite.counter.reads, 1);
@@ -87,10 +97,9 @@ test("getCachedSettings serves repeat reads from one query and refreshes on upda
 });
 
 test("getCachedComboByName caches positive and negative lookups, busts on combo write", async () => {
-  const db = core.getDbInstance();
   await createCombo("perf-cache-a", "gpt-4o");
 
-  const spy = countReads(db, COMBO_BY_NAME_READ);
+  const spy = countReads(COMBO_BY_NAME_READ);
   try {
     const first = await readCache.getCachedComboByName("perf-cache-a");
     const second = await readCache.getCachedComboByName("perf-cache-a");
@@ -109,7 +118,7 @@ test("getCachedComboByName caches positive and negative lookups, busts on combo 
   const combo = (await combosDb.getCombos()).find((entry) => entry.name === "perf-cache-a");
   await combosDb.updateCombo(combo!.id, { name: "perf-cache-a-renamed" });
 
-  const afterWrite = countReads(db, COMBO_BY_NAME_READ);
+  const afterWrite = countReads(COMBO_BY_NAME_READ);
   try {
     assert.equal(await readCache.getCachedComboByName("perf-cache-a"), null);
     const renamed = await readCache.getCachedComboByName("perf-cache-a-renamed");
@@ -121,7 +130,6 @@ test("getCachedComboByName caches positive and negative lookups, busts on combo 
 });
 
 test("getCachedComboForModel refreshes immediately after mapping update and delete", async () => {
-  const db = core.getDbInstance();
   const comboA = await createCombo("perf-map-a", "gpt-4o");
   const comboB = await createCombo("perf-map-b", "gpt-4o-mini");
   const mapping = await mappingsDb.createModelComboMapping({
@@ -130,7 +138,7 @@ test("getCachedComboForModel refreshes immediately after mapping update and dele
     priority: 1,
   });
 
-  const spy = countReads(db, MAPPING_RESOLVE_READ);
+  const spy = countReads(MAPPING_RESOLVE_READ);
   try {
     const first = await readCache.getCachedComboForModel("gpt-4o");
     const second = await readCache.getCachedComboForModel("gpt-4o");
@@ -143,7 +151,7 @@ test("getCachedComboForModel refreshes immediately after mapping update and dele
 
   await mappingsDb.updateModelComboMapping(mapping.id, { comboId: comboB.id });
 
-  const afterUpdate = countReads(db, MAPPING_RESOLVE_READ);
+  const afterUpdate = countReads(MAPPING_RESOLVE_READ);
   try {
     const updated = await readCache.getCachedComboForModel("gpt-4o");
     assert.equal(updated?.name, "perf-map-b");
@@ -154,7 +162,7 @@ test("getCachedComboForModel refreshes immediately after mapping update and dele
 
   await mappingsDb.deleteModelComboMapping(mapping.id);
 
-  const afterDelete = countReads(db, MAPPING_RESOLVE_READ);
+  const afterDelete = countReads(MAPPING_RESOLVE_READ);
   try {
     assert.equal(await readCache.getCachedComboForModel("gpt-4o"), null);
     assert.equal(afterDelete.counter.reads, 1);

@@ -107,7 +107,7 @@ test("G1: hung target with per-model timeout disabled → 504, not a silent hang
       comboTimeoutMs: 100,
     },
   };
-  saveModelsDevCapabilities({ openai: { "gpt-4o-mini": capabilityEntry(128000) } });
+  await saveModelsDevCapabilities({ openai: { "gpt-4o-mini": capabilityEntry(128000) } });
   const startedAt = Date.now();
   const result = await handleComboChat({
     body: {},
@@ -188,7 +188,7 @@ test("G4: round-robin hung model → 504 via loop safety timer", async () => {
       comboTimeoutMs: 100,
     },
   };
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     openai: { "gpt-4o-mini": capabilityEntry(128000) },
     claude: { sonnet: capabilityEntry(200000) },
   });

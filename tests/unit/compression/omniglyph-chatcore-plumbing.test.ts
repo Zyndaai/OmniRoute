@@ -7,7 +7,7 @@ test("chatCore uses the measured Anthropic byte-preserving transport policy", ()
   const chatCore = readFileSync("open-sse/handlers/chatCore.ts", "utf8");
 
   assert.match(chatCore, /resolveOmniGlyphTransport\(provider\)/);
-  const translationIndex = chatCore.indexOf("translatedBody = translateRequest(");
+  const translationIndex = chatCore.indexOf("translatedBody = await translateRequest(");
   const postCompressionIndex = chatCore.indexOf("if (runPostTranslationCompression");
   assert.ok(translationIndex >= 0, "chatCore deve manter a tradução explícita");
   assert.ok(postCompressionIndex > translationIndex, "OmniGlyph target-wire roda após tradução");

@@ -26,6 +26,18 @@ const {
 const coreDb = await import("../../src/lib/db/core.ts");
 const { listSchedules, replaceSchedules, deleteSchedulesForPool, parseDays, parseReserves } =
   await import("../../src/lib/db/quotaSchedules.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
+
+/** Schedules reference quota_pools by foreign key; seed the pool rows the tests write under. */
+const SEEDED_POOLS = [
+  "pool-rt",
+  "pool-reserves",
+  "pool-budget",
+  "pool-replace",
+  "pool-del",
+  "pool-a",
+  "pool-b",
+];
 
 type Schedule = Parameters<typeof isScheduleActive>[0];
 type ScheduleInput = Omit<Schedule, "poolId">;
@@ -61,10 +73,16 @@ const SUN_0130 = Date.UTC(2026, 8, 27, 1, 30); // the small hours after it
 
 before(async () => {
   await coreDb.ensureDbInitialized();
+  for (const id of SEEDED_POOLS) {
+    await getTestBackend().execute(
+      "INSERT INTO quota_pools (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [id, id]
+    );
+  }
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -284,13 +302,13 @@ test("parseDays keeps only valid weekday numbers, sorted and deduplicated", () =
   assert.deepEqual(parseDays(""), []);
 });
 
-test("schedules round-trip through the database in resolution order", () => {
-  replaceSchedules("pool-rt", [
+test("schedules round-trip through the database in resolution order", async () => {
+  await replaceSchedules("pool-rt", [
     input({ id: "low", priority: 1 }),
     input({ id: "high", priority: 9 }),
   ]);
 
-  const rows = listSchedules("pool-rt");
+  const rows = await listSchedules("pool-rt");
   assert.equal(rows.length, 2);
   assert.deepEqual(
     rows.map((r) => r.id),
@@ -320,8 +338,8 @@ test("parseReserves drops malformed rules instead of inventing a floor", () => {
   );
 });
 
-test("reserves round-trip through the database, fractions intact", () => {
-  replaceSchedules("pool-reserves", [
+test("reserves round-trip through the database, fractions intact", async () => {
+  await replaceSchedules("pool-reserves", [
     input({
       id: "r1",
       reserves: [
@@ -332,7 +350,7 @@ test("reserves round-trip through the database, fractions intact", () => {
     input({ id: "r2" }),
   ]);
 
-  const byId = Object.fromEntries(listSchedules("pool-reserves").map((s) => [s.id, s]));
+  const byId = Object.fromEntries((await listSchedules("pool-reserves")).map((s) => [s.id, s]));
   assert.deepEqual(byId.r1.reserves, [
     { window: "weekly", percent: 30 },
     { window: "5h", percent: 2.5 },
@@ -340,41 +358,41 @@ test("reserves round-trip through the database, fractions intact", () => {
   assert.deepEqual(byId.r2.reserves, [], "an empty list stays empty, never null");
 });
 
-test("a budget survives the round-trip only as a complete (value, unit) pair", () => {
-  replaceSchedules("pool-budget", [
+test("a budget survives the round-trip only as a complete (value, unit) pair", async () => {
+  await replaceSchedules("pool-budget", [
     input({ id: "full", budgetValue: 500_000, budgetUnit: "tokens" }),
     // Orphan half — the unit is missing, so there is no counter to attribute it to.
     input({ id: "half", budgetValue: 123 }),
   ]);
 
-  const byId = Object.fromEntries(listSchedules("pool-budget").map((s) => [s.id, s]));
+  const byId = Object.fromEntries((await listSchedules("pool-budget")).map((s) => [s.id, s]));
   assert.equal(byId.full.budgetValue, 500_000);
   assert.equal(byId.full.budgetUnit, "tokens");
   assert.equal(byId.half.budgetValue, undefined);
   assert.equal(byId.half.budgetUnit, undefined);
 });
 
-test("replaceSchedules replaces the whole set rather than appending", () => {
-  replaceSchedules("pool-replace", [input({ id: "first" })]);
-  replaceSchedules("pool-replace", [input({ id: "second" })]);
+test("replaceSchedules replaces the whole set rather than appending", async () => {
+  await replaceSchedules("pool-replace", [input({ id: "first" })]);
+  await replaceSchedules("pool-replace", [input({ id: "second" })]);
 
   assert.deepEqual(
-    listSchedules("pool-replace").map((s) => s.id),
+    (await listSchedules("pool-replace")).map((s) => s.id),
     ["second"]
   );
 });
 
-test("deleting a pool's schedules leaves nothing behind", () => {
-  replaceSchedules("pool-del", [input({ id: "gone" })]);
-  assert.equal(deleteSchedulesForPool("pool-del"), 1);
-  assert.deepEqual(listSchedules("pool-del"), []);
+test("deleting a pool's schedules leaves nothing behind", async () => {
+  await replaceSchedules("pool-del", [input({ id: "gone" })]);
+  assert.equal(await deleteSchedulesForPool("pool-del"), 1);
+  assert.deepEqual(await listSchedules("pool-del"), []);
 });
 
-test("schedules of one pool never leak into another", () => {
-  replaceSchedules("pool-a", [input({ id: "a1" })]);
-  replaceSchedules("pool-b", [input({ id: "b1" })]);
+test("schedules of one pool never leak into another", async () => {
+  await replaceSchedules("pool-a", [input({ id: "a1" })]);
+  await replaceSchedules("pool-b", [input({ id: "b1" })]);
   assert.deepEqual(
-    listSchedules("pool-a").map((s) => s.id),
+    (await listSchedules("pool-a")).map((s) => s.id),
     ["a1"]
   );
 });

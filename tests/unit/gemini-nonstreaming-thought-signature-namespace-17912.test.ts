@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 const { translateNonStreamingResponse } =
   await import("../../open-sse/handlers/responseTranslator.ts");
-const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { translateRequest, prefetchThoughtSignatures } =
+  await import("../../open-sse/translator/index.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { clearGeminiThoughtSignatureMemoryForTests } =
   await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
@@ -18,7 +19,9 @@ const CONNECTION_ID = "conn-17912";
 const MODEL = "gemini-4-argon";
 const SIGNATURE = "SIG_17912_ARGON_" + "A".repeat(80);
 
-test.beforeEach(() => clearGeminiThoughtSignatureMemoryForTests());
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatureMemoryForTests();
+});
 
 // Gemini/Vertex answer to step 1: functionCall part carrying a thoughtSignature.
 const geminiStep1 = () => ({
@@ -39,7 +42,7 @@ const geminiStep1 = () => ({
   usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3, totalTokenCount: 8 },
 });
 
-test("#17912: non-streaming Gemini tool_call signature is replayed on the follow-up request", () => {
+test("#17912: non-streaming Gemini tool_call signature is replayed on the follow-up request", async () => {
   // Step 1 (non-streaming): provider body -> OpenAI body shown to the client.
   const openaiResponse = translateNonStreamingResponse(
     geminiStep1(),
@@ -74,7 +77,7 @@ test("#17912: non-streaming Gemini tool_call signature is replayed on the follow
       },
     ],
   };
-  const translated = translateRequest(
+  const translated = (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.GEMINI,
     MODEL,
@@ -83,8 +86,13 @@ test("#17912: non-streaming Gemini tool_call signature is replayed on the follow
     null,
     "gemini",
     null,
-    { signatureNamespace: CONNECTION_ID }
-  ) as Translated;
+    {
+      signatureNamespace: CONNECTION_ID,
+      // translateRequest is synchronous past its entry point; the async caller prefetches the
+      // persisted signatures and passes them in, as the chat handler does.
+      thoughtSignatures: await prefetchThoughtSignatures(FORMATS.GEMINI, MODEL, body, CONNECTION_ID),
+    }
+  )) as Translated;
 
   const parts = translated.contents.flatMap((c: Content) => c.parts ?? []);
   const fc = parts.find((p: Part) => p.functionCall);

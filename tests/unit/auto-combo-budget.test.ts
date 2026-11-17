@@ -36,17 +36,17 @@ function cand(provider: string, model: string, cost: number) {
   } as never;
 }
 
-test("default budget math is unchanged without the new field", () => {
+test("default budget math is unchanged without the new field", async () => {
   const c = [cand("openai", "gpt-4o", 5)];
-  const r = selectProvider(config({ budgetCap: 1 }), c);
+  const r = await selectProvider(config({ budgetCap: 1 }), c);
   assert.equal(r.provider, "openai"); // (5/1M)*1000 = $0.005 < $1
 });
 
-test("32k estimated tokens enforce a 32x tighter budget", () => {
+test("32k estimated tokens enforce a 32x tighter budget", async () => {
   const c = [cand("openai", "gpt-4o", 5)];
   // (5/1M)*32000 = $0.16 — exceeds a $0.01 cap only when tokens are honored.
   // Message verified: "No candidate fits within the configured budget cap…" (engine.ts:59-62).
-  assert.throws(
+  await assert.rejects(
     () =>
       selectProvider(
         config({ budgetCap: 0.01, budgetFallback: "strict", estimatedInputTokens: 32000 }),

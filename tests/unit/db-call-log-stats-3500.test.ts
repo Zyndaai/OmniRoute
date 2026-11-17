@@ -1,30 +1,25 @@
 /**
  * #3500 — call_logs aggregation functions extracted into callLogStats.ts (Hard Rule #5).
  *
- * Seeds an in-memory temp SQLite DB and asserts each new db function returns the
- * correct aggregation. DB handles are released in test.after to prevent Node
- * native test runner from hanging (CLAUDE.md PII/Stream Learnings #3).
+ * Seeds the per-process Postgres database (tests/_setup/isolatePostgres.ts) and asserts
+ * each db function returns the correct aggregation. The database is emptied and reseeded
+ * with resetTestDb() before the file runs.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-callogstats-3500-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const mod = await import("../../src/lib/db/callLogStats.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 let _idSeq = 0;
-function insertCallLog(row: Record<string, unknown>) {
-  const db = core.getDbInstance();
-  const full = {
+
+async function insertCallLog(row: Record<string, unknown>) {
+  const b = getTestBackend();
+  const full: Record<string, unknown> = {
     method: "POST",
     path: "/v1/chat/completions",
     status: 200,
@@ -49,85 +44,66 @@ function insertCallLog(row: Record<string, unknown>) {
     artifact_relpath: null,
     artifact_size_bytes: null,
     artifact_sha256: null,
-    has_request_body: 0,
-    has_response_body: 0,
-    has_pipeline_details: 0,
+    has_request_body: false,
+    has_response_body: false,
+    has_pipeline_details: false,
     request_summary: null,
     request_type: null,
     ...row,
     id: row.id ?? `log-3500-${++_idSeq}`,
     timestamp: row.timestamp ?? new Date().toISOString(),
   };
-  db.prepare(
-    `INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, requested_model, provider, account,
-      connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
-      api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
-      error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
-      has_request_body, has_response_body, has_pipeline_details, request_summary, request_type
-    ) VALUES (
-      @id, @timestamp, @method, @path, @status, @model, @requested_model, @provider, @account,
-      @connection_id, @duration, @tokens_in, @tokens_out, @cache_source, @source_format, @target_format,
-      @api_key_id, @api_key_name, @combo_name, @combo_step_id, @combo_execution_key,
-      @error_summary, @detail_state, @artifact_relpath, @artifact_size_bytes, @artifact_sha256,
-      @has_request_body, @has_response_body, @has_pipeline_details, @request_summary, @request_type
-    )`
-  ).run(full);
+  const cols = Object.keys(full);
+  await b.execute(
+    `INSERT INTO call_logs (${cols.map((c) => `"${c}"`).join(", ")})
+     VALUES (${cols.map((_, i) => `$${i + 1}`).join(", ")})`,
+    cols.map((c) => full[c])
+  );
+}
+
+async function seedConnection(id: string, provider: string) {
+  const now = new Date().toISOString();
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, $3, $4)`,
+    [id, provider, now, now]
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-test.before(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await resetTestDb();
   // Search queries only surface providers with a live provider_connections
   // row — seed connections for the search providers used below so their
   // call_logs rows are not filtered out as deleted providers.
-  const now = new Date().toISOString();
-  const db = core.getDbInstance();
-  for (const [id, provider] of [
-    ["conn-3500-brave", "brave"],
-    ["conn-3500-serper", "serper"],
-    ["conn-3500-bing", "bing"],
-    ["conn-3500-rare-provider", "rare_provider"],
-  ] as const) {
-    db.prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    ).run(id, provider, now, now);
-  }
+  await seedConnection("conn-3500-brave", "brave");
+  await seedConnection("conn-3500-serper", "serper");
+  await seedConnection("conn-3500-bing", "bing");
+  await seedConnection("conn-3500-rare-provider", "rare_provider");
 });
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.after(async () => {
+  await resetTestDb().catch(() => {});
 });
 
 // ---------------------------------------------------------------------------
 // getProviderMetrics
 // ---------------------------------------------------------------------------
 
-test("#3500 getProviderMetrics — aggregates totals and latency per provider", () => {
+test("#3500 getProviderMetrics — aggregates totals and latency per provider", async () => {
   // #10714: getProviderMetrics() only surfaces providers with a live
   // provider_connections row — seed openai/anthropic connections so their
   // call_logs rows are not filtered out as ghost/deleted providers.
-  const db0 = core.getDbInstance();
-  db0
-    .prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run("conn-3500-openai", "openai", new Date().toISOString(), new Date().toISOString());
-  db0
-    .prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run("conn-3500-anthropic", "anthropic", new Date().toISOString(), new Date().toISOString());
+  await seedConnection("conn-3500-openai", "openai");
+  await seedConnection("conn-3500-anthropic", "anthropic");
 
   // Two openai rows: one success, one error with error_summary
   const ts1 = "2025-06-01T10:00:00.000Z";
   const ts2 = "2025-06-01T11:00:00.000Z";
-  insertCallLog({ provider: "openai", status: 200, duration: 100, timestamp: ts1 });
-  insertCallLog({
+  await insertCallLog({ provider: "openai", status: 200, duration: 100, timestamp: ts1 });
+  await insertCallLog({
     provider: "openai",
     status: 500,
     duration: 300,
@@ -136,20 +112,13 @@ test("#3500 getProviderMetrics — aggregates totals and latency per provider", 
   });
   // One anthropic success row
   const ts3 = "2025-06-01T09:00:00.000Z";
-  insertCallLog({ provider: "anthropic", status: 200, duration: 50, timestamp: ts3 });
+  await insertCallLog({ provider: "anthropic", status: 200, duration: 50, timestamp: ts3 });
   // Provider '-' should be excluded
-  insertCallLog({ provider: "-", status: 200 });
-  // Provider null should be excluded (insert directly to avoid type issue)
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
-      tokens_in, tokens_out, cache_source, detail_state, has_request_body, has_response_body, has_pipeline_details)
-     VALUES (?, ?, 'POST', '/v1/test', 200, 'x', NULL, 100, 0, 0, 'upstream', 'none', 0, 0, 0)`
-    )
-    .run(`log-3500-null-${++_idSeq}`, new Date().toISOString());
+  await insertCallLog({ provider: "-", status: 200 });
+  // Provider null should be excluded
+  await insertCallLog({ provider: null, status: 200, model: "x" });
 
-  const rows = mod.getProviderMetrics();
+  const rows = await mod.getProviderMetrics();
 
   // '-' and null providers must not appear
   assert.ok(!rows.some((r) => r.provider === "-"), "provider '-' excluded");
@@ -160,8 +129,9 @@ test("#3500 getProviderMetrics — aggregates totals and latency per provider", 
   assert.equal(openai.totalRequests, 2);
   assert.equal(openai.totalSuccesses, 1); // only the 200
   assert.equal(openai.avgLatencyMs, 200); // ROUND((100+300)/2) = 200
-  assert.equal(openai.lastRequestAt, ts2, "lastRequestAt = most recent ts");
-  assert.equal(openai.lastErrorAt, ts2, "lastErrorAt = ts of the 500/error row");
+  // Postgres returns timestamptz as ISO strings; compare the instant.
+  assert.equal(Date.parse(openai.lastRequestAt as string), Date.parse(ts2), "lastRequestAt = most recent ts");
+  assert.equal(Date.parse(openai.lastErrorAt as string), Date.parse(ts2), "lastErrorAt = ts of the 500/error row");
   assert.equal(openai.lastStatus, 500, "lastStatus = most recent status");
   assert.equal(openai.lastErrorStatus, 500, "lastErrorStatus = most recent error status");
 
@@ -178,14 +148,14 @@ test("#3500 getProviderMetrics — aggregates totals and latency per provider", 
 // getSearchProviderStats
 // ---------------------------------------------------------------------------
 
-test("#3500 getSearchProviderStats — aggregates search requests per provider", () => {
-  insertCallLog({ provider: "brave", status: 200, duration: 50, request_type: "search" });
-  insertCallLog({ provider: "brave", status: 200, duration: 150, request_type: "search" });
-  insertCallLog({ provider: "serper", status: 200, duration: 80, request_type: "search" });
+test("#3500 getSearchProviderStats — aggregates search requests per provider", async () => {
+  await insertCallLog({ provider: "brave", status: 200, duration: 50, request_type: "search" });
+  await insertCallLog({ provider: "brave", status: 200, duration: 150, request_type: "search" });
+  await insertCallLog({ provider: "serper", status: 200, duration: 80, request_type: "search" });
   // non-search row — must NOT appear
-  insertCallLog({ provider: "openai", status: 200, duration: 100, request_type: null });
+  await insertCallLog({ provider: "openai", status: 200, duration: 100, request_type: null });
 
-  const rows = mod.getSearchProviderStats();
+  const rows = await mod.getSearchProviderStats();
 
   // Only search request_type rows
   assert.ok(!rows.some((r) => r.provider === "openai"), "non-search row excluded");
@@ -193,7 +163,7 @@ test("#3500 getSearchProviderStats — aggregates search requests per provider",
   const brave = rows.find((r) => r.provider === "brave");
   assert.ok(brave, "brave row present");
   assert.equal(brave.requests, 2);
-  assert.equal(brave.avg_latency_ms, 100); // CAST(AVG(50,150) AS INTEGER) = 100
+  assert.equal(brave.avg_latency_ms, 100); // AVG(50,150) = 100
 
   const serper = rows.find((r) => r.provider === "serper");
   assert.ok(serper, "serper row present");
@@ -204,20 +174,20 @@ test("#3500 getSearchProviderStats — aggregates search requests per provider",
 // getRecentSearchLogs
 // ---------------------------------------------------------------------------
 
-test("#3500 getRecentSearchLogs — returns up to 10 most recent search rows", () => {
+test("#3500 getRecentSearchLogs — returns up to 10 most recent search rows", async () => {
   // Insert 12 search rows with incrementing timestamps
   for (let i = 1; i <= 12; i++) {
     const ts = new Date(Date.UTC(2025, 5, i, 12, 0, 0)).toISOString();
-    insertCallLog({
+    await insertCallLog({
       provider: "brave",
       status: 200,
       request_type: "search",
       timestamp: ts,
-      request_summary: JSON.stringify({ query: `q${i}` }),
+      request_summary: { query: `q${i}` },
     });
   }
 
-  const rows = mod.getRecentSearchLogs();
+  const rows = await mod.getRecentSearchLogs();
   assert.equal(rows.length, 10, "limited to 10 rows");
   // Most recent first (i=12 is the newest)
   assert.ok(rows[0].timestamp >= rows[rows.length - 1].timestamp, "ordered newest-first");
@@ -227,7 +197,7 @@ test("#3500 getRecentSearchLogs — returns up to 10 most recent search rows", (
 // getSearchAggregateStats
 // ---------------------------------------------------------------------------
 
-test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cached", () => {
+test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cached", async () => {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const todayIso = todayStart.toISOString();
@@ -237,14 +207,14 @@ test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cach
   // #13928: "cached" is driven by cache_source='semantic', not duration —
   // this row's duration is deliberately >5ms to prove the fix no longer
   // uses the old `duration < 5` latency heuristic.
-  insertCallLog({
+  await insertCallLog({
     provider: "brave",
     status: 200,
     duration: 100,
     request_type: "search",
     timestamp: nowIso,
   });
-  insertCallLog({
+  await insertCallLog({
     provider: "brave",
     status: 200,
     duration: 50,
@@ -252,7 +222,7 @@ test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cach
     request_type: "search",
     timestamp: nowIso,
   });
-  insertCallLog({
+  await insertCallLog({
     provider: "brave",
     status: 500,
     duration: 80,
@@ -261,7 +231,7 @@ test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cach
   });
   // Old row (yesterday) — not in today count
   const yesterday = new Date(Date.now() - 86_400_000).toISOString();
-  insertCallLog({
+  await insertCallLog({
     provider: "brave",
     status: 200,
     duration: 200,
@@ -269,7 +239,7 @@ test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cach
     timestamp: yesterday,
   });
 
-  const result = mod.getSearchAggregateStats(todayIso);
+  const result = await mod.getSearchAggregateStats(todayIso);
 
   assert.ok(result.total >= 4, "total includes all search rows (across all tests in file)");
   assert.ok(result.today >= 3, "today counts rows from today");
@@ -278,13 +248,12 @@ test("#3500 getSearchAggregateStats — correct totals, today, errors, avg, cach
   assert.ok(result.avg_duration !== null, "avg_duration not null when rows have duration > 0");
 });
 
-test("#3500 getSearchAggregateStats — returns zero struct when no search rows match", () => {
+test("#3500 getSearchAggregateStats — returns zero struct when no search rows match", async () => {
   // Use a far-future todayIso so no row qualifies
   const farFuture = "2999-01-01T00:00:00.000Z";
-  const result = mod.getSearchAggregateStats(farFuture);
-  // total should be 0 (no rows WHERE request_type='search' AND timestamp >= 2999…)
-  // Actually the total counts ALL search rows regardless of todayIso; only "today" is gated.
+  const result = await mod.getSearchAggregateStats(farFuture);
   // The function never returns null, so we just check the shape.
+  // Only "today" is gated by todayIso; total counts all search rows.
   assert.equal(typeof result.total, "number");
   assert.equal(typeof result.today, "number");
   assert.equal(result.today, 0, "no rows qualify as 'today' in far future");
@@ -294,16 +263,16 @@ test("#3500 getSearchAggregateStats — returns zero struct when no search rows 
 // getSearchProviderCounts
 // ---------------------------------------------------------------------------
 
-test("#3500 getSearchProviderCounts — ordered by cnt desc", () => {
+test("#3500 getSearchProviderCounts — ordered by cnt desc", async () => {
   // brave has multiple rows from earlier tests; add a burst to ensure ordering
   for (let i = 0; i < 5; i++) {
-    insertCallLog({ provider: "bing", status: 200, request_type: "search" });
+    await insertCallLog({ provider: "bing", status: 200, request_type: "search" });
   }
   for (let i = 0; i < 2; i++) {
-    insertCallLog({ provider: "rare_provider", status: 200, request_type: "search" });
+    await insertCallLog({ provider: "rare_provider", status: 200, request_type: "search" });
   }
 
-  const rows = mod.getSearchProviderCounts();
+  const rows = await mod.getSearchProviderCounts();
   // Each row must have provider + cnt
   for (const row of rows) {
     assert.equal(typeof row.provider, "string");
@@ -329,49 +298,43 @@ const USAGE_CUTOFF = "2025-07-01T00:00:00.000Z";
 const IN_WINDOW = "2025-07-02T12:00:00.000Z";
 const OUT_OF_WINDOW = "2025-06-01T12:00:00.000Z";
 
-function seedConnection(provider: string) {
-  const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run(`conn-usage-${provider}`, provider, now, now);
-}
+test("getProviderUsageSince — only counts rows inside the window", async () => {
+  await seedConnection("conn-usage-usage-window", "usage-window");
+  await insertCallLog({ provider: "usage-window", status: 200, timestamp: IN_WINDOW });
+  await insertCallLog({ provider: "usage-window", status: 200, timestamp: IN_WINDOW });
+  await insertCallLog({ provider: "usage-window", status: 200, timestamp: OUT_OF_WINDOW });
+  await insertCallLog({ provider: "usage-window", status: 500, timestamp: OUT_OF_WINDOW });
 
-test("getProviderUsageSince — only counts rows inside the window", () => {
-  seedConnection("usage-window");
-  insertCallLog({ provider: "usage-window", status: 200, timestamp: IN_WINDOW });
-  insertCallLog({ provider: "usage-window", status: 200, timestamp: IN_WINDOW });
-  insertCallLog({ provider: "usage-window", status: 200, timestamp: OUT_OF_WINDOW });
-  insertCallLog({ provider: "usage-window", status: 500, timestamp: OUT_OF_WINDOW });
-
-  const row = mod.getProviderUsageSince(USAGE_CUTOFF).find((r) => r.provider === "usage-window");
+  const row = (await mod.getProviderUsageSince(USAGE_CUTOFF)).find(
+    (r) => r.provider === "usage-window"
+  );
   assert.ok(row, "provider must be present");
   assert.equal(row.requests, 2, "rows before the cutoff must not be counted");
   assert.equal(row.successes, 2);
 });
 
-test("getProviderUsageSince — 2xx/3xx count as success, 4xx/5xx do not", () => {
-  seedConnection("usage-status");
+test("getProviderUsageSince — 2xx/3xx count as success, 4xx/5xx do not", async () => {
+  await seedConnection("conn-usage-usage-status", "usage-status");
   for (const status of [200, 204, 301, 399]) {
-    insertCallLog({ provider: "usage-status", status, timestamp: IN_WINDOW });
+    await insertCallLog({ provider: "usage-status", status, timestamp: IN_WINDOW });
   }
   for (const status of [400, 429, 500, 503]) {
-    insertCallLog({ provider: "usage-status", status, timestamp: IN_WINDOW });
+    await insertCallLog({ provider: "usage-status", status, timestamp: IN_WINDOW });
   }
 
-  const row = mod.getProviderUsageSince(USAGE_CUTOFF).find((r) => r.provider === "usage-status");
+  const row = (await mod.getProviderUsageSince(USAGE_CUTOFF)).find(
+    (r) => r.provider === "usage-status"
+  );
   assert.ok(row);
   assert.equal(row.requests, 8);
   assert.equal(row.successes, 4, "same success rule as getProviderMetrics");
 });
 
-test("getProviderUsageSince — a provider with no live connection is excluded (#10714)", () => {
+test("getProviderUsageSince — a provider with no live connection is excluded (#10714)", async () => {
   // No seedConnection() on purpose: rows exist in call_logs but the provider was deleted.
-  insertCallLog({ provider: "usage-ghost", status: 200, timestamp: IN_WINDOW });
+  await insertCallLog({ provider: "usage-ghost", status: 200, timestamp: IN_WINDOW });
 
-  const rows = mod.getProviderUsageSince(USAGE_CUTOFF);
+  const rows = await mod.getProviderUsageSince(USAGE_CUTOFF);
   assert.equal(
     rows.find((r) => r.provider === "usage-ghost"),
     undefined,
@@ -379,32 +342,34 @@ test("getProviderUsageSince — a provider with no live connection is excluded (
   );
 });
 
-test("getProviderUsageSince — latency and lastRequestAt are bounded by the window too", () => {
-  seedConnection("usage-latency");
-  insertCallLog({
+test("getProviderUsageSince — latency and lastRequestAt are bounded by the window too", async () => {
+  await seedConnection("conn-usage-usage-latency", "usage-latency");
+  await insertCallLog({
     provider: "usage-latency",
     status: 200,
     duration: 100,
     timestamp: IN_WINDOW,
   });
-  insertCallLog({
+  await insertCallLog({
     provider: "usage-latency",
     status: 200,
     duration: 900,
     timestamp: OUT_OF_WINDOW,
   });
 
-  const row = mod.getProviderUsageSince(USAGE_CUTOFF).find((r) => r.provider === "usage-latency");
+  const row = (await mod.getProviderUsageSince(USAGE_CUTOFF)).find(
+    (r) => r.provider === "usage-latency"
+  );
   assert.ok(row);
   assert.equal(row.avgLatencyMs, 100, "the out-of-window 900ms row must not weigh in");
-  assert.equal(row.lastRequestAt, IN_WINDOW);
+  assert.equal(Date.parse(row.lastRequestAt as string), Date.parse(IN_WINDOW));
 });
 
-test("getProviderUsageSince — providers '-' and NULL are excluded", () => {
-  seedConnection("-");
-  insertCallLog({ provider: "-", status: 200, timestamp: IN_WINDOW });
+test("getProviderUsageSince — providers '-' and NULL are excluded", async () => {
+  await seedConnection("conn-usage-dash", "-");
+  await insertCallLog({ provider: "-", status: 200, timestamp: IN_WINDOW });
 
-  const rows = mod.getProviderUsageSince(USAGE_CUTOFF);
+  const rows = await mod.getProviderUsageSince(USAGE_CUTOFF);
   assert.equal(
     rows.find((r) => r.provider === "-"),
     undefined

@@ -26,12 +26,13 @@ const { VisionBridgeGuardrail, getComboVisionBridgeDecision } =
   await import("../../../src/lib/guardrails/visionBridge.ts");
 const { resetGuardrailsForTests } = await import("../../../src/lib/guardrails/registry.ts");
 const { getResolvedModelCapabilities } = await import("../../../src/lib/modelCapabilities.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const core = await import("../../../src/lib/db/core.ts");
 const combosDb = await import("../../../src/lib/db/combos.ts");
 const mappingsDb = await import("../../../src/lib/db/modelComboMappings.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -40,8 +41,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -62,10 +63,10 @@ const TEXT_MODEL_B = "mistral/mistral-large-latest";
 
 // Fail loudly if the static vision heuristic drifts: these fixtures drive
 // every assertion in this file.
-test("fixture models have the expected static vision capability", () => {
-  assert.equal(getResolvedModelCapabilities(VISION_MODEL).supportsVision, true);
-  assert.notEqual(getResolvedModelCapabilities(TEXT_MODEL_A).supportsVision, true);
-  assert.notEqual(getResolvedModelCapabilities(TEXT_MODEL_B).supportsVision, true);
+test("fixture models have the expected static vision capability", async () => {
+  assert.equal((await getResolvedModelCapabilities(VISION_MODEL)).supportsVision, true);
+  assert.notEqual((await getResolvedModelCapabilities(TEXT_MODEL_A)).supportsVision, true);
+  assert.notEqual((await getResolvedModelCapabilities(TEXT_MODEL_B)).supportsVision, true);
 });
 
 const mockSettings = {

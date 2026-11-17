@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import {
   museSessionScope,
@@ -9,24 +9,33 @@ import {
   museClaimCandidates,
 } from "../../src/sse/services/museSessionOwnership.ts";
 import { lockModel, clearAllModelLockouts } from "../../open-sse/services/accountFallback.ts";
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const candidates = [{ id: "account-a" }, { id: "account-b" }];
+
+async function clearOwnership(): Promise<void> {
+  await getTestBackend().execute("DELETE FROM muse_session_ownership");
+}
+
 test("fresh sessions alternate while tool continuations preserve exact encrypted output and owner", async () => {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ?")
-    .run("muse_session_ownership");
+  await clearOwnership();
   const scope = museSessionScope({ prompt_cache_key: "session-a" }, undefined, "client");
   const other = museSessionScope({ prompt_cache_key: "session-b" }, undefined, "client");
   assert.equal(
-    claimMuseSession(scope, { input: "read fixture" }, candidates).connectionId,
+    (await claimMuseSession(scope, { input: "read fixture" }, candidates)).connectionId,
     "account-a"
   );
   assert.equal(
-    claimMuseSession(other, { input: "read fixture" }, candidates).connectionId,
+    (await claimMuseSession(other, { input: "read fixture" }, candidates)).connectionId,
     "account-b"
   );
-  const generation = bindMuseGeneration(scope, "account-a", "private-test-key-a", "identity-a");
+  const generation = await bindMuseGeneration(
+    scope,
+    "account-a",
+    "private-test-key-a",
+    "identity-a"
+  );
   const output = [
     { type: "reasoning", encrypted_content: "opaque-test-a", summary: [] },
     { type: "function_call", call_id: "call-a", name: "read", arguments: "{}" },
@@ -56,47 +65,59 @@ test("fresh sessions alternate while tool continuations preserve exact encrypted
     { type: "function_call_output", call_id: "call-a", output: "fixture result" },
   ];
   const before = structuredClone(input);
-  assert.equal(claimMuseSession(scope, { input }, candidates).connectionId, "account-a");
+  assert.equal((await claimMuseSession(scope, { input }, candidates)).connectionId, "account-a");
   assert.deepEqual(input, before);
-  assert.throws(() => claimMuseSession(other, { input }, candidates), /not issued/);
-  assert.throws(() => claimMuseSession(scope, { input }, [candidates[1]]), /unavailable/);
-  assert.throws(() => claimMuseSession(scope, { input }, candidates, "account-b"), /differs/);
-  assert.throws(
-    () => bindMuseGeneration(scope, "account-a", "replacement-key", "identity-a"),
+  await assert.rejects(claimMuseSession(other, { input }, candidates), /not issued/);
+  await assert.rejects(claimMuseSession(scope, { input }, [candidates[1]]), /unavailable/);
+  await assert.rejects(
+    claimMuseSession(scope, { input }, candidates, "account-b"),
+    /differs/
+  );
+  await assert.rejects(
+    bindMuseGeneration(scope, "account-a", "replacement-key", "identity-a"),
     /generation changed/
   );
-  assert.throws(
-    () => bindMuseGeneration(scope, "account-a", "private-test-key-a", "identity-b"),
+  await assert.rejects(
+    bindMuseGeneration(scope, "account-a", "private-test-key-a", "identity-b"),
     /owner changed/
   );
   assert.equal(
-    bindMuseGeneration(scope, "account-a", "private-test-key-a", "identity-a"),
+    await bindMuseGeneration(scope, "account-a", "private-test-key-a", "identity-a"),
     generation
   );
-  assert.throws(
-    () =>
-      claimMuseSession(
-        scope,
-        { input: [{ type: "function_call_output", call_id: "foreign-call", output: "foreign" }] },
-        candidates
-      ),
+  await assert.rejects(
+    claimMuseSession(
+      scope,
+      { input: [{ type: "function_call_output", call_id: "foreign-call", output: "foreign" }] },
+      candidates
+    ),
     /not issued/
   );
 });
 
-test("reminted same-account key is adopted when no replayable history was recorded", () => {
+test("reminted same-account key is adopted when no replayable history was recorded", async () => {
   const scope = museSessionScope({ prompt_cache_key: "remint-session" }, undefined, "client");
-  const owner = claimMuseSession(scope, { input: "fresh" }, candidates);
-  const first = bindMuseGeneration(scope, owner.connectionId, "minted-key-1", "stable-identity");
-  const second = bindMuseGeneration(scope, owner.connectionId, "minted-key-2", "stable-identity");
+  const owner = await claimMuseSession(scope, { input: "fresh" }, candidates);
+  const first = await bindMuseGeneration(
+    scope,
+    owner.connectionId,
+    "minted-key-1",
+    "stable-identity"
+  );
+  const second = await bindMuseGeneration(
+    scope,
+    owner.connectionId,
+    "minted-key-2",
+    "stable-identity"
+  );
   assert.notEqual(first, second);
   assert.equal(
-    bindMuseGeneration(scope, owner.connectionId, "minted-key-2", "stable-identity"),
+    await bindMuseGeneration(scope, owner.connectionId, "minted-key-2", "stable-identity"),
     second
   );
 });
 
-test("unknown replay, missing identity and another API client cannot adopt encrypted reasoning", () => {
+test("unknown replay, missing identity and another API client cannot adopt encrypted reasoning", async () => {
   assert.throws(
     () => museSessionScope({ input: "same prompt" }, undefined, "client"),
     /explicit session/
@@ -106,10 +127,10 @@ test("unknown replay, missing identity and another API client cannot adopt encry
     [{ type: "reasoning", encrypted_content: "foreign" }],
     [{ type: "function_call_output", call_id: "old", output: "old result" }],
   ]) {
-    assert.throws(() => claimMuseSession(scope, { input }, candidates), /no recorded owner/);
+    await assert.rejects(claimMuseSession(scope, { input }, candidates), /no recorded owner/);
   }
-  assert.throws(
-    () => claimMuseSession(scope, { previous_response_id: "old" }, candidates),
+  await assert.rejects(
+    claimMuseSession(scope, { previous_response_id: "old" }, candidates),
     /no recorded owner/
   );
   assert.notEqual(
@@ -124,13 +145,18 @@ test("unknown replay, missing identity and another API client cannot adopt encry
 
 test("JSON output records ownership, and upstream errors retain their original body/status", async () => {
   const scope = museSessionScope({ prompt_cache_key: "json-session" }, undefined, "client");
-  const owner = claimMuseSession(scope, { input: "fresh" }, candidates);
-  const generation = bindMuseGeneration(scope, owner.connectionId, "json-key", "json-identity");
+  const owner = await claimMuseSession(scope, { input: "fresh" }, candidates);
+  const generation = await bindMuseGeneration(
+    scope,
+    owner.connectionId,
+    "json-key",
+    "json-identity"
+  );
   const output = [{ type: "reasoning", encrypted_content: "json-opaque" }];
   const wire = JSON.stringify({ output });
   assert.equal(await recordMuseOutput(new Response(wire), scope, generation).text(), wire);
   assert.equal(
-    claimMuseSession(scope, { input: output }, candidates).connectionId,
+    (await claimMuseSession(scope, { input: output }, candidates)).connectionId,
     owner.connectionId
   );
   const failure = new Response("caller mismatch", { status: 400 });
@@ -149,57 +175,79 @@ test("chat tool history cannot acquire a fresh owner and emitted calls remain us
     },
     { role: "tool", tool_call_id: "chat-call", content: "result" },
   ];
-  assert.throws(() => claimMuseSession(scope, { messages }, candidates), /no recorded owner/);
-  const owner = claimMuseSession(
+  await assert.rejects(claimMuseSession(scope, { messages }, candidates), /no recorded owner/);
+  const owner = await claimMuseSession(
     scope,
     { messages: [{ role: "user", content: "hi" }] },
     candidates
   );
-  const generation = bindMuseGeneration(scope, owner.connectionId, "chat-key", "chat-account");
+  const generation = await bindMuseGeneration(
+    scope,
+    owner.connectionId,
+    "chat-key",
+    "chat-account"
+  );
   const wire = JSON.stringify({ choices: [{ message: messages[0] }] });
   assert.equal(await recordMuseOutput(new Response(wire), scope, generation).text(), wire);
-  assert.equal(claimMuseSession(scope, { messages }, candidates).connectionId, owner.connectionId);
+  assert.equal(
+    (await claimMuseSession(scope, { messages }, candidates)).connectionId,
+    owner.connectionId
+  );
   const foreign = museSessionScope({ session_id: "foreign-chat" }, undefined, "client");
-  claimMuseSession(foreign, { input: "fresh" }, candidates);
-  assert.throws(() => claimMuseSession(foreign, { messages }, candidates), /not issued/);
+  await claimMuseSession(foreign, { input: "fresh" }, candidates);
+  await assert.rejects(claimMuseSession(foreign, { messages }, candidates), /not issued/);
 });
 
 test("exhausted account is skipped for new sessions and unserved pins move to a healthy account", async () => {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ?")
-    .run("muse_session_ownership");
+  await clearOwnership();
   const healthy = [{ id: "account-a" }, { id: "account-b" }];
   const exhausted = [{ id: "account-a", unavailable: true }, { id: "account-b" }];
   const unserved = museSessionScope({ session_id: "unserved" }, undefined, "client");
-  assert.equal(claimMuseSession(unserved, { input: "fresh" }, healthy).connectionId, "account-a");
+  assert.equal(
+    (await claimMuseSession(unserved, { input: "fresh" }, healthy)).connectionId,
+    "account-a"
+  );
   for (const session of ["fresh-1", "fresh-2", "fresh-3"]) {
     const scope = museSessionScope({ session_id: session }, undefined, "client");
-    assert.equal(claimMuseSession(scope, { input: "fresh" }, exhausted).connectionId, "account-b");
+    assert.equal(
+      (await claimMuseSession(scope, { input: "fresh" }, exhausted)).connectionId,
+      "account-b"
+    );
   }
-  assert.equal(claimMuseSession(unserved, { input: "retry" }, exhausted).connectionId, "account-b");
-  assert.equal(claimMuseSession(unserved, { input: "retry" }, healthy).connectionId, "account-b");
+  assert.equal(
+    (await claimMuseSession(unserved, { input: "retry" }, exhausted)).connectionId,
+    "account-b"
+  );
+  assert.equal(
+    (await claimMuseSession(unserved, { input: "retry" }, healthy)).connectionId,
+    "account-b"
+  );
 
   const served = museSessionScope({ session_id: "served" }, undefined, "client");
   const flipped = [{ id: "account-a" }, { id: "account-b", unavailable: true }];
-  assert.equal(claimMuseSession(served, { input: "fresh" }, flipped).connectionId, "account-a");
-  const generation = bindMuseGeneration(served, "account-a", "served-key", "served-identity");
+  assert.equal(
+    (await claimMuseSession(served, { input: "fresh" }, flipped)).connectionId,
+    "account-a"
+  );
+  const generation = await bindMuseGeneration(served, "account-a", "served-key", "served-identity");
   await recordMuseOutput(
     new Response(JSON.stringify({ output: [{ type: "message", id: "msg-served" }] })),
     served,
     generation
   ).text();
-  assert.throws(
-    () => claimMuseSession(served, { input: "continue" }, exhausted),
+  await assert.rejects(
+    claimMuseSession(served, { input: "continue" }, exhausted),
     (error: { status?: number; message?: string }) =>
       error.status === 503 && /cross-account continuation is forbidden/.test(error.message || "")
   );
-  assert.equal(claimMuseSession(served, { input: "continue" }, flipped).connectionId, "account-a");
+  assert.equal(
+    (await claimMuseSession(served, { input: "continue" }, flipped)).connectionId,
+    "account-a"
+  );
 });
 
-test("a Muse 429 model lockout makes new and unserved sessions claim the healthy account", () => {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ?")
-    .run("muse_session_ownership");
+test("a Muse 429 model lockout makes new and unserved sessions claim the healthy account", async () => {
+  await clearOwnership();
   clearAllModelLockouts();
   const connections = [
     { id: "account-a", authType: "oauth", rateLimitedUntil: null, testStatus: "active" },
@@ -208,7 +256,10 @@ test("a Muse 429 model lockout makes new and unserved sessions claim the healthy
   const model = "muse-spark-1.3";
   const unserved = museSessionScope({ session_id: "lock-unserved" }, undefined, "client");
   const before = museClaimCandidates(connections, model);
-  assert.equal(claimMuseSession(unserved, { input: "fresh" }, before).connectionId, "account-a");
+  assert.equal(
+    (await claimMuseSession(unserved, { input: "fresh" }, before)).connectionId,
+    "account-a"
+  );
 
   // Account A's upstream 429 records only a per-model lockout; rateLimitedUntil and
   // testStatus stay untouched, as observed live.
@@ -220,9 +271,15 @@ test("a Muse 429 model lockout makes new and unserved sessions claim the healthy
   );
   for (const session of ["lock-fresh-1", "lock-fresh-2"]) {
     const scope = museSessionScope({ session_id: session }, undefined, "client");
-    assert.equal(claimMuseSession(scope, { input: "fresh" }, locked).connectionId, "account-b");
+    assert.equal(
+      (await claimMuseSession(scope, { input: "fresh" }, locked)).connectionId,
+      "account-b"
+    );
   }
-  assert.equal(claimMuseSession(unserved, { input: "retry" }, locked).connectionId, "account-b");
+  assert.equal(
+    (await claimMuseSession(unserved, { input: "retry" }, locked)).connectionId,
+    "account-b"
+  );
   assert.equal(
     museClaimCandidates(connections, model, null, true).every((c) => !c.unavailable),
     true
@@ -249,8 +306,13 @@ test("chatCore fences reminted continuation before dispatch and records fresh se
         undefined,
         "client"
       );
-      const owner = claimMuseSession(scope, { input: "fresh" }, candidates);
-      let generation = bindMuseGeneration(scope, owner.connectionId, "execution-key-1", "identity");
+      const owner = await claimMuseSession(scope, { input: "fresh" }, candidates);
+      let generation = await bindMuseGeneration(
+        scope,
+        owner.connectionId,
+        "execution-key-1",
+        "identity"
+      );
       if (continuation)
         await recordMuseOutput(
           new Response(
@@ -300,8 +362,8 @@ test("chatCore fences reminted continuation before dispatch and records fresh se
         clientRawRequest: { endpoint: "/v1/responses", headers: { accept: "application/json" } },
         cachedSettings: {},
         skipResourcePressureGuard: true,
-        beforeUpstreamAttempt: (credentials) => {
-          generation = bindMuseGeneration(
+        beforeUpstreamAttempt: async (credentials) => {
+          generation = await bindMuseGeneration(
             scope,
             owner.connectionId,
             credentials.accessToken,
@@ -319,14 +381,16 @@ test("chatCore fences reminted continuation before dispatch and records fresh se
         assert.equal(inferenceCalls.length, 2);
         assert.equal(
           generation,
-          bindMuseGeneration(scope, owner.connectionId, "execution-key-2", "identity")
+          await bindMuseGeneration(scope, owner.connectionId, "execution-key-2", "identity")
         );
         await recordMuseOutput(result.response, scope, generation).text();
         assert.equal(
-          claimMuseSession(
-            scope,
-            { input: [{ type: "reasoning", encrypted_content: "served-key-2" }] },
-            candidates
+          (
+            await claimMuseSession(
+              scope,
+              { input: [{ type: "reasoning", encrypted_content: "served-key-2" }] },
+              candidates
+            )
           ).connectionId,
           owner.connectionId
         );

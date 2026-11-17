@@ -104,9 +104,9 @@ test.beforeEach(() => {
 const BARE_UNKNOWN = "deepseek-coder-6.7b";
 const QUALIFIED_UNKNOWN = `llamagate/${BARE_UNKNOWN}`;
 
-test("VB-14003-FIXTURE: the bare and qualified fixture ids still have UNKNOWN vision", () => {
-  assert.strictEqual(getResolvedModelCapabilities(BARE_UNKNOWN).supportsVision, null);
-  const qualified = getResolvedModelCapabilities(QUALIFIED_UNKNOWN);
+test("VB-14003-FIXTURE: the bare and qualified fixture ids still have UNKNOWN vision", async () => {
+  assert.strictEqual((await getResolvedModelCapabilities(BARE_UNKNOWN)).supportsVision, null);
+  const qualified = await getResolvedModelCapabilities(QUALIFIED_UNKNOWN);
   assert.strictEqual(qualified.provider, "llamagate");
   assert.strictEqual(qualified.supportsVision, null);
 });

@@ -18,16 +18,34 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-preview-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-quota-preview-secret";
 process.env.QUOTA_STORE_DRIVER = "sqlite";
 
-const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const { createPool, upsertAllocations } = await import("@/lib/db/quotaPools");
+const { createProviderConnection } = await import("@/lib/db/providers");
+const { createApiKey } = await import("@/lib/db/apiKeys");
 const localDb = { updateSettings };
+
+// Pools and allocations reference provider_connections and api_keys through foreign keys.
+async function newConnectionId(label: string): Promise<string> {
+  const conn = (await createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: label,
+    apiKey: "sk-synthetic-preview-connection",
+  })) as { id: string };
+  return conn.id;
+}
+
+async function newApiKeyId(name: string): Promise<string> {
+  const key = (await createApiKey(name, "synthetic-machine")) as { id: string };
+  return key.id;
+}
 const compliance = await import("../../src/lib/compliance/index.ts");
 const { getSqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
 const { resetQuotaStoreSingleton } = await import("../../src/lib/quota/QuotaStore.ts");
@@ -38,20 +56,20 @@ async function enableManagementAuth() {
   await localDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetDb();
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -87,11 +105,15 @@ test("GET /api/quota/preview with nonexistent poolId → 404", async () => {
 
 test("GET /api/quota/preview with valid params → { decision } with kind", async () => {
   // Create a real pool
-  const pool = createPool({ connectionId: "conn-preview", name: "Preview Pool" });
-  upsertAllocations(pool.id, [{ apiKeyId: "preview-key-1", weight: 100, policy: "soft" }]);
+  const pool = await createPool({
+    connectionId: await newConnectionId("preview-conn"),
+    name: "Preview Pool",
+  });
+  const keyId = await newApiKeyId("preview-key-1");
+  await upsertAllocations(pool.id, [{ apiKeyId: keyId, weight: 100, policy: "soft" }]);
 
   const req = await makeManagementSessionRequest(
-    `http://localhost/api/quota/preview?apiKeyId=preview-key-1&poolId=${pool.id}&estimatedTokens=100`
+    `http://localhost/api/quota/preview?apiKeyId=${keyId}&poolId=${pool.id}&estimatedTokens=100`
   );
   const res = await previewRoute.GET(req);
   assert.equal(res.status, 200);
@@ -106,32 +128,40 @@ test("GET /api/quota/preview with valid params → { decision } with kind", asyn
 
 test("GET /api/quota/preview is dry-run: store counters unchanged after call", async () => {
   // Create pool and seed some consumption
-  const pool = createPool({ connectionId: "conn-dryrun", name: "Dry Run Pool" });
-  upsertAllocations(pool.id, [{ apiKeyId: "dryrun-key", weight: 100, policy: "hard" }]);
+  const pool = await createPool({
+    connectionId: await newConnectionId("dryrun-conn"),
+    name: "Dry Run Pool",
+  });
+  const keyId = await newApiKeyId("dryrun-key");
+  await upsertAllocations(pool.id, [{ apiKeyId: keyId, weight: 100, policy: "hard" }]);
 
   const store = getSqliteQuotaStore();
   const dim = { poolId: pool.id, unit: "tokens" as const, window: "daily" as const };
 
   // Pre-peek value
-  const before = await store.peek("dryrun-key", dim);
+  const before = await store.peek(keyId, dim);
 
   // Call preview (dry-run)
   const req = await makeManagementSessionRequest(
-    `http://localhost/api/quota/preview?apiKeyId=dryrun-key&poolId=${pool.id}&estimatedTokens=500`
+    `http://localhost/api/quota/preview?apiKeyId=${keyId}&poolId=${pool.id}&estimatedTokens=500`
   );
   await previewRoute.GET(req);
 
   // Post-peek value — must equal pre-peek (no consumption occurred)
-  const after = await store.peek("dryrun-key", dim);
+  const after = await store.peek(keyId, dim);
   assert.equal(before, after, "Store counter must not change after a preview (dry-run) call");
 });
 
 test("GET /api/quota/preview accepts optional estimatedUsd and estimatedRequests", async () => {
-  const pool = createPool({ connectionId: "conn-optional", name: "Optional Pool" });
-  upsertAllocations(pool.id, [{ apiKeyId: "opt-key", weight: 100, policy: "burst" }]);
+  const pool = await createPool({
+    connectionId: await newConnectionId("optional-conn"),
+    name: "Optional Pool",
+  });
+  const keyId = await newApiKeyId("opt-key");
+  await upsertAllocations(pool.id, [{ apiKeyId: keyId, weight: 100, policy: "burst" }]);
 
   const req = await makeManagementSessionRequest(
-    `http://localhost/api/quota/preview?apiKeyId=opt-key&poolId=${pool.id}&estimatedUsd=1.5&estimatedRequests=3`
+    `http://localhost/api/quota/preview?apiKeyId=${keyId}&poolId=${pool.id}&estimatedUsd=1.5&estimatedRequests=3`
   );
   const res = await previewRoute.GET(req);
   assert.equal(res.status, 200);

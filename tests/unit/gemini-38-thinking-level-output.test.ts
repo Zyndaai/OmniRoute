@@ -45,59 +45,59 @@ const reviewBody = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-function thinkingConfigOf(model: string, extra: Record<string, unknown> = {}) {
-  const result = openaiToGeminiRequest(model, reviewBody(extra), false) as GeminiReq;
+async function thinkingConfigOf(model: string, extra: Record<string, unknown> = {}) {
+  const result = (await openaiToGeminiRequest(model, reviewBody(extra), false)) as GeminiReq;
   return result.generationConfig?.thinkingConfig;
 }
 
-test("gemini-3.8-flash-high emits thinkingLevel high, not numeric thinkingBudget", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "high" });
+test("gemini-3.8-flash-high emits thinkingLevel high, not numeric thinkingBudget", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "high" });
   assert.equal(tc?.thinkingLevel, "high");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("gemini-3.8-flash-medium emits thinkingLevel medium", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-medium", { reasoning_effort: "medium" });
+test("gemini-3.8-flash-medium emits thinkingLevel medium", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-medium", { reasoning_effort: "medium" });
   assert.equal(tc?.thinkingLevel, "medium");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("gemini-3.8-flash-low emits thinkingLevel low", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-low", { reasoning_effort: "low" });
+test("gemini-3.8-flash-low emits thinkingLevel low", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-low", { reasoning_effort: "low" });
   assert.equal(tc?.thinkingLevel, "low");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("gemini-3.8-flash bare default maps thinkingLevel medium", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash");
+test("gemini-3.8-flash bare default maps thinkingLevel medium", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash");
   assert.equal(tc?.thinkingLevel, "medium");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("gemini-3.8-flash-tiered default maps thinkingLevel medium", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-tiered");
+test("gemini-3.8-flash-tiered default maps thinkingLevel medium", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-tiered");
   assert.equal(tc?.thinkingLevel, "medium");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("agy/gemini-3.8-flash-high prefix emits thinkingLevel high", () => {
-  const tc = thinkingConfigOf("agy/gemini-3.8-flash-high", { reasoning_effort: "high" });
+test("agy/gemini-3.8-flash-high prefix emits thinkingLevel high", async () => {
+  const tc = await thinkingConfigOf("agy/gemini-3.8-flash-high", { reasoning_effort: "high" });
   assert.equal(tc?.thinkingLevel, "high");
   assert.equal(tc?.thinkingBudget, undefined);
 });
 
-test("gemini-3.8 review-shaped request does not default-inject includeThoughts", () => {
-  const result = openaiToGeminiRequest("gemini-3.8-flash-high", reviewBody(), false) as GeminiReq;
+test("gemini-3.8 review-shaped request does not default-inject includeThoughts", async () => {
+  const result = await openaiToGeminiRequest("gemini-3.8-flash-high", reviewBody(), false) as GeminiReq;
   assert.equal(result.generationConfig?.maxOutputTokens, 65536);
   assert.equal(result.generationConfig?.thinkingConfig?.thinkingLevel, "high");
   assert.equal(result.generationConfig?.thinkingConfig?.includeThoughts, undefined);
 });
 
-test("gemini-3.8 includeThoughts is set only when the client asked for thoughts", () => {
-  const silent = thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "high" });
+test("gemini-3.8 includeThoughts is set only when the client asked for thoughts", async () => {
+  const silent = await thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "high" });
   assert.equal(silent?.includeThoughts, undefined);
 
-  const asked = thinkingConfigOf("gemini-3.8-flash-high", {
+  const asked = await thinkingConfigOf("gemini-3.8-flash-high", {
     reasoning_effort: "high",
     includeThoughts: true,
   });
@@ -105,15 +105,15 @@ test("gemini-3.8 includeThoughts is set only when the client asked for thoughts"
   assert.equal(asked?.thinkingLevel, "high");
 });
 
-test("gemini-3.8 reasoning_effort none stays an explicit off-switch", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "none" });
+test("gemini-3.8 reasoning_effort none stays an explicit off-switch", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-high", { reasoning_effort: "none" });
   assert.equal(tc?.thinkingBudget, 0);
   assert.equal(tc?.includeThoughts, false);
   assert.equal(tc?.thinkingLevel, undefined);
 });
 
-test("gemini-2.5-flash still emits numeric thinkingBudget (3.8 gate)", () => {
-  const result = openaiToGeminiRequest(
+test("gemini-2.5-flash still emits numeric thinkingBudget (3.8 gate)", async () => {
+  const result = await openaiToGeminiRequest(
     "gemini-2.5-flash",
     reviewBody({ reasoning_effort: "high" }),
     false
@@ -123,8 +123,8 @@ test("gemini-2.5-flash still emits numeric thinkingBudget (3.8 gate)", () => {
   assert.equal(result.generationConfig?.thinkingConfig?.thinkingLevel, undefined);
 });
 
-test("Antigravity envelope keeps maxOutputTokens 65536 and thinkingLevel for 3.8", () => {
-  const result = openaiToAntigravityRequest(
+test("Antigravity envelope keeps maxOutputTokens 65536 and thinkingLevel for 3.8", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-3.8-flash-high",
     reviewBody({ reasoning_effort: "high" }),
     false,
@@ -137,8 +137,8 @@ test("Antigravity envelope keeps maxOutputTokens 65536 and thinkingLevel for 3.8
   assert.equal(gc?.thinkingConfig?.includeThoughts, undefined);
 });
 
-test("gemini-3.8 thinking.budget_tokens maps thinkingLevel, not thinkingBudget", () => {
-  const tc = thinkingConfigOf("gemini-3.8-flash-high", {
+test("gemini-3.8 thinking.budget_tokens maps thinkingLevel, not thinkingBudget", async () => {
+  const tc = await thinkingConfigOf("gemini-3.8-flash-high", {
     thinking: { type: "enabled", budget_tokens: 24576 },
   });
   assert.equal(tc?.thinkingLevel, "high");
@@ -146,8 +146,8 @@ test("gemini-3.8 thinking.budget_tokens maps thinkingLevel, not thinkingBudget",
   assert.equal(tc?.includeThoughts, undefined);
 });
 
-test("claude-to-gemini gemini-3.8 budget_tokens maps thinkingLevel", () => {
-  const result = claudeToGeminiRequest(
+test("claude-to-gemini gemini-3.8 budget_tokens maps thinkingLevel", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3.8-flash-high",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "review diff" }] }],
@@ -161,8 +161,8 @@ test("claude-to-gemini gemini-3.8 budget_tokens maps thinkingLevel", () => {
   assert.equal(result.generationConfig?.thinkingConfig?.includeThoughts, undefined);
 });
 
-test("claude-to-gemini gemini-3.8-flash-high emits thinkingLevel, not includeThoughts", () => {
-  const result = claudeToGeminiRequest(
+test("claude-to-gemini gemini-3.8-flash-high emits thinkingLevel, not includeThoughts", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3.8-flash-high",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "review diff" }] }],
@@ -177,40 +177,40 @@ test("claude-to-gemini gemini-3.8-flash-high emits thinkingLevel, not includeTho
   assert.equal(result.generationConfig?.thinkingConfig?.includeThoughts, undefined);
 });
 
-test("gemini38ThinkingLevelFromBudget rejects budget <= 0", () => {
-  assert.throws(() => gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 0), RangeError);
-  assert.throws(() => gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", -1), RangeError);
+test("gemini38ThinkingLevelFromBudget rejects budget <= 0", async () => {
+  await assert.rejects(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 0), RangeError);
+  await assert.rejects(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", -1), RangeError);
 });
 
-test("gemini38ThinkingLevelFromBudget maps 1 and 1024 to low", () => {
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 1), "low");
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 1024), "low");
+test("gemini38ThinkingLevelFromBudget maps 1 and 1024 to low", async () => {
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 1), "low");
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 1024), "low");
 });
 
-test("gemini38ThinkingLevelFromBudget maps 1025 through medium cap to medium", () => {
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 1025), "medium");
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 8192), "medium");
+test("gemini38ThinkingLevelFromBudget maps 1025 through medium cap to medium", async () => {
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 1025), "medium");
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 8192), "medium");
 });
 
-test("gemini38ThinkingLevelFromBudget maps above medium cap to high", () => {
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 8193), "high");
-  assert.equal(gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 24576), "high");
+test("gemini38ThinkingLevelFromBudget maps above medium cap to high", async () => {
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-medium", 8193), "high");
+  assert.equal(await gemini38ThinkingLevelFromBudget("gemini-3.8-flash-high", 24576), "high");
 });
 
-test("vertex/gemini-4-argon emits thinkingLevel, never thinkingBudget (#16603)", () => {
-  const silent = thinkingConfigOf("vertex/gemini-4-argon");
+test("vertex/gemini-4-argon emits thinkingLevel, never thinkingBudget (#16603)", async () => {
+  const silent = await thinkingConfigOf("vertex/gemini-4-argon");
   assert.equal(silent?.thinkingLevel, "medium");
   assert.equal(silent?.thinkingBudget, undefined);
 
-  const low = thinkingConfigOf("vertex/gemini-4-argon", { reasoning_effort: "low" });
+  const low = await thinkingConfigOf("vertex/gemini-4-argon", { reasoning_effort: "low" });
   assert.equal(low?.thinkingLevel, "low");
   assert.equal(low?.thinkingBudget, undefined);
 
-  const high = thinkingConfigOf("vertex/gemini-4-argon", { reasoning_effort: "high" });
+  const high = await thinkingConfigOf("vertex/gemini-4-argon", { reasoning_effort: "high" });
   assert.equal(high?.thinkingLevel, "high");
   assert.equal(high?.thinkingBudget, undefined);
 
-  const claudeReq = claudeToGeminiRequest("vertex/gemini-4-argon", {
+  const claudeReq = await claudeToGeminiRequest("vertex/gemini-4-argon", {
     messages: [{ role: "user", content: "hi" }],
     thinking: { type: "enabled", budget_tokens: 16000 },
   }) as GeminiReq;

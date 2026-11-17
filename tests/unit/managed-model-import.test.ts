@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-managed-m
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { getModelAliases, setModelAlias } = await import("@/lib/db/models");
@@ -16,18 +17,29 @@ const { importManagedModels } = await import("../../src/lib/providerModels/manag
 const { mergeProviderModelListing } =
   await import("../../src/lib/providers/mergeProviderModelListing.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+async function insertConnection(
+  id: string,
+  provider: string,
+  authType: string,
+  name: string,
+  isActive: boolean,
+  date: string
+): Promise<void> {
+  // A synced catalog row is only stored for a connection that exists (its FK + the
+  // WHERE EXISTS guard in persistCanonicalSyncedAvailableModels), so every connection id a
+  // test syncs against must be seeded here first.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING",
+    [id, provider, authType, name, isActive, date, date]
+  );
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -71,6 +83,8 @@ test("sync preserves a disabled sibling catalog for later reactivation but prune
 });
 
 test("sync mode builds aliases from provider-level synced available models", async () => {
+  await insertConnection("conn-a", "openrouter", "apikey", "conn-a", true, "2026-05-29");
+  await insertConnection("conn-b", "openrouter", "apikey", "conn-b", true, "2026-05-29");
   await modelsDb.replaceSyncedAvailableModelsForConnection("openrouter", "conn-a", [
     { id: "shared/model-a", name: "Model A", source: "imported" },
   ]);
@@ -88,6 +102,7 @@ test("sync mode builds aliases from provider-level synced available models", asy
   assert.equal(aliases["model-b"], "openrouter/shared/model-b");
 });
 test("Crof managed import persists boolean reasoning effort metadata", async () => {
+  await insertConnection("conn-crof", "crof", "apikey", "conn-crof", true, "2026-05-29");
   const result = await importManagedModels({
     providerId: "crof",
     connectionId: "conn-crof",
@@ -110,6 +125,7 @@ test("Crof managed import persists boolean reasoning effort metadata", async () 
 });
 
 test("merge mode builds aliases from discovered models without pruning missing provider aliases", async () => {
+  await insertConnection("conn-a", "openrouter", "apikey", "conn-a", true, "2026-05-29");
   await modelsDb.replaceSyncedAvailableModelsForConnection("openrouter", "conn-a", [
     { id: "shared/model-a", name: "Model A", source: "imported" },
   ]);
@@ -130,6 +146,14 @@ test("merge mode builds aliases from discovered models without pruning missing p
 });
 
 test("sync keeps a same-id manual model as the user-configurable metadata override", async () => {
+  await insertConnection(
+    "openrouter-connection",
+    "openrouter",
+    "apikey",
+    "openrouter-connection",
+    true,
+    "2026-05-29"
+  );
   await modelsDb.addCustomModel(
     "openrouter",
     "shared-model",
@@ -203,13 +227,17 @@ test("sync keeps a same-id manual model as the user-configurable metadata overri
 });
 
 test("provider-level synced model deletion removes only that provider", async () => {
+  // connection_model_sync is keyed by connection id alone, so the OpenAI connection needs its own id.
+  await insertConnection("conn-a", "openrouter", "apikey", "conn-a", true, "2026-05-29");
+  await insertConnection("conn-b", "openrouter", "apikey", "conn-b", true, "2026-05-29");
+  await insertConnection("conn-c", "openai", "apikey", "conn-c", true, "2026-05-29");
   await modelsDb.replaceSyncedAvailableModelsForConnection("openrouter", "conn-a", [
     { id: "shared/model-a", name: "Model A", source: "imported" },
   ]);
   await modelsDb.replaceSyncedAvailableModelsForConnection("openrouter", "conn-b", [
     { id: "shared/model-b", name: "Model B", source: "imported" },
   ]);
-  await modelsDb.replaceSyncedAvailableModelsForConnection("openai", "conn-a", [
+  await modelsDb.replaceSyncedAvailableModelsForConnection("openai", "conn-c", [
     { id: "shared/model-c", name: "Model C", source: "imported" },
   ]);
 
@@ -223,6 +251,7 @@ test("provider-level synced model deletion removes only that provider", async ()
 });
 
 test("OpenAI import excludes deprecated and shutdown models from new selections", async () => {
+  await insertConnection("openai-conn", "openai", "apikey", "openai-conn", true, "2026-05-29");
   const result = await importManagedModels({
     providerId: "openai",
     connectionId: "openai-conn",
@@ -245,6 +274,7 @@ test("OpenAI import excludes deprecated and shutdown models from new selections"
 });
 
 test("OpenAI import excludes image and video generation models from chat selections", async () => {
+  await insertConnection("openai-media-conn", "openai", "apikey", "openai-media-conn", true, "2026-05-29");
   const result = await importManagedModels({
     providerId: "openai",
     connectionId: "openai-media-conn",
@@ -272,15 +302,17 @@ test("OpenAI import excludes image and video generation models from chat selecti
 });
 
 test("pruning stale connection available models during import", async () => {
-  const db = core.getDbInstance();
   // Insert connections
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("conn-active", "openrouter", "apikey", "Active Connection", 1, "2026-05-29", "2026-05-29");
-
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("conn-stale", "openrouter", "apikey", "Stale Connection", 0, "2026-05-29", "2026-05-29");
+  await insertConnection(
+    "conn-active",
+    "openrouter",
+    "apikey",
+    "Active Connection",
+    true,
+    "2026-05-29"
+  );
+  await insertConnection("conn-stale", "openrouter", "apikey", "Stale Connection", false, "2026-05-29");
+  await insertConnection("conn-new", "openrouter", "apikey", "New Connection", true, "2026-05-29");
 
   // Create synced available models for both
   await modelsDb.replaceSyncedAvailableModelsForConnection("openrouter", "conn-active", [
@@ -309,11 +341,8 @@ test("pruning stale connection available models during import", async () => {
 });
 
 test("antigravity sync dynamically builds and saves mitmAlias mappings", async () => {
-  const db = core.getDbInstance();
   // Create an antigravity connection
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("antigravity-conn", "antigravity", "oauth", "Antigravity", 1, "2026-05-29", "2026-05-29");
+  await insertConnection("antigravity-conn", "antigravity", "oauth", "Antigravity", true, "2026-05-29");
 
   await importManagedModels({
     providerId: "antigravity",
@@ -352,14 +381,9 @@ test("antigravity sync dynamically builds and saves mitmAlias mappings", async (
 });
 
 test("#11824: syncing account A's model catalog must not route account B's gemini-3.7-flash-high to an id B's own discovery never advertised", async () => {
-  const db = core.getDbInstance();
   const now = "2026-08-27";
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("acct-a", "antigravity", "oauth", "Antigravity A", 1, now, now);
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, auth_type, name, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("acct-b", "antigravity", "oauth", "Antigravity B", 1, now, now);
+  await insertConnection("acct-a", "antigravity", "oauth", "Antigravity A", true, now);
+  await insertConnection("acct-b", "antigravity", "oauth", "Antigravity B", true, now);
 
   // Account A: Google has provisioned direct tier-suffixed callability for this
   // project -- its own :fetchAvailableModels lists "gemini-3.7-flash-high" verbatim.

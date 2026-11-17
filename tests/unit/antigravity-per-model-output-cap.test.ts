@@ -28,15 +28,15 @@ function generationConfigOf(request: unknown): Record<string, unknown> {
   return gc as Record<string, unknown>;
 }
 
-function clampFor(modelId: string | null | undefined, requested: number): number {
+async function clampFor(modelId: string | null | undefined, requested: number): Promise<number> {
   const request: Record<string, unknown> = {
     generationConfig: { maxOutputTokens: requested },
   };
-  applyAntigravityGenerationDefaults(request, modelId);
+  await applyAntigravityGenerationDefaults(request, modelId);
   return (request.generationConfig as Record<string, unknown>).maxOutputTokens as number;
 }
 
-test("each published model is clamped to the limit it declares, not to a shared constant", () => {
+test("each published model is clamped to the limit it declares, not to a shared constant", async () => {
   const seen = new Set<number>();
 
   for (const model of ANTIGRAVITY_PUBLIC_MODELS) {
@@ -50,16 +50,19 @@ test("each published model is clamped to the limit it declares, not to a shared 
 
     // A request far above any published limit comes back at this model's own.
     assert.equal(
-      clampFor(model.id, 1_000_000),
+      await clampFor(model.id, 1_000_000),
       declared,
       `${model.id} should clamp to its declared ${declared}`
     );
 
     // One token under the limit is not the cap's business.
-    assert.equal(clampFor(model.id, (declared as number) - 1), (declared as number) - 1);
+    assert.equal(
+      await clampFor(model.id, (declared as number) - 1),
+      (declared as number) - 1
+    );
 
     // Exactly at the limit is not clamped either.
-    assert.equal(clampFor(model.id, declared as number), declared);
+    assert.equal(await clampFor(model.id, declared as number), declared);
   }
 
   // If every model agreed on one number, this test would pass even with the
@@ -70,20 +73,20 @@ test("each published model is clamped to the limit it declares, not to a shared 
   );
 });
 
-test("gpt-oss-120b-medium keeps its lower 32768 ceiling", () => {
+test("gpt-oss-120b-medium keeps its lower 32768 ceiling", async () => {
   // The specific regression a global raise to 65535 would have introduced.
-  assert.equal(clampFor("gpt-oss-120b-medium", 65535), 32768);
+  assert.equal(await clampFor("gpt-oss-120b-medium", 65535), 32768);
 });
 
-test("gemini-pro-agent reaches 65535 rather than the old 16384", () => {
-  assert.equal(clampFor("gemini-pro-agent", 65535), 65535);
+test("gemini-pro-agent reaches 65535 rather than the old 16384", async () => {
+  assert.equal(await clampFor("gemini-pro-agent", 65535), 65535);
 });
 
-test("an unknown model id falls back to the conservative ceiling", () => {
-  assert.equal(clampFor("no-such-model-xyz", 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
+test("an unknown model id falls back to the conservative ceiling", async () => {
+  assert.equal(await clampFor("no-such-model-xyz", 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
 });
 
-test("retired Antigravity Flash ids cannot inherit provider-neutral output caps", () => {
+test("retired Antigravity Flash ids cannot inherit provider-neutral output caps", async () => {
   for (const modelId of [
     "gemini-3.6-flash-low",
     "gemini-3.6-flash-medium",
@@ -94,17 +97,17 @@ test("retired Antigravity Flash ids cannot inherit provider-neutral output caps"
     "gemini-3.5-flash-high",
     "gemini-3-flash-agent",
   ]) {
-    assert.equal(clampFor(modelId, 65536), MAX_ANTIGRAVITY_OUTPUT_TOKENS, modelId);
+    assert.equal(await clampFor(modelId, 65536), MAX_ANTIGRAVITY_OUTPUT_TOKENS, modelId);
   }
 });
 
-test("a missing or empty model id falls back too", () => {
-  assert.equal(clampFor(undefined, 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
-  assert.equal(clampFor(null, 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
-  assert.equal(clampFor("   ", 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
+test("a missing or empty model id falls back too", async () => {
+  assert.equal(await clampFor(undefined, 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
+  assert.equal(await clampFor(null, 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
+  assert.equal(await clampFor("   ", 65535), MAX_ANTIGRAVITY_OUTPUT_TOKENS);
 });
 
-test("the thinkingBudget bump is still clamped by the per-model ceiling", () => {
+test("the thinkingBudget bump is still clamped by the per-model ceiling", async () => {
   // The bump sets floor(budget)+1; on the 32768 model that overshoots.
   const request: Record<string, unknown> = {
     generationConfig: {
@@ -112,11 +115,11 @@ test("the thinkingBudget bump is still clamped by the per-model ceiling", () => 
       thinkingConfig: { thinkingBudget: 60000 },
     },
   };
-  applyAntigravityGenerationDefaults(request, "gpt-oss-120b-medium");
+  await applyAntigravityGenerationDefaults(request, "gpt-oss-120b-medium");
   assert.equal((request.generationConfig as Record<string, unknown>).maxOutputTokens, 32768);
 });
 
-test("a thinkingBudget bump under the ceiling is left alone", () => {
+test("a thinkingBudget bump under the ceiling is left alone", async () => {
   // The counterpart to the test above: without this one, a cap that clamped
   // everything down to its own value would still pass, because every
   // assertion in sight would be looking at a clamped number.
@@ -126,13 +129,13 @@ test("a thinkingBudget bump under the ceiling is left alone", () => {
       thinkingConfig: { thinkingBudget: 4000 },
     },
   };
-  applyAntigravityGenerationDefaults(request, "gpt-oss-120b-medium");
+  await applyAntigravityGenerationDefaults(request, "gpt-oss-120b-medium");
   assert.equal((request.generationConfig as Record<string, unknown>).maxOutputTokens, 4001);
 });
 
-test("no maxOutputTokens requested means none is invented", () => {
+test("no maxOutputTokens requested means none is invented", async () => {
   const request: Record<string, unknown> = {};
-  applyAntigravityGenerationDefaults(request, "gemini-pro-agent");
+  await applyAntigravityGenerationDefaults(request, "gemini-pro-agent");
   assert.equal((request.generationConfig as Record<string, unknown>).maxOutputTokens, undefined);
 });
 
@@ -227,7 +230,7 @@ test("Gemini 3.8 Flash retains its output allowance above the thinking budget", 
   }
 });
 
-test("Gemini 3.8 Flash static spec keeps thinking and context, not only the output cap", () => {
+test("Gemini 3.8 Flash static spec keeps thinking and context, not only the output cap", async () => {
   const expectedBudget: Record<string, number> = {
     "gemini-3.8-flash-high": 24576,
     "gemini-3.8-flash-medium": 8192,
@@ -235,7 +238,7 @@ test("Gemini 3.8 Flash static spec keeps thinking and context, not only the outp
     "gemini-3.8-flash-tiered": 8192,
   };
   for (const model of Object.keys(expectedBudget)) {
-    const caps = getResolvedModelCapabilities({
+    const caps = await getResolvedModelCapabilities({
       provider: "antigravity",
       model,
     });

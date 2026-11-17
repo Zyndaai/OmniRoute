@@ -29,12 +29,12 @@ const { replaceCustomModels, mergeModelCompatOverride, getModelIsHidden, getMode
   await import("@/lib/db/models");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
-before(() => {
-  resetDbInstance();
+before(async () => {
+  await resetDbInstance();
 });
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -42,8 +42,8 @@ const PROVIDER = "llama-cpp-5086";
 
 test("an eye-hidden override survives replaceCustomModels when the new list omits it", async () => {
   // Operator hides a SYNCED model "ghost" with the EYE toggle (visibility only).
-  mergeModelCompatOverride(PROVIDER, "ghost", { isHidden: true });
-  assert.equal(getModelIsHidden(PROVIDER, "ghost"), true, "ghost is eye-hidden before sync");
+  await mergeModelCompatOverride(PROVIDER, "ghost", { isHidden: true });
+  assert.equal(await getModelIsHidden(PROVIDER, "ghost"), true, "ghost is eye-hidden before sync");
 
   // A periodic sync / import replaces the CUSTOM models with a list that does
   // NOT include "ghost" (it lives in the synced store, not customModels).
@@ -54,11 +54,11 @@ test("an eye-hidden override survives replaceCustomModels when the new list omit
 
   // The compat override (and thus the hidden flag) must NOT be wiped.
   assert.equal(
-    getModelIsHidden(PROVIDER, "ghost"),
+    await getModelIsHidden(PROVIDER, "ghost"),
     true,
     "ghost must stay hidden after replaceCustomModels omits it"
   );
-  const overrides = getModelCompatOverrides(PROVIDER).map((o) => o.id);
+  const overrides = (await getModelCompatOverrides(PROVIDER)).map((o) => o.id);
   assert.ok(
     overrides.includes("ghost"),
     "the compat override for ghost must still exist after the sync"

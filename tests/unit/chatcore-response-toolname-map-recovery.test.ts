@@ -25,8 +25,8 @@ import { caseInsensitiveToolNameLookup } from "../../open-sse/translator/helpers
 const MCP_TOOL_NAME = "mcp__chrome-devtools__list_pages";
 const GEMINI_WIRE_NAME = "mcp_chrome_devtools_list_pages";
 
-function geminiRequestWithMcpTool() {
-  return openaiToGeminiRequest(
+async function geminiRequestWithMcpTool() {
+  return await openaiToGeminiRequest(
     "gemini-3.5-flash",
     {
       messages: [{ role: "user", content: "list the browser pages" }],
@@ -45,8 +45,8 @@ function geminiRequestWithMcpTool() {
   ) as Record<string, unknown>;
 }
 
-test("gemini MCP tool alias survives extractRequestToolIdentityMap consuming the ledger", () => {
-  const translatedBody = geminiRequestWithMcpTool();
+test("gemini MCP tool alias survives extractRequestToolIdentityMap consuming the ledger", async () => {
+  const translatedBody = await geminiRequestWithMcpTool();
 
   const declared = (translatedBody.tools as { functionDeclarations?: { name?: string }[] }[])?.[0]
     ?.functionDeclarations?.[0]?.name;

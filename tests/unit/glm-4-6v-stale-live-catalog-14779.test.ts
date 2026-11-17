@@ -32,6 +32,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "glm-46v-14779-test-s
 const core = await import("../../src/lib/db/core.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "glm";
 const CONNECTION_ID = "glm-conn-14779";
@@ -39,26 +40,24 @@ const REGISTRY_MODEL_MISSING_FROM_SNAPSHOT = "glm-4.6v";
 const SNAPSHOTTED_MODEL = "glm-5.3";
 
 async function seedFreshAuthoritativeSnapshotMissingModel() {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
-       (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(CONNECTION_ID, PROVIDER, 1, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, true, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET updated_at = EXCLUDED.updated_at`,
+    [CONNECTION_ID, PROVIDER, now, now]
+  );
   await replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION_ID, [
     { id: SNAPSHOTTED_MODEL, name: SNAPSHOTTED_MODEL, source: "imported" as const },
   ]);
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

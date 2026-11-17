@@ -13,15 +13,13 @@ const { CANONICAL_EFFORT_VALUES, normalizeEffort, effortRequestSchema, normalize
   await import("../../src/shared/reasoning/effortStandardization.ts");
 const { providerChatCompletionSchema } =
   await import("../../src/shared/validation/schemas/apiV1.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const registry = await import("../../src/lib/modelMetadataRegistry.ts");
 const { extractReasoningIntent } = await import("../../src/lib/reasoningRouting/policy.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
@@ -35,7 +33,7 @@ test.after(async () => {
 
 // ── Schema ─────────────────────────────────────────────────────────────
 
-test("providerChatCompletionSchema parses canonical effort + thinking", () => {
+test("providerChatCompletionSchema parses canonical effort + thinking", async () => {
   const parsed = providerChatCompletionSchema.parse({
     model: "openai/gpt-5",
     messages: [{ role: "user", content: "hi" }],
@@ -46,7 +44,7 @@ test("providerChatCompletionSchema parses canonical effort + thinking", () => {
   assert.equal(parsed.thinking, true);
 });
 
-test("schema still accepts the existing object-shaped thinking config (back-compat)", () => {
+test("schema still accepts the existing object-shaped thinking config (back-compat)", async () => {
   const parsed = providerChatCompletionSchema.parse({
     model: "anthropic/claude-sonnet-4-5",
     messages: [{ role: "user", content: "hi" }],
@@ -55,7 +53,7 @@ test("schema still accepts the existing object-shaped thinking config (back-comp
   assert.deepEqual(parsed.thinking, { type: "enabled", budget_tokens: 2048 });
 });
 
-test("schema normalizes UI tier synonyms (extra) onto xhigh, preserves max, rejects garbage", () => {
+test("schema normalizes UI tier synonyms (extra) onto xhigh, preserves max, rejects garbage", async () => {
   assert.equal(effortRequestSchema.parse("extra"), "xhigh");
   assert.equal(effortRequestSchema.parse("MAX"), "max");
   assert.equal(effortRequestSchema.parse("medium"), "medium");
@@ -64,7 +62,7 @@ test("schema normalizes UI tier synonyms (extra) onto xhigh, preserves max, reje
 
 // ── normalizeEffort ────────────────────────────────────────────────────
 
-test("normalizeEffort maps canonical + aliases, ignores unknown", () => {
+test("normalizeEffort maps canonical + aliases, ignores unknown", async () => {
   assert.equal(normalizeEffort("high"), "high");
   assert.equal(normalizeEffort("HIGH"), "high");
   assert.equal(normalizeEffort("extra"), "xhigh");
@@ -77,7 +75,7 @@ test("normalizeEffort maps canonical + aliases, ignores unknown", () => {
 
 // ── normalizeReasoningRequest ──────────────────────────────────────────
 
-test("canonical effort populates reasoning_effort + reasoning.effort when client did not", () => {
+test("canonical effort populates reasoning_effort + reasoning.effort when client did not", async () => {
   const out = normalizeReasoningRequest({
     model: "openai/gpt-5",
     effort: "high",
@@ -86,7 +84,7 @@ test("canonical effort populates reasoning_effort + reasoning.effort when client
   assert.equal((out.reasoning as Record<string, unknown>).effort, "high");
 });
 
-test("canonical thinking boolean is preserved as the truthy toggle", () => {
+test("canonical thinking boolean is preserved as the truthy toggle", async () => {
   const out = normalizeReasoningRequest({
     model: "openai/gpt-5",
     effort: "medium",
@@ -96,14 +94,14 @@ test("canonical thinking boolean is preserved as the truthy toggle", () => {
   assert.equal(out.thinking, true);
 });
 
-test("Extra maps to xhigh, Max is preserved natively through the normalizer", () => {
+test("Extra maps to xhigh, Max is preserved natively through the normalizer", async () => {
   const extra = normalizeReasoningRequest({ effort: "extra" }) as Record<string, unknown>;
   assert.equal(extra.reasoning_effort, "xhigh");
   const max = normalizeReasoningRequest({ effort: "Max" }) as Record<string, unknown>;
   assert.equal(max.reasoning_effort, "max");
 });
 
-test("explicit client reasoning_effort is NOT overwritten by canonical effort", () => {
+test("explicit client reasoning_effort is NOT overwritten by canonical effort", async () => {
   const out = normalizeReasoningRequest({
     model: "openai/gpt-5",
     reasoning_effort: "low",
@@ -112,7 +110,7 @@ test("explicit client reasoning_effort is NOT overwritten by canonical effort", 
   assert.equal(out.reasoning_effort, "low");
 });
 
-test("explicit client reasoning.effort is NOT overwritten by canonical effort", () => {
+test("explicit client reasoning.effort is NOT overwritten by canonical effort", async () => {
   const out = normalizeReasoningRequest({
     reasoning: { effort: "low" },
     effort: "high",
@@ -121,7 +119,7 @@ test("explicit client reasoning.effort is NOT overwritten by canonical effort", 
   assert.equal(out.reasoning_effort, undefined);
 });
 
-test("explicit object-shaped thinking config is preserved (not clobbered by boolean)", () => {
+test("explicit object-shaped thinking config is preserved (not clobbered by boolean)", async () => {
   const cfg = { type: "enabled", budget_tokens: 4096 };
   const out = normalizeReasoningRequest({
     effort: "high",
@@ -131,7 +129,7 @@ test("explicit object-shaped thinking config is preserved (not clobbered by bool
   assert.equal(out.reasoning_effort, "high");
 });
 
-test("OpenRouter reasoning.enabled false normalizes to none without mutating the request", () => {
+test("OpenRouter reasoning.enabled false normalizes to none without mutating the request", async () => {
   const body = {
     model: "openai/gpt-5",
     messages: [{ role: "system", content: "Keep this prompt." }],
@@ -181,7 +179,7 @@ test("OpenRouter reasoning.enabled false normalizes to none without mutating the
   assert.equal(extractReasoningIntent(body.model, { effort: "extra" }).effort, "xhigh");
 });
 
-test("explicit effort beats reasoning.enabled false; true and non-boolean flags are untouched", () => {
+test("explicit effort beats reasoning.enabled false; true and non-boolean flags are untouched", async () => {
   const nested = normalizeReasoningRequest({
     reasoning: { enabled: false, effort: "high", summary: "auto" },
   }) as Record<string, unknown>;
@@ -229,7 +227,7 @@ test("explicit effort beats reasoning.enabled false; true and non-boolean flags 
   }
 });
 
-test("returns the same reference untouched when no canonical fields are set", () => {
+test("returns the same reference untouched when no canonical fields are set", async () => {
   const body = { model: "openai/gpt-5", reasoning_effort: "low" };
   const out = normalizeReasoningRequest(body);
   assert.equal(out, body);
@@ -237,8 +235,8 @@ test("returns the same reference untouched when no canonical fields are set", ()
 
 // ── /models capability exposure ────────────────────────────────────────
 
-test("enrichCatalogModelEntry exposes supportsThinking + effort_tiers for a thinking model", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("enrichCatalogModelEntry exposes supportsThinking + effort_tiers for a thinking model", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "gpt-5": {
         tool_call: true,
@@ -262,7 +260,7 @@ test("enrichCatalogModelEntry exposes supportsThinking + effort_tiers for a thin
     },
   });
 
-  const enriched = registry.enrichCatalogModelEntry({
+  const enriched = await registry.enrichCatalogModelEntry({
     id: "openai/gpt-5",
     object: "model",
     owned_by: "openai",
@@ -278,9 +276,9 @@ test("enrichCatalogModelEntry exposes supportsThinking + effort_tiers for a thin
   assert.equal(caps.reasoning, true);
 });
 
-test("enrichCatalogModelEntry preserves Kimi's provider-declared effort contract", () => {
+test("enrichCatalogModelEntry preserves Kimi's provider-declared effort contract", async () => {
   for (const model of ["k3", "k3-256k"]) {
-    const entry = registry.enrichCatalogModelEntry({
+    const entry = await registry.enrichCatalogModelEntry({
       id: `kmc/${model}`,
       object: "model",
       owned_by: "kimi-coding",
@@ -298,7 +296,7 @@ test("enrichCatalogModelEntry preserves Kimi's provider-declared effort contract
     );
   }
 
-  const k27 = registry.enrichCatalogModelEntry({
+  const k27 = await registry.enrichCatalogModelEntry({
     id: "kmc/kimi-for-coding",
     object: "model",
     owned_by: "kimi-coding",
@@ -308,8 +306,8 @@ test("enrichCatalogModelEntry preserves Kimi's provider-declared effort contract
   assert.equal("effort_tiers" in (k27.capabilities as Record<string, unknown>), false);
 });
 
-test("enrichCatalogModelEntry exposes Max for Kiro GPT-5.6 Luna", () => {
-  const enriched = registry.enrichCatalogModelEntry({
+test("enrichCatalogModelEntry exposes Max for Kiro GPT-5.6 Luna", async () => {
+  const enriched = await registry.enrichCatalogModelEntry({
     id: "kr/gpt-5.6-luna",
     object: "model",
     owned_by: "kr",

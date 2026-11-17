@@ -21,8 +21,8 @@ const { normalizeCcrConfig } = await import("../../src/lib/db/compressionDetailN
 const { compressionSettingsUpdateSchema } =
   await import("../../src/shared/validation/compressionConfigSchemas.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(tmpDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

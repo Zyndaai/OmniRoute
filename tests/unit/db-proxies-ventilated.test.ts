@@ -1,46 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-proxies-vent-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      if (
-        (error as { code?: string } | null)?.code === "EBUSY" ||
-        ((error as { code?: string } | null)?.code === "EPERM" && attempt < 9)
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
-});
-
-test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb();
 });
 
 type LogRow = {
@@ -56,28 +22,28 @@ let logSeq = 0;
 
 async function seedProxy(name: string, host: string, rows: LogRow[]) {
   const proxy = await proxiesDb.createProxy({ name, type: "http", host, port: 8080 });
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
   const now = new Date().toISOString();
-  const insertLog = db.prepare(`
-    INSERT INTO proxy_logs (
-      id, timestamp, status, proxy_type, proxy_host, proxy_port,
-      target_url, upstream_status, latency_ms, attempt_issue, error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
   for (const row of rows) {
     logSeq += 1;
-    insertLog.run(
-      `${row.id}-${logSeq}`,
-      now,
-      row.status,
-      "http",
-      host,
-      8080,
-      row.targetUrl,
-      row.upstreamStatus,
-      100,
-      row.attemptIssue ?? null,
-      row.error ?? null
+    await backend.execute(
+      `INSERT INTO proxy_logs (
+        id, "timestamp", status, proxy_type, proxy_host, proxy_port,
+        target_url, upstream_status, latency_ms, attempt_issue, error
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        `${row.id}-${logSeq}`,
+        now,
+        row.status,
+        "http",
+        host,
+        8080,
+        row.targetUrl,
+        row.upstreamStatus,
+        100,
+        row.attemptIssue ?? null,
+        row.error ?? null,
+      ]
     );
   }
   const stats = await proxiesDb.getProxyHealthStats({ hours: 2 });

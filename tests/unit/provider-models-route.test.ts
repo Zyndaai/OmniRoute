@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-provider-model-routes-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const providerModelsRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
@@ -25,7 +25,7 @@ async function resetStorage() {
     process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS = originalAllowPrivateProviderUrls;
   }
   antigravityVersion.clearAntigravityVersionCaches();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -57,7 +57,6 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -134,9 +133,9 @@ test("provider models route rejects connections with an empty provider id", asyn
   const connection = await seedConnection("openai", {
     apiKey: "sk-openai",
   });
-  const db = core.getDbInstance();
-
-  db.prepare("UPDATE provider_connections SET provider = '' WHERE id = ?").run(connection.id);
+  await getTestBackend().execute("UPDATE provider_connections SET provider = '' WHERE id = $1", [
+    connection.id,
+  ]);
 
   const response = await callRoute(connection.id);
 
@@ -902,6 +901,12 @@ test("provider models route uses synced models as the authoritative local catalo
     },
   });
 
+  // A synced list only lands for a connection that exists (the write is dropped otherwise),
+  // so the other connection is seeded as a real row first.
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, now(), now())`,
+    ["synced-conn", "opencode-go"]
+  );
   await modelsDb.replaceSyncedAvailableModelsForConnection("opencode-go", "synced-conn", [
     { id: "synced-only-model", name: "Synced Only Model" },
   ]);
@@ -1086,7 +1091,7 @@ test("provider models route filters hidden models from the static Claude catalog
     accessToken: "claude-access",
     apiKey: null,
   });
-  modelsDb.mergeModelCompatOverride("claude", "claude-sonnet-4-6", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("claude", "claude-sonnet-4-6", { isHidden: true });
 
   const response = await callRoute(connection.id, "?excludeHidden=true");
   const body = (await response.json()) as any;
@@ -1124,7 +1129,7 @@ test("provider models route trims Anthropic-compatible message URLs and filters 
       baseUrl: "https://proxy.example.com/v1/messages",
     },
   });
-  modelsDb.mergeModelCompatOverride("anthropic-compatible-demo", "hidden-model", {
+  await modelsDb.mergeModelCompatOverride("anthropic-compatible-demo", "hidden-model", {
     isHidden: true,
   });
 
@@ -1175,7 +1180,7 @@ test("provider models route paginates generic providers and filters hidden model
     providerSpecificData: { autoFetchModels: true },
     apiKey: "gm-key",
   });
-  modelsDb.mergeModelCompatOverride("gemini", "gemini-hidden", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("gemini", "gemini-hidden", { isHidden: true });
   const seenUrls = [];
 
   globalThis.fetch = async (url) => {

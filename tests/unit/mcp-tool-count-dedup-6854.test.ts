@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 
 const { countUniqueMcpTools } = await import("../../open-sse/mcp-server/toolCount.ts");
 const { MCP_TOOLS } = await import("../../open-sse/mcp-server/schemas/tools.ts");
-const { memoryTools } = await import("../../open-sse/mcp-server/tools/memoryTools.ts");
 const { skillTools } = await import("../../open-sse/mcp-server/tools/skillTools.ts");
 const { agentSkillTools } = await import("../../open-sse/mcp-server/tools/agentSkillTools.ts");
 const { githubSkillTools } = await import("../../open-sse/mcp-server/tools/githubSkillTools.ts");
@@ -45,7 +44,6 @@ test("#6854: countUniqueMcpTools de-duplicates tools registered in multiple coll
 
   const collections = {
     MCP_TOOLS: MCP_TOOLS as unknown as NamedTool[],
-    memoryTools: memoryTools as unknown as Record<string, NamedTool>,
     skillTools: skillTools as unknown as Record<string, NamedTool>,
     agentSkillTools: agentSkillTools as unknown as Record<string, NamedTool>,
     githubSkillTools: githubSkillTools as unknown as Record<string, NamedTool>,
@@ -58,7 +56,8 @@ test("#6854: countUniqueMcpTools de-duplicates tools registered in multiple coll
   };
 
   const total = countUniqueMcpTools(collections);
-  assert.equal(total, 102, "the published MCP inventory must match the registered tool set");
+  // 99 = registered tools after the memory engine (memoryTools) was removed.
+  assert.equal(total, 99, "the published MCP inventory must match the registered tool set");
 
   // Independently compute the "true" unique count by unioning every collection's
   // tool names into a Set — this must equal countUniqueMcpTools's own result AND

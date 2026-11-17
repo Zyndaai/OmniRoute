@@ -50,8 +50,12 @@ function geminiFunctionCallChunk(name: string) {
   };
 }
 
-test("claude-to-gemini: TitleCase tool name publishes a lowercase alias in _toolNameMap", () => {
-  const translated = claudeToGeminiRequest("gemini-2.5-pro", claudeBodyWithTools(["Read"]), false);
+test("claude-to-gemini: TitleCase tool name publishes a lowercase alias in _toolNameMap", async () => {
+  const translated = await claudeToGeminiRequest(
+    "gemini-2.5-pro",
+    claudeBodyWithTools(["Read"]),
+    false
+  );
 
   const map = translated._toolNameMap;
   assert.ok(map instanceof Map, "_toolNameMap must be present so the response can be remapped");
@@ -62,8 +66,12 @@ test("claude-to-gemini: TitleCase tool name publishes a lowercase alias in _tool
   );
 });
 
-test("Claude Code round trip: Gemini's lowercase 'read' is restored to 'Read'", () => {
-  const translated = claudeToGeminiRequest("gemini-2.5-pro", claudeBodyWithTools(["Read"]), true);
+test("Claude Code round trip: Gemini's lowercase 'read' is restored to 'Read'", async () => {
+  const translated = await claudeToGeminiRequest(
+    "gemini-2.5-pro",
+    claudeBodyWithTools(["Read"]),
+    true
+  );
 
   // chatCore extracts `_toolNameMap` from the translated request body and hands
   // it to the response translator as `state.toolNameMap`.
@@ -77,8 +85,8 @@ test("Claude Code round trip: Gemini's lowercase 'read' is restored to 'Read'", 
   );
 });
 
-test("Claude Code round trip: multiple TitleCase tools survive the lowercase round trip", () => {
-  const translated = claudeToGeminiRequest(
+test("Claude Code round trip: multiple TitleCase tools survive the lowercase round trip", async () => {
+  const translated = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     claudeBodyWithTools(["Read", "Bash", "WebFetch"]),
     true
@@ -95,9 +103,9 @@ test("Claude Code round trip: multiple TitleCase tools survive the lowercase rou
   }
 });
 
-test("claude-to-gemini: names actually sanitized for Gemini keep their original mapping", () => {
+test("claude-to-gemini: names actually sanitized for Gemini keep their original mapping", async () => {
   // A tool name Gemini cannot accept verbatim must still map back to the original.
-  const translated = claudeToGeminiRequest(
+  const translated = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     claudeBodyWithTools(["mcp__server__do-thing"]),
     false

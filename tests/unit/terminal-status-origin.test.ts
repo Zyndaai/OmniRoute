@@ -6,23 +6,22 @@ import path from "node:path";
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-t11-"));
 process.env.DATA_DIR = DIR;
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { runAsProbe } = await import("../../src/shared/utils/probeOrigin.ts");
 const { writeTerminalStatus } = await import("../../src/shared/utils/terminalStatus.ts");
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function row(id: string): { is_active: number; test_status: string } {
-  const result = core
-    .getDbInstance()
-    .prepare("SELECT is_active, test_status FROM provider_connections WHERE id=?")
-    .get(id);
+async function row(id: string): Promise<{ is_active: boolean; test_status: string }> {
+  const result = await getTestBackend().queryOne<{ is_active: boolean; test_status: string }>(
+    "SELECT is_active, test_status FROM provider_connections WHERE id=$1",
+    [id]
+  );
   assert.ok(result && typeof result === "object");
-  return result as { is_active: number; test_status: string };
+  return result;
 }
 
 test("probe-origin writeTerminalStatus records error but never deactivates", async () => {
@@ -48,8 +47,8 @@ test("probe-origin writeTerminalStatus records error but never deactivates", asy
       "probe"
     );
   });
-  const r = row(id);
-  assert.equal(r.is_active, 1); // probe n'a jamais désactivé
+  const r = await row(id);
+  assert.equal(r.is_active, true); // probe n'a jamais désactivé
   assert.equal(r.test_status, "active"); // terminal non posé
 });
 
@@ -74,7 +73,7 @@ test("production writeTerminalStatus deactivates on terminal", async () => {
     },
     "production"
   );
-  const r = row(id);
-  assert.equal(r.is_active, 0);
+  const r = await row(id);
+  assert.equal(r.is_active, false);
   assert.equal(r.test_status, "banned");
 });

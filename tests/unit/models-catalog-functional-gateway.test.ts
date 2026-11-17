@@ -10,15 +10,22 @@ import {
 } from "../../src/lib/db/featureFlags.ts";
 import { setFunctionalGatewayProviderSetting } from "../../src/lib/db/functionalGatewayMirrors.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { refreshFeatureFlagSnapshot } from "../../src/shared/utils/featureFlags.ts";
 
 const FLAG_KEY = "EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS";
 const NO_THINK_FLAG = "NO_THINKING_ALIAS_ENABLED";
 
-after(() => {
-  removeFeatureFlagOverride(FLAG_KEY);
-  removeFeatureFlagOverride(NO_THINK_FLAG);
-  setFunctionalGatewayProviderSetting("agentrouter", null);
-  resetDbInstance();
+// Flag reads are synchronous and served from an in-process snapshot, so refresh it after each write.
+async function setFlag(key: string, value: string) {
+  await setFeatureFlagOverride(key, value);
+  await refreshFeatureFlagSnapshot();
+}
+
+after(async () => {
+  await removeFeatureFlagOverride(FLAG_KEY);
+  await removeFeatureFlagOverride(NO_THINK_FLAG);
+  await setFunctionalGatewayProviderSetting("agentrouter", null);
+  await resetDbInstance();
 });
 
 // Minimal Request shim for applyCatalogPostFilters.
@@ -43,8 +50,8 @@ test("catalog post-filters do not add mirrors when gate off (default)", async ()
 });
 
 test("final catalog permission filtering does not let a mirror inherit base access", async () => {
-  setFeatureFlagOverride(FLAG_KEY, "true");
-  setFunctionalGatewayProviderSetting("agentrouter", "on");
+  await setFlag(FLAG_KEY, "true");
+  await setFunctionalGatewayProviderSetting("agentrouter", "on");
 
   const models = [{ id: "kmc/k3", owned_by: "kimi-coding", root: "k3" }];
   const withMirror = await applyCatalogPostFilters(makeRequest(), models, {
@@ -84,8 +91,8 @@ test("final catalog permission filtering does not let a mirror inherit base acce
 });
 
 test("catalog post-filters synthesize a gateway mirror when gate on and gateway has a connection", async () => {
-  setFeatureFlagOverride(FLAG_KEY, "true");
-  setFunctionalGatewayProviderSetting("agentrouter", "on");
+  await setFlag(FLAG_KEY, "true");
+  await setFunctionalGatewayProviderSetting("agentrouter", "on");
 
   const models = [
     { id: "deepseek/deepseek-v4-flash", owned_by: "deepseek", root: "deepseek-v4-flash" },
@@ -112,7 +119,7 @@ test("catalog post-filters synthesize a gateway mirror when gate on and gateway 
 });
 
 test("restricted catalog does not synthesize unauthorized effort or no-thinking variants", async () => {
-  setFeatureFlagOverride(NO_THINK_FLAG, "true");
+  await setFlag(NO_THINK_FLAG, "true");
   const baseId = "acme-gateway/claude-opus-5";
   const out = await applyCatalogPostFilters(
     makeRequest(),
@@ -132,7 +139,7 @@ test("restricted catalog does not synthesize unauthorized effort or no-thinking 
 });
 
 test("provider wildcard authorization retains provider-scoped effort variants", async () => {
-  setFeatureFlagOverride(NO_THINK_FLAG, "true");
+  await setFlag(NO_THINK_FLAG, "true");
   const baseId = "acme-gateway/claude-opus-5";
   const out = await applyCatalogPostFilters(
     makeRequest(),

@@ -9,7 +9,8 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_PLUGINS_DIR = path.join(TEST_DATA_DIR, "plugins");
 
 const core = await import("../../src/lib/db/core.ts");
-const { updateDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
+const { updateSettings } = await import("../../src/lib/db/settings.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { clearCache, getCachedResponse, generateSignature } =
   await import("../../src/lib/semanticCache.ts");
 const { SemanticCacheManager, resetSemanticCacheManager } =
@@ -83,20 +84,20 @@ test.afterEach(async () => {
   await waitForCallLogSaves(5000);
   clearPendingRequests();
   clearInflight();
-  clearCache();
+  await clearCache();
   resetSemanticCacheManager(null);
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
 test.after(async () => {
   await waitForCallLogSaves(5000);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 for (const stream of [false, true]) {
-  for (const control of ["key bypass", "database toggle", "legacy database toggle"]) {
+  for (const control of ["key bypass", "settings toggle"]) {
     test(`chatCore skips semantic cache writes with ${control} (stream=${stream})`, async () => {
       const manager = new SemanticCacheManager({ enabled: true }, undefined, async () => ({
         embedding: [1, 0],
@@ -110,18 +111,11 @@ for (const stream of [false, true]) {
         temperature: 0,
         messages: [{ role: "user", content: `cache policy ${control} ${stream}` }],
       };
-      const setEnabled = (enabled: boolean) => {
+      const setEnabled = async (enabled: boolean) => {
         if (control === "key bypass") {
           apiKeyInfo.cacheDefaultMode = enabled ? "legacy" : "bypass";
-        } else if (control === "database toggle") {
-          updateDatabaseSettings({ cache: { semanticCacheEnabled: enabled } });
         } else {
-          core
-            .getDbInstance()
-            .prepare(
-              "UPDATE key_value SET value = ? WHERE namespace = 'databaseSettings' AND key = 'semanticCacheEnabled'"
-            )
-            .run(JSON.stringify(enabled));
+          await updateSettings({ semanticCacheEnabled: enabled });
         }
       };
       const invoke = () =>
@@ -133,14 +127,14 @@ for (const stream of [false, true]) {
         });
 
       try {
-        setEnabled(false);
+        await setEnabled(false);
         const bypassed = await invoke();
         assert.equal(bypassed.result.success, true);
         await bypassed.result.response.text();
         await flushAsyncSideEffects();
         const signature = generateSignature(body.model, body.messages, 0, 1, apiKeyInfo.id);
         assert.equal(
-          getCachedResponse(signature),
+          await getCachedResponse(signature),
           null,
           "disabled request must not write the legacy cache"
         );
@@ -150,7 +144,7 @@ for (const stream of [false, true]) {
           "disabled request must not write the vector cache"
         );
 
-        setEnabled(true);
+        await setEnabled(true);
         const fresh = await invoke();
         assert.equal(
           fresh.calls.length,
@@ -160,7 +154,7 @@ for (const stream of [false, true]) {
         await fresh.result.response.text();
         await flushAsyncSideEffects();
         assert.ok(
-          getCachedResponse(signature),
+          await getCachedResponse(signature),
           "enabled request must still populate the legacy cache"
         );
         assert.equal(
@@ -169,12 +163,12 @@ for (const stream of [false, true]) {
           "enabled request must still populate the vector cache"
         );
 
-        setEnabled(false);
+        await setEnabled(false);
         const ignoredHit = await invoke();
         assert.equal(ignoredHit.calls.length, 1, "disabled request must ignore existing entries");
         await ignoredHit.result.response.text();
 
-        setEnabled(true);
+        await setEnabled(true);
         const hit = await invoke();
         assert.equal(hit.calls.length, 0, "re-enabled cache must serve existing entries");
         assert.equal(hit.result.response.headers.get("X-OmniRoute-Cache"), "HIT");

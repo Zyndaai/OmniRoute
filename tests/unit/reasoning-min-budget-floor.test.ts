@@ -51,8 +51,8 @@ function capabilityEntry(limitContext: unknown, overrides: Record<string, unknow
   };
 }
 
-test.before(() => {
-  saveModelsDevCapabilities({
+test.before(async () => {
+  await saveModelsDevCapabilities({
     zhipu: {
       "glm-5.2": capabilityEntry(200000, { reasoning: true, limit_output: 65536 }),
       "glm-5.2-output-cap-40000": capabilityEntry(200000, {
@@ -66,9 +66,9 @@ test.before(() => {
   });
 });
 
-test.after(() => {
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+test.after(async () => {
+  await clearModelsDevCapabilities();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -79,43 +79,46 @@ function setEnv(v: string | undefined) {
   else process.env[ENV] = v;
 }
 
-test("env unset: 512 stays 512 (no enlargement without opt-in)", () => {
+test("env unset: 512 stays 512 (no enlargement without opt-in)", async () => {
   setEnv(undefined);
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 512), 512);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 512), 512);
 });
 
-test("env=4096: 512 is raised to 4096", () => {
+test("env=4096: 512 is raised to 4096", async () => {
   setEnv("4096");
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 512), 4096);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 512), 4096);
 });
 
-test("env=4096: boundary 4095 raised, 4096 unchanged, 8192 unchanged", () => {
+test("env=4096: boundary 4095 raised, 4096 unchanged, 8192 unchanged", async () => {
   setEnv("4096");
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 4095), 4096);
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 4096), 4096);
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 8192), 8192);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 4095), 4096);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 4096), 4096);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 8192), 8192);
 });
 
-test("probes below REASONING_BUFFER_MIN_TRIGGER stay verbatim even with floor set", () => {
+test("probes below REASONING_BUFFER_MIN_TRIGGER stay verbatim even with floor set", async () => {
   setEnv("4096");
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 1), 1);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 1), 1);
   assert.equal(
-    resolveReasoningBufferedMaxTokens(THINKING, REASONING_BUFFER_MIN_TRIGGER - 1),
+    await resolveReasoningBufferedMaxTokens(THINKING, REASONING_BUFFER_MIN_TRIGGER - 1),
     REASONING_BUFFER_MIN_TRIGGER - 1
   );
 });
 
-test("floor is clamped by the model output cap", () => {
+test("floor is clamped by the model output cap", async () => {
   setEnv("50000");
-  assert.equal(resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 512), 40000);
+  assert.equal(
+    await resolveReasoningBufferedMaxTokens("zhipu/glm-5.2-output-cap-40000", 512),
+    40000
+  );
 });
 
-test("invalid env value is ignored (verbatim passthrough)", () => {
+test("invalid env value is ignored (verbatim passthrough)", async () => {
   setEnv("not-a-number");
-  assert.equal(resolveReasoningBufferedMaxTokens(THINKING, 512), 512);
+  assert.equal(await resolveReasoningBufferedMaxTokens(THINKING, 512), 512);
 });
 
-test("non-thinking model unaffected by floor (returns null = no adjustment)", () => {
+test("non-thinking model unaffected by floor (returns null = no adjustment)", async () => {
   setEnv("4096");
-  assert.equal(resolveReasoningBufferedMaxTokens("openai/gpt-5.4", 512), null);
+  assert.equal(await resolveReasoningBufferedMaxTokens("openai/gpt-5.4", 512), null);
 });

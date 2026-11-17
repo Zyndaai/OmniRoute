@@ -10,25 +10,16 @@ import { resolveModelAliasWithSeedFallback } from "../../src/lib/modelAliasResol
 // DB. This is the exact scenario the 401 fix targets — aliases unmapped in
 // the DB must fall back to the static seed.
 async function withEmptyAliasDb(fn: () => Promise<void>) {
-  const prevDataDir = process.env.DATA_DIR;
-  const prevKey = process.env.STORAGE_ENCRYPTION_KEY;
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "alias-seed-fallback-"));
-  process.env.DATA_DIR = dataDir;
-  delete process.env.STORAGE_ENCRYPTION_KEY;
-
+  const { resetDbInstance } = await import("../../src/lib/db/core");
+  const { resetTestDb } = await import("../helpers/postgres");
+  // Each test file gets its own migrated database; resetTestDb empties it so
+  // every case starts from the fresh-install alias state.
+  await resetDbInstance();
+  await resetTestDb();
   try {
-    // Reset the module-level DB singleton so it binds to the temp dir.
-    const { resetDbInstance } = await import("../../src/lib/db/core");
-    resetDbInstance?.();
     await fn();
   } finally {
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    const { resetDbInstance } = await import("../../src/lib/db/core");
-    resetDbInstance?.();
-    if (prevDataDir === undefined) delete process.env.DATA_DIR;
-    else process.env.DATA_DIR = prevDataDir;
-    if (prevKey === undefined) delete process.env.STORAGE_ENCRYPTION_KEY;
-    else process.env.STORAGE_ENCRYPTION_KEY = prevKey;
+    await resetDbInstance();
   }
 }
 
@@ -117,7 +108,7 @@ test("resolveModelAliasWithSeedFallback: skips alias when the target model is hi
     assert.equal(beforeHidden, "opencode/glm-5");
 
     // Hide the model
-    mergeModelCompatOverride("opencode", "glm-5", { isHidden: true });
+    await mergeModelCompatOverride("opencode", "glm-5", { isHidden: true });
 
     // After hiding, alias should be skipped and return original model name
     const afterHidden = await resolveModelAliasWithSeedFallback("glm-5");

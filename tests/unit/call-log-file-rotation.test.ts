@@ -4,9 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { useDecollidedMigrationsDir } from "./helpers/decollidedMigrationsDir.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-useDecollidedMigrationsDir();
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-call-log-files-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 const ORIGINAL_RETENTION_DAYS = process.env.CALL_LOG_RETENTION_DAYS;
@@ -24,48 +23,31 @@ const { getCallLogsDir, deleteCallArtifact } =
   await import("../../src/lib/usage/callLogArtifacts.ts");
 const CALL_LOGS_DIR = getCallLogsDir();
 
+type StateRow = { detail_state: string; artifact_relpath: string | null };
+
 async function resetTestDataDir() {
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  let lastError;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      core.resetDbInstance();
-      for (const entry of fs.readdirSync(TEST_DATA_DIR)) {
-        if (/^storage\.sqlite(?:-shm|-wal)?$/i.test(entry)) {
-          continue;
-        }
-        fs.rmSync(path.join(TEST_DATA_DIR, entry), {
-          recursive: true,
-          force: true,
-          maxRetries: 5,
-          retryDelay: 100,
-        });
-      }
-      const db = core.getDbInstance();
-      db.prepare("DELETE FROM call_logs").run();
-      return;
-    } catch (error: unknown) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
+  await resetTestDb();
+  for (const entry of fs.readdirSync(TEST_DATA_DIR)) {
+    fs.rmSync(path.join(TEST_DATA_DIR, entry), {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 }
 
-function insertCallLog(row) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `
+const INSERT_CALL_LOG_SQL = `
     INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, provider, account, detail_state, artifact_relpath,
+      id, "timestamp", method, path, status, model, provider, account, detail_state, artifact_relpath,
       has_request_body
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+  `;
+
+async function insertCallLog(row) {
+  await getTestBackend().execute(INSERT_CALL_LOG_SQL, [
     row.id,
     row.timestamp,
     row.method || "POST",
@@ -76,8 +58,25 @@ function insertCallLog(row) {
     row.account || "acct",
     row.detail_state || "ready",
     row.artifact_relpath || null,
-    row.has_request_body || 1
+    true,
+  ]);
+}
+
+async function stateOf(id: string): Promise<StateRow> {
+  const row = await getTestBackend().queryOne<StateRow>(
+    "SELECT detail_state, artifact_relpath FROM call_logs WHERE id = $1",
+    [id]
   );
+  assert.ok(row, `call log ${id} should exist`);
+  return row;
+}
+
+async function countWhere(where: string, params: unknown[] = []): Promise<number> {
+  const row = await getTestBackend().queryOne<{ cnt: number }>(
+    `SELECT COUNT(*) AS cnt FROM call_logs ${where}`,
+    params
+  );
+  return Number(row?.cnt);
 }
 
 function buildArtifactRelPath(date: Date, label: string) {
@@ -92,12 +91,8 @@ test.beforeEach(async () => {
   await resetTestDataDir();
 });
 
-test.afterEach(() => {
-  core.resetDbInstance();
-});
-
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {
@@ -122,10 +117,10 @@ test.after(async () => {
     process.env.CALL_LOGS_TABLE_MAX_ROWS = ORIGINAL_MAX_ROWS;
   }
 
-  await resetTestDataDir();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("call log file rotation honors both retention days and file count", () => {
+test("call log file rotation honors both retention days and file count", async () => {
   assert.ok(CALL_LOGS_DIR, "CALL_LOGS_DIR should resolve for test data dir");
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
@@ -148,22 +143,22 @@ test("call log file rotation honors both retention days and file count", () => {
     fs.writeFileSync(absolutePath, JSON.stringify({ relativePath }), "utf8");
   }
 
-  insertCallLog({
+  await insertCallLog({
     id: "old-log",
     timestamp: oldDate.toISOString(),
     artifact_relpath: oldRelPath,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "keep-a",
     timestamp: keepADate.toISOString(),
     artifact_relpath: keepARelPath,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "keep-b",
     timestamp: keepBDate.toISOString(),
     artifact_relpath: keepBRelPath,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "keep-c",
     timestamp: keepCDate.toISOString(),
     artifact_relpath: keepCRelPath,
@@ -189,23 +184,12 @@ test("call log file rotation honors both retention days and file count", () => {
     new Date(now - oneDay)
   );
 
-  rotateCallLogs();
+  await rotateCallLogs();
 
-  const db = core.getDbInstance();
-  assert.equal(
-    (
-      db.prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = ?").get("old-log") as {
-        cnt: number;
-      }
-    ).cnt,
-    0
-  );
+  assert.equal(await countWhere("WHERE id = $1", ["old-log"]), 0);
   assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, oldRelPath)), false);
 
-  const keepARow = db
-    .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-    .get("keep-a");
-  const typedKeepARow = keepARow as { detail_state: string; artifact_relpath: string | null };
+  const typedKeepARow = await stateOf("keep-a");
   assert.equal(typedKeepARow.detail_state, "missing");
   assert.equal(typedKeepARow.artifact_relpath, null);
   assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, keepARelPath)), false);
@@ -214,7 +198,7 @@ test("call log file rotation honors both retention days and file count", () => {
   assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, keepCRelPath)), true);
 });
 
-test("rotateCallLogs swallows filesystem errors during cleanup", () => {
+test("rotateCallLogs swallows filesystem errors during cleanup", async () => {
   assert.ok(CALL_LOGS_DIR, "CALL_LOGS_DIR should resolve for test data dir");
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
 
@@ -230,7 +214,7 @@ test("rotateCallLogs swallows filesystem errors during cleanup", () => {
   };
 
   try {
-    assert.doesNotThrow(() => rotateCallLogs());
+    await assert.doesNotReject(() => rotateCallLogs());
   } finally {
     fs.opendirSync = originalOpendirSync;
     console.error = originalConsoleError;
@@ -239,7 +223,7 @@ test("rotateCallLogs swallows filesystem errors during cleanup", () => {
   assert.ok(consoleCalls.some((line) => /simulated opendir failure/.test(line)));
 });
 
-test("cleanupOverflowCallLogFiles ignores rmSync failures for old artifacts", () => {
+test("cleanupOverflowCallLogFiles ignores rmSync failures for old artifacts", async () => {
   assert.ok(CALL_LOGS_DIR, "CALL_LOGS_DIR should resolve for test data dir");
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
@@ -254,12 +238,12 @@ test("cleanupOverflowCallLogFiles ignores rmSync failures for old artifacts", ()
   fs.writeFileSync(newerFile, "{}");
   fs.writeFileSync(olderFile, "{}");
 
-  insertCallLog({
+  await insertCallLog({
     id: "keep",
     timestamp: "2026-04-02T11:00:00.000Z",
     artifact_relpath: newerRelPath,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "remove",
     timestamp: "2026-04-02T10:00:00.000Z",
     artifact_relpath: olderRelPath,
@@ -278,7 +262,7 @@ test("cleanupOverflowCallLogFiles ignores rmSync failures for old artifacts", ()
   };
 
   try {
-    assert.doesNotThrow(() => cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 1));
+    await assert.doesNotReject(() => cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 1));
   } finally {
     fs.rmSync = originalRmSync;
   }
@@ -298,7 +282,7 @@ test("artifact deletion never removes an equivalent trailing-slash root", () => 
   assert.equal(fs.existsSync(baseDir), true);
 });
 
-test("scheduled rotation caps retention and max-row trimming at 100 each", () => {
+test("scheduled rotation caps retention and max-row trimming at 100 each", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   process.env.CALL_LOG_RETENTION_DAYS = "1";
@@ -307,29 +291,18 @@ test("scheduled rotation caps retention and max-row trimming at 100 each", () =>
   const oldBase = Date.parse("2020-01-01T00:00:00.000Z");
   const freshBase = Date.now() - 60_000;
   for (let i = 0; i < 250; i++) {
-    insertCallLog({ id: `old-${i}`, timestamp: new Date(oldBase + i).toISOString() });
+    await insertCallLog({ id: `old-${i}`, timestamp: new Date(oldBase + i).toISOString() });
   }
   for (let i = 0; i < 250; i++) {
-    insertCallLog({ id: `fresh-${i}`, timestamp: new Date(freshBase + i).toISOString() });
+    await insertCallLog({ id: `fresh-${i}`, timestamp: new Date(freshBase + i).toISOString() });
   }
 
-  rotateCallLogs();
-  const db = core.getDbInstance();
-  assert.equal(
-    (
-      db.prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id LIKE 'old-%'").get() as {
-        cnt: number;
-      }
-    ).cnt,
-    50
-  );
-  assert.equal(
-    (db.prepare("SELECT COUNT(*) AS cnt FROM call_logs").get() as { cnt: number }).cnt,
-    300
-  );
+  await rotateCallLogs();
+  assert.equal(await countWhere("WHERE id LIKE 'old-%'"), 50);
+  assert.equal(await countWhere(""), 300);
 });
 
-test("overflow cleanup removes at most 100 artifacts and continues across calls", () => {
+test("overflow cleanup removes at most 100 artifacts and continues across calls", async () => {
   assert.ok(CALL_LOGS_DIR);
   const now = Date.now();
   for (let i = 0; i < 205; i++) {
@@ -337,28 +310,20 @@ test("overflow cleanup removes at most 100 artifacts and continues across calls"
     const absPath = path.join(CALL_LOGS_DIR, relPath);
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, "{}");
-    insertCallLog({
+    await insertCallLog({
       id: `overflow-${i}`,
       timestamp: new Date(now + i).toISOString(),
       artifact_relpath: relPath,
     });
   }
 
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 100);
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 100);
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 0);
-  assert.equal(
-    (
-      core
-        .getDbInstance()
-        .prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE artifact_relpath IS NOT NULL")
-        .get() as { cnt: number }
-    ).cnt,
-    5
-  );
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 100);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 100);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 5, 100), 0);
+  assert.equal(await countWhere("WHERE artifact_relpath IS NOT NULL"), 5);
 });
 
-test("overflow cleanup frees references whose files are already gone", () => {
+test("overflow cleanup frees references whose files are already gone", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
@@ -377,7 +342,7 @@ test("overflow cleanup frees references whose files are already gone", () => {
       fs.mkdirSync(path.dirname(absPath), { recursive: true });
       fs.writeFileSync(absPath, "{}");
     }
-    insertCallLog({
+    await insertCallLog({
       id: `gone-${i}`,
       timestamp: new Date(now + i).toISOString(),
       artifact_relpath: relPath,
@@ -386,30 +351,16 @@ test("overflow cleanup frees references whose files are already gone", () => {
 
   // Overflow window (OFFSET 3) is ranks 5, 4, 3, 2, 1, 0: 2 deletions
   // (ranks 3, 0) + 4 freed missing references (ranks 5, 4, 2, 1).
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 3), 6);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 3), 6);
 
-  const db = core.getDbInstance();
-  assert.equal(
-    (
-      db
-        .prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE artifact_relpath IS NOT NULL")
-        .get() as {
-        cnt: number;
-      }
-    ).cnt,
-    3
-  );
+  assert.equal(await countWhere("WHERE artifact_relpath IS NOT NULL"), 3);
   for (const i of [1, 2, 4, 5]) {
-    const row = db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(`gone-${i}`) as { detail_state: string; artifact_relpath: string | null };
+    const row = await stateOf(`gone-${i}`);
     assert.equal(row.detail_state, "missing");
     assert.equal(row.artifact_relpath, null);
   }
   for (const i of [6, 7, 8]) {
-    const row = db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(`gone-${i}`) as { detail_state: string; artifact_relpath: string | null };
+    const row = await stateOf(`gone-${i}`);
     assert.equal(row.detail_state, "ready");
     assert.notEqual(row.artifact_relpath, null);
     assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, relPaths[i])), true);
@@ -419,7 +370,7 @@ test("overflow cleanup frees references whose files are already gone", () => {
   }
 });
 
-test("overflow cleanup frees a full window of missing files and lets the next pass finish", () => {
+test("overflow cleanup frees a full window of missing files and lets the next pass finish", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
@@ -429,34 +380,29 @@ test("overflow cleanup frees a full window of missing files and lets the next pa
   // the ceiling).
   const now = Date.now();
   for (let i = 0; i < 6; i++) {
-    insertCallLog({
+    await insertCallLog({
       id: `empty-${i}`,
       timestamp: new Date(now + i).toISOString(),
       artifact_relpath: `2026-04-07/${String(i).padStart(4, "0")}.json`,
     });
   }
 
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 4);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 4);
 
-  const db = core.getDbInstance();
   for (const i of [0, 1, 2, 3]) {
-    const row = db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(`empty-${i}`) as { detail_state: string; artifact_relpath: string | null };
+    const row = await stateOf(`empty-${i}`);
     assert.equal(row.detail_state, "missing");
     assert.equal(row.artifact_relpath, null);
   }
   for (const i of [4, 5]) {
-    const row = db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(`empty-${i}`) as { detail_state: string; artifact_relpath: string | null };
+    const row = await stateOf(`empty-${i}`);
     assert.equal(row.detail_state, "ready");
     assert.notEqual(row.artifact_relpath, null);
   }
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 0);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 0);
 });
 
-test("overflow cleanup keeps references when deletion is refused", () => {
+test("overflow cleanup keeps references when deletion is refused", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
@@ -469,12 +415,12 @@ test("overflow cleanup keeps references when deletion is refused", () => {
   const olderFile = path.join(CALL_LOGS_DIR, olderRelPath);
   fs.writeFileSync(newerFile, "{}");
   fs.writeFileSync(olderFile, "{}");
-  insertCallLog({
+  await insertCallLog({
     id: "refused-keep",
     timestamp: "2026-04-08T11:00:00.000Z",
     artifact_relpath: newerRelPath,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "refused-old",
     timestamp: "2026-04-08T10:00:00.000Z",
     artifact_relpath: olderRelPath,
@@ -489,17 +435,14 @@ test("overflow cleanup keeps references when deletion is refused", () => {
   };
   let freed: number | undefined;
   try {
-    freed = cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 1);
+    freed = await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 1);
   } finally {
     fs.rmSync = originalRmSync;
   }
   assert.equal(freed, 0);
 
-  const db = core.getDbInstance();
   for (const id of ["refused-keep", "refused-old"]) {
-    const row = db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-      .get(id) as { detail_state: string; artifact_relpath: string | null };
+    const row = await stateOf(id);
     assert.equal(row.detail_state, "ready");
     assert.notEqual(row.artifact_relpath, null);
   }
@@ -507,13 +450,13 @@ test("overflow cleanup keeps references when deletion is refused", () => {
   assert.equal(fs.existsSync(olderFile), true);
 });
 
-test("overflow cleanup frees an empty artifact reference instead of stalling", () => {
+test("overflow cleanup frees an empty artifact reference instead of stalling", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.rmSync(CALL_LOGS_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
 
   // Ceiling 2: the two newest rows stay kept (both with a file); the empty
-  // reference and the witness row are both overflow. The harness maps '' to
+  // reference and the witness row are both overflow. The helper maps '' to
   // NULL, so the empty reference is inserted with raw SQL.
   const now = Date.now();
   const keptA = "2026-04-09/110000_keep_a.json";
@@ -524,55 +467,41 @@ test("overflow cleanup frees an empty artifact reference instead of stalling", (
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, "{}");
   }
-  insertCallLog({
+  await insertCallLog({
     id: "empty-kept-a",
     timestamp: new Date(now + 3).toISOString(),
     artifact_relpath: keptA,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "empty-kept-b",
     timestamp: new Date(now + 2).toISOString(),
     artifact_relpath: keptB,
   });
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (
-        id, timestamp, method, path, status, model, provider, account, detail_state, artifact_relpath,
-        has_request_body
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      "empty-ref",
-      new Date(now + 1).toISOString(),
-      "POST",
-      "/v1/chat/completions",
-      200,
-      "openai/gpt-4.1",
-      "openai",
-      "acct",
-      "ready",
-      "",
-      1
-    );
-  insertCallLog({
+  await getTestBackend().execute(INSERT_CALL_LOG_SQL, [
+    "empty-ref",
+    new Date(now + 1).toISOString(),
+    "POST",
+    "/v1/chat/completions",
+    200,
+    "openai/gpt-4.1",
+    "openai",
+    "acct",
+    "ready",
+    "",
+    true,
+  ]);
+  await insertCallLog({
     id: "empty-witness",
     timestamp: new Date(now).toISOString(),
     artifact_relpath: witness,
   });
 
-  assert.equal(cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 2);
+  assert.equal(await cleanupOverflowCallLogFiles(CALL_LOGS_DIR, 2), 2);
 
-  const db = core.getDbInstance();
-  const emptyRow = db
-    .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-    .get("empty-ref") as { detail_state: string; artifact_relpath: string | null };
+  const emptyRow = await stateOf("empty-ref");
   assert.equal(emptyRow.detail_state, "missing");
   assert.equal(emptyRow.artifact_relpath, null);
-  const witnessRow = db
-    .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = ?")
-    .get("empty-witness") as { detail_state: string; artifact_relpath: string | null };
+  const witnessRow = await stateOf("empty-witness");
   assert.equal(witnessRow.detail_state, "missing");
   assert.equal(witnessRow.artifact_relpath, null);
   assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, witness)), false);
@@ -580,7 +509,7 @@ test("overflow cleanup frees an empty artifact reference instead of stalling", (
   assert.equal(fs.existsSync(path.join(CALL_LOGS_DIR, keptB)), true);
 });
 
-test("orphan cleanup scans at most 100 candidates, resumes, and protects fresh files", () => {
+test("orphan cleanup scans at most 100 candidates, resumes, and protects fresh files", async () => {
   assert.ok(CALL_LOGS_DIR);
   const dayDir = path.join(CALL_LOGS_DIR, "2026-04-04");
   fs.mkdirSync(dayDir, { recursive: true });
@@ -590,12 +519,18 @@ test("orphan cleanup scans at most 100 candidates, resumes, and protects fresh f
     fs.writeFileSync(file, "{}");
     fs.utimesSync(file, old, old);
   }
-  assert.equal(cleanupOrphanCallLogFiles(CALL_LOGS_DIR, { maxCandidates: 100, minAgeMs: 0 }), 100);
-  assert.equal(cleanupOrphanCallLogFiles(CALL_LOGS_DIR, { maxCandidates: 100, minAgeMs: 0 }), 100);
+  assert.equal(
+    await cleanupOrphanCallLogFiles(CALL_LOGS_DIR, { maxCandidates: 100, minAgeMs: 0 }),
+    100
+  );
+  assert.equal(
+    await cleanupOrphanCallLogFiles(CALL_LOGS_DIR, { maxCandidates: 100, minAgeMs: 0 }),
+    100
+  );
 
   const freshFile = path.join(dayDir, "fresh.json");
   fs.writeFileSync(freshFile, "{}");
-  const third = cleanupOrphanCallLogFiles(CALL_LOGS_DIR, {
+  const third = await cleanupOrphanCallLogFiles(CALL_LOGS_DIR, {
     maxCandidates: 100,
     minAgeMs: 5 * 60_000,
   });
@@ -603,7 +538,7 @@ test("orphan cleanup scans at most 100 candidates, resumes, and protects fresh f
   assert.equal(fs.existsSync(freshFile), true);
 });
 
-test("orphan traversal bounds every directory operation and resumes", () => {
+test("orphan traversal bounds every directory operation and resumes", async () => {
   const baseDir = path.join(TEST_DATA_DIR, "odd-artifact-tree");
   const dayDir = path.join(baseDir, "2026-04-05");
   fs.mkdirSync(dayDir, { recursive: true });
@@ -632,7 +567,7 @@ test("orphan traversal bounds every directory operation and resumes", () => {
   try {
     for (let pass = 0; pass < 2; pass++) {
       operations = 0;
-      deleted += cleanupOrphanCallLogFiles(baseDir, {
+      deleted += await cleanupOrphanCallLogFiles(baseDir, {
         maxCandidates: 100,
         maxScanEntries: 100,
         minAgeMs: 0,
@@ -649,7 +584,7 @@ test("orphan traversal bounds every directory operation and resumes", () => {
   assert.equal(fs.readdirSync(dayDir).filter((entry) => entry.endsWith(".json")).length, 0);
 });
 
-test("hot rotation avoids full artifact listing and bounds stat calls", () => {
+test("hot rotation avoids full artifact listing and bounds stat calls", async () => {
   assert.ok(CALL_LOGS_DIR);
   const dayDir = path.join(CALL_LOGS_DIR, "2026-04-05");
   fs.mkdirSync(dayDir, { recursive: true });
@@ -664,14 +599,14 @@ test("hot rotation avoids full artifact listing and bounds stat calls", () => {
     return originalStatSync.apply(fs, args);
   };
   try {
-    rotateCallLogs();
+    await rotateCallLogs();
   } finally {
     fs.statSync = originalStatSync;
   }
   assert.ok(statCalls <= 100, `expected at most 100 stat calls, got ${statCalls}`);
 });
 
-test("rotateCallLogs recovers a pending artifact write abandoned past its deadline (#15608)", () => {
+test("rotateCallLogs recovers a pending artifact write abandoned past its deadline (#15608)", async () => {
   // A process that dies between the call_logs INSERT (detail_state='pending') and the
   // artifact publish leaves the row pending. Rotation must turn an expired pending row
   // into terminal 'missing' so the dashboard stops treating it as in-flight; a write
@@ -679,232 +614,234 @@ test("rotateCallLogs recovers a pending artifact write abandoned past its deadli
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   const now = new Date().toISOString();
-  insertCallLog({ id: "pending-expired", timestamp: now, detail_state: "pending" });
-  insertCallLog({ id: "pending-live", timestamp: now, detail_state: "pending" });
-  const db = core.getDbInstance();
-  const setDeadline = db.prepare("UPDATE call_logs SET detail_pending_until = ? WHERE id = ?");
-  setDeadline.run(Date.now() - 1_000, "pending-expired");
-  setDeadline.run(Date.now() + 60_000, "pending-live");
+  await insertCallLog({ id: "pending-expired", timestamp: now, detail_state: "pending" });
+  await insertCallLog({ id: "pending-live", timestamp: now, detail_state: "pending" });
+  const db = getTestBackend();
+  const setDeadline = (id: string, deadlineMs: number) =>
+    db.execute("UPDATE call_logs SET detail_pending_until = $1 WHERE id = $2", [
+      new Date(deadlineMs).toISOString(),
+      id,
+    ]);
+  await setDeadline("pending-expired", Date.now() - 1_000);
+  await setDeadline("pending-live", Date.now() + 60_000);
 
-  rotateCallLogs();
+  await rotateCallLogs();
 
   const state = (id: string) =>
-    db.prepare("SELECT detail_state, detail_pending_until FROM call_logs WHERE id = ?").get(id) as {
-      detail_state: string;
-      detail_pending_until: number | null;
-    };
-  assert.equal(state("pending-expired").detail_state, "missing");
-  assert.equal(state("pending-expired").detail_pending_until, null);
-  assert.equal(state("pending-live").detail_state, "pending");
+    db.queryOne<{ detail_state: string; detail_pending_until: string | null }>(
+      "SELECT detail_state, detail_pending_until FROM call_logs WHERE id = $1",
+      [id]
+    ) as Promise<{ detail_state: string; detail_pending_until: string | null }>;
+  assert.equal((await state("pending-expired")).detail_state, "missing");
+  assert.equal((await state("pending-expired")).detail_pending_until, null);
+  assert.equal((await state("pending-live")).detail_state, "pending");
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function clearPersistedRetention() {
-  const db = core.getDbInstance();
-  db.prepare(
-    "DELETE FROM key_value WHERE namespace = 'databaseSettings' AND key IN ('retention.callLogs', 'callLogs')"
-  ).run();
-  try {
-    db.prepare(
-      "DELETE FROM key_value WHERE namespace = 'settings' AND key = 'databaseSettings'"
-    ).run();
-  } catch {}
+async function clearPersistedRetention() {
+  await getTestBackend().execute(
+    "DELETE FROM config_entries WHERE namespace = 'databaseSettings' AND key = 'retention.callLogs'"
+  );
 }
 
-const PERSISTED_RETENTION_READ =
-  "SELECT namespace, key, value FROM key_value WHERE (namespace = 'databaseSettings' AND key IN ('retention.callLogs', 'callLogs')) OR (namespace = 'settings' AND key = 'databaseSettings')";
-
-function countPersistedRetentionReads(db: ReturnType<typeof core.getDbInstance>) {
-  const original = db.prepare.bind(db);
+/** Counts reads of the saved retention through the process backend; `restore` undoes it. */
+function countPersistedRetentionReads() {
+  const db = getTestBackend();
+  const originalQuery = db.query;
+  const originalQueryOne = db.queryOne;
   const counter = { reads: 0 };
-  db.prepare = ((sql: string, ...rest: unknown[]) => {
-    if (sql === PERSISTED_RETENTION_READ) counter.reads++;
-    return (original as (...args: unknown[]) => unknown)(sql, ...rest);
-  }) as typeof db.prepare;
+  const isRetentionRead = (sql: unknown) =>
+    typeof sql === "string" && sql.includes("databaseSettings") && sql.includes("config_entries");
+  db.query = ((sql: string, ...rest: unknown[]) => {
+    if (isRetentionRead(sql)) counter.reads++;
+    return (originalQuery as (...args: unknown[]) => unknown).call(db, sql, ...rest);
+  }) as typeof db.query;
+  db.queryOne = ((sql: string, ...rest: unknown[]) => {
+    if (isRetentionRead(sql)) counter.reads++;
+    return (originalQueryOne as (...args: unknown[]) => unknown).call(db, sql, ...rest);
+  }) as typeof db.queryOne;
   return {
     counter,
     restore: () => {
-      db.prepare = original;
+      db.query = originalQuery;
+      db.queryOne = originalQueryOne;
     },
   };
 }
 
-function persistDashboardRetention(days: number) {
-  clearPersistedRetention();
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('databaseSettings', 'retention.callLogs', ?)"
-  ).run(JSON.stringify(days));
+async function persistDashboardRetention(days: number) {
+  await clearPersistedRetention();
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('databaseSettings', 'retention.callLogs', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify(days)]
+  );
 }
 
-function countCallLog(id: string): number {
-  return (
-    core.getDbInstance().prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = ?").get(id) as {
-      cnt: number;
-    }
-  ).cnt;
+function countCallLog(id: string): Promise<number> {
+  return countWhere("WHERE id = $1", [id]);
 }
 
-test("rotation keeps a 30-day-old request log when the dashboard keeps 90 days", () => {
+test("rotation keeps a 30-day-old request log when the dashboard keeps 90 days", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   delete process.env.CALL_LOG_RETENTION_DAYS;
-  persistDashboardRetention(90);
+  await persistDashboardRetention(90);
   try {
-    insertCallLog({
+    await insertCallLog({
       id: "dashboard-kept",
       timestamp: new Date(Date.now() - 30 * DAY_MS).toISOString(),
     });
 
-    rotateCallLogs();
+    await rotateCallLogs();
 
-    assert.equal(countCallLog("dashboard-kept"), 1);
+    assert.equal(await countCallLog("dashboard-kept"), 1);
   } finally {
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
-test("rotation drops a 30-day-old request log when the variable caps at 7 days", () => {
+test("rotation drops a 30-day-old request log when the variable caps at 7 days", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   process.env.CALL_LOG_RETENTION_DAYS = "7";
-  persistDashboardRetention(90);
+  await persistDashboardRetention(90);
   try {
-    insertCallLog({
+    await insertCallLog({
       id: "variable-capped",
       timestamp: new Date(Date.now() - 30 * DAY_MS).toISOString(),
     });
 
-    rotateCallLogs();
+    await rotateCallLogs();
 
-    assert.equal(countCallLog("variable-capped"), 0);
+    assert.equal(await countCallLog("variable-capped"), 0);
   } finally {
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
-test("rotation drops an 8-day-old request log when neither setting nor variable is set", () => {
+test("rotation drops an 8-day-old request log when neither setting nor variable is set", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   delete process.env.CALL_LOG_RETENTION_DAYS;
-  clearPersistedRetention();
+  await clearPersistedRetention();
   try {
-    insertCallLog({
+    await insertCallLog({
       id: "default-dropped",
       timestamp: new Date(Date.now() - 8 * DAY_MS).toISOString(),
     });
 
-    rotateCallLogs();
+    await rotateCallLogs();
 
-    assert.equal(countCallLog("default-dropped"), 0);
+    assert.equal(await countCallLog("default-dropped"), 0);
   } finally {
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
-test("rotation falls back to the variable when settings are unavailable", () => {
+test("rotation falls back to the variable when settings are unavailable", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   delete process.env.CALL_LOG_RETENTION_DAYS;
-  clearPersistedRetention();
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_backup");
+  await clearPersistedRetention();
+  const db = getTestBackend();
+  await db.execute("ALTER TABLE config_entries RENAME TO config_entries_backup");
   try {
-    assert.throws(() => {
-      db.prepare("SELECT key, value FROM key_value WHERE namespace = ?").all("settings");
-    });
+    await assert.rejects(() =>
+      db.query("SELECT key, value FROM config_entries WHERE namespace = $1", ["settings"])
+    );
 
-    assert.doesNotThrow(() => rotateCallLogs());
-    insertCallLog({
+    await assert.doesNotReject(() => rotateCallLogs());
+    await insertCallLog({
       id: "fallback-dropped",
       timestamp: new Date(Date.now() - 8 * DAY_MS).toISOString(),
     });
-    rotateCallLogs();
+    await rotateCallLogs();
 
-    assert.equal(countCallLog("fallback-dropped"), 0);
+    assert.equal(await countCallLog("fallback-dropped"), 0);
   } finally {
-    db.exec("ALTER TABLE key_value_backup RENAME TO key_value");
+    await db.execute("ALTER TABLE config_entries_backup RENAME TO config_entries");
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
 test("retention falls back when the persisted value is out of contract", async () => {
   delete process.env.CALL_LOG_RETENTION_DAYS;
-  persistDashboardRetention(0);
+  await persistDashboardRetention(0);
   try {
     const { resolveCallLogRetentionDays } = await import("../../src/lib/usage/callLogRetention.ts");
-    assert.equal(resolveCallLogRetentionDays(), 7);
+    // 0 is a saved value (>= 0 is accepted by the settings reader); it is only out of
+    // contract for the rotation, which falls back to the 7-day default.
+    assert.equal(await resolveCallLogRetentionDays(), 7);
   } finally {
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
 test("retention honors the dashboard when the variable is invalid", async () => {
   process.env.CALL_LOG_RETENTION_DAYS = "abc";
-  persistDashboardRetention(90);
+  await persistDashboardRetention(90);
   try {
     const { resolveCallLogRetentionDays } = await import("../../src/lib/usage/callLogRetention.ts");
-    assert.equal(resolveCallLogRetentionDays(), 90);
+    assert.equal(await resolveCallLogRetentionDays(), 90);
   } finally {
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
 test("retention reads no settings when the variable is set", async () => {
   process.env.CALL_LOG_RETENTION_DAYS = "30";
-  persistDashboardRetention(90);
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_backup");
+  await persistDashboardRetention(90);
+  const db = getTestBackend();
+  await db.execute("ALTER TABLE config_entries RENAME TO config_entries_backup");
   try {
     const { resolveCallLogRetentionDays } = await import("../../src/lib/usage/callLogRetention.ts");
-    assert.equal(resolveCallLogRetentionDays(), 30);
+    assert.equal(await resolveCallLogRetentionDays(), 30);
   } finally {
-    db.exec("ALTER TABLE key_value_backup RENAME TO key_value");
+    await db.execute("ALTER TABLE config_entries_backup RENAME TO config_entries");
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
-test("rotation reads the settings once per pass while the dashboard decides", () => {
+test("rotation reads the settings once per pass while the dashboard decides", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   delete process.env.CALL_LOG_RETENTION_DAYS;
-  persistDashboardRetention(90);
-  const db = core.getDbInstance();
-  const spy = countPersistedRetentionReads(db);
+  await persistDashboardRetention(90);
+  const spy = countPersistedRetentionReads();
   try {
-    rotateCallLogs();
-    rotateCallLogs();
-
+    await rotateCallLogs();
     assert.equal(spy.counter.reads, 1);
+    await rotateCallLogs();
+    assert.equal(spy.counter.reads, 2);
   } finally {
     spy.restore();
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });
 
-test("rotation reads no settings when the variable decides", () => {
+test("rotation reads no settings when the variable decides", async () => {
   assert.ok(CALL_LOGS_DIR);
   fs.mkdirSync(CALL_LOGS_DIR, { recursive: true });
   process.env.CALL_LOG_RETENTION_DAYS = "7";
-  persistDashboardRetention(90);
-  const db = core.getDbInstance();
-  const spy = countPersistedRetentionReads(db);
+  await persistDashboardRetention(90);
+  const spy = countPersistedRetentionReads();
   try {
-    rotateCallLogs();
+    await rotateCallLogs();
 
     assert.equal(spy.counter.reads, 0);
   } finally {
     spy.restore();
     process.env.CALL_LOG_RETENTION_DAYS = "7";
-    clearPersistedRetention();
+    await clearPersistedRetention();
   }
 });

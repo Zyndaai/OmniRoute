@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-felo-runtime-block-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -28,16 +29,13 @@ const RETIRED_PROVIDER_VARIANTS = [
   "felo",
   " FeLo-Web ",
   "\tFELO\n",
-  "\u00a0FELO-WEB\uFEFF",
-  "\u2003felo\u2029",
-  "\u3000FELO-WEB\u3000",
+  " FELO-WEB﻿",
+  " felo ",
+  "　FELO-WEB　",
 ] as const;
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
+  await resetTestDb();
   modelAliasResolver.invalidateAliasCache();
 }
 
@@ -51,9 +49,9 @@ test.afterEach(async () => {
   await new Promise((resolve) => setImmediate(resolve));
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -66,8 +64,11 @@ function isRetiredError(error: unknown): boolean {
 }
 
 test("retired Felo model prefixes cannot shadow custom compatible nodes", async () => {
+  // Prefixes are unique case-insensitively (provider_nodes_prefix_uq on lower(btrim(prefix))), so
+  // "FeLo-WeB" and "FELO" cannot be created next to "felo-web" and "felo". Those spellings are
+  // still checked below through the retired-identity path.
   const nodeIdsByPrefix = new Map<string, string>();
-  for (const [index, providerId] of ["felo-web", "felo", "FeLo-WeB", "FELO"].entries()) {
+  for (const [index, providerId] of ["felo-web", "felo"].entries()) {
     const nodeId = `openai-compatible-chat-retired-felo-prefix-${index}`;
     await providerNodesDb.createProviderNode({
       id: nodeId,
@@ -78,7 +79,8 @@ test("retired Felo model prefixes cannot shadow custom compatible nodes", async 
       baseUrl: "https://retired.example.invalid/v1",
     });
     nodeIdsByPrefix.set(providerId, nodeId);
-
+  }
+  for (const providerId of ["felo-web", "felo", "FeLo-WeB", "FELO"]) {
     await assert.rejects(() => getModelInfo(`${providerId}/gpt-4o`), isRetiredError);
   }
 
@@ -232,8 +234,8 @@ test("priority combo skips retired Felo target and falls back to a healthy targe
   assert.equal(body.choices?.[0]?.message?.content, "healthy fallback");
 });
 
-test("retired Felo ids stay ineligible after imports, even if DB triggers are bypassed", async () => {
-  const db = core.getDbInstance();
+test("retired Felo ids stay ineligible after imports, even if the write path is bypassed", async () => {
+  const backend = getTestBackend();
 
   const created = await providersDb.createProviderConnection({
     provider: "felo-web",
@@ -290,57 +292,9 @@ test("retired Felo ids stay ineligible after imports, even if DB triggers are by
   assert.equal(identityPreserved?.isActive, false);
   assert.equal(identityPreserved?.errorCode, "PROVIDER_REMOVED");
 
-  for (const [index, providerId] of RETIRED_PROVIDER_VARIANTS.entries()) {
-    const connectionId = `trigger-normalized-${index}`;
-    db.prepare(
-      "INSERT INTO provider_connections " +
-        "(id, provider, auth_type, name, is_active, test_status, created_at, updated_at) " +
-        "VALUES (?, ?, 'apikey', ?, 1, 'active', datetime('now'), datetime('now'))"
-    ).run(connectionId, providerId, `${providerId}-post-migration-import`);
-
-    const persistedState = db
-      .prepare(
-        "SELECT is_active, test_status, error_code, last_error_type, last_error_source " +
-          "FROM provider_connections WHERE id = ?"
-      )
-      .get(connectionId) as {
-      is_active: number;
-      test_status: string;
-      error_code: string;
-      last_error_type: string;
-      last_error_source: string;
-    };
-    assert.deepEqual(persistedState, {
-      is_active: 0,
-      test_status: "unavailable",
-      error_code: "PROVIDER_REMOVED",
-      last_error_type: "provider_removed",
-      last_error_source: "migration:retire-felo-web",
-    });
-
-    const credentials = await getProviderCredentials(
-      providerId,
-      null,
-      [connectionId],
-      "felo-chat",
-      { allowSuppressedConnections: true }
-    );
-    assert.equal(
-      credentials,
-      null,
-      `${providerId} must remain blocked after trigger normalization`
-    );
-  }
-
-  db.exec(`
-    DROP TRIGGER IF EXISTS provider_connections_retire_felo_web_insert;
-    DROP TRIGGER IF EXISTS provider_connections_retire_felo_web_update;
-    DROP TRIGGER IF EXISTS provider_connections_preserve_felo_web_identity_insert;
-    DROP TRIGGER IF EXISTS provider_connections_preserve_felo_web_identity_update;
-    DROP TRIGGER IF EXISTS exclusive_connection_leases_retire_felo_web_insert;
-    DROP TRIGGER IF EXISTS exclusive_connection_leases_retire_felo_web_update;
-  `);
-
+  // Rows that get past the write path (an import that writes SQL directly) must still be blocked
+  // at auth time, whatever their stored state says. This is the Postgres-era replacement for the
+  // retired SQLite triggers, which normalized such rows on insert.
   for (const [index, providerId] of RETIRED_PROVIDER_VARIANTS.entries()) {
     const connectionId = `truly-active-${index}`;
     const leaseOwnerId = `vlo_${String.fromCharCode(65 + index).repeat(43)}`;
@@ -349,33 +303,36 @@ test("retired Felo ids stay ineligible after imports, even if DB triggers are by
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 60_000).toISOString();
 
-    db.prepare(
+    await backend.execute(
       "INSERT INTO provider_connections " +
         "(id, provider, auth_type, name, is_active, test_status, created_at, updated_at) " +
-        "VALUES (?, ?, 'apikey', ?, 1, 'active', ?, ?)"
-    ).run(connectionId, providerId, `${providerId}-trigger-bypass`, now, now);
-    db.prepare(
+        "VALUES ($1, $2, 'apikey', $3, true, 'active', $4, $5)",
+      [connectionId, providerId, `${providerId}-trigger-bypass`, now, now]
+    );
+    await backend.execute(
       "INSERT INTO exclusive_connection_leases " +
         "(lease_owner_hash, api_key_id, provider, connection_id, generation, state, " +
-        "acquired_at, renewed_at, expires_at) VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)"
-    ).run(
-      hashLeaseOwnerId(leaseOwnerId),
-      apiKeyId,
-      providerId,
-      connectionId,
-      generation,
-      now,
-      now,
-      expiresAt
+        "acquired_at, renewed_at, expires_at) VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $7, $8)",
+      [
+        hashLeaseOwnerId(leaseOwnerId),
+        apiKeyId,
+        providerId,
+        connectionId,
+        generation,
+        now,
+        now,
+        expiresAt,
+      ]
     );
 
-    const activeBeforeSelection = db
-      .prepare("SELECT is_active, test_status FROM provider_connections WHERE id = ?")
-      .get(connectionId) as { is_active: number; test_status: string };
+    const activeBeforeSelection = await backend.queryOne<{
+      is_active: boolean;
+      test_status: string;
+    }>("SELECT is_active, test_status FROM provider_connections WHERE id = $1", [connectionId]);
     assert.deepEqual(
       activeBeforeSelection,
-      { is_active: 1, test_status: "active" },
-      "fixture must bypass the migration triggers so the auth tombstone is tested independently"
+      { is_active: true, test_status: "active" },
+      "fixture must bypass the write path so the auth tombstone is tested independently"
     );
 
     const credentials = await getProviderCredentials(
@@ -394,9 +351,10 @@ test("retired Felo ids stay ineligible after imports, even if DB triggers are by
     );
     assert.equal(credentials, null, `${providerId} must be blocked even with a truly active row`);
 
-    const lease = db
-      .prepare("SELECT state, end_reason FROM exclusive_connection_leases WHERE connection_id = ?")
-      .get(connectionId) as { state: string; end_reason: string | null };
+    const lease = await backend.queryOne<{ state: string; end_reason: string | null }>(
+      "SELECT state, end_reason FROM exclusive_connection_leases WHERE connection_id = $1",
+      [connectionId]
+    );
     assert.deepEqual(lease, {
       state: "INVALIDATED",
       end_reason: "CONNECTION_INELIGIBLE",

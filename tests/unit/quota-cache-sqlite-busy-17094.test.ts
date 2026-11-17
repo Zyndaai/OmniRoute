@@ -6,34 +6,31 @@ import path from "node:path";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-quota-busy-"));
 process.env.DATA_DIR = dir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const quota = await import("../../src/domain/quotaCache.ts");
 const { runQuotaSnapshotCleanup, SNAPSHOT_CLEANUP_BACKOFF_MS } =
   await import("../../src/domain/quotaSnapshotCleanup.ts");
 
-const busy = () => Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+// A write-lock conflict on PostgreSQL: a deadlock (SQLSTATE 40P01) is retryable.
+const busy = () => Object.assign(new Error("deadlock detected"), { code: "40P01" });
 
-test.after(() => {
+test.after(async () => {
   quota.stopBackgroundRefresh();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("#17094 a locked snapshot cleanup in the background tick is retried and never crashes", async () => {
-  const db = core.getDbInstance() as unknown as { prepare: (sql: string) => unknown };
-  const prepare = db.prepare.bind(db);
+  const backend = getTestBackend();
+  const execute = backend.execute.bind(backend);
   let locked = true;
   let deletes = 0;
-  db.prepare = (sql: string) => {
-    if (!sql.startsWith("DELETE FROM quota_snapshots")) return prepare(sql);
-    return {
-      run: (...args: unknown[]) => {
-        deletes++;
-        if (locked) throw busy();
-        return (prepare(sql) as { run: (...a: unknown[]) => unknown }).run(...args);
-      },
-    };
+  backend.execute = (sql: string, params?: unknown[]) => {
+    if (!sql.startsWith("DELETE FROM quota_snapshots")) return execute(sql, params);
+    deletes++;
+    if (locked) return Promise.reject(busy());
+    return execute(sql, params);
   };
   const rejections: unknown[] = [];
   const onRejection = (reason: unknown) => rejections.push(reason);
@@ -60,7 +57,7 @@ test("#17094 a locked snapshot cleanup in the background tick is retried and nev
     mock.timers.reset();
     warn.mock.restore();
     process.off("unhandledRejection", onRejection);
-    db.prepare = prepare;
+    backend.execute = execute;
   }
 });
 

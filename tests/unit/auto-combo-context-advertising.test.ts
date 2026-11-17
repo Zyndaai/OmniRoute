@@ -41,8 +41,40 @@ const suffixComposition = await import("../../open-sse/services/autoCombo/suffix
 const contextManager = await import("../../open-sse/services/contextManager.ts");
 const combosAutoRoute = await import("../../src/app/api/combos/auto/route.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+
+/** Runs `fn` and returns the normalized SQL of every statement the process backend received. */
+async function captureSql(fn: () => Promise<void>): Promise<string[]> {
+  const backend = getTestBackend() as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const seen: string[] = [];
+  const originals = new Map<string, (...args: unknown[]) => unknown>();
+  for (const name of ["query", "queryOne", "execute"]) {
+    const original = backend[name];
+    originals.set(name, original);
+    backend[name] = (...args: unknown[]) => {
+      seen.push(String(args[0]).replace(/\s+/g, " ").trim());
+      return original.apply(backend, args);
+    };
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [name, original] of originals) backend[name] = original;
+  }
+  return seen;
+}
+
+function countCapabilityReads(statements: string[]) {
+  return {
+    synced: statements.filter((s) => s.includes("FROM model_capabilities")).length,
+    capabilityOverrides: statements.filter((s) => s.includes("FROM model_capability_overrides"))
+      .length,
+    contextOverrides: statements.filter((s) => s.includes("FROM model_context_overrides")).length,
+  };
+}
+
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -52,12 +84,13 @@ test.after(() => {
 
 // ── virtualFactory.computeAdvertisedLimits ───────────────────────────────────
 
-test("computeAdvertisedLimits returns MAX of candidates' known context windows", () => {
+type AdvertisedLimits = { contextLength: number | null; maxOutputTokens: number | null };
+
+test("computeAdvertisedLimits returns MAX of candidates' known context windows", async () => {
   const { computeAdvertisedLimits } = virtualFactory as unknown as {
-    computeAdvertisedLimits: (candidates: Array<{ provider: string; model: string }>) => {
-      contextLength: number | null;
-      maxOutputTokens: number | null;
-    };
+    computeAdvertisedLimits: (
+      candidates: Array<{ provider: string; model: string }>
+    ) => Promise<AdvertisedLimits>;
   };
   assert.equal(
     typeof computeAdvertisedLimits,
@@ -67,7 +100,7 @@ test("computeAdvertisedLimits returns MAX of candidates' known context windows",
 
   // gemini has registry defaultContextLength=1048576; claude-sonnet-4-6 has 1000000 (#7129:
   // 1M GA per Anthropic docs) -- gemini's binary-1M window still wins as the MAX.
-  const result = computeAdvertisedLimits([
+  const result = await computeAdvertisedLimits([
     { provider: "claude", model: "claude-sonnet-4-6" },
     { provider: "gemini", model: "gemini-2.5-pro" },
   ]);
@@ -78,8 +111,8 @@ test("computeAdvertisedLimits returns MAX of candidates' known context windows",
   );
 });
 
-test("#9199 computeAdvertisedLimits reuses build-local prepared capability values", () => {
-  const result = virtualFactory.computeAdvertisedLimits([
+test("#9199 computeAdvertisedLimits reuses build-local prepared capability values", async () => {
+  const result = await virtualFactory.computeAdvertisedLimits([
     {
       provider: "prepared-provider",
       model: "prepared-model",
@@ -115,31 +148,14 @@ test("#9199 prepared auto inputs resolve each candidate capability before materi
 });
 
 test("#9199 catalog capability preparation bulk-loads each capability table once", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare;
-  const callPrepare = originalPrepare.bind(db);
-  const counts = {
-    synced: 0,
-    capabilityOverrides: 0,
-    contextOverrides: 0,
-  };
-
-  (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
-    const normalized = String(sql).replace(/\s+/g, " ").trim();
-    if (normalized.includes("FROM model_capabilities")) counts.synced++;
-    if (normalized.includes("FROM model_capability_overrides")) counts.capabilityOverrides++;
-    if (normalized.includes("FROM model_context_overrides")) counts.contextOverrides++;
-    return callPrepare(sql);
-  }) as typeof db.prepare;
-
-  try {
+  await resetTestDb(); // also drops the process-level synced-capabilities cache
+  const statements = await captureSql(async () => {
     const prepared = await virtualFactory.prepareVirtualAutoComboInputs({
       includeResolvedCapabilities: true,
     });
     assert.ok(prepared.regularCandidates.length + prepared.familyCandidates.length > 0);
-  } finally {
-    (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
-  }
+  });
+  const counts = countCapabilityReads(statements);
 
   assert.deepEqual(counts, {
     synced: 1,
@@ -160,29 +176,12 @@ test("#9199 default runtime preparation does not retain catalog-only capabilitie
 });
 
 test("#9199 default runtime preparation does not bulk-load capability tables", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare;
-  const callPrepare = originalPrepare.bind(db);
-  const counts = {
-    synced: 0,
-    capabilityOverrides: 0,
-    contextOverrides: 0,
-  };
-
-  (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
-    const normalized = String(sql).replace(/\s+/g, " ").trim();
-    if (normalized.includes("FROM model_capabilities")) counts.synced++;
-    if (normalized.includes("FROM model_capability_overrides")) counts.capabilityOverrides++;
-    if (normalized.includes("FROM model_context_overrides")) counts.contextOverrides++;
-    return callPrepare(sql);
-  }) as typeof db.prepare;
-
-  try {
+  await resetTestDb();
+  const statements = await captureSql(async () => {
     const prepared = await virtualFactory.prepareVirtualAutoComboInputs();
     assert.ok(prepared.regularCandidates.length + prepared.familyCandidates.length > 0);
-  } finally {
-    (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
-  }
+  });
+  const counts = countCapabilityReads(statements);
 
   assert.deepEqual(counts, {
     synced: 0,
@@ -204,11 +203,11 @@ test("#9199 capability preparation yields before publishing the snapshot", async
   assert.equal(heartbeatRan, true);
 });
 
-test("#9199 category filters reuse prepared capability flags", () => {
+test("#9199 category filters reuse prepared capability flags", async () => {
   const filter = suffixComposition.buildAutoCandidateFilter("reasoning");
   assert.ok(filter);
   assert.equal(
-    filter({
+    await filter({
       provider: "openai",
       model: "gpt-5.4",
       resolvedReasoning: false,
@@ -241,26 +240,24 @@ test("#9199 materialization passes prepared capability flags into category filte
   assert.equal(combo.models.length, 0);
 });
 
-test("computeAdvertisedLimits returns null limits for an empty candidate pool", () => {
+test("computeAdvertisedLimits returns null limits for an empty candidate pool", async () => {
   const { computeAdvertisedLimits } = virtualFactory as unknown as {
-    computeAdvertisedLimits: (candidates: Array<{ provider: string; model: string }>) => {
-      contextLength: number | null;
-      maxOutputTokens: number | null;
-    };
+    computeAdvertisedLimits: (
+      candidates: Array<{ provider: string; model: string }>
+    ) => Promise<AdvertisedLimits>;
   };
-  const result = computeAdvertisedLimits([]);
+  const result = await computeAdvertisedLimits([]);
   assert.equal(result.contextLength, null);
   assert.equal(result.maxOutputTokens, null);
 });
 
-test("computeAdvertisedLimits never returns 0 for a non-empty pool (unknown models fall back)", () => {
+test("computeAdvertisedLimits never returns 0 for a non-empty pool (unknown models fall back)", async () => {
   const { computeAdvertisedLimits } = virtualFactory as unknown as {
-    computeAdvertisedLimits: (candidates: Array<{ provider: string; model: string }>) => {
-      contextLength: number | null;
-      maxOutputTokens: number | null;
-    };
+    computeAdvertisedLimits: (
+      candidates: Array<{ provider: string; model: string }>
+    ) => Promise<AdvertisedLimits>;
   };
-  const result = computeAdvertisedLimits([
+  const result = await computeAdvertisedLimits([
     { provider: "totally-unknown-provider", model: "mystery-model" },
   ]);
   assert.ok(
@@ -298,13 +295,15 @@ test("GET /api/combos/auto includes positive context_length for combos with cand
 
 // ── contextManager.resolveComboContextLimit (per-target compression limit) ──
 
-test("resolveComboContextLimit prefers the executing target's own limit over combo min", () => {
+type ResolveComboContextLimit = (opts: {
+  provider: string;
+  model: string | null;
+  comboTargetLimits: number[];
+}) => Promise<{ limit: number; source: string }>;
+
+test("resolveComboContextLimit prefers the executing target's own limit over combo min", async () => {
   const { resolveComboContextLimit } = contextManager as unknown as {
-    resolveComboContextLimit: (opts: {
-      provider: string;
-      model: string | null;
-      comboTargetLimits: number[];
-    }) => { limit: number; source: string };
+    resolveComboContextLimit: ResolveComboContextLimit;
   };
   assert.equal(
     typeof resolveComboContextLimit,
@@ -314,7 +313,7 @@ test("resolveComboContextLimit prefers the executing target's own limit over com
 
   // Executing on gemini (1048576 provider default) while the combo also has
   // a tiny 32k target: compression must use the EXECUTING target's window.
-  const result = resolveComboContextLimit({
+  const result = await resolveComboContextLimit({
     provider: "gemini",
     model: "gemini-2.5-pro",
     comboTargetLimits: [32000, 1048576],
@@ -323,15 +322,11 @@ test("resolveComboContextLimit prefers the executing target's own limit over com
   assert.equal(result.source, "target");
 });
 
-test("resolveComboContextLimit regression: claude target must not be compressed at an 8k sibling", () => {
+test("resolveComboContextLimit regression: claude target must not be compressed at an 8k sibling", async () => {
   const { resolveComboContextLimit } = contextManager as unknown as {
-    resolveComboContextLimit: (opts: {
-      provider: string;
-      model: string | null;
-      comboTargetLimits: number[];
-    }) => { limit: number; source: string };
+    resolveComboContextLimit: ResolveComboContextLimit;
   };
-  const result = resolveComboContextLimit({
+  const result = await resolveComboContextLimit({
     provider: "claude",
     model: "claude-sonnet-4-6",
     comboTargetLimits: [8000],
@@ -343,15 +338,11 @@ test("resolveComboContextLimit regression: claude target must not be compressed 
   assert.equal(result.source, "target");
 });
 
-test("resolveComboContextLimit falls back to combo min when the target has no specific limit", () => {
+test("resolveComboContextLimit falls back to combo min when the target has no specific limit", async () => {
   const { resolveComboContextLimit } = contextManager as unknown as {
-    resolveComboContextLimit: (opts: {
-      provider: string;
-      model: string | null;
-      comboTargetLimits: number[];
-    }) => { limit: number; source: string };
+    resolveComboContextLimit: ResolveComboContextLimit;
   };
-  const result = resolveComboContextLimit({
+  const result = await resolveComboContextLimit({
     provider: "totally-unknown-provider",
     model: "mystery-model",
     comboTargetLimits: [32000, 200000],
@@ -360,15 +351,11 @@ test("resolveComboContextLimit falls back to combo min when the target has no sp
   assert.equal(result.source, "combo-min");
 });
 
-test("resolveComboContextLimit uses generic fallback when nothing else is known", () => {
+test("resolveComboContextLimit uses generic fallback when nothing else is known", async () => {
   const { resolveComboContextLimit } = contextManager as unknown as {
-    resolveComboContextLimit: (opts: {
-      provider: string;
-      model: string | null;
-      comboTargetLimits: number[];
-    }) => { limit: number; source: string };
+    resolveComboContextLimit: ResolveComboContextLimit;
   };
-  const result = resolveComboContextLimit({
+  const result = await resolveComboContextLimit({
     provider: "totally-unknown-provider",
     model: "mystery-model",
     comboTargetLimits: [],

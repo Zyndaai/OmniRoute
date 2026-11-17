@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 const { openaiToClaudeRequest } =
   await import("../../open-sse/translator/request/openai-to-claude.ts");
 
-function translateArguments(args: unknown) {
-  return openaiToClaudeRequest(
+async function translateArguments(args: unknown) {
+  const out = await openaiToClaudeRequest(
     "claude-4-sonnet",
     {
       messages: [
@@ -23,7 +23,8 @@ function translateArguments(args: unknown) {
       ],
     },
     false
-  ).messages[1].content[0];
+  );
+  return out.messages[1].content[0];
 }
 
 for (const [label, args] of [
@@ -35,12 +36,12 @@ for (const [label, args] of [
   ["JSON boolean", "true"],
   ["JSON string", '"text"'],
 ] as const) {
-  test(`normalizes ${label} tool arguments to an empty object`, () => {
-    assert.deepEqual(translateArguments(args).input, {});
+  test(`normalizes ${label} tool arguments to an empty object`, async () => {
+    assert.deepEqual((await translateArguments(args)).input, {});
   });
 }
 
-test("preserves empty and valid object tool arguments", () => {
-  assert.deepEqual(translateArguments("{}").input, {});
-  assert.deepEqual(translateArguments('{"limit":5}').input, { limit: 5 });
+test("preserves empty and valid object tool arguments", async () => {
+  assert.deepEqual((await translateArguments("{}")).input, {});
+  assert.deepEqual((await translateArguments('{"limit":5}')).input, { limit: 5 });
 });

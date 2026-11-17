@@ -7,7 +7,6 @@ import { writeFileSync } from "node:fs";
 const isolatedRoot = path.join(process.cwd(), ".sandbox", "direct-acp-test");
 process.env.HOME = path.join(isolatedRoot, "home");
 process.env.DATA_DIR = path.join(isolatedRoot, "data");
-process.env.SQLITE_FILE = path.join(isolatedRoot, "data", "storage.sqlite");
 process.env.DEVIN_AGENTIC_HOME = process.env.HOME;
 fs.mkdirSync(process.env.HOME, { recursive: true });
 fs.mkdirSync(process.env.DATA_DIR, { recursive: true });

@@ -11,7 +11,9 @@ import { FORMATS } from "../../open-sse/translator/formats.ts";
 import { translateRequest } from "../../open-sse/translator/index.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
 
-test.after(() => resetDbInstance());
+test.after(async () => {
+  await resetDbInstance();
+});
 const summary = "Keep the prior decision about caf\u00e9 and resume the pending task.";
 const message = {
   type: "message",
@@ -60,7 +62,7 @@ for (const type of ["compaction", "compaction_summary", "context_compaction"]) {
   });
 }
 
-test("the conversion helper and translation hub also retain readable context", () => {
+test("the conversion helper and translation hub also retain readable context", async () => {
   const body = {
     input: [{ type: "compaction", encrypted_content: encodeCompactionSummary(summary) }, message],
   };
@@ -68,7 +70,7 @@ test("the conversion helper and translation hub also retain readable context", (
   assert.deepEqual(messages(helper)[0].content, [
     { type: "text", text: `${SUMMARY_PREFIX}\n\n${summary}` },
   ]);
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI,
     "fixture-model",

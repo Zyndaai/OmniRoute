@@ -26,6 +26,7 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "sticky-failover-6219
 
 const core = await import("../../src/lib/db/core.ts");
 const affinityDb = await import("../../src/lib/db/sessionAccountAffinity.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "codex";
 const SESSION = "session-6219";
@@ -33,56 +34,68 @@ const CONN_A = "conn-A-exhausted";
 const CONN_B = "conn-B-healthy";
 const TTL = 60_000;
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("evicts the sticky pin when the pinned connection fails over (#6219)", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_A, Date.now(), TTL);
+test("evicts the sticky pin when the pinned connection fails over (#6219)", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_A, Date.now(), TTL);
   assert.equal(
-    affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
     CONN_A,
     "precondition: session pinned to the (soon-exhausted) connection A"
   );
 
-  const evicted = affinityDb.evictSessionAccountAffinityForConnection(SESSION, PROVIDER, CONN_A);
+  const evicted = await affinityDb.evictSessionAccountAffinityForConnection(
+    SESSION,
+    PROVIDER,
+    CONN_A
+  );
 
   assert.equal(evicted, true, "failover eviction should report it removed the pin");
   assert.equal(
-    affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL),
+    await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL),
     null,
     "after failover the sticky pin to the exhausted connection must be gone (re-pins next request)"
   );
 });
 
-test("does NOT evict a pin that points at a different (healthy) connection (#6219)", () => {
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_B, Date.now(), TTL);
+test("does NOT evict a pin that points at a different (healthy) connection (#6219)", async () => {
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_B, Date.now(), TTL);
 
-  const evicted = affinityDb.evictSessionAccountAffinityForConnection(SESSION, PROVIDER, CONN_A);
+  const evicted = await affinityDb.evictSessionAccountAffinityForConnection(
+    SESSION,
+    PROVIDER,
+    CONN_A
+  );
 
   assert.equal(evicted, false, "must not evict when the pin is for another connection");
   assert.equal(
-    affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity(SESSION, PROVIDER, TTL))?.connectionId,
     CONN_B,
     "a healthy pin to B must survive a failover on the unrelated connection A"
   );
 });
 
-test("eviction is not TTL-gated — clears the pin even for a stale stored record (#6219)", () => {
+test("eviction is not TTL-gated — clears the pin even for a stale stored record (#6219)", async () => {
   // The pre-fix guard read via getSessionAccountAffinity(key, provider) (ttl=0)
   // returned null and never deleted. The helper reads raw so eviction fires
   // regardless of the TTL gate.
   const past = Date.now() - 120_000;
-  affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_A, past, 60_000); // already expired
+  await affinityDb.upsertSessionAccountAffinity(SESSION, PROVIDER, CONN_A, past, 60_000); // already expired
 
-  const evicted = affinityDb.evictSessionAccountAffinityForConnection(SESSION, PROVIDER, CONN_A);
+  const evicted = await affinityDb.evictSessionAccountAffinityForConnection(
+    SESSION,
+    PROVIDER,
+    CONN_A
+  );
 
   assert.equal(evicted, true, "raw connection-matched eviction still removes the stale stored pin");
 });

@@ -16,8 +16,8 @@ export interface ComboRepository {
   list(limit?: number, offset?: number): Promise<ComboRecord[]>;
   count(): Promise<number>;
   findById(id: string): Promise<ComboRecord | null>;
+  /** Case-insensitive: combo names are unique on lower(name). */
   findByName(name: string): Promise<ComboRecord | null>;
-  findByNameInsensitive(name: string): Promise<ComboRecord | null>;
   create(data: ComboRecord): Promise<ComboRecord>;
   update(id: string, data: ComboRecord): Promise<ComboUpdateResult | null>;
   reorder(comboIds: string[]): Promise<ComboReorderResult>;

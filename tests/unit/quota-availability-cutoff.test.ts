@@ -19,7 +19,7 @@ const usage = {
 };
 const policy = { enabled: false, defaultThresholdPercent: 10, providerWindowDefaults: {} };
 for (const provider of unsupported) {
-  test(`${provider} reports unevaluated live cutoff only when its preflight gate is enabled`, () => {
+  test(`${provider} reports unevaluated live cutoff only when its preflight gate is enabled`, async () => {
     assert.equal(canEvaluateCachedCutoff(provider), false);
     const input = {
       id: `synthetic-${provider}`,
@@ -27,17 +27,17 @@ for (const provider of unsupported) {
       isActive: true,
       providerSpecificData: { quotaPreflightEnabled: true },
     };
-    const enabled = evaluateCachedQuotaAvailability(input, usage, policy);
+    const enabled = await evaluateCachedQuotaAvailability(input, usage, policy);
     assert.equal(enabled.cutoffEvaluated, false);
     assert.equal(enabled.usable, true);
     assert.deepEqual(enabled.blockers, []);
-    const disabled = evaluateCachedQuotaAvailability(
+    const disabled = await evaluateCachedQuotaAvailability(
       { ...input, providerSpecificData: { quotaPreflightEnabled: false } },
       usage,
       policy
     );
     assert.notEqual(disabled.cutoffEvaluated, false);
-    const defaultGate = evaluateCachedQuotaAvailability(
+    const defaultGate = await evaluateCachedQuotaAvailability(
       { ...input, providerSpecificData: {} },
       usage,
       { ...policy, defaultThresholdPercent: 2 }
@@ -46,8 +46,8 @@ for (const provider of unsupported) {
   });
 }
 for (const provider of ["codex", "ollama-cloud"]) {
-  test(`${provider} evaluates the cached cutoff through the routing converter`, () => {
-    const result = evaluateCachedQuotaAvailability(
+  test(`${provider} evaluates the cached cutoff through the routing converter`, async () => {
+    const result = await evaluateCachedQuotaAvailability(
       {
         id: `synthetic-${provider}`,
         provider,

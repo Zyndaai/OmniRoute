@@ -24,8 +24,8 @@ import { resetDbInstance } from "../../src/lib/db/core.ts";
 const PREV_NPM_PACKAGE_VERSION = process.env.npm_package_version;
 delete process.env.npm_package_version;
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   if (PREV_NPM_PACKAGE_VERSION === undefined) delete process.env.npm_package_version;
   else process.env.npm_package_version = PREV_NPM_PACKAGE_VERSION;
 });
@@ -33,7 +33,7 @@ after(() => {
 test("MCP initialize advertises the real package version without npm_package_version", async () => {
   const { createMcpServer } = await import("../../open-sse/mcp-server/server.ts");
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const client = new Client({ name: "version-drift-test", version: "1.0.0" });
   await server.connect(serverTransport);
   await client.connect(clientTransport);

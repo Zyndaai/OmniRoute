@@ -49,37 +49,39 @@ function syncedRow(limits: {
   };
 }
 
-function resetPersistedState() {
-  contextOverridesDb.removeModelContextOverride("stepfun", "step-5-preview");
-  capabilityOverridesDb.removeModelCapabilityOverride(STEP, "max_input_tokens");
-  capabilityOverridesDb.removeModelCapabilityOverride(STEP, "max_output_tokens");
-  modelsDevSync.clearModelsDevCapabilities();
+async function resetPersistedState() {
+  await contextOverridesDb.removeModelContextOverride("stepfun", "step-5-preview");
+  await capabilityOverridesDb.removeModelCapabilityOverride(STEP, "max_input_tokens");
+  await capabilityOverridesDb.removeModelCapabilityOverride(STEP, "max_output_tokens");
+  await modelsDevSync.clearModelsDevCapabilities();
 }
 
-function withSources(id: string, snapshot?: unknown) {
+async function withSources(id: string, snapshot?: unknown) {
   return modelCapabilities.getResolvedModelCapabilitiesWithLimitSources(
     id,
     snapshot as Parameters<typeof modelCapabilities.getResolvedModelCapabilities>[2]
   );
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => resetPersistedState());
+test.beforeEach(async () => {
+  await resetPersistedState();
+});
 
-test("registry-backed limits name the registry row; a persisted context override wins", () => {
-  const before = withSources(STEP);
+test("registry-backed limits name the registry row; a persisted context override wins", async () => {
+  const before = await withSources(STEP);
   assert.equal(before.capabilities.contextWindow, 1_024_000);
   assert.equal(before.limitSources.contextWindow, `registry:${STEP}`);
 
   assert.equal(
-    contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000),
+    await contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000),
     true
   );
-  const after = withSources(STEP);
+  const after = await withSources(STEP);
   assert.equal(after.capabilities.contextWindow, 1_000_000);
   assert.equal(after.limitSources.contextWindow, "override:context");
   // maxInputTokens has no narrower source, so it inherits the context window and its origin.
@@ -87,36 +89,36 @@ test("registry-backed limits name the registry row; a persisted context override
   assert.equal(after.limitSources.maxInputTokens, "override:context");
 });
 
-test("each limit is labelled independently (synced output, registry context)", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("each limit is labelled independently (synced output, registry context)", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     stepfun: { "step-5-preview": syncedRow({ limit_output: 45_678 }) },
   });
-  const { capabilities, limitSources } = withSources(STEP);
+  const { capabilities, limitSources } = await withSources(STEP);
   assert.equal(capabilities.maxOutputTokens, 45_678);
   assert.equal(limitSources.maxOutputTokens, `synced:${STEP}`);
   assert.equal(capabilities.contextWindow, 1_024_000);
   assert.equal(limitSources.contextWindow, `registry:${STEP}`);
 });
 
-test("persisted max_input / max_output overrides are labelled as overrides", () => {
-  capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_input_tokens", 500_000);
-  capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_output_tokens", 32_000);
-  const { capabilities, limitSources } = withSources(STEP);
+test("persisted max_input / max_output overrides are labelled as overrides", async () => {
+  await capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_input_tokens", 500_000);
+  await capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_output_tokens", 32_000);
+  const { capabilities, limitSources } = await withSources(STEP);
   assert.equal(capabilities.maxInputTokens, 500_000);
   assert.equal(limitSources.maxInputTokens, "override:max_input");
   assert.equal(capabilities.maxOutputTokens, 32_000);
   assert.equal(limitSources.maxOutputTokens, "override:max_output");
 });
 
-test("an input cap clamped to the total window reports the window's source", () => {
-  capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_input_tokens", 2_000_000);
-  const { capabilities, limitSources } = withSources(STEP);
+test("an input cap clamped to the total window reports the window's source", async () => {
+  await capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_input_tokens", 2_000_000);
+  const { capabilities, limitSources } = await withSources(STEP);
   assert.equal(capabilities.maxInputTokens, 1_024_000);
   assert.equal(limitSources.maxInputTokens, `registry:${STEP}`);
 });
 
-test("an unknown model reports `none` and null limits", () => {
-  const { capabilities, limitSources } = withSources("unknown-provider/never-seen-model");
+test("an unknown model reports `none` and null limits", async () => {
+  const { capabilities, limitSources } = await withSources("unknown-provider/never-seen-model");
   assert.equal(capabilities.contextWindow, null);
   assert.equal(capabilities.maxInputTokens, null);
   assert.equal(capabilities.maxOutputTokens, null);
@@ -127,25 +129,25 @@ test("an unknown model reports `none` and null limits", () => {
   });
 });
 
-test("effort-suffixed variants resolved from their base model carry an effort-base prefix", () => {
+test("effort-suffixed variants resolved from their base model carry an effort-base prefix", async () => {
   // `step-5-preview-high` has no row of its own; the resolver borrows step-5-preview's.
-  const { capabilities, limitSources } = withSources(`${STEP}-high`);
+  const { capabilities, limitSources } = await withSources(`${STEP}-high`);
   assert.equal(capabilities.contextWindow, 1_024_000);
   assert.equal(limitSources.contextWindow, `effort-base:registry:${STEP}`);
   // A variant with its own spec row is NOT marked as borrowed.
   assert.equal(
-    withSources("cmd/deepseek-v4-flash-max").limitSources.contextWindow,
+    (await withSources("cmd/deepseek-v4-flash-max")).limitSources.contextWindow,
     "spec:deepseek-v4-flash-max"
   );
 });
 
-test("collecting provenance never changes a resolved capability (all catalog models)", () => {
-  contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
-  capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_output_tokens", 32_000);
-  modelsDevSync.saveModelsDevCapabilities({
+test("collecting provenance never changes a resolved capability (all catalog models)", async () => {
+  await contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
+  await capabilityOverridesDb.setModelCapabilityOverride(STEP, "max_output_tokens", 32_000);
+  await modelsDevSync.saveModelsDevCapabilities({
     stepfun: { "step-5-preview": syncedRow({ limit_context: 900_000, limit_output: 45_678 }) },
   });
-  const snapshot = modelCapabilities.createModelCapabilityResolutionSnapshot();
+  const snapshot = await modelCapabilities.createModelCapabilityResolutionSnapshot();
   const ids = [
     ...AI_MODELS.map((m: { provider: string; model: string }) => `${m.provider}/${m.model}`),
     "cmd/deepseek-v4-flash-max",
@@ -155,8 +157,8 @@ test("collecting provenance never changes a resolved capability (all catalog mod
   assert.ok(ids.length > 50);
   for (const id of ids) {
     for (const snap of [undefined, snapshot]) {
-      const plain = modelCapabilities.getResolvedModelCapabilities(id, undefined, snap);
-      const traced = withSources(id, snap);
+      const plain = await modelCapabilities.getResolvedModelCapabilities(id, undefined, snap);
+      const traced = await withSources(id, snap);
       assert.deepEqual(traced.capabilities, plain, id);
       assert.equal(typeof traced.limitSources.contextWindow, "string", id);
       assert.equal(typeof traced.limitSources.maxInputTokens, "string", id);
@@ -185,7 +187,7 @@ async function getModels(query: string) {
 const LIMIT_KEYS = ["contextWindow", "maxInputTokens", "maxOutputTokens", "capsSource"];
 
 test("GET /api/models without withLimits keeps today's payload shape and values", async () => {
-  contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
+  await contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
   const plain = await getModels("?all=true");
   const explicitOff = await getModels("?all=true&withLimits=0");
   const withLimits = await getModels("?all=true&withLimits=1");
@@ -214,7 +216,7 @@ test("GET /api/models without withLimits keeps today's payload shape and values"
 });
 
 test("GET /api/models?withLimits=1 exposes resolved limits with their provenance", async () => {
-  contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
+  await contextOverridesDb.setModelContextOverride("stepfun", "step-5-preview", 1_000_000);
   const { status, body } = await getModels("?all=true&withLimits=1");
   assert.equal(status, 200);
   const step = body.models.find((model) => model.fullModel === STEP);
@@ -227,7 +229,7 @@ test("GET /api/models?withLimits=1 exposes resolved limits with their provenance
       "maxInputTokens",
       "maxOutputTokens",
     ]);
-    const resolved = modelCapabilities.getResolvedModelCapabilities(model.fullModel);
+    const resolved = await modelCapabilities.getResolvedModelCapabilities(model.fullModel);
     assert.equal(model.contextWindow, resolved.contextWindow, model.fullModel);
     assert.equal(model.maxInputTokens, resolved.maxInputTokens, model.fullModel);
     assert.equal(model.maxOutputTokens, resolved.maxOutputTokens, model.fullModel);

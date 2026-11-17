@@ -96,7 +96,7 @@ async function exercise(f: Fixture, blocked: boolean) {
         nextResetAt: null,
       });
     } else setQuotaCache(id, provider, quotas);
-    setProviderLimitsCache(id, toProviderLimitsCacheEntry({ quotas }, "synthetic"));
+    await setProviderLimitsCache(id, toProviderLimitsCacheEntry({ quotas }, "synthetic"));
     if (f.lock) lockExactModel(provider, id, model, "rate_limit", 600_000);
     await updateSettings({ quotaPreflight: { ...policy, enabled: f.cutoff === true } });
     if (f.cutoff) {
@@ -178,7 +178,7 @@ async function exercise(f: Fixture, blocked: boolean) {
     __setGenericUsageFetcherForTests(null);
     clearAllModelLockouts();
     getQuotaCacheState().cache.delete(id);
-    deleteProviderLimitsCache(id);
+    await deleteProviderLimitsCache(id);
     await deleteProviderConnection(id);
   }
 }

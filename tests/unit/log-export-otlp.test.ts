@@ -27,6 +27,8 @@ function authed(url: string, init: RequestInit = {}): Request {
 }
 Object.assign(process.env, { NODE_ENV: "test" });
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const dbDest = await import("../../src/lib/db/logExportDestinations.ts");
 const secrets = await import("../../src/lib/logExport/secrets.ts");
 const runner = await import("../../src/lib/logExport/runner.ts");
@@ -102,8 +104,8 @@ function attributes(span: Span) {
 const str = (stringValue: string) => ({ stringValue });
 const int = (value: number) => ({ intValue: String(value) });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -705,20 +707,23 @@ test("body attributes occur exactly once on the wire in either mapping mode", as
   }
 });
 
-function insertRows() {
-  const db = core.getDbInstance();
-  db.exec("DELETE FROM call_logs");
-  const stmt = db.prepare(
-    "INSERT INTO call_logs (id,timestamp,path,status,duration,ttft_ms,api_key_id) VALUES (?,?,?,?,?,?,?)"
+/** Empties the database (call_logs ids restart at 1) and seeds the two e2e rows. */
+async function insertRows() {
+  await resetTestDb();
+  await db().execute(
+    "INSERT INTO call_logs (id,timestamp,path,status,duration,ttft_ms,api_key_id) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    ["e2e-chat", record.timestamp, record.path, 200, 2000, 250, record.apiKeyId]
   );
-  stmt.run("e2e-chat", record.timestamp, record.path, 200, 2000, 250, record.apiKeyId);
-  stmt.run("e2e-embedding", record.timestamp, "/v1/embeddings", 200, 100, null, record.apiKeyId);
+  await db().execute(
+    "INSERT INTO call_logs (id,timestamp,path,status,duration,ttft_ms,api_key_id) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    ["e2e-embedding", record.timestamp, "/v1/embeddings", 200, 100, null, record.apiKeyId]
+  );
 }
 
 test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secrets not argv/env/errors", async () => {
-  insertRows();
-  assert.equal(source.getCallLogsForExport(0, 2)[0].record.ttftMs, 250);
-  assert.equal(source.getCallLogsForExport(0, 2)[1].record.ttftMs, null);
+  await insertRows();
+  assert.equal((await source.getCallLogsForExport(0, 2))[0].record.ttftMs, 250);
+  assert.equal((await source.getCallLogsForExport(0, 2))[1].record.ttftMs, null);
   let fail = false;
   const secret = "synthetic-e2e-header-value";
   const s = await server((_q, r) => {
@@ -746,7 +751,7 @@ test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secre
     },
   });
   try {
-    const dest = dbDest.createLogExportDestination({
+    const dest = await dbDest.createLogExportDestination({
       name: "e2e-otlp",
       type: "otlp-http",
       batchSize: 2,
@@ -759,37 +764,30 @@ test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secre
     assert.equal(result.success, true, result.error ?? "");
     assert.equal(result.exported, 2);
     assert.equal(result.cursorRowId, 2);
-    assert.equal(dbDest.getLogExportDestination(dest.id)?.cursorRowId, 2);
+    assert.equal((await dbDest.getLogExportDestination(dest.id))?.cursorRowId, 2);
     assert.equal(spans(JSON.parse(s.calls[0].body) as Payload).length, 1);
     fail = true;
-    dbDest.resetLogExportCursor(dest.id);
-    const failed = await runner.runDestinationExport(dbDest.getLogExportDestination(dest.id)!);
+    await dbDest.resetLogExportCursor(dest.id);
+    const failed = await runner.runDestinationExport((await dbDest.getLogExportDestination(dest.id))!);
     assert.equal(failed.success, false);
     assert.equal(failed.cursorRowId, 0);
-    assert.equal(
-      JSON.stringify([failed, dbDest.getLogExportDestination(dest.id)?.lastError, output]).includes(
-        secret
-      ),
-      false
-    );
+    const lastError = (await dbDest.getLogExportDestination(dest.id))?.lastError;
+    assert.equal(JSON.stringify([failed, lastError, output]).includes(secret), false);
 
     // One acknowledged batch stays committed. A later HTTP chunk failure retries
     // only the next cursor batch, including its accepted prefix, not earlier batches.
-    const db = core.getDbInstance();
-    db.exec("DELETE FROM call_logs");
-    const insert = db.prepare("INSERT INTO call_logs (id,timestamp,path,status) VALUES (?,?,?,?)");
-    db.transaction(() => {
-      for (let i = 0; i < 1004; i++)
-        insert.run(
-          `window-${i}`,
-          record.timestamp,
-          i === 0 || (i >= 502 && i < 1003) ? record.path : "/v1/embeddings",
-          200
-        );
-    })();
+    await resetTestDb();
+    await db().execute(
+      `INSERT INTO call_logs (id,timestamp,path,status)
+       SELECT 'window-' || g, $1::timestamptz,
+              CASE WHEN g = 0 OR (g >= 502 AND g < 1003) THEN $2 ELSE '/v1/embeddings' END,
+              200
+       FROM generate_series(0, 1003) AS g`,
+      [record.timestamp, record.path]
+    );
     const chunks = await server((_q, r, _body, i) => r.writeHead(i === 3 ? 400 : 200).end());
     try {
-      const windowDest = dbDest.createLogExportDestination({
+      const windowDest = await dbDest.createLogExportDestination({
         name: "later-chunk-window",
         type: "otlp-http",
         batchSize: 502,
@@ -803,14 +801,14 @@ test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secre
       assert.equal(partial.exported, 502, "processed count includes filtered rows");
       assert.equal(partial.batches, 1);
       assert.equal(partial.cursorRowId, 502);
-      const saved = dbDest.getLogExportDestination(windowDest.id)!;
+      const saved = (await dbDest.getLogExportDestination(windowDest.id))!;
       assert.equal(saved.cursorRowId, 502);
       assert.equal(saved.exportedTotal, 502);
       const retried = await runner.runDestinationExport(saved);
       assert.equal(retried.success, true, retried.error ?? "");
       assert.equal(retried.exported, 502);
       assert.equal(retried.cursorRowId, 1004);
-      assert.equal(dbDest.getLogExportDestination(windowDest.id)?.exportedTotal, 1004);
+      assert.equal((await dbDest.getLogExportDestination(windowDest.id))?.exportedTotal, 1004);
       assert.deepEqual(
         chunks.calls.map((c) => spans(JSON.parse(c.body) as Payload).length),
         [1, 500, 1, 500, 1]
@@ -831,7 +829,7 @@ test("child runner end-to-end: cursor advances filtered rows, ttft mapped, secre
 test("real runner marks failure, retains pending rows and resends identical spans after recovery", async (t) => {
   for (const mode of ["400", "partial success"]) {
     await t.test(mode, async () => {
-      insertRows();
+      await insertRows();
       const password = "8675309";
       const secret = 'synthetic-/"secret';
       const token = Buffer.from(`synthetic-user:${password}`).toString("base64");
@@ -862,7 +860,7 @@ test("real runner marks failure, retains pending rows and resends identical span
           headers: { Authorization: `Basic ${token}`, "X-Secret": secret },
           paths: [record.path, "/v1/embeddings"],
         });
-        const dest = dbDest.createLogExportDestination({
+        const dest = await dbDest.createLogExportDestination({
           name: "failure-retry",
           type: "otlp-http",
           batchSize: 2,
@@ -875,7 +873,7 @@ test("real runner marks failure, retains pending rows and resends identical span
         const probe = await otlp.otlpHttpDestination.createClient(cfg).test();
         assert.deepEqual(probe, { ok: false, detail: expected.replace("2 spans", "0 spans") });
         const failed = await runner.runDestinationExport(dest);
-        const saved = dbDest.getLogExportDestination(dest.id)!;
+        const saved = (await dbDest.getLogExportDestination(dest.id))!;
         assert.equal(spawned, 1, "must use the real child");
         assert.equal(s.calls.length, 2, "one probe and one send; no in-run resend");
         assert.equal(failed.success, false);
@@ -926,7 +924,7 @@ test("real runner marks failure, retains pending rows and resends identical span
         );
         recovered = true;
         const retried = await runner.runDestinationExport(saved);
-        const success = dbDest.getLogExportDestination(dest.id)!;
+        const success = (await dbDest.getLogExportDestination(dest.id))!;
         assert.equal(spawned, 2);
         assert.equal(s.calls.length, 3);
         assert.deepEqual(
@@ -950,7 +948,7 @@ test("real runner marks failure, retains pending rows and resends identical span
 });
 
 test("child hydration sends capped bodies only when includeBodies is enabled", async () => {
-  insertRows();
+  await insertRows();
   fs.mkdirSync(path.join(dir, "call_logs"), { recursive: true });
   fs.writeFileSync(
     path.join(dir, "call_logs", "otlp-body.json"),
@@ -959,18 +957,15 @@ test("child hydration sends capped bodies only when includeBodies is enabled", a
       responseBody: { text: "sanitized-fixture" },
     })
   );
-  core
-    .getDbInstance()
-    .prepare(
-      "UPDATE call_logs SET artifact_relpath = 'otlp-body.json', detail_state = 'ready', has_request_body = 1, has_response_body = 1 WHERE id = 'e2e-chat'"
-    )
-    .run();
+  await db().execute(
+    "UPDATE call_logs SET artifact_relpath = 'otlp-body.json', detail_state = 'ready', has_request_body = true, has_response_body = true WHERE id = 'e2e-chat'"
+  );
   const s = await server((_q, r) => {
     r.writeHead(200).end();
   });
   try {
     for (const includeBodies of [false, true]) {
-      const dest = dbDest.createLogExportDestination({
+      const dest = await dbDest.createLogExportDestination({
         name: "body-fixture",
         type: "otlp-http",
         includeBodies,
@@ -1028,7 +1023,7 @@ test("routes encrypt/redact headers and generated salt; updates retain salt and 
   };
   assert.equal(body.destination.config.headers, "__stored__");
   assert.equal(body.destination.config.identitySalt, "__stored__");
-  const stored = dbDest.getLogExportDestination(body.destination.id)!;
+  const stored = (await dbDest.getLogExportDestination(body.destination.id))!;
   assert.match(String(stored.config.headers), /^enc:v1:/);
   assert.match(String(stored.config.identitySalt), /^enc:v1:/);
   const plain = secrets.decryptDestinationConfig("otlp-http", stored.config);
@@ -1053,18 +1048,16 @@ test("routes encrypt/redact headers and generated salt; updates retain salt and 
     { params: Promise.resolve({ id: stored.id }) }
   );
   assert.equal(put.status, 200);
+  const updated = (await dbDest.getLogExportDestination(stored.id))!;
   assert.equal(
-    secrets.decryptDestinationConfig("otlp-http", dbDest.getLogExportDestination(stored.id)!.config)
-      .identitySalt,
+    secrets.decryptDestinationConfig("otlp-http", updated.config).identitySalt,
     plain.identitySalt
   );
   const second = await create();
   const next = (await second.json()) as typeof body;
+  const nextStored = (await dbDest.getLogExportDestination(next.destination.id))!;
   assert.notEqual(
-    secrets.decryptDestinationConfig(
-      "otlp-http",
-      dbDest.getLogExportDestination(next.destination.id)!.config
-    ).identitySalt,
+    secrets.decryptDestinationConfig("otlp-http", nextStored.config).identitySalt,
     plain.identitySalt
   );
 });
@@ -1073,7 +1066,7 @@ test("create startFromCurrentPosition uses max rowid; default remains zero", asy
   const s = await server((_q, r) => r.writeHead(200).end());
   try {
     for (const flag of [false, true]) {
-      insertRows();
+      await insertRows();
       s.calls.length = 0;
       const res = await create({
         startFromCurrentPosition: flag,
@@ -1081,13 +1074,18 @@ test("create startFromCurrentPosition uses max rowid; default remains zero", asy
       });
       assert.equal(res.status, 201);
       const body = (await res.json()) as { destination: { id: string; cursorRowId: number } };
-      assert.equal(body.destination.cursorRowId, flag ? source.getMaxCallLogRowId() : 0);
-      core
-        .getDbInstance()
-        .prepare("INSERT INTO call_logs (id,timestamp,path,status) VALUES (?,?,?,?)")
-        .run("after-create", record.timestamp, record.path, 200);
+      assert.equal(
+        body.destination.cursorRowId,
+        flag ? await source.getMaxCallLogRowId() : 0
+      );
+      await db().execute("INSERT INTO call_logs (id,timestamp,path,status) VALUES ($1,$2,$3,$4)", [
+        "after-create",
+        record.timestamp,
+        record.path,
+        200,
+      ]);
       const result = await runner.runDestinationExport(
-        dbDest.getLogExportDestination(body.destination.id)!
+        (await dbDest.getLogExportDestination(body.destination.id))!
       );
       assert.equal(result.success, true, result.error ?? "");
       assert.equal(result.exported, flag ? 1 : 3);

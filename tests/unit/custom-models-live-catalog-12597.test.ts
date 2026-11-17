@@ -21,6 +21,7 @@ const {
 } = await import("../../src/lib/db/models.ts");
 const { getActiveSyncedCatalog, catalogContainsModel, reconcileProvidersWithActiveSyncedCatalog } =
   await import("../../src/lib/db/models/activeSyncedCatalog.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "github";
 const CONNECTION_ID = "github-live-catalog-12597";
@@ -28,13 +29,14 @@ const SYNCED_MODEL = "gpt-4.1";
 const PICKER_MODEL = "nvidia/deepseek-ai/deepseek-r1";
 
 async function seedActiveSyncedCatalog(modelIds: string[] = [SYNCED_MODEL]) {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
-       (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(CONNECTION_ID, PROVIDER, 1, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, true, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = true,
+       updated_at = EXCLUDED.updated_at`,
+    [CONNECTION_ID, PROVIDER, now, now]
+  );
   await replaceSyncedAvailableModelsForConnection(
     PROVIDER,
     CONNECTION_ID,
@@ -43,14 +45,12 @@ async function seedActiveSyncedCatalog(modelIds: string[] = [SYNCED_MODEL]) {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   await seedActiveSyncedCatalog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -101,7 +101,6 @@ test("#12597 same-id custom overlay does not drop the synced row", async () => {
 });
 
 test("#12597 sparse custom overlay does not wipe synced capability fields", async () => {
-  const db = core.getDbInstance();
   await replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION_ID, [
     {
       id: SYNCED_MODEL,
@@ -112,9 +111,11 @@ test("#12597 sparse custom overlay does not wipe synced capability fields", asyn
       supportedThinkingEfforts: ["low", "high"],
     },
   ]);
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('customModels', ?, ?)"
-  ).run(PROVIDER, JSON.stringify([{ id: SYNCED_MODEL, name: "Operator name" }]));
+  await getTestBackend().execute(
+    `INSERT INTO provider_model_catalog (provider, custom_models) VALUES ($1, $2::jsonb)
+     ON CONFLICT (provider) DO UPDATE SET custom_models = EXCLUDED.custom_models`,
+    [PROVIDER, JSON.stringify([{ id: SYNCED_MODEL, name: "Operator name" }])]
+  );
 
   const catalog = await getActiveSyncedCatalog(PROVIDER);
   const match = catalog.models.find((model) => model.id === SYNCED_MODEL);

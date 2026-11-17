@@ -129,7 +129,7 @@ test("managed chat blocks missing and stale leases with zero provider dispatch",
   assert.equal(missing.status, 409);
   assert.equal((await missing.json()).error.code, "LEASE_REQUIRED");
 
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -148,7 +148,7 @@ test("managed chat blocks cross-key owner-generation replay before provider disp
   const connection = await seedConnection("openai");
   const ownerKey = await seedManagedKey([connection.id]);
   const replayKey = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: ownerKey.id,
     provider: "openai",
@@ -167,13 +167,13 @@ test("managed chat blocks cross-key owner-generation replay before provider disp
   assert.equal(replay.status, 409);
   assert.equal((await replay.json()).error.code, "LEASE_FENCE_STALE");
   assert.equal(dispatches, 0);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNER)?.apiKeyId, ownerKey.id);
+  assert.equal((await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.apiKeyId, ownerKey.id);
 });
 
 test("managed chat dispatches only the fenced active binding", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -205,13 +205,13 @@ test("identical prompts with different owners never share a managed connection",
     priority: 2,
   });
   const key = await seedManagedKey([firstConnection.id, secondConnection.id]);
-  const firstLease = leaseDb.acquireExclusiveConnectionLease({
+  const firstLease = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
     connectionId: firstConnection.id,
   });
-  const secondLease = leaseDb.acquireExclusiveConnectionLease({
+  const secondLease = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER_B,
     apiKeyId: key.id,
     provider: "openai",
@@ -256,15 +256,15 @@ test("identical prompts with different owners never share a managed connection",
   assert.equal(usedApiKeys.length, 2);
   assert.notEqual(usedApiKeys[0], usedApiKeys[1]);
   assert.notEqual(
-    leaseDb.getActiveExclusiveConnectionLease(OWNER)?.connectionId,
-    leaseDb.getActiveExclusiveConnectionLease(OWNER_B)?.connectionId
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.connectionId,
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNER_B))?.connectionId
   );
 });
 
 test("changing prompt, tools, and request model does not change the owner binding", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -288,7 +288,7 @@ test("changing prompt, tools, and request model does not change the owner bindin
   ]) {
     const response = await handleChat(managedRequest(key.key, acquired.lease.generation, {}, body));
     assert.equal(response.status, 200);
-    assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNER)?.connectionId, connection.id);
+    assert.equal((await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.connectionId, connection.id);
   }
   assert.equal(dispatches, 3);
 });
@@ -296,7 +296,7 @@ test("changing prompt, tools, and request model does not change the owner bindin
 test("legacy completions and messages-compatible paths use the managed lease handler", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -334,14 +334,14 @@ test("legacy completions and messages-compatible paths use the managed lease han
   assert.equal(completions.status, 200);
   assert.equal(messages.status, 200);
   assert.equal(dispatches, 2);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNER)?.connectionId, connection.id);
+  assert.equal((await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.connectionId, connection.id);
 });
 
 test("managed chat fences after an admission wait and before main executor dispatch", async () => {
   const connection = await seedConnection("openai");
   await providersDb.updateProviderConnection(connection.id, { maxConcurrent: 1 });
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -369,11 +369,11 @@ test("managed chat fences after an admission wait and before main executor dispa
   assert.equal(accountSemaphores.getStats()[semaphoreKey]?.queued, 1);
 
   assert.equal(
-    leaseDb.releaseExclusiveConnectionLease({
+    (await leaseDb.releaseExclusiveConnectionLease({
       leaseOwnerId: OWNER,
       generation: acquired.lease.generation,
       apiKeyId: key.id,
-    }).kind,
+    })).kind,
     "RELEASED"
   );
   releaseBlocker();
@@ -387,7 +387,7 @@ test("managed chat fences after an admission wait and before main executor dispa
 test("managed streaming chat preserves the lifecycle lease after completion", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -418,7 +418,7 @@ test("managed streaming chat preserves the lifecycle lease after completion", as
   assert.match(body, /managed stream success/);
   assert.equal(dispatches, 1);
   assert.equal(
-    leaseDb.getActiveExclusiveConnectionLease(OWNER)?.generation,
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.generation,
     acquired.lease.generation
   );
 });
@@ -426,7 +426,7 @@ test("managed streaming chat preserves the lifecycle lease after completion", as
 test("managed Responses-shaped request uses the same fenced chat path", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -458,14 +458,14 @@ test("managed Responses-shaped request uses the same fenced chat path", async ()
 
   assert.equal(response.status, 200);
   assert.equal(dispatches, 1);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNER)?.connectionId, connection.id);
+  assert.equal((await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.connectionId, connection.id);
 });
 
 test("a direct foreign connection pin cannot override the active binding", async () => {
   const bound = await seedConnection("openai", { name: "managed-bound", priority: 1 });
   const other = await seedConnection("openai", { name: "managed-other", priority: 2 });
   const key = await seedManagedKey([bound.id, other.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -480,7 +480,7 @@ test("a direct foreign connection pin cannot override the active binding", async
   };
 
   assert.notEqual(bound.id, other.id);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNER)?.connectionId, bound.id);
+  assert.equal((await leaseDb.getActiveExclusiveConnectionLease(OWNER))?.connectionId, bound.id);
 
   const pinnedRequest = managedRequest(key.key, acquired.lease.generation, {
     "X-OmniRoute-Connection": other.id,
@@ -537,7 +537,7 @@ test("managed combos reject every fan-out route before provider dispatch", async
     apiKey: "sk-managed-combo-second",
   });
   const key = await seedManagedKey([firstConnection.id, secondConnection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -607,7 +607,7 @@ test("managed combos reject every fan-out route before provider dispatch", async
 test("one-step managed pipeline uses the ordinary fenced lease path", async () => {
   const connection = await seedConnection("openai");
   const key = await seedManagedKey([connection.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: key.id,
     provider: "openai",
@@ -676,7 +676,7 @@ test("normal API key routes to alternative eligible connection when primary is a
   const managedKey = await seedManagedKey([connectionX.id]);
   const normalKey = await apiKeysDb.createApiKey("normal-key", "test");
 
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: managedKey.id,
     provider: "openai",
@@ -718,7 +718,7 @@ test("normal API key recovers connection after expired lease reconciliation with
   const baseTime = "2026-01-01T00:00:00.000Z";
   const afterExpiry = "2026-01-01T00:00:05.000Z";
 
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: managedKey.id,
     provider: "openai",
@@ -728,7 +728,7 @@ test("normal API key recovers connection after expired lease reconciliation with
   });
   assert.equal(acquired.kind, "ACQUIRED");
 
-  const expiredCount = leaseDb.reconcileExpiredExclusiveConnectionLeases(afterExpiry);
+  const expiredCount = await leaseDb.reconcileExpiredExclusiveConnectionLeases(afterExpiry);
   assert.equal(expiredCount, 1);
 
   const dispatchedKeys: string[] = [];

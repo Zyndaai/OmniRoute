@@ -24,6 +24,7 @@ const STAMP_TOKEN = "default-pw-peer-stamp-token";
 process.env.OMNIROUTE_PEER_STAMP_TOKEN = STAMP_TOKEN;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const pipeline = await import("../../src/server/authz/pipeline.ts");
 const { PEER_IP_HEADER, VIA_PROXY_HEADER, AUTHZ_HEADER_TRUSTED_PEER_IP } =
@@ -33,10 +34,8 @@ const connectRoute = await import("../../src/app/api/cli/connect/route.ts");
 
 const originalGetCookieStore = loginRoute.authRouteInternals.getCookieStore;
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+test.beforeEach(async () => {
+  await resetTestDb();
   process.env.INITIAL_PASSWORD = "CHANGEME";
   process.env.OMNIROUTE_PEER_STAMP_TOKEN = STAMP_TOKEN;
   loginRoute.authRouteInternals.getCookieStore = async () => ({ set() {} });
@@ -46,8 +45,8 @@ test.afterEach(() => {
   loginRoute.authRouteInternals.getCookieStore = originalGetCookieStore;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) delete process.env.INITIAL_PASSWORD;
   else process.env.INITIAL_PASSWORD = ORIGINAL_INITIAL_PASSWORD;
@@ -159,7 +158,7 @@ test("the blocked-login audit row describes the peer, not the forwarded address"
     host: "omniroute.example",
   };
   await login("CHANGEME", remote);
-  const [entry] = compliance.getAuditLog({
+  const [entry] = await compliance.getAuditLog({
     action: "auth.login.insecure_default_blocked",
     limit: 1,
   });
@@ -176,7 +175,7 @@ test("a wrong password from a remote peer forging X-Forwarded-For is not tagged 
     host: "omniroute.example",
   };
   assert.equal((await login("wrong-password", remote)).status, 401);
-  const [entry] = compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
+  const [entry] = await compliance.getAuditLog({ action: "auth.login.failed", limit: 1 });
   const metadata = entry.metadata as Record<string, unknown>;
   assert.equal(metadata.sourceScope, "public");
   assert.equal(metadata.internalOrigin, false);
@@ -190,7 +189,7 @@ test("the cli/connect audit rows keep the forwarded client address", async () =>
     host: "omniroute.example",
   };
   assert.equal((await connect("wrong-password", remote)).status, 401);
-  const [entry] = compliance.getAuditLog({ action: "cli.connect.failed", limit: 1 });
+  const [entry] = await compliance.getAuditLog({ action: "cli.connect.failed", limit: 1 });
   assert.equal(entry.ip_address, "198.51.100.77");
 });
 

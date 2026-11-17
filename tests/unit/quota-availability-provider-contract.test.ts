@@ -24,7 +24,7 @@ const resetAt = "2099-02-01T00:00:00Z";
 const fetchedAt = "2099-01-01T00:00:00Z";
 for (const provider of providers)
   for (const remainingPercentage of [80, 0]) {
-    test(`${provider} cached ${remainingPercentage ? "healthy" : "exhausted"} agrees with dispatch predicates`, () => {
+    test(`${provider} cached ${remainingPercentage ? "healthy" : "exhausted"} agrees with dispatch predicates`, async () => {
       const id = `synthetic-${provider}-${remainingPercentage}`;
       const quota = { remainingPercentage, resetAt };
       const usage = { fetchedAt, quotas: { session: quota, weekly: quota } };
@@ -63,7 +63,7 @@ for (const provider of providers)
             connectionId: id,
             providerSpecificData: {},
           }).proceed;
-        const summary = buildConnectionQuotaAvailability(connection, usage, policy);
+        const summary = await buildConnectionQuotaAvailability(connection, usage, policy);
         assert.equal(summary.account.usable, permitted);
         assert.equal(summary.account.usable, remainingPercentage > 0);
         assert.equal(summary.account.fetchedAt, fetchedAt.replace("Z", ".000Z"));

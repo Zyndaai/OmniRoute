@@ -12,12 +12,12 @@ import assert from "node:assert/strict";
 const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
 const { filterTargetsByRequestCompatibility } = await import("../../open-sse/services/combo.ts");
 
-test("#14232 qwen-cloud-token-plan image-accepting leaves resolve as vision-capable", () => {
+test("#14232 qwen-cloud-token-plan image-accepting leaves resolve as vision-capable", async () => {
   for (const id of [
     "qwen-cloud-token-plan/qwen3.8-flash",
     "qwen-cloud-token-plan/deepseek-v4.1-flash",
   ]) {
-    const resolved = getResolvedModelCapabilities(id);
+    const resolved = await getResolvedModelCapabilities(id);
     assert.equal(resolved.supportsVision, true, `${id} should be vision-capable`);
     assert.equal(resolved.reasoning, true, `${id} should be a reasoning model`);
   }
@@ -47,13 +47,18 @@ const imageBody = {
   ],
 };
 
-test("#14232 an image request keeps the qwen-cloud-token-plan leaf in the combo pool", () => {
-  const kept = filterTargetsByRequestCompatibility(
-    [target("qwen-cloud-token-plan/qwen3.8-flash"), target("groq/llama-3.1-8b-instant")],
-    imageBody,
-    noopLog
+test("#14232 an image request keeps the qwen-cloud-token-plan leaf in the combo pool", async () => {
+  const kept = (
+    await filterTargetsByRequestCompatibility(
+      [target("qwen-cloud-token-plan/qwen3.8-flash"), target("groq/llama-3.1-8b-instant")],
+      imageBody,
+      noopLog
+    )
   ).map((t) => t.modelStr);
-  assert.equal(getResolvedModelCapabilities("groq/llama-3.1-8b-instant").supportsVision, null);
+  assert.equal(
+    (await getResolvedModelCapabilities("groq/llama-3.1-8b-instant")).supportsVision,
+    null
+  );
   assert.deepEqual(kept, [
     "qwen-cloud-token-plan/qwen3.8-flash",
     "groq/llama-3.1-8b-instant",

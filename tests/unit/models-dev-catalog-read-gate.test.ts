@@ -72,8 +72,11 @@ function rowMatchesSynced(row: CatalogRow): boolean {
   );
 }
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
@@ -99,7 +102,7 @@ async function seedClaudeSyncedAndFullPricingCache() {
 
   // Full overlay: a live-synced id AND a market id this connection never
   // discovered. Do not filter this map to make the catalog assertion pass.
-  modelsDev.saveModelsDevPricing({
+  await modelsDev.saveModelsDevPricing({
     claude: {
       [SYNCED_MODEL_ID]: { input: SYNCED_INPUT, output: SYNCED_OUTPUT },
       [UNVERIFIED_MODEL_ID]: { input: 1, output: 2 },
@@ -112,7 +115,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -135,7 +138,7 @@ test("test 11: modelsDevSync does not insert synced_models rows", () => {
 test("test 11: models.dev pricing cache may contain unverified ids (read gate, not write-side intersection)", async () => {
   await seedClaudeSyncedAndFullPricingCache();
 
-  const pricing = modelsDev.getModelsDevPricing();
+  const pricing = await modelsDev.getModelsDevPricing();
   assert.ok(pricing.claude, "pricing overlay must keep the claude provider key");
   assert.equal(pricing.claude[SYNCED_MODEL_ID]?.input, SYNCED_INPUT);
   assert.equal(pricing.claude[UNVERIFIED_MODEL_ID]?.input, 1);
@@ -149,7 +152,7 @@ test("test 11: models.dev pricing cache may contain unverified ids (read gate, n
 test("test 11: getUnifiedModelsResponse does not list unverified models.dev ids", async (t) => {
   await seedClaudeSyncedAndFullPricingCache();
 
-  const pricing = modelsDev.getModelsDevPricing();
+  const pricing = await modelsDev.getModelsDevPricing();
   assert.ok(
     pricing.claude?.[UNVERIFIED_MODEL_ID],
     "precondition: pricing overlay still contains the unsynced market id"

@@ -119,6 +119,32 @@ let cacheTime = 0;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 let cachedCapabilities: CapabilitiesByProvider | null = null;
 let cachedCapabilitiesLoadedAll = false;
+let cachedCapabilitiesLoadedAt = 0;
+let capabilitiesFullLoad: Promise<CapabilitiesByProvider> | null = null;
+/**
+ * A full in-memory copy of model_capabilities is reused for this long. The sync job runs in
+ * one process; other processes on the same database pick its result up within this window.
+ */
+const CAPABILITIES_REFRESH_MS = 5 * 60 * 1000;
+
+function markCapabilitiesFullyLoaded(data: CapabilitiesByProvider): void {
+  cachedCapabilities = data;
+  cachedCapabilitiesLoadedAll = true;
+  cachedCapabilitiesLoadedAt = Date.now();
+}
+
+/** Drops the in-memory copy so the next lookup reads the table again (tests, after truncation). */
+export function resetSyncedCapabilitiesCache(): void {
+  cachedCapabilities = null;
+  cachedCapabilitiesLoadedAll = false;
+  cachedCapabilitiesLoadedAt = 0;
+}
+
+function hasFreshFullCapabilities(): boolean {
+  return (
+    cachedCapabilitiesLoadedAll && Date.now() - cachedCapabilitiesLoadedAt < CAPABILITIES_REFRESH_MS
+  );
+}
 const MODELS_DEV_ABORT_ERROR = "AbortError";
 
 function createAbortError(): Error {
@@ -348,7 +374,7 @@ export async function getSyncedCapabilities(
   provider?: string,
   modelId?: string
 ): Promise<CapabilitiesByProvider> {
-  if (cachedCapabilitiesLoadedAll) {
+  if (hasFreshFullCapabilities()) {
     if (!provider) {
       return cachedCapabilities || {};
     }
@@ -375,10 +401,7 @@ export async function getSyncedCapabilities(
 
   const result = capabilitiesFromRows(await db().query(query, params));
 
-  if (!provider && !modelId) {
-    cachedCapabilities = result;
-    cachedCapabilitiesLoadedAll = true;
-  }
+  if (!provider && !modelId) markCapabilitiesFullyLoaded(result);
 
   return result;
 }
@@ -423,23 +446,19 @@ export async function getSyncedCapability(
     return lookupSyncedCapabilityWithFallbacks(provider, (p) => bulk[p]?.[modelId] ?? null);
   }
 
-  // Fast path: every provider is in the in-memory cache, skip the database entirely.
-  if (cachedCapabilitiesLoadedAll) {
-    return lookupSyncedCapabilityWithFallbacks(
-      provider,
-      (p) => cachedCapabilities?.[p]?.[modelId] ?? null
-    );
+  // Callers look up many provider x model x alias candidates per request, so load the
+  // whole table once (one query, shared by concurrent callers) instead of one query per
+  // candidate, and answer from memory until it is due for a refresh.
+  if (!hasFreshFullCapabilities()) {
+    capabilitiesFullLoad ??= getSyncedCapabilities().finally(() => {
+      capabilitiesFullLoad = null;
+    });
+    await capabilitiesFullLoad;
   }
-
-  // Cold path: query the table for the provider and each fallback alias.
-  return lookupSyncedCapabilityWithFallbacks(provider, async (p) => {
-    const row = await db().queryOne(
-      "SELECT * FROM model_capabilities WHERE provider = $1 AND model_id = $2 LIMIT 1",
-      [p, modelId]
-    );
-    if (!row) return null;
-    return mapCapabilityRecord(toRecord(row));
-  });
+  return lookupSyncedCapabilityWithFallbacks(
+    provider,
+    (p) => cachedCapabilities?.[p]?.[modelId] ?? null
+  );
 }
 
 type CapabilityRowParams = readonly unknown[];
@@ -563,8 +582,7 @@ export async function saveModelsDevCapabilities(data: CapabilitiesByProvider): P
     const inserted = await insertCapabilityRows(tx, rows, false);
     return deleted.changes > 0 || inserted > 0;
   });
-  cachedCapabilities = data;
-  cachedCapabilitiesLoadedAll = true;
+  markCapabilitiesFullyLoaded(data);
   if (changed) invalidateDbCache("model-capabilities");
 }
 
@@ -600,8 +618,7 @@ export async function upsertSyncedCapabilities(
  */
 export async function clearModelsDevCapabilities(): Promise<void> {
   const info = await db().execute("DELETE FROM model_capabilities");
-  cachedCapabilities = {};
-  cachedCapabilitiesLoadedAll = true;
+  markCapabilitiesFullyLoaded({});
   if (info.changes > 0) invalidateDbCache("model-capabilities");
 }
 

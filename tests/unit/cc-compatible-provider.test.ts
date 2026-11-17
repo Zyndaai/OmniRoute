@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cc-compatible-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { DefaultExecutor } = await import("../../open-sse/executors/default.ts");
@@ -33,7 +33,7 @@ const originalAllowPrivateProviderUrls = process.env.OMNIROUTE_ALLOW_PRIVATE_PRO
 const originalAllowLocalProviderUrls = process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -58,7 +58,7 @@ test.afterEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   if (originalFlag === undefined) {
     delete process.env.ENABLE_CC_COMPATIBLE_PROVIDER;
@@ -75,7 +75,7 @@ test.after(() => {
   } else {
     process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS = originalAllowLocalProviderUrls;
   }
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -951,7 +951,7 @@ test("provider-nodes validate route blocks cloud metadata provider hosts before 
     error: "Blocked cloud-metadata endpoint",
   });
   assert.equal(called, false);
-  const auditEntries = compliance.getAuditLog({
+  const auditEntries = await compliance.getAuditLog({
     action: "provider.validation.ssrf_blocked",
     resourceType: "provider_validation",
   });

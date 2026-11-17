@@ -13,8 +13,8 @@ const { APIKEY_PROVIDERS } = await import("../../src/shared/constants/providers.
 const { DefaultExecutor } = await import("../../open-sse/executors/default.ts");
 const dbCore = await import("../../src/lib/db/core.ts");
 
-test.after(() => {
-  dbCore.closeDbInstance();
+test.after(async () => {
+  await dbCore.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -37,8 +37,8 @@ const rankings = await import("../../src/lib/freeProviderRankings.ts");
 
 const CUSTOM_MODEL_ID = "claude-fable-5-6368";
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -60,7 +60,7 @@ test("mergeProviderModels: no custom models returns the registry list unchanged"
 test("#6368: a provider whose only scored model is a user-added custom model appears under configuredOnly+availableOnly", async () => {
   // Give the custom model an arena_elo intelligence entry so it survives
   // the ranking builder's scoring step, same as any catalog model would.
-  intelligenceDb.upsertModelIntelligence({
+  await intelligenceDb.upsertModelIntelligence({
     model: CUSTOM_MODEL_ID,
     source: "arena_elo",
     category: "default",

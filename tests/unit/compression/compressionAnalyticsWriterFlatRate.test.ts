@@ -9,9 +9,9 @@
  * (upstream #5552) and the opt-in used by src/app/api/usage/analytics/route.ts.
  */
 
-import { test } from "node:test";
+import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,48 +19,22 @@ const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-caw-"));
 process.env.DATA_DIR = tmpDir;
 
 const core = await import("../../../src/lib/db/core.ts");
-core.resetDbInstance();
-const { getDbInstance } = core;
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 const { writeCompressionAnalytics } =
   await import("../../../open-sse/handlers/chatCore/compressionAnalyticsWrite.ts");
 
-function ensureTables() {
-  const db = getDbInstance();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS compression_analytics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp TEXT NOT NULL,
-      combo_id TEXT,
-      provider TEXT,
-      mode TEXT NOT NULL,
-      original_tokens INTEGER NOT NULL,
-      compressed_tokens INTEGER NOT NULL,
-      tokens_saved INTEGER NOT NULL,
-      duration_ms INTEGER,
-      request_id TEXT,
-      estimated_usd_saved REAL
-    )
-  `);
-  // costCalculator reads provider pricing through the layered pricing settings;
-  // an empty pricing namespace forces the defaults layer, which has non-zero
-  // rates for minimax — exactly the condition under which the bug books money.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS key_value (
-      namespace TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT,
-      PRIMARY KEY (namespace, key)
-    )
-  `);
-}
+// Migrations already create compression_analytics and the config store; the pricing
+// namespace is empty after a reset, which forces the defaults layer (non-zero rates for
+// minimax) — exactly the condition under which the bug books money.
 
-function lastRow() {
-  const db = getDbInstance();
-  return db
-    .prepare(
-      "SELECT provider, tokens_saved, estimated_usd_saved FROM compression_analytics ORDER BY id DESC LIMIT 1"
-    )
-    .get() as { provider: string; tokens_saved: number; estimated_usd_saved: number | null };
+async function lastRow() {
+  return getTestBackend().queryOne<{
+    provider: string;
+    tokens_saved: number;
+    estimated_usd_saved: number | null;
+  }>(
+    "SELECT provider, tokens_saved, estimated_usd_saved FROM compression_analytics ORDER BY id DESC LIMIT 1"
+  );
 }
 
 function makeStats(originalTokens: number, compressedTokens: number) {
@@ -75,10 +49,20 @@ function makeStats(originalTokens: number, compressedTokens: number) {
   } as never;
 }
 
-test("writeCompressionAnalytics books $0 savings for flat-rate providers (minimax)", async () => {
-  ensureTables();
-  getDbInstance().exec("DELETE FROM compression_analytics");
+before(async () => {
+  await core.ensureDbInitialized();
+});
 
+beforeEach(async () => {
+  await resetTestDb();
+});
+
+after(async () => {
+  await core.resetDbInstance();
+  rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
+
+test("writeCompressionAnalytics books $0 savings for flat-rate providers (minimax)", async () => {
   await writeCompressionAnalytics({
     stats: makeStats(10_000, 2_000),
     provider: "minimax",
@@ -93,7 +77,7 @@ test("writeCompressionAnalytics books $0 savings for flat-rate providers (minima
     log: null,
   });
 
-  const row = lastRow();
+  const row = await lastRow();
   assert.ok(row, "a compression_analytics row should have been written");
   assert.equal(row.provider, "minimax");
   assert.equal(row.tokens_saved, 8_000);
@@ -105,9 +89,6 @@ test("writeCompressionAnalytics books $0 savings for flat-rate providers (minima
 });
 
 test("writeCompressionAnalytics still books real savings for metered providers (openai)", async () => {
-  ensureTables();
-  getDbInstance().exec("DELETE FROM compression_analytics");
-
   await writeCompressionAnalytics({
     stats: makeStats(10_000, 2_000),
     provider: "openai",
@@ -122,7 +103,7 @@ test("writeCompressionAnalytics still books real savings for metered providers (
     log: null,
   });
 
-  const row = lastRow();
+  const row = await lastRow();
   assert.ok(row, "a compression_analytics row should have been written");
   assert.equal(row.provider, "openai");
   assert.equal(row.tokens_saved, 8_000);

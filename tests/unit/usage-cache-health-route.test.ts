@@ -1,7 +1,7 @@
 /**
  * Route contract for GET /api/usage/cache-health.
  *
- * Uses a real on-disk SQLite so the SQL itself is exercised — a summary that
+ * Uses a real database so the SQL itself is exercised — a summary that
  * silently returns zeros because the WHERE clause is wrong is worse than no
  * endpoint at all, and only a real query catches that.
  */
@@ -26,37 +26,36 @@ process.on("exit", () => {
   }
 });
 
-const { getDbInstance, resetDbInstance } = await import("@/lib/db/core");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { buildCacheHealthResponse } = await import("@/lib/usage/cacheHealth");
 const { GET } = await import("@/app/api/usage/cache-health/route");
 
 const NOW = Date.parse("2026-07-28T03:00:00.000Z");
 
-function seed() {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM call_logs").run();
-  const insert = db.prepare(
-    `INSERT INTO call_logs (id, timestamp, status, model, requested_model,
+async function seed() {
+  const backend = getTestBackend();
+  await backend.execute("DELETE FROM call_logs");
+  const insertSql = `INSERT INTO call_logs (id, "timestamp", status, model, requested_model,
        tokens_cache_read, tokens_cache_creation)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`;
   const iso = (minsAgo: number) => new Date(NOW - minsAgo * 60_000).toISOString();
+  const insert = (...values: unknown[]) => backend.execute(insertSql, values);
 
   // dentro da janela de 1h: um write inicial + dois reads (padrão saudável)
-  insert.run("a1", iso(10), 200, "claude-sonnet-5", "claude-sonnet-5", 0, 11660);
-  insert.run("a2", iso(9), 200, "claude-sonnet-5", "claude-sonnet-5", 11660, 14);
-  insert.run("a3", iso(8), 200, "claude-sonnet-5", "claude-sonnet-5", 11674, 15);
+  await insert("a1", iso(10), 200, "claude-sonnet-5", "claude-sonnet-5", 0, 11660);
+  await insert("a2", iso(9), 200, "claude-sonnet-5", "claude-sonnet-5", 11660, 14);
+  await insert("a3", iso(8), 200, "claude-sonnet-5", "claude-sonnet-5", 11674, 15);
   // uma chamada cara do mesmo período, modelo diferente
-  insert.run("a4", iso(7), 200, "claude-opus-4-8", "claude-opus-4-8", 37509, 91878);
+  await insert("a4", iso(7), 200, "claude-opus-4-8", "claude-opus-4-8", 37509, 91878);
   // ruído que NÃO pode entrar: erro, fora da janela, e linha sem contabilidade de cache
-  insert.run("b1", iso(5), 500, "claude-sonnet-5", "claude-sonnet-5", 999999, 999999);
-  insert.run("b2", iso(600), 200, "claude-sonnet-5", "claude-sonnet-5", 888888, 888888);
-  insert.run("b3", iso(4), 200, "claude-sonnet-5", "claude-sonnet-5", null, null);
+  await insert("b1", iso(5), 500, "claude-sonnet-5", "claude-sonnet-5", 999999, 999999);
+  await insert("b2", iso(600), 200, "claude-sonnet-5", "claude-sonnet-5", 888888, 888888);
+  await insert("b3", iso(4), 200, "claude-sonnet-5", "claude-sonnet-5", null, null);
 }
 
-test("resume a janela ignorando erro, fora-da-janela e linhas sem contabilidade", () => {
-  seed();
-  const r = buildCacheHealthResponse({ range: "1h", now: NOW });
+test("resume a janela ignorando erro, fora-da-janela e linhas sem contabilidade", async () => {
+  await seed();
+  const r = await buildCacheHealthResponse({ range: "1h", now: NOW });
 
   assert.equal(r.totalCalls, 4, "só as 4 chamadas 200 dentro de 1h com colunas de cache");
   assert.equal(r.cacheReadTotal, 0 + 11660 + 11674 + 37509);
@@ -69,9 +68,9 @@ test("resume a janela ignorando erro, fora-da-janela e linhas sem contabilidade"
   );
 });
 
-test("filtra por modelo quando pedido", () => {
-  seed();
-  const r = buildCacheHealthResponse({ range: "1h", model: "claude-opus-4-8", now: NOW });
+test("filtra por modelo quando pedido", async () => {
+  await seed();
+  const r = await buildCacheHealthResponse({ range: "1h", model: "claude-opus-4-8", now: NOW });
 
   assert.equal(r.totalCalls, 1);
   assert.equal(r.byModel.length, 1);
@@ -79,7 +78,7 @@ test("filtra por modelo quando pedido", () => {
 });
 
 test("GET responde 200 com o resumo", async () => {
-  seed();
+  await seed();
   const res = await GET(new Request("http://localhost/api/usage/cache-health?range=1h"));
   assert.equal(res.status, 200);
 
@@ -96,19 +95,18 @@ test("GET rejeita range inválido com 400", async () => {
 });
 
 test("GET assume 24h quando o range é omitido", async () => {
-  seed();
+  await seed();
   const res = await GET(new Request("http://localhost/api/usage/cache-health"));
   assert.equal(res.status, 200);
   assert.equal((await res.json()).timeRange, "24h");
 });
 
 test("erro interno responde 500 sem vazar stack trace nem SQL", async () => {
-  // Gatilho determinístico: sem a tabela, o prepare() lança SqliteError. Um
-  // DATA_DIR inválido NÃO serve — o driver fica preso tentando criar o arquivo
-  // em vez de falhar, e o teste passaria sem exercitar o catch.
-  seed();
-  const db = getDbInstance();
-  db.prepare("DROP TABLE call_logs").run();
+  // Gatilho determinístico: sem a tabela, a consulta falha. Um DATA_DIR inválido
+  // NÃO serve — a conexão falharia antes de chegar ao catch da rota.
+  await seed();
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE call_logs RENAME TO call_logs_offline");
   try {
     const res = await GET(new Request("http://localhost/api/usage/cache-health?range=1h"));
     assert.equal(res.status, 500, "o caminho de erro precisa ser realmente exercitado");
@@ -118,6 +116,6 @@ test("erro interno responde 500 sem vazar stack trace nem SQL", async () => {
     assert.ok(!/\.ts:\d+/.test(text), "sem caminho de arquivo no corpo");
     assert.ok(!/SELECT|call_logs/i.test(text), "sem o texto do SQL nem nome de tabela no corpo");
   } finally {
-    resetDbInstance();
+    await backend.execute("ALTER TABLE call_logs_offline RENAME TO call_logs");
   }
 });

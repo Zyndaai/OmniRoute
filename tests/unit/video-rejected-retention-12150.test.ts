@@ -10,7 +10,6 @@ Object.assign(process.env, {
   DATA_DIR: dataDir,
   OMNIROUTE_PLUGINS_DIR: path.join(dataDir, "plugins"),
   APP_LOG_TO_FILE: "false",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
 });
 
 test("pre-dispatch rejection logs redact video cues without mutating live input", async (t) => {
@@ -20,7 +19,7 @@ test("pre-dispatch rejection logs redact video cues without mutating live input"
     await import("../../src/sse/handlers/admissionRejectionLog.ts");
   t.after(async () => {
     await logs.closeCallLogSaves(30_000);
-    core.closeDbInstance({ checkpointMode: null });
+    await core.resetDbInstance();
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
   for (const container of ["messages", "input"]) {

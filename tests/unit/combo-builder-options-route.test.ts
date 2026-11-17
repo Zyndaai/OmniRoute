@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-builder-options-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -15,7 +16,7 @@ const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const route = await import("../../src/app/api/combos/builder/options/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -49,15 +50,15 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("combo builder options route aggregates providers, connections, models and combo refs", async () => {
   const nowPlusMinute = Date.now() + 60_000;
   // gpt-4o was removed from the openai registry; use gpt-4.1 (confirmed at providerRegistry.ts:1156)
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "gpt-4.1": {
         tool_call: true,
@@ -98,7 +99,7 @@ test("combo builder options route aggregates providers, connections, models and 
     authType: "oauth",
     email: "codex@example.com",
     accessToken: "codex-token",
-    rateLimitedUntil: nowPlusMinute,
+    rateLimitedUntil: new Date(nowPlusMinute).toISOString(),
     defaultModel: "gpt-5.3-codex",
   });
 
@@ -114,7 +115,7 @@ test("combo builder options route aggregates providers, connections, models and 
     "chat-completions",
     ["embeddings"]
   );
-  modelsDb.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
 
   const visibleCombo = await combosDb.createCombo({
     name: "team-router",

@@ -20,6 +20,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-skills-install-j
 const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
+import { resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
@@ -31,12 +33,11 @@ function clearSkillRegistry() {
   skillRegistry.versionCache?.clear?.();
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(tmpDir, { recursive: true });
   clearSkillRegistry();
-  core.getDbInstance();
 }
 
 function postRequest(url: string, body: string): Request {
@@ -47,12 +48,12 @@ function postRequest(url: string, body: string): Request {
   });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   clearSkillRegistry();
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;

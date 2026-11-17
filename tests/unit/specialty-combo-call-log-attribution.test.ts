@@ -8,7 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-specialty
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "specialty-log-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
@@ -24,17 +24,15 @@ type AttributionRow = {
   combo_name: string | null;
 };
 
-function latestAttribution(pathname: string): AttributionRow {
-  const row = core
-    .getDbInstance()
-    .prepare(
-      `SELECT status, model, requested_model, combo_name
-       FROM call_logs
-       WHERE path = ?
-       ORDER BY timestamp DESC, rowid DESC
-       LIMIT 1`
-    )
-    .get(pathname) as AttributionRow | undefined;
+async function latestAttribution(pathname: string): Promise<AttributionRow> {
+  const row = await getTestBackend().queryOne<AttributionRow>(
+    `SELECT status, model, requested_model, combo_name
+     FROM call_logs
+     WHERE path = $1
+     ORDER BY "timestamp" DESC, seq DESC
+     LIMIT 1`,
+    [pathname]
+  );
   assert.ok(row, `expected a persisted ${pathname} call log`);
   return row;
 }
@@ -103,7 +101,6 @@ test.before(async () => {
 
 test.after(() => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -114,7 +111,7 @@ test("embeddings logs direct, bare-combo, and canonical-combo request identity",
   });
   assert.equal(response.status, 200);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/embeddings"), {
+  assert.deepEqual(await latestAttribution("/v1/embeddings"), {
     status: 200,
     model: "openai/text-embedding-3-small",
     requested_model: "openai/text-embedding-3-small",
@@ -124,7 +121,7 @@ test("embeddings logs direct, bare-combo, and canonical-combo request identity",
   response = await createEmbeddingResponse({ model: "memory-embeddings", input: "bare" });
   assert.equal(response.status, 200);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/embeddings"), {
+  assert.deepEqual(await latestAttribution("/v1/embeddings"), {
     status: 200,
     model: "openai/text-embedding-3-small",
     requested_model: "memory-embeddings",
@@ -137,7 +134,7 @@ test("embeddings logs direct, bare-combo, and canonical-combo request identity",
   });
   assert.equal(response.status, 200);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/embeddings"), {
+  assert.deepEqual(await latestAttribution("/v1/embeddings"), {
     status: 200,
     model: "openai/text-embedding-3-small",
     requested_model: "combo/memory-embeddings",
@@ -147,7 +144,7 @@ test("embeddings logs direct, bare-combo, and canonical-combo request identity",
   response = await createEmbeddingResponse({ model: "memory-embeddings", input: "fail" });
   assert.equal(response.status, 503);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/embeddings"), {
+  assert.deepEqual(await latestAttribution("/v1/embeddings"), {
     status: 503,
     model: "openai/text-embedding-3-small",
     requested_model: "memory-embeddings",
@@ -163,7 +160,7 @@ test("rerank logs direct and bare-combo request identity on success and failure"
   });
   assert.equal(response.status, 200);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/rerank"), {
+  assert.deepEqual(await latestAttribution("/v1/rerank"), {
     status: 200,
     model: "cohere/rerank-v3.5",
     requested_model: "cohere/rerank-v3.5",
@@ -177,7 +174,7 @@ test("rerank logs direct and bare-combo request identity on success and failure"
   });
   assert.equal(response.status, 200);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/rerank"), {
+  assert.deepEqual(await latestAttribution("/v1/rerank"), {
     status: 200,
     model: "cohere/rerank-v3.5",
     requested_model: "memory-rerank",
@@ -191,7 +188,7 @@ test("rerank logs direct and bare-combo request identity on success and failure"
   });
   assert.equal(response.status, 503);
   await flushLogs();
-  assert.deepEqual(latestAttribution("/v1/rerank"), {
+  assert.deepEqual(await latestAttribution("/v1/rerank"), {
     status: 503,
     model: "cohere/rerank-v3.5",
     requested_model: "memory-rerank",

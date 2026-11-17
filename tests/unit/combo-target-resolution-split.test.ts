@@ -17,7 +17,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-tar
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { saveModelsDevCapabilities, clearModelsDevCapabilities } =
   await import("../../src/lib/modelsDevSync.ts");
 const { resolveComboTargetPipeline } =
@@ -25,8 +25,8 @@ const { resolveComboTargetPipeline } =
 const { clearAllStickyBindings, recordStickyBinding } =
   await import("../../open-sse/services/combo/sessionStickiness.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {
@@ -35,8 +35,8 @@ test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => {
-  clearModelsDevCapabilities();
+test.beforeEach(async () => {
+  await clearModelsDevCapabilities();
   clearAllStickyBindings();
 });
 
@@ -148,7 +148,7 @@ test("an empty combo yields an empty target pool (combo.ts turns it into a 404)"
 });
 
 test("request exceeding every approximate context hint keeps the target pool", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "unit-target-resolution": {
       tiny: capabilityEntry(8_000),
       small: capabilityEntry(16_000),
@@ -182,7 +182,7 @@ test("request exceeding every approximate context hint keeps the target pool", a
 // early response instead of letting an empty orderedTargets[] fall through to the
 // attempt loop.
 test("maxContextWindow rejecting every target returns a 404 context_requirements_exhausted earlyResponse", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "unit-target-resolution-max": {
       big1: capabilityEntry(500_000),
       big2: capabilityEntry(1_000_000),

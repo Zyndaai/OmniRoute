@@ -46,6 +46,7 @@ test("ServerSupervisor surfaces a fatal [STARTUP] Fatal: boot diagnostic to the 
     env: { ...process.env },
     maxRestarts: 2,
     memoryLimit: 256,
+    onCrashCallback: () => {},
   });
 
   try {

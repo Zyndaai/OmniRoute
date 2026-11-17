@@ -21,10 +21,10 @@ function setup() {
   process.env.DATA_DIR = tempDir;
 }
 
-function teardown() {
+async function teardown() {
   try {
-    const { resetDbInstance } = require("../../src/lib/db/core.ts");
-    resetDbInstance();
+    const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+    await resetDbInstance();
   } catch {
     // ignore if import fails
   }
@@ -40,23 +40,13 @@ function teardown() {
   }
 }
 
-function countRows(db: unknown, table: string): number {
-  const row = (db as { prepare: (sql: string) => { get: () => unknown } })
-    .prepare(`SELECT COUNT(*) as c FROM ${table}`)
-    .get() as { c: number };
-  return row.c;
+async function countRows(table: string): Promise<number> {
+  const { getTestBackend } = await import("../helpers/postgres.ts");
+  const row = await getTestBackend().queryOne<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM ${table}`
+  );
+  return Number(row?.c ?? 0);
 }
-
-test.after(() => {
-  // Belt-and-suspenders: guarantee the DB handle from the last test that ran
-  // (if teardown() somehow wasn't reached) is closed so node:test can exit.
-  try {
-    const { resetDbInstance } = require("../../src/lib/db/core.ts");
-    resetDbInstance();
-  } catch {
-    // ignore
-  }
-});
 
 test("purge usage API exposes every conversation reset counter", () => {
   const routeSource = fs.readFileSync(
@@ -76,21 +66,18 @@ test("purge usage API exposes every conversation reset counter", () => {
   );
 });
 
-test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hourly_usage_summary; a period only deletes rows older than the cutoff; an invalid period throws", async () => {
+test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary and the call/proxy/compression logs; a period only deletes rows older than the cutoff; an invalid period throws", async () => {
   setup();
   try {
-    const { getDbInstance } = await import("../../src/lib/db/core.ts");
+    const { getTestBackend } = await import("../helpers/postgres.ts");
     const { resetUsageHistory } = await import("../../src/lib/db/cleanup.ts");
-
-    const db = getDbInstance();
+    const b = getTestBackend();
 
     const now = Date.now();
     const oldIso = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago
     const recentIso = new Date(now - 60 * 60 * 1000).toISOString(); // 1 hour ago
     const oldDate = oldIso.slice(0, 10);
     const recentDate = recentIso.slice(0, 10);
-    const oldDateHour = `${oldIso.slice(0, 10)} ${oldIso.slice(11, 13)}:00:00`;
-    const recentDateHour = `${recentIso.slice(0, 10)} ${recentIso.slice(11, 13)}:00:00`;
     const oldArtifactRelpath = "2026-01-01/old-call.json";
     const recentArtifactRelpath = "2026-01-01/recent-call.json";
     const oldArtifactPath = path.join(tempDir, "call_logs", oldArtifactRelpath);
@@ -100,122 +87,97 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
     fs.writeFileSync(oldArtifactPath, "{}");
     fs.writeFileSync(recentArtifactPath, "{}");
 
-    function seed() {
-      db.prepare(
-        "INSERT INTO provider_nodes (id, type, name, prefix, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(
-        "openai-compatible-chat-test",
-        "chat",
-        "Custom Test",
-        "custom-test",
-        recentIso,
-        recentIso
+    async function seed() {
+      await b.execute(
+        "INSERT INTO provider_nodes (id, type, name, prefix, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        [
+          "openai-compatible-chat-test",
+          "openai-compatible",
+          "Custom Test",
+          "custom-test",
+          recentIso,
+          recentIso,
+        ]
       );
-      db.prepare("INSERT INTO api_keys (id, name, key, created_at) VALUES (?, ?, ?, ?)").run(
-        "key-test",
-        "Test Key",
-        "sk-test",
-        recentIso
+      await b.execute(
+        "INSERT INTO api_keys (id, name, key, key_hash, created_at) VALUES ($1, $2, $3, $4, $5)",
+        ["key-test", "Test Key", "sk-test", "a".repeat(64), recentIso]
       );
-      db.prepare(
-        "INSERT INTO combos (id, name, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
-      ).run("combo-test", "Test Combo", "{}", recentIso, recentIso);
-
-      db.prepare(
+      await b.execute(
+        "INSERT INTO combos (id, name, data, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)",
+        ["combo-test", "Test Combo", "{}", recentIso, recentIso]
+      );
+      await b.execute(
         `INSERT INTO agentic_conversations
-           (id, api_key_id, fingerprint_hash, last_message_count, last_messages_hash, turn_count, first_seen_at, last_seen_at)
-         VALUES ('conversation-test', 'key-test', 'fp', 0, '', 1, ?, ?)`
-      ).run(recentIso, recentIso);
-      db.prepare(
+           (id, api_key_id, fingerprint_hash, turn_count, first_seen_at, last_seen_at)
+         VALUES ('conversation-test', 'key-test', 'fp', 1, $1, $2)`,
+        [recentIso, recentIso]
+      );
+      await b.execute(
         `INSERT INTO conversation_turn_nodes
            (id, conversation_id, parent_id, role, content_hash, last_correlation_id, first_seen_at, last_seen_at)
-         VALUES ('turn-test', 'conversation-test', NULL, 'user', 'hash', 'recent-call', ?, ?)`
-      ).run(recentIso, recentIso);
-
-      db.prepare("INSERT INTO usage_history (provider, model, timestamp) VALUES (?, ?, ?)").run(
-        "openai",
-        "gpt-test",
-        oldIso
-      );
-      db.prepare("INSERT INTO usage_history (provider, model, timestamp) VALUES (?, ?, ?)").run(
-        "openai",
-        "gpt-test",
-        recentIso
+         VALUES ('turn-test', 'conversation-test', NULL, 'user', 'hash', 'recent-call', $1, $2)`,
+        [recentIso, recentIso]
       );
 
-      db.prepare("INSERT INTO call_logs (id, timestamp, artifact_relpath) VALUES (?, ?, ?)").run(
-        "old-call",
+      await b.execute(
+        'INSERT INTO usage_history (provider, model, "timestamp") VALUES ($1, $2, $3)',
+        ["openai", "gpt-test", oldIso]
+      );
+      await b.execute(
+        'INSERT INTO usage_history (provider, model, "timestamp") VALUES ($1, $2, $3)',
+        ["openai", "gpt-test", recentIso]
+      );
+
+      await b.execute(
+        'INSERT INTO call_logs (id, "timestamp", artifact_relpath) VALUES ($1, $2, $3)',
+        ["old-call", oldIso, oldArtifactRelpath]
+      );
+      await b.execute(
+        'INSERT INTO call_logs (id, "timestamp", artifact_relpath) VALUES ($1, $2, $3)',
+        ["recent-call", recentIso, recentArtifactRelpath]
+      );
+      await b.execute('INSERT INTO proxy_logs (id, "timestamp") VALUES ($1, $2)', [
+        "old-proxy",
         oldIso,
-        oldArtifactRelpath
-      );
-      db.prepare("INSERT INTO call_logs (id, timestamp, artifact_relpath) VALUES (?, ?, ?)").run(
-        "recent-call",
-        recentIso,
-        recentArtifactRelpath
-      );
-      db.prepare("INSERT INTO request_detail_logs (id, timestamp) VALUES (?, ?)").run(
-        "old-detail",
-        oldIso
-      );
-      db.prepare("INSERT INTO request_detail_logs (id, timestamp) VALUES (?, ?)").run(
-        "recent-detail",
-        recentIso
-      );
-      db.prepare("INSERT INTO proxy_logs (id, timestamp) VALUES (?, ?)").run("old-proxy", oldIso);
-      db.prepare("INSERT INTO proxy_logs (id, timestamp) VALUES (?, ?)").run(
+      ]);
+      await b.execute('INSERT INTO proxy_logs (id, "timestamp") VALUES ($1, $2)', [
         "recent-proxy",
-        recentIso
+        recentIso,
+      ]);
+      await b.execute(
+        'INSERT INTO compression_analytics ("timestamp", mode, original_tokens, compressed_tokens, tokens_saved) VALUES ($1, $2, $3, $4, $5)',
+        [oldIso, "lite", 100, 50, 50]
       );
-      db.prepare(
-        "INSERT INTO compression_analytics (timestamp, mode, original_tokens, compressed_tokens, tokens_saved) VALUES (?, ?, ?, ?, ?)"
-      ).run(oldIso, "lite", 100, 50, 50);
-      db.prepare(
-        "INSERT INTO compression_analytics (timestamp, mode, original_tokens, compressed_tokens, tokens_saved) VALUES (?, ?, ?, ?, ?)"
-      ).run(recentIso, "lite", 100, 50, 50);
-
-      db.prepare("INSERT INTO daily_usage_summary (provider, model, date) VALUES (?, ?, ?)").run(
-        "openai",
-        "gpt-test",
-        oldDate
-      );
-      db.prepare("INSERT INTO daily_usage_summary (provider, model, date) VALUES (?, ?, ?)").run(
-        "openai",
-        "gpt-test",
-        recentDate
+      await b.execute(
+        'INSERT INTO compression_analytics ("timestamp", mode, original_tokens, compressed_tokens, tokens_saved) VALUES ($1, $2, $3, $4, $5)',
+        [recentIso, "lite", 100, 50, 50]
       );
 
-      db.prepare(
-        "INSERT INTO hourly_usage_summary (provider, model, date_hour) VALUES (?, ?, ?)"
-      ).run("openai", "gpt-test", oldDateHour);
-      db.prepare(
-        "INSERT INTO hourly_usage_summary (provider, model, date_hour) VALUES (?, ?, ?)"
-      ).run("openai", "gpt-test", recentDateHour);
+      await b.execute(
+        "INSERT INTO daily_usage_summary (provider, model, date) VALUES ($1, $2, $3)",
+        ["openai", "gpt-test", oldDate]
+      );
+      await b.execute(
+        "INSERT INTO daily_usage_summary (provider, model, date) VALUES ($1, $2, $3)",
+        ["openai", "gpt-test", recentDate]
+      );
     }
 
-    seed();
+    await seed();
 
-    assert.equal(countRows(db, "usage_history"), 2, "sanity: 2 usage_history rows seeded");
-    assert.equal(countRows(db, "call_logs"), 2, "sanity: 2 call_logs rows seeded");
+    assert.equal(await countRows("usage_history"), 2, "sanity: 2 usage_history rows seeded");
+    assert.equal(await countRows("call_logs"), 2, "sanity: 2 call_logs rows seeded");
+    assert.equal(await countRows("proxy_logs"), 2, "sanity: 2 proxy_logs rows seeded");
     assert.equal(
-      countRows(db, "request_detail_logs"),
-      2,
-      "sanity: 2 request_detail_logs rows seeded"
-    );
-    assert.equal(countRows(db, "proxy_logs"), 2, "sanity: 2 proxy_logs rows seeded");
-    assert.equal(
-      countRows(db, "compression_analytics"),
+      await countRows("compression_analytics"),
       2,
       "sanity: 2 compression_analytics rows seeded"
     );
     assert.equal(
-      countRows(db, "daily_usage_summary"),
+      await countRows("daily_usage_summary"),
       2,
       "sanity: 2 daily_usage_summary rows seeded"
-    );
-    assert.equal(
-      countRows(db, "hourly_usage_summary"),
-      2,
-      "sanity: 2 hourly_usage_summary rows seeded"
     );
 
     // 1) A period ("1d") deletes only the row older than the cutoff, keeps the recent one.
@@ -228,11 +190,6 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       "should delete only the old usage_history row"
     );
     assert.equal(periodResult.deletedCallLogs, 1, "should delete only the old call_logs row");
-    assert.equal(
-      periodResult.deletedRequestDetailLogs,
-      1,
-      "should delete only the old request_detail_logs row"
-    );
     assert.equal(periodResult.deletedProxyLogs, 1, "should delete only the old proxy_logs row");
     assert.equal(
       periodResult.deletedCompressionAnalytics,
@@ -244,12 +201,7 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       1,
       "should delete only the old daily_usage_summary row"
     );
-    assert.equal(
-      periodResult.deletedHourlySummary,
-      1,
-      "should delete only the old hourly_usage_summary row"
-    );
-    assert.equal(periodResult.deleted, 7, "total deleted should sum the reset tables");
+    assert.equal(periodResult.deleted, 5, "total deleted should sum the reset tables");
     assert.equal(
       periodResult.deletedCallLogArtifacts,
       1,
@@ -266,50 +218,40 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       "period reset should preserve recent call artifact"
     );
 
-    assert.equal(countRows(db, "provider_nodes"), 1, "provider config should survive reset");
-    assert.equal(countRows(db, "api_keys"), 1, "API keys should survive reset");
-    assert.equal(countRows(db, "combos"), 1, "combos should survive reset");
+    assert.equal(await countRows("provider_nodes"), 1, "provider config should survive reset");
+    assert.equal(await countRows("api_keys"), 1, "API keys should survive reset");
+    assert.equal(await countRows("combos"), 1, "combos should survive reset");
     assert.equal(
-      countRows(db, "conversation_turn_nodes"),
+      await countRows("conversation_turn_nodes"),
       1,
       "a timed reset should preserve conversation identity nodes"
     );
     assert.equal(
-      countRows(db, "agentic_conversations"),
+      await countRows("agentic_conversations"),
       1,
       "a timed reset should preserve conversation roots"
     );
 
-    assert.equal(countRows(db, "usage_history"), 1, "recent usage_history row should survive");
-    assert.equal(countRows(db, "call_logs"), 1, "recent call_logs row should survive");
+    assert.equal(await countRows("usage_history"), 1, "recent usage_history row should survive");
+    assert.equal(await countRows("call_logs"), 1, "recent call_logs row should survive");
+    assert.equal(await countRows("proxy_logs"), 1, "recent proxy_logs row should survive");
     assert.equal(
-      countRows(db, "request_detail_logs"),
-      1,
-      "recent request_detail_logs row should survive"
-    );
-    assert.equal(countRows(db, "proxy_logs"), 1, "recent proxy_logs row should survive");
-    assert.equal(
-      countRows(db, "compression_analytics"),
+      await countRows("compression_analytics"),
       1,
       "recent compression_analytics row should survive"
     );
     assert.equal(
-      countRows(db, "daily_usage_summary"),
+      await countRows("daily_usage_summary"),
       1,
       "recent daily_usage_summary row should survive"
     );
-    assert.equal(
-      countRows(db, "hourly_usage_summary"),
-      1,
-      "recent hourly_usage_summary row should survive"
-    );
 
-    const survivingTimestamp = db.prepare("SELECT timestamp FROM usage_history").get() as {
-      timestamp: string;
-    };
+    const survivingUsage = await b.queryOne<{ timestamp: string }>(
+      'SELECT "timestamp" FROM usage_history'
+    );
     assert.equal(
-      survivingTimestamp.timestamp,
-      recentIso,
+      Date.parse(survivingUsage?.timestamp ?? ""),
+      Date.parse(recentIso),
       "the surviving usage_history row should be the recent one"
     );
 
@@ -323,11 +265,6 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       "'all' should delete the remaining usage_history row"
     );
     assert.equal(allResult.deletedCallLogs, 1, "'all' should delete the remaining call_logs row");
-    assert.equal(
-      allResult.deletedRequestDetailLogs,
-      1,
-      "'all' should delete the remaining request_detail_logs row"
-    );
     assert.equal(allResult.deletedProxyLogs, 1, "'all' should delete the remaining proxy_logs row");
     assert.equal(
       allResult.deletedCompressionAnalytics,
@@ -338,11 +275,6 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       allResult.deletedDailySummary,
       1,
       "'all' should delete the remaining daily_usage_summary row"
-    );
-    assert.equal(
-      allResult.deletedHourlySummary,
-      1,
-      "'all' should delete the remaining hourly_usage_summary row"
     );
     assert.equal(
       allResult.deletedCallLogArtifacts,
@@ -365,34 +297,28 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       "'all' should delete recent call artifact"
     );
 
-    assert.equal(countRows(db, "usage_history"), 0, "'all' should empty usage_history");
-    assert.equal(countRows(db, "call_logs"), 0, "'all' should empty call_logs");
-    assert.equal(countRows(db, "request_detail_logs"), 0, "'all' should empty request_detail_logs");
-    assert.equal(countRows(db, "proxy_logs"), 0, "'all' should empty proxy_logs");
+    assert.equal(await countRows("usage_history"), 0, "'all' should empty usage_history");
+    assert.equal(await countRows("call_logs"), 0, "'all' should empty call_logs");
+    assert.equal(await countRows("proxy_logs"), 0, "'all' should empty proxy_logs");
     assert.equal(
-      countRows(db, "compression_analytics"),
+      await countRows("compression_analytics"),
       0,
       "'all' should empty compression_analytics"
     );
-    assert.equal(countRows(db, "daily_usage_summary"), 0, "'all' should empty daily_usage_summary");
+    assert.equal(await countRows("daily_usage_summary"), 0, "'all' should empty daily_usage_summary");
     assert.equal(
-      countRows(db, "hourly_usage_summary"),
-      0,
-      "'all' should empty hourly_usage_summary"
-    );
-    assert.equal(
-      countRows(db, "conversation_turn_nodes"),
+      await countRows("conversation_turn_nodes"),
       0,
       "'all' should empty conversation_turn_nodes"
     );
     assert.equal(
-      countRows(db, "agentic_conversations"),
+      await countRows("agentic_conversations"),
       0,
       "'all' should empty agentic_conversations"
     );
-    assert.equal(countRows(db, "provider_nodes"), 1, "provider config should still survive 'all'");
-    assert.equal(countRows(db, "api_keys"), 1, "API keys should still survive 'all'");
-    assert.equal(countRows(db, "combos"), 1, "combos should still survive 'all'");
+    assert.equal(await countRows("provider_nodes"), 1, "provider config should still survive 'all'");
+    assert.equal(await countRows("api_keys"), 1, "API keys should still survive 'all'");
+    assert.equal(await countRows("combos"), 1, "combos should still survive 'all'");
 
     // 3) An invalid period throws instead of silently doing nothing / deleting everything.
     await assert.rejects(
@@ -401,6 +327,6 @@ test("resetUsageHistory: 'all' wipes usage_history, daily_usage_summary, and hou
       "an invalid period should throw"
     );
   } finally {
-    teardown();
+    await teardown();
   }
 });

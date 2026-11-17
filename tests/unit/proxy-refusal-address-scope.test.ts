@@ -14,32 +14,32 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-refusal-a
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const rotation = await import("../../src/lib/db/proxies/rotation.ts");
 const memory = await import("../../open-sse/utils/proxyRefusalMemory.ts");
 const outcome = await import("../../src/sse/handlers/proxyOutcomeMemory.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
-function resetStorage() {
+async function resetStorage() {
   memory.__resetProxyRefusalMemoryForTesting();
   process.env.PROXY_SKIP_RECENTLY_FAILED = "true";
-  proxyLogger.clearProxyLogs();
+  await proxyLogger.clearProxyLogs();
   rotation.__resetHotEgressCacheForTesting();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_SKIP_RECENTLY_FAILED;
   memory.__resetProxyRefusalMemoryForTesting();
   rotation.__resetHotEgressCacheForTesting();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -67,8 +67,8 @@ function logEgress(row: { type: string; host: string; port: number }, egressIp: 
   });
 }
 
-function flush() {
-  proxyLogger.flushProxyLogsSync();
+async function flush() {
+  await proxyLogger.flushProxyLogsSync();
 }
 
 async function pick(scope = "provider", scopeId: string | null = "opencode-go") {
@@ -81,7 +81,7 @@ test("a refusal on one address sets aside another member sharing it for the same
   logEgress(a, "203.0.113.7");
   logEgress(b, "203.0.113.7");
   logEgress(c, "203.0.113.44");
-  flush();
+  await flush();
   assert.equal(await pick(), a.host);
   // After the refusal, the entry itself is avoided and the member sharing its
   // address is skipped too (not just ranked last): the healthy member serves.
@@ -97,7 +97,7 @@ test("a member on another address stays eligible", async () => {
   const [a, b] = await dbTrio();
   logEgress(a, "203.0.113.7");
   logEgress(b, "203.0.113.44");
-  flush();
+  await flush();
   memory.noteProxyRefusal(memory.proxyEgressKey(a), "ip_quota_429");
   assert.equal(await pick(), b.host);
 });
@@ -116,7 +116,7 @@ test("an invalid observed address never sets anyone aside", async () => {
   const [a, b] = await dbTrio();
   logEgress(a, "203.0.113.7");
   logEgress(b, "not-an-ip");
-  flush();
+  await flush();
   memory.noteProxyRefusal(memory.proxyEgressKey(a), "ip_quota_429");
   assert.equal(await pick(), b.host);
 });
@@ -126,7 +126,7 @@ test("a held sticky member sharing the refused address advances to the next elig
   logEgress(a, "203.0.113.7");
   logEgress(b, "203.0.113.7");
   logEgress(c, "203.0.113.44");
-  flush();
+  await flush();
   await proxiesDb.setScopeRotationStrategy("provider", "opencode-go", "sticky", {
     stickyWindowMinutes: 30,
   });
@@ -144,7 +144,7 @@ test("without a provider the shared address keeps the plain hot-egress order", a
   logEgress(a, "203.0.113.7");
   logEgress(b, "203.0.113.7");
   logEgress(c, "203.0.113.44");
-  flush();
+  await flush();
   assert.equal(await pick("global", null), a.host);
   // The provider-scoped expansion never applies to multi-provider pools:
   // the shared address still ranks through the plain hot-egress order, so the
@@ -174,7 +174,7 @@ test("a refusal born on one bucketed scope stays eligible on another scope shari
   logEgress(shared, "203.0.113.7");
   logEgress(spareA, "203.0.113.44");
   logEgress(spareB, "203.0.113.99");
-  flush();
+  await flush();
   outcome.noteProxyOutcome("opencode-go", {
     proxy: { type: "http", host: shared.host, port: shared.port },
     upstreamStatus: 429,

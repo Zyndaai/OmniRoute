@@ -92,8 +92,8 @@ describe("isModelSelectable / getModelLifecycleDecision consult the snapshot (#1
 });
 
 describe("taskFitness layers 1–2 skip retired ids (#11625)", () => {
-  before(() => {
-    upsertModelIntelligence({
+  before(async () => {
+    await upsertModelIntelligence({
       model: "gpt-5.2-codex",
       source: "arena_elo",
       category: "coding",
@@ -102,7 +102,7 @@ describe("taskFitness layers 1–2 skip retired ids (#11625)", () => {
       confidence: "high",
       expiresAt: "2099-12-31T23:59:59Z",
     });
-    upsertModelIntelligence({
+    await upsertModelIntelligence({
       model: "openai/gpt-5.2-codex",
       source: "arena_elo",
       category: "coding",
@@ -111,7 +111,7 @@ describe("taskFitness layers 1–2 skip retired ids (#11625)", () => {
       confidence: "high",
       expiresAt: "2099-12-31T23:59:59Z",
     });
-    upsertModelIntelligence({
+    await upsertModelIntelligence({
       model: "claude-3-7-sonnet-20250219",
       source: "arena_elo",
       category: "coding",
@@ -120,7 +120,7 @@ describe("taskFitness layers 1–2 skip retired ids (#11625)", () => {
       confidence: "high",
       expiresAt: "2099-12-31T23:59:59Z",
     });
-    upsertModelIntelligence({
+    await upsertModelIntelligence({
       model: "gpt-5.6-sol",
       source: "arena_elo",
       category: "coding",
@@ -132,38 +132,38 @@ describe("taskFitness layers 1–2 skip retired ids (#11625)", () => {
     invalidateFitnessCache();
   });
 
-  after(() => {
-    resetDbInstance();
+  after(async () => {
+    await resetDbInstance();
     invalidateFitnessCache();
   });
 
-  it("does not return a seeded arena_elo row for a retired bare id", () => {
-    const result = getTaskFitnessWithSource("gpt-5.2-codex", "coding");
+  it("does not return a seeded arena_elo row for a retired bare id", async () => {
+    const result = await getTaskFitnessWithSource("gpt-5.2-codex", "coding");
     assert.notEqual(result.source, "arena_elo");
     assert.notEqual(result.score, 0.96);
   });
 
-  it("does not return a seeded arena_elo row for the vendor-prefixed catalog form", () => {
-    const result = getTaskFitnessWithSource("openai/gpt-5.2-codex", "coding");
+  it("does not return a seeded arena_elo row for the vendor-prefixed catalog form", async () => {
+    const result = await getTaskFitnessWithSource("openai/gpt-5.2-codex", "coding");
     assert.notEqual(result.source, "arena_elo");
     assert.notEqual(result.score, 0.96);
   });
 
-  it("does not inherit a retired base's arena row onto an effort variant", () => {
-    const result = getTaskFitnessWithSource("claude-3-7-sonnet-20250219-high", "coding");
+  it("does not inherit a retired base's arena row onto an effort variant", async () => {
+    const result = await getTaskFitnessWithSource("claude-3-7-sonnet-20250219-high", "coding");
     assert.notEqual(result.source, "arena_elo");
     assert.notEqual(result.source, "arena_elo:inherited");
     assert.notEqual(result.score, 0.94);
   });
 
-  it("does not let a retired *codex id keep the coding wildcard boost", () => {
-    const result = getTaskFitnessWithSource("openai/gpt-5.2-codex", "coding");
+  it("does not let a retired *codex id keep the coding wildcard boost", async () => {
+    const result = await getTaskFitnessWithSource("openai/gpt-5.2-codex", "coding");
     assert.equal(result.score, 0.5);
     assert.equal(result.source, "wildcard_boost");
   });
 
-  it("leaves a live flagship's arena row intact", () => {
-    const result = getTaskFitnessWithSource("gpt-5.6-sol", "coding");
+  it("leaves a live flagship's arena row intact", async () => {
+    const result = await getTaskFitnessWithSource("gpt-5.6-sol", "coding");
     assert.equal(result.score, 0.91);
     assert.equal(result.source, "arena_elo");
   });

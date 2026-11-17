@@ -30,19 +30,19 @@ const { getProviderCredentials } = await import("../../src/sse/services/auth.ts"
 const { createProviderConnection, updateProviderConnection, deleteProviderConnectionsByProvider } =
   await import("../../src/lib/db/providers.ts");
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
+const { deleteConfigValue } = await import("../../src/lib/db/configEntries.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 /** Set the opt-out list; pass null to remove the key entirely (absent setting). */
 async function setNoAuthFallbackDisabledProviders(providers: string[] | null): Promise<void> {
   if (providers === null) {
-    const db = core.getDbInstance();
-    db.prepare(
-      "DELETE FROM key_value WHERE namespace = 'settings' AND key = 'noAuthFallbackDisabledProviders'"
-    ).run();
+    await deleteConfigValue("settings", "noAuthFallbackDisabledProviders");
+    invalidateDbCache();
     return;
   }
   await updateSettings({ noAuthFallbackDisabledProviders: providers });

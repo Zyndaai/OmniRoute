@@ -16,12 +16,23 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const learnedCaps = await import("../../open-sse/services/learnedReasoningEffortCaps.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const PROVIDER = "grok-cli";
 const CONNECTION = "conn-grok-1";
 
+// A synced catalog row has a foreign key to its provider connection, so the
+// connection must exist before models can be stored for it.
+async function ensureConnection(provider: string, connectionId: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider, auth_type, is_active) VALUES ($1, $2, 'apikey', true) ON CONFLICT (id) DO NOTHING",
+    [connectionId, provider]
+  );
+}
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -51,14 +62,15 @@ async function createRestrictedKey(extra: Record<string, unknown> = {}) {
 test.beforeEach(async () => {
   await resetStorage();
   learnedCaps.__test_resetLearnedReasoningEffortCaps();
+  await ensureConnection(PROVIDER, CONNECTION);
   await modelsDb.replaceSyncedAvailableModelsForConnection(PROVIDER, CONNECTION, [
     { id: "grok-4.6", name: "Grok 4.6", supportedThinkingEfforts: ["low", "medium", "high"] },
     { id: "grok-4.5", name: "Grok 4.5" },
   ]);
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   learnedCaps.__test_resetLearnedReasoningEffortCaps();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -110,6 +122,7 @@ test("a literal synced id wins over the variant rule, including its own hidden f
 });
 
 test("providers that own their suffix mechanism are not resolved as synced variants", async () => {
+  await ensureConnection("glm", "conn-glm-1");
   await modelsDb.replaceSyncedAvailableModelsForConnection("glm", "conn-glm-1", [
     { id: "glm-x", name: "GLM X", supportedThinkingEfforts: ["low"] },
   ]);
@@ -118,6 +131,7 @@ test("providers that own their suffix mechanism are not resolved as synced varia
 });
 
 test("codex resolves a declared discovered tier as a synced variant (#13224)", async () => {
+  await ensureConnection("codex", "conn-codex-1");
   await modelsDb.replaceSyncedAvailableModelsForConnection("codex", "conn-codex-1", [
     { id: "gpt-x", name: "GPT X", supportedThinkingEfforts: ["low"] },
   ]);

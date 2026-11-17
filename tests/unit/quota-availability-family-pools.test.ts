@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getTestBackend } from "../helpers/postgres.ts";
 import {
   createProviderConnection,
   deleteProviderConnection,
@@ -34,6 +35,21 @@ import {
   buildConnectionQuotaAvailability,
   evaluateCachedQuotaAvailability,
 } from "../../src/lib/usage/availability.ts";
+
+// setQuotaCache persists snapshot rows fire-and-forget; wait until the rows are on disk before
+// the summary route reads them (the test drops the in-memory entry first).
+async function waitForSnapshotRows(connectionId: string, expected: number) {
+  const backend = getTestBackend();
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const row = await backend.queryOne<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM quota_snapshots WHERE connection_id = $1",
+      [connectionId]
+    );
+    if ((row?.n ?? 0) >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`quota snapshots for ${connectionId} were never persisted`);
+}
 
 for (const provider of ["antigravity", "agy"]) {
   for (const source of ["model cache", "snapshot"]) {
@@ -74,7 +90,8 @@ for (const provider of ["antigravity", "agy"]) {
               gemini_session: { remainingPercentage: 80, resetAt: geminiUntil },
               claude_gpt_session: { remainingPercentage: 80, resetAt: claudeUntil },
             });
-          else setProviderLimitsCache(id, toProviderLimitsCacheEntry(usage, "synthetic"));
+          else await setProviderLimitsCache(id, toProviderLimitsCacheEntry(usage, "synthetic"));
+          if (source === "snapshot") await waitForSnapshotRows(id, 2);
           getQuotaCacheState().cache.delete(id);
           clearAllModelLockouts();
           const response = await GET();
@@ -140,7 +157,7 @@ for (const provider of ["antigravity", "agy"]) {
         } finally {
           clearAllModelLockouts();
           getQuotaCacheState().cache.delete(id);
-          deleteProviderLimitsCache(id);
+          await deleteProviderLimitsCache(id);
           await deleteProviderConnection(id);
         }
       });
@@ -161,7 +178,7 @@ for (const provider of ["antigravity", "agy"]) {
     });
     const id = String(created.id);
     try {
-      setProviderLimitsCache(
+      await setProviderLimitsCache(
         id,
         toProviderLimitsCacheEntry(
           {
@@ -189,7 +206,7 @@ for (const provider of ["antigravity", "agy"]) {
     } finally {
       clearAllModelLockouts();
       getQuotaCacheState().cache.delete(id);
-      deleteProviderLimitsCache(id);
+      await deleteProviderLimitsCache(id);
       await deleteProviderConnection(id);
     }
   });
@@ -230,7 +247,7 @@ for (const provider of ["antigravity", "agy"]) {
       {},
       { session: { remainingPercentage: 0 }, weekly: { remainingPercentage: 0 } },
     ]) {
-      test(`${provider} ${quotaGroups ? "empty" : "missing"} groups with ${Object.keys(quotas).length ? "generic windows" : "no windows"} retain account routing`, () => {
+      test(`${provider} ${quotaGroups ? "empty" : "missing"} groups with ${Object.keys(quotas).length ? "generic windows" : "no windows"} retain account routing`, async () => {
         const usage = { quotaGroups, quotas, fetchedAt: new Date().toISOString() };
         const connection = { id: `synthetic-generic-${provider}`, provider, isActive: true };
         const scopes = availabilityScopes(provider, usage);
@@ -238,14 +255,14 @@ for (const provider of ["antigravity", "agy"]) {
           scopes.filter((scope) => scope.kind === "group"),
           []
         );
-        const verdict = buildConnectionQuotaAvailability(connection, usage, {
+        const verdict = await buildConnectionQuotaAvailability(connection, usage, {
           enabled: false,
           defaultThresholdPercent: 2,
           providerWindowDefaults: {},
         });
         assert.deepEqual(
           verdict.account,
-          evaluateCachedQuotaAvailability(
+          await evaluateCachedQuotaAvailability(
             connection,
             usage,
             { enabled: false, defaultThresholdPercent: 2, providerWindowDefaults: {} },
@@ -294,7 +311,7 @@ for (const provider of ["antigravity", "agy"]) {
   }
 
   for (const both of [false, true]) {
-    test(`${provider} generic windows with saved ${both ? "both families" : "one family"} use peer-pool decisions`, () => {
+    test(`${provider} generic windows with saved ${both ? "both families" : "one family"} use peer-pool decisions`, async () => {
       const now = Date.now();
       const until = new Date(now + 600_000).toISOString();
       const connection = {
@@ -309,7 +326,7 @@ for (const provider of ["antigravity", "agy"]) {
         fetchedAt: new Date(now).toISOString(),
         quotas: { session: { remainingPercentage: 80 } },
       };
-      const verdict = buildConnectionQuotaAvailability(connection, usage, {
+      const verdict = await buildConnectionQuotaAvailability(connection, usage, {
         enabled: false,
         defaultThresholdPercent: 2,
         providerWindowDefaults: {},

@@ -33,8 +33,8 @@ test("kimi-k3.1-pro routes to the OpenCode Go chat-completions URL", () => {
   assert.equal(executor.buildUrl(MODEL, true), "https://opencode.ai/zen/go/v1/chat/completions");
 });
 
-test("capability resolver reports the 1M window and 131072 output cap", () => {
-  const caps = getResolvedModelCapabilities(
+test("capability resolver reports the 1M window and 131072 output cap", async () => {
+  const caps = await getResolvedModelCapabilities(
     { provider: "opencode-go", model: MODEL },
     { persistedOverrides: false }
   );

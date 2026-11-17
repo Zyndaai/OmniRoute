@@ -29,15 +29,17 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-epsilon-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET ||= "quota-epsilon-test-secret";
 
 const providersDb = await import("../../src/lib/db/providers.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const quotaPools = await import("../../src/lib/db/quotaPools.ts");
 const { SqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
 const { enforceQuotaShare } = await import("../../src/lib/quota/enforce.ts");
 const core = await import("../../src/lib/db/core.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     try {
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -48,7 +50,9 @@ test.after(() => {
 });
 
 test("EPSILON (unconfigured) plan does not block after the first request", async () => {
-  const KEY = "key-eps";
+  // Allocations reference an API key row; create a real one and use its id.
+  const apiKeyRow = (await apiKeysDb.createApiKey("eps-key", "machine-eps")) as { id: string };
+  const KEY = apiKeyRow.id;
 
   // glm seeds tokens/5h + tokens/weekly with limit=Number.EPSILON (placeholder).
   const conn = await providersDb.createProviderConnection({
@@ -60,7 +64,7 @@ test("EPSILON (unconfigured) plan does not block after the first request", async
   const connId = (conn as Record<string, unknown>).id as string;
   assert.ok(connId, "connection should have an id");
 
-  const pool = quotaPools.createPool({
+  const pool = await quotaPools.createPool({
     connectionId: connId,
     name: "EpsilonPool",
     allocations: [{ apiKeyId: KEY, weight: 100, policy: "hard" }],

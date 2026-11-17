@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-compliance-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -11,27 +12,28 @@ process.env.CALL_LOG_RETENTION_DAYS = "5";
 
 const core = await import("../../src/lib/db/core.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("compliance audit log initialization, writes and filtered reads work end to end", () => {
+test("compliance audit log initialization, writes and filtered reads work end to end", async () => {
   compliance.initAuditLog();
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "settings.update",
     actor: "admin",
     target: "system-settings",
@@ -41,13 +43,13 @@ test("compliance audit log initialization, writes and filtered reads work end to
     requestId: "req-123",
     ipAddress: "127.0.0.1",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "apiKey.create",
     details: '"manual note"',
   });
 
-  const all = compliance.getAuditLog();
-  const filtered = compliance.getAuditLog({
+  const all = await compliance.getAuditLog();
+  const filtered = await compliance.getAuditLog({
     action: "settings.update",
     actor: "admin",
     limit: 1,
@@ -77,10 +79,10 @@ test("compliance audit log initialization, writes and filtered reads work end to
   ]);
 });
 
-test("compliance audit log supports structured filters, totals and secret redaction", () => {
+test("compliance audit log supports structured filters, totals and secret redaction", async () => {
   compliance.initAuditLog();
 
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "provider.credentials.updated",
     actor: "admin",
     target: "openai:primary",
@@ -103,7 +105,7 @@ test("compliance audit log supports structured filters, totals and secret redact
     ipAddress: "10.0.0.4",
     createdAt: "2026-04-14T10:00:00.000Z",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "provider.validation.ssrf_blocked",
     actor: "admin",
     target: "provider-node",
@@ -117,7 +119,7 @@ test("compliance audit log supports structured filters, totals and secret redact
     createdAt: "2026-04-14T11:00:00.000Z",
   });
 
-  const filtered = compliance.getAuditLog({
+  const filtered = await compliance.getAuditLog({
     resourceType: "provider_validation",
     status: "blocked",
     requestId: "req-provider-2",
@@ -125,7 +127,7 @@ test("compliance audit log supports structured filters, totals and secret redact
     to: "2026-04-14T12:00:00.000Z",
   });
 
-  assert.equal(compliance.countAuditLog({ actor: "admin" }), 2);
+  assert.equal(await compliance.countAuditLog({ actor: "admin" }), 2);
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].action, "provider.validation.ssrf_blocked");
   assert.deepEqual(filtered[0].metadata, {
@@ -133,7 +135,7 @@ test("compliance audit log supports structured filters, totals and secret redact
     baseUrl: "http://127.0.0.1:11434/v1",
   });
 
-  const updatedEntry = compliance.getAuditLog({ action: "provider.credentials.updated" })[0];
+  const updatedEntry = (await compliance.getAuditLog({ action: "provider.credentials.updated" }))[0];
   assert.deepEqual(updatedEntry.details, {
     apiKey: "[redacted]",
     nested: {
@@ -150,117 +152,101 @@ test("compliance audit log supports structured filters, totals and secret redact
   assert.deepEqual(updatedEntry.metadata, updatedEntry.details);
 });
 
-test("compliance noLog helpers cover missing ids, in-memory overrides and persisted DB values", () => {
-  const db = core.getDbInstance();
+test("compliance noLog helpers cover missing ids, in-memory overrides and persisted DB values", async () => {
   const now = new Date().toISOString();
+  const keyHash = createHash("sha256").update("sk-persisted").digest("hex");
 
-  db.prepare(
-    "INSERT INTO api_keys (id, name, key, machine_id, allowed_models, no_log, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run("persisted-no-log", "Persisted", "sk-persisted", null, "[]", 1, now);
+  await getTestBackend().execute(
+    `INSERT INTO api_keys (id, name, key, key_hash, machine_id, allowed_models, no_log, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+    ["persisted-no-log", "Persisted", "sk-persisted", keyHash, null, "[]", true, now]
+  );
 
-  assert.equal(compliance.isNoLog(""), false);
-  assert.equal(compliance.isNoLog("persisted-no-log"), true);
+  assert.equal(await compliance.isNoLog(""), false);
+  assert.equal(await compliance.isNoLog("persisted-no-log"), true);
 
   compliance.setNoLog("manual-no-log", true);
-  assert.equal(compliance.isNoLog("manual-no-log"), true);
+  assert.equal(await compliance.isNoLog("manual-no-log"), true);
 
   compliance.setNoLog("manual-no-log", false);
-  assert.equal(compliance.isNoLog("manual-no-log"), false);
+  assert.equal(await compliance.isNoLog("manual-no-log"), false);
   assert.deepEqual(compliance.getRetentionDays(), { app: 10, call: 5 });
 });
 
 test("cleanupExpiredLogs removes stale rows across all log tables and records an audit entry", async () => {
   compliance.initAuditLog();
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
   const oldCallTs = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
   const oldAppTs = new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString();
   const freshTs = new Date().toISOString();
 
-  db.prepare("INSERT INTO usage_history (provider, model, timestamp) VALUES (?, ?, ?)").run(
+  await backend.execute("INSERT INTO usage_history (provider, model, timestamp) VALUES ($1, $2, $3)", [
     "openai",
     "gpt-4o",
-    oldCallTs
-  );
-  db.prepare("INSERT INTO usage_history (provider, model, timestamp) VALUES (?, ?, ?)").run(
+    oldCallTs,
+  ]);
+  await backend.execute("INSERT INTO usage_history (provider, model, timestamp) VALUES ($1, $2, $3)", [
     "openai",
     "gpt-4o",
-    freshTs
-  );
-
-  db.prepare("INSERT INTO call_logs (id, timestamp, method, path) VALUES (?, ?, ?, ?)").run(
-    "call-old",
-    oldCallTs,
-    "POST",
-    "/v1/chat/completions"
-  );
-  db.prepare("INSERT INTO call_logs (id, timestamp, method, path) VALUES (?, ?, ?, ?)").run(
-    "call-new",
     freshTs,
-    "POST",
-    "/v1/chat/completions"
+  ]);
+
+  await backend.execute(
+    "INSERT INTO call_logs (id, timestamp, method, path) VALUES ($1, $2, $3, $4)",
+    ["call-old", oldCallTs, "POST", "/v1/chat/completions"]
+  );
+  await backend.execute(
+    "INSERT INTO call_logs (id, timestamp, method, path) VALUES ($1, $2, $3, $4)",
+    ["call-new", freshTs, "POST", "/v1/chat/completions"]
   );
 
-  db.prepare("INSERT INTO proxy_logs (id, timestamp, status, proxy_type) VALUES (?, ?, ?, ?)").run(
-    "proxy-old",
-    oldCallTs,
-    "ok",
-    "http"
+  await backend.execute(
+    "INSERT INTO proxy_logs (id, timestamp, status, proxy_type) VALUES ($1, $2, $3, $4)",
+    ["proxy-old", oldCallTs, "ok", "http"]
   );
-  db.prepare("INSERT INTO proxy_logs (id, timestamp, status, proxy_type) VALUES (?, ?, ?, ?)").run(
-    "proxy-new",
-    freshTs,
-    "ok",
-    "http"
+  await backend.execute(
+    "INSERT INTO proxy_logs (id, timestamp, status, proxy_type) VALUES ($1, $2, $3, $4)",
+    ["proxy-new", freshTs, "ok", "http"]
   );
 
-  db.prepare("INSERT INTO request_detail_logs (id, call_log_id, timestamp) VALUES (?, ?, ?)").run(
-    "rdl-old",
-    "call-old",
-    oldCallTs
-  );
-  db.prepare("INSERT INTO request_detail_logs (id, call_log_id, timestamp) VALUES (?, ?, ?)").run(
-    "rdl-new",
-    "call-new",
-    freshTs
-  );
-
-  db.prepare("INSERT INTO mcp_tool_audit (tool_name, created_at) VALUES (?, ?)").run(
+  await backend.execute("INSERT INTO mcp_tool_audit (tool_name, created_at) VALUES ($1, $2)", [
     "memory_search",
-    oldAppTs
-  );
-  db.prepare("INSERT INTO mcp_tool_audit (tool_name, created_at) VALUES (?, ?)").run(
+    oldAppTs,
+  ]);
+  await backend.execute("INSERT INTO mcp_tool_audit (tool_name, created_at) VALUES ($1, $2)", [
     "memory_add",
-    freshTs
-  );
+    freshTs,
+  ]);
 
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "admin.cleanup.seed",
     actor: "admin",
     details: { seeded: true },
   });
-  db.prepare("UPDATE audit_log SET timestamp = ? WHERE action = ?").run(
+  await backend.execute('UPDATE audit_log SET "timestamp" = $1 WHERE action = $2', [
     oldAppTs,
-    "admin.cleanup.seed"
-  );
+    "admin.cleanup.seed",
+  ]);
 
   const result = await compliance.cleanupExpiredLogs();
-  const usageCount = (db.prepare("SELECT COUNT(*) as count FROM usage_history").get() as any).count;
-  const callCount = (db.prepare("SELECT COUNT(*) as count FROM call_logs").get() as any).count;
-  const proxyCount = (db.prepare("SELECT COUNT(*) as count FROM proxy_logs").get() as any).count;
-  const requestDetailCount = (
-    db.prepare("SELECT COUNT(*) as count FROM request_detail_logs") as any
-  ).get().count;
-  const mcpAuditCount = (db.prepare("SELECT COUNT(*) as count FROM mcp_tool_audit").get() as any)
-    .count;
-  const auditEntries = compliance.getAuditLog();
+  const count = async (table: string) =>
+    Number(
+      (await backend.queryOne<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`))?.count
+    );
+  const usageCount = await count("usage_history");
+  const callCount = await count("call_logs");
+  const proxyCount = await count("proxy_logs");
+  const mcpAuditCount = await count("mcp_tool_audit");
+  const auditEntries = await compliance.getAuditLog();
   const auditActions = auditEntries.map((entry) => entry.action);
 
   assert.deepEqual(result, {
     deletedUsage: 1,
     deletedCallLogs: 1,
     deletedProxyLogs: 1,
-    deletedRequestDetailLogs: 1,
+    // request_detail_logs was removed with the SQLite migration; the field stays for shape.
+    deletedRequestDetailLogs: 0,
     deletedAuditLogs: 1,
     deletedMcpAuditLogs: 1,
     trimmedCallLogs: 0,
@@ -273,7 +259,6 @@ test("cleanupExpiredLogs removes stale rows across all log tables and records an
   assert.equal(usageCount, 1);
   assert.equal(callCount, 1);
   assert.equal(proxyCount, 1);
-  assert.equal(requestDetailCount, 1);
   assert.equal(mcpAuditCount, 1);
   assert.ok(auditActions.includes("compliance.cleanup"));
   const cleanupEntry = auditEntries.find((entry) => entry.action === "compliance.cleanup");
@@ -284,18 +269,20 @@ test("cleanupExpiredLogs removes stale rows across all log tables and records an
 
 test("cleanupExpiredLogs tolerates missing tables and logAuditEvent failures without breaking", async () => {
   compliance.initAuditLog();
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
-  db.exec(`
-    DROP TABLE usage_history;
-    DROP TABLE call_logs;
-    DROP TABLE proxy_logs;
-    DROP TABLE request_detail_logs;
-    DROP TABLE audit_log;
-    DROP TABLE mcp_tool_audit;
-  `);
+  // Rename (not drop) so the foreign keys and partitions of the other tables stay intact.
+  for (const table of [
+    "usage_history",
+    "call_logs",
+    "proxy_logs",
+    "audit_log",
+    "mcp_tool_audit",
+  ]) {
+    await backend.execute(`ALTER TABLE ${table} RENAME TO ${table}_gone`);
+  }
 
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "will.fail.silently",
     details: { reason: "table dropped" },
   });

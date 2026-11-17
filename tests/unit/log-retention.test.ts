@@ -12,109 +12,109 @@ process.env.CALL_LOGS_TABLE_MAX_ROWS = "5";
 process.env.PROXY_LOGS_TABLE_MAX_ROWS = "5";
 
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function countRows(table: string): Promise<number> {
+  const row = await db().queryOne<{ cnt: number }>(`SELECT COUNT(*)::int AS cnt FROM ${table}`);
+  return row?.cnt ?? 0;
+}
+
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  resetStorage();
+test.after(async () => {
+  await resetStorage();
+  await core.resetDbInstance();
 });
 
 test("cleanupExpiredLogs uses separate APP and CALL retention windows", async () => {
   compliance.initAuditLog();
-  const db = core.getDbInstance();
 
   const oldCallTs = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
   const freshCallTs = new Date().toISOString();
   const oldAppTs = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
   const freshAppTs = new Date().toISOString();
 
-  db.prepare(
-    "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run("openai", "old-usage", 1, 1, 1, 1, 1, oldCallTs);
-  db.prepare(
-    "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run("openai", "fresh-usage", 1, 1, 1, 1, 1, freshCallTs);
-
-  db.prepare(
-    "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(
-    "old-call",
-    oldCallTs,
-    "POST",
-    "/v1/chat/completions",
-    200,
-    "old",
-    "openai",
-    "-",
-    1,
-    1,
-    1,
-    0
+  await db().execute(
+    "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    ["openai", "old-usage", 1, 1, true, 1, 1, oldCallTs]
   );
-  db.prepare(
-    "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(
-    "fresh-call",
-    freshCallTs,
-    "POST",
-    "/v1/chat/completions",
-    200,
-    "fresh",
-    "openai",
-    "-",
-    1,
-    1,
-    1,
-    0
+  await db().execute(
+    "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+    ["openai", "fresh-usage", 1, 1, true, 1, 1, freshCallTs]
   );
 
-  db.prepare(
-    "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES (?, ?, ?, ?, ?)"
-  ).run("old-proxy", oldCallTs, "success", "direct", 1);
-  db.prepare(
-    "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES (?, ?, ?, ?, ?)"
-  ).run("fresh-proxy", freshCallTs, "success", "direct", 1);
-
-  db.prepare("INSERT INTO request_detail_logs (id, timestamp, duration_ms) VALUES (?, ?, ?)").run(
-    "old-detail",
-    oldCallTs,
-    1
+  await db().execute(
+    "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    [
+      "old-call",
+      oldCallTs,
+      "POST",
+      "/v1/chat/completions",
+      200,
+      "old",
+      "openai",
+      "-",
+      1,
+      1,
+      1,
+      false,
+    ]
   );
-  db.prepare("INSERT INTO request_detail_logs (id, timestamp, duration_ms) VALUES (?, ?, ?)").run(
-    "fresh-detail",
-    freshCallTs,
-    1
+  await db().execute(
+    "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+    [
+      "fresh-call",
+      freshCallTs,
+      "POST",
+      "/v1/chat/completions",
+      200,
+      "fresh",
+      "openai",
+      "-",
+      1,
+      1,
+      1,
+      false,
+    ]
   );
 
-  db.prepare("INSERT INTO audit_log (timestamp, action, actor) VALUES (?, ?, ?)").run(
+  await db().execute(
+    "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES ($1, $2, $3, $4, $5)",
+    ["old-proxy", oldCallTs, "success", "direct", 1]
+  );
+  await db().execute(
+    "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES ($1, $2, $3, $4, $5)",
+    ["fresh-proxy", freshCallTs, "success", "direct", 1]
+  );
+
+  await db().execute("INSERT INTO audit_log (timestamp, action, actor) VALUES ($1, $2, $3)", [
     oldAppTs,
     "old-audit",
-    "system"
-  );
-  db.prepare("INSERT INTO audit_log (timestamp, action, actor) VALUES (?, ?, ?)").run(
+    "system",
+  ]);
+  await db().execute("INSERT INTO audit_log (timestamp, action, actor) VALUES ($1, $2, $3)", [
     freshAppTs,
     "fresh-audit",
-    "system"
-  );
+    "system",
+  ]);
 
-  db.prepare("INSERT INTO mcp_tool_audit (tool_name, success, created_at) VALUES (?, ?, ?)").run(
-    "old-tool",
-    1,
-    oldAppTs
+  await db().execute(
+    "INSERT INTO mcp_tool_audit (tool_name, success, created_at) VALUES ($1, $2, $3)",
+    ["old-tool", true, oldAppTs]
   );
-  db.prepare("INSERT INTO mcp_tool_audit (tool_name, success, created_at) VALUES (?, ?, ?)").run(
-    "fresh-tool",
-    1,
-    freshAppTs
+  await db().execute(
+    "INSERT INTO mcp_tool_audit (tool_name, success, created_at) VALUES ($1, $2, $3)",
+    ["fresh-tool", true, freshAppTs]
   );
 
   const result = await compliance.cleanupExpiredLogs();
@@ -122,37 +122,43 @@ test("cleanupExpiredLogs uses separate APP and CALL retention windows", async ()
   assert.equal(result.deletedUsage, 1);
   assert.equal(result.deletedCallLogs, 1);
   assert.equal(result.deletedProxyLogs, 1);
-  assert.equal(result.deletedRequestDetailLogs, 1);
+  // request_detail_logs no longer exists; the result keeps the field at 0.
+  assert.equal(result.deletedRequestDetailLogs, 0);
   assert.equal(result.deletedAuditLogs, 1);
   assert.equal(result.deletedMcpAuditLogs, 1);
   assert.deepEqual(compliance.getRetentionDays(), { app: 2, call: 1 });
 
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM usage_history").get() as any).cnt, 1);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM call_logs").get() as any).cnt, 1);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM proxy_logs").get() as any).cnt, 1);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM request_detail_logs").get() as any).cnt, 1);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM audit_log").get() as any).cnt, 2);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM mcp_tool_audit").get() as any).cnt, 1);
+  assert.equal(await countRows("usage_history"), 1);
+  assert.equal(await countRows("call_logs"), 1);
+  assert.equal(await countRows("proxy_logs"), 1);
+  assert.equal(await countRows("audit_log"), 2);
+  assert.equal(await countRows("mcp_tool_audit"), 1);
 });
 
 test("cleanupExpiredLogs honors the dashboard usageHistory retention when env is unset (#4354)", async () => {
   // Operator did NOT set the retention env vars; the dashboard configured 90 days.
   // The startup cleanup must respect the dashboard value, not the 7-day env default.
+  // The dashboard saves retention in config_entries('databaseSettings', 'retention.<name>').
   const savedCall = process.env.CALL_LOG_RETENTION_DAYS;
   const savedApp = process.env.APP_LOG_RETENTION_DAYS;
   delete process.env.CALL_LOG_RETENTION_DAYS;
   delete process.env.APP_LOG_RETENTION_DAYS;
   try {
     compliance.initAuditLog();
-    const db = core.getDbInstance();
-
-    const { updateDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
-    updateDatabaseSettings({ retention: { usageHistory: 90, callLogs: 90 } } as any);
+    for (const name of ["usageHistory", "callLogs"]) {
+      await db().execute(
+        `INSERT INTO config_entries (namespace, key, value)
+         VALUES ('databaseSettings', $1, $2::jsonb)
+         ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+        [`retention.${name}`, "90"]
+      );
+    }
 
     const oldTs = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(
-      "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run("openai", "old-usage", 1, 1, 1, 1, 1, oldTs);
+    await db().execute(
+      "INSERT INTO usage_history (provider, model, tokens_input, tokens_output, success, latency_ms, ttft_ms, timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+      ["openai", "old-usage", 1, 1, true, 1, 1, oldTs]
+    );
 
     const result = await compliance.cleanupExpiredLogs();
 
@@ -163,7 +169,7 @@ test("cleanupExpiredLogs honors the dashboard usageHistory retention when env is
       0,
       "30-day usage_history must survive a 90-day dashboard retention"
     );
-    assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM usage_history").get() as any).cnt, 1);
+    assert.equal(await countRows("usage_history"), 1);
   } finally {
     if (savedCall !== undefined) process.env.CALL_LOG_RETENTION_DAYS = savedCall;
     else delete process.env.CALL_LOG_RETENTION_DAYS;
@@ -174,37 +180,25 @@ test("cleanupExpiredLogs honors the dashboard usageHistory retention when env is
 
 test("cleanupExpiredLogs enforces row count limits", async () => {
   compliance.initAuditLog();
-  const db = core.getDbInstance();
 
   const now = new Date().toISOString();
 
   for (let i = 0; i < 10; i++) {
-    db.prepare(
-      "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(
-      `call-${i}`,
-      now,
-      "POST",
-      "/v1/chat/completions",
-      200,
-      "model",
-      "provider",
-      "-",
-      1,
-      1,
-      1,
-      0
+    await db().execute(
+      "INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, has_pipeline_details) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+      [`call-${i}`, now, "POST", "/v1/chat/completions", 200, "model", "provider", "-", 1, 1, 1, false]
     );
   }
 
   for (let i = 0; i < 10; i++) {
-    db.prepare(
-      "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES (?, ?, ?, ?, ?)"
-    ).run(`proxy-${i}`, now, "success", "direct", 1);
+    await db().execute(
+      "INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms) VALUES ($1, $2, $3, $4, $5)",
+      [`proxy-${i}`, now, "success", "direct", 1]
+    );
   }
 
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM call_logs").get() as any).cnt, 10);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM proxy_logs").get() as any).cnt, 10);
+  assert.equal(await countRows("call_logs"), 10);
+  assert.equal(await countRows("proxy_logs"), 10);
 
   const result = await compliance.cleanupExpiredLogs();
 
@@ -213,8 +207,8 @@ test("cleanupExpiredLogs enforces row count limits", async () => {
   assert.equal(result.callLogsMaxRows, 5);
   assert.equal(result.proxyLogsMaxRows, 5);
 
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM call_logs").get() as any).cnt, 5);
-  assert.equal((db.prepare("SELECT COUNT(*) AS cnt FROM proxy_logs").get() as any).cnt, 5);
+  assert.equal(await countRows("call_logs"), 5);
+  assert.equal(await countRows("proxy_logs"), 5);
 });
 
 test("getCallLogsTableMaxRows returns configured value", async () => {

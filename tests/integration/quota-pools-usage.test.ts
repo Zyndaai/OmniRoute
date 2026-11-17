@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-pools-usage-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -25,9 +26,10 @@ process.env.API_KEY_SECRET = "test-quota-usage-secret";
 // Force SQLite store for deterministic tests
 process.env.QUOTA_STORE_DRIVER = "sqlite";
 
-const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const { createPool, upsertAllocations } = await import("@/lib/db/quotaPools");
+const { createProviderConnection } = await import("@/lib/db/providers");
+const { createApiKey } = await import("@/lib/db/apiKeys");
 const localDb = { updateSettings };
 const compliance = await import("../../src/lib/compliance/index.ts");
 const { getSqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
@@ -40,20 +42,36 @@ async function enableManagementAuth() {
   await localDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-function resetDb() {
-  core.resetDbInstance();
+// Pools and quota allocations reference provider_connections and api_keys through foreign keys.
+async function newConnectionId(label: string): Promise<string> {
+  const conn = (await createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: label,
+    apiKey: "sk-synthetic-usage-connection",
+  })) as { id: string };
+  return conn.id;
+}
+
+async function newApiKeyId(name: string): Promise<string> {
+  const key = (await createApiKey(name, "synthetic-machine")) as { id: string };
+  return key.id;
+}
+
+async function resetDb() {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetDb();
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -82,7 +100,7 @@ test("GET /api/quota/pools/[id]/usage → PoolUsageSnapshot shape with correct f
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
     body: {
-      connectionId: "conn-usage-test",
+      connectionId: await newConnectionId("usage-pool"),
       name: "Usage Test Pool",
       allocations: [],
     },
@@ -93,16 +111,18 @@ test("GET /api/quota/pools/[id]/usage → PoolUsageSnapshot shape with correct f
   const poolId = pool.id;
 
   // 2. Add allocations for 2 API keys
-  upsertAllocations(poolId, [
-    { apiKeyId: "key-alice", weight: 60, policy: "soft" },
-    { apiKeyId: "key-bob", weight: 40, policy: "soft" },
+  const aliceId = await newApiKeyId("usage-alice");
+  const bobId = await newApiKeyId("usage-bob");
+  await upsertAllocations(poolId, [
+    { apiKeyId: aliceId, weight: 60, policy: "soft" },
+    { apiKeyId: bobId, weight: 40, policy: "soft" },
   ]);
 
   // 3. Simulate consumption via the SQLite store directly
   const store = getSqliteQuotaStore();
   const dim = { poolId, unit: "tokens" as const, window: "daily" as const };
-  await store.consume("key-alice", dim, 1000);
-  await store.consume("key-bob", dim, 500);
+  await store.consume(aliceId, dim, 1000);
+  await store.consume(bobId, dim, 500);
 
   // 4. GET usage — endpoint uses poolUsageWithDimensions if available
   const usageReq = await makeManagementSessionRequest(
@@ -145,7 +165,7 @@ test("GET /api/quota/pools/[id]/usage response has required PoolUsageSnapshot fi
   // Create minimal pool
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-snapshot-shape", name: "Shape Pool" },
+    body: { connectionId: await newConnectionId("shape-pool"), name: "Shape Pool" },
   });
   const createRes = await poolsRoute.POST(createReq);
   const { pool } = (await createRes.json()) as { pool: { id: string } };

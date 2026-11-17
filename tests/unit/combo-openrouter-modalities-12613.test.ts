@@ -13,7 +13,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-12613-com
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "catalog-12613-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
@@ -30,7 +30,7 @@ type CatalogEntry = {
 };
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   catalog.__resetCatalogBuilderRunsForTest();
@@ -64,7 +64,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -86,7 +86,7 @@ test("#12613 combo with one unknown target keeps known vision modalities", async
     providerSpecificData: {},
   });
 
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "gpt-4o": capability({
         tool_call: true,
@@ -129,8 +129,8 @@ test("#12613 combo with one unknown target keeps known vision modalities", async
   );
 });
 
-test("#12613 upsertSyncedCapabilities writes OpenRouter modalities without wiping others", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("#12613 upsertSyncedCapabilities writes OpenRouter modalities without wiping others", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     openai: {
       "gpt-4o": capability({
         modalities_input: JSON.stringify(["text", "image"]),
@@ -138,14 +138,14 @@ test("#12613 upsertSyncedCapabilities writes OpenRouter modalities without wipin
       }),
     },
   });
-  modelsDevSync.upsertSyncedCapabilities("openrouter", {
+  await modelsDevSync.upsertSyncedCapabilities("openrouter", {
     "openai/gpt-4o": capability({
       tool_call: true,
       modalities_input: JSON.stringify(["text", "image"]),
       modalities_output: JSON.stringify(["text"]),
     }),
   });
-  const caps = modelsDevSync.getSyncedCapabilities();
+  const caps = await modelsDevSync.getSyncedCapabilities();
   assert.ok(caps.openai?.["gpt-4o"], "openai rows must survive upsert");
   assert.deepEqual(JSON.parse(caps.openrouter["openai/gpt-4o"].modalities_input), [
     "text",
@@ -165,7 +165,7 @@ test("#12613 openRouterCapabilityEntry rejects non-positive limits", () => {
 });
 
 test("#12613 upsertSyncedCapabilities refreshes limit_output on conflict", async () => {
-  modelsDevSync.upsertSyncedCapabilities("openrouter", {
+  await modelsDevSync.upsertSyncedCapabilities("openrouter", {
     "openai/gpt-4o": {
       ...capability(),
       modalities_input: JSON.stringify(["text"]),
@@ -173,7 +173,7 @@ test("#12613 upsertSyncedCapabilities refreshes limit_output on conflict", async
       limit_output: 100,
     },
   });
-  modelsDevSync.upsertSyncedCapabilities("openrouter", {
+  await modelsDevSync.upsertSyncedCapabilities("openrouter", {
     "openai/gpt-4o": {
       ...capability(),
       modalities_input: JSON.stringify(["text", "image"]),
@@ -181,7 +181,7 @@ test("#12613 upsertSyncedCapabilities refreshes limit_output on conflict", async
       limit_output: 200,
     },
   });
-  const caps = modelsDevSync.getSyncedCapabilities("openrouter", "openai/gpt-4o");
+  const caps = await modelsDevSync.getSyncedCapabilities("openrouter", "openai/gpt-4o");
   assert.equal(caps.openrouter["openai/gpt-4o"].limit_output, 200);
   assert.deepEqual(JSON.parse(caps.openrouter["openai/gpt-4o"].modalities_input), [
     "text",

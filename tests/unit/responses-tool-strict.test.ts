@@ -68,41 +68,41 @@ const responsesInput = [
   { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
 ];
 
-function chatToResponses(tool: JsonRecord): JsonRecord {
-  const out = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, "gpt-5.5", {
+async function chatToResponses(tool: JsonRecord): Promise<JsonRecord> {
+  const out = (await translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, "gpt-5.5", {
     model: "gpt-5.5",
     messages: [{ role: "user", content: "hi" }],
     tools: [tool],
-  }) as { tools: JsonRecord[] };
+  })) as { tools: JsonRecord[] };
   return out.tools[0];
 }
 
-function claudeToResponses(tool: JsonRecord): JsonRecord {
-  const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, "gpt-5.5", {
+async function claudeToResponses(tool: JsonRecord): Promise<JsonRecord> {
+  const out = (await translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI_RESPONSES, "gpt-5.5", {
     model: "gpt-5.5",
     max_tokens: 100,
     messages: [{ role: "user", content: "hi" }],
     tools: [tool],
-  }) as { tools: JsonRecord[] };
+  })) as { tools: JsonRecord[] };
   return out.tools.find((t) => t.name === "submit_page") as JsonRecord;
 }
 
-function claudeToChat(tool: JsonRecord): JsonRecord {
-  const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "gpt-5.5", {
+async function claudeToChat(tool: JsonRecord): Promise<JsonRecord> {
+  const out = (await translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "gpt-5.5", {
     model: "gpt-5.5",
     max_tokens: 100,
     messages: [{ role: "user", content: "hi" }],
     tools: [tool],
-  }) as { tools: Array<{ function: JsonRecord }> };
+  })) as { tools: Array<{ function: JsonRecord }> };
   return out.tools.find((t) => t.function.name === "submit_page")!.function;
 }
 
-function responsesToChat(tool: JsonRecord): JsonRecord {
-  const out = translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "gpt-x", {
+async function responsesToChat(tool: JsonRecord): Promise<JsonRecord> {
+  const out = (await translateRequest(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, "gpt-x", {
     model: "gpt-x",
     input: structuredClone(responsesInput),
     tools: [tool],
-  }) as { tools: Array<{ function: JsonRecord }> };
+  })) as { tools: Array<{ function: JsonRecord }> };
   return out.tools[0].function;
 }
 
@@ -143,47 +143,47 @@ test("restoreToolStrict restores only declared values", () => {
 
 // ── Chat Completions -> Responses ──────────────────────────────────────────
 
-test("Chat -> Responses: omitted strict reaches Responses as strict:false", () => {
-  const tool = chatToResponses(chatTool());
+test("Chat -> Responses: omitted strict reaches Responses as strict:false", async () => {
+  const tool = await chatToResponses(chatTool());
   assert.equal(tool.name, "submit_page");
   assert.equal(tool.strict, false);
 });
 
-test("Chat -> Responses: strict null -> false, booleans kept", () => {
-  assert.equal(chatToResponses(chatTool({ strict: null })).strict, false);
-  assert.equal(chatToResponses(chatTool({ strict: false })).strict, false);
-  assert.equal(chatToResponses(chatTool({ strict: true })).strict, true);
+test("Chat -> Responses: strict null -> false, booleans kept", async () => {
+  assert.equal((await chatToResponses(chatTool({ strict: null }))).strict, false);
+  assert.equal((await chatToResponses(chatTool({ strict: false }))).strict, false);
+  assert.equal((await chatToResponses(chatTool({ strict: true }))).strict, true);
 });
 
 // ── Claude -> Chat / Responses ─────────────────────────────────────────────
 
-test("Claude -> Chat: explicit boolean strict carried, omitted stays omitted", () => {
-  assert.equal(claudeToChat(claudeTool({ strict: true })).strict, true);
-  assert.equal(claudeToChat(claudeTool({ strict: false })).strict, false);
-  assert.equal("strict" in claudeToChat(claudeTool()), false);
-  assert.equal("strict" in claudeToChat(claudeTool({ strict: null })), false);
+test("Claude -> Chat: explicit boolean strict carried, omitted stays omitted", async () => {
+  assert.equal((await claudeToChat(claudeTool({ strict: true }))).strict, true);
+  assert.equal((await claudeToChat(claudeTool({ strict: false }))).strict, false);
+  assert.equal("strict" in (await claudeToChat(claudeTool())), false);
+  assert.equal("strict" in (await claudeToChat(claudeTool({ strict: null }))), false);
 });
 
-test("Claude -> Responses: omitted strict reaches Responses as false, true is kept", () => {
-  assert.equal(claudeToResponses(claudeTool()).strict, false);
-  assert.equal(claudeToResponses(claudeTool({ strict: true })).strict, true);
+test("Claude -> Responses: omitted strict reaches Responses as false, true is kept", async () => {
+  assert.equal((await claudeToResponses(claudeTool())).strict, false);
+  assert.equal((await claudeToResponses(claudeTool({ strict: true }))).strict, true);
 });
 
 // ── Responses -> Chat Completions ──────────────────────────────────────────
 
-test("Responses -> Chat: strict:null and undeclared strict do not leak into Chat", () => {
-  assert.equal("strict" in responsesToChat(flatTool({ strict: null })), false);
-  assert.equal("strict" in responsesToChat(flatTool()), false);
+test("Responses -> Chat: strict:null and undeclared strict do not leak into Chat", async () => {
+  assert.equal("strict" in (await responsesToChat(flatTool({ strict: null }))), false);
+  assert.equal("strict" in (await responsesToChat(flatTool())), false);
 });
 
-test("Responses -> Chat: boolean strict is kept", () => {
-  assert.equal(responsesToChat(flatTool({ strict: false })).strict, false);
-  assert.equal(responsesToChat(flatTool({ strict: true })).strict, true);
+test("Responses -> Chat: boolean strict is kept", async () => {
+  assert.equal((await responsesToChat(flatTool({ strict: false }))).strict, false);
+  assert.equal((await responsesToChat(flatTool({ strict: true }))).strict, true);
 });
 
-test("Responses -> Chat: custom tools do not leak strict:null", () => {
+test("Responses -> Chat: custom tools do not leak strict:null", async () => {
   const custom = { type: "custom", name: "apply_patch", description: "patch", strict: null };
-  assert.equal("strict" in responsesToChat(custom), false);
+  assert.equal("strict" in (await responsesToChat(custom)), false);
 });
 
 // ── Codex executor tool rebuild ────────────────────────────────────────────
@@ -211,8 +211,8 @@ test("codex rebuild: a declared null is not overridden by the translated-path de
   assert.equal(flat.strict, null);
 });
 
-test("Chat client end to end through the codex rebuild reaches upstream with strict:false", () => {
-  const translated = chatToResponses(chatTool());
+test("Chat client end to end through the codex rebuild reaches upstream with strict:false", async () => {
+  const translated = await chatToResponses(chatTool());
   normalizeCodexTools({ tools: [translated] }, { defaultFunctionStrict: undefined });
   assert.equal(translated.strict, false);
 });

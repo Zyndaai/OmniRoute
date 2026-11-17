@@ -34,7 +34,7 @@ await test.describe("#16072 executed empty-terminal contract", async () => {
     await waitForCallLogSaves(10_000);
     flushProxyLogsSync();
     clearAllModelLockouts();
-    core.resetDbInstance();
+    await core.resetDbInstance();
     globalThis.fetch = originalFetch;
     if (savedDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = savedDataDir;
@@ -363,7 +363,9 @@ await test.describe("#16072 executed empty-terminal contract", async () => {
       name: entry.name,
       type: entry.type,
       prefix: entry.name,
-      apiType: entry.apiType,
+      // The provider_nodes api_type CHECK allows only the OpenAI-style endpoint kinds; the
+      // Anthropic-compatible node carries no api_type (production never sets one for it).
+      apiType: entry.type === "anthropic-compatible" ? null : entry.apiType,
       baseUrl: entry.baseUrl,
     });
     const nodeConnection = await providers.createProviderConnection({

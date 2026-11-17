@@ -82,7 +82,7 @@ test("executor forwards Chat Completions and Responses effort to the agent wire"
 test("OpenAI-to-Cursor translation preserves explicit reasoning_effort through to RunRequest", async () => {
   const { translateRequest } = await import("../../open-sse/translator/index.ts");
   const { FORMATS } = await import("../../open-sse/translator/formats.ts");
-  const body = translateRequest(
+  const body = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CURSOR,
     "grok-4.7",

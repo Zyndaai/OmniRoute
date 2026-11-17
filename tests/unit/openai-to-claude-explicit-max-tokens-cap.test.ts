@@ -19,28 +19,28 @@ const tools = [
 ];
 const messages = [{ role: "user", content: "hi" }];
 
-function toClaude(extra: Record<string, unknown>) {
+async function toClaude(extra: Record<string, unknown>) {
   return openaiToClaudeRequest("claude-sonnet-4-5", { messages, tools, ...extra }, false);
 }
 
-test("openai->claude honors an explicit max_tokens=1 cap with tools", () => {
-  assert.equal(toClaude({ max_tokens: 1 }).max_tokens, 1);
+test("openai->claude honors an explicit max_tokens=1 cap with tools", async () => {
+  assert.equal((await toClaude({ max_tokens: 1 })).max_tokens, 1);
 });
 
-test("openai->claude honors an explicit max_completion_tokens=1 cap with tools", () => {
-  assert.equal(toClaude({ max_completion_tokens: 1 }).max_tokens, 1);
+test("openai->claude honors an explicit max_completion_tokens=1 cap with tools", async () => {
+  assert.equal((await toClaude({ max_completion_tokens: 1 })).max_tokens, 1);
 });
 
-test("openai->claude honors a small explicit cap (4096) with tools", () => {
-  assert.equal(toClaude({ max_tokens: 4096 }).max_tokens, 4096);
+test("openai->claude honors a small explicit cap (4096) with tools", async () => {
+  assert.equal((await toClaude({ max_tokens: 4096 })).max_tokens, 4096);
 });
 
-test("openai->claude without an explicit cap still defaults to DEFAULT_MAX_TOKENS", () => {
-  assert.equal(toClaude({}).max_tokens, DEFAULT_MAX_TOKENS);
+test("openai->claude without an explicit cap still defaults to DEFAULT_MAX_TOKENS", async () => {
+  assert.equal((await toClaude({})).max_tokens, DEFAULT_MAX_TOKENS);
 });
 
-test("openai->claude keeps max_tokens > budget_tokens when thinking is enabled with cap 1", () => {
-  const result = toClaude({
+test("openai->claude keeps max_tokens > budget_tokens when thinking is enabled with cap 1", async () => {
+  const result = await toClaude({
     max_tokens: 1,
     thinking: { type: "enabled", budget_tokens: 2048 },
   });

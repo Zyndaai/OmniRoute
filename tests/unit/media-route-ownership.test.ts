@@ -21,9 +21,9 @@ const mediaStore = await import("../../src/lib/media/mediaStore.ts");
 const { ANONYMOUS_OWNER_ID } = await import("../../src/shared/constants/anonymousOwner.ts");
 const mediaRoute = await import("../../src/app/api/v1/media/[id]/route.ts");
 
-test.after(() => {
-  apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+test.after(async () => {
+  await apiKeysDb.resetApiKeyState();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

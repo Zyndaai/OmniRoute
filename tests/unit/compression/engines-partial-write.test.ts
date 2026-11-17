@@ -1,7 +1,7 @@
 // Two dashboard pages write the `engines` map: the Omniglyph page and the context settings
 // panel. A write that carries only the engine it changed must leave every other engine as it
 // was, or a toggle on one page turns off what the other page (or a failed GET) never loaded.
-import { describe, it, beforeEach, afterEach, after } from "node:test";
+import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,21 +14,30 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../../src/lib/db/core.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../../src/lib/db/compression.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 
 type SettingsUpdate = Parameters<typeof updateCompressionSettings>[0];
 
-beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+// Writes a raw `engines` row (JSON text) and clears the 5s settings cache so reads see it.
+async function setRawEnginesRow(valueJson: string) {
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('compression', 'engines', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [valueJson]
+  );
+  await updateCompressionSettings({});
+}
+
+before(async () => {
+  await core.ensureDbInitialized();
 });
 
-afterEach(() => {
-  core.resetDbInstance();
+beforeEach(async () => {
+  await resetTestDb();
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -45,10 +54,8 @@ describe("updateCompressionSettings engines partial writes", () => {
         caveman: { enabled: true, level: "full" },
       },
     });
-    core.resetDbInstance();
 
     await updateCompressionSettings({ engines: { omniglyph: { enabled: true } } });
-    core.resetDbInstance();
 
     const { engines, enginesExplicit } = await getCompressionSettings();
     assert.deepEqual(engines.rtk, { enabled: true, level: "standard" });
@@ -63,7 +70,6 @@ describe("updateCompressionSettings engines partial writes", () => {
     await updateCompressionSettings({ engines: { omniglyph: { enabled: true } } });
     // ...then the panel turns caveman on.
     await updateCompressionSettings({ engines: { caveman: { enabled: true } } });
-    core.resetDbInstance();
 
     const { engines } = await getCompressionSettings();
     assert.equal(engines.omniglyph.enabled, true);
@@ -73,10 +79,8 @@ describe("updateCompressionSettings engines partial writes", () => {
 
   it("keeps a stored engine level when a write only sets enabled", async () => {
     await updateCompressionSettings({ engines: { caveman: { enabled: true, level: "ultra" } } });
-    core.resetDbInstance();
 
     await updateCompressionSettings({ engines: { caveman: { enabled: false } } });
-    core.resetDbInstance();
 
     const { engines } = await getCompressionSettings();
     assert.deepEqual(engines.caveman, { enabled: false, level: "ultra" });
@@ -84,14 +88,11 @@ describe("updateCompressionSettings engines partial writes", () => {
 
   it("keeps the engines derived from legacy settings on the first engines write", async () => {
     await updateCompressionSettings({ cavemanConfig: { enabled: true } } as SettingsUpdate);
-    core.resetDbInstance();
     const before = await getCompressionSettings();
     assert.equal(before.enginesExplicit, false);
     assert.equal(before.engines.caveman.enabled, true);
-    core.resetDbInstance();
 
     await updateCompressionSettings({ engines: { omniglyph: { enabled: true } } });
-    core.resetDbInstance();
 
     const after = await getCompressionSettings();
     assert.equal(after.enginesExplicit, true);
@@ -99,25 +100,18 @@ describe("updateCompressionSettings engines partial writes", () => {
     assert.equal(after.engines.omniglyph.enabled, true);
   });
 
-  it("treats a stored non-text engines row as absent and merges over the legacy-derived map", async () => {
+  it("treats a stored non-object engines row as absent and merges over the legacy-derived map", async () => {
     await updateCompressionSettings({ cavemanConfig: { enabled: true } } as SettingsUpdate);
-    core.resetDbInstance();
 
-    // A BLOB in the engines key: the read path skips non-text rows, so the write path must
-    // not pick the row up as a merge base either and falls back to the derived map.
-    core
-      .getDbInstance()
-      .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-      .run("compression", "engines", Buffer.from([0x00, 0xff]));
-    core.resetDbInstance();
+    // A non-object value in the engines key: the read path treats it as unusable, so the write
+    // path must not pick it up as a merge base either and falls back to the derived map.
+    await setRawEnginesRow(JSON.stringify("not-an-engines-map"));
 
     const before = await getCompressionSettings();
     assert.equal(before.enginesExplicit, false);
     assert.equal(before.engines.caveman.enabled, true);
-    core.resetDbInstance();
 
     await updateCompressionSettings({ engines: { omniglyph: { enabled: true } } });
-    core.resetDbInstance();
 
     const after = await getCompressionSettings();
     assert.equal(after.engines.caveman.enabled, true);

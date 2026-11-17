@@ -165,10 +165,10 @@ test("functional: wildcard webhook receives proxy.set_aside delivery", async () 
   const prevDataDir = process.env.DATA_DIR;
   process.env.DATA_DIR = dir;
   try {
-    const coreDb = await import("../../src/lib/db/core.ts");
-    coreDb.resetDbInstance();
+    const { resetTestDb } = await import("../helpers/postgres.ts");
+    await resetTestDb();
     const webhooksDb = await import("../../src/lib/db/webhooks.ts");
-    const created = webhooksDb.createWebhook({
+    const created = await webhooksDb.createWebhook({
       url: "https://hooks.example.com/setaside",
       events: ["*"],
     });
@@ -186,14 +186,14 @@ test("functional: wildcard webhook receives proxy.set_aside delivery", async () 
       timestamp: 5_000_000,
     });
     const { getDeliveries } = await import("../../src/lib/db/webhookDeliveries.ts");
-    const deliveries = getDeliveries(created.id, 5);
+    const deliveries = await getDeliveries(created.id, 5);
     assert.ok(deliveries.length >= 1, "wildcard webhook got a delivery row");
     assert.equal(deliveries[0].event_type, "proxy.set_aside");
   } finally {
     if (prevDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = prevDataDir;
-    const coreDb = await import("../../src/lib/db/core.ts");
-    coreDb.resetDbInstance();
+    const { resetTestDb } = await import("../helpers/postgres.ts");
+    await resetTestDb();
     fs.rmSync(dir, { recursive: true, force: true });
     resetAll();
   }

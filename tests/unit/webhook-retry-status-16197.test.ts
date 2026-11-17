@@ -45,7 +45,7 @@ test.beforeEach(() => {
 test.after(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
   if (previousDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = previousDataDir;
@@ -86,7 +86,7 @@ test("zero retries still reports the single terminal HTTP response", async () =>
 
 test("dispatchEvent persists the final HTTP status once after its four real attempts", async () => {
   const secret = "synthetic-dispatch-secret";
-  const webhook = createWebhook({ url, events: ["test.ping"], secret, kind: "custom" });
+  const webhook = await createWebhook({ url, events: ["test.ping"], secret, kind: "custom" });
   statuses.push(500, 503, 500, 502);
   try {
     await dispatchEvent("test.ping", { marker: "persisted retry" });
@@ -100,18 +100,18 @@ test("dispatchEvent persists the final HTTP status once after its four real atte
         `sha256=${createHmac("sha256", secret).update(request.body).digest("hex")}`
       );
     }
-    const deliveries = getDeliveries(webhook.id, 10);
+    const deliveries = await getDeliveries(webhook.id, 10);
     assert.equal(deliveries.length, 1);
     assert.equal(deliveries[0].status, "failed");
     assert.equal(deliveries[0].http_status, 502);
     assert.equal(deliveries[0].error, "Max retries exceeded");
-    const stored = getWebhook(webhook.id);
+    const stored = await getWebhook(webhook.id);
     assert.equal(stored?.last_status, 502);
     assert.equal(stored?.failure_count, 1);
     assert.equal(stored?.enabled, true);
     assert.ok(stored?.last_triggered_at);
   } finally {
-    deleteWebhook(webhook.id);
+    await deleteWebhook(webhook.id);
   }
 });
 

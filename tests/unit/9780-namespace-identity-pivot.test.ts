@@ -38,8 +38,8 @@ const NAMESPACE_REQUEST = {
   ],
 };
 
-function pivot(targetFormat: string): Record<string, unknown> {
-  return translateRequest(
+async function pivot(targetFormat: string): Promise<Record<string, unknown>> {
+  return (await translateRequest(
     "openai-responses",
     targetFormat,
     "any-model",
@@ -48,7 +48,7 @@ function pivot(targetFormat: string): Record<string, unknown> {
     null,
     null,
     null
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
 }
 
 function identityOf(body: Record<string, unknown>) {
@@ -57,15 +57,15 @@ function identityOf(body: Record<string, unknown>) {
   return map as Map<string, NamespaceIdentity>;
 }
 
-test("#9780: namespace identity survives the openai-responses -> kiro pivot", () => {
-  const identity = identityOf(pivot("kiro"));
+test("#9780: namespace identity survives the openai-responses -> kiro pivot", async () => {
+  const identity = identityOf(await pivot("kiro"));
 
   assert.equal(identity.size, 1);
   assert.deepEqual(identity.get("exec"), { namespace: "functions", name: "exec" });
 });
 
-test("#9780: namespace identity survives the openai-responses -> cursor pivot", () => {
-  const identity = identityOf(pivot("cursor"));
+test("#9780: namespace identity survives the openai-responses -> cursor pivot", async () => {
+  const identity = identityOf(await pivot("cursor"));
 
   assert.deepEqual(identity.get("exec"), { namespace: "functions", name: "exec" });
 });
@@ -73,8 +73,8 @@ test("#9780: namespace identity survives the openai-responses -> cursor pivot", 
 // Regression guard: these two appeared to "keep" a map before the fix, but it
 // was the alias map.
 for (const target of ["claude", "gemini"]) {
-  test(`#9780: ${target} pivot keeps its alias map AND the namespace identity`, () => {
-    const body = pivot(target);
+  test(`#9780: ${target} pivot keeps its alias map AND the namespace identity`, async () => {
+    const body = await pivot(target);
     const identity = identityOf(body);
 
     assert.deepEqual(identity.get("exec"), { namespace: "functions", name: "exec" });
@@ -89,8 +89,8 @@ for (const target of ["claude", "gemini"]) {
 }
 
 // Same-format requests are never flattened, so an absent map is correct here.
-test("#9780: same-format openai-responses request is not flattened at all", () => {
-  const body = pivot("openai-responses");
+test("#9780: same-format openai-responses request is not flattened at all", async () => {
+  const body = await pivot("openai-responses");
   const tools = body.tools as Array<Record<string, unknown>>;
 
   assert.equal(tools[0].type, "namespace");
@@ -98,8 +98,8 @@ test("#9780: same-format openai-responses request is not flattened at all", () =
   assert.equal(body._namespaceToolIdentityMap, undefined);
 });
 
-test("#9780: the identity channel is non-enumerable and never serializes", () => {
-  const body = pivot("kiro");
+test("#9780: the identity channel is non-enumerable and never serializes", async () => {
+  const body = await pivot("kiro");
 
   assert.ok(body._namespaceToolIdentityMap instanceof Map);
   assert.equal(
@@ -113,8 +113,8 @@ test("#9780: the identity channel is non-enumerable and never serializes", () =>
 // actually receives. Before the fix every target emitted `functions__exec` with
 // no namespace, which is the reported `unsupported call`.
 for (const target of ["kiro", "cursor", "claude", "gemini"]) {
-  test(`#9780: ${target} round-trip returns the declared name and its namespace`, () => {
-    const body = pivot(target);
+  test(`#9780: ${target} round-trip returns the declared name and its namespace`, async () => {
+    const body = await pivot(target);
     const state = initState(FORMATS.OPENAI_RESPONSES) as Record<string, unknown>;
     state.requestToolIdentityMap = body._namespaceToolIdentityMap;
 

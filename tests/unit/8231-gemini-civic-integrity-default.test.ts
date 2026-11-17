@@ -11,8 +11,8 @@ import { openaiToGeminiRequest } from "../../open-sse/translator/request/openai-
 // Antigravity/Cloud Code surface (open-sse/executors/antigravity.ts); this test
 // pins the same behavior for claude-to-gemini.ts and openai-to-gemini.ts.
 
-test("[repro #8231] claude-to-gemini default safetySettings must not force HARM_CATEGORY_CIVIC_INTEGRITY", () => {
-  const result = claudeToGeminiRequest(
+test("[repro #8231] claude-to-gemini default safetySettings must not force HARM_CATEGORY_CIVIC_INTEGRITY", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     { messages: [{ role: "user", content: "hi" }] },
     false,
@@ -28,8 +28,8 @@ test("[repro #8231] claude-to-gemini default safetySettings must not force HARM_
   );
 });
 
-test("[repro #8231] openai-to-gemini default safetySettings must not force HARM_CATEGORY_CIVIC_INTEGRITY", () => {
-  const result = openaiToGeminiRequest(
+test("[repro #8231] openai-to-gemini default safetySettings must not force HARM_CATEGORY_CIVIC_INTEGRITY", async () => {
+  const result = await openaiToGeminiRequest(
     "gemini-2.5-pro",
     { messages: [{ role: "user", content: "hi" }] },
     false,
@@ -45,9 +45,9 @@ test("[repro #8231] openai-to-gemini default safetySettings must not force HARM_
   );
 });
 
-test("[repro #8231] claude-to-gemini preserves caller-supplied safetySettings that explicitly request HARM_CATEGORY_CIVIC_INTEGRITY", () => {
+test("[repro #8231] claude-to-gemini preserves caller-supplied safetySettings that explicitly request HARM_CATEGORY_CIVIC_INTEGRITY", async () => {
   const explicit = [{ category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }];
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     { messages: [{ role: "user", content: "hi" }], safetySettings: explicit },
     false,
@@ -56,9 +56,9 @@ test("[repro #8231] claude-to-gemini preserves caller-supplied safetySettings th
   assert.deepEqual(result.safetySettings, explicit);
 });
 
-test("[repro #8231] openai-to-gemini preserves caller-supplied safetySettings that explicitly request HARM_CATEGORY_CIVIC_INTEGRITY", () => {
+test("[repro #8231] openai-to-gemini preserves caller-supplied safetySettings that explicitly request HARM_CATEGORY_CIVIC_INTEGRITY", async () => {
   const explicit = [{ category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }];
-  const result = openaiToGeminiRequest(
+  const result = await openaiToGeminiRequest(
     "gemini-2.5-pro",
     { messages: [{ role: "user", content: "hi" }], safetySettings: explicit },
     false,

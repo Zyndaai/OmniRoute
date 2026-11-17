@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
 
-test("Claude -> Gemini merges consecutive user text turns into a single user turn", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini merges consecutive user text turns into a single user turn", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -21,8 +21,8 @@ test("Claude -> Gemini merges consecutive user text turns into a single user tur
   assert.deepEqual(result.contents[0].parts, [{ text: "hello" }, { text: "world" }]);
 });
 
-test("Claude -> Gemini merges tool_result and subsequent user instruction into single user turn", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini merges tool_result and subsequent user instruction into single user turn", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -70,8 +70,8 @@ test("Claude -> Gemini merges tool_result and subsequent user instruction into s
   assert.deepEqual(lastTurn.parts[1], { text: "Now add 10 to that result" });
 });
 
-test("Claude -> Gemini preserves alternating conversation turns without spurious merging", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini preserves alternating conversation turns without spurious merging", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -92,8 +92,8 @@ test("Claude -> Gemini preserves alternating conversation turns without spurious
   assert.deepEqual(result.contents[2].parts, [{ text: "What is the capital of France?" }]);
 });
 
-test("Claude -> Gemini merges three or more consecutive user turns into a single user turn", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini merges three or more consecutive user turns into a single user turn", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -114,8 +114,8 @@ test("Claude -> Gemini merges three or more consecutive user turns into a single
   ]);
 });
 
-test("Claude -> Gemini handles empty messages array without error", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini handles empty messages array without error", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [],
@@ -126,8 +126,8 @@ test("Claude -> Gemini handles empty messages array without error", () => {
   assert.deepEqual(result.contents, []);
 });
 
-test("Claude -> Gemini merges consecutive assistant turns into a single model turn", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini merges consecutive assistant turns into a single model turn", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [

@@ -18,11 +18,9 @@ const ORIGINAL_ENV = {
   API_KEY_SECRET: process.env.API_KEY_SECRET,
   INITIAL_PASSWORD: process.env.INITIAL_PASSWORD,
   JWT_SECRET: process.env.JWT_SECRET,
-  DISABLE_SQLITE_AUTO_BACKUP: process.env.DISABLE_SQLITE_AUTO_BACKUP,
 };
 
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "cli-keys-rawkey-api-key-secret";
 process.env.JWT_SECRET = "cli-keys-rawkey-jwt-secret";
 process.env.INITIAL_PASSWORD = "cli-keys-rawkey-password";
@@ -40,12 +38,12 @@ const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-key
 ]);
 const victimKey = await apiKeysDb.createApiKey("victim-admin", "machine-keys-rawkey", ["admin"]);
 
-test.after(() => {
+test.after(async () => {
   try {
     apiKeysDb.resetApiKeyState?.();
   } catch {}
   try {
-    core.resetDbInstance();
+    await core.resetDbInstance();
   } catch {}
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
@@ -63,7 +61,7 @@ function entryFor(payload: { keys: Array<Record<string, unknown>> }) {
 }
 
 test("a read-scoped access token gets the listing without plaintext keys", async () => {
-  const reader = accessTokensDb.createAccessToken({ name: "reader", scope: "read" });
+  const reader = await accessTokensDb.createAccessToken({ name: "reader", scope: "read" });
   const res = await keysRoute.GET(
     new Request(URL_KEYS, { headers: { authorization: `Bearer ${reader.secret}` } })
   );

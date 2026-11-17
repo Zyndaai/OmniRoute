@@ -142,6 +142,7 @@ test("handleEmbedding sends translated media to the connection's llama-server UR
 test("createEmbeddingResponse keeps llama.cpp multimodal support on the synced-model route", async () => {
   const core = await import("../../src/lib/db/core.ts");
   const providersDb = await import("../../src/lib/db/providers.ts");
+  const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
   const { createEmbeddingResponse } = await import("../../src/lib/embeddings/service.ts");
 
   const connection = await providersDb.createProviderConnection({
@@ -153,22 +154,14 @@ test("createEmbeddingResponse keeps llama.cpp multimodal support on the synced-m
     providerSpecificData: { baseUrl: "http://embeddinggemma:8080/v1" },
   });
   // The shape model sync persists for a llama-server that advertises embeddings.
-  core
-    .getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-    )
-    .run(
-      `llama-cpp:${connection.id}`,
-      JSON.stringify([
-        {
-          id: "/models/embeddinggemma-2-F16.gguf",
-          name: "/models/embeddinggemma-2-F16.gguf",
-          source: "imported",
-          supportedEndpoints: ["embeddings"],
-        },
-      ])
-    );
+  await replaceSyncedAvailableModelsForConnection("llama-cpp", connection.id as string, [
+    {
+      id: "/models/embeddinggemma-2-F16.gguf",
+      name: "/models/embeddinggemma-2-F16.gguf",
+      source: "imported",
+      supportedEndpoints: ["embeddings"],
+    } as never,
+  ]);
 
   const originalFetch = globalThis.fetch;
   const bodies: Array<Record<string, unknown>> = [];
@@ -194,6 +187,6 @@ test("createEmbeddingResponse keeps llama.cpp multimodal support on the synced-m
     ]);
   } finally {
     globalThis.fetch = originalFetch;
-    core.resetDbInstance();
+    await core.resetDbInstance();
   }
 });

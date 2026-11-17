@@ -19,7 +19,6 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-provider-node-suffix-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const nodesDb = await import("../../src/lib/db/providers/nodes.ts");
 const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.ts");
 const { createProviderNodeSchema } =
@@ -30,13 +29,14 @@ const { getOpenAICompatibleType, isClaudeCodeCompatible } =
   await import("../../open-sse/services/provider.ts");
 const { nodeTypeFromId } = await import("../../src/lib/db/providerNodeSelect.ts");
 const { getProviderDisplayName } = await import("../../src/lib/display/names.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const UUID_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UUID = "02669115-2545-4896-b003-cb4dac09d441";
 
-function resetStorage() {
+async function resetStorage() {
   delete process.env.ENABLE_CC_COMPATIBLE_PROVIDER;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -59,12 +59,12 @@ const OPENAI_BASE = {
   baseUrl: "https://gateway.example.com/v1",
 };
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -98,7 +98,12 @@ test("the suffix applies to every OpenAI apiType segment", async () => {
   assert.equal(body.node.id, "openai-compatible-responses-responses_node");
   assert.equal(body.node.apiType, "responses");
 
-  const emb = await post({ ...OPENAI_BASE, apiType: "embeddings", providerIdSuffix: "emb1" });
+  const emb = await post({
+    ...OPENAI_BASE,
+    prefix: "teamgw-emb",
+    apiType: "embeddings",
+    providerIdSuffix: "emb1",
+  });
   assert.equal(emb.status, 201);
   assert.equal(
     ((await emb.json()) as { node: { id: string } }).node.id,
@@ -114,8 +119,9 @@ test("blank, whitespace, null or missing suffix keeps the random UUID id (non-re
     { providerIdSuffix: null },
   ];
   const seen = new Set<string>();
-  for (const extra of variants) {
-    const res = await post({ ...OPENAI_BASE, ...extra });
+  for (const [index, extra] of variants.entries()) {
+    // Prefixes are unique per node (provider_nodes_prefix_uq), so each variant gets its own.
+    const res = await post({ ...OPENAI_BASE, prefix: `teamgw-blank-${index}`, ...extra });
     assert.equal(res.status, 201, `variant ${JSON.stringify(extra)}`);
     const { node } = (await res.json()) as { node: { id: string } };
     assert.match(node.id, /^openai-compatible-chat-/);
@@ -159,7 +165,7 @@ test("duplicate custom id returns 409 and leaves the original node untouched", a
   assert.equal(stored.name, "Team Gateway");
   assert.equal(stored.prefix, "teamgw");
   assert.equal(stored.baseUrl, "https://gateway.example.com/v1");
-  assert.equal(nodesDb.getProviderNodesCount(), 1);
+  assert.equal(await nodesDb.getProviderNodesCount(), 1);
 });
 
 test("createProviderNode throws a typed conflict error instead of a raw SQLite error", async () => {
@@ -202,7 +208,7 @@ test("invalid suffix charset or length is rejected with 400", async () => {
     const res = await post({ ...OPENAI_BASE, providerIdSuffix });
     assert.equal(res.status, 400, `suffix ${JSON.stringify(providerIdSuffix)} must be rejected`);
   }
-  assert.equal(nodesDb.getProviderNodesCount(), 0);
+  assert.equal(await nodesDb.getProviderNodesCount(), 0);
   assert.equal(
     createProviderNodeSchema.safeParse({ ...OPENAI_BASE, providerIdSuffix: "ok-1.2_3" }).success,
     true

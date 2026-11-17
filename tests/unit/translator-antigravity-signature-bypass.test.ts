@@ -31,8 +31,8 @@ const body = {
   ],
 };
 
-function modelParts(model: string, b: unknown) {
-  const envelope = openaiToAntigravityRequest(model, b, true) as {
+async function modelParts(model: string, b: unknown) {
+  const envelope = (await openaiToAntigravityRequest(model, b, true)) as {
     request: { contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> };
   };
   const modelMsg = envelope.request.contents.find((c) => c.role === "model");
@@ -40,18 +40,18 @@ function modelParts(model: string, b: unknown) {
   return modelMsg.parts;
 }
 
-test("antigravity multi-turn tool call carries the signature bypass sentinel by default", () => {
-  const parts = modelParts("gemini-3.1-pro-low", body);
+test("antigravity multi-turn tool call carries the signature bypass sentinel by default", async () => {
+  const parts = await modelParts("gemini-3.1-pro-low", body);
   const fc = parts.find((p) => p.functionCall);
   assert.ok(fc, "expected a functionCall part");
   assert.equal(fc.thoughtSignature, "skip_thought_signature_validator");
 });
 
-test("ANTIGRAVITY_ALLOW_SIGNATURE_BYPASS=0 disables the sentinel", () => {
+test("ANTIGRAVITY_ALLOW_SIGNATURE_BYPASS=0 disables the sentinel", async () => {
   const prev = process.env.ANTIGRAVITY_ALLOW_SIGNATURE_BYPASS;
   process.env.ANTIGRAVITY_ALLOW_SIGNATURE_BYPASS = "0";
   try {
-    const parts = modelParts("gemini-3.1-pro-low", body);
+    const parts = await modelParts("gemini-3.1-pro-low", body);
     const fc = parts.find((p) => p.functionCall);
     assert.ok(fc, "expected a functionCall part");
     assert.equal(fc.thoughtSignature, undefined);

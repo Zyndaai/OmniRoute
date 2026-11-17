@@ -20,18 +20,9 @@ const { acquire, buildAccountSemaphoreKey, resetAll } =
 const { isRuntimeUnitAtConcurrencyCap } =
   await import("../../open-sse/services/combo/runtimeUnitCapacity.ts");
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 type ResolvedComboUnit = import("../../open-sse/services/combo/types.ts").ResolvedComboUnit;
-
-const db = getDbInstance();
-const databases = db.pragma("database_list") as Array<{ file?: string; name?: string }>;
-const activeDbPath = databases.find((database) => database.name === "main")?.file;
-assert.ok(activeDbPath, "test requires a file-backed main SQLite database");
-assert.equal(
-  fs.realpathSync(path.dirname(path.resolve(activeDbPath))),
-  fs.realpathSync(path.resolve(TEST_DATA_DIR)),
-  `active test database must be under TEST_DATA_DIR before inserts: ${activeDbPath}`
-);
 
 function createLog() {
   return {
@@ -49,18 +40,22 @@ function okResponse() {
   });
 }
 
-function seedConnection(id: string, provider: string, maxConcurrent: number) {
-  const db = getDbInstance();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
+async function seedConnection(id: string, provider: string, maxConcurrent: number) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections
       (id, provider, auth_type, is_active, max_concurrent, created_at, updated_at)
-     VALUES (?, ?, 'apikey', 1, ?, datetime('now'), datetime('now'))`
-  ).run(id, provider, maxConcurrent);
+     VALUES ($1, $2, 'apikey', true, $3, now(), now())
+     ON CONFLICT (id) DO UPDATE SET
+      provider = EXCLUDED.provider, auth_type = EXCLUDED.auth_type,
+      is_active = EXCLUDED.is_active, max_concurrent = EXCLUDED.max_concurrent,
+      updated_at = EXCLUDED.updated_at`,
+    [id, provider, maxConcurrent]
+  );
 }
 
-test.after(() => {
+test.after(async () => {
   resetAll();
-  resetDbInstance();
+  await resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -108,7 +103,7 @@ test("isRuntimeUnitAtConcurrencyCap returns true for a model unit at cap", async
 test("protected priority model stops at local capacity", async () => {
   const primaryConnectionId = "conn-protected-capacity";
   const provider = "featherless-ai";
-  seedConnection(primaryConnectionId, provider, 1);
+  await seedConnection(primaryConnectionId, provider, 1);
   const release = await acquire(
     buildAccountSemaphoreKey({ provider, accountKey: primaryConnectionId }),
     {
@@ -154,7 +149,7 @@ test("protected priority model stops at local capacity", async () => {
 test("protected priority combo-ref stops when its child is at local capacity", async () => {
   const connectionId = "conn-protected-child-capacity";
   const provider = "featherless-ai";
-  seedConnection(connectionId, provider, 1);
+  await seedConnection(connectionId, provider, 1);
   const release = await acquire(buildAccountSemaphoreKey({ provider, accountKey: connectionId }), {
     maxConcurrency: 1,
   });
@@ -494,8 +489,8 @@ test("execute fill-first overflows to the next unit when the first connection is
   const primaryConnectionId = "conn-primary-overflow";
   const backupConnectionId = "conn-backup-overflow";
   const provider = "featherless-ai";
-  seedConnection(primaryConnectionId, provider, 2);
-  seedConnection(backupConnectionId, "alibaba", 2);
+  await seedConnection(primaryConnectionId, provider, 2);
+  await seedConnection(backupConnectionId, "alibaba", 2);
 
   const key = buildAccountSemaphoreKey({ provider, accountKey: primaryConnectionId });
   const release1 = await acquire(key, { maxConcurrency: 2 });

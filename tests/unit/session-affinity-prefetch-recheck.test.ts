@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-affinity-"));
 process.env.DATA_DIR = dataDir;
 process.env.API_KEY_SECRET = "synthetic-affinity-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.REDIS_URL;
 delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 const core = await import("../../src/lib/db/core.ts");
@@ -52,9 +52,9 @@ test.beforeEach(() => {
   factory._setSessionAffinityRedisForTests(null);
   delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 });
-test.after(() => {
+test.after(async () => {
   factory._setSessionAffinityRedisForTests(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
@@ -90,28 +90,29 @@ for (const driver of ["sqlite", "redis"] as const) {
       const get = t.mock.method(store, "get");
       let evicted = false;
       let readsAtEviction = -1;
-      const db = core.getDbInstance();
-      const prepare = db.prepare.bind(db);
-      // This query runs inside the async lease-policy step, after the old
-      // prefetch and before the planner/selector. Both candidates stay eligible.
-      t.mock.method(db, "prepare", (sql: string) => {
+      // The process backend is the singleton that production db() returns, so wrapping its
+      // query() intercepts the lease-policy read. That query runs inside the async lease-policy
+      // step, after the old prefetch and before the planner/selector. Both candidates stay eligible.
+      const backend = getTestBackend();
+      const query = backend.query.bind(backend);
+      t.mock.method(backend, "query", async (sql: string, params?: unknown[]) => {
         if (!evicted && sql.includes("SELECT connection_id, lease_owner_hash, expires_at")) {
           evicted = true;
           readsAtEviction = get.mock.callCount();
           if (driver === "sqlite")
             assert.equal(
-              sqlite.evictSessionAccountAffinityForConnection(sessionKey, "glm", a),
+              await sqlite.evictSessionAccountAffinityForConnection(sessionKey, "glm", a),
               true
             );
           else
             assert.equal(
-              sqlite.evictSessionAccountAffinityForConnection(sessionKey, "glm", a),
+              await sqlite.evictSessionAccountAffinityForConnection(sessionKey, "glm", a),
               false,
               "shared upsert must not have installed a local mirror"
             );
           redis.values.clear(); // The shared eviction has landed too.
         }
-        return prepare(sql);
+        return query(sql, params);
       });
       const owner = `vlo_${(driver === "redis" ? "R" : "S").repeat(43)}`;
       const key = leasePath
@@ -164,15 +165,15 @@ for (const driver of ["sqlite", "redis"] as const) {
 
 test("SQLite selector reads at entry without an async store-read yield", async (t) => {
   const store = factory.getSessionAffinityStore();
-  const get = t.mock.method(store, "get");
-  sqlite.upsertSessionAccountAffinity("synthetic-entry", "glm", "A", Date.now(), 60_000);
+  await sqlite.upsertSessionAccountAffinity("synthetic-entry", "glm", "A", Date.now(), 60_000);
   const selection = pin.selectSessionAffinityConnection(
     "glm",
     "synthetic-entry",
     [{ id: "A" }, { id: "B", priority: 1 }],
     60_000
   );
-  assert.equal(get.mock.callCount(), 0, "SQLite must use the base synchronous getter");
+  // The read-count guard (0 store reads) only held for the removed synchronous SQLite getter;
+  // PostgreSQL reads the pin through the async store, so only the selection result is asserted.
   assert.equal((await selection)?.id, "A");
 });
 
@@ -186,8 +187,7 @@ test("SQLite forced-pin override uses its own synchronous read without prefetch"
     testStatus: "active",
   });
   const a = String(connection.id);
-  sqlite.upsertSessionAccountAffinity("synthetic-forced", "glm", a, Date.now(), 60_000);
-  const get = t.mock.method(factory.getSessionAffinityStore(), "get");
+  await sqlite.upsertSessionAccountAffinity("synthetic-forced", "glm", a, Date.now(), 60_000);
   const selected = await auth.getProviderCredentials("glm", null, [a], null, {
     sessionKey: "synthetic-forced",
     sessionAffinityTtlMs: 60_000,
@@ -195,5 +195,4 @@ test("SQLite forced-pin override uses its own synchronous read without prefetch"
     materializeCredentials: false,
   });
   assert.equal(selected?.connectionId, a);
-  assert.equal(get.mock.callCount(), 0);
 });

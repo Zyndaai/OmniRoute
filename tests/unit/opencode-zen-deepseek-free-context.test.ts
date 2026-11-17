@@ -16,6 +16,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-oc-deepse
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
 const { REGISTRY } = await import("../../open-sse/config/providerRegistry.ts");
@@ -50,18 +51,18 @@ function syncedRow(limitContext: number) {
   };
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -74,33 +75,35 @@ test("opencode-zen registry row declares the real ~330k window and 128k output",
   assert.deepEqual(row.aliases, [LEGACY_ALIAS]);
 });
 
-test("without a synced row the runtime limit is 330k, not the 200k provider default", () => {
-  assert.equal(getTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
+test("without a synced row the runtime limit is 330k, not the 200k provider default", async () => {
+  assert.equal(await getTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
 });
 
-test("a synced models.dev 1M window does not override the real 330k window", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("a synced models.dev 1M window does not override the real 330k window", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     "opencode-zen": { [MODEL]: syncedRow(SYNCED_WINDOW) },
     opencode: { [MODEL]: syncedRow(SYNCED_WINDOW) },
   });
 
   for (const modelId of [`opencode-zen/${MODEL}`, `opencode/${MODEL}`]) {
-    const caps = modelCapabilities.getResolvedModelCapabilities(modelId);
+    const caps = await modelCapabilities.getResolvedModelCapabilities(modelId);
     assert.equal(caps.contextWindow, REAL_WINDOW, modelId);
     assert.equal(caps.maxInputTokens, REAL_WINDOW, modelId);
   }
 
-  assert.equal(getTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
+  assert.equal(await getTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
   // The value the /v1/models catalog publishes when no canonical window is set.
-  assert.equal(getSourcedTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
+  assert.equal(await getSourcedTokenLimit("opencode-zen", MODEL), REAL_WINDOW);
 });
 
-test("the legacy deepseek-v4-flash-free alias resolves to the same 330k window", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("the legacy deepseek-v4-flash-free alias resolves to the same 330k window", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     "opencode-zen": { [MODEL]: syncedRow(SYNCED_WINDOW) },
   });
 
-  assert.equal(getTokenLimit("opencode-zen", LEGACY_ALIAS), REAL_WINDOW);
-  const caps = modelCapabilities.getResolvedModelCapabilities(`opencode-zen/${LEGACY_ALIAS}`);
+  assert.equal(await getTokenLimit("opencode-zen", LEGACY_ALIAS), REAL_WINDOW);
+  const caps = await modelCapabilities.getResolvedModelCapabilities(
+    `opencode-zen/${LEGACY_ALIAS}`
+  );
   assert.equal(caps.contextWindow, REAL_WINDOW);
 });

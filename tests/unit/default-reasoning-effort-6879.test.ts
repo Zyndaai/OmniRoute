@@ -157,7 +157,7 @@ test("7631: translateRequest promotes a stray top-level reasoning_effort into re
     reasoning_effort: "none",
   };
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -178,7 +178,7 @@ test("7631: same-format OPENAI_RESPONSES lane leaves an explicit reasoning objec
     reasoning: { effort: "high", summary: "auto" },
   };
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -199,7 +199,7 @@ test("7631: cross-format openai -> openai-responses promotion is unchanged (no r
     reasoning_effort: "none",
   };
 
-  const result = translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, "gpt-5.1-codex", body);
+  const result = await translateRequest(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, "gpt-5.1-codex", body);
 
   assert.equal("reasoning_effort" in result, false);
   assert.deepEqual(result.reasoning, { effort: "none" });

@@ -54,8 +54,8 @@ function collectToolIds(payload) {
 
 // --- RED: a tool_use with no matching tool_result anywhere must be dropped --
 
-test("kiro #13170: an orphaned parallel tool_call (no tool_result ever) is stripped, its sibling survives", () => {
-  const payload = build([
+test("kiro #13170: an orphaned parallel tool_call (no tool_result ever) is stripped, its sibling survives", async () => {
+  const payload = await build([
     { role: "user", content: "run two commands" },
     {
       role: "assistant",
@@ -75,8 +75,8 @@ test("kiro #13170: an orphaned parallel tool_call (no tool_result ever) is strip
   assert.deepEqual(answered, ["call_A"]);
 });
 
-test("kiro #13170: an assistant turn where every tool_call is orphaned drops toolUses entirely", () => {
-  const payload = build([
+test("kiro #13170: an assistant turn where every tool_call is orphaned drops toolUses entirely", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     {
       role: "assistant",
@@ -101,8 +101,8 @@ test("kiro #13170: an assistant turn where every tool_call is orphaned drops too
 
 // --- Regression: a still-in-flight trailing tool_call is not stripped ------
 
-test("kiro #13170: a trailing (in-flight) tool_call with no result yet is preserved", () => {
-  const payload = build([
+test("kiro #13170: a trailing (in-flight) tool_call with no result yet is preserved", async () => {
+  const payload = await build([
     { role: "user", content: "go" },
     {
       role: "assistant",
@@ -121,8 +121,8 @@ test("kiro #13170: a trailing (in-flight) tool_call with no result yet is preser
 
 // --- Characterization: fully-answered parallel calls must keep working ----
 
-test("kiro #13170: fully-answered parallel tool_calls are unaffected", () => {
-  const payload = build([
+test("kiro #13170: fully-answered parallel tool_calls are unaffected", async () => {
+  const payload = await build([
     { role: "user", content: "run two commands" },
     {
       role: "assistant",
@@ -142,8 +142,8 @@ test("kiro #13170: fully-answered parallel tool_calls are unaffected", () => {
   assert.deepEqual(answered.sort(), ["call_A", "call_B"]);
 });
 
-test("kiro #13170: assistant text is preserved on an ordinary non-tool transcript", () => {
-  const payload = build([
+test("kiro #13170: assistant text is preserved on an ordinary non-tool transcript", async () => {
+  const payload = await build([
     { role: "user", content: "hi" },
     { role: "assistant", content: "PLAIN_REPLY" },
     { role: "user", content: "again" },

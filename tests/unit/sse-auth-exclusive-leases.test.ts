@@ -7,7 +7,6 @@ import test from "node:test";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-auth-exclusive-lease-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "exclusive-lease-auth-test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -19,6 +18,7 @@ const quotaCache = await import("../../src/domain/quotaCache.ts");
 const quotaPreflight = await import("../../open-sse/services/quotaPreflight.ts");
 const fallback = await import("../../open-sse/services/accountFallback.ts");
 const oauthOccupancy = await import("../../open-sse/services/oauthSessionOccupancy.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const OWNERS = Array.from(
   { length: 12 },
@@ -65,7 +65,7 @@ function context(owner: string, generation: number) {
 }
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fallback.clearAllModelLockouts();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -73,8 +73,8 @@ async function resetStorage(): Promise<void> {
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -82,7 +82,7 @@ test.after(() => {
 test("foreign top candidate is skipped and the existing selector chooses the next free candidate", async () => {
   const [top, next] = await Promise.all([seedConnection(1), seedConnection(2)]);
   const key = await seedManagedKey([top.id, next.id]);
-  leaseDb.acquireExclusiveConnectionLease({
+  await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
@@ -100,13 +100,13 @@ test("foreign top candidate is skipped and the existing selector chooses the nex
 test("all eligible candidates foreign returns WAITING without credentials", async () => {
   const [first, second] = await Promise.all([seedConnection(1), seedConnection(2)]);
   const key = await seedManagedKey([first.id, second.id]);
-  leaseDb.acquireExclusiveConnectionLease({
+  await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
     connectionId: first.id,
   });
-  leaseDb.acquireExclusiveConnectionLease({
+  await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[1],
     apiKeyId: key.id,
     provider: "glm",
@@ -131,7 +131,7 @@ test("all eligible candidates foreign returns WAITING without credentials", asyn
 test("an eligible live owner binding is reused despite softer priority scoring", async () => {
   const [preferred, bound] = await Promise.all([seedConnection(1), seedConnection(2)]);
   const key = await seedManagedKey([preferred.id, bound.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
@@ -174,7 +174,10 @@ test("quota-preflight wrapper claims before returning even when live preflight i
 
   assert.equal(selected?.connectionId, connection.id);
   assert.equal((selected as auth.ExclusiveLeaseSelectionResult).exclusiveLease.generation, 1);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNERS[0])?.connectionId, connection.id);
+  assert.equal(
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]))?.connectionId,
+    connection.id
+  );
   assert.equal("apiKey" in selected, false);
 });
 
@@ -239,7 +242,7 @@ test("managed request distinguishes missing lease from stale generation", async 
   });
   assert.equal(missing?.leaseRequired, true);
 
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
@@ -285,7 +288,7 @@ test("generic lease selection is provider-neutral across GLM and OpenAI fixtures
       materializeCredentials: false,
     });
     assert.equal(selected?.connectionId, connection.id, provider);
-    leaseDb.releaseExclusiveConnectionLease({
+    await leaseDb.releaseExclusiveConnectionLease({
       leaseOwnerId: OWNERS[0],
       generation: selected!.exclusiveLease.generation,
       apiKeyId: key.id,
@@ -344,7 +347,7 @@ for (const strategy of ["fill-first", "round-robin", "random", "p2c", "strict-ra
     ]);
     const ids = [foreignTop.id, freeA.id, freeB.id];
     const key = await seedManagedKey(ids);
-    const foreign = leaseDb.acquireExclusiveConnectionLease({
+    const foreign = await leaseDb.acquireExclusiveConnectionLease({
       leaseOwnerId: OWNERS[0],
       apiKeyId: key.id,
       provider: "glm",
@@ -393,7 +396,10 @@ test("managed live quota preflight rejects one candidate and claims the next wit
 
   assert.deepEqual(calls, [blocked.id, healthy.id]);
   assert.equal(selected?.connectionId, healthy.id);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNERS[0])?.connectionId, healthy.id);
+  assert.equal(
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]))?.connectionId,
+    healthy.id
+  );
 });
 
 test("managed cached quota ineligibility transitions the live owner to a FREE connection", async () => {
@@ -406,7 +412,7 @@ test("managed cached quota ineligibility transitions the live owner to a FREE co
     seedConnection(2),
   ]);
   const key = await seedManagedKey([bound.id, free.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
@@ -429,7 +435,7 @@ test("managed cached quota ineligibility transitions the live owner to a FREE co
 
   assert.equal(selected?.connectionId, free.id);
   assert.equal(
-    leaseDb.getActiveExclusiveConnectionLease(OWNERS[0])?.generation,
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]))?.generation,
     acquired.lease.generation
   );
 });
@@ -439,7 +445,7 @@ test("managed cooldown and terminal-auth ineligibility transition only to a FREE
     await resetStorage();
     const [bound, free] = await Promise.all([seedConnection(1), seedConnection(2)]);
     const key = await seedManagedKey([bound.id, free.id]);
-    const acquired = leaseDb.acquireExclusiveConnectionLease({
+    const acquired = await leaseDb.acquireExclusiveConnectionLease({
       leaseOwnerId: OWNERS[0],
       apiKeyId: key.id,
       provider: "glm",
@@ -481,7 +487,7 @@ test("managed model lockout transitions the same generation to a FREE connection
     seedConnection(2, { provider: "gemini" }),
   ]);
   const key = await seedManagedKey([bound.id, free.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "gemini",
@@ -513,7 +519,7 @@ test("managed model lockout transitions the same generation to a FREE connection
   );
   assert.equal(selected?.connectionId, free.id);
   assert.equal(
-    leaseDb.getActiveExclusiveConnectionLease(OWNERS[0])?.generation,
+    (await leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]))?.generation,
     acquired.lease.generation
   );
 });
@@ -521,7 +527,7 @@ test("managed model lockout transitions the same generation to a FREE connection
 test("managed request invalidates an unsafe binding when no FREE failover target exists", async () => {
   const bound = await seedConnection(1);
   const key = await seedManagedKey([bound.id]);
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNERS[0],
     apiKeyId: key.id,
     provider: "glm",
@@ -544,5 +550,5 @@ test("managed request invalidates an unsafe binding when no FREE failover target
   });
 
   assert.equal(selected?.allRateLimited, true);
-  assert.equal(leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]), null);
+  assert.equal(await leaseDb.getActiveExclusiveConnectionLease(OWNERS[0]), null);
 });

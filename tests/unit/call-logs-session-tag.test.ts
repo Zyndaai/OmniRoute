@@ -12,9 +12,16 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+const sessionTagOf = (id: string) =>
+  getTestBackend().queryOne<{ id: string; session_tag: string | null }>(
+    "SELECT id, session_tag FROM call_logs WHERE id = $1",
+    [id]
+  );
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -33,10 +40,7 @@ test("saveCallLog persists sessionTag when explicitly supplied", async () => {
     sessionTag: "sess-abc",
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare("SELECT id, session_tag FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = await sessionTagOf(testId);
   assert.ok(row, "row should exist in call_logs");
   assert.equal(row.session_tag, "sess-abc");
 });
@@ -55,10 +59,7 @@ test("saveCallLog stores NULL session_tag when absent (never synthesized)", asyn
     tokens: { in: 10, out: 5 },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare("SELECT id, session_tag FROM call_logs WHERE id = ?")
-    .get(testId) as Record<string, unknown>;
+  const row = await sessionTagOf(testId);
   assert.ok(row, "row should exist in call_logs");
   assert.equal(row.session_tag, null, "session_tag must be null when no header was supplied");
 });
@@ -117,14 +118,10 @@ test("getCallLogs filters by sessionTag (substring match, mirroring correlationI
   assert.ok(!ids.includes(idOther), "non-matching sessionTag row must be excluded");
 });
 
-test("schemaColumns self-heal ALTER for session_tag is idempotent", async () => {
-  const db = core.getDbInstance();
-  // Re-run the exact idempotent guard twice; must not throw either time.
-  const { ensureCallLogsColumns } = await import("../../src/lib/db/schemaColumns.ts");
-  assert.doesNotThrow(() => ensureCallLogsColumns(db));
-  assert.doesNotThrow(() => ensureCallLogsColumns(db));
-
-  const columns = db.prepare("PRAGMA table_info(call_logs)").all() as Array<{ name: string }>;
+test("call_logs.session_tag column exists in the schema", async () => {
+  const columns = await getTestBackend().query<{ name: string }>(
+    "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+  );
   assert.ok(
     columns.some((c) => c.name === "session_tag"),
     "call_logs.session_tag column must exist"

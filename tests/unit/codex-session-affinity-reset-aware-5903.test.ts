@@ -28,8 +28,10 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const affinityDb = await import("../../src/lib/db/sessionAccountAffinity.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 
+import { resetTestDb } from "../helpers/postgres.ts";
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -54,7 +56,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -79,7 +81,7 @@ test("codex session affinity wins over a per-request reset-aware forcedConnectio
     "request 1 should pin to the scored winner A"
   );
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000))?.connectionId,
     connectionA.id,
     "affinity row must be created for session-S pointing at A"
   );
@@ -98,7 +100,7 @@ test("codex session affinity wins over a per-request reset-aware forcedConnectio
     "request 2 must still use the pinned connection A, not the freshly re-scored B"
   );
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000))?.connectionId,
     connectionA.id,
     "affinity row for session-S must remain pinned to A after re-scoring"
   );
@@ -115,14 +117,14 @@ test("codex session affinity wins over a per-request reset-aware forcedConnectio
     "a new session must honor the fresh re-scored pick"
   );
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-S2", "codex", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-S2", "codex", 60_000))?.connectionId,
     connectionB.id,
     "a new affinity row for session-S2 must be created pointing at B"
   );
 
   // Session S must remain unaffected by S2's independent pin.
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-S", "codex", 60_000))?.connectionId,
     connectionA.id,
     "session-S pin must stay isolated from session-S2"
   );

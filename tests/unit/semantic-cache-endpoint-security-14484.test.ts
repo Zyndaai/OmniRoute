@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "omni-cache-endpoint-14484-"));
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS = "true";
 process.env.OUTBOUND_SSRF_GUARD_ENABLED = "true";
 
@@ -14,11 +13,23 @@ const { createDefaultEmbeddingGenerator } =
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 const { POST } = await import("../../src/app/api/settings/cache-config/test-embedding/route.ts");
 const { PUT } = await import("../../src/app/api/settings/cache-config/route.ts");
-const { updateDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
 const { resolveSemanticCacheConfig } = await import("../../open-sse/config/semanticCacheConfig.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { setConfigValue } = await import("../../src/lib/db/configEntries.ts");
+const { encryptCacheValue } = await import("../../src/lib/db/cacheSecrets.ts");
+const { ensureSemanticCacheDbBridge, refreshSemanticCacheDbBridge } =
+  await import("../../src/lib/cache/semanticCacheDbBridge.ts");
 
 test.after(() => resetDbInstance());
+
+/** Writes cache settings the way the cache-config route does, then refreshes the resolver snapshot. */
+async function setCacheSettings(cache: Record<string, unknown>) {
+  await ensureSemanticCacheDbBridge();
+  for (const [key, value] of Object.entries(cache)) {
+    await setConfigValue("databaseSettings", `cache.${key}`, encryptCacheValue(key, value));
+  }
+  await refreshSemanticCacheDbBridge();
+}
 
 function request(body: unknown, method = "POST") {
   return new Request("http://localhost/api/settings/cache-config/test-embedding", {
@@ -98,11 +109,9 @@ test("test endpoint never transfers a stored connection key to an overridden end
   assert.equal(authorization, null);
   await POST(request({ provider: "fixture-14484", model: "embed" }));
   assert.equal(authorization, "Bearer fixture-only-stored-connection-key");
-  updateDatabaseSettings({
-    cache: {
-      semanticCacheEmbeddingProvider: "fixture-14484",
-      semanticCacheEmbeddingBaseUrl: "http://127.0.0.2:12345/v1",
-    },
+  await setCacheSettings({
+    semanticCacheEmbeddingProvider: "fixture-14484",
+    semanticCacheEmbeddingBaseUrl: "http://127.0.0.2:12345/v1",
   });
   assert.equal(resolveSemanticCacheConfig().embeddingApiKey, undefined);
 });

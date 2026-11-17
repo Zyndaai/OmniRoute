@@ -21,9 +21,10 @@ const core = await import("../../src/lib/db/core.ts");
 const { createFile, deleteFile } = await import("@/lib/db/files");
 const localDb = { createFile, deleteFile };
 const fileContentRoute = await import("../../src/app/api/files/[id]/content/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -34,6 +35,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -43,7 +45,7 @@ function makeFileContent(text: string) {
   return Buffer.from(text);
 }
 
-function createTestFile(
+async function createTestFile(
   opts: {
     filename?: string;
     content?: Buffer | null;
@@ -67,7 +69,7 @@ test("GET /api/files/{id}/content — null-owner file, no session/key → anonym
   // caller, even when auth is not required at the instance level — an
   // anonymous pass-through here was GHSA-2jm2-mpx8-6523's exact shape.
   const content = makeFileContent("hello batch");
-  const file = createTestFile({ filename: "hello.jsonl", content });
+  const file = await createTestFile({ filename: "hello.jsonl", content });
 
   const res = await fileContentRoute.GET(
     new Request(`http://localhost/api/files/${file.id}/content`),
@@ -81,7 +83,11 @@ test("GET /api/files/{id}/content — null-owner file, no session/key → anonym
 
 test("GET /api/files/{id}/content — with management session → 200 and file content", async () => {
   const content = makeFileContent('{"custom_id":"req-1","response":{"status_code":200}}');
-  const file = createTestFile({ filename: "output.jsonl", content, mimeType: "application/jsonl" });
+  const file = await createTestFile({
+    filename: "output.jsonl",
+    content,
+    mimeType: "application/jsonl",
+  });
 
   const res = await fileContentRoute.GET(
     await makeManagementSessionRequest(`http://localhost/api/files/${file.id}/content`),
@@ -95,7 +101,11 @@ test("GET /api/files/{id}/content — with management session → 200 and file c
 
 test("GET /api/files/{id}/content — with management session → content-type header set", async () => {
   const content = makeFileContent("data");
-  const file = createTestFile({ filename: "data.jsonl", content, mimeType: "application/jsonl" });
+  const file = await createTestFile({
+    filename: "data.jsonl",
+    content,
+    mimeType: "application/jsonl",
+  });
 
   const res = await fileContentRoute.GET(
     await makeManagementSessionRequest(`http://localhost/api/files/${file.id}/content`),
@@ -111,7 +121,7 @@ test("GET /api/files/{id}/content — with management session → content-type h
 
 test("GET /api/files/{id}/content — content-disposition includes filename", async () => {
   const content = makeFileContent("payload");
-  const file = createTestFile({ filename: "my_batch_output.jsonl", content });
+  const file = await createTestFile({ filename: "my_batch_output.jsonl", content });
 
   const res = await fileContentRoute.GET(
     await makeManagementSessionRequest(`http://localhost/api/files/${file.id}/content`),
@@ -132,7 +142,7 @@ test("GET /api/files/{id}/content — content-disposition includes filename", as
 
 test("GET /api/files/{id}/content — fallbacks to octet-stream when no mimeType", async () => {
   const content = makeFileContent("raw");
-  const file = createTestFile({ filename: "raw.bin", content, mimeType: undefined });
+  const file = await createTestFile({ filename: "raw.bin", content, mimeType: undefined });
 
   const res = await fileContentRoute.GET(
     await makeManagementSessionRequest(`http://localhost/api/files/${file.id}/content`),
@@ -162,10 +172,10 @@ test("GET /api/files/{id}/content — unknown file ID returns 404", async () => 
 
 test("GET /api/files/{id}/content — deleted file returns 404", async () => {
   const content = makeFileContent("will be deleted");
-  const file = createTestFile({ filename: "deleted.jsonl", content });
+  const file = await createTestFile({ filename: "deleted.jsonl", content });
 
   // Soft-delete the file
-  localDb.deleteFile(file.id);
+  await localDb.deleteFile(file.id);
 
   const res = await fileContentRoute.GET(
     await makeManagementSessionRequest(`http://localhost/api/files/${file.id}/content`),
@@ -180,7 +190,7 @@ test("GET /api/files/{id}/content — deleted file returns 404", async () => {
 test("GET /api/files/{id}/content — file with null content returns 404", async () => {
   // createFile with content=null simulates a file record with no stored bytes
   // (e.g., an expired file where content was cleared)
-  const file = localDb.createFile({
+  const file = await localDb.createFile({
     bytes: 0,
     filename: "no-content.jsonl",
     purpose: "batch",
@@ -203,7 +213,7 @@ test("GET /api/files/{id}/content — unauthenticated request is rejected when a
   process.env.INITIAL_PASSWORD = "test-password";
 
   const content = makeFileContent("secret");
-  const file = createTestFile({ filename: "secret.jsonl", content });
+  const file = await createTestFile({ filename: "secret.jsonl", content });
 
   try {
     const res = await fileContentRoute.GET(
@@ -226,7 +236,7 @@ test("GET /api/files/{id}/content — management session works when auth is requ
   process.env.INITIAL_PASSWORD = "test-password";
 
   const content = makeFileContent("authed content");
-  const file = createTestFile({ filename: "authed.jsonl", content });
+  const file = await createTestFile({ filename: "authed.jsonl", content });
 
   try {
     const res = await fileContentRoute.GET(

@@ -1,43 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-combos-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: any) {
-      if ((error?.code === "EBUSY" || error?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb().catch(() => {});
 });
 
 test("createCombo stores default strategy and supports lookup by id and name", async () => {
@@ -176,43 +148,45 @@ test("deleteCombo reports missing ids and removes existing rows", async () => {
 });
 
 test("getCombos upgrades legacy persisted entries to version 2 and resolves combo refs", async () => {
-  const db = core.getDbInstance();
+  const b = getTestBackend();
   const now = new Date().toISOString();
 
-  db.prepare(
-    "INSERT INTO combos (id, name, data, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(
-    "combo-child",
-    "child",
-    JSON.stringify({
-      id: "combo-child",
-      name: "child",
-      models: ["openai/gpt-4o-mini"],
-      strategy: "priority",
-      createdAt: now,
-      updatedAt: now,
-    }),
-    1,
-    now,
-    now
+  await b.execute(
+    "INSERT INTO combos (id, name, data, sort_order, created_at, updated_at) VALUES ($1, $2, $3::jsonb, $4, $5, $6)",
+    [
+      "combo-child",
+      "child",
+      JSON.stringify({
+        id: "combo-child",
+        name: "child",
+        models: ["openai/gpt-4o-mini"],
+        strategy: "priority",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      1,
+      now,
+      now,
+    ]
   );
 
-  db.prepare(
-    "INSERT INTO combos (id, name, data, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(
-    "combo-parent",
-    "parent",
-    JSON.stringify({
-      id: "combo-parent",
-      name: "parent",
-      models: ["child", { model: "anthropic/claude-sonnet-4", weight: 2 }],
-      strategy: "priority",
-      createdAt: now,
-      updatedAt: now,
-    }),
-    2,
-    now,
-    now
+  await b.execute(
+    "INSERT INTO combos (id, name, data, sort_order, created_at, updated_at) VALUES ($1, $2, $3::jsonb, $4, $5, $6)",
+    [
+      "combo-parent",
+      "parent",
+      JSON.stringify({
+        id: "combo-parent",
+        name: "parent",
+        models: ["child", { model: "anthropic/claude-sonnet-4", weight: 2 }],
+        strategy: "priority",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      2,
+      now,
+      now,
+    ]
   );
 
   const combos = await combosDb.getCombos();

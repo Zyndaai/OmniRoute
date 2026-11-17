@@ -7,10 +7,13 @@ import {
 } from "../../open-sse/translator/request/openai-to-gemini.ts";
 import {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
   clearGeminiThoughtSignatures,
 } from "../../open-sse/services/geminiThoughtSignatureStore.ts";
 import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { prefetchThoughtSignatures } from "../../open-sse/translator/index.ts";
+import { FORMATS } from "../../open-sse/translator/formats.ts";
 
 type ToolPart = {
   thoughtSignature?: string;
@@ -39,17 +42,17 @@ function toolParts(wire: Wire): ToolPart[] {
     .filter((part) => part.functionCall || part.functionResponse);
 }
 
-test.after(() => {
-  clearGeminiThoughtSignatures();
-  resetDbInstance();
+test.after(async () => {
+  await clearGeminiThoughtSignatures();
+  await resetDbInstance();
 });
 
-test("#15312: Responses function/custom histories get unique paired Cloud Code wire IDs", () => {
+test("#15312: Responses function/custom histories get unique paired Cloud Code wire IDs", async () => {
   const body = inputHistory();
   const original = structuredClone(body);
   const chat = openaiResponsesToOpenAIRequest("gemini-3.8-flash", body, false, null);
   const originalChat = structuredClone(chat);
-  const wire = openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false) as Wire;
+  const wire = (await openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false)) as Wire;
   const parts = toolParts(wire);
   assert.deepEqual(
     parts.filter((part) => part.functionCall).map((part) => part.functionCall.id),
@@ -66,12 +69,12 @@ test("#15312: Responses function/custom histories get unique paired Cloud Code w
   assert.deepEqual(body, original);
   assert.deepEqual(chat, originalChat);
   assert.deepEqual(
-    toolParts(openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false) as Wire),
+    toolParts((await openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false)) as Wire),
     parts
   );
 });
 
-test("ambiguous overlapping duplicate calls fail locally instead of guessing result pairing", () => {
+test("ambiguous overlapping duplicate calls fail locally instead of guessing result pairing", async () => {
   const body = {
     input: [
       { type: "message", role: "user", content: "Parallel calls" },
@@ -82,8 +85,8 @@ test("ambiguous overlapping duplicate calls fail locally instead of guessing res
     ],
   };
   const chat = openaiResponsesToOpenAIRequest("gemini-3.8-flash", body, false, null);
-  assert.throws(
-    () => openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false),
+  await assert.rejects(
+    openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false),
     (error: Error & { statusCode?: number; errorType?: string }) =>
       error.statusCode === 400 &&
       error.errorType === "invalid_request_error" &&
@@ -91,20 +94,34 @@ test("ambiguous overlapping duplicate calls fail locally instead of guessing res
   );
 });
 
-test("Antigravity resolves cached signatures with original IDs before wire normalization", () => {
-  const namespace = "chronological-test";
-  storeGeminiThoughtSignature(
+test("Antigravity resolves cached signatures with original IDs before wire normalization", async () => {
+  // Keys are model-family scoped (#4136) on both the store and the prefetch side.
+  const namespace = scopeGeminiThoughtSignatureNamespace(
+    "chronological-test",
+    "gemini-3.8-flash"
+  ) as string;
+  await storeGeminiThoughtSignature(
     buildGeminiThoughtSignatureKey(namespace, "call_repeat"),
     "original-signature"
   );
-  storeGeminiThoughtSignature(
+  await storeGeminiThoughtSignature(
     buildGeminiThoughtSignatureKey(namespace, "call_repeat_occ2"),
     "wrong-signature"
   );
   const chat = openaiResponsesToOpenAIRequest("gemini-3.8-flash", inputHistory(), false, null);
-  const envelope = openaiToAntigravityRequest("gemini-3.8-flash", chat, false, {
+  // The translators are synchronous; the async caller (translateRequest) reads the persisted
+  // signatures first and hands them over as `_thoughtSignatures`. Mirror that here.
+  // The prefetch scopes the raw connection namespace itself, so it gets the unscoped value.
+  const _thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.ANTIGRAVITY,
+    "gemini-3.8-flash",
+    chat,
+    "chronological-test"
+  );
+  const envelope = await openaiToAntigravityRequest("gemini-3.8-flash", chat, false, {
     projectId: "test-project",
     _signatureNamespace: namespace,
+    _thoughtSignatures,
   });
   const calls = toolParts(envelope.request as Wire).filter((part) => part.functionCall);
   assert.deepEqual(
@@ -117,12 +134,12 @@ test("Antigravity resolves cached signatures with original IDs before wire norma
   );
 });
 
-test("duplicate calls separated by a user turn are rejected before fallback response synthesis", () => {
+test("duplicate calls separated by a user turn are rejected before fallback response synthesis", async () => {
   const body = inputHistory();
   body.input.splice(2, 1);
   const chat = openaiResponsesToOpenAIRequest("gemini-3.8-flash", body, false, null);
-  assert.throws(
-    () => openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false),
+  await assert.rejects(
+    openaiToCloudCodeGeminiRequest("gemini-3.8-flash", chat, false),
     /overlapping tool calls/
   );
 });

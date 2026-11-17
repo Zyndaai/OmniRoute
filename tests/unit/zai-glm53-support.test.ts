@@ -107,7 +107,7 @@ test("zai GLM-5.3 effort aliases rewrite to base model and native effort", () =>
   assert.deepEqual(out.thinking, { type: "enabled", clear_thinking: false });
 });
 
-test("GlmExecutor resolves glm-5.3-flash effort aliases on the OpenAI coding transport", () => {
+test("GlmExecutor resolves glm-5.3-flash effort aliases on the OpenAI coding transport", async () => {
   const executor = new GlmExecutor("glm");
 
   for (const [alias, effort] of [
@@ -115,7 +115,7 @@ test("GlmExecutor resolves glm-5.3-flash effort aliases on the OpenAI coding tra
     ["glm-5.3-flash-low", "low"],
     ["glm-5.3-flash-max", "max"],
   ] as const) {
-    const transformed = executor.transformForTransport(
+    const transformed = await executor.transformForTransport(
       alias,
       { messages: [{ role: "user", content: "hi" }] },
       false,

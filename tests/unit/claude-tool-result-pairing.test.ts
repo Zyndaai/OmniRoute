@@ -5,8 +5,8 @@ import { FORMATS } from "../../open-sse/translator/formats.ts";
 import { translateRequest } from "../../open-sse/translator/index.ts";
 import { prepareClaudeRequest } from "../../open-sse/translator/helpers/claudeHelper.ts";
 
-function translate(body: Record<string, unknown>) {
-  return translateRequest(
+async function translate(body: Record<string, unknown>) {
+  const out = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "claude-fable-5",
@@ -14,12 +14,13 @@ function translate(body: Record<string, unknown>) {
     true,
     null,
     "github"
-  ) as { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> };
+  );
+  return out as { messages: Array<{ role: string; content: Array<Record<string, unknown>> }> };
 }
 
 describe("Claude tool result pairing", () => {
-  test("salvages orphaned results and fills missing parallel results", () => {
-    const out = translate({
+  test("salvages orphaned results and fills missing parallel results", async () => {
+    const out = await translate({
       messages: [
         { role: "user", content: "run" },
         {

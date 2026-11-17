@@ -1,169 +1,86 @@
 /**
  * Regression test for issue #8656 follow-up: model mappings saved via the UI
- * are invisible to the MITM proxy because the proxy reads from key_value
- * (namespace='mitmAlias') while the UI writes to agent_bridge_mappings.
+ * were invisible to the MITM proxy, because the proxy read a separate key_value
+ * mirror (namespace='mitmAlias') that the UI never kept in sync.
  *
- * This test verifies that syncAgentBridgeMappingsToMitmAlias() properly copies
- * mappings from agent_bridge_mappings to key_value for agents that have a
- * registered alias key in standaloneRouting.cjs::AGENT_ROUTE_CONFIG.
+ * After the PostgreSQL migration the MITM proxy reads `agent_bridge_mappings`
+ * directly, so the mirror is gone and `syncAgentBridgeMappingsToMitmAlias()` is a
+ * no-op kept for callers. These tests pin the current contract: saved mappings are
+ * the rows the proxy reads, replacing them replaces the rows, and no mitmAlias
+ * entry is written.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "fs";
-import os from "os";
-import path from "path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-8656-sync-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-
-// Import db core first to allow reset
 const core = await import("../../src/lib/db/core.ts");
-
-// Import getMitmAlias to verify key_value entries
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getMitmAlias } = await import("../../src/lib/db/models/mitmAlias.ts");
+const { setMappings, getMappingsForAgent, syncAgentBridgeMappingsToMitmAlias } =
+  await import("../../src/lib/db/agentBridgeMappings.ts");
 
-function resetDb() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+type StoredMapping = { source_model?: string; sourceModel?: string; target_model?: string; targetModel?: string };
+
+async function storedPairs(agentId: string): Promise<Array<[string, string]>> {
+  const rows = (await getMappingsForAgent(agentId)) as StoredMapping[];
+  return rows
+    .map((row): [string, string] => [
+      (row.source_model ?? row.sourceModel) as string,
+      (row.target_model ?? row.targetModel) as string,
+    ])
+    .sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
-test.after(() => {
-  try {
-    fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  } catch {
-    /* noop */
-  }
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
-// ── Sync Tests ─────────────────────────────────────────────────────────────
-
-test("syncAgentBridgeMappingsToMitmAlias: copies antigravity mappings to key_value", async () => {
-  // Dynamic import after DB reset
-  const { setMappings, syncAgentBridgeMappingsToMitmAlias } = await import(
-    "../../src/lib/db/agentBridgeMappings.ts?t=" + Date.now()
-  );
-
-  // Arrange: save mappings for antigravity
-  setMappings("antigravity", [
+test("setMappings stores antigravity mappings where the MITM proxy reads them", async () => {
+  await setMappings("antigravity", [
     { source: "gpt-oss-120b-medium", target: "openai/gpt-4o" },
     { source: "gemini-2.0-flash", target: "anthropic/claude-sonnet-4" },
   ]);
 
-  // Act: sync to mitmAlias
-  syncAgentBridgeMappingsToMitmAlias("antigravity");
-
-  // Get a fresh import of getMitmAlias to read the key_value table
-  const { getMitmAlias: getAlias } = await import(
-    "../../src/lib/db/models/mitmAlias.ts?t=" + Date.now()
-  );
-
-  // Assert: key_value has the mappings
-  const alias = await getAlias("antigravity");
-  assert.ok(alias, "mitmAlias for antigravity should exist");
-  assert.equal(
-    alias["gpt-oss-120b-medium"],
-    "openai/gpt-4o",
-    "gpt-oss-120b-medium should map to openai/gpt-4o"
-  );
-  assert.equal(
-    alias["gemini-2.0-flash"],
-    "anthropic/claude-sonnet-4",
-    "gemini-2.0-flash should map to anthropic/claude-sonnet-4"
-  );
+  assert.deepEqual(await storedPairs("antigravity"), [
+    ["gemini-2.0-flash", "anthropic/claude-sonnet-4"],
+    ["gpt-oss-120b-medium", "openai/gpt-4o"],
+  ]);
 });
 
-test("syncAgentBridgeMappingsToMitmAlias: skips agents not in MITM_ALIAS_AGENTS", async () => {
-  const { setMappings, syncAgentBridgeMappingsToMitmAlias } = await import(
-    "../../src/lib/db/agentBridgeMappings.ts?t=" + Date.now()
-  );
+test("the MITM alias view reads the saved mappings and the sync step changes nothing", async () => {
+  await setMappings("antigravity", [{ source: "gpt-oss-120b-medium", target: "openai/gpt-4o" }]);
+  await syncAgentBridgeMappingsToMitmAlias("antigravity");
 
-  // Arrange: save mappings for cursor (not in MITM_ALIAS_AGENTS)
-  setMappings("cursor", [{ source: "gpt-4o", target: "openai/gpt-4o" }]);
-
-  // Act: sync should skip cursor (no-op)
-  syncAgentBridgeMappingsToMitmAlias("cursor");
-
-  // Assert: key_value should have no mitmAlias entry for cursor
-  const { getMitmAlias: getAlias } = await import(
-    "../../src/lib/db/models/mitmAlias.ts?t=" + Date.now()
-  );
-  const alias = await getAlias();
-  assert.equal(alias["cursor"], undefined, "cursor should not have a mitmAlias entry");
+  assert.deepEqual(await getMitmAlias("antigravity"), {
+    "gpt-oss-120b-medium": "openai/gpt-4o",
+  });
 });
 
-test("syncAgentBridgeMappingsToMitmAlias: replaces existing mitmAlias entry", async () => {
-  const { setMappings, syncAgentBridgeMappingsToMitmAlias } = await import(
-    "../../src/lib/db/agentBridgeMappings.ts?t=" + Date.now()
-  );
-
-  // Arrange: save initial mappings and sync
-  setMappings("antigravity", [{ source: "gpt-oss-120b-medium", target: "openai/gpt-4o" }]);
-  syncAgentBridgeMappingsToMitmAlias("antigravity");
-
-  // Act: save different mappings and sync again
-  setMappings("antigravity", [
+test("setMappings replaces the previous mappings for the agent", async () => {
+  await setMappings("antigravity", [{ source: "gpt-oss-120b-medium", target: "openai/gpt-4o" }]);
+  await setMappings("antigravity", [
     { source: "gpt-oss-120b-medium", target: "anthropic/claude-opus-4" },
   ]);
-  syncAgentBridgeMappingsToMitmAlias("antigravity");
 
-  // Assert: key_value should have the updated mapping
-  const { getMitmAlias: getAlias } = await import(
-    "../../src/lib/db/models/mitmAlias.ts?t=" + Date.now()
-  );
-  const alias = await getAlias("antigravity");
-  assert.equal(
-    alias["gpt-oss-120b-medium"],
-    "anthropic/claude-opus-4",
-    "should have updated mapping after re-sync"
-  );
+  assert.deepEqual(await storedPairs("antigravity"), [
+    ["gpt-oss-120b-medium", "anthropic/claude-opus-4"],
+  ]);
 });
 
-test("syncAgentBridgeMappingsToMitmAlias: empty mappings clear key_value entry", async () => {
-  const { setMappings, syncAgentBridgeMappingsToMitmAlias } = await import(
-    "../../src/lib/db/agentBridgeMappings.ts?t=" + Date.now()
-  );
+test("setMappings with an empty list clears the agent's stored mappings", async () => {
+  await setMappings("antigravity", [{ source: "gpt-oss-120b-medium", target: "openai/gpt-4o" }]);
+  await setMappings("antigravity", []);
 
-  // Arrange: save some mappings first
-  setMappings("antigravity", [{ source: "gpt-oss-120b-medium", target: "openai/gpt-4o" }]);
-  syncAgentBridgeMappingsToMitmAlias("antigravity");
-
-  // Act: clear mappings and sync
-  setMappings("antigravity", []);
-  syncAgentBridgeMappingsToMitmAlias("antigravity");
-
-  // Assert: key_value entry should be an empty object
-  const { getMitmAlias: getAlias } = await import(
-    "../../src/lib/db/models/mitmAlias.ts?t=" + Date.now()
-  );
-  const alias = await getAlias("antigravity");
-  assert.ok(alias, "antigravity mitmAlias entry should still exist (empty object)");
-  assert.equal(Object.keys(alias).length, 0, "antigravity mitmAlias should have no mappings");
+  assert.deepEqual(await storedPairs("antigravity"), []);
 });
 
-test("syncAgentBridgeMappingsToMitmAlias: works for claude-code agent", async () => {
-  const { setMappings, syncAgentBridgeMappingsToMitmAlias } = await import(
-    "../../src/lib/db/agentBridgeMappings.ts?t=" + Date.now()
-  );
+test("setMappings stores claude-code mappings independently of other agents", async () => {
+  await setMappings("claude-code", [{ source: "claude-sonnet-4", target: "openai/gpt-4o" }]);
+  await setMappings("cursor", [{ source: "gpt-4o", target: "openai/gpt-4o" }]);
 
-  // Arrange: save and sync for claude-code
-  setMappings("claude-code", [{ source: "claude-sonnet-4", target: "openai/gpt-4o" }]);
-  syncAgentBridgeMappingsToMitmAlias("claude-code");
-
-  // Assert
-  const { getMitmAlias: getAlias } = await import(
-    "../../src/lib/db/models/mitmAlias.ts?t=" + Date.now()
-  );
-  const alias = await getAlias("claude-code");
-  assert.ok(alias, "mitmAlias for claude-code should exist");
-  assert.equal(
-    alias["claude-sonnet-4"],
-    "openai/gpt-4o",
-    "claude-sonnet-4 should map to openai/gpt-4o"
-  );
+  assert.deepEqual(await storedPairs("claude-code"), [["claude-sonnet-4", "openai/gpt-4o"]]);
+  assert.deepEqual(await storedPairs("cursor"), [["gpt-4o", "openai/gpt-4o"]]);
 });

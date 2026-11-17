@@ -22,22 +22,21 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-624
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { updateSettings } = await import("../../src/lib/db/settings.ts");
 const { safeResolveProxy } = await import("../../src/sse/handlers/chatHelpers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-function setGlobalProxyEnabled(enabled: boolean) {
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'proxyEnabled', ?)"
-  ).run(JSON.stringify(enabled));
+async function setGlobalProxyEnabled(enabled: boolean) {
+  await updateSettings({ proxyEnabled: enabled });
 }
 
 async function makeConnection(): Promise<string> {
@@ -51,7 +50,7 @@ async function makeConnection(): Promise<string> {
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -68,7 +67,7 @@ test("BLOCKS: an account proxy assigned but marked inactive (the IP-leak case)",
   await proxiesDb.assignProxyToScope("account", connId, proxy!.id);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     true,
     "a dead assigned proxy must block, not fall back to a direct egress"
   );
@@ -78,7 +77,7 @@ test("ALLOWS DIRECT: a connection with no proxy assignment at all", async () => 
   await resetStorage();
   const connId = await makeConnection();
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     false,
     "no assignment = user never configured a proxy = direct is legitimate"
   );
@@ -96,7 +95,7 @@ test("NOT BLOCKING: an assigned proxy that is still ALIVE", async () => {
   await proxiesDb.assignProxyToScope("account", connId, proxy!.id);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     false,
     "an alive assigned proxy resolves normally; nothing to block"
   );
@@ -113,10 +112,10 @@ test("EXPLICIT DIRECT: global proxyEnabled=false is a deliberate choice, not a l
   });
   await proxiesDb.updateProxy(proxy!.id, { status: "inactive" });
   await proxiesDb.assignProxyToScope("account", connId, proxy!.id);
-  setGlobalProxyEnabled(false);
+  await setGlobalProxyEnabled(false);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     false,
     "operator turned proxying off globally — direct is intended, do not block"
   );
@@ -135,7 +134,7 @@ test("BLOCKS: a dead GLOBAL proxy assignment blocks any connection", async () =>
   await proxiesDb.assignProxyToScope("global", null, proxy!.id);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     true,
     "a dead global proxy assignment must block, not leak direct"
   );
@@ -154,17 +153,17 @@ test("BLOCKS: a dead COMBO-scoped proxy assignment when the combo name is thread
   await proxiesDb.assignProxyToScope("combo", "my-combo", proxy!.id);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId, "openai", "my-combo"),
+    await proxiesDb.hasBlockingProxyAssignment(connId, "openai", "my-combo"),
     true,
     "a dead combo-scoped proxy must block when the combo name is passed"
   );
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId, "openai", "some-other-combo"),
+    await proxiesDb.hasBlockingProxyAssignment(connId, "openai", "some-other-combo"),
     false,
     "a dead combo-scoped proxy must NOT block a request routed under a different combo"
   );
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId, "openai"),
+    await proxiesDb.hasBlockingProxyAssignment(connId, "openai"),
     false,
     "without a combo name (e.g. a non-combo request), the combo-scoped assignment is irrelevant"
   );
@@ -208,7 +207,7 @@ test("BLOCKS: a dead no-auth provider proxy assignment", async () => {
   await proxiesDb.assignProxyToScope("provider", "opencode", proxy!.id);
 
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment("noauth", "opencode"),
+    await proxiesDb.hasBlockingProxyAssignment("noauth", "opencode"),
     true,
     "a dead no-auth provider proxy must block instead of allowing direct egress"
   );

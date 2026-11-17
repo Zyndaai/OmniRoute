@@ -29,7 +29,7 @@ export function isComboModelVisible(
 /** Share one hidden-model snapshot across all candidates of a recovery decision. */
 export async function createComboModelVisibility(
   hiddenModelsByProvider?: HiddenModelsByProvider
-): Promise<(model: string, provider: string) => boolean> {
+): Promise<(model: string, provider: string | null) => boolean> {
   const hidden = hiddenModelsByProvider ?? (await getHiddenModelsByProvider());
   return (model, provider) => isComboModelVisible(model, provider, hidden);
 }

@@ -33,8 +33,8 @@ const dbCore = await import("../../src/lib/db/core.ts");
 const CN_CHAT_URL = "https://api.agnes-ai.cn/v1/chat/completions";
 const INTL_CHAT_URL = "https://apihub.agnes-ai.com/v1/chat/completions";
 
-test.after(() => {
-  dbCore.closeDbInstance();
+test.after(async () => {
+  await dbCore.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -1,54 +1,47 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-model-cache-8728-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-
-const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
-
-function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 function catalogVersion() {
   return readCache.getModelCatalogCacheVersion();
 }
 
-function totalChanges() {
-  return Number(
-    (
-      core.getDbInstance().prepare("SELECT total_changes() AS count").get() as {
-        count: number;
-      }
-    ).count
+/** Rows are the only write evidence Postgres gives: a skipped write leaves updated_at alone. */
+async function syncedRow(connectionId: string) {
+  return (
+    (await getTestBackend().queryOne<{ updated_at: string; models: unknown }>(
+      "SELECT updated_at, models FROM connection_model_sync WHERE connection_id = $1",
+      [connectionId]
+    )) ?? null
   );
 }
 
-function seedSynced(providerId: string, connectionId: string, value: unknown) {
-  core
-    .getDbInstance()
-    .prepare("INSERT INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)")
-    .run(`${providerId}:${connectionId}`, JSON.stringify(value));
+// connection_model_sync rows have a foreign key to provider_connections, so a sync for an
+// unknown connection is dropped. Each test connection must exist first.
+async function ensureConnection(providerId: string, connectionId: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    [connectionId, providerId]
+  );
 }
 
-test.beforeEach(() => {
-  resetStorage();
-});
+async function seedSynced(providerId: string, connectionId: string, value: unknown) {
+  await ensureConnection(providerId, connectionId);
+  await getTestBackend().execute(
+    `INSERT INTO connection_model_sync (connection_id, provider, models) VALUES ($1, $2, $3::jsonb)`,
+    [connectionId, providerId, JSON.stringify(value)]
+  );
+}
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
 test("replace invalidates only for canonical persisted changes", async () => {
+  await ensureConnection("openai", "a");
   const initialVersion = catalogVersion();
 
   await models.replaceSyncedAvailableModelsForConnection("openai", "a", [
@@ -62,7 +55,7 @@ test("replace invalidates only for canonical persisted changes", async () => {
   ]);
   assert.equal(catalogVersion(), initialVersion + 1);
 
-  const beforeIdenticalChanges = totalChanges();
+  const beforeIdenticalRow = await syncedRow("a");
   const beforeIdenticalVersion = catalogVersion();
   await models.replaceSyncedAvailableModelsForConnection("openai", "a", [
     {
@@ -73,7 +66,11 @@ test("replace invalidates only for canonical persisted changes", async () => {
     },
     { id: "gpt-a", name: "GPT A", source: "imported" },
   ]);
-  assert.equal(totalChanges(), beforeIdenticalChanges, "canonical equality must skip the DB write");
+  assert.deepEqual(
+    await syncedRow("a"),
+    beforeIdenticalRow,
+    "canonical equality must skip the DB write"
+  );
   assert.equal(catalogVersion(), beforeIdenticalVersion, "canonical equality must not invalidate");
 
   await models.replaceSyncedAvailableModelsForConnection("openai", "a", [
@@ -90,11 +87,12 @@ test("replace invalidates only for canonical persisted changes", async () => {
 });
 
 test("replace handles empty and normalized models without phantom writes", async () => {
+  await ensureConnection("openai", "absent");
+  await ensureConnection("openai", "present");
   const startVersion = catalogVersion();
-  const startChanges = totalChanges();
 
   await models.replaceSyncedAvailableModelsForConnection("openai", "absent", []);
-  assert.equal(totalChanges(), startChanges, "absent-to-empty replacement must be a no-op");
+  assert.equal(await syncedRow("absent"), null, "absent-to-empty replacement must be a no-op");
   assert.equal(catalogVersion(), startVersion);
 
   await models.replaceSyncedAvailableModelsForConnection("openai", "absent", [
@@ -107,7 +105,7 @@ test("replace handles empty and normalized models without phantom writes", async
     ["restored"]
   );
 
-  seedSynced("openai", "present", [{ id: "existing", name: "Existing" }]);
+  await seedSynced("openai", "present", [{ id: "existing", name: "Existing" }]);
   const beforeDeleteVersion = catalogVersion();
   await models.replaceSyncedAvailableModelsForConnection("openai", "present", []);
   assert.equal(catalogVersion(), beforeDeleteVersion + 1, "present-to-empty must invalidate");
@@ -119,7 +117,7 @@ test("remove and connection/provider deletes invalidate only when rows actually 
   assert.equal(await models.removeSyncedAvailableModel("openai", "missing"), false);
   assert.equal(catalogVersion(), version);
 
-  seedSynced("openai", "a", [
+  await seedSynced("openai", "a", [
     { id: "gpt-a", name: "GPT A" },
     { id: "gpt-b", name: "GPT B" },
   ]);
@@ -135,15 +133,15 @@ test("remove and connection/provider deletes invalidate only when rows actually 
 
   assert.equal(await models.deleteSyncedAvailableModelsForProvider("openai"), 0);
   assert.equal(catalogVersion(), version);
-  seedSynced("openai", "b", [{ id: "gpt-b", name: "GPT B" }]);
-  seedSynced("openai", "c", [{ id: "gpt-c", name: "GPT C" }]);
+  await seedSynced("openai", "b", [{ id: "gpt-b", name: "GPT B" }]);
+  await seedSynced("openai", "c", [{ id: "gpt-c", name: "GPT C" }]);
   assert.equal(await models.deleteSyncedAvailableModelsForProvider("openai"), 2);
   assert.equal(catalogVersion(), ++version);
 });
 
 test("prune uses affected rows and the delegated provider delete invalidates exactly once", async () => {
-  seedSynced("openai", "keep", [{ id: "gpt-a", name: "GPT A" }]);
-  seedSynced("openai", "stale", [{ id: "gpt-b", name: "GPT B" }]);
+  await seedSynced("openai", "keep", [{ id: "gpt-a", name: "GPT A" }]);
+  await seedSynced("openai", "stale", [{ id: "gpt-b", name: "GPT B" }]);
   let version = catalogVersion();
 
   assert.equal(

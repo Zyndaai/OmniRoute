@@ -22,35 +22,38 @@ const seed = (apiKeyId: string | null, label: string) =>
   });
 
 describe("deleteFileOwnedBy — owner-scoped soft delete", () => {
-  after(() => {
-    resetDbInstance();
+  after(async () => {
+    await resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it("soft-deletes the owner's own file and nulls its content", () => {
-    const own = seed("key-A", "own");
-    assert.strictEqual(deleteFileOwnedBy(own.id, "key-A"), true);
-    assert.strictEqual(getFile(own.id), null, "metadata read hides a soft-deleted file");
-    assert.strictEqual(getFileContent(own.id), null);
+  it("soft-deletes the owner's own file and nulls its content", async () => {
+    const own = await seed("key-A", "own");
+    assert.strictEqual(await deleteFileOwnedBy(own.id, "key-A"), true);
+    assert.strictEqual(await getFile(own.id), null, "metadata read hides a soft-deleted file");
+    assert.strictEqual(await getFileContent(own.id), null);
   });
 
-  it("returns false and leaves another key's file intact", () => {
-    const other = seed("key-B", "other");
-    assert.strictEqual(deleteFileOwnedBy(other.id, "key-A"), false);
-    assert.ok(getFile(other.id));
-    assert.strictEqual(getFileContent(other.id)?.toString(), "other");
+  it("returns false and leaves another key's file intact", async () => {
+    const other = await seed("key-B", "other");
+    assert.strictEqual(await deleteFileOwnedBy(other.id, "key-A"), false);
+    assert.ok(await getFile(other.id));
+    assert.strictEqual((await getFileContent(other.id))?.toString(), "other");
   });
 
-  it("returns false for an unowned file (api_key_id NULL) — only the instance sweep reaches those", () => {
-    const unowned = seed(null, "unowned");
-    assert.strictEqual(deleteFileOwnedBy(unowned.id, "key-A"), false);
-    assert.strictEqual(getFileContent(unowned.id)?.toString(), "unowned");
+  it("returns false for an unowned file (api_key_id NULL) — only the instance sweep reaches those", async () => {
+    const unowned = await seed(null, "unowned");
+    assert.strictEqual(await deleteFileOwnedBy(unowned.id, "key-A"), false);
+    assert.strictEqual((await getFileContent(unowned.id))?.toString(), "unowned");
   });
 
-  it("throws on an empty apiKeyId instead of widening", () => {
-    const own = seed("key-A", "guard");
-    assert.throws(() => deleteFileOwnedBy(own.id, ""), /apiKeyId/);
-    assert.throws(() => deleteFileOwnedBy(own.id, undefined as unknown as string), /apiKeyId/);
-    assert.strictEqual(getFileContent(own.id)?.toString(), "guard");
+  it("throws on an empty apiKeyId instead of widening", async () => {
+    const own = await seed("key-A", "guard");
+    await assert.rejects(deleteFileOwnedBy(own.id, ""), /apiKeyId/);
+    await assert.rejects(
+      deleteFileOwnedBy(own.id, undefined as unknown as string),
+      /apiKeyId/
+    );
+    assert.strictEqual((await getFileContent(own.id))?.toString(), "guard");
   });
 });

@@ -41,13 +41,19 @@ function candidate() {
   } as unknown as Parameters<typeof scoreAutoTargets>[1][number];
 }
 
-test("scoreAutoTargets — a tier/complexity hint moves the score off tier-neutral", () => {
-  const withoutHint = scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS);
+test("scoreAutoTargets — a tier/complexity hint moves the score off tier-neutral", async () => {
+  const withoutHint = await scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS);
   const hint = {
     recommendedMinTier: "premium",
     specificity: { score: 80 },
   } as unknown as RoutingHint;
-  const withHint = scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS, hint);
+  const withHint = await scoreAutoTargets(
+    [target()],
+    [candidate()],
+    "default",
+    DEFAULT_WEIGHTS,
+    hint
+  );
 
   assert.equal(withoutHint.length, 1);
   assert.equal(withHint.length, 1);
@@ -58,8 +64,8 @@ test("scoreAutoTargets — a tier/complexity hint moves the score off tier-neutr
   );
 });
 
-test("scoreAutoTargets — a null hint is identical to no hint (backward compatible)", () => {
-  const a = scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS);
-  const b = scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS, null);
+test("scoreAutoTargets — a null hint is identical to no hint (backward compatible)", async () => {
+  const a = await scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS);
+  const b = await scoreAutoTargets([target()], [candidate()], "default", DEFAULT_WEIGHTS, null);
   assert.equal(a[0].score, b[0].score, "null hint must equal no hint (default behavior unchanged)");
 });

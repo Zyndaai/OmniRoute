@@ -70,7 +70,7 @@ test("#8560: pruneOlderInlineImages keeps the newest images and drops older ones
   assert.equal((pruned[2].content as Array<Record<string, unknown>>)[1].type, "input_image");
 });
 
-test("#8560: compressContext prunes older images before purifying history", () => {
+test("#8560: compressContext prunes older images before purifying history", async () => {
   const base64 = makeFakePngBase64(8_000);
   const messages = Array.from({ length: 6 }, (_, i) => ({
     role: "user",
@@ -83,7 +83,7 @@ test("#8560: compressContext prunes older images before purifying history", () =
   // Force pruning all the way down to keepLatest=2 (~1200 tokens saved per image).
   const target = original - 5_000;
 
-  const result = compressContext(
+  const result = await compressContext(
     { model: "gpt-5.6-terra", messages },
     { provider: "codex", maxTokens: target, reserveTokens: 0, keepLatestImages: 2 }
   );
@@ -115,7 +115,7 @@ test("#8560: compressContext prunes older images before purifying history", () =
   assert.ok(target < original);
 });
 
-test("#8560: Responses input adapts → compressContext → restore shrinks and keeps latest images", () => {
+test("#8560: Responses input adapts → compressContext → restore shrinks and keeps latest images", async () => {
   const base64 = makeFakePngBase64(12_000);
   const filler = "x".repeat(40_000); // ~10k text tokens to force compaction
   const body = {
@@ -136,7 +136,7 @@ test("#8560: Responses input adapts → compressContext → restore shrinks and 
 
   const before = estimateTokens(adapter.body.messages);
   // Compress well below the original so prune + purify must engage.
-  const result = compressContext(adapter.body, {
+  const result = await compressContext(adapter.body, {
     provider: "codex",
     model: "gpt-5.6-terra",
     maxTokens: Math.max(8_000, Math.floor(before * 0.4)),

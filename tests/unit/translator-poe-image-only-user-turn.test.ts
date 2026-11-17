@@ -50,7 +50,7 @@ test("non-poe providers are untouched (same reference)", () => {
   }
 });
 
-test("translateRequest claude->openai for poe: image-only tool_result gets a text part", () => {
+test("translateRequest claude->openai for poe: image-only tool_result gets a text part", async () => {
   const body = {
     model: "glm-5.3-flash",
     max_tokens: 64,
@@ -82,8 +82,8 @@ test("translateRequest claude->openai for poe: image-only tool_result gets a tex
       { name: "Read", description: "Read", input_schema: { type: "object", properties: {} } },
     ],
   };
-  const pick = (provider: string) => {
-    const out = translateRequest(
+  const pick = async (provider: string) => {
+    const out = await translateRequest(
       FORMATS.CLAUDE,
       FORMATS.OPENAI,
       "glm-5.3-flash",
@@ -96,13 +96,13 @@ test("translateRequest claude->openai for poe: image-only tool_result gets a tex
     };
     return out.messages[out.messages.length - 1];
   };
-  const poeLast = pick("poe");
+  const poeLast = await pick("poe");
   assert.equal(poeLast.role, "user");
   assert.deepEqual(
     (poeLast.content as { type: string }[]).map((p) => p.type),
     ["text", "image_url"]
   );
-  const otherLast = pick("glmt");
+  const otherLast = await pick("glmt");
   assert.deepEqual(
     (otherLast.content as { type: string }[]).map((p) => p.type),
     ["image_url"]

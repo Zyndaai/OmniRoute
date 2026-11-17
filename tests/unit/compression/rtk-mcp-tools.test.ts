@@ -11,6 +11,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-rtk-mcp-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const { handleRtkDiscover, handleRtkLearn } =
   await import("../../../open-sse/mcp-server/tools/compressionTools.ts");
 const { maybePersistRtkRawOutput } =
@@ -40,14 +41,14 @@ function seedSamples() {
 }
 
 beforeEach(async () => {
-  core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance(); // run migrations → mcp_tool_audit table exists
+  await core.ensureDbInitialized(); // migrations run once; mcp_tool_audit exists
+  await resetTestDb(); // empty tables (audit, samples) between tests
 });
 
 after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await cleanupTempDataDir(TEST_DATA_DIR);
 });
 

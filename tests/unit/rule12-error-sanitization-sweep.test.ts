@@ -10,8 +10,8 @@
  * path and must NOT match /at \/|[A-Za-z]:\\/ — i.e. it is the sanitized form.
  *
  * mock.module() is unavailable in this tsx/ESM + Node setup (see
- * tests/unit/proxyfetch-undici-retry.test.ts), so we monkeypatch the shared DB
- * singleton returned by getDbInstance() and restore it after each test.
+ * tests/unit/proxyfetch-undici-retry.test.ts), so we wrap the query methods of the
+ * shared Postgres backend (getTestBackend()) and restore them after each test.
  */
 
 import assert from "node:assert/strict";
@@ -30,7 +30,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const compressionRoute = await import("../../src/app/api/settings/compression/route.ts");
 const cacheEntriesRoute = await import("../../src/app/api/cache/entries/route.ts");
-const dbHealthRoute = await import("../../src/app/api/db/health/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { sanitizeErrorMessage } = await import("../../open-sse/utils/error.ts");
 
 // An error message carrying BOTH a first-line absolute source path (must be
@@ -60,33 +60,28 @@ test("sanitizeErrorMessage strips absolute paths + stack tail (self-check)", () 
   assert.ok(out.includes("<path>"), "path token should be replaced");
 });
 
-// Wrap the shared DB singleton's `prepare` so any statement whose SQL matches
-// `sqlMatch` throws our leaky error; everything else (auth's getSettings, etc.)
-// keeps working. Returns a restore fn.
+// Wrap the shared backend's query methods so any statement whose SQL contains
+// `sqlMatch` rejects with our leaky error; everything else (auth's settings read,
+// etc.) keeps working. Returns a restore fn.
 function patchPrepareToThrow(sqlMatch: string): () => void {
-  const db = core.getDbInstance();
-  const orig = db.prepare.bind(db);
-  (db as unknown as { prepare: unknown }).prepare = (sql: string, ...rest: unknown[]) => {
-    if (typeof sql === "string" && sql.includes(sqlMatch)) {
-      throw makeLeakyError();
+  const backend = getTestBackend() as unknown as Record<string, unknown>;
+  const methods = ["query", "queryOne", "execute"] as const;
+  const originals: Record<string, unknown> = {};
+  for (const method of methods) {
+    const original = backend[method] as (...args: unknown[]) => Promise<unknown>;
+    originals[method] = original;
+    backend[method] = (sql: unknown, params?: unknown, ...rest: unknown[]) => {
+      const text = typeof sql === "string" ? sql : "";
+      if (text.includes(sqlMatch) || JSON.stringify(params ?? []).includes(sqlMatch)) {
+        return Promise.reject(makeLeakyError());
+      }
+      return original.call(backend, sql, params, ...rest);
+    };
+  }
+  return () => {
+    for (const method of methods) {
+      backend[method] = originals[method];
     }
-    return orig(sql, ...(rest as []));
-  };
-  return () => {
-    (db as unknown as { prepare: unknown }).prepare = orig;
-  };
-}
-
-// #13717 runs the managed health check in a child process for a real file-backed DB;
-// a child never inherits the JS stubs below, so force the owning-connection path.
-// (#13149 additionally makes the dashboard GET skip the integrity scan, so the throw
-// has to come from a prepare() on the schema-version probe, not from pragma().)
-function forceOwningConnectionPath(): () => void {
-  const db = core.getDbInstance();
-  const nameDescriptor = Object.getOwnPropertyDescriptor(db, "name");
-  Object.defineProperty(db, "name", { configurable: true, value: ":memory:" });
-  return () => {
-    if (nameDescriptor) Object.defineProperty(db, "name", nameDescriptor);
   };
 }
 
@@ -99,8 +94,8 @@ function assertSanitized(raw: string, context: string): void {
   assert.ok(!/at \/|[A-Za-z]:\\/.test(raw), `${context}: matched /at \\/|[A-Za-z]:\\\\/ → ${raw}`);
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -110,7 +105,7 @@ test.after(() => {
 });
 
 test("GET /api/settings/compression → 500 body is sanitized (shape { error })", async () => {
-  const restore = patchPrepareToThrow("FROM key_value WHERE namespace = ?");
+  const restore = patchPrepareToThrow("compression");
   try {
     const res = await compressionRoute.GET(
       makeRequest("http://localhost/api/settings/compression")
@@ -134,20 +129,5 @@ test("GET /api/cache/entries → 500 body is sanitized (shape { error })", async
     assertSanitized(body.error, "cache/entries GET");
   } finally {
     restore();
-  }
-});
-
-test("GET /api/db/health → 500 body is sanitized (shape { error: { message } })", async () => {
-  const restoreName = forceOwningConnectionPath();
-  const restore = patchPrepareToThrow("SELECT value FROM db_meta WHERE key = 'schema_version'");
-  try {
-    const res = await dbHealthRoute.GET(makeRequest("http://localhost/api/db/health"));
-    assert.equal(res.status, 500);
-    const body = (await res.json()) as { error: { message: string } };
-    assert.equal(typeof body.error.message, "string");
-    assertSanitized(body.error.message, "db/health GET");
-  } finally {
-    restore();
-    restoreName();
   }
 });

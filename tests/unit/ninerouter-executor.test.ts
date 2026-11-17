@@ -8,17 +8,16 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ninerouter-exec-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
-const db = core.getDbInstance();
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 // Seed version_manager row so getOrCreateApiKey can read/write
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager
+await getTestBackend().execute(
+  `INSERT INTO version_manager
      (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('9router', 'stopped', 20130, 0, 1, 0)`
-).run();
+   VALUES ('9router', 'stopped', 20130, false, true, false)
+   ON CONFLICT (tool) DO NOTHING`
+);
 
 // ─── Registry helpers ─────────────────────────────────────────────────────────
 const { registerSupervisor, unregisterSupervisor } =

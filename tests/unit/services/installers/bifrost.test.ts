@@ -9,7 +9,6 @@ const FAKE_BIN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-bifrost-fa
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const originalPath = process.env.PATH ?? "";
 process.env.PATH = `${FAKE_BIN_DIR}:${originalPath}`;
@@ -59,11 +58,12 @@ fs.writeFileSync(fakeNpmPath, process.platform === "win32" ? fakeNpmCmd : fakeNp
 
 // DB bootstrap (must be before bifrost import due to db/core eager init)
 const core = await import("../../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('bifrost', 'not_installed', 8080, 0, 1, 1)`
-).run();
+const { getTestBackend } = await import("../../../helpers/postgres.ts");
+await getTestBackend().execute(
+  `INSERT INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
+   VALUES ('bifrost', 'not_installed', 8080, false, true, true)
+   ON CONFLICT (tool) DO NOTHING`
+);
 
 const {
   install,
@@ -76,9 +76,9 @@ const {
   BIFROST_INSTALL_DIR,
 } = await import("../../../../src/lib/services/installers/bifrost.ts");
 
-test.after(() => {
+test.after(async () => {
   process.env.PATH = originalPath;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(FAKE_BIN_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

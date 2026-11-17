@@ -53,9 +53,11 @@ test("PII data-mutation flags are opt-in (default 'false')", async (t) => {
     delete process.env.PII_REDACTION_ENABLED;
     delete process.env.PII_RESPONSE_SANITIZATION;
     const { clearAllFeatureFlagOverrides } = await import("@/lib/db/featureFlags");
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
 
-    const { isFeatureFlagEnabled } = await import("@/shared/utils/featureFlags");
+    const { isFeatureFlagEnabled, refreshFeatureFlagSnapshot } =
+      await import("@/shared/utils/featureFlags");
+    await refreshFeatureFlagSnapshot();
     assert.strictEqual(isFeatureFlagEnabled("PII_REDACTION_ENABLED"), false);
     assert.strictEqual(isFeatureFlagEnabled("PII_RESPONSE_SANITIZATION"), false);
   });
@@ -63,7 +65,9 @@ test("PII data-mutation flags are opt-in (default 'false')", async (t) => {
   await t.test("response data passes through untouched by default", async () => {
     delete process.env.PII_RESPONSE_SANITIZATION;
     const { clearAllFeatureFlagOverrides } = await import("@/lib/db/featureFlags");
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
+    const { refreshFeatureFlagSnapshot } = await import("@/shared/utils/featureFlags");
+    await refreshFeatureFlagSnapshot();
 
     const { sanitizePII, sanitizePIIResponse } = await import("@/lib/piiSanitizer");
 

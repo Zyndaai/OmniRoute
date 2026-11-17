@@ -14,37 +14,34 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "sensenova-15622-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { addCustomModel } = await import("../../src/lib/db/models.ts");
 const { getModelInfoCore } = await import("../../open-sse/services/model.ts");
 
 const PREFIXED = "sensenova/sensenova-6.8-flash-lite";
 const BARE = "sensenova-6.8-flash-lite";
 
-function seedConnection(provider: string, id: string, active = 1) {
+async function seedConnection(provider: string, id: string, active = 1) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT OR REPLACE INTO provider_connections
-         (id, provider, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(id, provider, active, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = EXCLUDED.is_active`,
+    [id, provider, active === 1, now, now]
+  );
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("#15622 sensenova/<customModel> routes to sensenova when the provider is active and has the id", async () => {
-  seedConnection("sensenova", "sensenova-conn-15622");
+  await seedConnection("sensenova", "sensenova-conn-15622");
   await addCustomModel("sensenova", BARE, "SenseNova 6.8 Flash Lite");
 
   const info = await getModelInfoCore(PREFIXED, null);
@@ -53,7 +50,7 @@ test("#15622 sensenova/<customModel> routes to sensenova when the provider is ac
 });
 
 test("#15622 inactive sensenova connection keeps the exact-id behaviour", async () => {
-  seedConnection("sensenova", "sensenova-conn-15622", 0);
+  await seedConnection("sensenova", "sensenova-conn-15622", 0);
   await addCustomModel("sensenova", BARE, "SenseNova 6.8 Flash Lite");
 
   const info = await getModelInfoCore(PREFIXED, null);
@@ -61,7 +58,7 @@ test("#15622 inactive sensenova connection keeps the exact-id behaviour", async 
 });
 
 test("#15622 prefix whose provider has no such model anywhere stays an exact id", async () => {
-  seedConnection("sensenova", "sensenova-conn-15622");
+  await seedConnection("sensenova", "sensenova-conn-15622");
 
   const info = await getModelInfoCore(PREFIXED, null);
   assert.notEqual(info.provider, "sensenova");

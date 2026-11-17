@@ -10,7 +10,6 @@ import path from "node:path";
 // are unaffected. Isolated DATA_DIR + DB handle closed in test.after.
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-mgmt-auth-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 // Force isAuthRequired() === true deterministically (config'd password present).
 process.env.INITIAL_PASSWORD = "test-pass";
 
@@ -26,9 +25,9 @@ function req(method: string, pathname: string, token?: string): Request {
   return new Request(`${BASE}${pathname}`, { method, headers });
 }
 
-test.after(() => {
+test.after(async () => {
   try {
-    core.resetDbInstance();
+    await core.resetDbInstance();
   } catch {}
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -58,7 +57,7 @@ test("internal service token requires the trusted loopback locality marker", asy
 });
 
 test("read token: allowed on GET, rejected (403) on a write route", async () => {
-  const { secret } = at.createAccessToken({ name: "read-tok", scope: "read" });
+  const { secret } = await at.createAccessToken({ name: "read-tok", scope: "read" });
   assert.equal(await requireManagementAuth(req("GET", "/api/v1/models", secret)), null);
 
   const denied = await requireManagementAuth(req("POST", "/api/keys", secret));
@@ -67,7 +66,7 @@ test("read token: allowed on GET, rejected (403) on a write route", async () => 
 });
 
 test("write token: allowed on write route, rejected (403) on admin route", async () => {
-  const { secret } = at.createAccessToken({ name: "write-tok", scope: "write" });
+  const { secret } = await at.createAccessToken({ name: "write-tok", scope: "write" });
   assert.equal(await requireManagementAuth(req("POST", "/api/combos", secret)), null);
   assert.equal(await requireManagementAuth(req("GET", "/api/v1/models", secret)), null);
 
@@ -79,7 +78,7 @@ test("write token: allowed on write route, rejected (403) on admin route", async
 });
 
 test("admin token: allowed on admin route", async () => {
-  const { secret } = at.createAccessToken({ name: "admin-tok", scope: "admin" });
+  const { secret } = await at.createAccessToken({ name: "admin-tok", scope: "admin" });
   assert.equal(await requireManagementAuth(req("POST", "/api/cli/tokens", secret)), null);
   assert.equal(await requireManagementAuth(req("POST", "/api/providers", secret)), null);
 });
@@ -91,15 +90,19 @@ test("invalid/expired access token is rejected with 401", async () => {
   assert.equal(bad?.status, 401);
 
   const past = new Date(Date.now() - 60_000).toISOString();
-  const { secret } = at.createAccessToken({ name: "exp", scope: "admin", expiresAt: past });
+  const { secret } = await at.createAccessToken({
+    name: "exp",
+    scope: "admin",
+    expiresAt: past,
+  });
   const expired = await requireManagementAuth(req("GET", "/api/v1/models", secret));
   assert.equal(expired?.status, 401);
 });
 
 test("revoked access token is rejected", async () => {
-  const { secret, record } = at.createAccessToken({ name: "rev", scope: "admin" });
+  const { secret, record } = await at.createAccessToken({ name: "rev", scope: "admin" });
   assert.equal(await requireManagementAuth(req("GET", "/api/v1/models", secret)), null);
-  at.revokeAccessToken(record.id);
+  await at.revokeAccessToken(record.id);
   const denied = await requireManagementAuth(req("GET", "/api/v1/models", secret));
   assert.equal(denied?.status, 401);
 });

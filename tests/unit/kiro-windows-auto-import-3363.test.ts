@@ -28,6 +28,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-kiro-3363
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // Import the GET handler at the module level so the DB is initialised once
 // before any test runs.
@@ -40,10 +41,10 @@ const ORIGINAL_FETCH = globalThis.fetch;
 
 let tmpHome: string;
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-kiro-3363-"));
-  // Reset DB instance so each test gets a clean settings DB (no requireLogin).
-  core.resetDbInstance();
+  // Empty the database so each test gets a clean settings DB (no requireLogin).
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   // Override HOME so homedir() returns a temp dir where no kiro-cli DB exists.
@@ -72,8 +73,8 @@ test.afterEach(() => {
   if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

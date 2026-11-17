@@ -45,7 +45,7 @@ function jsonRequest(url: string, method: string, body: string): Request {
 const manageKey = await apiKeysDb.createApiKey("manage-malformed-json", "machine-relay", [
   "manage",
 ]);
-const relayTokenId = relayDb.createRelayToken({ name: "malformed-json-target" }).id;
+const relayTokenId = (await relayDb.createRelayToken({ name: "malformed-json-target" })).id;
 const relayUrl = `http://localhost/api/relay/tokens/${relayTokenId}`;
 const relayParams = () => ({ params: Promise.resolve({ id: relayTokenId }) });
 
@@ -55,9 +55,9 @@ function managedJsonRequest(url: string, method: string, body: string): Request 
   return request;
 }
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -91,7 +91,7 @@ test("PATCH /api/relay/tokens/[id] — malformed JSON body returns 400", async (
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error?: string };
   assert.equal(body.error, "Invalid JSON body");
-  assert.equal(relayDb.getRelayToken(relayTokenId)?.name, "malformed-json-target");
+  assert.equal((await relayDb.getRelayToken(relayTokenId))?.name, "malformed-json-target");
 });
 
 test("PATCH /api/relay/tokens/[id] — well-formed but empty update still returns 400", async () => {

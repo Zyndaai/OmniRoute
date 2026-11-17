@@ -485,7 +485,7 @@ test("#9597 matrix: bridge transformation clears the real fail-closed combo visi
 
   assert.equal(deriveRequestCompatibilityRequirements(rawPayload).requiresVision, true);
 
-  const rawFiltered = filterTargetsByRequestCompatibility([target], rawPayload, comboLog);
+  const rawFiltered = await filterTargetsByRequestCompatibility([target], rawPayload, comboLog);
 
   assert.equal(
     rawFiltered.length,
@@ -493,7 +493,7 @@ test("#9597 matrix: bridge transformation clears the real fail-closed combo visi
     "the existing fail-closed combo filter must still reject the raw image request"
   );
 
-  const rawExhaustion = describeCapabilityFilterExhaustion([target], rawPayload, "glm5.2");
+  const rawExhaustion = await describeCapabilityFilterExhaustion([target], rawPayload, "glm5.2");
 
   assert.ok(rawExhaustion);
   assert.equal(rawExhaustion.terminalReason, "capability_mismatch");
@@ -527,12 +527,20 @@ test("#9597 matrix: bridge transformation clears the real fail-closed combo visi
     "Vision Bridge must remove the image requirement before combo filtering"
   );
 
-  const filteredAfterBridge = filterTargetsByRequestCompatibility([target], modified, comboLog);
+  const filteredAfterBridge = await filterTargetsByRequestCompatibility(
+    [target],
+    modified,
+    comboLog
+  );
 
   assert.equal(filteredAfterBridge.length, 1);
   assert.equal(filteredAfterBridge[0]?.modelStr, target.modelStr);
 
-  const exhaustionAfterBridge = describeCapabilityFilterExhaustion([target], modified, "glm5.2");
+  const exhaustionAfterBridge = await describeCapabilityFilterExhaustion(
+    [target],
+    modified,
+    "glm5.2"
+  );
 
   assert.equal(
     exhaustionAfterBridge,

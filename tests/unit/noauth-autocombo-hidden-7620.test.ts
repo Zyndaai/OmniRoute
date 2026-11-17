@@ -23,9 +23,11 @@ const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -41,6 +43,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -50,9 +53,9 @@ test.after(async () => {
 });
 
 test("#7620: a no-auth model hidden via the eye icon (isHidden:true) must be ABSENT from the auto-combo candidate pool", async () => {
-  modelsDb.setModelIsHidden("duckduckgo-web", "gpt-5.4-mini", true);
+  await modelsDb.setModelIsHidden("duckduckgo-web", "gpt-5.4-mini", true);
 
-  const hiddenMap = modelsDb.getHiddenModelsByProvider();
+  const hiddenMap = await modelsDb.getHiddenModelsByProvider();
   const hidden = [...hiddenMap.values()].some((ids) => ids.has("gpt-5.4-mini"));
   assert.equal(
     hidden,

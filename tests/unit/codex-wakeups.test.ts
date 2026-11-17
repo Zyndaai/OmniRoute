@@ -1,9 +1,9 @@
 /**
  * Scheduled Codex account wakeups — persistence (claim/lease/recovery) and the scheduler.
  *
- * The store runs against a throwaway DATA_DIR SQLite file. The per-account ping goes
- * through injected deps (no network, no real executor), and every timer the service
- * arms is cleared before the call returns, so nothing keeps the test process alive.
+ * The store runs against the per-file PostgreSQL database (tests/_setup/isolatePostgres.ts). The
+ * per-account ping goes through injected deps (no network, no real executor), and every timer the
+ * service arms is cleared before the call returns, so nothing keeps the test process alive.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -19,19 +19,18 @@ process.env.APP_LOG_TO_FILE = "false";
 const store = await import("../../src/lib/db/codexWakeups.ts");
 const service = await import("../../src/lib/services/codexWakeups.ts");
 const { nextWakeupAt } = await import("../../src/lib/services/codexWakeupSchedule.ts");
-const { resetDbInstance, getDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 test.after(async () => {
   const { flushProxyLogsSync } = await import("../../src/lib/proxyLogger.ts");
   flushProxyLogsSync();
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(directory, { recursive: true, force: true });
 });
 
-test.beforeEach(() => {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM codex_wakeup_runs").run();
-  db.prepare("DELETE FROM codex_wakeup_tasks").run();
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
 const T0 = Date.parse("2026-03-10T09:00:00.000Z");
@@ -102,9 +101,9 @@ function buildDeps(overrides: Record<string, unknown> = {}, connections: Conn[] 
 
 // --- store --------------------------------------------------------------------
 
-test("store round-trips a task and lists it", () => {
-  const created = createDueTask({ name: "Daily", connectionIds: ["a", "b"] });
-  const listed = store.listCodexWakeupTasks();
+test("store round-trips a task and lists it", async () => {
+  const created = await createDueTask({ name: "Daily", connectionIds: ["a", "b"] });
+  const listed = await store.listCodexWakeupTasks();
   assert.equal(listed.length, 1);
   assert.deepEqual(listed[0], created);
   assert.deepEqual(created.connectionIds, ["a", "b"]);
@@ -112,60 +111,64 @@ test("store round-trips a task and lists it", () => {
   assert.deepEqual(created.schedule, { kind: "interval", minutes: 60 });
 });
 
-test("a scheduled claim needs a due, enabled task and advances next_run_at", () => {
-  const notDue = store.createCodexWakeupTask(taskInput(), new Date(T0 + 60_000).toISOString(), T0);
-  assert.equal(store.claimCodexWakeupRun(notDue.id, "scheduled", T0, nextWakeupAt), null);
-  const disabled = createDueTask({ enabled: false });
-  assert.equal(store.claimCodexWakeupRun(disabled.id, "scheduled", T0, nextWakeupAt), null);
+test("a scheduled claim needs a due, enabled task and advances next_run_at", async () => {
+  const notDue = await store.createCodexWakeupTask(
+    taskInput(),
+    new Date(T0 + 60_000).toISOString(),
+    T0
+  );
+  assert.equal(await store.claimCodexWakeupRun(notDue.id, "scheduled", T0, nextWakeupAt), null);
+  const disabled = await createDueTask({ enabled: false });
+  assert.equal(await store.claimCodexWakeupRun(disabled.id, "scheduled", T0, nextWakeupAt), null);
 
-  const due = createDueTask();
-  const claim = store.claimCodexWakeupRun(due.id, "scheduled", T0, nextWakeupAt);
+  const due = await createDueTask();
+  const claim = await store.claimCodexWakeupRun(due.id, "scheduled", T0, nextWakeupAt);
   assert.ok(claim);
   assert.equal(claim.run.status, "running");
   assert.equal(claim.run.trigger, "scheduled");
-  assert.equal(store.getCodexWakeupTask(due.id)?.nextRunAt, "2026-03-10T10:00:00.000Z");
+  assert.equal((await store.getCodexWakeupTask(due.id))?.nextRunAt, "2026-03-10T10:00:00.000Z");
 });
 
-test("a live run blocks a second claim of the same task (lease)", () => {
-  const task = createDueTask();
-  assert.ok(store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt));
-  assert.equal(store.claimCodexWakeupRun(task.id, "manual", T0 + 1000, nextWakeupAt), null);
-  assert.throws(
-    () => store.updateCodexWakeupTask(task.id, taskInput(), null, T0 + 1000),
+test("a live run blocks a second claim of the same task (lease)", async () => {
+  const task = await createDueTask();
+  assert.ok(await store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt));
+  assert.equal(await store.claimCodexWakeupRun(task.id, "manual", T0 + 1000, nextWakeupAt), null);
+  await assert.rejects(
+    store.updateCodexWakeupTask(task.id, taskInput(), null, T0 + 1000),
     (err: unknown) => err instanceof store.CodexWakeupStoreError && err.code === "running"
   );
-  assert.throws(
-    () => store.deleteCodexWakeupTask(task.id, T0 + 1000),
+  await assert.rejects(
+    store.deleteCodexWakeupTask(task.id, T0 + 1000),
     (err: unknown) => err instanceof store.CodexWakeupStoreError && err.code === "running"
   );
 });
 
-test("a manual claim leaves the schedule untouched", () => {
-  const task = createDueTask();
-  assert.ok(store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt));
-  assert.equal(store.getCodexWakeupTask(task.id)?.nextRunAt, task.nextRunAt);
+test("a manual claim leaves the schedule untouched", async () => {
+  const task = await createDueTask();
+  assert.ok(await store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt));
+  assert.equal((await store.getCodexWakeupTask(task.id))?.nextRunAt, task.nextRunAt);
 });
 
-test("an orphaned running run is recovered as interrupted once its lease expires", () => {
-  const task = createDueTask();
-  const claim = store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
+test("an orphaned running run is recovered as interrupted once its lease expires", async () => {
+  const task = await createDueTask();
+  const claim = await store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
   assert.ok(claim);
-  assert.equal(store.recoverCodexWakeupRuns(T0 + 1000), 0, "lease still live");
-  assert.equal(store.recoverCodexWakeupRuns(claim.run.leaseExpiresAt), 1);
-  const [run] = store.listCodexWakeupRuns();
+  assert.equal(await store.recoverCodexWakeupRuns(T0 + 1000), 0, "lease still live");
+  assert.equal(await store.recoverCodexWakeupRuns(claim.run.leaseExpiresAt), 1);
+  const [run] = await store.listCodexWakeupRuns();
   assert.equal(run.status, "interrupted");
   assert.ok(run.finishedAt);
   // Results recorded after recovery are dropped: the run is no longer running.
-  store.recordCodexWakeupResult(claim.run.id, {
+  await store.recordCodexWakeupResult(claim.run.id, {
     connectionId: "codex-1",
     status: "succeeded",
     reason: "completed",
     durationMs: 1,
   });
-  assert.deepEqual(store.listCodexWakeupRuns()[0].results, []);
+  assert.deepEqual((await store.listCodexWakeupRuns())[0].results, []);
 });
 
-test("finishing a run derives its status from the per-account results", () => {
+test("finishing a run derives its status from the per-account results", async () => {
   const cases: [string[], string][] = [
     [["succeeded", "succeeded"], "succeeded"],
     [["succeeded", "skipped"], "partial"],
@@ -173,44 +176,44 @@ test("finishing a run derives its status from the per-account results", () => {
     [[], "interrupted"],
   ];
   for (const [statuses, expected] of cases) {
-    const task = createDueTask();
-    const claim = store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
+    const task = await createDueTask();
+    const claim = await store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
     assert.ok(claim);
     for (const status of statuses) {
-      store.recordCodexWakeupResult(claim.run.id, {
+      await store.recordCodexWakeupResult(claim.run.id, {
         connectionId: "c",
         status: status as "succeeded",
         reason: "completed",
         durationMs: 5,
       });
     }
-    assert.equal(store.finishCodexWakeupRun(claim.run.id, T0 + 10)?.status, expected);
+    assert.equal((await store.finishCodexWakeupRun(claim.run.id, T0 + 10))?.status, expected);
   }
 });
 
-test("run history is pruned to the newest finished runs", () => {
-  const task = createDueTask();
+test("run history is pruned to the newest finished runs", async () => {
+  const task = await createDueTask();
   for (let i = 0; i < store.CODEX_WAKEUP_MAX_RUNS + 5; i += 1) {
-    const claim = store.claimCodexWakeupRun(task.id, "manual", T0 + i * 1000, nextWakeupAt);
+    const claim = await store.claimCodexWakeupRun(task.id, "manual", T0 + i * 1000, nextWakeupAt);
     assert.ok(claim);
-    store.finishCodexWakeupRun(claim.run.id, T0 + i * 1000 + 1);
+    await store.finishCodexWakeupRun(claim.run.id, T0 + i * 1000 + 1);
   }
-  const count = getDbInstance().prepare("SELECT COUNT(*) AS n FROM codex_wakeup_runs").get() as {
-    n: number;
-  };
-  assert.equal(count.n, store.CODEX_WAKEUP_MAX_RUNS);
+  const count = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM codex_wakeup_runs"
+  );
+  assert.equal(count?.n, store.CODEX_WAKEUP_MAX_RUNS);
 });
 
-test("deleting a task removes it and its runs; unknown ids are not_found", () => {
-  const task = createDueTask();
-  const claim = store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
+test("deleting a task removes it and its runs; unknown ids are not_found", async () => {
+  const task = await createDueTask();
+  const claim = await store.claimCodexWakeupRun(task.id, "manual", T0, nextWakeupAt);
   assert.ok(claim);
-  store.finishCodexWakeupRun(claim.run.id, T0 + 1);
-  store.deleteCodexWakeupTask(task.id, T0 + 2);
-  assert.equal(store.getCodexWakeupTask(task.id), null);
-  assert.equal(store.listCodexWakeupRuns().length, 0);
-  assert.throws(
-    () => store.deleteCodexWakeupTask(task.id, T0 + 3),
+  await store.finishCodexWakeupRun(claim.run.id, T0 + 1);
+  await store.deleteCodexWakeupTask(task.id, T0 + 2);
+  assert.equal(await store.getCodexWakeupTask(task.id), null);
+  assert.equal((await store.listCodexWakeupRuns()).length, 0);
+  await assert.rejects(
+    store.deleteCodexWakeupTask(task.id, T0 + 3),
     (err: unknown) => err instanceof store.CodexWakeupStoreError && err.code === "not_found"
   );
 });
@@ -338,8 +341,8 @@ test("wakeup ping maps a thrown error to a fixed reason without leaking it", asy
 // --- scheduler tick ---------------------------------------------------------------
 
 test("the tick runs only due tasks, records each account and advances the schedule", async () => {
-  const due = createDueTask({ connectionIds: ["codex-1", "codex-2"] });
-  const later = store.createCodexWakeupTask(
+  const due = await createDueTask({ connectionIds: ["codex-1", "codex-2"] });
+  const later = await store.createCodexWakeupTask(
     taskInput({ name: "Later" }),
     new Date(T0 + 3_600_000).toISOString(),
     T0
@@ -351,7 +354,7 @@ test("the tick runs only due tasks, records each account and advances the schedu
   await service.waitForCodexWakeupRuns(state);
 
   assert.equal(calls.execute.length, 2);
-  const runs = store.listCodexWakeupRuns();
+  const runs = await store.listCodexWakeupRuns();
   assert.equal(runs.length, 1);
   assert.equal(runs[0].taskId, due.id);
   assert.equal(runs[0].status, "succeeded");
@@ -362,13 +365,13 @@ test("the tick runs only due tasks, records each account and advances the schedu
       ["codex-2", "succeeded", "completed"],
     ]
   );
-  assert.equal(store.getCodexWakeupTask(due.id)?.nextRunAt, "2026-03-10T10:00:00.000Z");
-  assert.equal(store.getCodexWakeupTask(later.id)?.nextRunAt, later.nextRunAt);
+  assert.equal((await store.getCodexWakeupTask(due.id))?.nextRunAt, "2026-03-10T10:00:00.000Z");
+  assert.equal((await store.getCodexWakeupTask(later.id))?.nextRunAt, later.nextRunAt);
 });
 
 test("a schedule missed while the server was down runs once, not once per missed slot", async () => {
   // Due 5 hours ago on an hourly interval: one run, then the next slot is counted from now.
-  const task = store.createCodexWakeupTask(
+  const task = await store.createCodexWakeupTask(
     taskInput(),
     new Date(T0 - 5 * 3_600_000).toISOString(),
     T0
@@ -380,15 +383,15 @@ test("a schedule missed while the server was down runs once, not once per missed
   assert.equal(await service.runCodexWakeupTick(deps, state, () => T0 + 1000), 0);
   await service.waitForCodexWakeupRuns(state);
   assert.equal(calls.execute.length, 1);
-  assert.equal(store.getCodexWakeupTask(task.id)?.nextRunAt, "2026-03-10T10:00:00.000Z");
+  assert.equal((await store.getCodexWakeupTask(task.id))?.nextRunAt, "2026-03-10T10:00:00.000Z");
 });
 
 test("a re-entrant tick is a no-op and disabled tasks never run", async () => {
-  createDueTask({ enabled: false });
+  await createDueTask({ enabled: false });
   const { deps, calls } = buildDeps();
   const state = service.createCodexWakeupState();
   state.ticking = true;
-  createDueTask();
+  await createDueTask();
   assert.equal(await service.runCodexWakeupTick(deps, state, () => T0), 0);
   state.ticking = false;
   assert.equal(await service.runCodexWakeupTick(deps, state, () => T0), 1);
@@ -397,14 +400,17 @@ test("a re-entrant tick is a no-op and disabled tasks never run", async () => {
 });
 
 test("the tick recovers an expired orphaned run before claiming", async () => {
-  const task = createDueTask();
-  const orphan = store.claimCodexWakeupRun(task.id, "manual", T0 - 3_600_000, nextWakeupAt);
+  const task = await createDueTask();
+  const orphan = await store.claimCodexWakeupRun(task.id, "manual", T0 - 3_600_000, nextWakeupAt);
   assert.ok(orphan);
   const { deps } = buildDeps();
   const state = service.createCodexWakeupState();
   assert.equal(await service.runCodexWakeupTick(deps, state, () => T0), 1);
   await service.waitForCodexWakeupRuns(state);
-  const statuses = store.listCodexWakeupRuns().map((run) => [run.id === orphan.run.id, run.status]);
+  const statuses = (await store.listCodexWakeupRuns()).map((run) => [
+    run.id === orphan.run.id,
+    run.status,
+  ]);
   assert.deepEqual(statuses.sort(), [
     [false, "succeeded"],
     [true, "interrupted"],
@@ -412,22 +418,19 @@ test("the tick recovers an expired orphaned run before claiming", async () => {
 });
 
 test("run now starts a manual run and refuses a second one while it is live", async () => {
-  const task = createDueTask();
+  const task = await createDueTask();
   const { deps } = buildDeps({
     getExecutor: async () => ({ execute: () => new Promise(() => {}) }),
   });
   const state = service.createCodexWakeupState();
   state.pingTimeoutMs = 30;
-  const run = service.runCodexWakeupTaskNow(task.id, deps, state, () => T0);
+  const run = await service.runCodexWakeupTaskNow(task.id, deps, state, () => T0);
   assert.ok(run);
   assert.equal(run.trigger, "manual");
-  assert.equal(
-    service.runCodexWakeupTaskNow(task.id, deps, state, () => T0),
-    null
-  );
+  assert.equal(await service.runCodexWakeupTaskNow(task.id, deps, state, () => T0), null);
   await service.waitForCodexWakeupRuns(state);
-  assert.equal(store.listCodexWakeupRuns()[0].status, "failed");
-  assert.equal(store.getCodexWakeupTask(task.id)?.nextRunAt, task.nextRunAt);
+  assert.equal((await store.listCodexWakeupRuns())[0].status, "failed");
+  assert.equal((await store.getCodexWakeupTask(task.id))?.nextRunAt, task.nextRunAt);
 });
 
 test("account validation reports ids that are not active Codex OAuth connections", async () => {

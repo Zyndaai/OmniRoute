@@ -14,9 +14,9 @@ const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const { createEmbeddingResponse } = await import("../../src/lib/embeddings/service.ts");
 const { mergeModelCompatOverride } = await import("../../src/lib/db/models.ts");
 
-test.after(() => {
-  // Release the SQLite handle so the native test runner can exit (CLAUDE.md #3).
-  resetDbInstance();
+test.after(async () => {
+  // Release the Postgres pool so the native test runner can exit (CLAUDE.md #3).
+  await resetDbInstance();
 });
 
 test("createEmbeddingResponse rejects a mixed-dimension embedding combo without dispatching upstream", async () => {
@@ -79,7 +79,7 @@ test("createEmbeddingResponse allows a uniform-dimension embedding combo to proc
 });
 
 test("createEmbeddingResponse excludes hidden leaves before embedding family validation and dispatch", async () => {
-  mergeModelCompatOverride("nebius", "Qwen/Qwen3-Embedding-8B", { isHidden: true });
+  await mergeModelCompatOverride("nebius", "Qwen/Qwen3-Embedding-8B", { isHidden: true });
   await createCombo({
     name: "partial-hidden-embeds-combo",
     strategy: "priority",

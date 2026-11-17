@@ -23,12 +23,13 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const accessTokensDb = await import("../../src/lib/db/accessTokens.ts");
 const { requireManagementAuth } = await import("../../src/lib/api/requireManagementAuth.ts");
 const { MCP_CONNECT_SCOPE } = await import("../../src/shared/constants/managementScopes.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const ORIGINAL_JWT = process.env.JWT_SECRET;
 const ORIGINAL_INITIAL = process.env.INITIAL_PASSWORD;
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -36,12 +37,12 @@ function reset() {
   delete process.env.INITIAL_PASSWORD;
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_JWT === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = ORIGINAL_JWT;
@@ -229,7 +230,7 @@ test("when auth is not required (no JWT_SECRET), the guard passes everything —
 // fails loudly.
 test("oma_ access token with only mcp:connect scope is rejected (admin required by owner policy)", async () => {
   await seedAuthRequired();
-  const token = accessTokensDb.createAccessToken({
+  const token = await accessTokensDb.createAccessToken({
     name: "mcp-oma-test",
     scope: MCP_CONNECT_SCOPE,
     expiresAt: null,
@@ -248,7 +249,7 @@ test("oma_ access token with only mcp:connect scope is rejected (admin required 
 
 test("oma_ access token with admin scope passes the MCP guard", async () => {
   await seedAuthRequired();
-  const token = accessTokensDb.createAccessToken({
+  const token = await accessTokensDb.createAccessToken({
     name: "mcp-oma-admin",
     scope: "admin",
     expiresAt: null,

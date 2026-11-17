@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "usage-limit-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { updatePricing } = await import("@/lib/db/settings");
 const localDb = { updatePricing };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -18,19 +19,17 @@ const usageLimits = await import("../../src/lib/usage/apiKeyUsageLimits.ts");
 const NOW = Date.parse("2026-06-19T20:00:00.000Z");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   usageHistory.clearPendingRequests();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -185,8 +184,13 @@ test("getApiKeyUsageLimitStatus cuts weekly USD spend at observed provider quota
     timestamp: "2026-06-20T02:00:00.000Z",
   });
 
-  const db = core.getDbInstance();
-  const insertSnapshot = db.prepare(`
+  const backend = getTestBackend();
+  // quota_snapshots / provider_quota_reset_events reference provider_connections.
+  await backend.execute(
+    "INSERT INTO provider_connections (id, provider, is_active) VALUES ($1, $2, true)",
+    ["conn-claude", "claude"]
+  );
+  const insertSnapshotSql = `
     INSERT INTO quota_snapshots (
       provider,
       connection_id,
@@ -197,61 +201,45 @@ test("getApiKeyUsageLimitStatus cuts weekly USD spend at observed provider quota
       window_duration_ms,
       raw_data,
       created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertSnapshot.run(
-    "claude",
-    "conn-claude",
-    "weekly (7d)",
-    72,
-    0,
-    "2026-06-25T23:00:00.000Z",
-    null,
-    null,
-    "2026-06-19T23:55:00.000Z"
-  );
-  insertSnapshot.run(
-    "claude",
-    "conn-claude",
-    "weekly (7d)",
-    100,
-    0,
-    "2026-06-25T23:00:00.000Z",
-    null,
-    null,
-    "2026-06-20T01:42:52.590Z"
-  );
-  insertSnapshot.run(
-    "claude",
-    "conn-claude",
-    "weekly (7d)",
-    99,
-    0,
-    "2026-06-25T23:00:00.000Z",
-    null,
-    null,
-    "2026-06-20T02:10:00.000Z"
-  );
-  db.prepare(
+    ) VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8::jsonb, $9::timestamptz)
+  `;
+  for (const [remaining, createdAt] of [
+    [72, "2026-06-19T23:55:00.000Z"],
+    [100, "2026-06-20T01:42:52.590Z"],
+    [99, "2026-06-20T02:10:00.000Z"],
+  ] as const) {
+    await backend.execute(insertSnapshotSql, [
+      "claude",
+      "conn-claude",
+      "weekly (7d)",
+      remaining,
+      false,
+      "2026-06-25T23:00:00.000Z",
+      null,
+      null,
+      createdAt,
+    ]);
+  }
+  await backend.execute(
     `
     INSERT INTO provider_quota_reset_events
       (provider, connection_id, window_key, window_started_at, window_resets_at,
        observed_at, previous_remaining_percentage, new_remaining_percentage,
-       previous_used_percentage, new_used_percentage, raw_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    "claude",
-    "conn-claude",
-    "weekly (7d)",
-    "2026-06-18T23:00:00.000Z",
-    "2026-06-25T23:00:00.000Z",
-    "2026-06-18T23:04:00.000Z",
-    0,
-    100,
-    100,
-    0,
-    null
+       previous_used_percentage, new_used_percentage)
+    VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6::timestamptz, $7, $8, $9, $10)
+  `,
+    [
+      "claude",
+      "conn-claude",
+      "weekly (7d)",
+      "2026-06-18T23:00:00.000Z",
+      "2026-06-25T23:00:00.000Z",
+      "2026-06-18T23:04:00.000Z",
+      0,
+      100,
+      100,
+      0,
+    ]
   );
 
   const metadata = await apiKeysDb.getApiKeyMetadata(created.key);

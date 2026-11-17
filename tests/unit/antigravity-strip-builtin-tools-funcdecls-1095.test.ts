@@ -24,8 +24,8 @@ const CREDS = { projectId: "proj-1" } as never;
 // declared next to other callable functions is no longer promoted to native
 // grounding on the Antigravity path, so it stays a plain callable declaration and
 // the request carries no native entry at all.
-test("Antigravity mixed google_search + custom tool sends no native grounding next to functionDeclarations (#1095, #16567)", () => {
-  const result = openaiToAntigravityRequest(
+test("Antigravity mixed google_search + custom tool sends no native grounding next to functionDeclarations (#1095, #16567)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: "Search and read" }],
@@ -58,8 +58,8 @@ test("Antigravity mixed google_search + custom tool sends no native grounding ne
   });
 });
 
-test("Antigravity envelope keeps a normal custom-only tool request intact (#1095 regression)", () => {
-  const result = openaiToAntigravityRequest(
+test("Antigravity envelope keeps a normal custom-only tool request intact (#1095 regression)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: "Hello" }],
@@ -81,8 +81,8 @@ test("Antigravity envelope keeps a normal custom-only tool request intact (#1095
   });
 });
 
-test("Antigravity envelope drops tools + toolConfig when only built-in tools are present (#1095)", () => {
-  const result = openaiToAntigravityRequest(
+test("Antigravity envelope drops tools + toolConfig when only built-in tools are present (#1095)", async () => {
+  const result = await openaiToAntigravityRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: "Search the web" }],

@@ -11,9 +11,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import "../_setup/isolateDataDir.ts";
 
-process.env.DISABLE_SQLITE_AUTO_BACKUP ||= "true";
-
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
 const registryModule = await import("../../src/lib/skills/registry.ts");
 const executorModule = await import("../../src/lib/skills/executor.ts");
@@ -47,8 +46,8 @@ skillExecutor.registerHandler(
   () => new Promise((resolve) => setTimeout(() => resolve({ late: true }), 1_000))
 );
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 // ─── (a) Public surface snapshot ─────────────────────────────────────────────
@@ -60,7 +59,6 @@ test("skills modules consumed outside src/lib/skills export exactly this surface
     "githubCollector",
     "injection",
     "interception",
-    "memoryBuiltins",
     "providerSettings",
     "registry",
     "sandbox",
@@ -108,18 +106,6 @@ test("skills modules consumed outside src/lib/skills export exactly this surface
       "handleToolCallExecution",
       "interceptToolCalls",
       "setFenceFnForTesting",
-    ],
-    memoryBuiltins: [
-      "MEMORY_BUILTIN_TOOL_NAMES",
-      "MEMORY_DELETE_TOOL_NAME",
-      "MEMORY_SAVE_TOOL_NAME",
-      "MEMORY_SEARCH_TOOL_NAME",
-      "MEMORY_UPDATE_TOOL_NAME",
-      "buildMemoryClaudeTools",
-      "buildMemoryGeminiTools",
-      "buildMemoryOpenAITools",
-      "buildMemoryToolsForProvider",
-      "memoryBuiltinHandlers",
     ],
     providerSettings: [
       "DEFAULT_SKILLS_PROVIDER",
@@ -235,13 +221,10 @@ test("loadFromDatabase picks up rows written outside the registry", async () => 
   const name = uniqueName("char-loaded");
   const id = randomUUID();
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO skills (id, api_key_id, name, version, description, schema, handler, enabled, mode, source_provider, tags, install_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+  await getTestBackend().execute(
+    `INSERT INTO skills (id, api_key_id, name, version, description, schema, handler, enabled, mode, source_provider, tags, install_count, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)`,
+    [
       id,
       "char-loader",
       name,
@@ -249,14 +232,15 @@ test("loadFromDatabase picks up rows written outside the registry", async () => 
       "from db",
       JSON.stringify(SCHEMA),
       "char-echo",
-      1,
+      true,
       "auto",
       "skillssh",
       '["x", 1]',
       7,
       now,
-      now
-    );
+      now,
+    ]
+  );
 
   assert.equal(skillRegistry.getSkill(name, "char-loader"), undefined);
   skillRegistry.invalidateCache();
@@ -291,13 +275,13 @@ test("execute a fixture skill: success output, execution row persisted", async (
   assert.equal(execution.errorMessage, null);
   assert.equal(typeof execution.durationMs, "number");
 
-  const stored = skillExecutor.getExecution(execution.id);
+  const stored = await skillExecutor.getExecution(execution.id);
   assert.ok(stored);
   assert.equal(stored.status, "success");
   assert.deepEqual(stored.input, { text: "hello" });
   assert.deepEqual(stored.output, { echoed: "hello" });
   assert.equal(stored.sessionId, "sess-1");
-  assert.equal(skillExecutor.countExecutions("char-exec-key"), 1);
+  assert.equal(await skillExecutor.countExecutions("char-exec-key"), 1);
 });
 
 test("execute: a failure-shaped output and a throwing handler both resolve with status error", async () => {
@@ -433,7 +417,7 @@ test("execute rejects unknown / disabled skills without writing history", async 
     skillExecutor.execute(name, {}, { apiKeyId: "char-dis" }),
     new RegExp(`Skill is disabled: ${name}`)
   );
-  assert.equal(skillExecutor.countExecutions("char-dis"), 0);
+  assert.equal(await skillExecutor.countExecutions("char-dis"), 0);
 });
 
 test("execute with an unknown handler rejects AND leaves an error row in history", async () => {
@@ -448,7 +432,7 @@ test("execute with an unknown handler rejects AND leaves an error row in history
     skillExecutor.execute(name, {}, { apiKeyId: "char-nh" }),
     /Handler not found: char-missing-handler/
   );
-  const rows = skillExecutor.listExecutions("char-nh");
+  const rows = await skillExecutor.listExecutions("char-nh");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, "error");
   assert.equal(rows[0].errorMessage, "Handler not found: char-missing-handler");

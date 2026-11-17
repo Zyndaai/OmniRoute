@@ -13,20 +13,20 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetDbInstance } from "../../src/lib/db/core.ts";
 import { saveCallLog } from "../../src/lib/usage/callLogs.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const PREFIX = "test-enc-reasoning";
 
-test.after(() => {
+test.after(async () => {
   try {
-    const db = getDbInstance();
-    db.prepare(`DELETE FROM call_logs WHERE id LIKE '${PREFIX}-%'`).run();
+    await getTestBackend().execute("DELETE FROM call_logs WHERE id LIKE $1", [`${PREFIX}-%`]);
   } catch {
     // best-effort cleanup
   }
   try {
-    resetDbInstance();
+    await resetDbInstance();
   } catch {
     // best-effort handle release (per DB-handle hang rule)
   }
@@ -46,7 +46,6 @@ function opaqueReasoningItem() {
 // ── RED: opaque reasoning snapshot in a Responses-shaped body ────────────────
 
 test("saveCallLog records reasoning_source=encrypted for opaque reasoning item", async () => {
-  const db = getDbInstance();
   const testId = `${PREFIX}-sink-${Date.now()}`;
 
   await saveCallLog({
@@ -65,27 +64,25 @@ test("saveCallLog records reasoning_source=encrypted for opaque reasoning item",
     },
   });
 
-  const row = db
-    .prepare(
-      "SELECT tokens_reasoning, reasoning_source, reasoning_encrypted, reasoning_duration_ms FROM call_logs WHERE id = ?"
-    )
-    .get(testId) as {
+  const row = await getTestBackend().queryOne<{
     tokens_reasoning: number | null;
     reasoning_source: string | null;
-    reasoning_encrypted: number | null;
+    reasoning_encrypted: boolean | null;
     reasoning_duration_ms: number | null;
-  };
+  }>(
+    "SELECT tokens_reasoning, reasoning_source, reasoning_encrypted, reasoning_duration_ms FROM call_logs WHERE id = $1",
+    [testId]
+  );
 
   assert.ok(row, "row should exist");
   assert.equal(row.reasoning_source, "encrypted", "opaque reasoning item → source=encrypted");
-  assert.equal(row.reasoning_encrypted, 1, "opaque reasoning item → flag=1");
+  assert.equal(row.reasoning_encrypted, true, "opaque reasoning item → flag=true");
   assert.equal(row.reasoning_duration_ms, null, "sink-side snapshot → duration NULL");
 });
 
 // ── Neighbour cases: existing behaviour unchanged ──────────────────────────
 
 test("saveCallLog keeps reasoning_source NULL with no reasoning at all", async () => {
-  const db = getDbInstance();
   const testId = `${PREFIX}-none-${Date.now()}`;
 
   await saveCallLog({
@@ -102,16 +99,16 @@ test("saveCallLog keeps reasoning_source NULL with no reasoning at all", async (
     },
   });
 
-  const row = db.prepare("SELECT reasoning_source FROM call_logs WHERE id = ?").get(testId) as {
-    reasoning_source: string | null;
-  };
+  const row = await getTestBackend().queryOne<{ reasoning_source: string | null }>(
+    "SELECT reasoning_source FROM call_logs WHERE id = $1",
+    [testId]
+  );
 
   assert.ok(row, "row should exist");
   assert.equal(row.reasoning_source, null, "no reasoning → source stays NULL");
 });
 
 test("saveCallLog keeps reasoning_source=usage when usage reports reasoning tokens", async () => {
-  const db = getDbInstance();
   const testId = `${PREFIX}-usage-${Date.now()}`;
 
   await saveCallLog({
@@ -132,12 +129,10 @@ test("saveCallLog keeps reasoning_source=usage when usage reports reasoning toke
     },
   });
 
-  const row = db
-    .prepare("SELECT tokens_reasoning, reasoning_source FROM call_logs WHERE id = ?")
-    .get(testId) as {
+  const row = await getTestBackend().queryOne<{
     tokens_reasoning: number | null;
     reasoning_source: string | null;
-  };
+  }>("SELECT tokens_reasoning, reasoning_source FROM call_logs WHERE id = $1", [testId]);
 
   assert.ok(row, "row should exist");
   assert.equal(row.reasoning_source, "usage", "usage-reported reasoning keeps source=usage");
@@ -147,7 +142,6 @@ test("saveCallLog keeps reasoning_source=usage when usage reports reasoning toke
 // ── Streaming meta: flag+duration+efforts threaded from the stream ───────────
 
 test("saveCallLog writes stream reasoningMeta (flag plus duration plus efforts)", async () => {
-  const db = getDbInstance();
   const testId = `${PREFIX}-stream-${Date.now()}`;
 
   await saveCallLog({
@@ -167,21 +161,20 @@ test("saveCallLog writes stream reasoningMeta (flag plus duration plus efforts)"
     upstreamRequestBody: { model: "muse-spark-model", reasoning: { effort: "xhigh" } },
   });
 
-  const row = db
-    .prepare(
-      "SELECT reasoning_source, reasoning_encrypted, reasoning_duration_ms, reasoning_effort_requested, reasoning_effort_upstream FROM call_logs WHERE id = ?"
-    )
-    .get(testId) as {
+  const row = await getTestBackend().queryOne<{
     reasoning_source: string | null;
-    reasoning_encrypted: number | null;
+    reasoning_encrypted: boolean | null;
     reasoning_duration_ms: number | null;
     reasoning_effort_requested: string | null;
     reasoning_effort_upstream: string | null;
-  };
+  }>(
+    "SELECT reasoning_source, reasoning_encrypted, reasoning_duration_ms, reasoning_effort_requested, reasoning_effort_upstream FROM call_logs WHERE id = $1",
+    [testId]
+  );
 
   assert.ok(row, "row should exist");
   assert.equal(row.reasoning_source, "encrypted", "stream flag → source=encrypted");
-  assert.equal(row.reasoning_encrypted, 1, "stream flag → flag=1");
+  assert.equal(row.reasoning_encrypted, true, "stream flag → flag=true");
   assert.equal(row.reasoning_duration_ms, 44000, "stream duration threaded to the row");
   assert.equal(row.reasoning_effort_requested, "xhigh", "client effort value only");
   assert.equal(row.reasoning_effort_upstream, "xhigh", "upstream effort value only");

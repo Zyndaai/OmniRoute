@@ -76,7 +76,7 @@ test("en/ar catalogs define Thinking Budget mode keys with real copy", () => {
   }
 });
 
-test("AUTO mode strips Codex reasoning object (effort + summary), not only reasoning_effort", () => {
+test("AUTO mode strips Codex reasoning object (effort + summary), not only reasoning_effort", async () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.AUTO });
   try {
     const body = {
@@ -85,7 +85,7 @@ test("AUTO mode strips Codex reasoning object (effort + summary), not only reaso
       reasoning: { effort: "ultra", summary: "detailed" },
       reasoning_effort: "ultra",
     };
-    const result = applyThinkingBudget(body) as Record<string, unknown>;
+    const result = (await applyThinkingBudget(body)) as Record<string, unknown>;
     assert.equal(result.reasoning, undefined);
     assert.equal(result.reasoning_effort, undefined);
   } finally {

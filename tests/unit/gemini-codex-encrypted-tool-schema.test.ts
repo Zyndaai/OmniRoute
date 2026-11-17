@@ -49,7 +49,7 @@ test("encrypted is in GEMINI_UNSUPPORTED_SCHEMA_KEYS", () => {
   assert.ok(GEMINI_UNSUPPORTED_SCHEMA_KEYS.has("encrypted"));
 });
 
-test("OpenAI -> Gemini request strips encrypted from Codex collaboration tool parameters", () => {
+test("OpenAI -> Gemini request strips encrypted from Codex collaboration tool parameters", async () => {
   const body = {
     messages: [{ role: "user", content: "hi" }],
     tools: [
@@ -71,7 +71,7 @@ test("OpenAI -> Gemini request strips encrypted from Codex collaboration tool pa
     ],
   };
 
-  const result = openaiToGeminiRequest("gemini-3.7-flash-low", body, false) as {
+  const result = (await openaiToGeminiRequest("gemini-3.7-flash-low", body, false)) as {
     tools?: Array<{ functionDeclarations?: Array<{ parameters: unknown }> }>;
   };
 

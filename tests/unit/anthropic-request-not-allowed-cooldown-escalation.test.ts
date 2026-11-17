@@ -21,6 +21,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-rr-escala
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createProviderConnection, updateProviderConnection } =
   await import("../../src/lib/db/providers.ts");
 const { buildInternalChatRequest } = await import("../../src/lib/api/modelTestRunner.ts");
@@ -50,23 +51,21 @@ test.beforeEach(() => {
   invalidateDbCache("connections");
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 type Row = Record<string, unknown> | undefined;
 
-function readRow(connId: string): Row {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { get: (id: string) => Record<string, unknown> | undefined };
-  };
-  return db
-    .prepare(
-      "SELECT is_active, test_status, rate_limited_until, last_error, last_error_type, last_error_at, error_code FROM provider_connections WHERE id = ?"
-    )
-    .get(connId);
+async function readRow(connId: string): Promise<Row> {
+  return (
+    (await getTestBackend().queryOne<Record<string, unknown>>(
+      "SELECT is_active, test_status, rate_limited_until, last_error, last_error_type, last_error_at, error_code FROM provider_connections WHERE id = $1",
+      [connId]
+    )) ?? undefined
+  );
 }
 
 async function createClaudeConnection(): Promise<string> {
@@ -133,7 +132,7 @@ function cooldownMsOf(row: Row): number {
 }
 
 function assertCoolingDown(row: Row, expectedMs: number, label: string) {
-  assert.equal(row?.is_active, 1, `${label}: connection stays active`);
+  assert.equal(row?.is_active, true, `${label}: connection stays active`);
   assert.equal(row?.test_status, "unavailable", `${label}: cooling down, not banned`);
   assert.equal(row?.last_error_type, "request_rejected", `${label}: error type`);
   assert.equal(Number(row?.error_code), 403, `${label}: error code`);
@@ -158,17 +157,17 @@ test("claude 403 'Request not allowed': 5 min, then 15 min, banned on the 3rd co
 
   const first = await sendOnce(connId);
   assert.notEqual(first.status, 200);
-  assertCoolingDown(readRow(connId), COOLDOWN_MS.requestRejected, "1st refusal");
+  assertCoolingDown(await readRow(connId), COOLDOWN_MS.requestRejected, "1st refusal");
 
   await elapseCooldown(connId, COOLDOWN_MS.requestRejected);
   await sendOnce(connId);
-  assertCoolingDown(readRow(connId), COOLDOWN_MS.requestRejectedRepeat, "2nd refusal");
+  assertCoolingDown(await readRow(connId), COOLDOWN_MS.requestRejectedRepeat, "2nd refusal");
 
   await elapseCooldown(connId, COOLDOWN_MS.requestRejectedRepeat);
   await sendOnce(connId);
-  const row = readRow(connId);
+  const row = await readRow(connId);
   assert.equal(row?.test_status, "banned", "3rd consecutive refusal: terminal");
-  assert.equal(row?.is_active, 0);
+  assert.equal(row?.is_active, false);
   assert.match(String(row?.last_error), /3 consecutive refusals/);
   assert.equal(hasRequestRejectedStreak(connId), false, "escalation clears the streak");
 });
@@ -179,7 +178,7 @@ test("requests arriving while the connection is already excluded are one episode
   upstreamCalls = 0;
 
   await sendOnce(connId);
-  const afterFirst = readRow(connId);
+  const afterFirst = await readRow(connId);
   assertCoolingDown(afterFirst, COOLDOWN_MS.requestRejected, "1st refusal");
   // The mocked fetch also serves auxiliary calls (identity bootstrap), so only
   // the delta matters below.
@@ -191,13 +190,13 @@ test("requests arriving while the connection is already excluded are one episode
   // first 403 came back. They are one episode: nothing is re-persisted and,
   // above all, three of them must not ban.
   for (let i = 0; i < 3; i += 1) await sendOnce(connId);
-  const afterBurst = readRow(connId);
+  const afterBurst = await readRow(connId);
   assert.ok(
     upstreamCalls > callsAfterFirst,
     "the burst did reach the upstream (pinned connection)"
   );
   assert.equal(afterBurst?.test_status, "unavailable", "still just cooling down, not banned");
-  assert.equal(afterBurst?.is_active, 1);
+  assert.equal(afterBurst?.is_active, true);
   assert.equal(
     afterBurst?.rate_limited_until,
     afterFirst?.rate_limited_until,
@@ -208,34 +207,34 @@ test("requests arriving while the connection is already excluded are one episode
   // Once the cooldown has elapsed, the next refusal is the 2nd of the streak.
   await elapseCooldown(connId, COOLDOWN_MS.requestRejected);
   await sendOnce(connId);
-  assertCoolingDown(readRow(connId), COOLDOWN_MS.requestRejectedRepeat, "2nd episode");
+  assertCoolingDown(await readRow(connId), COOLDOWN_MS.requestRejectedRepeat, "2nd episode");
 });
 
 test("a successful response resets the streak — sporadic refusals never accumulate", async () => {
   const connId = await createClaudeConnection();
   mockAnthropic403("Request not allowed");
   await sendOnce(connId);
-  assertCoolingDown(readRow(connId), COOLDOWN_MS.requestRejected, "1st refusal");
+  assertCoolingDown(await readRow(connId), COOLDOWN_MS.requestRejected, "1st refusal");
 
   await elapseCooldown(connId, COOLDOWN_MS.requestRejected);
   mockAnthropic200();
   const ok = await sendOnce(connId);
   assert.equal(ok.status, 200, "healthy response goes through");
   assert.equal(hasRequestRejectedStreak(connId), false, "success clears the streak");
-  const clean = readRow(connId);
+  const clean = await readRow(connId);
   assert.equal(clean?.test_status, "active");
   assert.equal(clean?.rate_limited_until, null);
 
   mockAnthropic403("Request not allowed");
   await sendOnce(connId);
-  assertCoolingDown(readRow(connId), COOLDOWN_MS.requestRejected, "refusal after success");
+  assertCoolingDown(await readRow(connId), COOLDOWN_MS.requestRejected, "refusal after success");
 });
 
 test("any other claude 403 still bans on the first response (regression guard)", async () => {
   const connId = await createClaudeConnection();
   mockAnthropic403("Your organization has been disabled.");
   await sendOnce(connId);
-  const row = readRow(connId);
+  const row = await readRow(connId);
   assert.equal(row?.test_status, "banned");
-  assert.equal(row?.is_active, 0);
+  assert.equal(row?.is_active, false);
 });

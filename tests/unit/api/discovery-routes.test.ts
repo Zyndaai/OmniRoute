@@ -27,8 +27,6 @@ before(async () => {
   delete process.env.REQUIRE_API_KEY;
   process.env.OMNIROUTE_DISABLE_AUTH = "1";
   core = await import("@/lib/db/core");
-  core.resetDbInstance();
-  core.getDbInstance();
   db = await import("@/lib/db/discoveryResults");
   resultsRoute = await import("@/app/api/discovery/results/route");
   resultByIdRoute = await import("@/app/api/discovery/results/[id]/route");
@@ -36,15 +34,15 @@ before(async () => {
   verifyRoute = await import("@/app/api/discovery/verify/[id]/route");
 });
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   if (tmpDataDir)
     rmSync(tmpDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("discovery API routes", () => {
   test("GET /results lists persisted findings (and filters by providerId)", async () => {
-    db.upsertDiscoveryResult({
+    await db.upsertDiscoveryResult({
       providerId: "acme",
       method: "free_tier",
       authType: "none",
@@ -60,7 +58,7 @@ describe("discovery API routes", () => {
   });
 
   test("GET /results/:id returns the row, 404 when missing, 400 on bad id", async () => {
-    const created = db.upsertDiscoveryResult({
+    const created = await db.upsertDiscoveryResult({
       providerId: "beta",
       method: "trial",
       authType: "api_key",
@@ -91,7 +89,7 @@ describe("discovery API routes", () => {
     assert.ok(Array.isArray(body.results) && body.results.length > 0);
     assert.ok(body.results[0].id > 0);
     // the persisted row is now queryable
-    assert.ok(db.getDiscoveryResults("gamma").length > 0);
+    assert.ok((await db.getDiscoveryResults("gamma")).length > 0);
 
     const invalid = await scanRoute.POST(req("POST", "/api/discovery/scan", { providerId: "" }));
     assert.equal(invalid.status, 400);
@@ -106,7 +104,7 @@ describe("discovery API routes", () => {
   });
 
   test("POST /verify/:id marks verified, 404 when missing", async () => {
-    const created = db.upsertDiscoveryResult({
+    const created = await db.upsertDiscoveryResult({
       providerId: "delta",
       method: "public_api",
       authType: "api_key",
@@ -128,7 +126,7 @@ describe("discovery API routes", () => {
   });
 
   test("DELETE /results/:id removes the row, 404 on second delete", async () => {
-    const created = db.upsertDiscoveryResult({
+    const created = await db.upsertDiscoveryResult({
       providerId: "epsilon",
       method: "free_tier",
       authType: "none",

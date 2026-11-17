@@ -20,7 +20,7 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { saveModelsDevCapabilities, clearModelsDevCapabilities } =
   await import("../../src/lib/modelsDevSync.ts");
 const { resetAllComboMetrics } = await import("../../open-sse/services/comboMetrics.ts");
@@ -126,12 +126,12 @@ function runCombo(overrides: {
   }).then((response) => ({ response, attempted }));
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   clearCooldownState();
-  clearModelsDevCapabilities();
-  saveModelsDevCapabilities({
+  await clearModelsDevCapabilities();
+  await saveModelsDevCapabilities({
     openai: {
       "pr-a": capabilityEntry(128000, { tool_call: false }),
       "pr-b": capabilityEntry(128000),
@@ -139,12 +139,12 @@ test.beforeEach(() => {
   });
 });
 
-test.after(() => {
+test.after(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   clearCooldownState();
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+  await clearModelsDevCapabilities();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;

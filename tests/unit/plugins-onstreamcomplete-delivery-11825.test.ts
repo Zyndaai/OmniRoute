@@ -23,7 +23,6 @@ import { tmpdir } from "node:os";
 const { validateManifest } = await import("../../src/lib/plugins/manifest.ts");
 const mgr = await import("../../src/lib/plugins/manager.ts");
 const db = await import("../../src/lib/db/plugins.ts");
-const { getDbInstance } = await import("../../src/lib/db/core.ts");
 const { runPluginOnStreamCompleteHook } =
   await import("../../open-sse/handlers/chatCore/pluginOnResponse.ts");
 
@@ -57,10 +56,9 @@ describe("#11825 onStreamComplete is delivered to an installed+activated plugin"
   const NAME = "sc-delivery-11825";
   const outFile = join(tmpdir(), `omniroute-onstreamcomplete-11825-${process.pid}.json`);
 
-  beforeEach(() => {
-    getDbInstance(); // ensure the plugins table migration has run
+  beforeEach(async () => {
     try {
-      db.deletePlugin(NAME);
+      await db.deletePlugin(NAME);
     } catch {}
     try {
       rmSync(outFile, { force: true });
@@ -95,7 +93,7 @@ module.exports = {
     t.after(async () => {
       await mgr.pluginManager.deactivate(NAME).catch(() => {});
       try {
-        db.deletePlugin(NAME);
+        await db.deletePlugin(NAME);
       } catch {}
       rmSync(tmp, { recursive: true, force: true });
       rmSync(outFile, { force: true });
@@ -105,7 +103,7 @@ module.exports = {
     await mgr.pluginManager.activate(NAME);
 
     // Sanity: the DB should record the declared hook (also broken on the buggy path).
-    const row = db.getPluginByName(NAME);
+    const row = await db.getPluginByName(NAME);
     assert.ok(row, "plugin should be installed");
     assert.ok(
       (row!.hooks as unknown as string[]).includes("onStreamComplete"),

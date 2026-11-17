@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-calllogs-filters-route-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -24,14 +25,14 @@ async function enableManagementAuth() {
   await settingsDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -50,14 +51,11 @@ test("filters route requires management auth", async () => {
 test("filters route lists configured keys without traffic and never returns key material", async () => {
   await enableManagementAuth();
   const created = await apiKeysDb.createApiKey("Never Used", "machine-1");
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, detail_state)
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", method, path, status, model, provider, detail_state)
        VALUES ('row-1', '2026-01-01T00:00:00.000Z', 'POST', '/v1/chat/completions', 200,
          'gpt-5', 'codex', 'none')`
-    )
-    .run();
+  );
 
   const res = await route.GET(
     await makeManagementSessionRequest("http://localhost/api/usage/call-logs/filters")
@@ -73,11 +71,13 @@ test("filters route lists configured keys without traffic and never returns key 
 
 test("filters route serves repeat requests from a short-lived snapshot", async () => {
   await enableManagementAuth();
-  const insert = core.getDbInstance().prepare(
-    `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, detail_state)
-       VALUES (@id, '2026-01-01T00:00:00.000Z', 'POST', '/v1/chat/completions', 200, 'm', @provider,
-         'none')`
-  );
+  const insert = (params: { id: string; provider: string }) =>
+    getTestBackend().execute(
+      `INSERT INTO call_logs (id, "timestamp", method, path, status, model, provider, detail_state)
+       VALUES ($1, '2026-01-01T00:00:00.000Z', 'POST', '/v1/chat/completions', 200, 'm', $2,
+         'none')`,
+      [params.id, params.provider]
+    );
   const get = async () =>
     (
       await route.GET(
@@ -88,7 +88,7 @@ test("filters route serves repeat requests from a short-lived snapshot", async (
   // An earlier test in this file may have primed the snapshot; the second call must
   // return exactly what the first one did, without re-scanning call_logs.
   const first = await get();
-  insert.run({ id: "later-row", provider: "provider-added-later" });
+  await insert({ id: "later-row", provider: "provider-added-later" });
   const second = await get();
   assert.deepEqual(second.providers, first.providers);
   assert.equal(second.providers.includes("provider-added-later"), false);

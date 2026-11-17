@@ -20,9 +20,11 @@ const core = await import("../../src/lib/db/core.ts");
 const customHostsDb = await import("../../src/lib/db/inspectorCustomHosts.ts");
 const manager = await import("../../src/mitm/manager.ts");
 const { ALL_TARGETS } = await import("../../src/mitm/targets/index.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -46,12 +48,12 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("collectManagedHosts includes every host of every agent target", () => {
-  const managed = new Set(manager.collectManagedHosts());
+test("collectManagedHosts includes every host of every agent target", async () => {
+  const managed = new Set(await manager.collectManagedHosts());
   for (const target of ALL_TARGETS) {
     for (const host of target.hosts) {
       assert.ok(
@@ -62,14 +64,14 @@ test("collectManagedHosts includes every host of every agent target", () => {
   }
 });
 
-test("collectManagedHosts returns a de-duplicated list", () => {
-  const list = manager.collectManagedHosts();
+test("collectManagedHosts returns a de-duplicated list", async () => {
+  const list = await manager.collectManagedHosts();
   assert.equal(list.length, new Set(list).size, "collectManagedHosts must not return duplicates");
 });
 
-test("collectManagedHosts includes custom hosts persisted in the DB", () => {
-  customHostsDb.addCustomHost("api.my-internal-llm.test", "custom");
-  const managed = new Set(manager.collectManagedHosts());
+test("collectManagedHosts includes custom hosts persisted in the DB", async () => {
+  await customHostsDb.addCustomHost("api.my-internal-llm.test", "custom");
+  const managed = new Set(await manager.collectManagedHosts());
   assert.ok(
     managed.has("api.my-internal-llm.test"),
     "a custom host added to the DB must be enumerated for cleanup"

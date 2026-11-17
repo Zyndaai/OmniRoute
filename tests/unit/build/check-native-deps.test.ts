@@ -87,14 +87,10 @@ test("extractServerExternalPackages: a quoted word in a trailing comment is not 
   assert.deepEqual(extractServerExternalPackages(source), ["ws", "bufferutil"]);
 });
 
-test("extractServerExternalPackages: the real next.config.mjs lists better-sqlite3", () => {
+test("extractServerExternalPackages: finds the list in the real next.config.mjs", () => {
   const source = fs.readFileSync(new URL("../../../next.config.mjs", import.meta.url), "utf8");
   const externals = extractServerExternalPackages(source);
   assert.ok(externals.length > 0, "should find serverExternalPackages in the real config");
-  assert.ok(
-    externals.includes("better-sqlite3"),
-    "better-sqlite3 must be externalised — this gate exists because it is"
-  );
 });
 
 // ---------------------------------------------------------------------------

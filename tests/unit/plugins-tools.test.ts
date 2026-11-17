@@ -70,16 +70,16 @@ function cleanupSourceDirs() {
 
 // ── Lifecycle ──
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
   hooks.resetHooks();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   cleanupSourceDirs();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   cleanupSourceDirs();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -224,7 +224,7 @@ test("plugin_uninstall: removes plugin", async () => {
   const tool = getTool("plugin_uninstall");
   const result = await tool.handler({ name });
   assert.equal(result.success, true);
-  assert.equal(dbPlugins.getPluginByName(name), null);
+  assert.equal(await dbPlugins.getPluginByName(name), null);
 });
 
 test("plugin_uninstall: returns error for nonexistent plugin", async () => {
@@ -261,7 +261,7 @@ test("plugin_configure: updates config", async () => {
   assert.equal(result.success, true);
   assert.equal(result.config.apiUrl, "https://example.com");
 
-  const fromDb = dbPlugins.getPluginByName(name);
+  const fromDb = await dbPlugins.getPluginByName(name);
   const config = JSON.parse(fromDb!.config);
   assert.equal(config.apiUrl, "https://example.com");
 

@@ -10,18 +10,18 @@ const originalAllowPrivateProviderUrls = process.env.OMNIROUTE_ALLOW_PRIVATE_PRO
 const originalAllowLocalProviderUrls = process.env.OMNIROUTE_ALLOW_LOCAL_PROVIDER_URLS;
 
 // Load modules at top level
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const validateRoute = await import("../../src/app/api/providers/validate/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (originalAllowPrivateProviderUrls === undefined) {
     delete process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS;
@@ -148,7 +148,7 @@ test("providers validate route blocks private baseUrl values when local provider
       error: "Blocked private or local provider URL",
     });
     assert.equal(called, false);
-    const auditEntries = compliance.getAuditLog({
+    const auditEntries = await compliance.getAuditLog({
       action: "provider.validation.ssrf_blocked",
       resourceType: "provider_validation",
     });

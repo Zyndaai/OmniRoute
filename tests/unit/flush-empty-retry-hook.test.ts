@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // Hook-level tests for the flush empty-turn retry (translate-path streams).
 //
@@ -44,7 +45,7 @@ function setFlag(enabled: boolean) {
 
 async function resetStorage() {
   clearInflight();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   resetAllCircuitBreakers();
@@ -169,7 +170,7 @@ test.afterEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -350,7 +351,7 @@ test("a managed lease replays the leased connection instead of rotating", async 
   const key = await apiKeysDb.createApiKey("managed-flush", "test", ["lease:exclusive"], {
     allowedConnections: [leased.id],
   });
-  const acquired = leaseDb.acquireExclusiveConnectionLease({
+  const acquired = await leaseDb.acquireExclusiveConnectionLease({
     leaseOwnerId: owner,
     apiKeyId: key.id,
     provider: "gemini",

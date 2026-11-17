@@ -16,6 +16,7 @@ process.env.STORAGE_ENCRYPTION_KEY = "codex-import-userid-dedup-test-key";
 const core = await import("../../src/lib/db/core.ts");
 const { parseAndValidateCodexAuth, createConnectionFromAuthFile } =
   await import("../../src/lib/oauth/utils/codexAuthImport.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 type JsonRecord = Record<string, unknown>;
 
@@ -66,32 +67,20 @@ function buildAuthFile(accountId: string, userId: string, email: string): JsonRe
   };
 }
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error) {
-      const code = (error as { code?: string } | null)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+/** Raw token columns of one connection, as stored (ciphertext when encryption is on). */
+async function storedTokens(id: string) {
+  return getTestBackend().queryOne<Record<string, string>>(
+    "SELECT access_token, refresh_token, id_token FROM provider_connections WHERE id = $1",
+    [id]
+  );
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -127,13 +116,7 @@ test("Codex auth import ignores matching non-OAuth connections", async () => {
   assert.equal(untouched?.authType, "access_token");
   assert.equal(untouched?.accessToken, "website-access-token");
 
-  const rawOauth = core
-    .getDbInstance()
-    .prepare(
-      `SELECT access_token, refresh_token, id_token
-       FROM provider_connections WHERE id = ?`
-    )
-    .get(imported.connection.id) as Record<string, string>;
+  const rawOauth = (await storedTokens(imported.connection.id as string)) as Record<string, string>;
   assert.match(rawOauth.access_token, /^enc:v1:/);
   assert.match(rawOauth.refresh_token, /^enc:v1:/);
   assert.match(rawOauth.id_token, /^enc:v1:/);
@@ -245,13 +228,10 @@ test("Codex auth import promotes the compatible email legacy row and leaves its 
     timestamp: "2026-01-03T00:00:00.000Z",
   });
 
-  const rows = core
-    .getDbInstance()
-    .prepare(
-      `SELECT account_label label, COUNT(*) requests, SUM(tokens_input + tokens_output) tokens
-       FROM usage_history GROUP BY account_key ORDER BY label`
-    )
-    .all();
+  const rows = await getTestBackend().query(
+    `SELECT account_label AS label, COUNT(*) AS requests, SUM(tokens_input + tokens_output) AS tokens
+       FROM usage_history GROUP BY account_key, account_label ORDER BY account_label`
+  );
   assert.equal(imported.connection.id, bob.id);
   assert.deepEqual(rows, [
     { label: "Alice history", requests: 1, tokens: 15 },
@@ -304,25 +284,16 @@ test("an established Codex user prevents an email-less legacy row from absorbing
     parsed.accessToken
   );
 
-  const stored = core
-    .getDbInstance()
-    .prepare(
-      `SELECT access_token, refresh_token, id_token
-       FROM provider_connections WHERE id = ?`
-    )
-    .get(imported.connection.id) as Record<string, string>;
+  const stored = (await storedTokens(imported.connection.id as string)) as Record<string, string>;
   assert.notEqual(stored.access_token, parsed.accessToken);
   assert.notEqual(stored.refresh_token, parsed.refreshToken);
   assert.notEqual(stored.id_token, parsed.idToken);
 
-  const histories = core
-    .getDbInstance()
-    .prepare(
-      `SELECT connection_id, account_label, COUNT(*) requests,
-              SUM(tokens_input + tokens_output) tokens
+  const histories = await getTestBackend().query(
+    `SELECT connection_id, account_label, COUNT(*) AS requests,
+            SUM(tokens_input + tokens_output) AS tokens
        FROM usage_history GROUP BY connection_id, account_label ORDER BY account_label`
-    )
-    .all();
+  );
   assert.deepEqual(histories, [
     { connection_id: alice.id, account_label: "Alice history", requests: 1, tokens: 15 },
     { connection_id: legacy.id, account_label: "Legacy history", requests: 1, tokens: 30 },
@@ -366,27 +337,18 @@ test("legacy workspace/email identity promotes to a user identity without losing
     timestamp: "2026-01-02T00:00:00.000Z",
   });
 
-  const groups = core
-    .getDbInstance()
-    .prepare(
-      `SELECT account_key, COUNT(*) requests, SUM(tokens_input + tokens_output) tokens,
-              MAX(account_label) FILTER (WHERE account_label_priority = 4) historic_label
+  const groups = await getTestBackend().query(
+    `SELECT account_key, COUNT(*) AS requests, SUM(tokens_input + tokens_output) AS tokens,
+            MAX(account_label) FILTER (WHERE account_label_priority = 4) AS historic_label
        FROM usage_history GROUP BY account_key`
-    )
-    .all() as Array<Record<string, unknown>>;
+  );
   assert.equal(result.id, legacy.id);
   assert.equal(result.accessToken, "safe-promotion-access-token");
   assert.equal(result.apiKey, "preserved-legacy-api-key");
   const decrypted = await providersDb.getProviderConnectionById(result.id as string);
   assert.equal(decrypted?.accessToken, "safe-promotion-access-token");
   assert.equal(decrypted?.apiKey, "preserved-legacy-api-key");
-  const stored = core
-    .getDbInstance()
-    .prepare(
-      `SELECT access_token, refresh_token, id_token
-       FROM provider_connections WHERE id = ?`
-    )
-    .get(result.id) as Record<string, string>;
+  const stored = (await storedTokens(result.id as string)) as Record<string, string>;
   assert.notEqual(stored.access_token, "safe-promotion-access-token");
   assert.notEqual(stored.refresh_token, "safe-promotion-refresh-token");
   assert.notEqual(stored.id_token, "safe-promotion-id-token");
@@ -409,14 +371,12 @@ test("partial legacy identity promotion preserves credentials encrypted under an
     "legacy-refresh",
     "legacy-id",
   ]);
-  core
-    .getDbInstance()
-    .prepare(
-      `UPDATE provider_connections
-       SET access_token = ?, refresh_token = ?, id_token = ?
-       WHERE id = ?`
-    )
-    .run(accessToken, refreshToken, idToken, legacy.id);
+  await getTestBackend().execute(
+    `UPDATE provider_connections
+       SET access_token = $1, refresh_token = $2, id_token = $3
+       WHERE id = $4`,
+    [accessToken, refreshToken, idToken, legacy.id]
+  );
   const beforeCiphertext = {
     access_token: accessToken,
     refresh_token: refreshToken,
@@ -438,19 +398,14 @@ test("partial legacy identity promotion preserves credentials encrypted under an
   assert.equal(promoted?.refreshToken, undefined);
   assert.equal(promoted?.idToken, undefined);
 
-  const after = core
-    .getDbInstance()
-    .prepare(
-      `SELECT access_token, refresh_token, id_token
-       FROM provider_connections WHERE id = ?`
-    )
-    .get(legacy.id) as Record<string, string>;
+  const after = await storedTokens(legacy.id as string);
   assert.deepEqual({ ...after }, beforeCiphertext);
 });
 
 test("failed legacy promotion rolls back both provider and usage identity", async () => {
   const providersDb = await import("../../src/lib/db/providers.ts");
   const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
+  const backend = getTestBackend();
   const legacy = await providersDb.createProviderConnection({
     provider: "codex",
     authType: "oauth",
@@ -466,32 +421,42 @@ test("failed legacy promotion rolls back both provider and usage identity", asyn
     timestamp: "2026-01-01T00:00:00.000Z",
   });
 
-  const db = core.getDbInstance();
-  const semanticState = () => ({
-    provider: db
-      .prepare("SELECT email, provider_specific_data FROM provider_connections WHERE id = ?")
-      .get(legacy.id),
-    usage: db
-      .prepare(
-        `SELECT COUNT(DISTINCT account_key) accounts, COUNT(*) requests,
-                SUM(tokens_input + tokens_output) tokens, MAX(account_label) label
-         FROM usage_history WHERE connection_id = ?`
-      )
-      .get(legacy.id),
+  const semanticState = async () => ({
+    provider: await backend.queryOne(
+      "SELECT email, provider_specific_data FROM provider_connections WHERE id = $1",
+      [legacy.id]
+    ),
+    usage: await backend.queryOne(
+      `SELECT COUNT(DISTINCT account_key) AS accounts, COUNT(*) AS requests,
+              SUM(tokens_input + tokens_output) AS tokens, MAX(account_label) AS label
+         FROM usage_history WHERE connection_id = $1`,
+      [legacy.id]
+    ),
   });
-  const before = semanticState();
-  db.exec(`CREATE TRIGGER reject_codex_promotion BEFORE UPDATE ON provider_connections
-           BEGIN SELECT RAISE(ABORT, 'forced provider update failure'); END`);
-
-  await assert.rejects(
-    providersDb.createProviderConnection({
-      provider: "codex",
-      authType: "oauth",
-      email: "alice@example.com",
-      providerSpecificData: { workspaceId: "acct-shared", chatgptUserId: "user-alice" },
-    }),
-    /forced provider update failure/
+  const before = await semanticState();
+  await backend.execute(`
+    CREATE OR REPLACE FUNCTION reject_codex_promotion() RETURNS trigger AS $$
+    BEGIN RAISE EXCEPTION 'forced provider update failure'; END;
+    $$ LANGUAGE plpgsql`);
+  await backend.execute(
+    `CREATE TRIGGER reject_codex_promotion BEFORE UPDATE ON provider_connections
+       FOR EACH ROW EXECUTE FUNCTION reject_codex_promotion()`
   );
 
-  assert.deepEqual(semanticState(), before);
+  try {
+    await assert.rejects(
+      providersDb.createProviderConnection({
+        provider: "codex",
+        authType: "oauth",
+        email: "alice@example.com",
+        providerSpecificData: { workspaceId: "acct-shared", chatgptUserId: "user-alice" },
+      }),
+      /forced provider update failure/
+    );
+
+    assert.deepEqual(await semanticState(), before);
+  } finally {
+    await backend.execute("DROP TRIGGER IF EXISTS reject_codex_promotion ON provider_connections");
+    await backend.execute("DROP FUNCTION IF EXISTS reject_codex_promotion()");
+  }
 });

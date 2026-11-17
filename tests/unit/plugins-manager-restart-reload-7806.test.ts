@@ -25,7 +25,6 @@ import { tmpdir } from "node:os";
 
 const mod = await import("../../src/lib/plugins/manager.ts");
 const db = await import("../../src/lib/db/plugins.ts");
-const { getDbInstance } = await import("../../src/lib/db/core.ts");
 
 function makeTmpPlugin(name: string, manifest: Record<string, unknown> = {}) {
   const tmp = mkdtempSync(join(tmpdir(), "mgr-restart-test-"));
@@ -61,11 +60,10 @@ describe("pluginManager reload after restart (#7806)", () => {
   const testPlugins: string[] = [];
   const tmpDirs: string[] = [];
 
-  beforeEach(() => {
-    getDbInstance();
+  beforeEach(async () => {
     for (const name of testPlugins) {
       try {
-        db.deletePlugin(name);
+        await db.deletePlugin(name);
       } catch {
         // not present — fine
       }
@@ -90,7 +88,7 @@ describe("pluginManager reload after restart (#7806)", () => {
         "sanity: in-memory state cleared, mirroring a fresh process"
       );
 
-      const dbRow = db.getPluginByName(name);
+      const dbRow = await db.getPluginByName(name);
       assert.equal(dbRow!.status, "active", "DB row still says active across the 'restart'");
 
       await mod.pluginManager.activate(name);

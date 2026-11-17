@@ -1,5 +1,9 @@
 import { db } from "./pg";
-import { invalidateDbCache } from "./readCache";
+import {
+  invalidateDbCache,
+  invalidateModelMetadataSnapshots,
+  loadModelMetadataSnapshot,
+} from "./readCache";
 
 /**
  * Feature 5004 — self-correcting context-window overrides.
@@ -10,9 +14,9 @@ import { invalidateDbCache } from "./readCache";
  * - `auto:discovery`: written by the reconciler when a provider's own `/models`
  *   discovery declares a window that diverges from the catalog.
  *
- * Cacheless on purpose: the read path already touches the DB (synced capabilities),
- * and a single indexed PK lookup is negligible — this avoids any cache-staleness
- * hazard with `resetDbInstance()` in tests.
+ * Lookups answer from a whole-table snapshot (see loadModelMetadataSnapshot): on Postgres a
+ * PK lookup is a network round trip, and the chat path asks ~10 times per request. Writers
+ * call invalidateDbCache("model-capabilities"); so does resetDbInstance() in tests.
  */
 
 export type ModelContextOverrideSource = "manual" | "auto:discovery";
@@ -57,6 +61,15 @@ function toOverride(row: OverrideRow): ModelContextOverride {
   };
 }
 
+function contextOverrideSnapshot(): Promise<Map<string, ModelContextOverride>> {
+  return loadModelMetadataSnapshot("model_context_overrides", async () => {
+    const rows = await db().query<OverrideRow>(
+      "SELECT provider, model_id, real_context, source, refreshed_at FROM model_context_overrides"
+    );
+    return new Map(rows.map((row) => [`${row.provider}\u0000${row.model_id}`, toOverride(row)]));
+  });
+}
+
 /** Full override record for (provider, modelId), or null. Never throws. */
 export async function getModelContextOverrideRecord(
   provider: string | null | undefined,
@@ -65,12 +78,8 @@ export async function getModelContextOverrideRecord(
   const key = normalizeKey(provider, modelId);
   if (!key) return null;
   try {
-    const row = await db().queryOne<OverrideRow>(
-      "SELECT provider, model_id, real_context, source, refreshed_at " +
-        "FROM model_context_overrides WHERE provider = $1 AND model_id = $2",
-      [key.provider, key.modelId]
-    );
-    return row ? toOverride(row) : null;
+    const record = (await contextOverrideSnapshot()).get(`${key.provider}\u0000${key.modelId}`);
+    return record ? { ...record } : null;
   } catch {
     // Database unavailable — fall through to the catalog.
     return null;
@@ -105,6 +114,15 @@ export interface ModelContextOverrideWriteOptions {
 }
 
 /**
+ * Every write drops the metadata snapshots so this process reads its own write at once;
+ * `invalidate: false` only defers the /v1/models catalog bump to the batch writer.
+ */
+function invalidateWrite(options: ModelContextOverrideWriteOptions): void {
+  if (options.invalidate === false) invalidateModelMetadataSnapshots();
+  else invalidateDbCache("model-capabilities");
+}
+
+/**
  * Upsert an override. `realContext` must be a positive integer (a token count);
  * anything else is rejected (no write). Returns true when a row was written.
  */
@@ -128,7 +146,7 @@ export async function setModelContextOverride(
                    refreshed_at = EXCLUDED.refreshed_at`,
     [key.provider, key.modelId, realContext, normalizedSource]
   );
-  if (options.invalidate !== false) invalidateDbCache("model-capabilities");
+  invalidateWrite(options);
   return true;
 }
 
@@ -144,7 +162,7 @@ export async function removeModelContextOverride(
     "DELETE FROM model_context_overrides WHERE provider = $1 AND model_id = $2",
     [key.provider, key.modelId]
   );
-  if (info.changes > 0 && options.invalidate !== false) invalidateDbCache("model-capabilities");
+  if (info.changes > 0) invalidateWrite(options);
   return info.changes > 0;
 }
 

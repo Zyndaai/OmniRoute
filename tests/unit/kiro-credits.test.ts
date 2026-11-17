@@ -23,6 +23,7 @@ process.env.API_KEY_SECRET = "unit-test-only";
 process.env.KIRO_CREDIT_PRICE_USD = "0.02";
 
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
 const { saveRequestUsage } = await import("../../src/lib/usage/usageHistory.ts");
 const { calculateCost } = await import("../../src/lib/usage/costCalculator.ts");
 const limits = await import("../../src/lib/usage/apiKeyUsageLimits.ts");
@@ -37,7 +38,7 @@ const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
 test.after(async () => {
   await closeCallLogSaves();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   delete process.env.KIRO_CREDIT_PRICE_USD;
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -102,10 +103,10 @@ test("quota, stats and rollup read the persisted cost; a later price does not re
   await saveRequestUsage(entry);
   await saveRequestUsage(entry);
 
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT provider_credits, provider_cost_usd FROM usage_history WHERE api_key_id = ?")
-    .get(key.id);
+  const row = await db().queryOne(
+    "SELECT provider_credits, provider_cost_usd FROM usage_history WHERE api_key_id = $1",
+    [key.id]
+  );
   assert.deepEqual(row, { provider_credits: 0.5, provider_cost_usd: 0.01 });
 
   // A tariff this high makes any token-based charge unmistakable.
@@ -126,10 +127,10 @@ test("quota, stats and rollup read the persisted cost; a later price does not re
     assert.equal((await stats.getUsageStats()).byApiKey[`id:${key.id}`].cost, 0.01);
 
     assert.equal((await rollupUsageHistoryBeforeDate("2100-01-01")).errors, 0);
-    const summary = core
-      .getDbInstance()
-      .prepare("SELECT total_cost FROM daily_usage_summary WHERE provider = 'kiro'")
-      .get() as { total_cost: number };
+    const summary = await db().queryOne<{ total_cost: number }>(
+      "SELECT total_cost FROM daily_usage_summary WHERE provider = $1",
+      ["kiro"]
+    );
     assert.equal(summary.total_cost, 0.01);
   } finally {
     process.env.KIRO_CREDIT_PRICE_USD = "0.02";

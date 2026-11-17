@@ -27,14 +27,15 @@ process.env.OMNIROUTE_PEER_STAMP_TOKEN = "test-peer-stamp-13679d";
 
 const ORIGINAL_INITIAL_PASSWORD = process.env.INITIAL_PASSWORD;
 
-const core = await import("../../src/lib/db/core.ts");
+import { resetTestDb } from "../helpers/postgres.ts";
+
 const compliance = await import("../../src/lib/compliance/index.ts");
 const loginRoute = await import("../../src/app/api/auth/login/route.ts");
 
 const originalGetCookieStore = loginRoute.authRouteInternals.getCookieStore;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   process.env.INITIAL_PASSWORD = "CHANGEME";
@@ -49,10 +50,10 @@ test.afterEach(() => {
   loginRoute.authRouteInternals.getCookieStore = originalGetCookieStore;
 });
 
-test.after(() => {
+test.after(async () => {
   if (ORIGINAL_STAMP_TOKEN === undefined) delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   else process.env.OMNIROUTE_PEER_STAMP_TOKEN = ORIGINAL_STAMP_TOKEN;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_INITIAL_PASSWORD === undefined) {
     delete process.env.INITIAL_PASSWORD;
@@ -90,7 +91,7 @@ test("a public-IP login with the well-known default password CHANGEME is rejecte
   );
   assert.equal(response.headers.get("set-cookie"), null, "no session cookie must be issued");
 
-  const [entry] = compliance.getAuditLog({
+  const [entry] = await compliance.getAuditLog({
     action: "auth.login.insecure_default_blocked",
     limit: 1,
   });

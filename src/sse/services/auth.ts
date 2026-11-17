@@ -1018,12 +1018,14 @@ export async function getProviderCredentials(
       model: string | null
     ): boolean => provider === "codex" && isCodexChildUnavailable(connection, model);
 
-    // Only Redis needs a snapshot for synchronous consumers; SQLite reads in place.
+    // Prefetch once for the synchronous consumers below (applySessionAffinityPin,
+    // planSessionAffinityConnection). Every store is async now; they no longer read in place,
+    // so a missing prefetch would silently disable the pin (#5903) and overwrite the affinity.
     const affinityStore = getSessionAffinityStore();
     const affinityRecord =
-      affinityStore.driver === "redis" && options.sessionKey && sessionAffinityTtlMs > 0
+      options.sessionKey && sessionAffinityTtlMs > 0
         ? await affinityStore.get(options.sessionKey, provider, sessionAffinityTtlMs)
-        : undefined;
+        : null;
     if (!options.lease) {
       forcedConnectionId =
         applySessionAffinityPin({

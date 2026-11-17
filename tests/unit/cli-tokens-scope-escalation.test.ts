@@ -21,11 +21,9 @@ const ORIGINAL_ENV = {
   API_KEY_SECRET: process.env.API_KEY_SECRET,
   INITIAL_PASSWORD: process.env.INITIAL_PASSWORD,
   JWT_SECRET: process.env.JWT_SECRET,
-  DISABLE_SQLITE_AUTO_BACKUP: process.env.DISABLE_SQLITE_AUTO_BACKUP,
 };
 
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.API_KEY_SECRET = "cli-tokens-scope-api-key-secret";
 process.env.JWT_SECRET = "cli-tokens-scope-jwt-secret";
 process.env.INITIAL_PASSWORD = "cli-tokens-scope-password";
@@ -44,12 +42,12 @@ const adminScopedApiKey = await apiKeysDb.createApiKey("admin-automation", "mach
   "admin",
 ]);
 
-test.after(() => {
+test.after(async () => {
   try {
     apiKeysDb.resetApiKeyState?.();
   } catch {}
   try {
-    core.resetDbInstance();
+    await core.resetDbInstance();
   } catch {}
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
@@ -70,10 +68,10 @@ function mintWith(headers: Record<string, string>, body: Record<string, unknown>
   );
 }
 
-function liveAdminTokenNamed(name: string) {
-  return accessTokensDb
-    .listAccessTokens()
-    .filter((t) => t.name === name && t.scope === "admin" && !t.revokedAt);
+async function liveAdminTokenNamed(name: string) {
+  return (await accessTokensDb.listAccessTokens()).filter(
+    (t) => t.name === name && t.scope === "admin" && !t.revokedAt
+  );
 }
 
 test("a manage-scoped API key cannot mint an admin access token", async () => {
@@ -84,7 +82,7 @@ test("a manage-scoped API key cannot mint an admin access token", async () => {
   assert.equal(res.status, 403);
   const body = await res.json();
   assert.equal(body.token, undefined, "no secret is returned on refusal");
-  assert.equal(liveAdminTokenNamed("escalate-manage").length, 0, "nothing was persisted");
+  assert.equal((await liveAdminTokenNamed("escalate-manage")).length, 0, "nothing was persisted");
 });
 
 test("an admin-scoped API key cannot mint an admin access token either", async () => {
@@ -93,17 +91,17 @@ test("an admin-scoped API key cannot mint an admin access token either", async (
     { name: "escalate-admin-key", scope: "admin" }
   );
   assert.equal(res.status, 403);
-  assert.equal(liveAdminTokenNamed("escalate-admin-key").length, 0);
+  assert.equal((await liveAdminTokenNamed("escalate-admin-key")).length, 0);
 });
 
 test("an admin access token cannot mint another admin access token", async () => {
-  const admin = accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
+  const admin = await accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
   const res = await mintWith(
     { authorization: `Bearer ${admin.secret}` },
     { name: "escalate-oma", scope: "admin" }
   );
   assert.equal(res.status, 403);
-  assert.equal(liveAdminTokenNamed("escalate-oma").length, 0);
+  assert.equal((await liveAdminTokenNamed("escalate-oma")).length, 0);
 });
 
 test("a manage-scoped API key may still mint write and read tokens (default read)", async () => {
@@ -125,7 +123,7 @@ test("a manage-scoped API key may still mint write and read tokens (default read
 });
 
 test("an admin access token may still mint narrower tokens", async () => {
-  const admin = accessTokensDb.createAccessToken({ name: "remote-admin-2", scope: "admin" });
+  const admin = await accessTokensDb.createAccessToken({ name: "remote-admin-2", scope: "admin" });
   const res = await mintWith(
     { authorization: `Bearer ${admin.secret}` },
     { name: "narrower", scope: "write" }
@@ -172,7 +170,7 @@ test("with login disabled, minting still takes a credential: anonymous 401, the 
     assert.equal((await getSettings()).requireLogin, false, "open mode must stick");
     const anon = await mintWith({}, { name: "open-instance-admin", scope: "admin" });
     assert.equal(anon.status, 401);
-    assert.equal(liveAdminTokenNamed("open-instance-admin").length, 0);
+    assert.equal((await liveAdminTokenNamed("open-instance-admin")).length, 0);
 
     const req = await makeManagementSessionRequest(URL_TOKENS, {
       method: "POST",

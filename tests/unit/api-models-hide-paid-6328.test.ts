@@ -20,6 +20,9 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const customModelsDb = await import("../../src/lib/db/models.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
 const modelsRoute = await import("../../src/app/api/models/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
+const { writeCatalogColumn } = await import("../../src/lib/db/models/catalogRow.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
 async function fetchModels(): Promise<
   Array<{ provider: string; model: string; supportsVision?: boolean }>
@@ -29,8 +32,8 @@ async function fetchModels(): Promise<
   return body.models;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -38,29 +41,47 @@ test.after(() => {
   }
 });
 
+/**
+ * Runs `run` while every statement that reads the custom-models document of
+ * `provider_model_catalog` is passed to `onRead` (which may throw to simulate a failing read).
+ */
+async function withCustomModelReadHook<T>(
+  onRead: (sql: string) => void,
+  run: () => Promise<T>
+): Promise<T> {
+  const backend = getTestBackend() as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const originalQuery = backend.query;
+  const originalQueryOne = backend.queryOne;
+  const wrap =
+    (original: (...args: unknown[]) => unknown) =>
+    (sql: string, ...rest: unknown[]) => {
+      const normalized = String(sql).replace(/\s+/g, " ");
+      if (normalized.includes("custom_models") && normalized.includes("FROM provider_model_catalog")) {
+        onRead(normalized);
+      }
+      return original(sql, ...rest);
+    };
+  backend.query = wrap(originalQuery) as typeof originalQuery;
+  backend.queryOne = wrap(originalQueryOne) as typeof originalQueryOne;
+  try {
+    return await run();
+  } finally {
+    backend.query = originalQuery;
+    backend.queryOne = originalQueryOne;
+  }
+}
+
 test("/api/models retains genuine resolved vision capability for the Video Bridge picker", async () => {
   await settingsDb.updateSettings({ hidePaidModels: false });
-  const db = core.getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) " + "VALUES ('customModels', ?, ?)"
-  ).run("openai", JSON.stringify([{ id: "gpt-4o", supportsVision: false }]));
-  const originalPrepare = db.prepare;
-  const callPrepare = originalPrepare.bind(db);
+  await writeCatalogColumn("custom_models", "openai", [{ id: "gpt-4o", supportsVision: false }]);
   let customModelReads = 0;
-  (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
-    const normalized = String(sql).replace(/\s+/g, " ").trim();
-    if (normalized.includes("FROM key_value WHERE namespace = 'customModels'")) {
-      customModelReads++;
-    }
-    return callPrepare(sql);
-  }) as typeof db.prepare;
 
-  let models: Awaited<ReturnType<typeof fetchModels>>;
-  try {
-    models = await fetchModels();
-  } finally {
-    (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
-  }
+  const models = await withCustomModelReadHook(
+    () => {
+      customModelReads++;
+    },
+    () => fetchModels()
+  );
   const vision = models.find(
     (model) => model.provider === "openai" && model.model === "gpt-4o-mini"
   );
@@ -86,79 +107,41 @@ test("/api/models retains genuine resolved vision capability for the Video Bridg
 });
 
 test("custom-model vision DB failures fail open through point, bulk, snapshot, and route reads", async () => {
-  const failure = new Error("private sqlite failure");
-  const pointFactories: Array<() => unknown> = [
-    () => {
-      throw failure;
-    },
-    () => ({
-      prepare() {
-        throw failure;
-      },
-    }),
-    () => ({
-      prepare() {
-        return {
-          get() {
-            throw failure;
-          },
-        };
-      },
-    }),
-  ];
-  for (const getDatabase of pointFactories) {
-    assert.equal(
-      customModelsDb.getCustomModelVisionOverride("openai", "gpt-4o", undefined, {
-        getDatabase,
-      }),
-      null
-    );
-  }
-
-  const bulkFactories: Array<() => unknown> = [
-    ...pointFactories.slice(0, 2),
-    () => ({
-      prepare() {
-        return {
-          all() {
-            throw failure;
-          },
-        };
-      },
-    }),
-    () => ({
-      prepare() {
-        return {
-          all() {
-            return [
-              {
-                get key() {
-                  throw failure;
-                },
-                value: "[]",
-              },
-            ];
-          },
-        };
-      },
-    }),
-  ];
-  for (const getDatabase of bulkFactories) {
-    const overrides = customModelsDb.listCustomModelVisionOverrides({ getDatabase });
-    assert.equal(overrides.size, 0);
-  }
-
-  const customDbFailure = {
-    getDatabase: () => {
-      throw failure;
-    },
+  // The custom-models reads really fail (the statement throws), as an unavailable database would.
+  const failure = new Error("private database failure");
+  const failCustomModelReads = () => {
+    throw failure;
   };
-  const snapshot = modelCapabilities.createModelCapabilityResolutionSnapshot({
-    customModelVision: customDbFailure,
-  });
+  // Drop the process catalog snapshot first so each read really reaches the failing database.
+  const whileReadsFail = <T>(run: () => Promise<T>) => {
+    invalidateDbCache("model-capabilities");
+    return withCustomModelReadHook(failCustomModelReads, run);
+  };
+
+  assert.equal(
+    await whileReadsFail(() => customModelsDb.getCustomModelVisionOverride("openai", "gpt-4o")),
+    null,
+    "point read"
+  );
+  assert.equal(
+    await whileReadsFail(() =>
+      customModelsDb.getCustomModelVisionOverride("openai", "vendor/gpt-4o", undefined, {
+        lookupKey: "openai/vendor/gpt-4o",
+      })
+    ),
+    null,
+    "point read with the path-shaped bulk fallback"
+  );
+
+  const overrides = await whileReadsFail(() => customModelsDb.listCustomModelVisionOverrides());
+  assert.equal(overrides.size, 0, "bulk read");
+
+  const snapshot = await whileReadsFail(() =>
+    modelCapabilities.createModelCapabilityResolutionSnapshot()
+  );
   assert.equal(snapshot.customVisionOverrides.size, 0);
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities("openai/gpt-4o-mini", undefined, snapshot)
+    (await modelCapabilities.getResolvedModelCapabilities("openai/gpt-4o-mini", undefined, snapshot))
       .supportsVision,
     true,
     "ordinary static capability fallback must survive the optional DB read"
@@ -168,9 +151,7 @@ test("custom-model vision DB failures fail open through point, bulk, snapshot, a
     new Request("http://localhost/api/models?all=true"),
     {
       createCapabilitySnapshot: () =>
-        modelCapabilities.createModelCapabilityResolutionSnapshot({
-          customModelVision: customDbFailure,
-        }),
+        whileReadsFail(() => modelCapabilities.createModelCapabilityResolutionSnapshot()),
     }
   );
   assert.equal(response.status, 200);

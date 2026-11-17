@@ -55,7 +55,7 @@ test("AUTH_LOG_INCLUDE_ACCOUNT_ID feature flag defaults to OFF, independent of d
   await t.test("effective runtime resolution is OFF with no override", async () => {
     delete process.env.AUTH_LOG_INCLUDE_ACCOUNT_ID;
     const { clearAllFeatureFlagOverrides } = await import("@/lib/db/featureFlags");
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
 
     const { isFeatureFlagEnabled } = await import("@/shared/utils/featureFlags");
     assert.strictEqual(isFeatureFlagEnabled("AUTH_LOG_INCLUDE_ACCOUNT_ID"), false);

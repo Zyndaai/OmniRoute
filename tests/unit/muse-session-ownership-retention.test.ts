@@ -1,6 +1,6 @@
 /**
  * #15567 / #15521 review follow-ups for Muse session ownership:
- *  - the key_value SQL lives in src/lib/db/museSessionOwnership.ts, not in the service;
+ *  - the ownership SQL lives in src/lib/db/museSessionOwnership.ts, not in the service;
  *  - recorded opaque/reference rows are bounded: an idle session is pruned with its pins;
  *  - a single OAuth account (nothing to rotate to) keeps working without a session id.
  */
@@ -21,17 +21,17 @@ import {
   readMuseOwnershipValue,
   touchMuseOwnershipScope,
 } from "../../src/lib/db/museSessionOwnership.ts";
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
-const NAMESPACE = "muse_session_ownership";
 const candidates = [{ id: "account-a" }, { id: "account-b" }];
 
-function rowsFor(scope: string): number {
-  return (
-    getDbInstance()
-      .prepare("SELECT COUNT(*) AS n FROM key_value WHERE namespace = ? AND key LIKE ?")
-      .get(NAMESPACE, `%${scope}%`) as { n: number }
-  ).n;
+async function rowsFor(scope: string): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM muse_session_ownership WHERE key LIKE $1",
+    [`%${scope}%`]
+  );
+  return row?.n ?? 0;
 }
 
 async function serve(scope: string, generation: string) {
@@ -54,27 +54,32 @@ test("service keeps no raw SQL: persistence goes through src/lib/db", () => {
     "utf8"
   );
   assert.match(source, /export /);
-  assert.doesNotMatch(source, /getDbInstance|\.prepare\(|key_value/);
+  assert.doesNotMatch(source, /getDbInstance|\.prepare\(|key_value|muse_session_ownership/);
 });
 
 test("an idle session is pruned with its owner pin and recorded items; active ones stay", async () => {
-  getDbInstance().prepare("DELETE FROM key_value WHERE namespace = ?").run(NAMESPACE);
+  await getTestBackend().execute("DELETE FROM muse_session_ownership");
   const idle = museSessionScope({ prompt_cache_key: "idle" }, undefined, "client");
   const active = museSessionScope({ prompt_cache_key: "active" }, undefined, "client");
   for (const scope of [idle, active]) {
-    const owner = claimMuseSession(scope, { input: "hi" }, candidates);
-    const generation = bindMuseGeneration(scope, owner.connectionId, `key-${scope}`, "identity");
+    const owner = await claimMuseSession(scope, { input: "hi" }, candidates);
+    const generation = await bindMuseGeneration(
+      scope,
+      owner.connectionId,
+      `key-${scope}`,
+      "identity"
+    );
     await serve(scope, generation);
-    assert.ok(readMuseOwnershipValue(`touched:${scope}`), "activity is recorded");
-    assert.ok(rowsFor(scope) >= 5, "session, served, touched, opaque and reference rows exist");
+    assert.ok(await readMuseOwnershipValue(`touched:${scope}`), "activity is recorded");
+    assert.ok((await rowsFor(scope)) >= 5, "session, served, touched, opaque and reference rows exist");
   }
   const now = Date.now();
-  touchMuseOwnershipScope(idle, now - MUSE_SESSION_IDLE_TTL_MS - 1);
+  await touchMuseOwnershipScope(idle, now - MUSE_SESSION_IDLE_TTL_MS - 1);
 
-  assert.equal(pruneIdleMuseOwnershipScopes(now), 1);
-  assert.equal(rowsFor(idle), 0);
-  assert.ok(rowsFor(active) >= 5);
-  assert.ok(readMuseOwnershipValue("cursor"), "the rotation cursor is not a session row");
+  assert.equal(await pruneIdleMuseOwnershipScopes(now), 1);
+  assert.equal(await rowsFor(idle), 0);
+  assert.ok((await rowsFor(active)) >= 5);
+  assert.ok(await readMuseOwnershipValue("cursor"), "the rotation cursor is not a session row");
 });
 
 test("one OAuth account and no session id falls back to unpinned routing instead of a 400", () => {

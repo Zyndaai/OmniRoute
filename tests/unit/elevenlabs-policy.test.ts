@@ -15,8 +15,9 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-elevenlab
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "elevenlabs-policy-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const voicesRoute = await import("../../src/app/api/v1/voices/route.ts");
@@ -27,16 +28,14 @@ const { nativeGenerationRoutes } = await import("./helpers/elevenLabsGenerationR
 const originalFetch = globalThis.fetch;
 const ELEVENLABS_API_KEY = "test-elevenlabs-key";
 
-function seedElevenLabsCredential() {
-  const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT OR REPLACE INTO provider_connections
-         (id, provider, auth_type, is_active, api_key, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run("elevenlabs-policy-test", "elevenlabs", "apikey", 1, ELEVENLABS_API_KEY, now, now);
+async function seedElevenLabsCredential() {
+  await providersDb.createProviderConnection({
+    provider: "elevenlabs",
+    authType: "apikey",
+    name: "elevenlabs-policy-test",
+    apiKey: ELEVENLABS_API_KEY,
+    isActive: true,
+  });
   readCache.invalidateDbCache("connections");
 }
 
@@ -84,25 +83,25 @@ async function callAllNativeRoutes(apiKey: string) {
 }
 
 test.beforeEach(async () => {
-  await core.ensureDbInitialized();
-  seedElevenLabsCredential();
+  await resetTestDb();
+  await seedElevenLabsCredential();
 });
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  core.resetDbInstance();
+  await costRules.resetCostData();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("an over-budget key is rejected with 429 on all native ElevenLabs routes without reaching upstream", async () => {
   const key = await apiKeysDb.createApiKey("EL Budget Key", "machine-elevenlabs-budget");
-  costRules.setBudget(key.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
+  await costRules.setBudget(key.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
   costRules.recordCost(key.id, 2);
 
   const upstreamWasCalled = stubUpstream();

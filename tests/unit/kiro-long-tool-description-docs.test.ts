@@ -61,9 +61,9 @@ const TURN_SHAPES = {
 // `currentMessage` (a single user turn, or the "no user turn" fallback) does
 // it stay there. Whichever turn carries it, it must reach the model exactly
 // once — resending it on both would reintroduce #13652's duplication bug.
-test("relocated tool documentation reaches exactly one turn for every turn shape", () => {
+test("relocated tool documentation reaches exactly one turn for every turn shape", async () => {
   for (const [label, messages] of Object.entries(TURN_SHAPES)) {
-    const payload = buildKiroPayload(
+    const payload = await buildKiroPayload(
       "claude-sonnet-4.5",
       { messages, tools: bigToolWithDescriptionLength(12000) },
       true,
@@ -95,9 +95,9 @@ test("relocated tool documentation reaches exactly one turn for every turn shape
   }
 });
 
-test("relocation never leaks an unknown field into the upstream payload", () => {
+test("relocation never leaks an unknown field into the upstream payload", async () => {
   for (const [label, messages] of Object.entries(TURN_SHAPES)) {
-    const payload = buildKiroPayload(
+    const payload = await buildKiroPayload(
       "claude-sonnet-4.5",
       { messages, tools: bigToolWithDescriptionLength(12000) },
       true,
@@ -111,8 +111,8 @@ test("relocation never leaks an unknown field into the upstream payload", () => 
   }
 });
 
-test("a description within the limit is left alone and adds no documentation block", () => {
-  const payload = buildKiroPayload(
+test("a description within the limit is left alone and adds no documentation block", async () => {
+  const payload = await buildKiroPayload(
     "claude-sonnet-4.5",
     {
       messages: TURN_SHAPES["multi-turn conversation"],
@@ -145,10 +145,10 @@ test("a description within the limit is left alone and adds no documentation blo
 
 // A description exactly at the limit must pass through: the guard triggers only
 // above it, and an off-by-one here would relocate a description Kiro accepts.
-test("the relocation boundary triggers above the limit, not at it", () => {
+test("the relocation boundary triggers above the limit, not at it", async () => {
   const messages = TURN_SHAPES["multi-turn conversation"];
 
-  const atLimit = buildKiroPayload(
+  const atLimit = await buildKiroPayload(
     "claude-sonnet-4.5",
     { messages, tools: bigToolWithDescriptionLength(10000) },
     true,
@@ -165,7 +165,7 @@ test("the relocation boundary triggers above the limit, not at it", () => {
     "no documentation block at the boundary"
   );
 
-  const overLimit = buildKiroPayload(
+  const overLimit = await buildKiroPayload(
     "claude-sonnet-4.5",
     { messages, tools: bigToolWithDescriptionLength(10001) },
     true,
@@ -181,8 +181,8 @@ test("the relocation boundary triggers above the limit, not at it", () => {
 
 // Only the oversized tool is relocated; a mixed inventory must keep the short
 // descriptions inline so the model still sees them next to the schema.
-test("only oversized descriptions are relocated in a mixed tool inventory", () => {
-  const payload = buildKiroPayload(
+test("only oversized descriptions are relocated in a mixed tool inventory", async () => {
+  const payload = await buildKiroPayload(
     "claude-sonnet-4.5",
     {
       messages: TURN_SHAPES["multi-turn conversation"],

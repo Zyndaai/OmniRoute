@@ -7,13 +7,13 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-usage-history-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 
 const clearPendingRequests = usageHistory.clearPendingRequests;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   clearPendingRequests();
@@ -51,8 +51,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -128,14 +128,13 @@ test("usage history persists service tier and defaults to standard", async () =>
 });
 
 test("getUsageDb provides nextCursor when rows exceed MAX_ROWS", async () => {
-  const db = core.getDbInstance();
   // Insert exactly MAX_ROWS + 1 = 10001 rows so getUsageDb returns a cursor
-  for (let i = 0; i < 10001; i++) {
-    db.prepare(
-      `INSERT INTO usage_history (provider, model, timestamp, tokens_input, tokens_output, success, latency_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(`prov-${i}`, `model-${i}`, new Date(Date.now() - i * 1000).toISOString(), 10, 5, 1, 100);
-  }
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, model, "timestamp", tokens_input, tokens_output, success, latency_ms)
+     SELECT 'prov-' || i, 'model-' || i, $1::timestamptz - make_interval(secs => i), 10, 5, true, 100
+       FROM generate_series(0, 10000) AS i`,
+    [new Date().toISOString()]
+  );
 
   const result = await usageHistory.getUsageDb();
 

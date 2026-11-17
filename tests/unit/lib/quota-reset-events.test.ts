@@ -8,6 +8,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-res
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { db } = await import("../../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 const {
   recordProviderQuotaResetEventIfChanged,
   getProviderQuotaWindowStart,
@@ -15,22 +17,42 @@ const {
   hasObservedClaudeQuotaResetAfter,
 } = await import("../../../src/lib/db/quotaResetEvents.ts");
 
-// Force migrations (incl. 108_provider_quota_reset_events) to run.
-core.getDbInstance();
-
 const CONN = "conn-1";
 const PROVIDER = "antigravity";
 const PREV_RESET = "2026-01-08T00:00:00.000Z";
 const CUR_RESET = "2026-01-15T00:00:00.000Z"; // +7d, different day
 const OBSERVED = "2026-01-15T00:05:00.000Z";
 
-test.after(() => {
-  core.resetDbInstance();
+// Quota reset events and quota snapshots reference provider_connections (FK), so
+// every connection id the tests use needs a row.
+const CONNECTION_IDS = [
+  CONN,
+  "conn-early-reset-snapshot",
+  "conn-early-reset-record",
+  "conn-sameday",
+  "conn-daily",
+  "conn-17043-confirmed",
+  "conn-17043-unknown-refill",
+  "conn-17043-model-only-reset",
+];
+
+test.beforeEach(async () => {
+  await resetTestDb();
+  for (const id of CONNECTION_IDS) {
+    await db().execute("INSERT INTO provider_connections (id, provider) VALUES ($1, $2)", [
+      id,
+      "claude",
+    ]);
+  }
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("records a weekly window transition and getWindowStart returns the prior window start", () => {
-  recordProviderQuotaResetEventIfChanged({
+test("records a weekly window transition and getWindowStart returns the prior window start", async () => {
+  await recordProviderQuotaResetEventIfChanged({
     provider: PROVIDER,
     connectionId: CONN,
     windowKey: "weekly",
@@ -41,92 +63,79 @@ test("records a weekly window transition and getWindowStart returns the prior wi
   });
 
   // For the new window (resets at CUR_RESET) the observed start is PREV_RESET.
-  const start = getProviderQuotaWindowStartIso(CONN, CUR_RESET, Date.parse(OBSERVED) + 1000);
+  const start = await getProviderQuotaWindowStartIso(
+    CONN,
+    CUR_RESET,
+    Date.parse(OBSERVED) + 1000
+  );
   assert.equal(start, PREV_RESET);
 });
 
-test("getWindowStart returns null for a reset day with no recorded event", () => {
+test("getWindowStart returns null for a reset day with no recorded event", async () => {
   assert.equal(
-    getProviderQuotaWindowStartIso(CONN, "2026-02-01T00:00:00.000Z", Date.parse(OBSERVED) + 1000),
+    await getProviderQuotaWindowStartIso(
+      CONN,
+      "2026-02-01T00:00:00.000Z",
+      Date.parse(OBSERVED) + 1000
+    ),
     null
   );
 });
 
-test("observed same-resetAt quota drop overrides an older recorded weekly window", () => {
+test("observed same-resetAt quota drop overrides an older recorded weekly window", async () => {
   const connectionId = "conn-early-reset-snapshot";
   const targetResetAt = "2026-07-02T23:00:00.000Z";
-  const db = core.getDbInstance();
 
-  db.prepare(
-    `
-    INSERT INTO provider_quota_reset_events
+  await db().execute(
+    `INSERT INTO provider_quota_reset_events
       (provider, connection_id, window_key, window_started_at, window_resets_at,
        observed_at, previous_remaining_percentage, new_remaining_percentage,
-       previous_used_percentage, new_used_percentage, raw_data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    "claude",
-    connectionId,
-    "weekly (7d)",
-    "2026-06-25T23:00:00.000Z",
-    targetResetAt,
-    "2026-06-25T23:04:00.000Z",
-    0,
-    100,
-    100,
-    0,
-    null
+       previous_used_percentage, new_used_percentage)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      "claude",
+      connectionId,
+      "weekly (7d)",
+      "2026-06-25T23:00:00.000Z",
+      targetResetAt,
+      "2026-06-25T23:04:00.000Z",
+      0,
+      100,
+      100,
+      0,
+    ]
   );
 
-  const insertSnapshot = db.prepare(`
-    INSERT INTO quota_snapshots (
-      provider,
-      connection_id,
-      window_key,
-      remaining_percentage,
-      is_exhausted,
-      next_reset_at,
-      window_duration_ms,
-      raw_data,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertSnapshot.run(
-    "claude",
-    connectionId,
-    "weekly (7d)",
-    100,
-    0,
-    targetResetAt,
-    null,
-    null,
-    "2026-06-25T23:04:00.000Z"
-  );
-  insertSnapshot.run(
-    "claude",
-    connectionId,
-    "weekly (7d)",
-    4,
-    0,
-    targetResetAt,
-    null,
-    null,
-    "2026-07-01T00:05:00.000Z"
-  );
-  insertSnapshot.run(
-    "claude",
-    connectionId,
-    "weekly (7d)",
-    100,
-    0,
-    targetResetAt,
-    null,
-    null,
-    "2026-07-01T21:41:13.293Z"
-  );
+  const insertSnapshot = (remainingPercentage: number, createdAt: string) =>
+    db().execute(
+      `INSERT INTO quota_snapshots (
+        provider,
+        connection_id,
+        window_key,
+        remaining_percentage,
+        is_exhausted,
+        next_reset_at,
+        window_duration_ms,
+        raw_data,
+        created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        "claude",
+        connectionId,
+        "weekly (7d)",
+        remainingPercentage,
+        false,
+        targetResetAt,
+        null,
+        null,
+        createdAt,
+      ]
+    );
+  await insertSnapshot(100, "2026-06-25T23:04:00.000Z");
+  await insertSnapshot(4, "2026-07-01T00:05:00.000Z");
+  await insertSnapshot(100, "2026-07-01T21:41:13.293Z");
 
-  const start = getProviderQuotaWindowStart(
+  const start = await getProviderQuotaWindowStart(
     connectionId,
     targetResetAt,
     Date.parse("2026-07-02T00:00:00.000Z")
@@ -137,7 +146,7 @@ test("observed same-resetAt quota drop overrides an older recorded weekly window
     source: "observed_snapshot_reset",
   });
   assert.equal(
-    getProviderQuotaWindowStartIso(
+    await getProviderQuotaWindowStartIso(
       connectionId,
       targetResetAt,
       Date.parse("2026-07-02T00:00:00.000Z")
@@ -146,12 +155,12 @@ test("observed same-resetAt quota drop overrides an older recorded weekly window
   );
 });
 
-test("records same-resetAt weekly resets when usage drops back to the reset floor", () => {
+test("records same-resetAt weekly resets when usage drops back to the reset floor", async () => {
   const connectionId = "conn-early-reset-record";
   const targetResetAt = "2026-07-02T23:00:00.000Z";
   const observedAt = "2026-07-01T21:41:13.293Z";
 
-  recordProviderQuotaResetEventIfChanged({
+  await recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId,
     windowKey: "weekly (7d)",
@@ -162,7 +171,7 @@ test("records same-resetAt weekly resets when usage drops back to the reset floo
   });
 
   assert.equal(
-    getProviderQuotaWindowStartIso(
+    await getProviderQuotaWindowStartIso(
       connectionId,
       targetResetAt,
       Date.parse("2026-07-02T00:00:00.000Z")
@@ -171,8 +180,8 @@ test("records same-resetAt weekly resets when usage drops back to the reset floo
   );
 });
 
-test("does not record when previous and current reset fall on the same day without a reset drop", () => {
-  recordProviderQuotaResetEventIfChanged({
+test("does not record when previous and current reset fall on the same day without a reset drop", async () => {
+  await recordProviderQuotaResetEventIfChanged({
     provider: PROVIDER,
     connectionId: "conn-sameday",
     windowKey: "weekly",
@@ -182,7 +191,7 @@ test("does not record when previous and current reset fall on the same day witho
     observedAt: "2026-03-10T23:30:00.000Z",
   });
   assert.equal(
-    getProviderQuotaWindowStartIso(
+    await getProviderQuotaWindowStartIso(
       "conn-sameday",
       "2026-03-10T23:00:00.000Z",
       Date.parse("2026-03-11T00:00:00.000Z")
@@ -191,8 +200,8 @@ test("does not record when previous and current reset fall on the same day witho
   );
 });
 
-test("does not record for a non-weekly (e.g. daily) window", () => {
-  recordProviderQuotaResetEventIfChanged({
+test("does not record for a non-weekly (e.g. daily) window", async () => {
+  await recordProviderQuotaResetEventIfChanged({
     provider: PROVIDER,
     connectionId: "conn-daily",
     windowKey: "daily",
@@ -202,19 +211,19 @@ test("does not record for a non-weekly (e.g. daily) window", () => {
     observedAt: OBSERVED,
   });
   assert.equal(
-    getProviderQuotaWindowStartIso("conn-daily", CUR_RESET, Date.parse(OBSERVED) + 1000),
+    await getProviderQuotaWindowStartIso("conn-daily", CUR_RESET, Date.parse(OBSERVED) + 1000),
     null
   );
 });
 
-test("#17043: only a measured Claude weekly refill AFTER the 429 authorizes recovery", () => {
+test("#17043: only a measured Claude weekly refill AFTER the 429 authorizes recovery", async () => {
   const now = Date.now();
   const observedAt = new Date(now - 10_000).toISOString();
   const lastErrorAt = new Date(now - 20_000).toISOString();
   const weeklyReset = new Date(now + 86_400_000).toISOString();
   const id = "conn-17043-confirmed";
 
-  recordProviderQuotaResetEventIfChanged({
+  await recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId: id,
     windowKey: "weekly (7d)",
@@ -223,22 +232,25 @@ test("#17043: only a measured Claude weekly refill AFTER the 429 authorizes reco
     previousObservation: { resetAt: weeklyReset, remainingPercentage: 0 },
     observedAt,
   });
-  assert.equal(hasObservedClaudeQuotaResetAfter(id, lastErrorAt, now), true);
+  assert.equal(await hasObservedClaudeQuotaResetAfter(id, lastErrorAt, now), true);
   assert.equal(
-    hasObservedClaudeQuotaResetAfter(id, new Date(now - 5_000).toISOString(), now),
+    await hasObservedClaudeQuotaResetAfter(id, new Date(now - 5_000).toISOString(), now),
     false,
     "a second 429 newer than the event must never inherit an older reset"
   );
-  assert.equal(hasObservedClaudeQuotaResetAfter("conn-17043-unrelated", lastErrorAt, now), false);
-  assert.equal(hasObservedClaudeQuotaResetAfter(id, null, now), false);
+  assert.equal(
+    await hasObservedClaudeQuotaResetAfter("conn-17043-unrelated", lastErrorAt, now),
+    false
+  );
+  assert.equal(await hasObservedClaudeQuotaResetAfter(id, null, now), false);
 });
 
-test("#17043: a reset timestamp change without measured quota recovery is insufficient", () => {
+test("#17043: a reset timestamp change without measured quota recovery is insufficient", async () => {
   const now = Date.now();
   const id = "conn-17043-unknown-refill";
   const pastReset = new Date(now + 86_400_000).toISOString();
   const nextReset = new Date(now + 2 * 86_400_000).toISOString();
-  recordProviderQuotaResetEventIfChanged({
+  await recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId: id,
     windowKey: "weekly (7d)",
@@ -248,13 +260,13 @@ test("#17043: a reset timestamp change without measured quota recovery is insuff
     observedAt: new Date(now - 5_000).toISOString(),
   });
   assert.equal(
-    hasObservedClaudeQuotaResetAfter(id, new Date(now - 10_000).toISOString(), now),
+    await hasObservedClaudeQuotaResetAfter(id, new Date(now - 10_000).toISOString(), now),
     false,
     "a reset date moving without known previous capacity is not positive evidence"
   );
 });
 
-test("#17043: a model-scoped weekly refill cannot unlock the account-wide 429", () => {
+test("#17043: a model-scoped weekly refill cannot unlock the account-wide 429", async () => {
   const now = Date.now();
   const before429 = new Date(now - 30_000).toISOString();
   const observedAt = new Date(now - 10_000).toISOString();
@@ -264,7 +276,7 @@ test("#17043: a model-scoped weekly refill cannot unlock the account-wide 429", 
   // These rows pass the legacy broad weekly-window matcher, so they exercise
   // the SQL selector rather than assuming the ingestion path filters them out.
   for (const windowKey of ["weekly opus (7d)", "weekly haiku (7d)"]) {
-    recordProviderQuotaResetEventIfChanged({
+    await recordProviderQuotaResetEventIfChanged({
       provider: "claude",
       connectionId: id,
       windowKey,
@@ -275,12 +287,12 @@ test("#17043: a model-scoped weekly refill cannot unlock the account-wide 429", 
     });
   }
   assert.equal(
-    hasObservedClaudeQuotaResetAfter(id, before429, now),
+    await hasObservedClaudeQuotaResetAfter(id, before429, now),
     false,
     "a scoped model refill cannot establish global weekly capacity"
   );
 
-  recordProviderQuotaResetEventIfChanged({
+  await recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId: id,
     windowKey: "weekly (7d)",
@@ -290,7 +302,7 @@ test("#17043: a model-scoped weekly refill cannot unlock the account-wide 429", 
     observedAt,
   });
   assert.equal(
-    hasObservedClaudeQuotaResetAfter(id, before429, now),
+    await hasObservedClaudeQuotaResetAfter(id, before429, now),
     true,
     "a measured global weekly refill is still sufficient"
   );

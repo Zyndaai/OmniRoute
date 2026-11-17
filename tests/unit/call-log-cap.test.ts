@@ -4,16 +4,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Typed views over the raw sqlite rows / payload envelopes this suite inspects —
+// Typed views over the raw rows / payload envelopes this suite inspects —
 // keeps the assertions honest without @typescript-eslint/no-explicit-any (#12146).
 type CallLogRow = {
   name?: string;
   cnt?: number;
   detail_state?: string | null;
   cache_source?: string | null;
-  has_request_body?: number;
-  has_response_body?: number;
-  has_pipeline_details?: number;
+  has_request_body?: boolean;
+  has_response_body?: boolean;
+  has_pipeline_details?: boolean;
   artifact_relpath?: string;
   artifact_size_bytes?: number;
   error_summary?: string | null;
@@ -21,9 +21,8 @@ type CallLogRow = {
 type PayloadEnvelope = { body?: Record<string, unknown> };
 type PayloadMap = { providerResponse?: PayloadEnvelope; clientResponse?: PayloadEnvelope };
 
-import { useDecollidedMigrationsDir } from "./helpers/decollidedMigrationsDir.ts";
+import { getTestBackend, resetTestDb } from "./../helpers/postgres.ts";
 
-useDecollidedMigrationsDir();
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-calllogs-artifacts-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.CALL_LOG_RETENTION_DAYS = "3650";
@@ -33,11 +32,10 @@ const ORIGINAL_CALL_LOG_PIPELINE_MAX_SIZE_KB = process.env.CALL_LOG_PIPELINE_MAX
 
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
-const detailedLogs = await import("../../src/lib/db/detailedLogs.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -50,26 +48,11 @@ function restorePipelineEnv() {
   }
 }
 
-function insertCallLog(row) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `
-    INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, requested_model, provider, account,
-      connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
-      api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
-      error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
-      has_request_body, has_response_body, has_pipeline_details, request_summary
-    )
-    VALUES (
-      @id, @timestamp, @method, @path, @status, @model, @requested_model, @provider, @account,
-      @connection_id, @duration, @tokens_in, @tokens_out, @cache_source, @source_format, @target_format,
-      @api_key_id, @api_key_name, @combo_name, @combo_step_id, @combo_execution_key,
-      @error_summary, @detail_state, @artifact_relpath, @artifact_size_bytes, @artifact_sha256,
-      @has_request_body, @has_response_body, @has_pipeline_details, @request_summary
-    )
-  `
-  ).run({
+const one = (sql: string, params: unknown[]) =>
+  getTestBackend().queryOne<CallLogRow>(sql, params) as Promise<CallLogRow>;
+
+async function insertCallLog(row) {
+  const r = {
     requested_model: null,
     connection_id: null,
     duration: 0,
@@ -88,12 +71,62 @@ function insertCallLog(row) {
     artifact_relpath: null,
     artifact_size_bytes: null,
     artifact_sha256: null,
-    has_request_body: 0,
-    has_response_body: 0,
-    has_pipeline_details: 0,
+    has_request_body: false,
+    has_response_body: false,
+    has_pipeline_details: false,
     request_summary: null,
     ...row,
-  });
+  };
+  await getTestBackend().execute(
+    `
+    INSERT INTO call_logs (
+      id, "timestamp", method, path, status, model, requested_model, provider, account,
+      connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
+      api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
+      error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
+      has_request_body, has_response_body, has_pipeline_details, request_summary
+    )
+    VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9,
+      $10, $11, $12, $13, $14, $15, $16,
+      $17, $18, $19, $20, $21,
+      $22, $23, $24, $25, $26,
+      $27, $28, $29, $30
+    )
+  `,
+    [
+      r.id,
+      r.timestamp,
+      r.method,
+      r.path,
+      r.status,
+      r.model,
+      r.requested_model,
+      r.provider,
+      r.account,
+      r.connection_id,
+      r.duration,
+      r.tokens_in,
+      r.tokens_out,
+      r.cache_source,
+      r.source_format,
+      r.target_format,
+      r.api_key_id,
+      r.api_key_name,
+      r.combo_name,
+      r.combo_step_id,
+      r.combo_execution_key,
+      r.error_summary,
+      r.detail_state,
+      r.artifact_relpath,
+      r.artifact_size_bytes,
+      r.artifact_sha256,
+      r.has_request_body,
+      r.has_response_body,
+      r.has_pipeline_details,
+      r.request_summary,
+    ]
+  );
 }
 
 test.beforeEach(async () => {
@@ -102,9 +135,9 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   restorePipelineEnv();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -167,29 +200,29 @@ test("saveCallLog stores only summary metadata in SQLite and writes detailed art
     /^2026-03-30\/2026-03-30T12-34-56\.789Z_req_artifact_1\.json$/
   );
 
-  const db = core.getDbInstance();
-  const columns = db
-    .prepare("SELECT name FROM pragma_table_info('call_logs') ORDER BY cid")
-    .all()
-    .map((row) => (row as CallLogRow).name);
+  const columns = (
+    await getTestBackend().query<CallLogRow>(
+      "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'call_logs'"
+    )
+  ).map((row) => row.name);
+  assert.ok(columns.length > 0);
   assert.equal(columns.includes("request_body"), false);
   assert.equal(columns.includes("response_body"), false);
   assert.equal(columns.includes("error"), false);
 
-  const summaryRow = db
-    .prepare(
-      `
-      SELECT detail_state, artifact_relpath, cache_source, has_request_body, has_response_body, has_pipeline_details
-      FROM call_logs WHERE id = ?
+  const summaryRow = await one(
     `
-    )
-    .get(logId);
-  assert.equal((summaryRow as CallLogRow).detail_state, "ready");
-  assert.equal((summaryRow as CallLogRow).cache_source, "semantic");
-  assert.equal((summaryRow as CallLogRow).has_request_body, 1);
-  assert.equal((summaryRow as CallLogRow).has_response_body, 1);
-  assert.equal((summaryRow as CallLogRow).has_pipeline_details, 1);
-  assert.equal(typeof (summaryRow as CallLogRow).artifact_relpath, "string");
+      SELECT detail_state, artifact_relpath, cache_source, has_request_body, has_response_body, has_pipeline_details
+      FROM call_logs WHERE id = $1
+    `,
+    [logId]
+  );
+  assert.equal(summaryRow.detail_state, "ready");
+  assert.equal(summaryRow.cache_source, "semantic");
+  assert.equal(summaryRow.has_request_body, true);
+  assert.equal(summaryRow.has_response_body, true);
+  assert.equal(summaryRow.has_pipeline_details, true);
+  assert.equal(typeof summaryRow.artifact_relpath, "string");
 
   const artifactPath = path.join(TEST_DATA_DIR, "call_logs", detail.artifactRelPath);
   const serializedArtifact = fs.readFileSync(artifactPath, "utf8");
@@ -210,7 +243,7 @@ test("getCallLogs resolves raw account labels from provider connections", async 
     accessToken: "token",
   });
 
-  insertCallLog({
+  await insertCallLog({
     id: "masked-account-log",
     timestamp: "2026-03-30T12:34:56.789Z",
     method: "POST",
@@ -238,7 +271,7 @@ test("rotateCallLogs removes expired rows and orphaned artifacts but keeps fresh
   fs.mkdirSync(path.dirname(oldAbsPath), { recursive: true });
   fs.writeFileSync(oldAbsPath, JSON.stringify({ schemaVersion: 4 }, null, 2));
 
-  insertCallLog({
+  await insertCallLog({
     id: "expired-log",
     timestamp: "2026-03-10T00:00:00.000Z",
     method: "POST",
@@ -249,7 +282,7 @@ test("rotateCallLogs removes expired rows and orphaned artifacts but keeps fresh
     account: "Expired",
     detail_state: "ready",
     artifact_relpath: oldRelPath,
-    has_request_body: 1,
+    has_request_body: true,
   });
 
   await callLogs.saveCallLog({
@@ -263,46 +296,27 @@ test("rotateCallLogs removes expired rows and orphaned artifacts but keeps fresh
     requestBody: { ok: true },
   });
 
-  const freshRow = core
-    .getDbInstance()
-    .prepare("SELECT artifact_relpath FROM call_logs WHERE id = ?")
-    .get("fresh-log");
-  const freshAbsPath = path.join(
-    TEST_DATA_DIR,
-    "call_logs",
-    (freshRow as CallLogRow).artifact_relpath
-  );
+  const freshRow = await one("SELECT artifact_relpath FROM call_logs WHERE id = $1", [
+    "fresh-log",
+  ]);
+  const freshAbsPath = path.join(TEST_DATA_DIR, "call_logs", freshRow.artifact_relpath);
 
   assert.equal(
-    (
-      core
-        .getDbInstance()
-        .prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = ?")
-        .get("expired-log") as CallLogRow
-    ).cnt,
+    (await one("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = $1", ["expired-log"])).cnt,
     1
   );
   assert.equal(fs.existsSync(oldAbsPath), true);
   assert.equal(fs.existsSync(freshAbsPath), true);
 
-  callLogs.rotateCallLogs();
+  await callLogs.rotateCallLogs();
 
-  const db = core.getDbInstance();
   assert.equal(
-    (
-      db
-        .prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = ?")
-        .get("expired-log") as CallLogRow
-    ).cnt,
+    (await one("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = $1", ["expired-log"])).cnt,
     0
   );
   assert.equal(fs.existsSync(oldAbsPath), false);
   assert.equal(
-    (
-      db
-        .prepare("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = ?")
-        .get("fresh-log") as CallLogRow
-    ).cnt,
+    (await one("SELECT COUNT(*) AS cnt FROM call_logs WHERE id = $1", ["fresh-log"])).cnt,
     1
   );
   assert.equal(fs.existsSync(freshAbsPath), true);
@@ -311,14 +325,14 @@ test("rotateCallLogs removes expired rows and orphaned artifacts but keeps fresh
   const orphanFile = path.join(orphanDir, "orphan.json");
   fs.mkdirSync(orphanDir, { recursive: true });
   fs.writeFileSync(orphanFile, "{}");
-  callLogs.cleanupOrphanCallLogFiles();
+  await callLogs.cleanupOrphanCallLogFiles();
   assert.equal(fs.existsSync(orphanFile), false);
 
   process.env.CALL_LOG_RETENTION_DAYS = "3650";
 });
 
 test("getCallLogs applies provider, account, apiKey, combo, search, and status filters with summary fields", async () => {
-  insertCallLog({
+  await insertCallLog({
     id: "filter-hit",
     timestamp: "2026-03-30T12:34:56.000Z",
     method: "POST",
@@ -339,9 +353,9 @@ test("getCallLogs applies provider, account, apiKey, combo, search, and status f
     combo_name: "combo-a",
     combo_step_id: "step-a",
     combo_execution_key: "combo-a:0:step-a",
-    has_request_body: 1,
+    has_request_body: true,
   });
-  insertCallLog({
+  await insertCallLog({
     id: "filter-miss",
     timestamp: "2026-03-30T12:35:56.000Z",
     method: "POST",
@@ -359,7 +373,7 @@ test("getCallLogs applies provider, account, apiKey, combo, search, and status f
     api_key_id: "key-2",
     api_key_name: "Backup Key",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "status-error-by-message",
     timestamp: "2026-03-30T12:36:56.000Z",
     method: "POST",
@@ -370,7 +384,7 @@ test("getCallLogs applies provider, account, apiKey, combo, search, and status f
     account: "Primary Account",
     error_summary: "synthetic failure",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "status-error",
     timestamp: "2026-03-30T12:37:56.000Z",
     method: "POST",
@@ -411,72 +425,8 @@ test("getCallLogs applies provider, account, apiKey, combo, search, and status f
   );
 });
 
-test("getCallLogById falls back to legacy inline rows and request_detail_logs", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    CREATE TABLE call_logs_v1_legacy (
-      id TEXT PRIMARY KEY,
-      request_body TEXT,
-      response_body TEXT,
-      error TEXT
-    );
-  `);
-
-  insertCallLog({
-    id: "legacy-read",
-    timestamp: "2026-03-30T12:34:56.000Z",
-    method: "POST",
-    path: "/v1/chat/completions",
-    status: 200,
-    model: "openai/gpt-4.1",
-    provider: "openai",
-    account: "Primary Account",
-    detail_state: "legacy-inline",
-    has_request_body: 1,
-    has_response_body: 1,
-  });
-  db.prepare(
-    `
-    INSERT INTO call_logs_v1_legacy (id, request_body, response_body, error)
-    VALUES (?, ?, ?, ?)
-  `
-  ).run(
-    "legacy-read",
-    JSON.stringify({ recovered: "request" }),
-    JSON.stringify({ recovered: "response" }),
-    JSON.stringify({ message: "legacy-error" })
-  );
-
-  detailedLogs.saveRequestDetailLog({
-    call_log_id: "legacy-read",
-    client_request: { body: { from: "detail-client" } },
-    translated_request: { body: { from: "detail-provider-request" } },
-    provider_response: { body: { from: "detail-provider-response" } },
-    client_response: { body: { from: "detail-client-response" } },
-  });
-
-  const detail = await callLogs.getCallLogById("legacy-read");
-  assert.deepEqual(detail?.requestBody, { recovered: "request" });
-  assert.deepEqual(detail?.responseBody, { recovered: "response" });
-  assert.deepEqual(detail?.error, { message: "legacy-error" });
-  assert.equal(detail?.pipelinePayloads?.clientRequest?.body?.from, "detail-client");
-  assert.equal(
-    (detail?.pipelinePayloads?.providerRequest as PayloadEnvelope | undefined)?.body?.from,
-    "detail-provider-request"
-  );
-  assert.equal(
-    (detail?.pipelinePayloads?.providerResponse as PayloadEnvelope | undefined)?.body?.from,
-    "detail-provider-response"
-  );
-  assert.equal(
-    (detail?.pipelinePayloads?.clientResponse as PayloadEnvelope | undefined)?.body?.from,
-    "detail-client-response"
-  );
-  assert.equal(detail?.hasPipelineDetails, true);
-});
-
 test("getCallLogById marks missing artifacts explicitly and clears stale DB pointers", async () => {
-  insertCallLog({
+  await insertCallLog({
     id: "missing-artifact",
     timestamp: "2026-03-30T12:34:56.000Z",
     method: "POST",
@@ -487,22 +437,22 @@ test("getCallLogById marks missing artifacts explicitly and clears stale DB poin
     account: "Primary Account",
     detail_state: "ready",
     artifact_relpath: "2026-03-30/missing.json",
-    has_request_body: 1,
+    has_request_body: true,
   });
 
   const detail = await callLogs.getCallLogById("missing-artifact");
   assert.equal(detail?.detailState, "missing");
   assert.equal(detail?.requestBody, null);
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare("SELECT artifact_relpath, detail_state FROM call_logs WHERE id = ?")
-    .get("missing-artifact");
-  assert.equal((row as CallLogRow).artifact_relpath, null);
-  assert.equal((row as CallLogRow).detail_state, "missing");
+  const row = await one(
+    "SELECT artifact_relpath, detail_state FROM call_logs WHERE id = $1",
+    ["missing-artifact"]
+  );
+  assert.equal(row.artifact_relpath, null);
+  assert.equal(row.detail_state, "missing");
 });
 
-test("saveCallLog keeps large payloads out of SQLite while preserving explicit detail export", async () => {
+test("saveCallLog keeps large payloads out of the database while preserving explicit detail export", async () => {
   const requestBody = { payload: "x".repeat(320 * 1024) };
 
   await callLogs.saveCallLog({
@@ -519,21 +469,19 @@ test("saveCallLog keeps large payloads out of SQLite while preserving explicit d
     error: "upstream unavailable",
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT detail_state, has_request_body, artifact_relpath, error_summary, request_summary
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("artifact-only-large-payload");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.equal((row as CallLogRow).has_request_body, 1);
-  assert.equal(typeof (row as CallLogRow).artifact_relpath, "string");
-  assert.equal((row as CallLogRow).error_summary, "upstream unavailable");
+      SELECT detail_state, has_request_body, artifact_relpath, error_summary, request_summary
+      FROM call_logs WHERE id = $1
+    `,
+    ["artifact-only-large-payload"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.equal(row.has_request_body, true);
+  assert.equal(typeof row.artifact_relpath, "string");
+  assert.equal(row.error_summary, "upstream unavailable");
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.equal(artifact.requestBody.payload.length, requestBody.payload.length);
 
@@ -570,19 +518,17 @@ test("saveCallLog truncates oversized call log artifacts for storage", async () 
     },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("truncated-artifact");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.ok((row as CallLogRow).artifact_size_bytes <= 512 * 1024);
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["truncated-artifact"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.ok(row.artifact_size_bytes <= 512 * 1024);
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.deepEqual(artifact.requestBody, { payload: "request" });
   assert.deepEqual(artifact.responseBody, { output: "response" });
@@ -613,19 +559,17 @@ test("saveCallLog omits oversized non-stream pipeline payloads to enforce artifa
     },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("truncated-pipeline-artifact");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.ok((row as CallLogRow).artifact_size_bytes <= 512 * 1024);
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["truncated-pipeline-artifact"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.ok(row.artifact_size_bytes <= 512 * 1024);
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.deepEqual(artifact.requestBody, { payload: "request" });
   assert.deepEqual(artifact.responseBody, { output: "response" });
@@ -657,19 +601,17 @@ test("saveCallLog honors CALL_LOG_PIPELINE_MAX_SIZE_KB for pipeline artifacts", 
     },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("configured-pipeline-artifact-cap");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.ok((row as CallLogRow).artifact_size_bytes <= 8 * 1024);
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["configured-pipeline-artifact-cap"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.ok(row.artifact_size_bytes <= 8 * 1024);
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.deepEqual(artifact.pipeline, {
     error: {
@@ -699,19 +641,17 @@ test("saveCallLog falls back to a compact sentinel when the configured cap is ve
     },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("tiny-pipeline-artifact-cap");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.ok((row as CallLogRow).artifact_size_bytes <= 1024);
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["tiny-pipeline-artifact-cap"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.ok(row.artifact_size_bytes <= 1024);
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.deepEqual(artifact, {
     schemaVersion: 5,
@@ -747,18 +687,16 @@ test("saveCallLog preserves a truncated error in size-limit-fallback artifacts (
     },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("tiny-cap-preserves-error");
-  assert.equal((row as CallLogRow).detail_state, "ready");
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["tiny-cap-preserves-error"]
+  );
+  assert.equal(row.detail_state, "ready");
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.equal(
     artifact.error,
@@ -789,32 +727,33 @@ test("CALL_LOG_PIPELINE_MAX_SIZE_KB does not cap artifacts without pipeline deta
     responseBody: { output: "response" },
   });
 
-  const db = core.getDbInstance();
-  const row = db
-    .prepare(
-      `
-      SELECT artifact_relpath, artifact_size_bytes, detail_state
-      FROM call_logs WHERE id = ?
+  const row = await one(
     `
-    )
-    .get("non-pipeline-artifact-ignores-pipeline-cap");
-  assert.equal((row as CallLogRow).detail_state, "ready");
-  assert.ok((row as CallLogRow).artifact_size_bytes > 8 * 1024);
+      SELECT artifact_relpath, artifact_size_bytes, detail_state
+      FROM call_logs WHERE id = $1
+    `,
+    ["non-pipeline-artifact-ignores-pipeline-cap"]
+  );
+  assert.equal(row.detail_state, "ready");
+  assert.ok(row.artifact_size_bytes > 8 * 1024);
 
-  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", (row as CallLogRow).artifact_relpath);
+  const artifactPath = path.join(TEST_DATA_DIR, "call_logs", row.artifact_relpath);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.equal(artifact.requestBody.payload.length, requestBody.payload.length);
 });
 
-test("saveCallLog logs and returns when sqlite persistence throws unexpectedly", async () => {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare;
+test("saveCallLog logs and returns when database persistence throws unexpectedly", async () => {
+  const db = getTestBackend();
+  const originalExecute = db.execute;
   const originalConsoleError = console.error;
   const consoleCalls = [];
 
-  db.prepare = () => {
-    throw new Error("simulated sqlite prepare failure");
-  };
+  db.execute = ((sql: string, ...rest: unknown[]) => {
+    if (/INSERT INTO call_logs/.test(sql)) {
+      return Promise.reject(new Error("simulated sqlite prepare failure"));
+    }
+    return (originalExecute as (...args: unknown[]) => unknown).call(db, sql, ...rest);
+  }) as typeof db.execute;
   console.error = (...args) => {
     consoleCalls.push(args.join(" "));
   };
@@ -833,7 +772,7 @@ test("saveCallLog logs and returns when sqlite persistence throws unexpectedly",
       })
     );
   } finally {
-    db.prepare = originalPrepare;
+    db.execute = originalExecute;
     console.error = originalConsoleError;
   }
 

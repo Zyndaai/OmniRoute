@@ -13,22 +13,21 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-comp-cache-test-
 process.env.DATA_DIR = testDataDir;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { recordCompressionCacheStats } =
   await import("../../open-sse/handlers/chatCore/compressionCacheStats.ts");
 
-function rowsFor(provider: string): Array<Record<string, unknown>> {
-  return coreDb
-    .getDbInstance()
-    .prepare(
-      "SELECT provider, compression_mode AS mode, tokens_saved_compression AS saved FROM compression_cache_stats WHERE provider = ?"
-    )
-    .all(provider) as Array<Record<string, unknown>>;
+async function rowsFor(provider: string): Promise<Array<Record<string, unknown>>> {
+  return getTestBackend().query<Record<string, unknown>>(
+    "SELECT provider, compression_mode AS mode, tokens_saved_compression AS saved FROM compression_cache_stats WHERE provider = $1",
+    [provider]
+  );
 }
 
 async function waitForRows(provider: string, min: number, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (rowsFor(provider).length >= min) break;
+    if ((await rowsFor(provider)).length >= min) break;
     await new Promise((r) => setTimeout(r, 25));
   }
   return rowsFor(provider);
@@ -38,8 +37,8 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {

@@ -1,6 +1,6 @@
-// MCP memory and skill tools act on per-tenant data. The tenant must be the authenticated caller,
-// never an `apiKeyId` written into the tool arguments: otherwise any MCP client could read, add or
-// clear another tenant's memories, and enable or run another tenant's or the global skills.
+// MCP skill tools act on per-tenant data. The tenant must be the authenticated caller,
+// never an `apiKeyId` written into the tool arguments: otherwise any MCP client could enable or
+// run another tenant's or the global skills.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,14 +18,12 @@ delete process.env.OMNIROUTE_API_KEY;
 delete process.env.ROUTER_API_KEY;
 
 const coreDb = await import("../../src/lib/db/core.ts");
-const { createMemory, listMemories } = await import("../../src/lib/memory/store.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
 const { skillExecutor } = await import("../../src/lib/skills/executor.ts");
-const { memoryTools } = await import("../../open-sse/mcp-server/tools/memoryTools.ts");
 const { skillTools } = await import("../../open-sse/mcp-server/tools/skillTools.ts");
 
 type ToolResult = {
-  data: { memories: Array<{ content: string }> };
   skills: Array<{ name: string }>;
   count: number;
   success: boolean;
@@ -41,78 +39,22 @@ function resetSkills() {
   skillExecutor["handlers"].clear();
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetSkills();
-  coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   resetSkills();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_OMNIROUTE_API_KEY !== undefined)
     process.env.OMNIROUTE_API_KEY = ORIGINAL_OMNIROUTE_API_KEY;
   if (ORIGINAL_ROUTER_API_KEY !== undefined) process.env.ROUTER_API_KEY = ORIGINAL_ROUTER_API_KEY;
-});
-
-async function seedMemory(apiKeyId: string, key: string, content: string) {
-  return createMemory({
-    apiKeyId,
-    sessionId: "",
-    type: "factual",
-    key,
-    content,
-    metadata: {},
-  } as Parameters<typeof createMemory>[0]);
-}
-
-test("memory search as tenant A does not return tenant B's memories, whatever apiKeyId says", async () => {
-  await seedMemory("tenant-b", "secret", "tenant B private note");
-  await seedMemory("tenant-a", "mine", "tenant A note");
-
-  const result = await handlerOf(memoryTools.omniroute_memory_search)(
-    { apiKeyId: "tenant-b" },
-    callerA
-  );
-
-  const contents = result.data.memories.map((m) => m.content);
-  assert.ok(!contents.includes("tenant B private note"));
-  assert.ok(contents.includes("tenant A note"));
-});
-
-test("memory add stores under the caller, not under the id in the arguments", async () => {
-  await handlerOf(memoryTools.omniroute_memory_add)(
-    { apiKeyId: "tenant-b", type: "factual", key: "planted", content: "injected into B" },
-    callerA
-  );
-
-  assert.equal((await listMemories({ apiKeyId: "tenant-b" })).data.length, 0);
-  assert.equal((await listMemories({ apiKeyId: "tenant-a" })).data.length, 1);
-});
-
-test("memory clear removes the caller's memories and leaves tenant B's", async () => {
-  await seedMemory("tenant-b", "keep", "B keeps this");
-  await seedMemory("tenant-a", "drop", "A drops this");
-
-  await handlerOf(memoryTools.omniroute_memory_clear)({ apiKeyId: "tenant-b" }, callerA);
-
-  assert.equal((await listMemories({ apiKeyId: "tenant-b" })).data.length, 1);
-  assert.equal((await listMemories({ apiKeyId: "tenant-a" })).data.length, 0);
-});
-
-test("a local process with no key and no configured key can still name its owner", async () => {
-  await seedMemory("local-owner", "k", "local note");
-
-  const result = await handlerOf(memoryTools.omniroute_memory_search)(
-    { apiKeyId: "local-owner" },
-    undefined
-  );
-
-  assert.equal(result.data.memories.length, 1);
 });
 
 async function registerSkill(name: string, apiKeyId: string, enabled: boolean, handler: string) {

@@ -16,7 +16,7 @@ const { createSSETransformStreamWithLogger } = await import("../../open-sse/util
 
 test.after(async () => {
   const { resetDbInstance } = await import("../../src/lib/db/core.ts");
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 const tools = [
@@ -46,8 +46,8 @@ function request(input: unknown[] = []) {
     input: [{ role: "user", content: "run" }, ...input],
   };
 }
-function pivot(body: Record<string, unknown>) {
-  return translateRequest(
+async function pivot(body: Record<string, unknown>) {
+  return await translateRequest(
     "openai-responses",
     "gemini",
     "gemini-test",
@@ -125,8 +125,8 @@ async function response(
   }>;
 }
 
-test("Gemini aliases survive extraction alongside namespace identities", () => {
-  const translated = pivot(request());
+test("Gemini aliases survive extraction alongside namespace identities", async () => {
+  const translated = await pivot(request());
   const aliases = translated._toolNameMap;
   assert.ok(aliases instanceof Map);
   const identities = extractRequestToolIdentityMap(translated);
@@ -143,7 +143,7 @@ test("two Gemini custom calls round-trip raw input, namespace, history and a leg
   let previousNames: string[] | undefined;
   for (let turn = 0; turn < 2; turn++) {
     const body = request(input);
-    const translated = pivot(body);
+    const translated = await pivot(body);
     const names = wireNames(translated);
     assert.equal(new Set(names).size, 2);
     if (previousNames)
@@ -195,8 +195,8 @@ test("two Gemini custom calls round-trip raw input, namespace, history and a leg
 test("colliding ordinary function and unknown hash names are never reinterpreted as custom tools", async () => {
   for (const unknown of [false, true]) {
     const body = request();
-    const translated = pivot(body);
-    const name = unknown ? "functions_exec_unknownhash" : wireNames(translated)[1];
+    const translated = await pivot(body);
+    const name =unknown ? "functions_exec_unknownhash" : wireNames(translated)[1];
     const events = await response(body, translated, name, { value: 7 });
     const item = events.find((e) => e.type === "response.completed")?.response?.output[0];
     assert.equal(item?.type, "function_call");
@@ -277,7 +277,7 @@ test("worker Chat-to-Responses transform restores namespaced custom items with f
   );
 });
 
-test("native Responses tool declarations retain reserved schemas unchanged", () => {
+test("native Responses tool declarations retain reserved schemas unchanged", async () => {
   const body = request();
   body.tools.push({
     type: "function",
@@ -285,7 +285,7 @@ test("native Responses tool declarations retain reserved schemas unchanged", () 
     parameters: { type: "object", properties: { value: { type: "number" } } },
   });
   const original = structuredClone(body);
-  const native = translateRequest(
+  const native = (await translateRequest(
     "openai-responses",
     "openai-responses",
     "gemini-test",
@@ -294,11 +294,11 @@ test("native Responses tool declarations retain reserved schemas unchanged", () 
     null,
     null,
     null
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
   assert.deepEqual(native.tools, original.tools);
 });
 
-test("Responses function history uses the same qualified name as its declaration", () => {
+test("Responses function history uses the same qualified name as its declaration", async () => {
   const body = {
     input: [
       { role: "user", content: "run" },
@@ -325,7 +325,7 @@ test("Responses function history uses the same qualified name as its declaration
       },
     ],
   };
-  const translated = translateRequest(
+  const translated = (await translateRequest(
     "openai-responses",
     "openai",
     "test-model",
@@ -334,7 +334,7 @@ test("Responses function history uses the same qualified name as its declaration
     null,
     null,
     null
-  ) as {
+  )) as {
     tools: Array<{ function: { name: string } }>;
     messages: Array<{
       tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;

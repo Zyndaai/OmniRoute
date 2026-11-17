@@ -19,36 +19,20 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sqlite-store-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "quota-sqlite-store-secret";
+
 const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const sqliteQuotaStoreModule = await import("../../src/lib/quota/sqliteQuotaStore.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: unknown) {
-      const e = err as { code?: string };
-      if ((e?.code === "EBUSY" || e?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -123,13 +107,13 @@ test("sqliteQuotaStore: bucket rotation applies decay from prev bucket", async (
   const dimKey = `pool-rotate:tokens:hourly`;
 
   // Write directly to prev bucket (bypassing store)
-  incrementBucket("key-rotate", dimKey, prevBucket, 1000, nowMs - windowMs);
+  await incrementBucket("key-rotate", dimKey, prevBucket, 1000, nowMs - windowMs);
 
   // Peek at 50% elapsed through current bucket
   // We can't easily fake time without mocking Date.now, so we verify the formula
   // by reading the pair directly and computing manually.
   const { getPair } = await import("../../src/lib/db/quotaConsumption.ts");
-  const { curr, prev } = getPair("key-rotate", dimKey, currentBucket);
+  const { curr, prev } = await getPair("key-rotate", dimKey, currentBucket);
 
   assert.equal(curr, 0, "curr bucket should be empty");
   assert.equal(prev, 1000, "prev bucket should have 1000");
@@ -179,19 +163,25 @@ test("sqliteQuotaStore: poolUsageWithDimensions returns correct shape", async ()
   const { SqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
   const store = new SqliteQuotaStore();
 
-  // Create a real pool with allocations
-  const pool = poolsDb.createPool({
+  // Create a real pool with allocations (pool and allocation rows reference real rows).
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    ["conn-pool-usage", "openai"]
+  );
+  const keyA = (await apiKeysDb.createApiKey("quota-sqlite-key-a", "machine-sqlite-a")).id as string;
+  const keyB = (await apiKeysDb.createApiKey("quota-sqlite-key-b", "machine-sqlite-b")).id as string;
+  const pool = await poolsDb.createPool({
     connectionId: "conn-pool-usage",
     name: "Test Pool",
     allocations: [
-      { apiKeyId: "key-a", weight: 60, policy: "hard" },
-      { apiKeyId: "key-b", weight: 40, policy: "soft" },
+      { apiKeyId: keyA, weight: 60, policy: "hard" },
+      { apiKeyId: keyB, weight: 40, policy: "soft" },
     ],
   });
 
   const dim = makeDim(pool.id, "tokens", "hourly");
-  await store.consume("key-a", dim, 300);
-  await store.consume("key-b", dim, 200);
+  await store.consume(keyA, dim, 300);
+  await store.consume(keyB, dim, 200);
 
   const snapshot = await store.poolUsageWithDimensions(pool.id, [
     { unit: "tokens", window: "hourly", limit: 1000 },

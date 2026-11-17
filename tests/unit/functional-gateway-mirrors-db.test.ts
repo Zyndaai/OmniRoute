@@ -16,37 +16,37 @@ import {
 
 const FLAG_KEY = "EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS";
 
-after(() => {
-  removeFeatureFlagOverride(FLAG_KEY);
-  resetDbInstance();
+after(async () => {
+  await removeFeatureFlagOverride(FLAG_KEY);
+  await resetDbInstance();
 });
 
-test("global state defaults to off", () => {
-  const { enabled } = getFunctionalGatewayGlobalState();
+test("global state defaults to off", async () => {
+  const { enabled } = await getFunctionalGatewayGlobalState();
   assert.equal(enabled, false);
 });
 
-test("can flip global on via feature-flag override (the dashboard/env mechanism)", () => {
-  setFeatureFlagOverride(FLAG_KEY, "true");
-  const { enabled, source } = getFunctionalGatewayGlobalState();
+test("can flip global on via feature-flag override (the dashboard/env mechanism)", async () => {
+  await setFeatureFlagOverride(FLAG_KEY, "true");
+  const { enabled, source } = await getFunctionalGatewayGlobalState();
   assert.equal(enabled, true);
   assert.equal(source, "db");
 });
 
-test("provider and model settings default to null", () => {
-  assert.equal(getFunctionalGatewayProviderSetting("agentrouter"), null);
+test("provider and model settings default to null", async () => {
+  assert.equal(await getFunctionalGatewayProviderSetting("agentrouter"), null);
   assert.equal(
-    getFunctionalGatewayModelSetting("agentrouter/deepseek/deepseek-v4-flash"),
+    await getFunctionalGatewayModelSetting("agentrouter/deepseek/deepseek-v4-flash"),
     null
   );
 });
 
-test("bulk settings reflect provider/model overrides", () => {
-  setFunctionalGatewayProviderSetting("agentrouter", "on");
-  setFunctionalGatewayModelSetting("openrouter/deepseek/deepseek-v4-flash", "off");
-  const { providers, models } = getFunctionalGatewaySettingsBulk();
+test("bulk settings reflect provider/model overrides", async () => {
+  await setFunctionalGatewayProviderSetting("agentrouter", "on");
+  await setFunctionalGatewayModelSetting("openrouter/deepseek/deepseek-v4-flash", "off");
+  const { providers, models } = await getFunctionalGatewaySettingsBulk();
   assert.equal(providers.get("agentrouter"), "on");
   assert.equal(models.get("openrouter/deepseek/deepseek-v4-flash"), "off");
-  setFunctionalGatewayProviderSetting("agentrouter", null);
-  setFunctionalGatewayModelSetting("openrouter/deepseek/deepseek-v4-flash", null);
+  await setFunctionalGatewayProviderSetting("agentrouter", null);
+  await setFunctionalGatewayModelSetting("openrouter/deepseek/deepseek-v4-flash", null);
 });

@@ -1,4 +1,4 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, before, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -356,10 +356,19 @@ describe("tryIdeAuth", () => {
   // real tryOpenSync() call. mock.module() is unavailable in this tsx/ESM +
   // Node native test-runner setup (see tests/unit/token-health-check-sweep.test.ts),
   // and tryIdeAuth() takes no injectable options — so instead of mocking the
-  // driver, these seed a REAL sqlite file at the exact candidate path via the
-  // same resilient driver factory (openDatabaseAsync), matching the technique
-  // tests/unit/db-import-resilient-driver-3025.test.ts already uses.
+  // driver, these seed a REAL sqlite file (Cursor's own state.vscdb, opened with
+  // better-sqlite3 exactly as src/lib/cursor/tokenExtractor.ts does) at the
+  // exact candidate path. OmniRoute's own database is PostgreSQL now; this file
+  // is Cursor's, so it stays SQLite.
   describe("on a supported platform (darwin), against a real state.vscdb", () => {
+    // better-sqlite3 loads its native binary on first use, and that load picks the
+    // prebuild by process.platform. Warm it up here, before the darwin override in
+    // beforeEach, so the spoofed platform does not pick a darwin .node on Windows/Linux.
+    before(async () => {
+      const Database = (await import("better-sqlite3")).default;
+      new Database(":memory:").close();
+    });
+
     beforeEach(() => {
       Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
       tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cursor-ide-auth-"));
@@ -371,8 +380,8 @@ describe("tryIdeAuth", () => {
       const dbPath = cursorDbCandidatePaths("darwin", { home: tmpHome as string })[0];
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-      const { openDatabaseAsync } = await import("@/lib/db/adapters/driverFactory");
-      const seed = await openDatabaseAsync(dbPath);
+      const Database = (await import("better-sqlite3")).default;
+      const seed = new Database(dbPath);
       seed.exec("CREATE TABLE itemTable (key TEXT PRIMARY KEY, value TEXT)");
       seed
         .prepare("INSERT INTO itemTable (key, value) VALUES (?, ?)")
@@ -393,8 +402,8 @@ describe("tryIdeAuth", () => {
       const dbPath = cursorDbCandidatePaths("darwin", { home: tmpHome as string })[0];
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-      const { openDatabaseAsync } = await import("@/lib/db/adapters/driverFactory");
-      const seed = await openDatabaseAsync(dbPath);
+      const Database = (await import("better-sqlite3")).default;
+      const seed = new Database(dbPath);
       seed.exec("CREATE TABLE itemTable (key TEXT PRIMARY KEY, value TEXT)");
       seed.prepare("INSERT INTO itemTable (key, value) VALUES (?, ?)").run("irrelevant.key", "x");
       seed.close();

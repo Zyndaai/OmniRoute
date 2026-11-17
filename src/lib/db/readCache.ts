@@ -1,11 +1,10 @@
 /**
  * DB Read Cache — In-memory TTL cache for hot read paths.
  *
- * SQLite reads are already fast since better-sqlite3 is synchronous and
- * memory-mapped. However, some functions (getSettings, getPricing,
- * getProviderConnections) are called on every request by multiple callers.
- * A short TTL cache (5s) eliminates redundant I/O without staling data for
- * long enough to matter (settings changes are applied within one cache cycle).
+ * Every uncached read is a PostgreSQL round trip, and some functions (getSettings,
+ * getPricing, getProviderConnections) are called several times per request. A short TTL
+ * (5 s) removes that traffic. Writes in this process invalidate immediately; other
+ * processes on the same database see a change within one TTL, so keep TTLs short.
  *
  * Usage:
  *   import { dbCache } from '@/lib/db/readCache';
@@ -85,7 +84,7 @@ class TTLCache<T> {
 }
 
 // Cache with 5s TTL — short enough to pick up dashboard changes quickly,
-// long enough to serve burst request bursts without hammering SQLite.
+// long enough to absorb request bursts without a round trip each.
 const SETTINGS_TTL_MS = 5_000;
 const PRICING_TTL_MS = 30_000;
 const CONNECTIONS_TTL_MS = 5_000;
@@ -270,6 +269,17 @@ export async function getCachedComboByName(name: string): Promise<Record<string,
   });
 }
 
+const comboByIdCache = new TTLCache<Record<string, unknown> | null>(COMBO_LOOKUP_TTL_MS, 500);
+
+/** Cached getComboById — same version-keyed contract as above. */
+export async function getCachedComboById(id: string): Promise<Record<string, unknown> | null> {
+  const key = `${getCombosCacheVersion()}:${id}`;
+  return comboByIdCache.load(key, async () => {
+    const { getComboById } = await import("@/lib/db/combos");
+    return getComboById(id);
+  });
+}
+
 /** Cached resolveComboForModel — same version-keyed contract as above. */
 export async function getCachedComboForModel(
   model: string
@@ -304,6 +314,73 @@ export function getModelCatalogCacheVersion(): number {
 /** Invalidate only the unified model catalog response cache. */
 export function invalidateModelCatalogCache(): void {
   modelCatalogCacheVersion++;
+}
+
+// ──────────────── API-Key Policy Config ────────────────
+//
+// enforceApiKeyPolicy and the post-response accounting read a key's billing team, quota
+// limits, token limits and pool allocations on every request (measured 2026-11-17: 6 queries).
+// These are admin-edited config rows, so they share the settings TTL. Each owning module drops
+// the whole cache on any write (writes are rare, so per-key invalidation is not worth its risk).
+// Usage counters and the unpriced-usage flags are runtime state and are never cached here.
+const API_KEY_POLICY_TTL_MS = 5_000;
+const apiKeyPolicyCache = new TTLCache<unknown>(API_KEY_POLICY_TTL_MS, 5_000);
+
+/** Cached per-key policy config read; the caller gets its own copy. */
+export async function loadApiKeyPolicyConfig<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  return structuredClone((await apiKeyPolicyCache.load(key, loader)) as T);
+}
+
+/**
+ * Call after any write to a table read through loadApiKeyPolicyConfig. Goes through
+ * invalidateDbCache (scope "api-key-policy") so every invalidation shares one entry point;
+ * policy config does not feed the /v1/models catalog, so that cache is left alone.
+ */
+export function invalidateApiKeyPolicyCache(): void {
+  invalidateDbCache("api-key-policy", undefined, { skipModelCatalog: true });
+}
+
+// ──────────────── Model Metadata Snapshots ────────────────
+//
+// The chat path reads provider_model_catalog documents and the model capability/context
+// override tables dozens of times per request (measured 2026-11-17: ~77 of 116 queries before
+// dispatch). Each of those tables is small, so one query loads the whole table into a snapshot
+// that the per-model getters answer from. Writes in this process call
+// invalidateDbCache("model-capabilities"), which bumps the version and drops every snapshot at
+// once; the TTL bounds how long another process keeps serving an old one.
+const MODEL_METADATA_TTL_MS = 10_000;
+let modelMetadataVersion = 0;
+const modelMetadataSnapshots = new Map<
+  string,
+  { version: number; expiresAt: number; value: Promise<unknown> }
+>();
+
+/**
+ * Drop the model-metadata snapshots only, without the /v1/models catalog bump that
+ * invalidateDbCache("model-capabilities") also does. For batch writers that defer the catalog
+ * invalidation to the end of a pass but must still read their own writes.
+ */
+export function invalidateModelMetadataSnapshots(): void {
+  modelMetadataVersion++;
+}
+
+/**
+ * One shared load of `loader()` per `name`, reused until a model-metadata write or the TTL.
+ * A load that fails is not kept, so the next read retries. Callers must not mutate the value.
+ */
+export function loadModelMetadataSnapshot<T>(name: string, loader: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const entry = modelMetadataSnapshots.get(name);
+  if (entry && entry.version === modelMetadataVersion && entry.expiresAt > now) {
+    return entry.value as Promise<T>;
+  }
+  const value = loader();
+  const next = { version: modelMetadataVersion, expiresAt: now + MODEL_METADATA_TTL_MS, value };
+  modelMetadataSnapshots.set(name, next);
+  value.catch(() => {
+    if (modelMetadataSnapshots.get(name) === next) modelMetadataSnapshots.delete(name);
+  });
+  return value;
 }
 
 /**
@@ -388,7 +465,14 @@ export function invalidateConnectionUpdate(
  * the catalog still reflects them immediately.
  */
 export function invalidateDbCache(
-  scope?: "settings" | "pricing" | "connections" | "combos" | "nodes" | "model-capabilities",
+  scope?:
+    | "settings"
+    | "pricing"
+    | "connections"
+    | "combos"
+    | "nodes"
+    | "model-capabilities"
+    | "api-key-policy",
   id?: string,
   opts?: { skipModelCatalog?: boolean }
 ): void {
@@ -405,6 +489,8 @@ export function invalidateDbCache(
   }
   if (!scope || scope === "nodes") nodesCache.invalidate();
   if (!scope || scope === "combos") combosCacheVersion++;
+  if (!scope || scope === "model-capabilities") modelMetadataVersion++;
+  if (!scope || scope === "api-key-policy") apiKeyPolicyCache.invalidate();
   if (opts?.skipModelCatalog) return;
   // Settings/connections/combos all feed the unified model catalog builder
   // (blockedProviders + hidePaidModels, provider connections + excludedModels,

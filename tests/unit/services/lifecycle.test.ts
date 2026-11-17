@@ -15,20 +15,20 @@ import { mock } from "node:test";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lifecycle-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Bootstrap DB
 const core = await import("../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
 
 // Seed service rows
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('9router', 'stopped', 20130, 0, 1, 1)`
-).run();
-
-const { updateVersionManagerTool, getVersionManagerTool } =
+const { updateVersionManagerTool, getVersionManagerTool, upsertVersionManagerTool } =
   await import("../../../src/lib/db/versionManager.ts");
+await upsertVersionManagerTool({
+  tool: "9router",
+  status: "stopped",
+  port: 20130,
+  autoStart: false,
+  autoUpdate: true,
+});
 
 // Set version so installer functions have something to read
 await updateVersionManagerTool("9router", { installedVersion: "0.4.59", status: "stopped" });
@@ -54,8 +54,8 @@ function makeFakeSup(tool: string) {
   });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

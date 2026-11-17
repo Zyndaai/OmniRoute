@@ -29,9 +29,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const { waitForCallLogSaves } = await import("../../src/lib/usage/callLogs.ts");
 const searchRoute = await import("../../src/app/api/v1/search/route.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -81,14 +82,12 @@ test("issue #13928: a cache-hit /v1/search response logs its own call_logs row",
     const drained = await waitForCallLogSaves(15_000);
     assert.ok(drained, "call log saves must drain before the assertions below");
 
-    const rows = core
-      .getDbInstance()
-      .prepare(
-        `SELECT status, cache_source FROM call_logs
-         WHERE path = '/v1/search' AND provider = 'duckduckgo-free'
-         ORDER BY timestamp ASC`
-      )
-      .all() as Array<{ status: number; cache_source: string }>;
+    const rows = await getTestBackend().query<{ status: number; cache_source: string }>(
+      `SELECT status, cache_source FROM call_logs
+       WHERE path = $1 AND provider = $2
+       ORDER BY "timestamp" ASC`,
+      ["/v1/search", "duckduckgo-free"]
+    );
 
     assert.equal(
       rows.length,

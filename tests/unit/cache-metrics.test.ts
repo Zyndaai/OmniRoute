@@ -1,42 +1,25 @@
 import { describe, test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getCacheMetrics } from "../../src/lib/db/settings.ts";
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
+
+const INSERT_USAGE = `
+  INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name,
+    tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
+    status, success, latency_ms, ttft_ms, error_code, "timestamp")
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+`;
 
 describe("Cache Metrics Database", () => {
-  let db;
+  let db: ReturnType<typeof getTestBackend>;
 
   before(() => {
-    db = getDbInstance();
-    // Create usage_history table if it doesn't exist (mimicking production schema)
-    db.prepare(
-      `
-      CREATE TABLE IF NOT EXISTS usage_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        provider TEXT,
-        model TEXT,
-        connection_id TEXT,
-        api_key_id TEXT,
-        api_key_name TEXT,
-        tokens_input INTEGER DEFAULT 0,
-        tokens_output INTEGER DEFAULT 0,
-        tokens_cache_read INTEGER DEFAULT 0,
-        tokens_cache_creation INTEGER DEFAULT 0,
-        tokens_reasoning INTEGER DEFAULT 0,
-        status TEXT,
-        timestamp TEXT,
-        success INTEGER,
-        latency_ms INTEGER DEFAULT 0,
-        ttft_ms INTEGER DEFAULT 0,
-        error_code TEXT
-      )
-    `
-    ).run();
+    db = getTestBackend();
   });
 
   after(async () => {
     // Clean up test data
-    db.prepare("DELETE FROM usage_history WHERE provider = 'test-provider'").run();
+    await db.execute("DELETE FROM usage_history WHERE provider = 'test-provider'");
   });
 
   describe("getCacheMetrics", () => {
@@ -54,18 +37,11 @@ describe("Cache Metrics Database", () => {
 
     test("returns aggregated metrics from usage_history", async () => {
       // Clean up any existing test data first
-      db.prepare("DELETE FROM usage_history WHERE provider = 'test-provider'").run();
+      await db.execute("DELETE FROM usage_history WHERE provider = 'test-provider'");
 
       const now = new Date().toISOString();
 
-      db.prepare(
-        `
-        INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name,
-          tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
-          status, success, latency_ms, ttft_ms, error_code, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `
-      ).run(
+      await db.execute(INSERT_USAGE, [
         "test-provider",
         "test-model",
         "test-connection",
@@ -77,22 +53,15 @@ describe("Cache Metrics Database", () => {
         200, // tokens_cache_creation
         0, // tokens_reasoning
         "200", // status
-        1, // success
+        true, // success
         100, // latency_ms
         50, // ttft_ms
         null, // error_code
-        now // timestamp
-      );
+        now, // timestamp
+      ]);
 
       // Insert another row
-      db.prepare(
-        `
-        INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name,
-          tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
-          status, success, latency_ms, ttft_ms, error_code, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `
-      ).run(
+      await db.execute(INSERT_USAGE, [
         "test-provider",
         "test-model",
         "test-connection",
@@ -104,12 +73,12 @@ describe("Cache Metrics Database", () => {
         100, // tokens_cache_creation
         0, // tokens_reasoning
         "200", // status
-        1, // success
+        true, // success
         80, // latency_ms
         40, // ttft_ms
         null, // error_code
-        now // timestamp
-      );
+        now, // timestamp
+      ]);
 
       const metrics = await getCacheMetrics();
 
@@ -130,7 +99,7 @@ describe("Cache Metrics Database", () => {
       assert.ok(metrics.byProvider["test-provider"].cacheCreationTokens >= 300);
 
       // Clean up
-      db.prepare("DELETE FROM usage_history WHERE provider = 'test-provider'").run();
+      await db.execute("DELETE FROM usage_history WHERE provider = 'test-provider'");
     });
   });
 });

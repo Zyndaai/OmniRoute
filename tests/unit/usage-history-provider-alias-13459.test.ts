@@ -12,9 +12,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -34,9 +35,8 @@ test("#13459 saveRequestUsage stores the canonical provider id for an alias", as
       timestamp: new Date(base + i * 1000).toISOString(),
     });
   }
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT provider, COUNT(*) AS n FROM usage_history GROUP BY provider")
-    .all() as Array<{ provider: string; n: number }>;
+  const rows = await getTestBackend().query<{ provider: string; n: number }>(
+    "SELECT provider, COUNT(*)::int AS n FROM usage_history GROUP BY provider"
+  );
   assert.deepEqual(rows, [{ provider: "api-airforce", n: 2 }]);
 });

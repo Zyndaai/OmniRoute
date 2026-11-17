@@ -16,28 +16,13 @@ const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR))
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      break;
-    } catch (error: unknown) {
-      const code = (error as { code?: string } | undefined)?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else throw error;
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -121,16 +106,17 @@ test("#14553: the combo pool rotation cursor is dropped with the assignments", a
   await proxiesDb.setScopeRotationStrategy("combo", survivorId, "round-robin");
 
   // Touch the doomed combo's cursor so a stale row would be observable.
-  const db = core.getDbInstance();
-  db.prepare(
-    "UPDATE proxy_scope_rotation SET cursor = 1 WHERE scope = 'combo' AND scope_id = ?"
-  ).run(doomedId);
+  const db = getTestBackend();
+  await db.execute(
+    "UPDATE proxy_scope_rotation SET cursor = 1 WHERE scope = 'combo' AND scope_id = $1",
+    [doomedId]
+  );
 
   assert.equal(await combosDb.deleteCombo(doomedId), true);
 
-  const rotationRows = db
-    .prepare("SELECT scope_id FROM proxy_scope_rotation WHERE scope = 'combo'")
-    .all() as { scope_id: string }[];
+  const rotationRows = (await db.query(
+    "SELECT scope_id FROM proxy_scope_rotation WHERE scope = 'combo'"
+  )) as { scope_id: string }[];
   assert.equal(
     rotationRows.filter((row) => row.scope_id === doomedId).length,
     0,

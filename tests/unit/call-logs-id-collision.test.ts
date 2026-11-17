@@ -11,6 +11,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CALL_LOG_SETTLE_TIMEOUT_MS } from "../helpers/callLogSettle.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-call-log-id-collision-"));
 process.env.DATA_DIR = testDataDir;
@@ -51,28 +52,27 @@ function baseCtx(overrides: Record<string, unknown> = {}) {
   } as Parameters<typeof persistAttemptLogs>[1];
 }
 
-function clearCallLogs() {
-  coreDb.getDbInstance().prepare("DELETE FROM call_logs").run();
+async function clearCallLogs() {
+  await getTestBackend().execute("DELETE FROM call_logs");
 }
 
-function allCallLogRows(): Array<{ id: string; status: number }> {
-  return coreDb
-    .getDbInstance()
-    .prepare("SELECT id, status FROM call_logs ORDER BY status, id")
-    .all() as Array<{ id: string; status: number }>;
+function allCallLogRows(): Promise<Array<{ id: string; status: number }>> {
+  return getTestBackend().query<{ id: string; status: number }>(
+    "SELECT id, status FROM call_logs ORDER BY status, id"
+  );
 }
 
 before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("saveCallLog without an id persists a UUID primary key, not Date.now()-counter", async () => {
-  clearCallLogs();
+  await clearCallLogs();
   await callLogs.saveCallLog({
     method: "POST",
     path: "/v1/chat/completions",
@@ -83,14 +83,14 @@ test("saveCallLog without an id persists a UUID primary key, not Date.now()-coun
     tokens: { in: 1, out: 1 },
   });
   assert.equal(await callLogs.waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
-  const rows = allCallLogRows();
+  const rows = await allCallLogRows();
   assert.equal(rows.length, 1);
   assert.match(rows[0].id, UUID_RE);
   assert.doesNotMatch(rows[0].id, /^\d+-\d+$/);
 });
 
 test("two persistAttemptLogs sharing a 6-char dashboard traceId both land as rows", async () => {
-  clearCallLogs();
+  await clearCallLogs();
   const traceId = "9cfcc2";
   const lifecycleIds: string[] = [];
   const offCompleted = on("request.completed", (payload) => {
@@ -106,7 +106,7 @@ test("two persistAttemptLogs sharing a 6-char dashboard traceId both land as row
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
-    const rows = allCallLogRows();
+    const rows = await allCallLogRows();
     assert.equal(
       rows.length,
       2,
@@ -119,7 +119,7 @@ test("two persistAttemptLogs sharing a 6-char dashboard traceId both land as row
     );
     assert.ok(
       rows.every((row) => row.id !== traceId),
-      "SQLite primary key must not be the dashboard traceId"
+      "the primary key id must not be the dashboard traceId"
     );
     assert.ok(rows.every((row) => UUID_RE.test(row.id)));
 
@@ -144,10 +144,14 @@ test("two persistAttemptLogs sharing a 6-char dashboard traceId both land as row
 });
 
 test("saveCallLog retries UNIQUE on an explicit id instead of dropping the second row", async () => {
-  clearCallLogs();
+  await clearCallLogs();
   const collidingId = "durable-call-log-id-collision";
+  // The primary key is (id, "timestamp"): a reused id only collides when the timestamp is
+  // reused too, so both attempts carry the same one.
+  const timestamp = "2026-10-06T12:00:00.000Z";
   await callLogs.saveCallLog({
     id: collidingId,
+    timestamp,
     method: "POST",
     path: "/v1/chat/completions",
     status: 500,
@@ -159,6 +163,7 @@ test("saveCallLog retries UNIQUE on an explicit id instead of dropping the secon
   });
   await callLogs.saveCallLog({
     id: collidingId,
+    timestamp,
     method: "POST",
     path: "/v1/chat/completions",
     status: 200,
@@ -169,7 +174,7 @@ test("saveCallLog retries UNIQUE on an explicit id instead of dropping the secon
   });
   assert.equal(await callLogs.waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
 
-  const rows = allCallLogRows();
+  const rows = await allCallLogRows();
   assert.equal(rows.length, 2, "UNIQUE must not swallow the second insert");
   assert.deepEqual(
     rows.map((row) => row.status),
@@ -183,7 +188,7 @@ test("saveCallLog retries UNIQUE on an explicit id instead of dropping the secon
 });
 
 test("a repeated explicit id with the same timestamp does not overwrite the first row's artifact", async () => {
-  clearCallLogs();
+  await clearCallLogs();
   const collidingId = "replayed-session-id";
   const timestamp = "2026-10-05T12:00:00.000Z";
   const base = {
@@ -200,10 +205,11 @@ test("a repeated explicit id with the same timestamp does not overwrite the firs
   await callLogs.saveCallLog({ ...base, status: 502, error: "second attempt detail" });
   assert.equal(await callLogs.waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
 
-  const rows = coreDb
-    .getDbInstance()
-    .prepare("SELECT id, status, artifact_relpath FROM call_logs ORDER BY status")
-    .all() as Array<{ id: string; status: number; artifact_relpath: string | null }>;
+  const rows = await getTestBackend().query<{
+    id: string;
+    status: number;
+    artifact_relpath: string | null;
+  }>("SELECT id, status, artifact_relpath FROM call_logs ORDER BY status");
   assert.equal(rows.length, 2);
   assert.ok(rows.every((row) => row.artifact_relpath));
   assert.notEqual(

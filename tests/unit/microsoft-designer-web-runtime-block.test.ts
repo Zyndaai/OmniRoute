@@ -6,25 +6,25 @@ import test from "node:test";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-designer-retired-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const leasesDb = await import("../../src/lib/db/exclusiveConnectionLeases.ts");
 const auth = await import("../../src/sse/services/auth.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const LEASE_OWNER_ID = `vlo_${"D".repeat(43)}`;
 const API_KEY_ID = "designer-retirement-managed-key";
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -96,17 +96,8 @@ test("creating a retired Microsoft Designer connection reports its persisted tom
 });
 
 test("retired Microsoft Designer credentials are rejected and an active managed lease is invalidated", async () => {
-  await core.ensureDbInitialized();
-  const db = core.getDbInstance();
-  for (const trigger of [
-    "trg_retire_microsoft_designer_web_provider_insert",
-    "trg_retire_microsoft_designer_web_provider_update",
-    "trg_retire_microsoft_designer_web_lease_insert",
-    "trg_retire_microsoft_designer_web_lease_update",
-  ]) {
-    db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
-  }
-
+  // The SQLite retirement triggers are not ported to PostgreSQL; the tombstone is enforced
+  // in application code (db/providers.ts and sse/services/auth.ts), which this test covers.
   const connection = (await providersDb.createProviderConnection({
     provider: "microsoft-designer-web",
     authType: "cookie",
@@ -115,7 +106,7 @@ test("retired Microsoft Designer credentials are rejected and an active managed 
     providerSpecificData: { accessToken: "test-token" },
   })) as { id: string };
 
-  const acquired = leasesDb.acquireExclusiveConnectionLease({
+  const acquired = await leasesDb.acquireExclusiveConnectionLease({
     leaseOwnerId: LEASE_OWNER_ID,
     apiKeyId: API_KEY_ID,
     provider: "microsoft-designer-web",
@@ -144,5 +135,5 @@ test("retired Microsoft Designer credentials are rejected and an active managed 
   );
 
   assert.equal(selected, null);
-  assert.equal(leasesDb.getActiveExclusiveConnectionLease(LEASE_OWNER_ID), null);
+  assert.equal(await leasesDb.getActiveExclusiveConnectionLease(LEASE_OWNER_ID), null);
 });

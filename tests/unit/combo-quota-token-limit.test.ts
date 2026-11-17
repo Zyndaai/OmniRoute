@@ -13,12 +13,12 @@ process.env.OMNIROUTE_QUOTA_AWARE_ROUTING = "1";
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { getProviderQuota } = await import("../../src/lib/quota/providerQuotaState.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
-const dbCore = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const log = { info() {}, warn() {}, debug() {}, error() {} };
 
-test.after(() => {
-  dbCore.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   if (ORIGINAL_QUOTA_ROUTING === undefined) delete process.env.OMNIROUTE_QUOTA_AWARE_ROUTING;
@@ -69,7 +69,7 @@ test("round-robin quota reservation keeps the connection token limit", async () 
   });
 
   assert.equal(result.ok, true);
-  const snapshot = getProviderQuota(connection.id, model);
+  const snapshot = await getProviderQuota(connection.id, model);
   assert.equal(snapshot?.known, true);
   assert.equal(snapshot?.tokenLimit, 5000);
   assert.ok((snapshot?.tokensUsed ?? 0) > 0);

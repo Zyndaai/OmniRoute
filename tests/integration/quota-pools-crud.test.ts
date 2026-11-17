@@ -19,6 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-pools-crud-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -28,6 +29,7 @@ process.env.API_KEY_SECRET = "test-quota-pools-secret";
 const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
+const { createProviderConnection } = await import("@/lib/db/providers");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const poolsRoute = await import("../../src/app/api/quota/pools/route.ts");
 const poolIdRoute = await import("../../src/app/api/quota/pools/[id]/route.ts");
@@ -37,19 +39,30 @@ async function enableManagementAuth() {
   await localDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-function resetDb() {
-  core.resetDbInstance();
+// Pools reference provider_connections through a foreign key, so each pool needs a real connection.
+async function newConnectionId(label: string): Promise<string> {
+  const conn = (await createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: label,
+    apiKey: "sk-synthetic-pool-connection",
+  })) as { id: string };
+  return conn.id;
+}
+
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetDb();
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -85,7 +98,7 @@ test("POST /api/quota/pools with auth + valid body → 201 + pool returned", asy
   const req = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
     body: {
-      connectionId: "conn-test-1",
+      connectionId: await newConnectionId("pool-alpha"),
       name: "Test Pool Alpha",
       allocations: [],
     },
@@ -95,18 +108,18 @@ test("POST /api/quota/pools with auth + valid body → 201 + pool returned", asy
   const body = (await res.json()) as { pool: { id: string; name: string; connectionId: string } };
   assert.ok(body.pool.id, "Pool should have an id");
   assert.equal(body.pool.name, "Test Pool Alpha");
-  assert.equal(body.pool.connectionId, "conn-test-1");
+  assert.ok(body.pool.connectionId, "pool should keep its connection");
 });
 
 test("POST /api/quota/pools → audit event logged", async () => {
   const req = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-audit-check", name: "Audited Pool" },
+    body: { connectionId: await newConnectionId("pool-audit"), name: "Audited Pool" },
   });
   await poolsRoute.POST(req);
 
   // Verify audit event was recorded
-  const logs = compliance.getAuditLog({ action: "quota.pool.created", limit: 10 });
+  const logs = await compliance.getAuditLog({ action: "quota.pool.created", limit: 10 });
   const events = Array.isArray(logs) ? logs : [];
   assert.ok(events.length >= 1, "Should have at least one quota.pool.created audit event");
   const evt = events.find(
@@ -126,7 +139,7 @@ test("GET /api/quota/pools returns list including created pool", async () => {
   // Create a pool first
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-list-test", name: "List Test Pool" },
+    body: { connectionId: await newConnectionId("pool-list"), name: "List Test Pool" },
   });
   const createRes = await poolsRoute.POST(createReq);
   assert.equal(createRes.status, 201);
@@ -152,7 +165,7 @@ test("GET /api/quota/pools/[id] → 200 with pool detail", async () => {
   // Create pool
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-detail", name: "Detail Pool" },
+    body: { connectionId: await newConnectionId("pool-detail"), name: "Detail Pool" },
   });
   const createRes = await poolsRoute.POST(createReq);
   const created = (await createRes.json()) as { pool: { id: string } };
@@ -189,7 +202,7 @@ test("PATCH /api/quota/pools/[id] → 200 updated + audit event", async () => {
   // Create
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-patch", name: "Original Name" },
+    body: { connectionId: await newConnectionId("pool-patch"), name: "Original Name" },
   });
   const createRes = await poolsRoute.POST(createReq);
   const created = (await createRes.json()) as { pool: { id: string } };
@@ -211,7 +224,7 @@ test("PATCH /api/quota/pools/[id] → 200 updated + audit event", async () => {
   assert.equal(body.pool.name, "Updated Name");
 
   // Audit event
-  const logs = compliance.getAuditLog({ action: "quota.pool.updated", limit: 10 });
+  const logs = await compliance.getAuditLog({ action: "quota.pool.updated", limit: 10 });
   const events = Array.isArray(logs) ? logs : [];
   const evt = events.find(
     (e) =>
@@ -242,7 +255,7 @@ test("DELETE /api/quota/pools/[id] → 204 + audit event; subsequent GET → 404
   // Create
   const createReq = await makeManagementSessionRequest("http://localhost/api/quota/pools", {
     method: "POST",
-    body: { connectionId: "conn-delete", name: "Delete Me" },
+    body: { connectionId: await newConnectionId("pool-delete"), name: "Delete Me" },
   });
   const createRes = await poolsRoute.POST(createReq);
   const created = (await createRes.json()) as { pool: { id: string } };
@@ -259,7 +272,7 @@ test("DELETE /api/quota/pools/[id] → 204 + audit event; subsequent GET → 404
   assert.equal(deleteRes.status, 204);
 
   // Audit event
-  const logs = compliance.getAuditLog({ action: "quota.pool.deleted", limit: 10 });
+  const logs = await compliance.getAuditLog({ action: "quota.pool.deleted", limit: 10 });
   const events = Array.isArray(logs) ? logs : [];
   const evt = events.find(
     (e) =>

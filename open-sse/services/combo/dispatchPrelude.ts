@@ -29,7 +29,7 @@ import {
   resolveComboRuntimeUnits,
   resolveComboTargets,
 } from "./comboStructure.ts";
-import { isComboModelVisible } from "./comboVisibility.ts";
+import { createComboModelVisibility } from "./comboVisibility.ts";
 import { buildFusionHandleSingleModel, extractFusionPanelSpec } from "./fusionPanel.ts";
 import { expandTargetsForAllStrategies } from "./connectionAwareExpansion.ts";
 import { buildAllTargetsCoolingDownResponse, type PreDispatchExclusion } from "./pinRecovery.ts";
@@ -427,10 +427,12 @@ export async function tryFusionDispatch(args: {
   // explicit judge is a bare string that never passes through it (#8878). Drop a
   // hidden judge so fusion falls back to a surviving panel member instead of
   // dispatching a model the operator hid.
+  // isComboModelVisible needs a hidden-models map (it keys a WeakMap on it), so load one
+  // when the caller did not pass it instead of crashing on `undefined`.
   const judgeModel =
     configuredJudge &&
     !judgeLacksConfirmedVision &&
-    isComboModelVisible(configuredJudge, null, args.hiddenModelsByProvider)
+    (await createComboModelVisibility(args.hiddenModelsByProvider))(configuredJudge, null)
       ? configuredJudge
       : undefined;
   const fusionTuning =

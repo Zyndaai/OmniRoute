@@ -38,7 +38,7 @@ test.afterEach(() => {
 test.after(async () => {
   const { flushProxyLogsSync } = await import("../../src/lib/proxyLogger.ts");
   flushProxyLogsSync();
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(directory, { recursive: true, force: true });
 });
 

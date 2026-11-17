@@ -28,6 +28,7 @@ const ORIGINAL_STORAGE_ENCRYPTION_KEY = process.env.STORAGE_ENCRYPTION_KEY;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 // Import settings to control auth requirements
 const settingsDb = await import("../../src/lib/db/settings.ts");
 // Import the route under test
@@ -36,7 +37,7 @@ const route = await import("../../src/app/api/settings/obsidian/webdav/route.ts"
 const obsidianDb = await import("../../src/lib/db/obsidian.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -70,8 +71,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -224,8 +225,8 @@ test("POST rejects a vaultPath that IS the data directory → 400 (GHSA-7pq4-8pv
   assert.ok(msg && /data directory/i.test(msg), `expected a data-directory refusal, got: ${msg}`);
   assert.ok(!msg.includes("at /"), "error must not carry a stack trace");
   assert.ok(!msg.includes(TEST_DATA_DIR), "error must not echo the data directory location");
-  assert.equal(obsidianDb.getWebdavEnabled(), false, "WebDAV must stay disabled");
-  assert.equal(obsidianDb.getObsidianVaultPath(), null, "vault path must not be stored");
+  assert.equal(await obsidianDb.getWebdavEnabled(), false, "WebDAV must stay disabled");
+  assert.equal(await obsidianDb.getObsidianVaultPath(), null, "vault path must not be stored");
 });
 
 test("POST rejects a vaultPath that CONTAINS the data directory (parent dir) → 400 (GHSA-7pq4-8pvv-rx7r)", async () => {
@@ -233,7 +234,7 @@ test("POST rejects a vaultPath that CONTAINS the data directory (parent dir) →
   assert.equal(res.status, 400);
   const msg = await errorMessageOf(res);
   assert.ok(msg && /data directory/i.test(msg), `expected a data-directory refusal, got: ${msg}`);
-  assert.equal(obsidianDb.getWebdavEnabled(), false);
+  assert.equal(await obsidianDb.getWebdavEnabled(), false);
 });
 
 test("POST rejects a vaultPath INSIDE the data directory → 400 (GHSA-7pq4-8pvv-rx7r)", async () => {
@@ -241,7 +242,7 @@ test("POST rejects a vaultPath INSIDE the data directory → 400 (GHSA-7pq4-8pvv
   fs.mkdirSync(inside, { recursive: true });
   const res = await postVault(inside);
   assert.equal(res.status, 400);
-  assert.equal(obsidianDb.getWebdavEnabled(), false);
+  assert.equal(await obsidianDb.getWebdavEnabled(), false);
 });
 
 test("POST rejects a symlink that resolves to the data directory → 400 (GHSA-7pq4-8pvv-rx7r)", async () => {
@@ -256,7 +257,7 @@ test("POST rejects a symlink that resolves to the data directory → 400 (GHSA-7
   try {
     const res = await postVault(link);
     assert.equal(res.status, 400);
-    assert.equal(obsidianDb.getWebdavEnabled(), false);
+    assert.equal(await obsidianDb.getWebdavEnabled(), false);
   } finally {
     fs.rmSync(linkParent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -269,7 +270,7 @@ test("POST with a directory unrelated to the data directory still succeeds (sibl
     assert.equal(res.status, 200);
     const body = (await res.json()) as Record<string, unknown>;
     assert.equal(body.vaultPath, path.resolve(vaultDir));
-    assert.equal(obsidianDb.getWebdavEnabled(), true);
+    assert.equal(await obsidianDb.getWebdavEnabled(), true);
   } finally {
     fs.rmSync(vaultDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -392,21 +393,20 @@ test("encryption round-trip: setWebdavPassword stores encrypted, getWebdavPasswo
 
   // Invalidate cached encryption keys so the new env var is picked up.
   // The encryption module caches keys in module-level vars; we reset via db instance.
-  core.resetDbInstance();
+  await core.resetDbInstance();
 
   const plaintext = "super-secret-webdav-password-12345";
-  obsidianDb.setWebdavPassword(plaintext);
+  await obsidianDb.setWebdavPassword(plaintext);
 
   // Inspect raw DB row — it must NOT be the plaintext
-  const db = core.getDbInstance();
-  type KVRow = { value: string };
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get("obsidian", "webdav_password") as KVRow | undefined;
+  const row = await getTestBackend().queryOne<{ value: unknown }>(
+    "SELECT value FROM config_entries WHERE namespace = $1 AND key = $2",
+    ["obsidian", "webdav_password"]
+  );
 
-  assert.ok(row !== undefined, "Row should exist");
-  // The stored JSON string — parse to get inner value
-  const storedInner = JSON.parse(row!.value) as string;
+  assert.ok(row !== null && row !== undefined, "Row should exist");
+  // jsonb comes back parsed: the stored string value is the inner value itself
+  const storedInner = row!.value as string;
   assert.notEqual(
     storedInner,
     plaintext,
@@ -418,21 +418,21 @@ test("encryption round-trip: setWebdavPassword stores encrypted, getWebdavPasswo
   );
 
   // getWebdavPassword must round-trip back to plaintext
-  const retrieved = obsidianDb.getWebdavPassword();
+  const retrieved = await obsidianDb.getWebdavPassword();
   assert.equal(retrieved, plaintext, "getWebdavPassword must return original plaintext");
 
   // Clean up env for other tests
   delete process.env.STORAGE_ENCRYPTION_KEY;
-  core.resetDbInstance();
+  await core.resetDbInstance();
 });
 
 test("encryption graceful fallback: plaintext stored without key reads back correctly", async () => {
   // No encryption key set — store plaintext
   const plaintext = "plaintext-webdav-password";
-  obsidianDb.setWebdavPassword(plaintext);
+  await obsidianDb.setWebdavPassword(plaintext);
 
   // Must read back the same value
-  const retrieved = obsidianDb.getWebdavPassword();
+  const retrieved = await obsidianDb.getWebdavPassword();
   assert.equal(
     retrieved,
     plaintext,

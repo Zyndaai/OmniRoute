@@ -8,7 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-account-a
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-account-analytics-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { updatePricing } = await import("@/lib/db/settings");
 const localDb = { updatePricing };
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -33,15 +33,15 @@ async function readAccounts() {
   return (await readAnalytics()).byAccount;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -232,16 +232,14 @@ test("deleting and recreating the same Codex account preserves one historical ac
 test("account cost and usage share the same trimmed legacy connection fallback", async () => {
   await localDb.updatePricing({ codex: { "gpt-5.5": { input: 1, output: 2 } } });
   const timestamp = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO usage_history
-        (provider, model, connection_id, account_label, account_label_priority,
-         tokens_input, tokens_output, success, timestamp)
-       VALUES ('codex', 'gpt-5.5', '  legacy-id  ', 'Legacy Codex', 4,
-               1000, 500, 1, ?)`
-    )
-    .run(timestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history
+      (provider, model, connection_id, account_label, account_label_priority,
+       tokens_input, tokens_output, success, "timestamp")
+     VALUES ('codex', 'gpt-5.5', '  legacy-id  ', 'Legacy Codex', 4,
+             1000, 500, true, $1)`,
+    [timestamp]
+  );
 
   const analytics = await readAnalytics();
   assert.equal(analytics.byAccount.length, 1);
@@ -259,21 +257,28 @@ test("account cost and usage share the same trimmed legacy connection fallback",
 
 test("analytics prefers the highest-priority historical label and reports blank orphan IDs as unknown", async () => {
   await localDb.updatePricing({ codex: { "gpt-5.5": { input: 1, output: 2 } } });
-  const db = core.getDbInstance();
-  const insert = db.prepare(`INSERT INTO usage_history
+  const backend = getTestBackend();
+  const insertSql = `INSERT INTO usage_history
     (provider, model, connection_id, account_key, account_label, account_label_priority,
-     tokens_input, tokens_output, success, timestamp)
-    VALUES (?, 'gpt-5.5', ?, ?, ?, ?, 10, 5, 1, ?)`);
-  insert.run(
+     tokens_input, tokens_output, success, "timestamp")
+    VALUES ($1, 'gpt-5.5', $2, $3, $4, $5, 10, 5, true, $6)`;
+  await backend.execute(insertSql, [
     "codex",
     "old-uuid",
     "stable-account",
     "  Production Codex  ",
     4,
-    "2026-01-01T00:00:00.000Z"
-  );
-  insert.run("codex", "new-uuid", "stable-account", "   ", 5, "2026-01-02T00:00:00.000Z");
-  insert.run("codex", "   ", null, null, 0, "2026-01-03T00:00:00.000Z");
+    "2026-01-01T00:00:00.000Z",
+  ]);
+  await backend.execute(insertSql, [
+    "codex",
+    "new-uuid",
+    "stable-account",
+    "   ",
+    5,
+    "2026-01-02T00:00:00.000Z",
+  ]);
+  await backend.execute(insertSql, ["codex", "   ", null, null, 0, "2026-01-03T00:00:00.000Z"]);
 
   const analytics = await readAnalytics();
   assert.deepEqual(
@@ -327,13 +332,11 @@ test("generic provider and Codex workspace identities stay distinct under a shar
 });
 
 test("a nonblank orphaned connection ID stays a truthful fallback label", async () => {
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run("codex", "gpt-5.5", "deleted-legacy-uuid", 10, 5, 1, 25, "2026-01-01T00:00:00.000Z");
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, latency_ms, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    ["codex", "gpt-5.5", "deleted-legacy-uuid", 10, 5, true, 25, "2026-01-01T00:00:00.000Z"]
+  );
 
   const accounts = await readAccounts();
   assert.equal(accounts.length, 1);
@@ -341,7 +344,7 @@ test("a nonblank orphaned connection ID stays a truthful fallback label", async 
 });
 
 test("the newest label wins for one account at equal priority", async () => {
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
   const accountKey = resolveUsageAccountIdentity({
     id: "new-uuid",
     provider: "codex",
@@ -350,13 +353,11 @@ test("the newest label wins for one account at equal priority", async () => {
     providerSpecificData: { chatgptUserId: "user-a" },
   }).accountKey;
   const now = Date.now();
-  const insert = db.prepare(
-    `INSERT INTO usage_history
-      (provider, model, connection_id, account_key, account_label, account_label_priority,
-       tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  insert.run(
+  const insertSql = `INSERT INTO usage_history
+    (provider, model, connection_id, account_key, account_label, account_label_priority,
+     tokens_input, tokens_output, success, latency_ms, "timestamp")
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`;
+  await backend.execute(insertSql, [
     "codex",
     "gpt-5.5",
     "old-uuid",
@@ -365,11 +366,11 @@ test("the newest label wins for one account at equal priority", async () => {
     4,
     10,
     5,
-    1,
+    true,
     20,
-    new Date(now - 60_000).toISOString()
-  );
-  insert.run(
+    new Date(now - 60_000).toISOString(),
+  ]);
+  await backend.execute(insertSql, [
     "codex",
     "gpt-5.5",
     "new-uuid",
@@ -378,10 +379,10 @@ test("the newest label wins for one account at equal priority", async () => {
     4,
     20,
     10,
-    1,
+    true,
     30,
-    new Date(now).toISOString()
-  );
+    new Date(now).toISOString(),
+  ]);
 
   const analytics = await readAnalytics();
   assert.equal(analytics.summary.uniqueAccounts, 1);

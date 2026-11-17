@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { makeManagementSessionRequest } from "../../helpers/managementSession.ts";
+import { resetTestDb } from "../../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-autopilot-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -13,7 +14,6 @@ const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../../src/lib/db/core.ts");
 const combosDb = await import("../../../src/lib/db/combos.ts");
 const providersDb = await import("../../../src/lib/db/providers.ts");
 const settingsDb = await import("../../../src/lib/db/settings.ts");
@@ -26,7 +26,7 @@ const { normalizeComboStep } = await import("../../../src/lib/combos/steps.ts");
 
 async function resetStorage() {
   comboMetrics.resetAllComboMetrics();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -37,6 +37,18 @@ async function enableManagementAuth() {
 }
 
 async function seedDegradedCombo() {
+  // quota_snapshots.connection_id is a foreign key to provider_connections on Postgres, so the
+  // degraded connection must exist before its quota snapshot can be written.
+  const connection = (await providersDb.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "combo-autopilot-openai",
+    apiKey: "combo-autopilot-openai-key",
+    isActive: true,
+    testStatus: "active",
+  })) as Record<string, unknown>;
+  const connectionId = String(connection.id);
+
   const comboInput = {
     name: "combo-autopilot-degraded",
     strategy: "priority",
@@ -45,7 +57,7 @@ async function seedDegradedCombo() {
         kind: "model",
         providerId: "openai",
         model: "openai/gpt-4o-mini",
-        connectionId: "combo-autopilot-conn-a",
+        connectionId,
         label: "Autopilot A",
       },
       {
@@ -73,7 +85,7 @@ async function seedDegradedCombo() {
       model: "openai/gpt-4o-mini",
       requestedModel: comboInput.name,
       provider: "openai",
-      connectionId: "combo-autopilot-conn-a",
+      connectionId,
       duration: 500,
       comboName: comboInput.name,
       comboStepId: firstStep.id,
@@ -82,9 +94,9 @@ async function seedDegradedCombo() {
     });
   }
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
-    connection_id: "combo-autopilot-conn-a",
+    connection_id: connectionId,
     window_key: "daily",
     remaining_percentage: 3,
     is_exhausted: 0,

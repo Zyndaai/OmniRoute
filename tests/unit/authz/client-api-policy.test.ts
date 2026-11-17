@@ -12,14 +12,28 @@ process.env.API_KEY_SECRET = "test-secret";
 const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
 const featureFlagsDb = await import("../../../src/lib/db/featureFlags.ts");
 const core = await import("../../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 const ORIGINAL_OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY;
 const ORIGINAL_ROUTER_API_KEY = process.env.ROUTER_API_KEY;
 const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 const ORIGINAL_REQUIRE_API_KEY = process.env.REQUIRE_API_KEY;
 
-function resetStorage() {
-  core.resetDbInstance();
+/**
+ * Writes a DB override, then waits for the in-process flag snapshot to reload. Flag reads are
+ * synchronous and served from a snapshot refreshed on a background TTL, so a write is only
+ * visible to them after that refresh.
+ */
+async function setFlagOverride(key: string, value: string) {
+  await featureFlagsDb.setFeatureFlagOverride(key, value);
+  const { refreshFeatureFlagSnapshot } = await import("../../../src/shared/utils/featureFlags.ts");
+  await refreshFeatureFlagSnapshot();
+}
+
+async function resetStorage() {
+  await resetTestDb();
+  const { refreshFeatureFlagSnapshot } = await import("../../../src/shared/utils/featureFlags.ts");
+  await refreshFeatureFlagSnapshot();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -29,11 +43,12 @@ function resetStorage() {
   process.env.REQUIRE_API_KEY = "true";
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_OMNIROUTE_API_KEY === undefined) delete process.env.OMNIROUTE_API_KEY;
   else process.env.OMNIROUTE_API_KEY = ORIGINAL_OMNIROUTE_API_KEY;
@@ -124,7 +139,7 @@ test("clientApiPolicy: websocket descriptor handshake accepts relative request U
 
 test("clientApiPolicy: REQUIRE_API_KEY DB feature flag override rejects anonymous", async () => {
   process.env.REQUIRE_API_KEY = "false";
-  featureFlagsDb.setFeatureFlagOverride("REQUIRE_API_KEY", "true");
+  await setFlagOverride("REQUIRE_API_KEY", "true");
 
   const policy = await loadPolicy();
   const out = await policy.evaluate(ctx(new Headers()));
@@ -137,7 +152,7 @@ test("clientApiPolicy: REQUIRE_API_KEY DB feature flag override rejects anonymou
 
 test("clientApiPolicy: REQUIRE_API_KEY DB feature flag override can disable env requirement", async () => {
   process.env.REQUIRE_API_KEY = "true";
-  featureFlagsDb.setFeatureFlagOverride("REQUIRE_API_KEY", "false");
+  await setFlagOverride("REQUIRE_API_KEY", "false");
 
   const policy = await loadPolicy();
   const out = await policy.evaluate(ctx(new Headers()));

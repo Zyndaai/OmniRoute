@@ -10,17 +10,24 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-singbox-i
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // DB bootstrap
 const core = await import("../../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('singbox', 'not_installed', 20140, 0, 0, 0)`
-).run();
+const { upsertVersionManagerTool, getVersionManagerTool } =
+  await import("../../../../src/lib/db/versionManager.ts");
+await upsertVersionManagerTool({
+  tool: "singbox",
+  status: "not_installed",
+  port: 20140,
+  autoStart: false,
+  autoUpdate: false,
+});
 
 const singbox = await import("../../../../src/lib/services/installers/singbox.ts");
+
+test.after(async () => {
+  await core.resetDbInstance();
+});
 
 test("singbox installer: getInstalledVersion returns null when not installed", async () => {
   const version = await singbox.getInstalledVersion();
@@ -234,10 +241,8 @@ test(
       assert.ok(fs.existsSync(singbox.getConfigPath()), "default config is written");
       assert.equal(await singbox.getInstalledVersion(), singbox.SINGBOX_PINNED_VERSION);
 
-      const row = db
-        .prepare("SELECT status, installed_version FROM version_manager WHERE tool = 'singbox'")
-        .get() as { status: string; installed_version: string } | undefined;
-      assert.equal(row?.installed_version, singbox.SINGBOX_PINNED_VERSION);
+      const row = await getVersionManagerTool("singbox");
+      assert.equal(row?.installedVersion, singbox.SINGBOX_PINNED_VERSION);
       assert.equal(row?.status, "stopped");
     } finally {
       f.restore();

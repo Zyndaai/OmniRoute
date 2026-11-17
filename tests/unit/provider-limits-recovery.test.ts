@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-provider-limits-recovery-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb, getTestBackend } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providerLimitsDb = await import("../../src/lib/db/providerLimits.ts");
 const providerLimits = await import("../../src/lib/usage/providerLimits.ts");
@@ -16,9 +17,27 @@ const providerLimits = await import("../../src/lib/usage/providerLimits.ts");
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+/**
+ * quotaCache persists reset events fire-and-forget (the cache is the routing source of
+ * truth), so a test that reads the reset events right after setQuotaCache waits for the
+ * weekly event to land.
+ */
+async function waitForWeeklyResetEvent(connectionId: string) {
+  const backend = getTestBackend();
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const row = await backend.queryOne<{ n: number }>(
+      "SELECT count(*)::int AS n FROM provider_quota_reset_events WHERE connection_id = $1 AND window_key = 'weekly (7d)'",
+      [connectionId]
+    );
+    if (Number(row?.n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 async function withMockedFetch(fetchImpl: typeof fetch, fn: () => Promise<void>) {
@@ -78,7 +97,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -223,7 +242,7 @@ test("Codex stale quota fallback preserves banked reset credits", async () => {
   });
   const connectionId = (connection as { id: string }).id;
 
-  providerLimitsDb.setProviderLimitsCache(connectionId, {
+  await providerLimitsDb.setProviderLimitsCache(connectionId, {
     quotas: { session: { used: 10, total: 100, remainingPercentage: 90 } },
     plan: "pro",
     message: null,
@@ -618,9 +637,9 @@ test("quota recovery path does NOT overwrite a concurrent mark (TOCTOU closed)",
   // Mock fetch so that DURING the quota fetch (between read and clear), a
   // concurrent mark writes a fresh error state. This deterministically
   // reproduces the TOCTOU window the CAS primitive is meant to close.
-  const concurrentMarkFetch = (() => {
+  const concurrentMarkFetch = (async () => {
     // Simulate concurrent markAccountUnavailable writing fresh state.
-    providersDb.updateProviderConnection(connectionId, {
+    await providersDb.updateProviderConnection(connectionId, {
       lastErrorAt: new Date(Date.now() + 1000).toISOString(),
       rateLimitedUntil: new Date(Date.now() + 120_000).toISOString(),
       lastError: "fresh concurrent 429",
@@ -891,6 +910,7 @@ test("#17043: absent, empty, or unrelated model telemetry preserves Sonnet lock 
       // Exercise the persisted reset-event producer, not a manually inserted event.
       quotaCache.setQuotaCache(id, "claude", initial);
       quotaCache.setQuotaCache(id, "claude", refilled);
+      await waitForWeeklyResetEvent(id);
 
       fallback.lockModel(
         "claude", id, "claude-sonnet-5", RateLimitReason.QUOTA_EXHAUSTED, 120_000
@@ -962,7 +982,7 @@ test("#17043: old event, exhausted window, stale poll and terminal status cannot
   });
   const id = (created as {id: string}).id;
   const events = await import("../../src/lib/db/quotaResetEvents.ts");
-  events.recordProviderQuotaResetEventIfChanged({
+  await events.recordProviderQuotaResetEventIfChanged({
     provider: "claude", connectionId: id, windowKey: "weekly (7d)",
     currentResetAt: weeklyReset, currentRemainingPercentage: 100,
     previousObservation: {resetAt: weeklyReset, remainingPercentage: 0},
@@ -974,7 +994,7 @@ test("#17043: old event, exhausted window, stale poll and terminal status cannot
     weekly: { remainingPercentage: 94, resetAt: weeklyReset },
   }};
   assert.ok((await providerLimits.maybeClearRecoveredQuotaState(base, recovered)).rateLimitedUntil);
-  events.recordProviderQuotaResetEventIfChanged({
+  await events.recordProviderQuotaResetEventIfChanged({
     provider: "claude", connectionId: id, windowKey: "weekly (7d)",
     currentResetAt: new Date(now + 4 * 86400_000).toISOString(),
     currentRemainingPercentage: 100,
@@ -1021,7 +1041,7 @@ test("#17043: a weekly refill never clears an ordinary per-minute 429", async ()
   });
   const id = (created as { id: string }).id;
   const event = await import("../../src/lib/db/quotaResetEvents.ts");
-  event.recordProviderQuotaResetEventIfChanged({
+  await event.recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId: id,
     windowKey: "weekly (7d)",
@@ -1076,7 +1096,7 @@ test("#17043: a concurrent new 429 defeats the stale recovery CAS and keeps mode
   const event = await import("../../src/lib/db/quotaResetEvents.ts");
   const fallback = await import("../../open-sse/services/accountFallback.ts");
   const { RateLimitReason } = await import("../../open-sse/config/constants.ts");
-  event.recordProviderQuotaResetEventIfChanged({
+  await event.recordProviderQuotaResetEventIfChanged({
     provider: "claude",
     connectionId: id,
     windowKey: "weekly (7d)",

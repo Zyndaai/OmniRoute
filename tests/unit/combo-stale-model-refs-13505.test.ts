@@ -11,7 +11,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-13505-sta
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "stale-refs-13505-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -66,17 +66,17 @@ function mockModelsFetch(response: () => Response) {
   };
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   globalThis.fetch = originalFetch;
   modelSyncRoute.__resetLoopbackReadinessForTests?.();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -137,14 +137,14 @@ test("#13505 successful sync returns staleComboRefs and writes one audit entry",
   );
   assert.equal(await comboModels("sync-13505"), before, "sync must not prune combo steps");
 
-  const audit = compliance.getAuditLog({ action: AUDIT_ACTION });
+  const audit = await compliance.getAuditLog({ action: AUDIT_ACTION });
   assert.equal(audit.length, 1);
   assert.equal(audit[0].target, PROVIDER);
 
   // An unchanged follow-up sync still reports the ref but does not repeat the audit entry.
   const again = (await (await postSync(connectionId)).json()) as SyncBody;
   assert.equal(again.staleComboRefs?.length, 1);
-  assert.equal(compliance.getAuditLog({ action: AUDIT_ACTION }).length, 1);
+  assert.equal((await compliance.getAuditLog({ action: AUDIT_ACTION })).length,1);
 });
 
 test("#13505 builder options expose stale refs across providers for the editor badge", async () => {
@@ -198,6 +198,6 @@ for (const [label, upstream] of SKIPPED_SYNCS) {
     const body = (await response.json()) as SyncBody;
     assert.equal("staleComboRefs" in body, false);
     assert.equal(await comboModels(`${label}-13505`), before);
-    assert.equal(compliance.getAuditLog({ action: AUDIT_ACTION }).length, 0);
+    assert.equal((await compliance.getAuditLog({ action: AUDIT_ACTION })).length,0);
   });
 }

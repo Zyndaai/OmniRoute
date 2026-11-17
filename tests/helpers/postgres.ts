@@ -65,6 +65,9 @@ export async function resetTestDb(): Promise<void> {
   await truncateAll(backend);
   for (const sql of migrationSeeds()) await backend.execute(sql);
   invalidateDbCache();
+  // Loaded lazily: most tests never touch models.dev capabilities.
+  const { resetSyncedCapabilitiesCache } = await import("../../src/lib/modelsDevSync.ts");
+  resetSyncedCapabilitiesCache();
 }
 
 /** In-process Postgres (no Docker) with the migrations applied; closed after `fn`. */

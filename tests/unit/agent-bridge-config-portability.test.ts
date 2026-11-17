@@ -15,9 +15,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const portability = await import("../../src/lib/inspector/configPortability.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR))
@@ -37,7 +38,7 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -71,7 +72,7 @@ test("AgentBridgeConfigSchema rejects a non-string bypass pattern", () => {
   assert.equal(parsed.success, false);
 });
 
-test("import then export roundtrips bypass + custom hosts + mappings", () => {
+test("import then export roundtrips bypass + custom hosts + mappings", async () => {
   const config = {
     version: 1 as const,
     bypassPatterns: ["*.bank.test", "literal.example.com"],
@@ -80,8 +81,8 @@ test("import then export roundtrips bypass + custom hosts + mappings", () => {
       cursor: [{ source: "gpt-4o", target: "claude-sonnet-4-5" }],
     },
   };
-  portability.importConfig(config);
-  const exported = portability.exportConfig();
+  await portability.importConfig(config);
+  const exported = await portability.exportConfig();
 
   assert.deepEqual(
     [...exported.bypassPatterns].sort(),

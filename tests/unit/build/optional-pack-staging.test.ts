@@ -17,9 +17,16 @@ import { readFileSync } from "node:fs";
 const stagingMod = await import("../../../scripts/build/optionalPackStaging.mjs");
 const manifestMod = await import("../../../scripts/packs/optionalPackManifest.mjs");
 
-const { stageOptionalPacks, findMemberDirs } = stagingMod as typeof stagingMod & {
+const { findMemberDirs } = stagingMod as typeof stagingMod & {
   findMemberDirs: (root: string, member: string) => string[];
 };
+type StageResult = { packs: unknown[]; index: { packs: PackIndexEntry[] } };
+const stageOptionalPacks = stagingMod.stageOptionalPacks as unknown as (opts: {
+  stagingRoot: string;
+  packsOutDir: string;
+  emitTarballs: boolean;
+  log: () => void;
+}) => Promise<StageResult>;
 const { OPTIONAL_PACKS, PACK_INDEX_FILENAME, verifyAgainstIndexEntry } =
   manifestMod as typeof manifestMod & {
     OPTIONAL_PACKS: { name: string; packages: { name: string }[] }[];

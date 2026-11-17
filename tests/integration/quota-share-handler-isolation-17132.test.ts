@@ -60,13 +60,13 @@ async function fixture(absoluteCap = false) {
   });
   const a = await harness.seedApiKey({ allowedConnections: [connection.id] });
   const b = await harness.seedApiKey({ allowedConnections: [connection.id] });
-  plans.upsertPlan(
+  await plans.upsertPlan(
     connection.id,
     "claude",
     [{ unit: "tokens", window: "hourly", limit: 10000 }],
     "manual"
   );
-  const pool = pools.createPool({
+  const pool = await pools.createPool({
     connectionId: connection.id,
     name: `quota-pool-${connection.id}`,
     allocations: [
@@ -139,7 +139,7 @@ test("absolute cap returns a clean 429; another key immediately uses the same OA
 
 test("a model cap skips only that combo target and dispatches the next model on the same connection", async () => {
   const { connection, a, pool, store } = await fixture();
-  caps.setModelCap({
+  await caps.setModelCap({
     poolId: pool.id,
     apiKeyId: a.id,
     model: MODEL,
@@ -205,7 +205,7 @@ test("a fully capped two-model combo reports 429 without poisoning the shared co
 
 test("a real closed quota schedule preserves its Retry-After through handleChat", async () => {
   const { connection, a, pool } = await fixture();
-  schedules.replaceSchedules(pool.id, [
+  await schedules.replaceSchedules(pool.id, [
     {
       days: [(new Date().getUTCDay() + 1) % 7],
       startMinute: 0,

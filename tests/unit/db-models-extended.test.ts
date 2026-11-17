@@ -1,40 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-models-ext-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
-
-function cleanupGlobalDb() {
-  try {
-    if ((globalThis as any).__omnirouteDb?.open) {
-      (globalThis as any).__omnirouteDb.close();
-    }
-  } catch {}
-  delete (globalThis as any).__omnirouteDb;
-}
-
-async function resetStorage() {
-  cleanupGlobalDb();
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
-}
 
 test("sanitizeUpstreamHeadersMap returns empty for null/undefined", () => {
   assert.deepEqual(models.sanitizeUpstreamHeadersMap(null), {});
@@ -102,35 +70,35 @@ test("sanitizeUpstreamHeadersMap rejects forbidden header names", () => {
 });
 
 test("getModelCompatOverrides returns empty array for unknown provider", async () => {
-  await resetStorage();
-  const overrides = models.getModelCompatOverrides("unknown-provider");
+  await resetTestDb();
+  const overrides = await models.getModelCompatOverrides("unknown-provider");
   assert.ok(Array.isArray(overrides));
 });
 
 test("getModelIsHidden returns false for unknown model", async () => {
-  await resetStorage();
-  assert.equal(models.getModelIsHidden("unknown", "unknown-model"), false);
+  await resetTestDb();
+  assert.equal(await models.getModelIsHidden("unknown", "unknown-model"), false);
 });
 
 test("getModelNormalizeToolCallId returns boolean or undefined", async () => {
-  await resetStorage();
-  const result = models.getModelNormalizeToolCallId("openai", "gpt-4o");
+  await resetTestDb();
+  const result = await models.getModelNormalizeToolCallId("openai", "gpt-4o");
   assert.ok(result === undefined || typeof result === "boolean");
 });
 
 test("getModelPreserveOpenAIDeveloperRole returns boolean or undefined", async () => {
-  await resetStorage();
-  const result = models.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4o");
+  await resetTestDb();
+  const result = await models.getModelPreserveOpenAIDeveloperRole("openai", "gpt-4o");
   assert.ok(result === undefined || typeof result === "boolean");
 });
 
 test("getModelUpstreamExtraHeaders returns empty object when no overrides", async () => {
-  await resetStorage();
-  const result = models.getModelUpstreamExtraHeaders("openai", "gpt-4o");
+  await resetTestDb();
+  const result = await models.getModelUpstreamExtraHeaders("openai", "gpt-4o");
   assert.deepEqual(result, {});
 });
 
 test("removeModelCompatOverride does not throw for unknown provider/model", async () => {
-  await resetStorage();
-  assert.doesNotThrow(() => models.removeModelCompatOverride("unknown", "unknown"));
+  await resetTestDb();
+  await assert.doesNotReject(() => models.removeModelCompatOverride("unknown", "unknown"));
 });

@@ -25,33 +25,23 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const { reconcilePoolExclusivity } = await import("../../src/lib/quota/quotaKey.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
+/** Quota pool connections reference provider_connections; create a real one and return its id. */
+async function connectionFor(label: string): Promise<string> {
+  const conn = await providersDb.createProviderConnection({
+    provider: "glm",
+    authType: "apikey",
+    name: `excl-${label}`,
+    apiKey: `sk-excl-${label}`,
+  });
+  return String((conn as Record<string, unknown>).id);
+}
 
 // ---------------------------------------------------------------------------
 // Test lifecycle helpers
 // ---------------------------------------------------------------------------
-
-async function resetStorage() {
-  core.resetDbInstance();
-  apiKeysDb.resetApiKeyState();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const err = error as NodeJS.ErrnoException;
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
 
 /** Helper: get the current allowedQuotas for a key by id. */
 async function getAllowedQuotas(keyId: string): Promise<string[]> {
@@ -63,11 +53,12 @@ async function getAllowedQuotas(keyId: string): Promise<string[]> {
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
+  apiKeysDb.resetApiKeyState();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -77,7 +68,10 @@ test.after(async () => {
 // ---------------------------------------------------------------------------
 
 test("reconcilePoolExclusivity: exclusive=true adds poolId to allocated key, leaves other key unchanged", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-1", name: "Excl Pool A" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("1"),
+    name: "Excl Pool A",
+  });
   const keyA = await apiKeysDb.createApiKey("Key A", "machine-excl-a");
   const keyB = await apiKeysDb.createApiKey("Key B", "machine-excl-b");
 
@@ -94,7 +88,10 @@ test("reconcilePoolExclusivity: exclusive=true adds poolId to allocated key, lea
 });
 
 test("reconcilePoolExclusivity: transferring exclusivity — prev key loses poolId, next key gains it", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-2", name: "Excl Pool B" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("2"),
+    name: "Excl Pool B",
+  });
   const keyA = await apiKeysDb.createApiKey("Key A2", "machine-excl-a2");
   const keyB = await apiKeysDb.createApiKey("Key B2", "machine-excl-b2");
 
@@ -114,7 +111,10 @@ test("reconcilePoolExclusivity: transferring exclusivity — prev key loses pool
 });
 
 test("reconcilePoolExclusivity: exclusive=false removes poolId from all prev+next keys", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-3", name: "Excl Pool C" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("3"),
+    name: "Excl Pool C",
+  });
   const keyB = await apiKeysDb.createApiKey("Key B3", "machine-excl-b3");
 
   // Give keyB the poolId first
@@ -130,7 +130,10 @@ test("reconcilePoolExclusivity: exclusive=false removes poolId from all prev+nex
 });
 
 test("reconcilePoolExclusivity: idempotent — calling twice with same args does not duplicate or change anything", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-4", name: "Excl Pool D" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("4"),
+    name: "Excl Pool D",
+  });
   const keyA = await apiKeysDb.createApiKey("Key A4", "machine-excl-a4");
 
   // First call
@@ -163,7 +166,10 @@ test("reconcilePoolExclusivity: idempotent — calling twice with same args does
 });
 
 test("reconcilePoolExclusivity: idempotent removal — calling exclusive=false twice is safe", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-5", name: "Excl Pool E" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("5"),
+    name: "Excl Pool E",
+  });
   const keyA = await apiKeysDb.createApiKey("Key A5", "machine-excl-a5");
 
   await apiKeysDb.updateApiKeyPermissions(keyA.id, { allowedQuotas: [pool.id] });
@@ -184,7 +190,10 @@ test("reconcilePoolExclusivity: idempotent removal — calling exclusive=false t
 });
 
 test("reconcilePoolExclusivity: missing/unknown keyId is skipped defensively (no throw)", async () => {
-  const pool = poolsDb.createPool({ connectionId: "conn-excl-6", name: "Excl Pool F" });
+  const pool = await poolsDb.createPool({
+    connectionId: await connectionFor("6"),
+    name: "Excl Pool F",
+  });
 
   // ghost-key does not exist in the DB; must not throw
   await assert.doesNotReject(
@@ -194,8 +203,14 @@ test("reconcilePoolExclusivity: missing/unknown keyId is skipped defensively (no
 });
 
 test("reconcilePoolExclusivity: exclusive=true preserves other poolIds already in allowedQuotas", async () => {
-  const pool1 = poolsDb.createPool({ connectionId: "conn-excl-7a", name: "Excl Pool G1" });
-  const pool2 = poolsDb.createPool({ connectionId: "conn-excl-7b", name: "Excl Pool G2" });
+  const pool1 = await poolsDb.createPool({
+    connectionId: await connectionFor("7a"),
+    name: "Excl Pool G1",
+  });
+  const pool2 = await poolsDb.createPool({
+    connectionId: await connectionFor("7b"),
+    name: "Excl Pool G2",
+  });
   const keyA = await apiKeysDb.createApiKey("Key A7", "machine-excl-a7");
 
   // Pre-seed keyA with pool1 already

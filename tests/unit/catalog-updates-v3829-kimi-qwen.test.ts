@@ -60,7 +60,7 @@ test("Kimi exposes one Code card plus Web and Moonshot services", () => {
   assert.equal(providerCatalog.isManagedProviderConnectionId("kimi-coding"), false);
 });
 
-test("Kimi Web models do not advertise unsupported function tools", () => {
+test("Kimi Web models do not advertise unsupported function tools", async () => {
   const models = getModelsByProviderId("kimi-web");
   assert.deepEqual(
     models.map(({ id, toolCalling }) => ({ id, toolCalling })),
@@ -70,7 +70,10 @@ test("Kimi Web models do not advertise unsupported function tools", () => {
     ]
   );
   for (const model of models) {
-    const capabilities = getResolvedModelCapabilities({ provider: "kimi-web", model: model.id });
+    const capabilities = await getResolvedModelCapabilities({
+      provider: "kimi-web",
+      model: model.id,
+    });
     assert.equal(capabilities.toolCalling, false);
     assert.equal(capabilities.supportsTools, false);
   }

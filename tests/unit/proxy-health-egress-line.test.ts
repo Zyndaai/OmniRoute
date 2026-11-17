@@ -15,7 +15,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES = "true";
 delete process.env.PROXY_LOG_INCLUDE_IPS;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const { forceProxyHealthSweep, formatEgressSharingSummaryLine } =
@@ -29,17 +29,15 @@ const { forceProxyHealthSweep, formatEgressSharingSummaryLine } =
   };
 import type { EgressSharingSummary } from "../../src/lib/proxyEgress.ts";
 
-function resetStorage() {
-  core.resetDbInstance();
-  proxyLogger.clearProxyLogs();
-  // clearProxyLogs() reopens the DB; release it so Windows can delete the data dir.
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
+  await proxyLogger.clearProxyLogs();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.PROXY_LOG_INCLUDE_IPS;
 });
@@ -70,7 +68,7 @@ test("formatEgressSharingSummaryLine is anonymous by default and raw when opted 
 });
 
 test("forceProxyHealthSweep logs the anonymous egress line when accounts share an IP", async () => {
-  resetStorage();
+  await resetStorage();
 
   await proxiesDb.createProxy({
     name: "Dead Local Proxy",
@@ -96,7 +94,7 @@ test("forceProxyHealthSweep logs the anonymous egress line when accounts share a
     account: "acc-b",
     connectionId: "conn-b",
   });
-  proxyLogger.flushProxyLogsSync(); // persist the enqueued batch before the sweep reads the DB
+  await proxyLogger.flushProxyLogsSync(); // persist the enqueued batch before the sweep reads the DB
 
   const logs: string[] = [];
   const originalLog = console.log;
@@ -117,7 +115,7 @@ test("forceProxyHealthSweep logs the anonymous egress line when accounts share a
 });
 
 test("forceProxyHealthSweep logs raw details only with PROXY_LOG_INCLUDE_IPS=true", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.PROXY_LOG_INCLUDE_IPS = "true";
 
   await proxiesDb.createProxy({
@@ -142,7 +140,7 @@ test("forceProxyHealthSweep logs raw details only with PROXY_LOG_INCLUDE_IPS=tru
     account: "acc-b",
     connectionId: "conn-b",
   });
-  proxyLogger.flushProxyLogsSync(); // persist the enqueued batch before the sweep reads the DB
+  await proxyLogger.flushProxyLogsSync(); // persist the enqueued batch before the sweep reads the DB
 
   const logs: string[] = [];
   const originalLog = console.log;

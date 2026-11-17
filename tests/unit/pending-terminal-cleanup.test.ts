@@ -20,17 +20,18 @@ import {
   STREAM_IDLE_TIMEOUT_MS,
   translateRequest,
 } from "./_helpers/pendingTerminalCleanup.ts";
+import { prefetchThoughtSignatures } from "../../open-sse/translator/index.ts";
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   history.clearPendingRequests();
-  costRules.resetCostData();
+  await costRules.resetCostData();
 });
 test.afterEach(async () => {
   await new Promise<void>((resolve) => setImmediate(resolve));
 });
 test.after(async () => {
   history.clearPendingRequests();
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await cleanup();
 });
 
@@ -72,7 +73,7 @@ test("terminal streaming bookkeeping failure releases pending without changing c
   result.outcome.carry.onPipelineStreamError?.({ message: "late failure", statusCode: 502 });
   assert.equal(result.writes(), 0);
   assert.equal(result.failures(), 0);
-  assert.equal(costRules.getCostSummary(API_KEY_ID).totalEntries, 0);
+  assert.equal((await costRules.getCostSummary(API_KEY_ID)).totalEntries, 0);
   assertOnlySurvivor(survivor, survivorBytes);
 });
 
@@ -81,11 +82,15 @@ test("successful stream records once and duplicate terminal signals leave concur
   const survivorBytes = history.getPendingRetainedBytes();
   const terminal = pending();
   const result = await stream(terminal, false);
-  for (let i = 0; i < 100 && costRules.getCostSummary(API_KEY_ID).totalEntries === 0; i++) {
+  for (
+    let i = 0;
+    i < 100 && (await costRules.getCostSummary(API_KEY_ID)).totalEntries === 0;
+    i++
+  ) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  assert.equal(costRules.getCostSummary(API_KEY_ID).totalEntries, 1);
-  assert.equal(costRules.getDailyTotal(API_KEY_ID), BILLED_COST);
+  assert.equal((await costRules.getCostSummary(API_KEY_ID)).totalEntries, 1);
+  assert.equal(await costRules.getDailyTotal(API_KEY_ID), BILLED_COST);
   assert.match(result.text, /fixture answer/);
   assert.equal(result.writes(), 1);
   assert.equal(result.failures(), 0);
@@ -116,8 +121,8 @@ test("successful stream records once and duplicate terminal signals leave concur
   assert.equal(result.writes(), 1);
   assert.equal(result.failures(), 0);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(costRules.getCostSummary(API_KEY_ID).totalEntries, 1);
-  assert.equal(costRules.getDailyTotal(API_KEY_ID), BILLED_COST);
+  assert.equal((await costRules.getCostSummary(API_KEY_ID)).totalEntries, 1);
+  assert.equal(await costRules.getDailyTotal(API_KEY_ID), BILLED_COST);
   assert.deepEqual(completed.getCompletedDetailsCacheStats(), stats);
   assert.equal(completed.getCompletedDetails().get(terminal), normal);
   assertOnlySurvivor(survivor, survivorBytes);
@@ -265,7 +270,7 @@ for (const formats of [
       assert.equal(result.writes(), 0);
       assert.equal(result.failures(), 0);
       assert.equal(result.released(), 1);
-      assert.equal(costRules.getCostSummary(API_KEY_ID).totalEntries, 0);
+      assert.equal((await costRules.getCostSummary(API_KEY_ID)).totalEntries, 0);
       for (let i = 0; i < 2; i++) {
         assert.equal(
           result.outcome.carry.onPipelineStreamError?.({
@@ -335,11 +340,7 @@ for (const rawConnectionId of [null, undefined]) {
         });
       const callId = calls.find((call) => call.id)?.id;
       assert.ok(callId, "the real Gemini stream must emit a client tool-call ID");
-      const followup = translateRequest(
-        "openai",
-        "gemini",
-        model,
-        {
+      const followupBody = {
           model,
           messages: [
             { role: "user", content: "Look up Tokyo" },
@@ -356,13 +357,21 @@ for (const rawConnectionId of [null, undefined]) {
             },
             { role: "tool", tool_call_id: callId, content: "sunny" },
           ],
-        },
+      };
+      // Same read-ahead chatCore performs: the Gemini translators are synchronous, so the
+      // persisted signatures are resolved first and passed in as `thoughtSignatures`.
+      const thoughtSignatures = await prefetchThoughtSignatures("gemini", model, followupBody, CONN);
+      const followup = (await translateRequest(
+        "openai",
+        "gemini",
+        model,
+        followupBody,
         false,
         { connectionId: CONN },
         "gemini",
         null,
-        { signatureNamespace: rawConnectionId }
-      ) as {
+        { signatureNamespace: rawConnectionId, thoughtSignatures }
+      )) as {
         contents: Array<{ parts: Array<{ functionCall?: unknown; thoughtSignature?: string }> }>;
       };
       const part = followup.contents

@@ -30,36 +30,15 @@ const { syncQuotaCombos } = await import("../../src/lib/quota/quotaCombos.ts");
 const { isQuotaModelName, quotaModelName } =
   await import("../../src/lib/quota/quotaModelNaming.ts");
 const { PROVIDER_MODELS } = await import("../../open-sse/config/providerModels.ts");
-
-// Trigger migration once at module load so the schema is ready for the first
-// beforeEach without a slow per-test full migration run.
-core.getDbInstance();
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-// Tables touched by this test suite.  Cleared via SQL between tests to avoid
-// the slow per-test full-migration race that fires under --test-force-exit
-// with high concurrency (the rmSync approach also corrupts the module-level
-// SQLITE_FILE pointer shared across concurrent test files).
-const CLEAR_TABLES = [
-  "quota_pool_connections",
-  "quota_allocations",
-  "quota_pools",
-  "provider_connections",
-  "combos",
-];
-
-function resetStorage() {
-  const db = core.getDbInstance();
-  for (const table of CLEAR_TABLES) {
-    db.prepare(`DELETE FROM ${table}`).run();
-  }
-  // Re-seed the default quota group removed by the cascading delete on quota_pools.
-  db.prepare(
-    "INSERT OR IGNORE INTO quota_groups (id, name) VALUES ('group-demo', 'GroupDemo')"
-  ).run();
+// Each test starts from a fresh database (tables emptied, migration seed rows restored).
+async function resetStorage() {
+  await resetTestDb();
 }
 
 /**
@@ -78,12 +57,12 @@ async function flushPendingSyncs(): Promise<void> {
   }
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -134,7 +113,7 @@ test("B1: syncQuotaCombos — 2-connection same-provider pool produces ONE combo
   const idA = (connA as Record<string, unknown>).id as string;
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "BalancingPool B1",
     connectionIds: [idA, idB],
@@ -215,7 +194,7 @@ test("B2: syncQuotaCombos — single-connection pool still produces 1-step combo
   });
   const connId = (conn as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: connId,
     name: "SingleConnPool B2",
   });
@@ -257,7 +236,7 @@ test("B3: syncQuotaCombos — idempotent on 2-connection pool (no duplicates aft
   const idA = (connA as Record<string, unknown>).id as string;
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "IdempotentBalancingPool B3",
     connectionIds: [idA, idB],
@@ -310,7 +289,7 @@ test("B4: syncQuotaCombos — after removing one connection from pool, re-sync c
   });
   const idA = (connA as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "CollapsePool B4",
     connectionIds: [idA, (connB as Record<string, unknown>).id as string],
@@ -330,7 +309,7 @@ test("B4: syncQuotaCombos — after removing one connection from pool, re-sync c
   }
 
   // Remove connB — pool now has only connA.
-  poolsDb.updatePool(pool.id, { connectionIds: [idA] });
+  await poolsDb.updatePool(pool.id, { connectionIds: [idA] });
 
   // Drain the fire-and-forget from updatePool so it cannot overwrite the
   // 1-step result that the following explicit sync will produce.
@@ -370,7 +349,7 @@ test("B5: after syncQuotaCombos on 2-connection pool, getComboByName returns the
   const idA = (connA as Record<string, unknown>).id as string;
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "GetByNamePool B5",
     connectionIds: [idA, idB],

@@ -29,33 +29,25 @@ const { syncQuotaCombos, removeQuotaCombosForPool } =
 const { PoolUpdateSchema } = await import("../../src/shared/schemas/quota.ts");
 const { isQuotaModelName, parseQuotaModelName, quotaGroupSlug } =
   await import("../../src/lib/quota/quotaModelNaming.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const err = error as NodeJS.ErrnoException;
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
+/** Pool connections reference provider connections by foreign key; seed the rows. */
+async function seedConnections(connectionIds: string[]) {
+  const backend = getTestBackend();
+  for (const id of connectionIds) {
+    await backend.execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [id, "openai"]
+    );
   }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -114,7 +106,7 @@ test("PoolUpdateSchema accepts only groupId (partial update)", () => {
 
 test("updatePool with new connectionIds triggers combo re-sync (openrouter → baidu)", async () => {
   // Create a named group
-  const group = createGroup("PoolUpdateGroup");
+  const group = await createGroup("PoolUpdateGroup");
   const groupSlug = quotaGroupSlug(group.name);
 
   // Provider connection 1: openrouter
@@ -136,7 +128,7 @@ test("updatePool with new connectionIds triggers combo re-sync (openrouter → b
   const idB = (connB as Record<string, unknown>).id as string;
 
   // Create pool initially pointing to openrouter
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "Pool Switch Test",
     groupId: group.id,
@@ -153,7 +145,7 @@ test("updatePool with new connectionIds triggers combo re-sync (openrouter → b
   assert.ok(orBefore.length > 0, `Expected openrouter combos before switch, got 0`);
 
   // Now update the pool to point to baidu
-  const updated = poolsDb.updatePool(pool.id, { connectionIds: [idB] });
+  const updated = await poolsDb.updatePool(pool.id, { connectionIds: [idB] });
   assert.ok(updated, "updatePool should return the updated pool");
   assert.equal(updated!.connectionId, idB, "primary connectionId should now be baidu conn");
 
@@ -173,13 +165,13 @@ test("updatePool with new connectionIds triggers combo re-sync (openrouter → b
   );
 
   // The pool's primary connection should now reflect baidu
-  const reread = poolsDb.getPool(pool.id)!;
+  const reread = (await poolsDb.getPool(pool.id))!;
   assert.equal(reread.connectionId, idB, "pool.connectionId must be baidu conn after update");
   assert.deepEqual(reread.connectionIds, [idB], "pool.connectionIds must contain only baidu conn");
 });
 
 test("PATCH route sequence (remove→update→sync) prunes OLD-provider combos on switch", async () => {
-  const group = createGroup("RouteSwitchGroup");
+  const group = await createGroup("RouteSwitchGroup");
   const groupSlug = quotaGroupSlug(group.name);
 
   const connA = await providersDb.createProviderConnection({
@@ -197,7 +189,11 @@ test("PATCH route sequence (remove→update→sync) prunes OLD-provider combos o
   });
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({ connectionId: idA, name: "Route Switch", groupId: group.id });
+  const pool = await poolsDb.createPool({
+    connectionId: idA,
+    name: "Route Switch",
+    groupId: group.id,
+  });
   await syncQuotaCombos(pool.id);
   assert.ok(
     (await listQuotaCombos()).some((c) => parseQuotaModelName(c.name)?.provider === "openrouter"),
@@ -206,7 +202,7 @@ test("PATCH route sequence (remove→update→sync) prunes OLD-provider combos o
 
   // Mirror the PATCH route's connection/group-change path exactly:
   await removeQuotaCombosForPool(pool.id); // pool still has OLD (openrouter) provider here
-  poolsDb.updatePool(pool.id, { connectionIds: [idB] });
+  await poolsDb.updatePool(pool.id, { connectionIds: [idB] });
   await syncQuotaCombos(pool.id); // pool now has NEW (baidu) provider
 
   const after = await listQuotaCombos();
@@ -224,11 +220,12 @@ test("PATCH route sequence (remove→update→sync) prunes OLD-provider combos o
   );
 });
 
-test("updatePool with groupId persists the new group assignment", () => {
-  const groupA = createGroup("GroupAlpha");
-  const groupB = createGroup("GroupBeta");
+test("updatePool with groupId persists the new group assignment", async () => {
+  const groupA = await createGroup("GroupAlpha");
+  const groupB = await createGroup("GroupBeta");
+  await seedConnections(["gc-conn-1"]);
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: "gc-conn-1",
     name: "Group Reassign Pool",
     groupId: groupA.id,
@@ -236,36 +233,38 @@ test("updatePool with groupId persists the new group assignment", () => {
 
   assert.equal(pool.groupId, groupA.id, "pool should start in groupA");
 
-  const updated = poolsDb.updatePool(pool.id, { groupId: groupB.id });
+  const updated = await poolsDb.updatePool(pool.id, { groupId: groupB.id });
   assert.ok(updated, "updatePool should return updated pool");
   assert.equal(updated!.groupId, groupB.id, "pool should now be in groupB");
 
   // Re-read from DB to confirm persistence
-  const reread = poolsDb.getPool(pool.id)!;
+  const reread = (await poolsDb.getPool(pool.id))!;
   assert.equal(reread.groupId, groupB.id, "persisted groupId should be groupB");
 });
 
-test("updatePool without connectionIds leaves connection membership untouched", () => {
-  const pool = poolsDb.createPool({
+test("updatePool without connectionIds leaves connection membership untouched", async () => {
+  await seedConnections(["stable-conn", "stable-conn-2"]);
+  const pool = await poolsDb.createPool({
     connectionId: "stable-conn",
     name: "Stable Conn Pool",
     connectionIds: ["stable-conn", "stable-conn-2"],
   });
 
-  poolsDb.updatePool(pool.id, { name: "Renamed" });
+  await poolsDb.updatePool(pool.id, { name: "Renamed" });
 
-  const reread = poolsDb.getPool(pool.id)!;
+  const reread = (await poolsDb.getPool(pool.id))!;
   assert.equal(reread.name, "Renamed");
   assert.equal(reread.connectionIds.length, 2, "connectionIds should be unchanged");
   assert.ok(reread.connectionIds.includes("stable-conn"));
   assert.ok(reread.connectionIds.includes("stable-conn-2"));
 });
 
-test("PoolUpdateSchema path: groupId flows through to updatePool (schema→db round-trip)", () => {
-  const groupX = createGroup("XGroup");
-  const groupY = createGroup("YGroup");
+test("PoolUpdateSchema path: groupId flows through to updatePool (schema→db round-trip)", async () => {
+  const groupX = await createGroup("XGroup");
+  const groupY = await createGroup("YGroup");
+  await seedConnections(["grp-rt-conn"]);
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: "grp-rt-conn",
     name: "Round Trip Pool",
     groupId: groupX.id,
@@ -275,13 +274,14 @@ test("PoolUpdateSchema path: groupId flows through to updatePool (schema→db ro
   const parsed = PoolUpdateSchema.safeParse({ groupId: groupY.id });
   assert.ok(parsed.success);
 
-  const updated = poolsDb.updatePool(pool.id, parsed.data!);
+  const updated = await poolsDb.updatePool(pool.id, parsed.data!);
   assert.ok(updated);
   assert.equal(updated!.groupId, groupY.id);
 });
 
-test("PoolUpdateSchema path: connectionIds flows through to updatePool (schema→db round-trip)", () => {
-  const pool = poolsDb.createPool({
+test("PoolUpdateSchema path: connectionIds flows through to updatePool (schema→db round-trip)", async () => {
+  await seedConnections(["rt-conn-old", "rt-conn-new"]);
+  const pool = await poolsDb.createPool({
     connectionId: "rt-conn-old",
     name: "ConnIds Round Trip Pool",
   });
@@ -289,7 +289,7 @@ test("PoolUpdateSchema path: connectionIds flows through to updatePool (schema�
   const parsed = PoolUpdateSchema.safeParse({ connectionIds: ["rt-conn-new"] });
   assert.ok(parsed.success);
 
-  const updated = poolsDb.updatePool(pool.id, parsed.data!);
+  const updated = await poolsDb.updatePool(pool.id, parsed.data!);
   assert.ok(updated);
   assert.equal(updated!.connectionId, "rt-conn-new");
   assert.deepEqual(updated!.connectionIds, ["rt-conn-new"]);

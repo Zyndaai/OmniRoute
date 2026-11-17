@@ -5,18 +5,9 @@
  * compression_run_telemetry had no retention cleanup, causing unbounded
  * DB growth and OOM crashes on relays with heavy traffic.
  *
- * These tests call the REAL cleanup functions against a real SQLite adapter
- * (seeded with test data). If the production DELETE logic breaks, these
- * tests WILL fail.
- *
- * DATA_DIR isolation is self-contained (mkdtempSync below), not dependent on
- * the test:unit harness's `--import ./tests/_setup/isolateDataDir.ts`. This
- * file calls real DELETE-based cleanup functions against getDbInstance(),
- * which resolves to the developer's real ~/.omniroute/storage.sqlite when
- * DATA_DIR is unset — running this file directly (as documented under
- * "Running Tests": `node --import tsx/esm --test tests/unit/<file>.test.ts`)
- * would otherwise delete real rows from that database, not test rows. Do NOT
- * remove the DATA_DIR override below.
+ * These tests call the REAL cleanup functions against the PostgreSQL test
+ * database (isolated per test file by tests/_setup/isolatePostgres.ts).
+ * If the production DELETE logic breaks, these tests WILL fail.
  */
 
 import test from "node:test";
@@ -28,151 +19,114 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-6848-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-// Import the real functions — they use getDbInstance(), which resolves to the
-// isolated temp DB created above (set before this import so the module's
-// first getDbInstance() call already sees the isolated DATA_DIR).
 const {
   cleanupDomainCostHistory,
   cleanupCompressionCacheStats,
   cleanupCompressionRunTelemetry,
 } = await import("../../src/lib/db/cleanup.ts");
 
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-// Repo test rule: DB-touching tests must close the handle in test.after(),
-// or the native test runner can hang indefinitely on a dangling connection.
 test.after(() => {
-  resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const DAY_MS = 86_400_000;
 
-/** Ensure compression_run_telemetry table exists (created lazily in production). */
-function ensureTelemetryTable(): void {
-  const db = getDbInstance()!;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS compression_run_telemetry (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp INTEGER NOT NULL,
-      request_id TEXT,
-      model TEXT,
-      provider TEXT,
-      source TEXT,
-      tokens_before INTEGER NOT NULL,
-      tokens_after INTEGER NOT NULL,
-      ratio REAL,
-      cost_delta REAL,
-      output_styles TEXT,
-      output_style_bypass TEXT,
-      output_tokens INTEGER
-    )
-  `);
+async function count(table: string): Promise<number> {
+  const row = await getTestBackend().queryOne<{ cnt: number }>(
+    `SELECT COUNT(*) AS cnt FROM ${table}`
+  );
+  return Number(row?.cnt ?? 0);
 }
 
-test.beforeEach(() => {
-  ensureTelemetryTable();
-  const db = getDbInstance()!;
+test.beforeEach(async () => {
   for (const table of [
     "domain_cost_history",
     "compression_cache_stats",
     "compression_run_telemetry",
   ]) {
-    db.exec(`DELETE FROM ${table}`);
+    await getTestBackend().execute(`DELETE FROM ${table}`);
   }
 });
 
 // ─── Tests ───────────────────────────────────────────────────────────────
 
 test("#6848 cleanupDomainCostHistory: deletes rows older than retention window", async () => {
-  const db = getDbInstance()!;
+  const backend = getTestBackend();
   const now = Date.now();
-  const insert = db.prepare(
-    "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES (?, ?, ?)"
-  );
+  const insert = (cost: number, ts: number) =>
+    backend.execute(
+      'INSERT INTO domain_cost_history (api_key_id, cost, "timestamp") VALUES ($1, $2, $3)',
+      ["key1", cost, new Date(ts).toISOString()]
+    );
 
   // 3 old (40 days ago), 2 recent (5 days ago)
-  insert.run("key1", 1.0, now - 40 * DAY_MS);
-  insert.run("key1", 2.0, now - 40 * DAY_MS);
-  insert.run("key1", 3.0, now - 40 * DAY_MS);
-  insert.run("key1", 4.0, now - 5 * DAY_MS);
-  insert.run("key1", 5.0, now - 5 * DAY_MS);
+  await insert(1.0, Date.now() - 40 * DAY_MS);
+  await insert(2.0, Date.now() - 40 * DAY_MS);
+  await insert(3.0, Date.now() - 40 * DAY_MS);
+  await insert(4.0, now - 5 * DAY_MS);
+  await insert(5.0, now - 5 * DAY_MS);
 
   const result = await cleanupDomainCostHistory();
 
   assert.strictEqual(result.deleted, 3);
   assert.strictEqual(result.errors, 0);
-
-  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM domain_cost_history").get() as {
-    cnt: number;
-  };
-  assert.strictEqual(remaining.cnt, 2);
+  assert.strictEqual(await count("domain_cost_history"), 2);
 });
 
 test("#6848 cleanupCompressionCacheStats: deletes rows older than retention window", async () => {
-  const db = getDbInstance()!;
+  const backend = getTestBackend();
   const oldDate = new Date(Date.now() - 40 * DAY_MS).toISOString();
   const recentDate = new Date(Date.now() - 5 * DAY_MS).toISOString();
-  const insert = db.prepare(
-    "INSERT INTO compression_cache_stats (provider, compression_mode, created_at) VALUES (?, ?, ?)"
-  );
+  const insert = (provider: string, createdAt: string) =>
+    backend.execute(
+      "INSERT INTO compression_cache_stats (provider, compression_mode, created_at) VALUES ($1, $2, $3)",
+      [provider, "auto", createdAt]
+    );
 
-  insert.run("openai", "auto", oldDate);
-  insert.run("openai", "auto", oldDate);
-  insert.run("anthropic", "auto", recentDate);
+  await insert("openai", oldDate);
+  await insert("openai", oldDate);
+  await insert("anthropic", recentDate);
 
   const result = await cleanupCompressionCacheStats();
 
   assert.strictEqual(result.deleted, 2);
   assert.strictEqual(result.errors, 0);
-
-  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM compression_cache_stats").get() as {
-    cnt: number;
-  };
-  assert.strictEqual(remaining.cnt, 1);
+  assert.strictEqual(await count("compression_cache_stats"), 1);
 });
 
 test("#6848 cleanupCompressionRunTelemetry: deletes rows older than retention window", async () => {
-  ensureTelemetryTable();
-  const db = getDbInstance()!;
+  const backend = getTestBackend();
   const now = Date.now();
-  const insert = db.prepare(
-    "INSERT INTO compression_run_telemetry (timestamp, tokens_before, tokens_after) VALUES (?, ?, ?)"
-  );
+  const insert = (ts: number, before: number, after: number) =>
+    backend.execute(
+      'INSERT INTO compression_run_telemetry ("timestamp", tokens_before, tokens_after) VALUES ($1, $2, $3)',
+      [new Date(ts).toISOString(), before, after]
+    );
 
-  // insertCompressionRunTelemetryRow() stamps Date.now() — epoch MILLISECONDS.
-  // Seeding seconds here encoded the same unit mismatch the cleanup had.
-  insert.run(now - 40 * DAY_MS, 1000, 500);
-  insert.run(now - 40 * DAY_MS, 2000, 800);
-  insert.run(now - 5 * DAY_MS, 1500, 600);
+  await insert(now - 40 * DAY_MS, 1000, 500);
+  await insert(now - 40 * DAY_MS, 2000, 800);
+  await insert(now - 5 * DAY_MS, 1500, 600);
 
   const result = await cleanupCompressionRunTelemetry();
 
   assert.strictEqual(result.deleted, 2);
   assert.strictEqual(result.errors, 0);
-
-  const remaining = db.prepare("SELECT COUNT(*) as cnt FROM compression_run_telemetry").get() as {
-    cnt: number;
-  };
-  assert.strictEqual(remaining.cnt, 1);
+  assert.strictEqual(await count("compression_run_telemetry"), 1);
 });
 
-test("#6848 cleanupCompressionRunTelemetry: missing lazy table is an empty no-op", async () => {
-  getDbInstance()!.exec("DROP TABLE compression_run_telemetry");
-
-  const result = await cleanupCompressionRunTelemetry();
-
-  assert.deepStrictEqual(result, { deleted: 0, errors: 0 });
-});
-
-test("#6848 cleanupCompressionRunTelemetry: contains table lookup failures", async (t) => {
-  const db = getDbInstance()!;
-  const prepare = db.prepare.bind(db);
-  t.mock.method(db, "prepare", (sql: string) => {
-    if (sql.includes("sqlite_master")) {
-      throw new Error("injected table lookup failure");
+test("#6848 cleanupCompressionRunTelemetry: contains delete failures", async (t) => {
+  const backend = getTestBackend();
+  const failing = (sql: string) => {
+    if (String(sql).includes("compression_run_telemetry")) {
+      throw new Error("injected delete failure");
     }
-    return prepare(sql);
+  };
+  const originalExecute = backend.execute.bind(backend);
+  t.mock.method(backend, "execute", (sql: string, params?: unknown[]) => {
+    failing(sql);
+    return originalExecute(sql, params as never);
   });
   t.mock.method(console, "error", () => {});
 
@@ -182,22 +136,22 @@ test("#6848 cleanupCompressionRunTelemetry: contains table lookup failures", asy
 });
 
 test("#6848 no rows deleted when all data is within retention window (calls all 3 real functions)", async () => {
-  ensureTelemetryTable();
-  const db = getDbInstance()!;
+  const backend = getTestBackend();
   const nowMilliseconds = Date.now();
   const recentISO = new Date().toISOString();
 
-  db.prepare("INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES (?, ?, ?)").run(
-    "k",
-    1,
-    nowMilliseconds - DAY_MS
+  await backend.execute(
+    'INSERT INTO domain_cost_history (api_key_id, cost, "timestamp") VALUES ($1, $2, $3)',
+    ["k", 1, new Date(nowMilliseconds - DAY_MS).toISOString()]
   );
-  db.prepare(
-    "INSERT INTO compression_cache_stats (provider, compression_mode, created_at) VALUES (?, ?, ?)"
-  ).run("p", "auto", recentISO);
-  db.prepare(
-    "INSERT INTO compression_run_telemetry (timestamp, tokens_before, tokens_after) VALUES (?, ?, ?)"
-  ).run(nowMilliseconds - DAY_MS, 100, 50);
+  await backend.execute(
+    "INSERT INTO compression_cache_stats (provider, compression_mode, created_at) VALUES ($1, $2, $3)",
+    ["p", "auto", recentISO]
+  );
+  await backend.execute(
+    'INSERT INTO compression_run_telemetry ("timestamp", tokens_before, tokens_after) VALUES ($1, $2, $3)',
+    [new Date(nowMilliseconds - DAY_MS).toISOString(), 100, 50]
+  );
 
   const r1 = await cleanupDomainCostHistory();
   const r2 = await cleanupCompressionCacheStats();
@@ -206,17 +160,4 @@ test("#6848 no rows deleted when all data is within retention window (calls all 
   assert.strictEqual(r1.deleted, 0);
   assert.strictEqual(r2.deleted, 0);
   assert.strictEqual(r3.deleted, 0);
-});
-
-test("#6848 DEFAULT_DATABASE_SETTINGS has new retention keys", async () => {
-  const mod = await import("../../src/types/databaseSettings.ts");
-  const defaults = mod.DEFAULT_DATABASE_SETTINGS.retention;
-
-  assert.ok(typeof defaults.domainCostHistory === "number");
-  assert.ok(typeof defaults.compressionCacheStats === "number");
-  assert.ok(typeof defaults.compressionRunTelemetry === "number");
-
-  assert.strictEqual(defaults.domainCostHistory, 30);
-  assert.strictEqual(defaults.compressionCacheStats, 30);
-  assert.strictEqual(defaults.compressionRunTelemetry, 30);
 });

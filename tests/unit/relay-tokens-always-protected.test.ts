@@ -35,9 +35,9 @@ const tokenByIdRoute = await import("../../src/app/api/relay/tokens/[id]/route.t
 
 const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-relay", ["manage"]);
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -76,8 +76,8 @@ function withManageKey(url: string, method = "GET", body?: unknown): Request {
   return request;
 }
 
-function seedToken(name: string): string {
-  return relayDb.createRelayToken({ name }).id;
+async function seedToken(name: string): Promise<string> {
+  return (await relayDb.createRelayToken({ name })).id;
 }
 
 async function assertUnauthenticated(response: Response): Promise<void> {
@@ -94,7 +94,7 @@ test("with login disabled, anonymous callers cannot list or mint relay tokens", 
       await collection.POST(anonymous(COLLECTION_URL, "POST", { name: "anon-mint" }))
     );
     assert.equal(
-      relayDb.getRelayTokens().some((t) => t.name === "anon-mint"),
+      (await relayDb.getRelayTokens()).some((t) => t.name === "anon-mint"),
       false,
       "an anonymous mint must not persist a token"
     );
@@ -104,7 +104,7 @@ test("with login disabled, anonymous callers cannot list or mint relay tokens", 
 });
 
 test("with login disabled, anonymous callers cannot read, edit, toggle or revoke a relay token", async () => {
-  const id = seedToken("open-mode-target");
+  const id = await seedToken("open-mode-target");
   await updateSettings({ requireLogin: false });
   try {
     await assertUnauthenticated(await item.GET(anonymous(itemUrl(id)), ctx(id)));
@@ -115,7 +115,7 @@ test("with login disabled, anonymous callers cannot read, edit, toggle or revoke
       await item.PATCH(anonymous(itemUrl(id), "PATCH", { name: "renamed-anon" }), ctx(id))
     );
     await assertUnauthenticated(await item.DELETE(anonymous(itemUrl(id), "DELETE"), ctx(id)));
-    const after = relayDb.getRelayToken(id);
+    const after = await relayDb.getRelayToken(id);
     assert.ok(after, "an anonymous DELETE must not revoke the token");
     assert.equal(after.enabled, true, "an anonymous PATCH must not toggle the token");
     assert.equal(after.name, "open-mode-target", "an anonymous PATCH must not rename the token");
@@ -125,7 +125,7 @@ test("with login disabled, anonymous callers cannot read, edit, toggle or revoke
 });
 
 test("with login enabled, anonymous callers still get 401 on every handler", async () => {
-  const id = seedToken("closed-mode-target");
+  const id = await seedToken("closed-mode-target");
   await assertUnauthenticated(await collection.GET(anonymous(COLLECTION_URL)));
   await assertUnauthenticated(
     await collection.POST(anonymous(COLLECTION_URL, "POST", { name: "anon-mint-closed" }))
@@ -170,7 +170,7 @@ for (const requireLogin of [false, true]) {
         ctx(mintedBody.id)
       );
       assert.equal(patched.status, 200);
-      assert.equal(relayDb.getRelayToken(mintedBody.id)?.enabled, false);
+      assert.equal((await relayDb.getRelayToken(mintedBody.id))?.enabled, false);
 
       const fetched = await item.GET(
         await makeManagementSessionRequest(itemUrl(mintedBody.id)),
@@ -183,7 +183,7 @@ for (const requireLogin of [false, true]) {
         ctx(mintedBody.id)
       );
       assert.equal(deleted.status, 200);
-      assert.equal(relayDb.getRelayToken(mintedBody.id), null);
+      assert.equal(await relayDb.getRelayToken(mintedBody.id), null);
     } finally {
       await updateSettings({ requireLogin: true });
     }
@@ -192,7 +192,7 @@ for (const requireLogin of [false, true]) {
   test(`${mode}: a manage-scoped API key still lists, edits and revokes`, async () => {
     await updateSettings({ requireLogin });
     try {
-      const id = seedToken(`key-managed-${mode}`);
+      const id = await seedToken(`key-managed-${mode}`);
 
       assert.equal((await collection.GET(withManageKey(COLLECTION_URL))).status, 200);
       assert.equal(

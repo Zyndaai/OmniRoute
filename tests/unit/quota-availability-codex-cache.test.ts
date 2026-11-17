@@ -15,6 +15,7 @@ import {
   setProviderLimitsCacheBatch,
   deleteProviderLimitsCache,
 } from "../../src/lib/db/providerLimits.ts";
+import { createProviderConnection } from "../../src/lib/db/providers.ts";
 import {
   buildHealthAccount,
   type HealthQuota,
@@ -32,7 +33,15 @@ test("Codex upstream limit flag survives cache writes and server reconstruction"
     },
     rate_limit_reached_type: "weekly",
   };
-  const connection = { id: "synthetic-codex-limit-flag", provider: "codex", isActive: true };
+  // The limits cache row has a foreign key to provider_connections, so the fixture must be a stored connection.
+  const stored = await createProviderConnection({
+    provider: "codex",
+    authType: "oauth",
+    name: "Synthetic codex limit flag",
+    accessToken: "synthetic-access-token",
+    isActive: true,
+  });
+  const connection = { id: stored.id, provider: "codex", isActive: true };
   setCodexUsageFetchForTests(async () => Response.json(wire));
   try {
     const usage = await getCodexUsage("synthetic-token");
@@ -42,9 +51,9 @@ test("Codex upstream limit flag survives cache writes and server reconstruction"
     });
     const next = toProviderLimitsCacheEntry(usage, "manual", new Date(now).toISOString());
     const merged = mergeProviderLimitsCacheEntry("codex", next, { ...next, limitReached: false });
-    setProviderLimitsCache(connection.id, merged);
-    const cached = getProviderLimitsCache(connection.id)!;
-    const verdict = buildConnectionQuotaAvailability(connection, cached, policy);
+    await setProviderLimitsCache(connection.id, merged);
+    const cached = (await getProviderLimitsCache(connection.id))!;
+    const verdict = await buildConnectionQuotaAvailability(connection, cached, policy);
     const display = displayAccount(
       buildHealthAccount(
         connection,
@@ -72,18 +81,18 @@ test("Codex upstream limit flag survives cache writes and server reconstruction"
     assert.ok(reconstructed && "rateLimitReachedType" in reconstructed);
     assert.equal(reconstructed.rateLimitReachedType, "weekly");
     assert.notEqual(display.kind, "ok");
-    setProviderLimitsCacheBatch([{ connectionId: connection.id, entry: merged }]);
-    assert.deepEqual(getProviderLimitsCache(connection.id), cached);
+    await setProviderLimitsCacheBatch([{ connectionId: connection.id, entry: merged }]);
+    assert.deepEqual(await getProviderLimitsCache(connection.id), cached);
     wire.rate_limit.limit_reached = false;
     const cleared = mergeProviderLimitsCacheEntry(
       "codex",
       toProviderLimitsCacheEntry(await getCodexUsage("synthetic-token"), "scheduled"),
       cached
     );
-    setProviderLimitsCache(connection.id, cleared);
-    assert.equal(getProviderLimitsCache(connection.id)?.limitReached, false);
+    await setProviderLimitsCache(connection.id, cleared);
+    assert.equal((await getProviderLimitsCache(connection.id))?.limitReached, false);
     assert.equal(
-      buildConnectionQuotaAvailability(connection, cleared, policy).account.usable,
+      (await buildConnectionQuotaAvailability(connection, cleared, policy)).account.usable,
       true
     );
     assert.equal(
@@ -96,11 +105,11 @@ test("Codex upstream limit flag survives cache writes and server reconstruction"
     );
   } finally {
     setCodexUsageFetchForTests(null);
-    deleteProviderLimitsCache(connection.id);
+    await deleteProviderLimitsCache(connection.id);
   }
 });
 
-test("Codex legacy cache entries without a limit flag retain their existing eligibility", () => {
+test("Codex legacy cache entries without a limit flag retain their existing eligibility", async () => {
   const now = Date.now();
   const usage = toProviderLimitsCacheEntry(
     {
@@ -113,10 +122,12 @@ test("Codex legacy cache entries without a limit flag retain their existing elig
   const quota = convertCachedUsageToQuotaInfo("codex", usage, "gpt-5.4");
   assert.equal(quota?.limitReached, false);
   assert.equal(
-    buildConnectionQuotaAvailability(
-      { id: "synthetic-codex-legacy", provider: "codex" },
-      usage,
-      policy
+    (
+      await buildConnectionQuotaAvailability(
+        { id: "synthetic-codex-legacy", provider: "codex" },
+        usage,
+        policy
+      )
     ).account.usable,
     true
   );

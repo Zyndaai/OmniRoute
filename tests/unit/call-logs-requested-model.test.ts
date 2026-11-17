@@ -7,12 +7,14 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-calllogs-rm-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const providers = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -21,8 +23,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -94,13 +96,13 @@ test("requestedModel read-time transformation for old logs stored with UUID pref
     baseUrl: "https://api.my.ai/v1",
   });
 
-  const db = core.getDbInstance();
   const logId = `old-log-${Date.now()}`;
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, method, path, status, model, requested_model, provider,
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, "timestamp", method, path, status, model, requested_model, provider,
       account, duration, tokens_in, tokens_out, cache_source)
-     VALUES (?, ?, 'POST', '/v1/chat/completions', 200, 'gpt-4', ?, ?, '-', 100, 10, 20, 'upstream')`
-  ).run(logId, new Date().toISOString(), `${providerId}/gpt-4`, providerId);
+     VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'gpt-4', $3, $4, '-', 100, 10, 20, 'upstream')`,
+    [logId, new Date().toISOString(), `${providerId}/gpt-4`, providerId]
+  );
 
   const all = await callLogs.getCallLogs({ limit: 10 });
   assert.equal(all.length, 1);

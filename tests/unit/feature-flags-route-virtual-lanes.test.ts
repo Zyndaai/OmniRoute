@@ -70,17 +70,17 @@ async function getFlag(): Promise<FlagPayload> {
   return flag;
 }
 
-before(() => {
-  removeFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
+before(async () => {
+  await removeFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
 });
 
-after(() => {
+after(async () => {
   if (ORIGINAL_ENV_VALUE === undefined) {
     delete process.env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY];
   } else {
     process.env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY] = ORIGINAL_ENV_VALUE;
   }
-  removeFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
+  await removeFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
 });
 
 test("flag appears in GET with the requiresRestart boolean surface (default off)", async () => {
@@ -95,7 +95,7 @@ test("flag appears in GET with the requiresRestart boolean surface (default off)
 
 test('env wins over a DB override in GET (env "1" + DB false -> env)', async () => {
   process.env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY] = "1";
-  setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY, "false");
+  await setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY,"false");
   const flag = await getFlag();
   assert.equal(flag.effectiveValue, "true");
   assert.equal(flag.source, "env");
@@ -103,7 +103,7 @@ test('env wins over a DB override in GET (env "1" + DB false -> env)', async () 
 
 test('env explicit off still wins in GET (env "0" + DB true -> env off)', async () => {
   process.env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY] = "0";
-  setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY, "true");
+  await setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY,"true");
   const flag = await getFlag();
   assert.equal(flag.effectiveValue, "false");
   assert.equal(flag.source, "env");
@@ -111,7 +111,7 @@ test('env explicit off still wins in GET (env "0" + DB true -> env off)', async 
 
 test("DB override enables when env is absent (source db)", async () => {
   delete process.env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY];
-  setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY, "true");
+  await setFeatureFlagOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY,"true");
   const flag = await getFlag();
   assert.equal(flag.effectiveValue, "true");
   assert.equal(flag.source, "db");

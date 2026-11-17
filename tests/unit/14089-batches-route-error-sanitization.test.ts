@@ -29,47 +29,37 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "batches-14089-api-secret";
 
 const core = await import("../../src/lib/db/core.ts");
-const singleton = await import("../../src/lib/db/singleton.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createApiKey } = await import("../../src/lib/db/apiKeys.ts");
 const { createFile } = await import("../../src/lib/db/files.ts");
 const batchesRoute = await import("../../src/app/api/v1/batches/route.ts");
-type SqliteAdapter = import("../../src/lib/db/adapters/types.ts").SqliteAdapter;
 
 type ErrorBody = { error?: { message?: string; type?: string } };
 
-// The DB file path a real SQLITE_CANTOPEN would name, plus a stack tail. None of
-// it may reach the client (Hard Rule #12).
+// A server-side path a real storage failure could name. None of it may reach the
+// client (Hard Rule #12).
 const LEAKY_DB_PATH = path.join(TEST_DATA_DIR, "storage.sqlite");
-const LEAKY_MESSAGE = `SQLITE_CANTOPEN: unable to open database file ${LEAKY_DB_PATH}`;
+const LEAKY_MESSAGE = `storage failure: unable to open database file ${LEAKY_DB_PATH}`;
 
 /**
- * Wrap the live adapter so every read (auth lookup, file ownership, validation)
- * runs for real, but the batch INSERT throws the leaky SQLite error. The thrown
- * error carries the real DB path in both its message and a stack frame, exactly
- * like a genuine SQLITE_CANTOPEN from the driver.
+ * Make the batch INSERT fail with a given message through a BEFORE INSERT trigger, so every
+ * read (auth lookup, file ownership, validation) and the handler run for real. The returned
+ * function removes the trigger.
  */
-function installThrowingInsertAdapter(): SqliteAdapter {
-  const real = core.getDbInstance() as SqliteAdapter;
-  const wrapper: SqliteAdapter = {
-    ...real,
-    prepare(sql: string) {
-      const stmt = real.prepare(sql);
-      if (/\bINSERT\s+INTO\s+batches\b/i.test(sql)) {
-        return {
-          run() {
-            const err = new Error(LEAKY_MESSAGE);
-            err.stack = `Error: ${LEAKY_MESSAGE}\n    at createBatch (${LEAKY_DB_PATH}:42:11)`;
-            throw err;
-          },
-          get: stmt.get.bind(stmt),
-          all: stmt.all.bind(stmt),
-        };
-      }
-      return stmt;
-    },
+async function installFailingBatchInsert(message: string): Promise<() => Promise<void>> {
+  const backend = getTestBackend();
+  const literal = message.replace(/'/g, "''");
+  await backend.execute(
+    `CREATE OR REPLACE FUNCTION fail_batch_insert_14089() RETURNS trigger LANGUAGE plpgsql AS
+     $fn$ BEGIN RAISE EXCEPTION '%', '${literal}'; END $fn$`
+  );
+  await backend.execute(
+    `CREATE TRIGGER fail_batch_insert_14089 BEFORE INSERT ON batches
+     FOR EACH ROW EXECUTE FUNCTION fail_batch_insert_14089()`
+  );
+  return async () => {
+    await backend.execute("DROP TRIGGER IF EXISTS fail_batch_insert_14089 ON batches");
   };
-  singleton.setDbInstance(wrapper);
-  return real;
 }
 
 async function postBatch(apiKey: string, inputFileId: string) {
@@ -90,7 +80,7 @@ async function postBatch(apiKey: string, inputFileId: string) {
   return { res, body: (await res.json()) as ErrorBody };
 }
 
-function seedOwnedInputFile(apiKeyId: string, label: string) {
+async function seedOwnedInputFile(apiKeyId: string, label: string) {
   return createFile({
     bytes: 10,
     filename: `${label}.jsonl`,
@@ -101,8 +91,8 @@ function seedOwnedInputFile(apiKeyId: string, label: string) {
   });
 }
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -111,11 +101,11 @@ describe("#14089 POST /api/v1/batches error sanitization", () => {
     const key = await createApiKey("batches-14089", "machine-14089-a", []);
     // The input file is owned by this key so the ownership check passes and
     // execution reaches the batch INSERT (the catch block under test).
-    const ownedFile = seedOwnedInputFile(key.id, "batches-14089-owned");
-    const real = installThrowingInsertAdapter();
+    const ownedFile = await seedOwnedInputFile(key.id, "batches-14089-owned");
+    const restore = await installFailingBatchInsert(LEAKY_MESSAGE);
 
     const { res, body } = await postBatch(key.key, ownedFile.id);
-    singleton.setDbInstance(real);
+    await restore();
 
     assert.equal(res.status, 400);
     const message = body.error?.message ?? "";
@@ -128,30 +118,13 @@ describe("#14089 POST /api/v1/batches error sanitization", () => {
 
   it("keeps a clean, non-sensitive error message intact after sanitization", async () => {
     const key = await createApiKey("batches-14089-clean", "machine-14089-b", []);
-    const ownedFile = seedOwnedInputFile(key.id, "batches-14089-clean");
+    const ownedFile = await seedOwnedInputFile(key.id, "batches-14089-clean");
     // A genuinely non-sensitive failure message must survive sanitization rather
     // than being blanked — the fix must not turn every error into "[REDACTED]".
-    const real = core.getDbInstance() as SqliteAdapter;
-    const wrapper: SqliteAdapter = {
-      ...real,
-      prepare(sql: string) {
-        const stmt = real.prepare(sql);
-        if (/\bINSERT\s+INTO\s+batches\b/i.test(sql)) {
-          return {
-            run() {
-              throw new Error("Batch endpoint is not enabled on this instance");
-            },
-            get: stmt.get.bind(stmt),
-            all: stmt.all.bind(stmt),
-          };
-        }
-        return stmt;
-      },
-    };
-    singleton.setDbInstance(wrapper);
+    const restore = await installFailingBatchInsert("Batch endpoint is not enabled on this instance");
 
     const { res, body } = await postBatch(key.key, ownedFile.id);
-    singleton.setDbInstance(real);
+    await restore();
 
     assert.equal(res.status, 400);
     assert.match(body.error?.message ?? "", /not enabled on this instance/);

@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-store-settings-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -25,7 +26,6 @@ process.env.API_KEY_SECRET = "test-quota-store-settings-secret";
 delete process.env.QUOTA_STORE_REDIS_URL;
 process.env.QUOTA_STORE_DRIVER = "sqlite";
 
-const core = await import("../../src/lib/db/core.ts");
 const { updateSettings } = await import("@/lib/db/settings");
 const localDb = { updateSettings };
 const compliance = await import("../../src/lib/compliance/index.ts");
@@ -37,8 +37,8 @@ async function enableManagementAuth() {
   await localDb.updateSettings({ requireLogin: true, password: "" });
 }
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   delete process.env.QUOTA_STORE_REDIS_URL;
   delete process.env.INITIAL_PASSWORD;
@@ -46,13 +46,13 @@ function resetDb() {
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -155,7 +155,7 @@ test("PUT /api/settings/quota-store driver=redis with valid URL → 200 + audit 
   assert.equal(body.redisUrl, null);
 
   // Audit event
-  const logs = compliance.getAuditLog({ action: "quota.store.driver_changed", limit: 10 });
+  const logs = await compliance.getAuditLog({ action: "quota.store.driver_changed", limit: 10 });
   const events = Array.isArray(logs) ? logs : [];
   const evt = events.find(
     (e) =>

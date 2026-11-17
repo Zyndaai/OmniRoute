@@ -31,7 +31,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-vision-14
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET ?? "vision-14081-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
 const snapshotModule = await import("../../src/lib/modelCapabilityResolutionSnapshot.ts");
 const syncedCapabilitiesModule = await import("../../src/app/api/v1/models/syncedCapabilities.ts");
@@ -46,8 +46,8 @@ const VISION_MODEL_ID = "custom-node-14081-alpha-model";
 const TEXT_ONLY_MODEL_ID = "custom-node-14081-beta-model";
 const ABSENT_MODEL_ID = "custom-node-14081-gamma-model";
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -55,11 +55,11 @@ test.after(() => {
   }
 });
 
-function seedFixture() {
-  core.resetDbInstance();
+async function seedFixture() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
   // Exactly what detectVisionInput() persists for a custom OpenAI-compatible
   // node whose upstream /v1/models declared
@@ -80,13 +80,20 @@ function seedFixture() {
     },
   ];
 
-  db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-  ).run(`${PROVIDER_ID}:${CONNECTION_ID}`, JSON.stringify(rows));
+  // The synced row hangs off a provider connection (FK), so seed that parent first.
+  await backend.execute(
+    "INSERT INTO provider_connections (id, provider, auth_type, name, api_key, is_active, created_at, updated_at) " +
+      "VALUES ($1, $2, 'apikey', $3, 'sk-14081-test', true, now(), now())",
+    [CONNECTION_ID, PROVIDER_ID, "custom-node-14081"]
+  );
+  await backend.execute(
+    "INSERT INTO connection_model_sync (connection_id, provider, models) VALUES ($1, $2, $3::jsonb)",
+    [CONNECTION_ID, PROVIDER_ID, JSON.stringify(rows)]
+  );
 }
 
-test("issue #14081: /v1/models catalog and getResolvedModelCapabilities agree on vision:true for a synced custom-node row", () => {
-  seedFixture();
+test("issue #14081: /v1/models catalog and getResolvedModelCapabilities agree on vision:true for a synced custom-node row", async () => {
+  await seedFixture();
 
   // Sanity: this is the real helper /v1/models uses to build
   // `capabilities.vision` for a synced model row -- not in dispute, matches
@@ -103,7 +110,7 @@ test("issue #14081: /v1/models catalog and getResolvedModelCapabilities agree on
 
   // On-demand path (no snapshot): the Vision Bridge guardrail's normal
   // per-request call shape.
-  const resolvedOnDemand = modelCapabilities.getResolvedModelCapabilities({
+  const resolvedOnDemand = await modelCapabilities.getResolvedModelCapabilities({
     provider: PROVIDER_ID,
     model: VISION_MODEL_ID,
   });
@@ -116,8 +123,8 @@ test("issue #14081: /v1/models catalog and getResolvedModelCapabilities agree on
 
   // Snapshot-backed path: catalog/build-local generation must see the same
   // verdict as the on-demand path (#9199 parity).
-  const snapshot = snapshotModule.createModelCapabilityResolutionSnapshot();
-  const resolvedFromSnapshot = modelCapabilities.getResolvedModelCapabilities(
+  const snapshot = await snapshotModule.createModelCapabilityResolutionSnapshot();
+  const resolvedFromSnapshot = await modelCapabilities.getResolvedModelCapabilities(
     { provider: PROVIDER_ID, model: VISION_MODEL_ID },
     undefined,
     snapshot
@@ -130,14 +137,14 @@ test("issue #14081: /v1/models catalog and getResolvedModelCapabilities agree on
   );
 });
 
-test("issue #14081: positive-only contract -- a synced row without supportsVision:true is never upgraded", () => {
-  seedFixture();
+test("issue #14081: positive-only contract -- a synced row without supportsVision:true is never upgraded", async () => {
+  await seedFixture();
 
   // A synced row with supportsVision:false must not be flipped to true by
   // this new source (it may still resolve to false/null through other
   // branches of resolveVisionCapability -- this source itself must add
   // nothing here).
-  const resolvedTextOnly = modelCapabilities.getResolvedModelCapabilities({
+  const resolvedTextOnly = await modelCapabilities.getResolvedModelCapabilities({
     provider: PROVIDER_ID,
     model: TEXT_ONLY_MODEL_ID,
   });
@@ -150,7 +157,7 @@ test("issue #14081: positive-only contract -- a synced row without supportsVisio
 
   // No synced row at all for this model id -- must not spuriously resolve to
   // true from this source either.
-  const resolvedAbsent = modelCapabilities.getResolvedModelCapabilities({
+  const resolvedAbsent = await modelCapabilities.getResolvedModelCapabilities({
     provider: PROVIDER_ID,
     model: ABSENT_MODEL_ID,
   });

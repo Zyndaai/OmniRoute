@@ -22,13 +22,13 @@ class PassthroughExecutor extends BaseExecutor {
   }
 }
 
-test.after(() => {
-  core.resetDbInstance?.();
+test.after(async () => {
+  await core.resetDbInstance?.();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("auto-learn strips a param Anthropic reports as deprecated, retries, and persists it per model", async () => {
-  setParamFilterConfig("autolearn-test", { block: [], allow: [], autoLearn: true });
+  await setParamFilterConfig("autolearn-test", { block: [], allow: [], autoLearn: true });
   const executor = new PassthroughExecutor();
   const originalFetch = globalThis.fetch;
   const bodies: Record<string, unknown>[] = [];
@@ -68,7 +68,7 @@ test("auto-learn strips a param Anthropic reports as deprecated, retries, and pe
     assert.equal(bodies[1].max_tokens, 16, "other params survive the retry");
     assert.equal(result.response.status, 200);
 
-    const cfg = getParamFilterConfig("autolearn-test");
+    const cfg = await getParamFilterConfig("autolearn-test");
     assert.deepEqual(cfg?.models?.["claude-next-1"]?.block, ["temperature"]);
     assert.deepEqual(cfg?.block, [], "learned per model, not provider-wide");
   } finally {

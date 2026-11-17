@@ -18,6 +18,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), "omniroute-quota-pool-usage-provider-")
@@ -29,22 +30,23 @@ process.env.QUOTA_STORE_DRIVER = "sqlite";
 const core = await import("../../src/lib/db/core.ts");
 const { createPool, upsertAllocations } = await import("@/lib/db/quotaPools");
 const { createProviderConnection } = await import("@/lib/db/providers");
+const { createApiKey } = await import("@/lib/db/apiKeys");
 const { resetQuotaStoreSingleton } = await import("../../src/lib/quota/QuotaStore.ts");
 const usageRoute = await import("../../src/app/api/quota/pools/[id]/usage/route.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   resetQuotaStoreSingleton();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -58,8 +60,9 @@ test("GET /usage surfaces catalog dimensions for a catalog-only pool (provider r
     apiKey: "sk-kimi-test",
   })) as { id: string };
 
-  const pool = createPool({ name: "Kimi Shared Pool", connectionId: conn.id });
-  upsertAllocations(pool.id, [{ apiKeyId: "key-a", weight: 100, policy: "hard" }]);
+  const apiKey = await createApiKey("usage-pool-key-a", "synthetic-machine");
+  const pool = await createPool({ name: "Kimi Shared Pool", connectionId: conn.id });
+  await upsertAllocations(pool.id, [{ apiKeyId: apiKey.id, weight: 100, policy: "hard" }]);
 
   const req = await makeManagementSessionRequest(
     `http://localhost/api/quota/pools/${pool.id}/usage`
@@ -94,7 +97,7 @@ test("GET /usage still returns a 200 snapshot when the provider has no catalog p
     apiKey: "sk-unknown-test",
   })) as { id: string };
 
-  const pool = createPool({ name: "Unknown Pool", connectionId: conn.id });
+  const pool = await createPool({ name: "Unknown Pool", connectionId: conn.id });
 
   const req = await makeManagementSessionRequest(
     `http://localhost/api/quota/pools/${pool.id}/usage`

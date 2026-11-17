@@ -1,38 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-provider-limits-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const providerLimitsDb = await import("../../src/lib/db/providerLimits.ts");
 
-async function resetStorage() {
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+// connection_limits_cache rows are only written while their connection exists (foreign key),
+// so every connection id used below is seeded first.
+async function seedConnections(ids: string[]) {
+  const backend = getTestBackend();
+  for (const id of ids) {
+    await backend.execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, 'test-provider') ON CONFLICT (id) DO NOTHING",
+      [id]
+    );
+  }
 }
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test("providerLimits cache returns empty defaults before any writes", async () => {
+  assert.equal(await providerLimitsDb.getProviderLimitsCache("conn-1"), null);
+  assert.deepEqual(await providerLimitsDb.getAllProviderLimitsCache(), {});
+  assert.equal(await providerLimitsDb.setProviderLimitsCacheBatch([]), 0);
 });
 
-test("providerLimits cache returns empty defaults before any writes", () => {
-  assert.equal(providerLimitsDb.getProviderLimitsCache("conn-1"), null);
-  assert.deepEqual(providerLimitsDb.getAllProviderLimitsCache(), {});
-  assert.equal(providerLimitsDb.setProviderLimitsCacheBatch([]), 0);
-});
-
-test("providerLimits cache preserves Codex banked reset credits", () => {
-  const entry = providerLimitsDb.setProviderLimitsCache("codex-conn", {
+test("providerLimits cache preserves Codex banked reset credits", async () => {
+  await seedConnections(["codex-conn"]);
+  const entry = await providerLimitsDb.setProviderLimitsCache("codex-conn", {
     quotas: { session: { remainingPercentage: 90 } },
     plan: null,
     message: null,
@@ -42,18 +39,22 @@ test("providerLimits cache preserves Codex banked reset credits", () => {
   });
 
   assert.equal(entry.bankedResetCredits, 3);
-  assert.equal(providerLimitsDb.getProviderLimitsCache("codex-conn")?.bankedResetCredits, 3);
-  assert.equal(providerLimitsDb.getAllProviderLimitsCache()["codex-conn"]?.bankedResetCredits, 3);
+  assert.equal((await providerLimitsDb.getProviderLimitsCache("codex-conn"))?.bankedResetCredits, 3);
+  assert.equal(
+    (await providerLimitsDb.getAllProviderLimitsCache())["codex-conn"]?.bankedResetCredits,
+    3
+  );
 });
 
-test("providerLimits cache persists Codex paid credits independently of reset credits", () => {
+test("providerLimits cache persists Codex paid credits independently of reset credits", async () => {
+  await seedConnections(["paid-codex"]);
   const paidCredits = {
     hasCredits: true,
     unlimited: false,
     overageLimitReached: false,
     balance: null,
   };
-  providerLimitsDb.setProviderLimitsCache("paid-codex", {
+  await providerLimitsDb.setProviderLimitsCache("paid-codex", {
     quotas: { session: { remainingPercentage: 0 } },
     plan: "business",
     message: null,
@@ -61,14 +62,15 @@ test("providerLimits cache persists Codex paid credits independently of reset cr
     paidCredits,
     bankedResetCredits: 2,
   });
-  const cached = providerLimitsDb.getProviderLimitsCache("paid-codex");
+  const cached = await providerLimitsDb.getProviderLimitsCache("paid-codex");
   assert.deepEqual(cached?.paidCredits, paidCredits);
   assert.equal(cached?.bankedResetCredits, 2);
   assert.deepEqual(cached?.quotas, { session: { remainingPercentage: 0 } });
 });
 
-test("providerLimits cache supports single writes, batch writes and deletions", () => {
-  const first = providerLimitsDb.setProviderLimitsCache("conn-1", {
+test("providerLimits cache supports single writes, batch writes and deletions", async () => {
+  await seedConnections(["conn-1", "conn-2", "conn-3"]);
+  const first = await providerLimitsDb.setProviderLimitsCache("conn-1", {
     quotas: { remaining: 12 },
     plan: "pro",
     message: "ok",
@@ -77,9 +79,9 @@ test("providerLimits cache supports single writes, batch writes and deletions", 
   });
 
   assert.equal(first.plan, "pro");
-  assert.deepEqual(providerLimitsDb.getProviderLimitsCache("conn-1"), first);
+  assert.deepEqual(await providerLimitsDb.getProviderLimitsCache("conn-1"), first);
 
-  const inserted = providerLimitsDb.setProviderLimitsCacheBatch([
+  const inserted = await providerLimitsDb.setProviderLimitsCacheBatch([
     {
       connectionId: "conn-2",
       entry: {
@@ -101,26 +103,27 @@ test("providerLimits cache supports single writes, batch writes and deletions", 
   ]);
 
   assert.equal(inserted, 2);
-  assert.equal(Object.keys(providerLimitsDb.getAllProviderLimitsCache()).length, 3);
+  assert.equal(Object.keys(await providerLimitsDb.getAllProviderLimitsCache()).length, 3);
 
-  providerLimitsDb.deleteProviderLimitsCache("conn-2");
-  assert.equal(providerLimitsDb.getProviderLimitsCache("conn-2"), null);
+  await providerLimitsDb.deleteProviderLimitsCache("conn-2");
+  assert.equal(await providerLimitsDb.getProviderLimitsCache("conn-2"), null);
 });
 
-test("providerLimits cache ignores malformed stored values", () => {
-  const db = coreDb.getDbInstance();
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "providerLimitsCache",
-    "broken-json",
-    "{not-json"
+test("providerLimits cache ignores malformed stored values", async () => {
+  await seedConnections(["broken-json", "missing-fetched-at"]);
+  const backend = getTestBackend();
+  // The column is jsonb, so text that is not valid JSON cannot be stored at all; the
+  // malformed cases that can exist are a non-object JSON value and an object without fetchedAt.
+  await backend.execute(
+    "INSERT INTO connection_limits_cache (connection_id, data) VALUES ($1, $2::jsonb)",
+    ["broken-json", JSON.stringify("not-an-object")]
   );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "providerLimitsCache",
-    "missing-fetched-at",
-    JSON.stringify({ quotas: { remaining: 5 } })
+  await backend.execute(
+    "INSERT INTO connection_limits_cache (connection_id, data) VALUES ($1, $2::jsonb)",
+    ["missing-fetched-at", JSON.stringify({ quotas: { remaining: 5 } })]
   );
 
-  assert.equal(providerLimitsDb.getProviderLimitsCache("broken-json"), null);
-  assert.equal(providerLimitsDb.getProviderLimitsCache("missing-fetched-at"), null);
-  assert.deepEqual(providerLimitsDb.getAllProviderLimitsCache(), {});
+  assert.equal(await providerLimitsDb.getProviderLimitsCache("broken-json"), null);
+  assert.equal(await providerLimitsDb.getProviderLimitsCache("missing-fetched-at"), null);
+  assert.deepEqual(await providerLimitsDb.getAllProviderLimitsCache(), {});
 });

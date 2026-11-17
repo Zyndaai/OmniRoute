@@ -17,6 +17,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-calllogs-
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.CALL_LOG_RETENTION_DAYS = "3650";
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogFilterOptions.ts");
 const { mergeLogFilterOptions } = await import("../../src/shared/utils/logFilterOptions.ts");
@@ -32,43 +34,51 @@ type SeedRow = {
   api_key_name?: string | null;
 };
 
-function insertCallLog(row: SeedRow) {
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (
-        id, timestamp, method, path, status, model, requested_model, provider, account,
+async function insertCallLog(row: SeedRow) {
+  const r = {
+    model: null,
+    requested_model: null,
+    provider: null,
+    account: null,
+    connection_id: null,
+    api_key_id: null,
+    api_key_name: null,
+    ...row,
+  };
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (
+        id, "timestamp", method, path, status, model, requested_model, provider, account,
         connection_id, api_key_id, api_key_name, detail_state
       ) VALUES (
-        @id, '2026-01-01T00:00:00.000Z', 'POST', '/v1/chat/completions', 200, @model,
-        @requested_model, @provider, @account, @connection_id, @api_key_id, @api_key_name, 'none'
-      )`
-    )
-    .run({
-      model: null,
-      requested_model: null,
-      provider: null,
-      account: null,
-      connection_id: null,
-      api_key_id: null,
-      api_key_name: null,
-      ...row,
-    });
+        $1, '2026-01-01T00:00:00.000Z', 'POST', '/v1/chat/completions', 200, $2,
+        $3, $4, $5, $6, $7, $8, 'none'
+      )`,
+    [
+      r.id,
+      r.model,
+      r.requested_model,
+      r.provider,
+      r.account,
+      r.connection_id,
+      r.api_key_id,
+      r.api_key_name,
+    ]
+  );
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("getCallLogFilterOptions returns distinct values across the whole table", async () => {
-  insertCallLog({
+  await insertCallLog({
     id: "a",
     model: "gpt-5",
     requested_model: "codex/gpt-5",
@@ -77,7 +87,7 @@ test("getCallLogFilterOptions returns distinct values across the whole table", a
     api_key_id: "key-a",
     api_key_name: "Team A",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "b",
     model: "gpt-5",
     provider: "codex",
@@ -85,7 +95,7 @@ test("getCallLogFilterOptions returns distinct values across the whole table", a
     api_key_id: "key-a",
     api_key_name: "Team A",
   });
-  insertCallLog({
+  await insertCallLog({
     id: "c",
     model: "claude-opus",
     provider: "cursor",
@@ -94,7 +104,7 @@ test("getCallLogFilterOptions returns distinct values across the whole table", a
     api_key_name: "Team B",
   });
   // Unattributed / placeholder values must not become options.
-  insertCallLog({ id: "d", model: "", provider: "-", account: "-" });
+  await insertCallLog({ id: "d", model: "", provider: "-", account: "-" });
 
   const options = await callLogs.getCallLogFilterOptions();
 
@@ -108,16 +118,13 @@ test("getCallLogFilterOptions returns distinct values across the whole table", a
 });
 
 test("getCallLogFilterOptions resolves the account label like the list rows do", async () => {
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO provider_connections
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections
          (id, provider, auth_type, name, email, is_active, created_at, updated_at)
-       VALUES ('conn-1', 'codex', 'oauth', 'Codex Main', 'main@example.com', 1,
+       VALUES ('conn-1', 'codex', 'oauth', 'Codex Main', 'main@example.com', true,
          '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
-    )
-    .run();
-  insertCallLog({ id: "a", provider: "codex", account: "raw-id", connection_id: "conn-1" });
+  );
+  await insertCallLog({ id: "a", provider: "codex", account: "raw-id", connection_id: "conn-1" });
 
   const options = await callLogs.getCallLogFilterOptions();
   assert.deepEqual(options.accounts, ["Codex Main"]);

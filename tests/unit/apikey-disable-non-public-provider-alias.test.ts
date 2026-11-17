@@ -19,9 +19,19 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const apiKeyGroups = await import("../../src/lib/db/apiKeyGroups.ts");
 const { createProviderNode } = await import("../../src/lib/db/providers/nodes.ts");
 const { getProviderAlias } = await import("../../src/shared/constants/providers.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+
+// A synced catalog row has a foreign key to its provider connection.
+async function ensureConnection(provider: string, connectionId: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider, auth_type, is_active) VALUES ($1, $2, 'apikey', true) ON CONFLICT (id) DO NOTHING",
+    [connectionId, provider]
+  );
+}
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -52,11 +62,11 @@ test.beforeEach(async () => {
     "audio-speech",
     ["audio-speech"]
   );
-  modelsDb.mergeModelCompatOverride("soniox", "tts-rt-v1", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("soniox", "tts-rt-v1", { isHidden: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -92,7 +102,7 @@ test("the alias form still honours deny rules written against the canonical id",
 });
 
 test("a hidden flag set under the alias still hides the model", async () => {
-  modelsDb.mergeModelCompatOverride("sx", "tts-rt-v2", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("sx", "tts-rt-v2", { isHidden: true });
   const key = await createRestrictedKey();
 
   assert.equal(await apiKeysDb.isModelAllowedForKey(key, "sx/tts-rt-v2"), false);
@@ -114,6 +124,7 @@ test("a provider node that claims the alias prefix is not judged by the built-in
 });
 
 test("a synced effort variant addressed by alias resolves to its base model", async () => {
+  await ensureConnection("grok-cli", "conn-grok-1");
   await modelsDb.replaceSyncedAvailableModelsForConnection("grok-cli", "conn-grok-1", [
     { id: "grok-4.6", name: "Grok 4.6", supportedThinkingEfforts: ["low"] },
   ]);
@@ -131,10 +142,10 @@ test("a synced effort variant addressed by alias resolves to its base model", as
 
 test("a group deny rule on the canonical provider also stops the alias form", async () => {
   const created = await apiKeysDb.createApiKey("Alias Group Key", "machine-alias-04");
-  const group = apiKeyGroups.createKeyGroup("Soniox deny", "deny soniox");
-  apiKeyGroups.addKeyToGroup(created.id, group.id);
-  apiKeyGroups.addGroupPermission(group.id, "*", "deny", "soniox");
-  apiKeyGroups.addGroupPermission(group.id, "*", "allow");
+  const group = await apiKeyGroups.createKeyGroup("Soniox deny", "deny soniox");
+  await apiKeyGroups.addKeyToGroup(created.id, group.id);
+  await apiKeyGroups.addGroupPermission(group.id, "*", "deny", "soniox");
+  await apiKeyGroups.addGroupPermission(group.id, "*", "allow");
   apiKeysDb.clearApiKeyCaches();
 
   assert.equal(await apiKeysDb.isModelAllowedForKey(created.key, "soniox/tts-rt-v2"), false);
@@ -143,9 +154,9 @@ test("a group deny rule on the canonical provider also stops the alias form", as
 
 test("a group allow rule written against the alias keeps working", async () => {
   const created = await apiKeysDb.createApiKey("Alias Allow Key", "machine-alias-05");
-  const group = apiKeyGroups.createKeyGroup("Soniox alias allow", "allow sx");
-  apiKeyGroups.addKeyToGroup(created.id, group.id);
-  apiKeyGroups.addGroupPermission(group.id, "*", "allow", "sx");
+  const group = await apiKeyGroups.createKeyGroup("Soniox alias allow", "allow sx");
+  await apiKeyGroups.addKeyToGroup(created.id, group.id);
+  await apiKeyGroups.addGroupPermission(group.id, "*", "allow", "sx");
   apiKeysDb.clearApiKeyCaches();
 
   assert.equal(await apiKeysDb.isModelAllowedForKey(created.key, "sx/tts-rt-v2"), true);

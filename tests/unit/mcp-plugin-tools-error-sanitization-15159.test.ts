@@ -81,8 +81,8 @@ function cleanup() {
   sourceDirs.length = 0;
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   cleanup();
   for (const dir of [TEST_DATA_DIR, TEST_PLUGINS_DIR]) {
     try {
@@ -100,7 +100,7 @@ test("M-05: plugin_activate does not leak the plugin's absolute path to the clie
 
   // Remove the installed directory so activate() fails with a message that embeds
   // the absolute pluginDir — the realistic shape of this leak.
-  const row = dbPlugins.getPluginByName(name);
+  const row = await dbPlugins.getPluginByName(name);
   assert.ok(row?.pluginDir, "expected an installed plugin row with a pluginDir");
   const pluginDir = row.pluginDir;
   fs.rmSync(pluginDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

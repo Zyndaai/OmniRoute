@@ -23,15 +23,19 @@ async function withEnv<T>(value: string | undefined, fn: () => Promise<T> | T): 
 async function withDbOverride<T>(value: string | undefined, fn: () => Promise<T> | T): Promise<T> {
   const { setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("../../src/lib/db/featureFlags.ts");
+  const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
   if (value === undefined) {
-    removeFeatureFlagOverride(KEY);
+    await removeFeatureFlagOverride(KEY);
   } else {
-    setFeatureFlagOverride(KEY, value);
+    await setFeatureFlagOverride(KEY, value);
   }
+  // Sync readers see the in-process snapshot; the dashboard route refreshes it after a write.
+  await refreshFeatureFlagSnapshot();
   try {
     return await fn();
   } finally {
-    removeFeatureFlagOverride(KEY);
+    await removeFeatureFlagOverride(KEY);
+    await refreshFeatureFlagSnapshot();
   }
 }
 
@@ -117,7 +121,9 @@ test("a DB override = 'false' for local provider URLs still restores public-only
   delete process.env[LOCAL_KEY];
   const { setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("../../src/lib/db/featureFlags.ts");
-  setFeatureFlagOverride(LOCAL_KEY, "false");
+  await setFeatureFlagOverride(LOCAL_KEY, "false");
+  const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
+  await refreshFeatureFlagSnapshot();
   try {
     await withEnv(undefined, async () => {
       await withDbOverride(undefined, async () => {
@@ -127,7 +133,7 @@ test("a DB override = 'false' for local provider URLs still restores public-only
       });
     });
   } finally {
-    removeFeatureFlagOverride(LOCAL_KEY);
+    await removeFeatureFlagOverride(LOCAL_KEY);
     if (prev === undefined) delete process.env[LOCAL_KEY];
     else process.env[LOCAL_KEY] = prev;
   }

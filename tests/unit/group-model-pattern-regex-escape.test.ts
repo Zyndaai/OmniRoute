@@ -33,11 +33,11 @@ async function keyWithRule(pattern: string, accessType: "allow" | "deny"): Promi
   const label = `pattern-escape-${counter++}`;
   const key = await apiKeys.createApiKey(label, `machine-${label}`);
   assert.ok(key, "test key must be created");
-  const group = apiKeyGroups.createKeyGroup(label);
-  apiKeyGroups.addKeyToGroup(key.id, group.id);
-  apiKeyGroups.addGroupPermission(group.id, pattern, accessType);
+  const group = await apiKeyGroups.createKeyGroup(label);
+  await apiKeyGroups.addKeyToGroup(key.id, group.id);
+  await apiKeyGroups.addGroupPermission(group.id, pattern, accessType);
   if (accessType === "deny") {
-    apiKeyGroups.addGroupPermission(group.id, "*", "allow");
+    await apiKeyGroups.addGroupPermission(group.id, "*", "allow");
   }
   return key.id;
 }
@@ -46,12 +46,12 @@ test("a deny pattern's '.' is a literal, not any-character", async () => {
   const keyId = await keyWithRule("gpt-4.1*", "deny");
 
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "gpt-4.1-mini").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "gpt-4.1-mini")).allowed,
     false,
     "the model the operator meant to deny must still be denied"
   );
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "gpt-4o1-preview").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "gpt-4o1-preview")).allowed,
     true,
     "'.' must not match 'o' — an unrelated model was being denied"
   );
@@ -63,12 +63,12 @@ test("an allow pattern's '.' does not widen the grant", async () => {
   const keyId = await keyWithRule("claude-3.5*", "allow");
 
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "claude-3.5-sonnet").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "claude-3.5-sonnet")).allowed,
     true,
     "the model the operator meant to allow must still be allowed"
   );
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "claude-3x5-internal").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "claude-3x5-internal")).allowed,
     false,
     "'.' must not match 'x' — an unnamed model was being granted"
   );
@@ -78,7 +78,7 @@ test("patterns that are not valid regexes no longer throw", async () => {
   // Each of these threw SyntaxError out of the request path before the fix.
   for (const pattern of ["gpt-4(*", "claude-3[*", "*+*", "a{2*", "gpt-4\\*"]) {
     const keyId = await keyWithRule(pattern, "deny");
-    assert.doesNotThrow(
+    await assert.doesNotReject(
       () => apiKeyGroups.checkKeyModelAccess(keyId, "gpt-4o"),
       `pattern ${JSON.stringify(pattern)} must not throw`
     );
@@ -91,10 +91,10 @@ test("the throw also escaped through isModelAllowedForKey", async () => {
   const label = `pattern-escape-e2e-${counter++}`;
   const key = await apiKeys.createApiKey(label, `machine-${label}`);
   assert.ok(key);
-  const group = apiKeyGroups.createKeyGroup(label);
-  apiKeyGroups.addKeyToGroup(key.id, group.id);
-  apiKeyGroups.addGroupPermission(group.id, "gpt-4(*", "deny");
-  apiKeyGroups.addGroupPermission(group.id, "*", "allow");
+  const group = await apiKeyGroups.createKeyGroup(label);
+  await apiKeyGroups.addKeyToGroup(key.id, group.id);
+  await apiKeyGroups.addGroupPermission(group.id, "gpt-4(*", "deny");
+  await apiKeyGroups.addGroupPermission(group.id, "*", "allow");
 
   const allowed = await apiKeys.isModelAllowedForKey(key.key, "openai/gpt-4o");
   assert.equal(
@@ -110,12 +110,12 @@ test("literal metacharacters in a pattern match themselves", async () => {
   const keyId = await keyWithRule("qwen2.5+vl*", "deny");
 
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "qwen2.5+vl-7b").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "qwen2.5+vl-7b")).allowed,
     false,
     "the literal pattern must match the literal model id"
   );
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "qwen2X5vvl-7b").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "qwen2X5vvl-7b")).allowed,
     true,
     "and must not match the regex reading of itself"
   );
@@ -126,13 +126,13 @@ test("plain wildcard semantics are unchanged", async () => {
 
   for (const model of ["gpt-4", "gpt-4o", "gpt-4-turbo"]) {
     assert.equal(
-      apiKeyGroups.checkKeyModelAccess(keyId, model).allowed,
+      (await apiKeyGroups.checkKeyModelAccess(keyId, model)).allowed,
       false,
       `${model} must still be denied by gpt-4*`
     );
   }
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(keyId, "gpt-3.5-turbo").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(keyId, "gpt-3.5-turbo")).allowed,
     true,
     "an unrelated model must still be allowed"
   );
@@ -140,16 +140,19 @@ test("plain wildcard semantics are unchanged", async () => {
 
 test("'*' and exact matches keep their fast paths", async () => {
   const denyAll = await keyWithRule("*", "deny");
-  assert.equal(apiKeyGroups.checkKeyModelAccess(denyAll, "anything/at-all").allowed, false);
+  assert.equal(
+    (await apiKeyGroups.checkKeyModelAccess(denyAll, "anything/at-all")).allowed,
+    false
+  );
 
   const exact = await keyWithRule("gpt-4.1-mini", "deny");
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(exact, "gpt-4.1-mini").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(exact, "gpt-4.1-mini")).allowed,
     false,
     "an exact pattern still matches exactly"
   );
   assert.equal(
-    apiKeyGroups.checkKeyModelAccess(exact, "gpt-4X1-mini").allowed,
+    (await apiKeyGroups.checkKeyModelAccess(exact, "gpt-4X1-mini")).allowed,
     true,
     "an exact pattern was never a regex and must stay literal"
   );

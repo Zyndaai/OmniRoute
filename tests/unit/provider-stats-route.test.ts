@@ -3,7 +3,7 @@
  * response cache and reports the start of its stats window.
  *
  * Gates:
- *   - "cached": the second call is served from the cache with no SQL prepared
+ *   - "cached": the second call is served from the cache with no SQL issued
  *   - "bounded": the payload carries `windowSince` (ISO start of the window)
  *   - "window": `?days=` changes the lookback, bounded by that cap
  *   - "orphaned provider": excluded from the response (EXISTS guard)
@@ -20,13 +20,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_ANALYTICS_CACHE_TTL_MS = "60000";
 process.env.OMNIROUTE_ANALYTICS_CACHE_MIN_COMPUTE_MS = "0";
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const cache = await import("../../src/lib/usage/analyticsResponseCache.ts");
 const stats = await import("../../src/lib/db/providerStats.ts");
 const { NOAUTH_PROVIDERS, AI_PROVIDERS } = await import("../../src/shared/constants/providers.ts");
 const { GET } = await import("../../src/app/api/provider-stats/route.ts");
 
-let prepareCalls = 0;
+let queryCalls = 0;
 
 interface ProviderStatsBody {
   providers: Array<Record<string, unknown>>;
@@ -37,39 +38,48 @@ const keylessProvider = Object.keys(NOAUTH_PROVIDERS)[0];
 const keylessDisplayName =
   (AI_PROVIDERS as Record<string, { name?: string }>)[keylessProvider]?.name ?? keylessProvider;
 
-function seed() {
-  const db = core.getDbInstance();
+async function seed() {
+  const b = getTestBackend();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-  ).run("route-conn", "openai", now, now);
-  db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, model, status, duration, tokens_in, tokens_out)
-     VALUES (?, ?, 'openai', 'openai/gpt-4.1', 200, 100, 10, 20),
-             (?, ?, 'openai', 'openai/gpt-4.1', 500, 300, 5, 0),
-             (?, ?, 'ghost-provider', 'ghost/model', 200, 50, 1, 2),
-             (?, ?, ?, 'free-model', 200, 40, 1, 1)`
-  ).run("rlog-1", now, "rlog-2", now, "rlog-3", now, "rlog-4", now, keylessProvider);
+  await b.execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, $3, $4)`,
+    ["route-conn", "openai", now, now]
+  );
+  await b.execute(
+    `INSERT INTO call_logs (id, "timestamp", provider, model, status, duration, tokens_in, tokens_out)
+     VALUES ($1, $2, 'openai', 'openai/gpt-4.1', 200, 100, 10, 20),
+            ($3, $4, 'openai', 'openai/gpt-4.1', 500, 300, 5, 0),
+            ($5, $6, 'ghost-provider', 'ghost/model', 200, 50, 1, 2),
+            ($7, $8, $9, 'free-model', 200, 40, 1, 1)`,
+    ["rlog-1", now, "rlog-2", now, "rlog-3", now, "rlog-4", now, keylessProvider]
+  );
 }
 
-test.before(() => {
-  core.resetDbInstance();
-  const db = core.getDbInstance();
-  const realPrepare = db.prepare.bind(db);
-  db.prepare = (...args: unknown[]) => {
-    prepareCalls += 1;
-    return realPrepare(...(args as []));
-  };
-  seed();
+/** Counts every SQL statement the route issues, so a cache hit can be proven to issue none. */
+function instrumentQueries() {
+  const b = getTestBackend() as unknown as Record<string, (...args: unknown[]) => unknown>;
+  for (const method of ["query", "queryOne", "execute"]) {
+    const real = b[method].bind(b);
+    b[method] = (...args: unknown[]) => {
+      queryCalls += 1;
+      return real(...args);
+    };
+  }
+}
+
+test.before(async () => {
+  await resetTestDb();
+  await seed();
+  instrumentQueries();
 });
 
 test.beforeEach(() => {
   cache.clearAnalyticsResponseCache();
-  prepareCalls = 0;
+  queryCalls = 0;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   delete process.env.OMNIROUTE_ANALYTICS_CACHE_TTL_MS;
   delete process.env.OMNIROUTE_ANALYTICS_CACHE_MIN_COMPUTE_MS;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -111,15 +121,15 @@ test("first call computes and bounds the window, orphaned provider excluded", as
   );
 });
 
-test("second call is served from the cache with no SQL prepared", async () => {
+test("second call is served from the cache with no SQL issued", async () => {
   await getBody();
-  assert.equal(prepareCalls > 0, true, "first call prepared statements");
-  const firstCalls = prepareCalls;
+  assert.equal(queryCalls > 0, true, "first call issued queries");
+  const firstCalls = queryCalls;
 
   const { res, body } = await getBody();
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-analytics-cache"), "hit");
-  assert.equal(prepareCalls, firstCalls, "no SQL prepared on the cached call");
+  assert.equal(queryCalls, firstCalls, "no SQL issued on the cached call");
   assert.ok(typeof body.windowSince === "string", "cached payload keeps windowSince");
   assert.equal(body.providers.length, 2);
 });

@@ -270,15 +270,15 @@ describe("Memory Mitigations — Comprehensive Edge Cases & Failure Modes", () =
   // 4. thinkingBudget Adaptive Multiplier via real entry point
   // =========================================================================
   describe("thinkingBudget: adaptive multiplier scaling", () => {
-    function adaptiveBudgetFor(body: unknown, effort: string): number {
-      const result = applyThinkingBudget(body, {
+    async function adaptiveBudgetFor(body: unknown, effort: string): Promise<number> {
+      const result = (await applyThinkingBudget(body, {
         mode: ThinkingMode.ADAPTIVE,
         effortLevel: effort,
-      }) as { thinking?: { budget_tokens: number } };
+      })) as { thinking?: { budget_tokens: number } };
       return result.thinking?.budget_tokens ?? 0;
     }
 
-    it("scales multiplier for long last user message (>2000 chars) on string content", () => {
+    it("scales multiplier for long last user message (>2000 chars) on string content", async () => {
       const shortBody = {
         model: "claude-opus-4-8",
         messages: [{ role: "user", content: "x".repeat(500) }],
@@ -288,8 +288,8 @@ describe("Memory Mitigations — Comprehensive Edge Cases & Failure Modes", () =
         messages: [{ role: "user", content: "x".repeat(2500) }],
       };
 
-      const shortBudget = adaptiveBudgetFor(shortBody, "medium");
-      const longBudget = adaptiveBudgetFor(longBody, "medium");
+      const shortBudget = await adaptiveBudgetFor(shortBody, "medium");
+      const longBudget = await adaptiveBudgetFor(longBody, "medium");
 
       // Base 10240. Long last-msg adds +0.3 => ceil(10240*1.3) = 13312
       // (short stays at 1.0 => 10240, unless model caps).
@@ -297,7 +297,7 @@ describe("Memory Mitigations — Comprehensive Edge Cases & Failure Modes", () =
       assert.ok(longBudget > shortBudget, `long budget ${longBudget} > short ${shortBudget}`);
     });
 
-    it("scales multiplier for >2000-char array content via jsonLength", () => {
+    it("scales multiplier for >2000-char array content via jsonLength", async () => {
       const longArrayBody = {
         model: "claude-opus-4-8",
         messages: [
@@ -310,21 +310,21 @@ describe("Memory Mitigations — Comprehensive Edge Cases & Failure Modes", () =
           },
         ],
       };
-      const budget = adaptiveBudgetFor(longArrayBody, "medium");
+      const budget = await adaptiveBudgetFor(longArrayBody, "medium");
       // array content length ~3000 > 2000 => multiplier 1.3
       assert.equal(budget, 10240 * 1.3);
     });
 
-    it("handles missing, empty, or null user messages without throwing", () => {
+    it("handles missing, empty, or null user messages without throwing", async () => {
       const base: Record<string, unknown> = { model: "claude-opus-4-8", messages: [] };
-      assert.doesNotThrow(() => adaptiveBudgetFor(base, "low"));
-      assert.doesNotThrow(() =>
+      await assert.doesNotReject(() => adaptiveBudgetFor(base, "low"));
+      await assert.doesNotReject(() =>
         adaptiveBudgetFor({ ...base, messages: [{ role: "system", content: "hi" }] }, "low")
       );
-      assert.doesNotThrow(() =>
+      await assert.doesNotReject(() =>
         adaptiveBudgetFor({ ...base, messages: [{ role: "user", content: "" }] }, "low")
       );
-      assert.doesNotThrow(() =>
+      await assert.doesNotReject(() =>
         adaptiveBudgetFor({ ...base, messages: [{ role: "user", content: null }] }, "low")
       );
     });

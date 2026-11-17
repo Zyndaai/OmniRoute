@@ -14,6 +14,8 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-skillssh-inputs-
 const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
+import { resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
@@ -35,24 +37,23 @@ function clearSkillRegistry() {
   internals.versionCache?.clear?.();
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(tmpDir, { recursive: true });
   clearSkillRegistry();
-  core.getDbInstance();
 }
 
 const originalFetch = globalThis.fetch;
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   await settingsDb.updateSettings({ skillsProvider: "skillssh", requireLogin: false });
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   clearSkillRegistry();
   globalThis.fetch = originalFetch;
   process.env.DATA_DIR = originalDataDir;

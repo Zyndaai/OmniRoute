@@ -13,74 +13,36 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.CALL_LOG_RETENTION_DAYS = "3650";
 process.env.CALL_LOG_MAX_ENTRIES = "100000";
 
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
+
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 
-function insertCallLog(row: Record<string, unknown>) {
-  const db = core.getDbInstance();
-  db.prepare(
+async function insertCallLog(row: { id: string; timestamp: string }) {
+  await getTestBackend().execute(
     `
     INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, requested_model, provider, account,
-      connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
-      api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
-      error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
-      has_request_body, has_response_body, has_pipeline_details, request_summary
+      id, "timestamp", method, path, status, model, provider, cache_source, detail_state
     )
-    VALUES (
-      @id, @timestamp, @method, @path, @status, @model, @requested_model, @provider, @account,
-      @connection_id, @duration, @tokens_in, @tokens_out, @cache_source, @source_format, @target_format,
-      @api_key_id, @api_key_name, @combo_name, @combo_step_id, @combo_execution_key,
-      @error_summary, @detail_state, @artifact_relpath, @artifact_size_bytes, @artifact_sha256,
-      @has_request_body, @has_response_body, @has_pipeline_details, @request_summary
-    )
-  `
-  ).run({
-    method: "POST",
-    path: "/v1/chat/completions",
-    status: 200,
-    model: "openai/gpt-4.1",
-    requested_model: null,
-    provider: "openai",
-    account: null,
-    connection_id: null,
-    duration: 0,
-    tokens_in: 0,
-    tokens_out: 0,
-    cache_source: "upstream",
-    source_format: null,
-    target_format: null,
-    api_key_id: null,
-    api_key_name: null,
-    combo_name: null,
-    combo_step_id: null,
-    combo_execution_key: null,
-    error_summary: null,
-    detail_state: "none",
-    artifact_relpath: null,
-    artifact_size_bytes: null,
-    artifact_sha256: null,
-    has_request_body: 0,
-    has_response_body: 0,
-    has_pipeline_details: 0,
-    request_summary: null,
-    ...row,
-  });
+    VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'openai/gpt-4.1', 'openai', 'upstream', 'none')
+  `,
+    [row.id, row.timestamp]
+  );
 }
 
 test.before(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   // Seed 25 rows with strictly increasing timestamps (id N -> minute N).
   for (let i = 0; i < 25; i++) {
     const mm = String(i).padStart(2, "0");
-    insertCallLog({ id: `log_${mm}`, timestamp: `2026-05-22T10:${mm}:00.000Z` });
+    await insertCallLog({ id: `log_${mm}`, timestamp: `2026-05-22T10:${mm}:00.000Z` });
   }
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

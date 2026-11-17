@@ -23,16 +23,14 @@ const { normalizeUsage, sanitizeProviderUsageForRequest } =
   await import("../../open-sse/utils/usageTracking.ts");
 const { createSSEStream } = await import("../../open-sse/utils/stream.ts");
 const { calculateCost } = await import("../../src/lib/usage/costCalculator.ts");
+const { updatePricing } = await import("../../src/lib/db/settings/pricing.ts");
 
 const PROVIDER = "synthetic-cache-read-13746";
 const MODEL = "synthetic-cache-read-model-13746";
 const PRICING = { input: 10, cached: 1, output: 50 };
 
-function seedSyntheticPricing(): void {
-  core
-    .getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run("pricing", PROVIDER, JSON.stringify({ [MODEL]: PRICING }));
+async function seedSyntheticPricing(): Promise<void> {
+  await updatePricing({ [PROVIDER]: { [MODEL]: PRICING } });
 }
 
 async function costOf(usage: Record<string, unknown>): Promise<number> {
@@ -65,13 +63,13 @@ function assertCost(actual: number, expected: number): void {
   assert.ok(Math.abs(actual - expected) < Number.EPSILON, `${actual} !== ${expected}`);
 }
 
-test.before(() => {
-  seedSyntheticPricing();
+test.before(async () => {
+  await seedSyntheticPricing();
 });
 
 test.after(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

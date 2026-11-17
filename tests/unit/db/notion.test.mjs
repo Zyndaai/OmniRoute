@@ -11,7 +11,7 @@ test("notion DB module exports expected functions", async () => {
 
 test("getNotionConfig returns expected shape", async () => {
   const { getNotionConfig } = await import("../../../src/lib/db/notion.ts");
-  const config = getNotionConfig();
+  const config = await getNotionConfig();
   assert.ok(typeof config === "object");
   assert.ok("connected" in config);
   assert.ok("token" in config);
@@ -20,6 +20,6 @@ test("getNotionConfig returns expected shape", async () => {
 
 test("setNotionToken and clearNotionToken are callable without DB", async () => {
   const { setNotionToken, clearNotionToken } = await import("../../../src/lib/db/notion.ts");
-  assert.doesNotThrow(() => setNotionToken("test"));
-  assert.doesNotThrow(() => clearNotionToken());
+  await assert.doesNotReject(() => setNotionToken("test"));
+  await assert.doesNotReject(() => clearNotionToken());
 });

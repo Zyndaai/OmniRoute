@@ -19,7 +19,7 @@ const {
 const { recordProviderCooldown, isProviderInCooldown, recordProviderSuccess, clearCooldownState } =
   await import("../../open-sse/services/providerCooldownTracker.ts");
 const { resolveResilienceSettings } = await import("../../src/lib/resilience/settings.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
@@ -46,7 +46,7 @@ async function cleanupTestDataDir() {
   let lastError;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      core.resetDbInstance();
+      await resetTestDb();
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       return;
     } catch (error: any) {
@@ -67,7 +67,7 @@ test.after(async () => {
 beforeEach(async () => {
   clearAllModelLockouts();
   clearCooldownState();
-  settingsDb.clearAllLKGP();
+  await settingsDb.clearAllLKGP();
 });
 
 describe("combo selected connection success handling", () => {

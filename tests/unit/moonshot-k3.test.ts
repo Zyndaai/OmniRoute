@@ -49,8 +49,11 @@ test("Moonshot and hidden legacy Kimi ids share the curated model catalog", () =
   assert.deepEqual(registryModelIds("kimi"), EXPECTED_MODELS);
 });
 
-test("Kimi K3 advertises its 1M context/output and native capabilities", () => {
-  const capabilities = getResolvedModelCapabilities({ provider: "moonshot", model: "kimi-k3" });
+test("Kimi K3 advertises its 1M context/output and native capabilities", async () => {
+  const capabilities = await getResolvedModelCapabilities({
+    provider: "moonshot",
+    model: "kimi-k3",
+  });
 
   assert.equal(capabilities.contextWindow, 1048576);
   assert.equal(capabilities.maxOutputTokens, 1048576);
@@ -183,9 +186,9 @@ test("Moonshot K3 participates in reasoning replay", () => {
   );
 });
 
-test("Responses history preserves authentic reasoning for native Moonshot K3", () => {
+test("Responses history preserves authentic reasoning for native Moonshot K3", async () => {
   for (const provider of ["moonshot", "kimi"]) {
-    const output = translateRequest(
+    const output = await translateRequest(
       "openai-responses",
       "openai",
       "kimi-k3",
@@ -230,8 +233,8 @@ test("Responses history preserves authentic reasoning for native Moonshot K3", (
   }
 });
 
-test("video_url is preserved only for Moonshot's OpenAI-compatible extension", () => {
-  const moonshot = translateRequest(
+test("video_url is preserved only for Moonshot's OpenAI-compatible extension", async () => {
+  const moonshot = await translateRequest(
     "openai",
     "openai",
     "kimi-k3",
@@ -240,7 +243,7 @@ test("video_url is preserved only for Moonshot's OpenAI-compatible extension", (
     null,
     "moonshot"
   ) as { messages: Array<{ content: Array<{ type: string }> }> };
-  const generic = translateRequest(
+  const generic = await translateRequest(
     "openai",
     "openai",
     "llama-model",
@@ -260,7 +263,7 @@ test("video_url is preserved only for Moonshot's OpenAI-compatible extension", (
   );
 });
 
-test("Moonshot keeps empty partial assistant prefixes without replaying reasoning", () => {
+test("Moonshot keeps empty partial assistant prefixes without replaying reasoning", async () => {
   const scope = "api-key:test\x1fpartial-prefix";
   const messages = [
     {
@@ -274,7 +277,7 @@ test("Moonshot keeps empty partial assistant prefixes without replaying reasonin
   cacheReasoningByKey(cacheKey, "moonshot", "kimi-k3", "unrelated prior reasoning");
 
   try {
-    const output = translateRequest(
+    const output = await translateRequest(
       "openai",
       "openai",
       "kimi-k3",
@@ -296,10 +299,10 @@ test("Moonshot keeps empty partial assistant prefixes without replaying reasonin
   }
 });
 
-test("Moonshot K3 and K2.7 replay only authentic reasoning content", () => {
+test("Moonshot K3 and K2.7 replay only authentic reasoning content", async () => {
   for (const model of ["kimi-k3", "kimi-k2.7-code"]) {
     const missingCacheId = `call_missing_${model.replace(/[^a-z0-9]/gi, "_")}`;
-    const withoutCache = translateRequest(
+    const withoutCache = await translateRequest(
       "openai",
       "openai",
       model,
@@ -327,7 +330,7 @@ test("Moonshot K3 and K2.7 replay only authentic reasoning content", () => {
     const cachedId = `call_cached_${model.replace(/[^a-z0-9]/gi, "_")}`;
     cacheReasoning(cachedId, "moonshot", model, `real reasoning for ${model}`);
     try {
-      const withCache = translateRequest(
+      const withCache = await translateRequest(
         "openai",
         "openai",
         model,

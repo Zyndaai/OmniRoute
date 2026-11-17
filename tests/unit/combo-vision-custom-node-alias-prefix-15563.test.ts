@@ -17,7 +17,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-vision-no
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { addCustomModel } = await import("../../src/lib/db/models.ts");
 const { createProviderNode } = await import("../../src/lib/db/providers.ts");
 const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
@@ -65,26 +65,29 @@ test.before(async () => {
   );
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
 
-test("control: bare step honors the custom vision row", () => {
+test("control: bare step honors the custom vision row", async () => {
   assert.equal(
-    getResolvedModelCapabilities({ provider: NODE_ID, model: MODEL_ID }).supportsVision,
+    (await getResolvedModelCapabilities({ provider: NODE_ID, model: MODEL_ID })).supportsVision,
     true
   );
 });
 
-test("alias-prefixed custom-node step {nodeId, aegy/<id>} honors the custom vision row", () => {
-  const caps = getResolvedModelCapabilities({ provider: NODE_ID, model: `${PREFIX}/${MODEL_ID}` });
+test("alias-prefixed custom-node step {nodeId, aegy/<id>} honors the custom vision row", async () => {
+  const caps = await getResolvedModelCapabilities({
+    provider: NODE_ID,
+    model: `${PREFIX}/${MODEL_ID}`,
+  });
   assert.equal(caps.supportsVision, true);
 });
 
-test("combo vision filter does not exclude the alias-prefixed custom-node step", () => {
+test("combo vision filter does not exclude the alias-prefixed custom-node step", async () => {
   const requirements = {
     requiresTools: false,
     requiresVision: true,
@@ -94,12 +97,15 @@ test("combo vision filter does not exclude the alias-prefixed custom-node step",
     requiredContextTokens: 10,
   };
   assert.equal(
-    isVisionIncompatibleTarget(target(NODE_ID, `${PREFIX}/${MODEL_ID}`), requirements),
+    await isVisionIncompatibleTarget(target(NODE_ID, `${PREFIX}/${MODEL_ID}`), requirements),
     false
   );
 });
 
-test("negative: another provider's prefix is not stripped", () => {
-  const caps = getResolvedModelCapabilities({ provider: NODE_ID, model: `other/${MODEL_ID}` });
+test("negative: another provider's prefix is not stripped", async () => {
+  const caps = await getResolvedModelCapabilities({
+    provider: NODE_ID,
+    model: `other/${MODEL_ID}`,
+  });
   assert.notEqual(caps.supportsVision, true);
 });

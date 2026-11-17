@@ -17,39 +17,42 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#10734: resolveTokenLimit marks the generic 128k catch-all as specific:false", () => {
-  const resolved = resolveTokenLimit("not-a-real-provider", "no-such-model");
+test("#10734: resolveTokenLimit marks the generic 128k catch-all as specific:false", async () => {
+  const resolved = await resolveTokenLimit("not-a-real-provider", "no-such-model");
   assert.equal(resolved.limit, 128000);
   assert.equal(resolved.specific, false);
 });
 
-test("#10734: getSourcedTokenLimit omits the generic 128k catch-all", () => {
-  assert.equal(getSourcedTokenLimit("not-a-real-provider", "no-such-model"), undefined);
-  assert.equal(getTokenLimit("not-a-real-provider", "no-such-model"), 128000);
+test("#10734: getSourcedTokenLimit omits the generic 128k catch-all", async () => {
+  assert.equal(await getSourcedTokenLimit("not-a-real-provider", "no-such-model"), undefined);
+  assert.equal(await getTokenLimit("not-a-real-provider", "no-such-model"), 128000);
 });
 
-test("#10734: getSourcedTokenLimit keeps an explicit canonical window", () => {
-  assert.equal(getSourcedTokenLimit("not-a-real-provider", "no-such-model", 500000), 500000);
+test("#10734: getSourcedTokenLimit keeps an explicit canonical window", async () => {
+  assert.equal(
+    await getSourcedTokenLimit("not-a-real-provider", "no-such-model", 500000),
+    500000
+  );
 });
 
-test("#10734: getSourcedTokenLimit keeps provider-specific defaults (claude)", () => {
-  const sourced = getSourcedTokenLimit("claude", "claude-sonnet-4");
+test("#10734: getSourcedTokenLimit keeps provider-specific defaults (claude)", async () => {
+  const sourced = await getSourcedTokenLimit("claude", "claude-sonnet-4");
   assert.equal(typeof sourced, "number");
   assert.ok(sourced && sourced > 128000);
-  assert.equal(resolveTokenLimit("claude", "claude-sonnet-4").specific, true);
+  assert.equal((await resolveTokenLimit("claude", "claude-sonnet-4")).specific, true);
 });
 
-test("#10734: combo min() ignores unsourced members instead of advertising 128k", () => {
+test("#10734: combo min() ignores unsourced members instead of advertising 128k", async () => {
   const combo = {
     name: "large-plus-unknown",
     models: ["glm/glm-5.2", "not-a-real-provider/no-such-model"],
   };
-  const result = computeComboContextLength(combo, []);
+  const result = await computeComboContextLength(combo, []);
   assert.equal(
     result,
     1000000,
@@ -57,7 +60,7 @@ test("#10734: combo min() ignores unsourced members instead of advertising 128k"
   );
 });
 
-test("#10734: nested combo-ref inherits sourced min(), not 128k", () => {
+test("#10734: nested combo-ref inherits sourced min(), not 128k", async () => {
   const inner = {
     name: "inner-large",
     models: ["glm/glm-5.2", "not-a-real-provider/no-such-model"],
@@ -66,13 +69,13 @@ test("#10734: nested combo-ref inherits sourced min(), not 128k", () => {
     name: "wrapper-large",
     models: [{ kind: "combo-ref", comboName: "inner-large" }],
   };
-  const result = computeComboContextLength(wrapper, [inner, wrapper]);
+  const result = await computeComboContextLength(wrapper, [inner, wrapper]);
   assert.equal(result, 1000000);
 });
 
 test("#10734: GET /v1/models does not advertise 128k for a 500k combo plus an unsourced member", async () => {
   const modelId = "gpt-5.6-terra";
-  assert.equal(contextOverrides.setModelContextOverride("codex", modelId, 500000), true);
+  assert.equal(await contextOverrides.setModelContextOverride("codex", modelId, 500000), true);
 
   await providersDb.createProviderConnection({
     provider: "codex",

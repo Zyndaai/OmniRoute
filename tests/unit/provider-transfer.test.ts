@@ -23,6 +23,7 @@ process.env.JWT_SECRET = "provider-transfer-jwt-secret";
 process.env.INITIAL_PASSWORD = "provider-transfer-password";
 process.env.STORAGE_ENCRYPTION_KEY = "provider-transfer-storage-key-0123456789";
 
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -90,9 +91,9 @@ async function seed() {
 
 const seeded = await seed();
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -121,9 +122,11 @@ async function exportAll() {
   return initialBundle;
 }
 
-function countConnections() {
-  const db = core.getDbInstance();
-  return (db.prepare("SELECT count(*) AS n FROM provider_connections").get() as { n: number }).n;
+async function countConnections(): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    "SELECT count(*)::int AS n FROM provider_connections"
+  );
+  return Number(row?.n ?? 0);
 }
 
 test("sealed envelope round-trips and rejects a wrong passphrase or a tampered file", async () => {
@@ -247,7 +250,7 @@ test("import: add restores a deleted account, replace keeps local policy, nothin
     name: "Unrelated",
     apiKey: "gsk-unrelated",
   })) as Json;
-  const countBefore = countConnections();
+  const countBefore = await countConnections();
 
   const plan = await transfer.previewProviderTransfer(bundle, PASSPHRASE);
   const oauthItem = plan.providerConnections.find((item) => item.sourceId === oauthId);
@@ -258,7 +261,7 @@ test("import: add restores a deleted account, replace keeps local policy, nothin
   });
   assert.equal(result.deletions, 0);
   assert.equal(result.applied.providerConnections, 2);
-  assert.equal(countConnections(), countBefore + 1, "only the deleted account comes back");
+  assert.equal(await countConnections(), countBefore + 1, "only the deleted account comes back");
   assert.ok(await providersDb.getProviderConnectionById(String(extra.id)), "unrelated row kept");
 
   const restored = (
@@ -266,11 +269,11 @@ test("import: add restores a deleted account, replace keeps local policy, nothin
   )[0];
   assert.equal(restored.apiKey, SECRETS.openaiKey, "credential re-encrypted and readable");
   assert.notEqual(restored.testStatus, "unavailable", "runtime state does not travel");
-  const rawRow = core
-    .getDbInstance()
-    .prepare("SELECT api_key FROM provider_connections WHERE id = ?")
-    .get(String(restored.id)) as { api_key: string };
-  assert.match(rawRow.api_key, /^enc:v1:/, "stored encrypted at rest");
+  const rawRow = await getTestBackend().queryOne<{ api_key: string }>(
+    "SELECT api_key FROM provider_connections WHERE id = $1",
+    [String(restored.id)]
+  );
+  assert.match(String(rawRow?.api_key), /^enc:v1:/, "stored encrypted at rest");
 
   const replaced = (await providersDb.getProviderConnectionById(oauthId)) as Json;
   assert.equal(replaced.name ?? null, (seeded.oauth.name as string | null) ?? null);
@@ -281,7 +284,7 @@ test("import: add restores a deleted account, replace keeps local policy, nothin
 
 test("import validates every decision before writing anything", async () => {
   const bundle = await exportAll();
-  const countBefore = countConnections();
+  const countBefore = await countConnections();
   await assert.rejects(
     transfer.applyProviderTransfer(bundle, PASSPHRASE, {
       [`connection:${seeded.openai.id}`]: "skip",
@@ -293,21 +296,21 @@ test("import validates every decision before writing anything", async () => {
     transfer.applyProviderTransfer(bundle, PASSPHRASE, { "connection:unknown": "skip" }),
     transfer.ProviderTransferInputError
   );
-  assert.equal(countConnections(), countBefore);
+  assert.equal(await countConnections(), countBefore);
 });
 
 test("import refuses an account whose provider node is being skipped", async () => {
   const bundle = await exportAll();
   await providersDb.deleteProviderConnection(String(seeded.compat.id));
   await providersDb.deleteProviderNode(String(seeded.node.id));
-  const countBefore = countConnections();
+  const countBefore = await countConnections();
   await assert.rejects(
     transfer.applyProviderTransfer(bundle, PASSPHRASE, {
       [`node:${seeded.node.id}`]: "skip",
     }),
     /needs its provider node/
   );
-  assert.equal(countConnections(), countBefore);
+  assert.equal(await countConnections(), countBefore);
 
   const result = await transfer.applyProviderTransfer(bundle, PASSPHRASE, {});
   assert.equal(result.applied.providerNodes, 1);

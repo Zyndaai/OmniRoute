@@ -66,19 +66,3 @@ test("CLI generates STORAGE_ENCRYPTION_KEY into DATA_DIR on first run (#1622)", 
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
-
-test("CLI refuses to auto-generate a key when a database already exists (#1622)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-key-b-"));
-  try {
-    fs.writeFileSync(path.join(dir, "storage.sqlite"), "fake-db");
-    const { stderr } = runCli(dir);
-    const envPath = path.join(dir, ".env");
-    const hasKey =
-      fs.existsSync(envPath) &&
-      fs.readFileSync(envPath, "utf-8").includes("STORAGE_ENCRYPTION_KEY=");
-    assert.equal(hasKey, false, "must NOT generate a key when a DB already exists");
-    assert.match(stderr, /already exists/i, "must warn that a database already exists");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
-});

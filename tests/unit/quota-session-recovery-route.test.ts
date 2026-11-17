@@ -11,7 +11,6 @@ import path from "node:path";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-recovery-route-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.STORAGE_ENCRYPTION_KEY = "quota-recovery-route-test-key";
 process.env.API_KEY_SECRET = "quota-recovery-route-api-key-secret";
 
@@ -25,8 +24,8 @@ const route = await import("../../src/app/api/v1/quota-recoveries/[id]/route.ts"
 const owner = await apiKeysDb.createApiKey("recovery-owner", "machine-quota-recovery");
 const other = await apiKeysDb.createApiKey("recovery-other", "machine-quota-recovery");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -125,8 +124,8 @@ test("a pending ticket polls as 202 for its owner", async () => {
 });
 
 test("a completed ticket returns the recovered response body (200)", async () => {
-  assert.ok(tickets.claimQuotaRecoveryTicket(ticketId, new Date(Date.now() + 10 * 60_000)));
-  assert.equal(tickets.completeQuotaRecoveryTicket(ticketId, '{"id":"chatcmpl-1"}'), true);
+  assert.ok(await tickets.claimQuotaRecoveryTicket(ticketId, new Date(Date.now() + 10 * 60_000)));
+  assert.equal(await tickets.completeQuotaRecoveryTicket(ticketId, '{"id":"chatcmpl-1"}'), true);
   const res = await route.GET(pollRequest(owner.key), ctx(ticketId));
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("X-OmniRoute-Recovery-State"), "completed");

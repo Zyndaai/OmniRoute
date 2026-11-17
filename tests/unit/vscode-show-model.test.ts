@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildShowPayload, getRequestedModelName } from "../../src/lib/vscode/showModel.ts";
 
-test("show payload preserves the caller's published id and display name", () => {
+test("show payload preserves the caller's published id and display name", async () => {
   const model = {
     id: "custom/example",
     owned_by: "custom",
@@ -13,8 +13,8 @@ test("show payload preserves the caller's published id and display name", () => 
     output_modalities: ["text"],
     supported_endpoints: ["chat/completions"],
   };
-  const grouped = buildShowPayload(model, "Friendly model", "published-alias");
-  const raw = buildShowPayload(model, "Raw model", model.id);
+  const grouped = await buildShowPayload(model, "Friendly model", "published-alias");
+  const raw = await buildShowPayload(model, "Raw model", model.id);
   assert.equal(grouped.model, "published-alias");
   assert.equal(grouped.modelfile, "FROM published-alias");
   assert.equal(grouped.remote_model, "Friendly model");

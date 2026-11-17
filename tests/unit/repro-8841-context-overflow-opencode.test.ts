@@ -13,8 +13,8 @@ const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const { getTokenLimit } = await import("../../open-sse/services/contextManager.ts");
 const core = await import("../../src/lib/db/core.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -50,9 +50,9 @@ function upstreamContextOverflowResponse() {
   );
 }
 
-test("#8841 advertised vs compat-filter limit agree", () => {
-  const advertised = getTokenLimit("opencode-zen", "mimo-v2.5-free");
-  const caps = getResolvedModelCapabilities("opencode/mimo-v2.5-free");
+test("#8841 advertised vs compat-filter limit agree", async () => {
+  const advertised = await getTokenLimit("opencode-zen", "mimo-v2.5-free");
+  const caps = await getResolvedModelCapabilities("opencode/mimo-v2.5-free");
   assert.ok(advertised > 0);
   assert.ok(
     caps.contextWindow != null && caps.contextWindow > 0,

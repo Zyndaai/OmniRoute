@@ -17,9 +17,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const logTps = await import("../../src/shared/utils/logTps.ts");
 const usageHelpers = await import("../../src/lib/usage/usageHistory/helpers.ts");
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -115,7 +116,7 @@ test("accumulateLatencySample uses generation window + reasoning-aware numerator
 
 test("call_logs persists ttft_ms and the summary row exposes it as log.ttft", async () => {
   const callLogs = await import("../../src/lib/usage/callLogs.ts");
-  const db = core.getDbInstance();
+  const db = getTestBackend();
   const testId = `test-ttft-${Date.now()}`;
   try {
     await callLogs.saveCallLog({
@@ -130,9 +131,10 @@ test("call_logs persists ttft_ms and the summary row exposes it as log.ttft", as
       tokens: { in: 100, out: 3000 },
     });
 
-    const row = db
-      .prepare("SELECT ttft_ms, duration FROM call_logs WHERE id = ?")
-      .get(testId) as Record<string, unknown>;
+    const row = await db.queryOne<Record<string, unknown>>(
+      "SELECT ttft_ms, duration FROM call_logs WHERE id = $1",
+      [testId]
+    );
     assert.ok(row, "row should exist in call_logs");
     assert.equal(row.ttft_ms, 60_000);
     assert.equal(row.duration, 90_000);
@@ -155,11 +157,12 @@ test("call_logs persists ttft_ms and the summary row exposes it as log.ttft", as
       duration: 5_000,
       tokens: { in: 10, out: 50 },
     });
-    const row2 = db
-      .prepare("SELECT ttft_ms FROM call_logs WHERE id = ?")
-      .get(nonStreamId) as Record<string, unknown>;
+    const row2 = await db.queryOne<Record<string, unknown>>(
+      "SELECT ttft_ms FROM call_logs WHERE id = $1",
+      [nonStreamId]
+    );
     assert.equal(row2.ttft_ms, null);
-    db.prepare("DELETE FROM call_logs WHERE id = ?").run(nonStreamId);
+    await db.execute("DELETE FROM call_logs WHERE id = $1", [nonStreamId]);
 
     // Negative/garbage TTFT is normalized away, never persisted.
     const badId = `test-badttft-${Date.now()}`;
@@ -174,13 +177,13 @@ test("call_logs persists ttft_ms and the summary row exposes it as log.ttft", as
       ttftMs: -42,
       tokens: { in: 1, out: 1 },
     });
-    const row3 = db.prepare("SELECT ttft_ms FROM call_logs WHERE id = ?").get(badId) as Record<
-      string,
-      unknown
-    >;
+    const row3 = await db.queryOne<Record<string, unknown>>(
+      "SELECT ttft_ms FROM call_logs WHERE id = $1",
+      [badId]
+    );
     assert.equal(row3.ttft_ms, null);
-    db.prepare("DELETE FROM call_logs WHERE id = ?").run(badId);
+    await db.execute("DELETE FROM call_logs WHERE id = $1", [badId]);
   } finally {
-    db.prepare("DELETE FROM call_logs WHERE id = ?").run(testId);
+    await db.execute("DELETE FROM call_logs WHERE id = $1", [testId]);
   }
 });

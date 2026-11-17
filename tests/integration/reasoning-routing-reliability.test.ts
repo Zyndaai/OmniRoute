@@ -54,13 +54,13 @@ test.beforeEach(async () => {
   };
 });
 test.afterEach(async () => {
-  flushProxyLogsSync();
+  await flushProxyLogsSync();
   h.BaseExecutor.RETRY_CONFIG.delayMs = h.originalRetryDelayMs;
   await h.resetStorage();
 });
-test.after(() => {
-  flushProxyLogsSync();
-  return h.cleanup();
+test.after(async () => {
+  await flushProxyLogsSync();
+  await h.cleanup();
 });
 
 async function forceLow(modelPattern: string, apiKeyId: string) {

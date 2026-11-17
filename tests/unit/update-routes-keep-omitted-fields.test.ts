@@ -22,8 +22,8 @@ const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const { handleProxyUpdate } = await import("../../src/lib/api/proxyRegistryRouteHandlers.ts");
 const bulkImportRoute = await import("../../src/app/api/settings/proxies/bulk-import/route.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -66,7 +66,7 @@ test("renaming a disabled reasoning rule keeps it disabled and keeps its setting
 });
 
 test("renaming a playground preset keeps its params", async () => {
-  const preset = presetsDb.createPlaygroundPreset({
+  const preset = await presetsDb.createPlaygroundPreset({
     name: "before",
     endpoint: "chat",
     model: "m",

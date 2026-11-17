@@ -8,7 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sse-auth-
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "sse-auth-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -18,7 +18,7 @@ const fallback = await import("../../open-sse/services/accountFallback.ts");
 const oauthOccupancy = await import("../../open-sse/services/oauthSessionOccupancy.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -70,7 +70,6 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -155,7 +154,7 @@ test("codex session account affinity is opt-in and honors TTL", async () => {
   assert.equal(typeof withoutAffinityA.connectionId, "string");
   assert.equal(typeof withoutAffinityB.connectionId, "string");
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-without-affinity", "codex", 60_000),
+    await affinityDb.getSessionAccountAffinity("session-without-affinity", "codex", 60_000),
     null
   );
 
@@ -170,7 +169,8 @@ test("codex session account affinity is opt-in and honors TTL", async () => {
 
   assert.equal(withAffinityB.connectionId, withAffinityA.connectionId);
   assert.equal(
-    affinityDb.getSessionAccountAffinity("session-with-affinity", "codex", 60_000)?.connectionId,
+    (await affinityDb.getSessionAccountAffinity("session-with-affinity", "codex", 60_000))
+      ?.connectionId,
     withAffinityA.connectionId
   );
 });
@@ -179,15 +179,15 @@ test("session account affinity expires when TTL has passed", async () => {
   const affinityDb = await import("../../src/lib/db/sessionAccountAffinity.ts");
   const now = Date.now();
 
-  affinityDb.upsertSessionAccountAffinity("expiring-session", "codex", "conn-a", now, 1000);
+  await affinityDb.upsertSessionAccountAffinity("expiring-session", "codex", "conn-a", now, 1000);
 
   assert.equal(
-    affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 500)
+    (await affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 500))
       ?.connectionId,
     "conn-a"
   );
   assert.equal(
-    affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 1001),
+    await affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 1001),
     null
   );
 });
@@ -1342,6 +1342,7 @@ test("markAccountUnavailable uses configured cooldowns for local 404 model locko
     "openai",
     "local-model"
   );
+  await flushWrites();
   const updated = await providersDb.getProviderConnectionById(connection.id);
 
   assert.equal(result.shouldFallback, true);
@@ -1742,28 +1743,23 @@ test("markAccountUnavailable swallows auto-disable persistence errors", async ()
     name: "permanent-ban-update-fails",
   });
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-  db.prepare = (sql) => {
-    const statement = originalPrepare(sql);
-    if (!String(sql).includes("UPDATE provider_connections SET")) {
-      return statement;
-    }
-
-    return new Proxy(statement, {
-      get(target, prop, receiver) {
-        if (prop === "run") {
-          return (params) => {
-            if (params && typeof params === "object" && params.isActive === 0) {
-              throw new Error("persist disable failed");
-            }
-            return target.run(params);
-          };
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    });
-  };
+  // Make the auto-disable write fail at the database: a trigger rejects any row
+  // update that sets is_active to false.
+  const backend = getTestBackend();
+  await backend.execute(`
+    CREATE OR REPLACE FUNCTION test_fail_auto_disable() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.is_active = false THEN
+        RAISE EXCEPTION 'persist disable failed';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+  await backend.execute(`
+    CREATE TRIGGER test_fail_auto_disable BEFORE UPDATE ON provider_connections
+    FOR EACH ROW EXECUTE FUNCTION test_fail_auto_disable()
+  `);
 
   try {
     const result = await auth.markAccountUnavailable(
@@ -1779,7 +1775,8 @@ test("markAccountUnavailable swallows auto-disable persistence errors", async ()
     assert.equal(updated.isActive, true);
     assert.equal(updated.testStatus, "banned");
   } finally {
-    db.prepare = originalPrepare;
+    await backend.execute("DROP TRIGGER IF EXISTS test_fail_auto_disable ON provider_connections");
+    await backend.execute("DROP FUNCTION IF EXISTS test_fail_auto_disable()");
   }
 });
 

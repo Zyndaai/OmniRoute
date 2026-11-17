@@ -34,7 +34,7 @@ function assistantWithCalls(ids: string[]) {
   };
 }
 
-test("openaiToClaudeRequest: id-less tool messages pair with pending calls in order", () => {
+test("openaiToClaudeRequest: id-less tool messages pair with pending calls in order", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -44,7 +44,7 @@ test("openaiToClaudeRequest: id-less tool messages pair with pending calls in or
       { role: "tool", content: "result B" },
     ],
   };
-  const results = toolResults(openaiToClaudeRequest("claude-sonnet-4", body, false));
+  const results = toolResults(await openaiToClaudeRequest("claude-sonnet-4", body, false));
   assert.deepEqual(
     results.map((block) => [block.tool_use_id, block.content]),
     [
@@ -54,7 +54,7 @@ test("openaiToClaudeRequest: id-less tool messages pair with pending calls in or
   );
 });
 
-test("openaiToClaudeRequest: id-less result takes the call not yet answered", () => {
+test("openaiToClaudeRequest: id-less result takes the call not yet answered", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -64,7 +64,7 @@ test("openaiToClaudeRequest: id-less result takes the call not yet answered", ()
       { role: "tool", content: "result A" },
     ],
   };
-  const results = toolResults(openaiToClaudeRequest("claude-sonnet-4", body, false));
+  const results = toolResults(await openaiToClaudeRequest("claude-sonnet-4", body, false));
   // Adjacency enforcement re-orders results to the tool_use order.
   assert.deepEqual(
     results.map((block) => [block.tool_use_id, block.content]),
@@ -75,7 +75,7 @@ test("openaiToClaudeRequest: id-less result takes the call not yet answered", ()
   );
 });
 
-test("openaiToClaudeRequest: Claude-shaped tool_result part without tool_use_id is paired", () => {
+test("openaiToClaudeRequest: Claude-shaped tool_result part without tool_use_id is paired", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -84,13 +84,13 @@ test("openaiToClaudeRequest: Claude-shaped tool_result part without tool_use_id 
       { role: "user", content: [{ type: "tool_result", content: "x output" }] },
     ],
   };
-  const results = toolResults(openaiToClaudeRequest("claude-sonnet-4", body, false));
+  const results = toolResults(await openaiToClaudeRequest("claude-sonnet-4", body, false));
   assert.equal(results.length, 1);
   assert.equal(results[0].tool_use_id, "call_x");
   assert.equal(results[0].content, "x output");
 });
 
-test("openaiToClaudeRequest: id-less result with nothing pending is still dropped", () => {
+test("openaiToClaudeRequest: id-less result with nothing pending is still dropped", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -100,14 +100,14 @@ test("openaiToClaudeRequest: id-less result with nothing pending is still droppe
       { role: "tool", content: "stray" },
     ],
   };
-  const results = toolResults(openaiToClaudeRequest("claude-sonnet-4", body, false));
+  const results = toolResults(await openaiToClaudeRequest("claude-sonnet-4", body, false));
   assert.deepEqual(
     results.map((block) => block.tool_use_id),
     ["call_a"]
   );
 });
 
-test("openaiToClaudeRequest: pairing uses the sanitized tool_use id (#7705 guard)", () => {
+test("openaiToClaudeRequest: pairing uses the sanitized tool_use id (#7705 guard)", async () => {
   const body = {
     _disableToolPrefix: true,
     messages: [
@@ -117,7 +117,7 @@ test("openaiToClaudeRequest: pairing uses the sanitized tool_use id (#7705 guard
       { role: "tool", tool_call_id: "call.two:x", content: "explicit" },
     ],
   };
-  const result = openaiToClaudeRequest("claude-sonnet-4", body, false);
+  const result = await openaiToClaudeRequest("claude-sonnet-4", body, false);
   const toolUseIds = (result.messages as Array<{ content: unknown }>)
     .flatMap((msg) => (Array.isArray(msg.content) ? (msg.content as Block[]) : []))
     .filter((block) => block.type === "tool_use")

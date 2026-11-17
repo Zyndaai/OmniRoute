@@ -11,6 +11,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "api-models-15585-test-secret";
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const modelsRoute = await import("../../src/app/api/models/route.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
@@ -18,18 +19,18 @@ const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const PROVIDER = "opencode-zen";
 const CONN = "oz-conn-15585";
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("#15585: /api/models available matches the authoritative live-catalog gate", async () => {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run(CONN, PROVIDER, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active)
+     VALUES ($1, $2, true)
+     ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, is_active = true`,
+    [CONN, PROVIDER]
+  );
 
   const res0 = await modelsRoute.GET(new Request("http://localhost/api/models"));
   const body0 = (await res0.json()) as {

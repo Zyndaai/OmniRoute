@@ -28,7 +28,7 @@ test.after(async () => {
   // handleEmbedding records call logs asynchronously; let those writes settle
   // before closing the singleton so a late write cannot reopen the test DB.
   await new Promise((resolve) => setTimeout(resolve, 50));
-  resetDbInstance();
+  await resetDbInstance();
 });
 
 // ---------------------------------------------------------------------------

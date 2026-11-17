@@ -64,9 +64,9 @@ function candidate(
   } as AutoProviderCandidate;
 }
 
-test("auto scoring skips GLM when its 2% remaining quota hit the hard cutoff", () => {
+test("auto scoring skips GLM when its 2% remaining quota hit the hard cutoff", async () => {
   const targets = [target("glm", "glm-5.2", "glm-empty"), target("mcode", "mimo-auto", "mcode-ok")];
-  const ranked = scoreAutoTargets(
+  const ranked = await scoreAutoTargets(
     targets,
     [
       candidate("glm", "glm-5.2", "glm-empty", {
@@ -89,13 +89,13 @@ test("auto scoring skips GLM when its 2% remaining quota hit the hard cutoff", (
   assert.equal(ranked[0]?.target.connectionId, "mcode-ok");
 });
 
-test("blocked quota candidates are not included in the scoring pool", () => {
+test("blocked quota candidates are not included in the scoring pool", async () => {
   const targets = [
     target("fast", "healthy", "fast-ok"),
     target("slow", "healthy", "slow-ok"),
     target("glm", "glm-5.2", "glm-empty"),
   ];
-  const ranked = scoreAutoTargets(
+  const ranked = await scoreAutoTargets(
     targets,
     [
       candidate("fast", "healthy", "fast-ok", { p95LatencyMs: 100 }),
@@ -149,12 +149,12 @@ test("future unavailable connection maps to rate_limited quota cutoff reason", (
   );
 });
 
-test("status-blocked candidates are removed before auto scoring", () => {
+test("status-blocked candidates are removed before auto scoring", async () => {
   const targets = [
     target("pollinations", "fast-free", "pollinations-empty"),
     target("cerebras", "healthy", "cerebras-ok"),
   ];
-  const ranked = scoreAutoTargets(
+  const ranked = await scoreAutoTargets(
     targets,
     [
       candidate("pollinations", "fast-free", "pollinations-empty", {

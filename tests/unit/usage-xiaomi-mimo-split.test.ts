@@ -15,27 +15,28 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-xiaomi-split-"));
 process.env.DATA_DIR = TMP;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const X = await import("../../open-sse/services/usage/xiaomi-mimo.ts");
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   tokensIn: number,
   tokensOut: number,
   timestamp: string
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, connectionId, tokensIn, tokensOut, timestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, "timestamp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, connectionId, tokensIn, tokensOut, timestamp]
+  );
 }
 
 describe("xiaomi-mimo leaf self-tracked quota", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
-    insertUsage("conn-leaf", "xiaomi-mimo", 1_000_000, 500_000, new Date().toISOString());
-    insertUsage(
+  before(async () => {
+    await core.ensureDbInitialized(); // trigger migrations
+    await insertUsage("conn-leaf", "xiaomi-mimo", 1_000_000, 500_000, new Date().toISOString());
+    await insertUsage(
       "conn-plan",
       "xiaomi-mimo-token-plan",
       2_000_000,
@@ -44,8 +45,8 @@ describe("xiaomi-mimo leaf self-tracked quota", () => {
     );
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {

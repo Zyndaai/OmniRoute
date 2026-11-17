@@ -12,14 +12,14 @@ const { mergeModelCompatOverride, getModelCompatOverrides } =
   await import("../../src/lib/db/models/compat.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 
-test("mergeModelCompatOverride persists apiFormat, targetFormat, and supportsVision overrides for built-in models", () => {
-  mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
+test("mergeModelCompatOverride persists apiFormat, targetFormat, and supportsVision overrides for built-in models", async () => {
+  await mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
     apiFormat: "responses",
     targetFormat: "claude",
     supportsVision: true,
   });
 
-  const overrides = getModelCompatOverrides("opencode-zen");
+  const overrides = await getModelCompatOverrides("opencode-zen");
   const modelOverride = overrides.find((m) => m.id === "claude-opus-5");
 
   assert.ok(modelOverride, "Model override row should exist");
@@ -29,7 +29,7 @@ test("mergeModelCompatOverride persists apiFormat, targetFormat, and supportsVis
 });
 
 test("getModelInfo resolves apiFormat, targetFormat, and supportsVision from modelCompatOverrides", async () => {
-  mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
+  await mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
     apiFormat: "responses",
     targetFormat: "claude",
     supportsVision: true,

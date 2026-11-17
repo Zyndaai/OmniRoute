@@ -30,25 +30,25 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-synced-re
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "synced-reconcile-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const persistence = await import("../../src/lib/db/models/syncedAvailableModelPersistence.ts");
 const resolver = await import("../../src/lib/contextWindowResolver.ts");
 const reconcileContextWindows = resolver.reconcileContextWindows;
 type DiscoveredWindow = resolver.DiscoveredWindow;
 type ReconcileDeps = resolver.ReconcileDeps;
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -65,16 +65,37 @@ function normalizeModels(models: unknown) {
     : [];
 }
 
+// Synced catalog rows belong to a provider connection (connection_model_sync has a
+// foreign key), so each test seeds the connection its key points at.
+async function seedSyncKey(name: string): Promise<string> {
+  const conn = await providersDb.createProviderConnection({
+    provider: "openrouter",
+    authType: "apikey",
+    name,
+    apiKey: `sk-${name}`,
+    testStatus: "active",
+  });
+  return `openrouter:${conn.id}`;
+}
+
 test("unchanged synced-catalog write does not schedule a post-sync reconcile", async () => {
-  const key = "openrouter:conn-a";
+  const key = await seedSyncKey("sync-reconcile-a");
   const models = [{ id: "stealth/ox-alpha", inputTokenLimit: 1048576 }];
-  const first = persistence.persistCanonicalSyncedAvailableModels(key, models, normalizeModels);
+  const first = await persistence.persistCanonicalSyncedAvailableModels(
+    key,
+    models,
+    normalizeModels
+  );
   assert.equal(first, true); // first write is a change
 
   // Let any scheduled reconcile from the first write flush before asserting the no-op.
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  const second = persistence.persistCanonicalSyncedAvailableModels(key, models, normalizeModels);
+  const second = await persistence.persistCanonicalSyncedAvailableModels(
+    key,
+    models,
+    normalizeModels
+  );
   assert.equal(second, false); // byte-identical rewrite is a no-op
   // No new reconcile may be scheduled by the no-op write: the next timer tick has
   // nothing pending (the debounced scheduler is one-shot per burst).
@@ -84,9 +105,14 @@ test("unchanged synced-catalog write does not schedule a post-sync reconcile", a
 });
 
 test("changed synced-catalog write completes without blocking and persists the catalog", async () => {
-  const key = "openrouter:conn-b";
+  const key = await seedSyncKey("sync-reconcile-b");
+  const connectionId = key.slice("openrouter:".length);
   const models = [{ id: "stealth/ox-alpha", inputTokenLimit: 1048576 }];
-  const changed = persistence.persistCanonicalSyncedAvailableModels(key, models, normalizeModels);
+  const changed = await persistence.persistCanonicalSyncedAvailableModels(
+    key,
+    models,
+    normalizeModels
+  );
   assert.equal(changed, true);
 
   // Give the debounced, fire-and-forget reconcile a moment — it must not throw
@@ -94,12 +120,13 @@ test("changed synced-catalog write completes without blocking and persists the c
   // effect instead below).
   await new Promise((resolve) => setTimeout(resolve, 50));
 
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get(key) as { value: string } | undefined;
+  // The key is "<provider>:<connectionId>"; the row is keyed by connection_id.
+  const row = await getTestBackend().queryOne<{ models: Array<{ id: string }> }>(
+    "SELECT models FROM connection_model_sync WHERE connection_id = $1",
+    [connectionId]
+  );
   assert.ok(row, "synced catalog row persisted");
-  assert.equal(JSON.parse(row.value)[0].id, "stealth/ox-alpha");
+  assert.equal(row.models[0].id, "stealth/ox-alpha");
 });
 
 // ---------------------------------------------------------------------------
@@ -118,23 +145,23 @@ function makeDeps(catalog: Record<string, number | null>, existing: Record<strin
   return { deps, writes, removes };
 }
 
-test("reconcile pins a newly-synced model's real window when the catalog has none (the ox-alpha gap)", () => {
+test("reconcile pins a newly-synced model's real window when the catalog has none (the ox-alpha gap)", async () => {
   const discovered: DiscoveredWindow[] = [
     { provider: "openrouter", modelId: "stealth/ox-alpha", window: 1048576 },
   ];
   // Override-free catalog view: no models.dev row, no registry/spec entry -> null.
   const { deps, writes } = makeDeps({});
-  const result = reconcileContextWindows(discovered, deps);
+  const result = await reconcileContextWindows(discovered, deps);
   assert.deepEqual(writes, [["openrouter", "stealth/ox-alpha", 1048576]]);
   assert.equal(result.written, 1);
 });
 
-test("reconcile leaves a model alone when models.dev already carries the same window", () => {
+test("reconcile leaves a model alone when models.dev already carries the same window", async () => {
   const discovered: DiscoveredWindow[] = [
     { provider: "openrouter", modelId: "openai/gpt-4o", window: 128000 },
   ];
   const { deps, writes, removes } = makeDeps({ "openai/gpt-4o": 128000 });
-  const result = reconcileContextWindows(discovered, deps);
+  const result = await reconcileContextWindows(discovered, deps);
   assert.deepEqual(writes, []);
   assert.deepEqual(removes, []);
   assert.equal(result.written, 0);

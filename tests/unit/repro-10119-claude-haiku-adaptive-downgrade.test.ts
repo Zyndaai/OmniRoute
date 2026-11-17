@@ -11,7 +11,7 @@ import { openaiToClaudeRequest } from "../../open-sse/translator/request/openai-
 // model". The translator must downgrade `adaptive` -> `enabled` (with a safe budget) for
 // any non-`isAdaptiveThinkingOnly` Claude model instead of forwarding an incompatible type.
 
-function toClaude(model: string, thinking: Record<string, unknown>) {
+async function toClaude(model: string, thinking: Record<string, unknown>) {
   return openaiToClaudeRequest(
     model,
     { model, thinking, messages: [{ role: "user", content: "hi" }] },
@@ -20,8 +20,8 @@ function toClaude(model: string, thinking: Record<string, unknown>) {
   );
 }
 
-test("downgrades client-supplied adaptive thinking to manual enabled for Haiku 4.5", () => {
-  const out = toClaude("claude-haiku-4-5-20251001", { type: "adaptive" });
+test("downgrades client-supplied adaptive thinking to manual enabled for Haiku 4.5", async () => {
+  const out = await toClaude("claude-haiku-4-5-20251001", { type: "adaptive" });
   assert.equal(out.thinking?.type, "enabled", "adaptive must not survive on a Haiku target");
   assert.ok(
     Number(out.thinking?.budget_tokens) >= 1024,
@@ -29,14 +29,14 @@ test("downgrades client-supplied adaptive thinking to manual enabled for Haiku 4
   );
 });
 
-test("downgrades adaptive thinking for any non-adaptive-only Claude model generically", () => {
+test("downgrades adaptive thinking for any non-adaptive-only Claude model generically", async () => {
   // claude-sonnet-4-5 is NOT adaptive-only (unlike Opus 4.7+/Sonnet-5), so the same
   // downgrade must apply — the guard is keyed on isAdaptiveThinkingOnly(), not the Haiku id.
-  const out = toClaude("claude-sonnet-4-5", { type: "adaptive" });
+  const out = await toClaude("claude-sonnet-4-5", { type: "adaptive" });
   assert.equal(out.thinking?.type, "enabled", "non-adaptive-only models must not receive adaptive");
 });
 
-test("preserves adaptive thinking for an adaptive-only model (Opus 4.7+)", () => {
-  const out = toClaude("claude-opus-4-7", { type: "adaptive" });
+test("preserves adaptive thinking for an adaptive-only model (Opus 4.7+)", async () => {
+  const out = await toClaude("claude-opus-4-7", { type: "adaptive" });
   assert.equal(out.thinking?.type, "adaptive", "adaptive-only models keep adaptive thinking");
 });

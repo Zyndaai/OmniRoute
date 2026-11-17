@@ -357,13 +357,13 @@ describe("Conol web provider", () => {
     );
   });
 
-  it("reports native vision support for effort variants and preserves text-only models", () => {
+  it("reports native vision support for effort variants and preserves text-only models", async () => {
     assert.equal(
-      getResolvedModelCapabilities("conol-web/claude-fable-5-xhigh").supportsVision,
+      (await getResolvedModelCapabilities("conol-web/claude-fable-5-xhigh")).supportsVision,
       true
     );
     assert.equal(
-      getResolvedModelCapabilities("cnl/deepseek/deepseek-v4-pro").supportsVision,
+      (await getResolvedModelCapabilities("cnl/deepseek/deepseek-v4-pro")).supportsVision,
       false
     );
   });

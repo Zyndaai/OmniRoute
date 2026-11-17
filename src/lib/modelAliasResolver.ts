@@ -10,7 +10,7 @@
  */
 import { getModelAliases } from "@/lib/db/models/aliases";
 import { DEFAULT_MODEL_ALIAS_SEED } from "@/lib/modelAliasSeed";
-import { getComboByName } from "@/lib/db/combos";
+import { getCachedComboByName } from "@/lib/db/readCache";
 import { getModelIsHidden } from "@/lib/db/models";
 import { resolveProviderId } from "@/shared/constants/providers";
 
@@ -54,7 +54,7 @@ export async function resolveModelAliasWithSeedFallback(
 
   // Combo routing takes precedence over individual model aliases (#10124 / #9020)
   if (model.startsWith("combo/")) return model;
-  const existingCombo = await getComboByName(model).catch(() => null);
+  const existingCombo = await getCachedComboByName(model).catch(() => null);
   if (existingCombo) return model;
 
   const aliases = await loadAliases();

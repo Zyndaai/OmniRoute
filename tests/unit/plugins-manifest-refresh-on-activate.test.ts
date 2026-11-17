@@ -15,7 +15,7 @@
 //
 // The fix must also be fail-safe: a corrupt/missing/mismatched plugin.json on disk
 // falls back to the stored manifest exactly as before — never brick an install.
-import { test, describe, beforeEach, after } from "node:test";
+import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,15 +24,8 @@ import { randomUUID } from "node:crypto";
 
 const mgr = await import("../../src/lib/plugins/manager.ts");
 const db = await import("../../src/lib/db/plugins.ts");
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
 const { runPluginOnStreamCompleteHook } =
   await import("../../open-sse/handlers/chatCore/pluginOnResponse.ts");
-
-// Release the SQLite handle when the file is done — a leaked handle hangs the
-// Node test runner (see AGENTS.md → "Database Handles in Tests").
-after(() => {
-  resetDbInstance();
-});
 
 async function waitFor(pred: () => boolean, timeoutMs = 6000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -73,8 +66,8 @@ function legacyStoredManifest(name: string, hooks: Record<string, boolean>) {
 }
 
 /** Insert the DB row as a pre-upgrade install would have left it. */
-function insertLegacyRow(name: string, pluginDir: string, hooks: Record<string, boolean>) {
-  db.insertPlugin({
+async function insertLegacyRow(name: string, pluginDir: string, hooks: Record<string, boolean>) {
+  await db.insertPlugin({
     id: randomUUID(),
     name,
     version: "1.0.0",
@@ -96,10 +89,6 @@ function makePluginDir(name: string): { tmp: string; pluginDir: string } {
 }
 
 describe("activate() refreshes the stored manifest from disk (pre-#11934 installs)", () => {
-  beforeEach(() => {
-    getDbInstance(); // ensure the plugins table migration has run
-  });
-
   test(
     "a hook field the old schema stripped registers after activate()",
     { timeout: 10000 },
@@ -133,14 +122,14 @@ module.exports = {
 
       // …but the DB row was persisted by the OLD schema: the flag is gone.
       try {
-        db.deletePlugin(NAME);
+        await db.deletePlugin(NAME);
       } catch {}
-      insertLegacyRow(NAME, pluginDir, {});
+      await insertLegacyRow(NAME, pluginDir, {});
 
       t.after(async () => {
         await mgr.pluginManager.deactivate(NAME).catch(() => {});
         try {
-          db.deletePlugin(NAME);
+          await db.deletePlugin(NAME);
         } catch {}
         rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         rmSync(outFile, { force: true });
@@ -170,7 +159,7 @@ module.exports = {
       assert.equal(payload.requestId, "trace-manifest-refresh");
 
       // The refreshed manifest must also be persisted so the row stays coherent.
-      const row = db.getPluginByName(NAME);
+      const row = await db.getPluginByName(NAME);
       assert.ok(row, "plugin row should exist");
       const storedManifest = JSON.parse(row!.manifest) as {
         hooks: Record<string, boolean | undefined>;
@@ -188,6 +177,7 @@ module.exports = {
   );
 
   test("a corrupt plugin.json on disk falls back to the stored manifest (never bricks)", async (t) => {
+    // The plugins table comes from the migrated test database (tests/_setup/isolatePostgres.ts).
     const NAME = "sc-manifest-fallback";
     const { tmp, pluginDir } = makePluginDir(NAME);
 
@@ -195,15 +185,15 @@ module.exports = {
     writeFileSync(join(pluginDir, "index.js"), `module.exports = { onRequest: async () => ({}) };`);
 
     try {
-      db.deletePlugin(NAME);
+      await db.deletePlugin(NAME);
     } catch {}
-    insertLegacyRow(NAME, pluginDir, { onRequest: true });
-    const before = db.getPluginByName(NAME)!.manifest;
+    await insertLegacyRow(NAME, pluginDir, { onRequest: true });
+    const before = (await db.getPluginByName(NAME))!.manifest;
 
     t.after(async () => {
       await mgr.pluginManager.deactivate(NAME).catch(() => {});
       try {
-        db.deletePlugin(NAME);
+        await db.deletePlugin(NAME);
       } catch {}
       rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     });
@@ -215,7 +205,7 @@ module.exports = {
       "activation must still succeed on the stored manifest when plugin.json is unreadable"
     );
     assert.equal(
-      db.getPluginByName(NAME)!.manifest,
+      (await db.getPluginByName(NAME))!.manifest,
       before,
       "a failed disk read must not overwrite the stored manifest"
     );
@@ -238,15 +228,15 @@ module.exports = {
     writeFileSync(join(pluginDir, "index.js"), `module.exports = { onRequest: async () => ({}) };`);
 
     try {
-      db.deletePlugin(NAME);
+      await db.deletePlugin(NAME);
     } catch {}
-    insertLegacyRow(NAME, pluginDir, { onRequest: true });
-    const before = db.getPluginByName(NAME)!.manifest;
+    await insertLegacyRow(NAME, pluginDir, { onRequest: true });
+    const before = (await db.getPluginByName(NAME))!.manifest;
 
     t.after(async () => {
       await mgr.pluginManager.deactivate(NAME).catch(() => {});
       try {
-        db.deletePlugin(NAME);
+        await db.deletePlugin(NAME);
       } catch {}
       rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     });
@@ -258,7 +248,7 @@ module.exports = {
       "activation should proceed on the stored manifest"
     );
     assert.equal(
-      db.getPluginByName(NAME)!.manifest,
+      (await db.getPluginByName(NAME))!.manifest,
       before,
       "a name-mismatched disk manifest must never replace the stored one"
     );

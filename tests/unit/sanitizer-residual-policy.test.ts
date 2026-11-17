@@ -20,8 +20,8 @@ const { evaluatePromptInjection } = await import("../../src/lib/guardrails/promp
 const { PIIMaskerGuardrail } = await import("../../src/lib/guardrails/piiMasker.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -108,7 +108,7 @@ test("sanitizeRequest and evaluatePromptInjection share high-default threshold",
       INPUT_SANITIZER_MODE: "block",
       INPUT_SANITIZER_BLOCK_THRESHOLD: "high",
     },
-    () => {
+    async () => {
       // Medium-only detections should not block at default threshold.
       // Use a content shape that is unlikely to also trip high patterns.
       const body = {
@@ -117,7 +117,7 @@ test("sanitizeRequest and evaluatePromptInjection share high-default threshold",
         ],
       };
       const sanitized = sanitizeRequest(body, silentLogger);
-      const evaluated = evaluatePromptInjection(body, {}, { log: silentLogger });
+      const evaluated = await evaluatePromptInjection(body, {}, { log: silentLogger });
       // If medium patterns matched, neither path should block under high threshold.
       if (
         sanitized.detections.some((d) => d.severity === "medium") &&

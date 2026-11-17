@@ -10,6 +10,8 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.STORAGE_ENCRYPTION_KEY = "log-export-runner-test-key";
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const destinationsDb = await import("../../src/lib/db/logExportDestinations.ts");
 const callLogDetails = await import("../../src/lib/db/callLogDetails.ts");
 const source = await import("../../src/lib/usage/callLogExportSource.ts");
@@ -67,20 +69,19 @@ function installFetchStub(options: { failInsert?: boolean; insertDelayMs?: numbe
   });
 }
 
-function insertCallLogs(count: number, startIndex = 0) {
-  const db = coreDb.getDbInstance();
-  const statement = db.prepare(
-    `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
-                            tokens_in, tokens_out)
-     VALUES (?, ?, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100, 10, 20)`
-  );
+async function insertCallLogs(count: number, startIndex = 0) {
   for (let i = 0; i < count; i++) {
     const index = startIndex + i;
-    statement.run(`log-${index}`, new Date(Date.UTC(2026, 7, 28, 10, 0, index)).toISOString());
+    await db().execute(
+      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
+                              tokens_in, tokens_out)
+       VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100, 10, 20)`,
+      [`log-${index}`, new Date(Date.UTC(2026, 7, 28, 10, 0, index)).toISOString()]
+    );
   }
 }
 
-function createBigQueryDestination(overrides: Record<string, unknown> = {}) {
+async function createBigQueryDestination(overrides: Record<string, unknown> = {}) {
   return destinationsDb.createLogExportDestination({
     name: "Test BigQuery",
     type: "bigquery",
@@ -99,8 +100,8 @@ function createBigQueryDestination(overrides: Record<string, unknown> = {}) {
   });
 }
 
-test.beforeEach(() => {
-  coreDb.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   googleAuth.__resetServiceAccountTokenCache();
@@ -111,14 +112,14 @@ test.afterEach(() => {
   runner.__setLogExportChildOptionsForTest(null);
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
 test("runDestinationExport_PendingLogs_ShipsThemInBatchesAndAdvancesTheCursor", async () => {
-  insertCallLogs(5);
-  const destination = createBigQueryDestination();
+  await insertCallLogs(5);
+  const destination = await createBigQueryDestination();
   const batches = installFetchStub();
 
   const result = await runner.runDestinationExport(destination);
@@ -132,22 +133,22 @@ test("runDestinationExport_PendingLogs_ShipsThemInBatchesAndAdvancesTheCursor", 
   );
   assert.equal(result.pendingAfterRun, 0);
 
-  const stored = destinationsDb.getLogExportDestination(destination.id);
+  const stored = await destinationsDb.getLogExportDestination(destination.id);
   assert.equal(stored?.exportedTotal, 5);
-  assert.equal(stored?.cursorRowId, source.getMaxCallLogRowId());
+  assert.equal(stored?.cursorRowId, await source.getMaxCallLogRowId());
   assert.equal(stored?.lastStatus, "success");
 });
 
 test("runDestinationExport_SecondRun_ExportsOnlyTheNewRows", async () => {
-  insertCallLogs(3);
-  const destination = createBigQueryDestination();
+  await insertCallLogs(3);
+  const destination = await createBigQueryDestination();
   installFetchStub();
   await runner.runDestinationExport(destination);
 
-  insertCallLogs(2, 100);
+  await insertCallLogs(2, 100);
   const batches = installFetchStub();
   const second = await runner.runDestinationExport(
-    destinationsDb.getLogExportDestination(destination.id)!
+    (await destinationsDb.getLogExportDestination(destination.id))!
   );
 
   assert.equal(second.exported, 2);
@@ -156,7 +157,7 @@ test("runDestinationExport_SecondRun_ExportsOnlyTheNewRows", async () => {
 });
 
 test("runDestinationExport_NoPendingRows_SendsNothingAndStaysSuccessful", async () => {
-  const destination = createBigQueryDestination();
+  const destination = await createBigQueryDestination();
   const batches = installFetchStub();
 
   const result = await runner.runDestinationExport(destination);
@@ -167,15 +168,15 @@ test("runDestinationExport_NoPendingRows_SendsNothingAndStaysSuccessful", async 
 });
 
 test("runDestinationExport_DestinationRejectsBatch_KeepsCursorSoRowsAreRetried", async () => {
-  insertCallLogs(4);
-  const destination = createBigQueryDestination();
+  await insertCallLogs(4);
+  const destination = await createBigQueryDestination();
   installFetchStub({ failInsert: true });
 
   const failed = await runner.runDestinationExport(destination);
 
   assert.equal(failed.success, false);
   assert.match(failed.error ?? "", /backend error/);
-  const afterFailure = destinationsDb.getLogExportDestination(destination.id);
+  const afterFailure = await destinationsDb.getLogExportDestination(destination.id);
   assert.equal(afterFailure?.cursorRowId, 0, "cursor must not move past an unaccepted batch");
   assert.equal(afterFailure?.lastStatus, "failure");
 
@@ -188,8 +189,8 @@ test("runDestinationExport_DestinationRejectsBatch_KeepsCursorSoRowsAreRetried",
 });
 
 test("runDestinationExport_MaxRowsPerRun_StopsEarlyAndReportsTheBacklog", async () => {
-  insertCallLogs(10);
-  const destination = createBigQueryDestination({ batchSize: 2, maxRowsPerRun: 4 });
+  await insertCallLogs(10);
+  const destination = await createBigQueryDestination({ batchSize: 2, maxRowsPerRun: 4 });
   installFetchStub();
 
   const result = await runner.runDestinationExport(destination);
@@ -199,18 +200,18 @@ test("runDestinationExport_MaxRowsPerRun_StopsEarlyAndReportsTheBacklog", async 
 });
 
 test("runDestinationExport_CallLogsPurgedBelowCursor_RewindsInsteadOfSkippingForever", async () => {
-  insertCallLogs(3);
-  const destination = createBigQueryDestination();
+  await insertCallLogs(3);
+  const destination = await createBigQueryDestination();
   installFetchStub();
   await runner.runDestinationExport(destination);
 
   // Simulate a purge: rowids restart, so the stored cursor now sits above max(rowid).
-  coreDb.getDbInstance().prepare("DELETE FROM call_logs").run();
-  insertCallLogs(2, 200);
+  await db().execute("TRUNCATE call_logs RESTART IDENTITY");
+  await insertCallLogs(2, 200);
 
   const batches = installFetchStub();
   const result = await runner.runDestinationExport(
-    destinationsDb.getLogExportDestination(destination.id)!
+    (await destinationsDb.getLogExportDestination(destination.id))!
   );
 
   assert.equal(result.exported, 2);
@@ -221,8 +222,8 @@ test("runDestinationExport_CallLogsPurgedBelowCursor_RewindsInsteadOfSkippingFor
 });
 
 test("runAllLogExports_DisabledDestination_IsSkipped", async () => {
-  insertCallLogs(2);
-  createBigQueryDestination({ enabled: false });
+  await insertCallLogs(2);
+  await createBigQueryDestination({ enabled: false });
   const batches = installFetchStub();
 
   const summary = await runner.runAllLogExports();
@@ -233,8 +234,8 @@ test("runAllLogExports_DisabledDestination_IsSkipped", async () => {
 });
 
 test("runAllLogExports_EnabledDestination_ExportsAndSummarises", async () => {
-  insertCallLogs(3);
-  createBigQueryDestination();
+  await insertCallLogs(3);
+  await createBigQueryDestination();
   installFetchStub();
 
   const summary = await runner.runAllLogExports();
@@ -244,8 +245,8 @@ test("runAllLogExports_EnabledDestination_ExportsAndSummarises", async () => {
   assert.equal(summary.failures, 0);
 });
 
-test("createClientForDestination_UnknownType_ThrowsInsteadOfSilentlySkipping", () => {
-  const destination = destinationsDb.createLogExportDestination({
+test("createClientForDestination_UnknownType_ThrowsInsteadOfSilentlySkipping", async () => {
+  const destination = await destinationsDb.createLogExportDestination({
     name: "Ghost",
     type: "datadog",
     enabled: true,
@@ -255,9 +256,9 @@ test("createClientForDestination_UnknownType_ThrowsInsteadOfSilentlySkipping", (
   assert.throws(() => runner.createClientForDestination(destination), /Unknown log export/);
 });
 
-test("getCallLogsForExport_ProjectedRecord_CarriesTheDashboardFields", () => {
-  insertCallLogs(1);
-  const rows = source.getCallLogsForExport(0, 10);
+test("getCallLogsForExport_ProjectedRecord_CarriesTheDashboardFields", async () => {
+  await insertCallLogs(1);
+  const rows = await source.getCallLogsForExport(0, 10);
 
   assert.equal(rows.length, 1);
   assert.ok(rows[0].rowId > 0);
@@ -270,8 +271,8 @@ test("getCallLogsForExport_ProjectedRecord_CarriesTheDashboardFields", () => {
 });
 
 test("runDestinationExport_ConcurrentRun_IsSkippedInsteadOfRewindingTheCursor", async () => {
-  insertCallLogs(6);
-  const destination = createBigQueryDestination();
+  await insertCallLogs(6);
+  const destination = await createBigQueryDestination();
   const batches = installFetchStub({ insertDelayMs: 30 });
 
   const [first, second] = await Promise.all([
@@ -286,33 +287,9 @@ test("runDestinationExport_ConcurrentRun_IsSkippedInsteadOfRewindingTheCursor", 
   assert.equal(drained.exported, 6);
   assert.equal(batches.flatMap((batch) => batch.rows).length, 6, "no row is sent twice");
 
-  const stored = destinationsDb.getLogExportDestination(destination.id);
+  const stored = await destinationsDb.getLogExportDestination(destination.id);
   assert.equal(stored?.exportedTotal, 6);
 });
-
-test("migration170_DatabaseThatPredatesTheFeature_GainsTheTableOnUpgrade", () => {
-  // Simulate an install created before migration 170 shipped: drop the table and its
-  // ledger row, then reopen. The upgrade path must recreate it, not leave the exporter
-  // querying a table that does not exist.
-  const db = coreDb.getDbInstance();
-  db.prepare("DROP TABLE IF EXISTS log_export_destinations").run();
-  db.prepare("DELETE FROM _omniroute_migrations WHERE version = '170'").run();
-  assert.equal(tableExists("log_export_destinations"), false, "precondition: table removed");
-
-  coreDb.resetDbInstance();
-  coreDb.getDbInstance();
-
-  assert.equal(tableExists("log_export_destinations"), true);
-  assert.deepEqual(destinationsDb.getLogExportDestinations(), []);
-});
-
-function tableExists(name: string): boolean {
-  const row = coreDb
-    .getDbInstance()
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-    .get(name);
-  return row !== undefined && row !== null;
-}
 
 // ---------------------------------------------------------------- payload export
 
@@ -321,7 +298,7 @@ function tableExists(name: string): boolean {
  * points at an on-disk artifact holding the request/response bodies and the pipeline's
  * client and provider views.
  */
-function insertCallLogWithBodies(
+async function insertCallLogWithBodies(
   id: string,
   bodies: {
     requestBody?: unknown;
@@ -329,7 +306,6 @@ function insertCallLogWithBodies(
     pipeline?: Record<string, unknown>;
   }
 ) {
-  const db = coreDb.getDbInstance();
   const timestamp = new Date(Date.UTC(2026, 7, 29, 12, 0, 0)).toISOString();
   const relPath = artifacts.buildArtifactRelativePath(timestamp, id);
 
@@ -373,21 +349,22 @@ function insertCallLogWithBodies(
     relPath
   );
 
-  db.prepare(
+  await db().execute(
     `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
                             tokens_in, tokens_out, artifact_relpath, detail_state,
                             has_request_body, has_response_body, has_pipeline_details)
-     VALUES (?, ?, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100, 10, 20,
-             ?, 'ready', 1, 1, ?)`
-  ).run(id, timestamp, relPath, bodies.pipeline ? 1 : 0);
+     VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100, 10, 20,
+             $3, 'ready', true, true, $4)`,
+    [id, timestamp, relPath, Boolean(bodies.pipeline)]
+  );
 }
 
 test("runDestinationExport_IncludeBodiesOff_ShipsNoPayloadsAtAll", async () => {
-  insertCallLogWithBodies("with-bodies", {
+  await insertCallLogWithBodies("with-bodies", {
     requestBody: { messages: [{ role: "user", content: "secret prompt" }] },
     responseBody: { choices: [{ message: { content: "secret answer" } }] },
   });
-  const destination = createBigQueryDestination();
+  const destination = await createBigQueryDestination();
   const batches = installFetchStub();
 
   await runner.runDestinationExport(destination);
@@ -404,7 +381,7 @@ test("runDestinationExport_IncludeBodiesOff_ShipsNoPayloadsAtAll", async () => {
 });
 
 test("runDestinationExport_IncludeBodiesOn_ShipsClientAndProviderPayloads", async () => {
-  insertCallLogWithBodies("full-detail", {
+  await insertCallLogWithBodies("full-detail", {
     requestBody: { messages: [{ role: "user", content: "what is 2+2" }] },
     responseBody: { choices: [{ message: { content: "4" } }] },
     pipeline: {
@@ -416,7 +393,7 @@ test("runDestinationExport_IncludeBodiesOn_ShipsClientAndProviderPayloads", asyn
       clientResponse: { choices: [{ message: { content: "4" } }] },
     },
   });
-  const destination = createBigQueryDestination({ includeBodies: true });
+  const destination = await createBigQueryDestination({ includeBodies: true });
   const batches = installFetchStub();
 
   await runner.runDestinationExport(destination);
@@ -434,14 +411,14 @@ test("runDestinationExport_IncludeBodiesOn_ShipsClientAndProviderPayloads", asyn
 });
 
 test("runDestinationExport_PendingArtifact_DoesNotSkipLaterBodies", async () => {
-  insertCallLogWithBodies("ready-before", { requestBody: { text: "first" } });
-  const db = coreDb.getDbInstance();
-  db.prepare(
+  await insertCallLogWithBodies("ready-before", { requestBody: { text: "first" } });
+  await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until, has_request_body)
-     VALUES ('pending-middle', ?, 'pending', ?, 1)`
-  ).run(new Date().toISOString(), Date.now() + 60_000);
-  insertCallLogWithBodies("ready-after", { requestBody: { text: "third" } });
-  const destination = createBigQueryDestination({ includeBodies: true, batchSize: 10 });
+     VALUES ('pending-middle', $1, 'pending', $2, true)`,
+    [new Date().toISOString(), new Date(Date.now() + 60_000).toISOString()]
+  );
+  await insertCallLogWithBodies("ready-after", { requestBody: { text: "third" } });
+  const destination = await createBigQueryDestination({ includeBodies: true, batchSize: 10 });
   const batches = installFetchStub();
 
   const first = await runner.runDestinationExport(destination);
@@ -465,13 +442,14 @@ test("runDestinationExport_PendingArtifact_DoesNotSkipLaterBodies", async () => 
     middle
   );
   assert.ok(pendingArtifact);
-  db.prepare(
+  await db().execute(
     `UPDATE call_logs SET detail_state = 'ready', detail_pending_until = NULL,
-       artifact_relpath = ? WHERE id = 'pending-middle'`
-  ).run(middle);
+       artifact_relpath = $1 WHERE id = 'pending-middle'`,
+    [middle]
+  );
 
   const second = await runner.runDestinationExport(
-    destinationsDb.getLogExportDestination(destination.id)!
+    (await destinationsDb.getLogExportDestination(destination.id))!
   );
   assert.equal(second.exported, 2);
   assert.deepEqual(
@@ -483,13 +461,13 @@ test("runDestinationExport_PendingArtifact_DoesNotSkipLaterBodies", async () => 
 });
 
 test("runDestinationExport_ExpiredPending_UnblocksBodiesWithoutTimestampHeuristics", async () => {
-  const db = coreDb.getDbInstance();
-  db.prepare(
+  await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until, has_request_body)
-     VALUES (?, ?, 'pending', ?, 1)`
-  ).run("expired", "2099-01-01T00:00:00.000Z", Date.now() - 1);
-  insertCallLogWithBodies("after-expired", { requestBody: { text: "retained" } });
-  const destination = createBigQueryDestination({ includeBodies: true, batchSize: 10 });
+     VALUES ($1, $2, 'pending', $3, true)`,
+    ["expired", "2099-01-01T00:00:00.000Z", new Date(Date.now() - 1).toISOString()]
+  );
+  await insertCallLogWithBodies("after-expired", { requestBody: { text: "retained" } });
+  const destination = await createBigQueryDestination({ includeBodies: true, batchSize: 10 });
   const batches = installFetchStub();
 
   const result = await runner.runDestinationExport(destination);
@@ -501,93 +479,99 @@ test("runDestinationExport_ExpiredPending_UnblocksBodiesWithoutTimestampHeuristi
   assert.equal(batches[0].rows[0].json.request_body, null);
   assert.match(String(batches[0].rows[1].json.request_body), /retained/);
   assert.deepEqual(
-    db
-      .prepare("SELECT detail_state, detail_pending_until FROM call_logs WHERE id = 'expired'")
-      .get(),
+    await db().queryOne(
+      "SELECT detail_state, detail_pending_until FROM call_logs WHERE id = 'expired'"
+    ),
     { detail_state: "missing", detail_pending_until: null }
   );
 });
 
-test("pending detail publication and expiry are conditional terminal transitions", () => {
-  const db = coreDb.getDbInstance();
-  const insert = db.prepare(
-    `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until)
-     VALUES (?, ?, 'pending', ?)`
-  );
-  insert.run("expires-first", new Date().toISOString(), Date.now() - 1);
-  callLogDetails.expirePendingCallLogDetails(db);
+test("pending detail publication and expiry are conditional terminal transitions", async () => {
+  const executor = db();
+  const insert = (id: string, pendingUntil: number) =>
+    executor.execute(
+      `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until)
+       VALUES ($1, $2, 'pending', $3)`,
+      [id, new Date().toISOString(), new Date(pendingUntil).toISOString()]
+    );
+  const stateOf = async (id: string) =>
+    (
+      await executor.queryOne<{ detail_state: string }>(
+        "SELECT detail_state FROM call_logs WHERE id = $1",
+        [id]
+      )
+    )?.detail_state;
+
+  await insert("expires-first", Date.now() - 1);
+  await callLogDetails.expirePendingCallLogDetails(executor);
   assert.equal(
-    callLogDetails.publishPendingCallLogDetail(db, "expires-first", {
+    await callLogDetails.publishPendingCallLogDetail(executor, "expires-first", {
       relPath: "late.json",
       sizeBytes: 1,
       sha256: "late",
     }),
     false
   );
-  assert.equal(
-    db.prepare("SELECT detail_state FROM call_logs WHERE id = 'expires-first'").get().detail_state,
-    "missing"
-  );
+  assert.equal(await stateOf("expires-first"), "missing");
 
-  insert.run("deadline-elapsed", new Date().toISOString(), Date.now() - 1);
+  await insert("deadline-elapsed", Date.now() - 1);
   assert.equal(
-    callLogDetails.publishPendingCallLogDetail(db, "deadline-elapsed", {
+    await callLogDetails.publishPendingCallLogDetail(executor, "deadline-elapsed", {
       relPath: "too-late.json",
       sizeBytes: 1,
       sha256: "late",
     }),
     false
   );
-  callLogDetails.failPendingCallLogDetail(db, "deadline-elapsed");
-  assert.equal(
-    db.prepare("SELECT detail_state FROM call_logs WHERE id = 'deadline-elapsed'").get()
-      .detail_state,
-    "missing"
-  );
+  await callLogDetails.failPendingCallLogDetail(executor, "deadline-elapsed");
+  assert.equal(await stateOf("deadline-elapsed"), "missing");
 
-  insert.run("publishes-first", new Date().toISOString(), Date.now() + 60_000);
+  await insert("publishes-first", Date.now() + 60_000);
   assert.equal(
-    callLogDetails.publishPendingCallLogDetail(db, "publishes-first", {
+    await callLogDetails.publishPendingCallLogDetail(executor, "publishes-first", {
       relPath: "early.json",
       sizeBytes: 1,
       sha256: "early",
     }),
     true
   );
-  callLogDetails.expirePendingCallLogDetails(db);
+  await callLogDetails.expirePendingCallLogDetails(executor);
   assert.deepEqual(
-    db
-      .prepare("SELECT detail_state, artifact_relpath FROM call_logs WHERE id = 'publishes-first'")
-      .get(),
+    await executor.queryOne(
+      "SELECT detail_state, artifact_relpath FROM call_logs WHERE id = 'publishes-first'"
+    ),
     { detail_state: "ready", artifact_relpath: "early.json" }
   );
 });
 
 test("runDestinationExport_PendingFirst_LeavesCursorUntilPublished", async () => {
-  const db = coreDb.getDbInstance();
-  db.prepare(
+  await db().execute(
     `INSERT INTO call_logs (id, timestamp, detail_state, detail_pending_until)
-     VALUES ('first-pending', ?, 'pending', ?)`
-  ).run(new Date().toISOString(), Date.now() + 60_000);
-  insertCallLogWithBodies("later-ready", { requestBody: { text: "later" } });
-  const destination = createBigQueryDestination({ includeBodies: true });
+     VALUES ('first-pending', $1, 'pending', $2)`,
+    [new Date().toISOString(), new Date(Date.now() + 60_000).toISOString()]
+  );
+  await insertCallLogWithBodies("later-ready", { requestBody: { text: "later" } });
+  const destination = await createBigQueryDestination({ includeBodies: true });
   const batches = installFetchStub();
   const result = await runner.runDestinationExport(destination);
   assert.equal(result.exported, 0);
   assert.equal(result.pendingAfterRun, 2);
-  assert.equal(destinationsDb.getLogExportDestination(destination.id)?.cursorRowId, 0);
+  assert.equal((await destinationsDb.getLogExportDestination(destination.id))?.cursorRowId, 0);
   assert.equal(batches.length, 0);
 
-  const summaries = createBigQueryDestination({ includeBodies: false });
+  const summaries = await createBigQueryDestination({ includeBodies: false });
   const summaryResult = await runner.runDestinationExport(summaries);
   assert.equal(summaryResult.exported, 2);
 });
 
 test("runDestinationExport_PayloadOverTheCap_TruncatesAndFlagsInsteadOfDropping", async () => {
-  insertCallLogWithBodies("oversized", {
+  await insertCallLogWithBodies("oversized", {
     requestBody: { messages: [{ role: "user", content: "z".repeat(20_000) }] },
   });
-  const destination = createBigQueryDestination({ includeBodies: true, maxBodyBytes: 2048 });
+  const destination = await createBigQueryDestination({
+    includeBodies: true,
+    maxBodyBytes: 2048,
+  });
   const batches = installFetchStub();
 
   await runner.runDestinationExport(destination);
@@ -601,15 +585,15 @@ test("runDestinationExport_PayloadOverTheCap_TruncatesAndFlagsInsteadOfDropping"
 
 test("runDestinationExport_MissingArtifact_ExportsSummaryRatherThanFailingTheBatch", async () => {
   // A row that claims an artifact which is not on disk: retention or a manual purge.
-  const db = coreDb.getDbInstance();
-  db.prepare(
+  await db().execute(
     `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, duration,
                             tokens_in, tokens_out, artifact_relpath, detail_state, has_request_body)
-     VALUES ('orphan', ?, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100,
-             10, 20, '2026/08/29/orphan.json', 'ready', 1)`
-  ).run(new Date(Date.UTC(2026, 7, 29, 13, 0, 0)).toISOString());
+     VALUES ('orphan', $1, 'POST', '/v1/chat/completions', 200, 'claude-opus-5', 'anthropic', 100,
+             10, 20, '2026/08/29/orphan.json', 'ready', true)`,
+    [new Date(Date.UTC(2026, 7, 29, 13, 0, 0)).toISOString()]
+  );
 
-  const destination = createBigQueryDestination({ includeBodies: true });
+  const destination = await createBigQueryDestination({ includeBodies: true });
   const batches = installFetchStub();
 
   const result = await runner.runDestinationExport(destination);

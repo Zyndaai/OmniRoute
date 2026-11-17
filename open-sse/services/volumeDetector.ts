@@ -155,8 +155,8 @@ export async function recommendStrategyOverride(
 
   // Check if adaptive routing is enabled globally
   try {
-    const { getSettings } = await import("@/lib/db/settings");
-    const settings = await getSettings();
+    const { getCachedSettings } = await import("@/lib/db/readCache");
+    const settings = await getCachedSettings();
     if (!settings.adaptiveVolumeRouting) {
       return noOverride;
     }

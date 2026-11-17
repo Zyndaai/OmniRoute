@@ -24,10 +24,10 @@ if (testDataDir) {
 const { ensureDbInitialized, resetDbInstance } = await import("../../src/lib/db/core.ts");
 await ensureDbInitialized();
 
-test.after(() => {
+test.after(async () => {
   if (testDataDir) {
     try {
-      resetDbInstance();
+      await resetDbInstance();
       fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {}
   }
@@ -49,7 +49,7 @@ function findRow(models: readonly unknown[] | undefined, id: string): Row | unde
   return (models as Row[] | undefined)?.find((m) => m.id === id);
 }
 
-test("deepseek registry flags the Flash ids as vision-capable", () => {
+test("deepseek registry flags the Flash ids as vision-capable", async () => {
   for (const id of ["deepseek-flash", "deepseek-v4-flash"]) {
     const row = findRow(deepseekProvider.models, id);
     assert.ok(row, `${id} must be in the deepseek static catalog`);
@@ -60,7 +60,7 @@ test("deepseek registry flags the Flash ids as vision-capable", () => {
   assert.ok(flashRow?.aliases?.includes("deepseek-4.1-flash"));
 });
 
-test("deepseek registry lookup exposes the vision flag", () => {
+test("deepseek registry lookup exposes the vision flag", async () => {
   const models = getRegistryEntry("deepseek")?.models;
   for (const id of ["deepseek-flash", "deepseek-v4-flash"]) {
     assert.equal(findRow(models, id)?.supportsVision, true, `${id} via getRegistryEntry`);
@@ -74,14 +74,17 @@ test("deepseek registry lookup exposes the vision flag", () => {
   }
 });
 
-test("deepseek-v4-pro stays text-only", () => {
+test("deepseek-v4-pro stays text-only", async () => {
   const row = findRow(deepseekProvider.models, "deepseek-v4-pro");
   assert.ok(row, "deepseek-v4-pro must still be registered");
   assert.notEqual(row.supportsVision, true);
-  assert.notEqual(getResolvedModelCapabilities("deepseek/deepseek-v4-pro").supportsVision, true);
+  assert.notEqual(
+    (await getResolvedModelCapabilities("deepseek/deepseek-v4-pro")).supportsVision,
+    true
+  );
 });
 
-test("resolved capabilities: vision on the deepseek Flash ids and aliases", () => {
+test("resolved capabilities: vision on the deepseek Flash ids and aliases", async () => {
   for (const modelId of [
     "deepseek/deepseek-flash",
     "deepseek/deepseek-v4-flash",
@@ -92,7 +95,7 @@ test("resolved capabilities: vision on the deepseek Flash ids and aliases", () =
     "ds/deepseek-4.1-flash",
   ]) {
     assert.equal(
-      getResolvedModelCapabilities(modelId).supportsVision,
+      (await getResolvedModelCapabilities(modelId)).supportsVision,
       true,
       `${modelId} must resolve supportsVision: true`
     );
@@ -105,14 +108,14 @@ test("resolved capabilities: vision on the deepseek Flash ids and aliases", () =
     { provider: "ds", model: "deepseek-4.1-flash" },
   ]) {
     assert.equal(
-      getResolvedModelCapabilities(input).supportsVision,
+      (await getResolvedModelCapabilities(input)).supportsVision,
       true,
       `${JSON.stringify(input)} must resolve supportsVision: true`
     );
   }
 });
 
-test("deepseek model canonicalization maps flash aliases to deepseek-flash", () => {
+test("deepseek model canonicalization maps flash aliases to deepseek-flash", async () => {
   assert.deepEqual(resolveCanonicalProviderModel("deepseek", "deepseek-v4.1-flash"), {
     provider: "deepseek",
     model: "deepseek-flash",
@@ -151,8 +154,8 @@ const imageBody = {
   ],
 };
 
-test("#17180 image request keeps deepseek flash targets in the combo pool", () => {
-  const kept = filterTargetsByRequestCompatibility(
+test("#17180 image request keeps deepseek flash targets in the combo pool", async () => {
+  const kept = (await filterTargetsByRequestCompatibility(
     [
       target("deepseek/deepseek-4.1-flash"),
       target("deepseek/deepseek-v4.1-flash"),
@@ -162,14 +165,14 @@ test("#17180 image request keeps deepseek flash targets in the combo pool", () =
     ],
     imageBody,
     noopLog
-  ).map((t) => t.modelStr);
+  )).map((t) => t.modelStr);
 
   // #17289 (tip): unknown-vision targets are no longer dropped from an image
   // request; they trail the confirmed-vision tier as last-resort fallbacks.
   // The Flash ids/aliases must form that confirmed tier, in their original order.
   for (const fallback of ["deepseek/deepseek-v4-pro", "groq/llama-3.1-8b-instant"]) {
     assert.equal(
-      getResolvedModelCapabilities(fallback).supportsVision,
+      (await getResolvedModelCapabilities(fallback)).supportsVision,
       null,
       `${fallback} is an unknown-vision fallback, not a confirmed one`
     );
@@ -187,7 +190,7 @@ test("#17180 image request keeps deepseek flash targets in the combo pool", () =
   );
 });
 
-test("the id heuristic gets no generic deepseek fragment", () => {
+test("the id heuristic gets no generic deepseek fragment", async () => {
   assert.equal(isVisionModelId("deepseek-v4-pro"), false);
   assert.equal(isVisionModelId("deepseek-flash"), false);
 });

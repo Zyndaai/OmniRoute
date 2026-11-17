@@ -69,8 +69,8 @@ test.before(async () => {
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -160,11 +160,13 @@ test("a credit-metered provider keeps its numeric pricing and gets no per-token 
   assert.ok(credit.length > 0, "catalog lists priced kiro models");
   for (const entry of credit) {
     // Exactly what catalog enrichment produced before per-token strings existed.
-    const before = enrichCatalogModelEntry({
-      id: entry.id,
-      owned_by: entry.owned_by,
-      root: entry.root,
-    }).pricing;
+    const before = (
+      await enrichCatalogModelEntry({
+        id: entry.id,
+        owned_by: entry.owned_by,
+        root: entry.root,
+      })
+    ).pricing;
     assert.deepEqual(entry.pricing, before, entry.id);
     assert.equal("prompt" in (entry.pricing ?? {}), false, entry.id);
     assert.equal("completion" in (entry.pricing ?? {}), false, entry.id);

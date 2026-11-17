@@ -110,8 +110,8 @@ test("integer enum on an integer type keeps its range after the enum is dropped"
   assert.equal(out.maximum, 7);
 });
 
-test("response_format literal union reaches Gemini as a typed integer property", () => {
-  const result = openaiToGeminiRequest(
+test("response_format literal union reaches Gemini as a typed integer property", async () => {
+  const result = await openaiToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: "rate it" }],

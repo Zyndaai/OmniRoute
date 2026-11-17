@@ -2,12 +2,11 @@
  * Unit tests for src/lib/arenaEloSync.ts
  *
  * Uses Node.js native test runner. All external fetch calls are mocked.
- * DB functions use a real in-memory SQLite instance via node:sqlite (DatabaseSync),
- * injected through the core module's globalThis.__omnirouteDb singleton.
- * backupDbFile is called during first sync but safely no-ops (no file on disk).
+ * DB functions use the per-process isolated PostgreSQL database
+ * (tests/_setup/isolatePostgres.ts); each test starts from resetTestDb().
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -16,18 +15,8 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-arena-elo-test-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(
-    import.meta.dirname ?? __dirname,
-    "../../src/lib/db/migrations/097_model_intelligence.sql"
-  ),
-  "utf8"
-);
-
-import { tryOpenSync } from "../../src/lib/db/adapters/driverFactory";
-import type { SqliteAdapter } from "../../src/lib/db/adapters/types";
-
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 const {
   normalizeModelName,
@@ -41,6 +30,7 @@ const {
 const { applyArenaEloRefresh } = await import("../../src/lib/db/modelIntelligence.ts");
 const { setFeatureFlagOverride, removeFeatureFlagOverride } =
   await import("../../src/lib/db/featureFlags.ts");
+const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
 const { resolveScoresAs } = await import("../../open-sse/services/autoCombo/scoresAs.ts");
 
 import type {
@@ -99,43 +89,40 @@ function makeLeaderboardMap(
   return map;
 }
 
-let testAdapter: SqliteAdapter;
-
-function createTestAdapter(): SqliteAdapter {
-  const patchedSql = MIGRATION_SQL.replace(
-    /\n\s*synced_at TEXT NOT NULL DEFAULT \(datetime\('now'\)\)/,
-    "\n  synced_at TEXT NOT NULL"
-  );
-  const adapter = tryOpenSync(":memory:")!;
-  adapter.exec(`
-    CREATE TABLE IF NOT EXISTS key_value (
-      namespace TEXT NOT NULL,
-      key TEXT NOT NULL,
-      value TEXT NOT NULL,
-      PRIMARY KEY (namespace, key)
-    );
-  `);
-  adapter.exec(patchedSql);
-  return adapter;
+// Flag reads serve an in-process snapshot (src/shared/utils/featureFlags.ts) that is not
+// refreshed by setFeatureFlagOverride(); reload it explicitly (twice, in case a refresh that
+// began before the write was already in flight).
+async function syncFlagSnapshot(): Promise<void> {
+  await refreshFeatureFlagSnapshot();
+  await refreshFeatureFlagSnapshot();
 }
 
-function countArenaEloEntries(): number {
-  const row = testAdapter
-    .prepare("SELECT COUNT(*) as cnt FROM model_intelligence WHERE source = 'arena_elo'")
-    .get() as Record<string, unknown> | undefined;
+async function countArenaEloEntries(): Promise<number> {
+  const row = await getTestBackend().queryOne<{ cnt: number }>(
+    "SELECT COUNT(*) AS cnt FROM model_intelligence WHERE source = 'arena_elo'"
+  );
   return Number(row?.cnt ?? 0);
 }
 
-function getAllEntries(): Array<Record<string, unknown>> {
-  return testAdapter
-    .prepare("SELECT * FROM model_intelligence WHERE source = 'arena_elo' ORDER BY model, category")
-    .all() as Array<Record<string, unknown>>;
+async function getAllEntries(): Promise<Array<Record<string, unknown>>> {
+  return getTestBackend().query<Record<string, unknown>>(
+    "SELECT * FROM model_intelligence WHERE source = 'arena_elo' ORDER BY model, category"
+  );
 }
 
-beforeEach(() => {
-  core.resetDbInstance();
-  testAdapter = createTestAdapter();
-  globalThis.__omnirouteDb = testAdapter as never;
+async function setArenaSyncedAt(iso: string): Promise<void> {
+  await getTestBackend().execute(
+    "UPDATE model_intelligence SET synced_at = $1 WHERE source = 'arena_elo'",
+    [iso]
+  );
+}
+
+async function deleteArenaRows(): Promise<void> {
+  await getTestBackend().execute("DELETE FROM model_intelligence WHERE source = 'arena_elo'");
+}
+
+beforeEach(async () => {
+  await resetTestDb();
   stopArenaEloSync();
   delete process.env.ARENA_ELO_SYNC_ENABLED;
 });
@@ -143,8 +130,12 @@ beforeEach(() => {
 afterEach(() => {
   restoreFetch();
   stopArenaEloSync();
-  delete globalThis.__omnirouteDb;
   delete process.env.ARENA_ELO_SYNC_ENABLED;
+});
+
+after(async () => {
+  await core.resetDbInstance();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -660,7 +651,7 @@ describe("syncArenaElo()", () => {
     assert.strictEqual(result.source, "arena_elo");
     assert.ok(result.modelCount > 0);
 
-    const dbCount = countArenaEloEntries();
+    const dbCount = await countArenaEloEntries();
     assert.ok(dbCount > 0);
     assert.strictEqual(dbCount, result.modelCount);
   });
@@ -679,7 +670,7 @@ describe("syncArenaElo()", () => {
 
     await syncArenaElo();
 
-    const entries = getAllEntries().filter((e) => String(e.model) === "unique-test-model");
+    const entries = (await getAllEntries()).filter((e) => String(e.model) === "unique-test-model");
     const categories = entries.map((e) => String(e.category)).sort();
     assert.deepStrictEqual(categories, ["debugging", "default", "documentation", "review"]);
 
@@ -705,7 +696,7 @@ describe("syncArenaElo()", () => {
     assert.strictEqual(result.success, true);
     assert.ok(result.modelCount > 0);
 
-    const dbCount = countArenaEloEntries();
+    const dbCount = await countArenaEloEntries();
     assert.strictEqual(dbCount, 0, "dryRun should not write to DB");
   });
 
@@ -714,7 +705,7 @@ describe("syncArenaElo()", () => {
     // lastSync should remain unchanged from whatever it was.
     // Since we can't reset module-level vars, we verify that a dryRun
     // after a non-dryRun doesn't overwrite the model count.
-    const statusBefore = getArenaEloSyncStatus();
+    const statusBefore = await getArenaEloSyncStatus();
 
     const textData = makeLeaderboardData(
       [makeModelEntry({ model: "test-model", score: 1200, votes: 5000, rank: 1 })],
@@ -729,7 +720,7 @@ describe("syncArenaElo()", () => {
 
     await syncArenaElo(true);
 
-    const statusAfter = getArenaEloSyncStatus();
+    const statusAfter = await getArenaEloSyncStatus();
     // dryRun should not change the modelCount
     assert.strictEqual(statusAfter.lastSyncModelCount, statusBefore.lastSyncModelCount);
   });
@@ -752,11 +743,9 @@ describe("syncArenaElo()", () => {
   });
 
   it("calls deleteExpiredIntelligence before writing new entries", async () => {
-    testAdapter
-      .prepare(
-        "INSERT INTO model_intelligence (model, source, category, score, elo_raw, confidence, synced_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-      )
-      .run(
+    await getTestBackend().execute(
+      "INSERT INTO model_intelligence (model, source, category, score, elo_raw, confidence, synced_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+      [
         "old-model",
         "arena_elo",
         "default",
@@ -764,10 +753,11 @@ describe("syncArenaElo()", () => {
         1000,
         "low",
         "2025-01-01T00:00:00Z",
-        "2020-01-01T00:00:00Z"
-      );
+        "2020-01-01T00:00:00Z",
+      ]
+    );
 
-    assert.strictEqual(countArenaEloEntries(), 1);
+    assert.strictEqual(await countArenaEloEntries(), 1);
 
     const textData = makeLeaderboardData(
       [makeModelEntry({ model: "new-model", score: 1200, votes: 5000, rank: 1 })],
@@ -783,10 +773,10 @@ describe("syncArenaElo()", () => {
     const syncResult = await syncArenaElo();
     assert.strictEqual(syncResult.success, true);
 
-    const expiredEntry = testAdapter
-      .prepare("SELECT * FROM model_intelligence WHERE model = 'old-model'")
-      .get();
-    assert.strictEqual(expiredEntry, undefined);
+    const expiredEntry = await getTestBackend().queryOne(
+      "SELECT * FROM model_intelligence WHERE model = 'old-model'"
+    );
+    assert.ok(!expiredEntry, "expired row must be deleted");
   });
 
   it("handles empty leaderboard gracefully (0 entries, no DB write)", async () => {
@@ -800,7 +790,7 @@ describe("syncArenaElo()", () => {
 
     assert.strictEqual(result.success, true);
     assert.strictEqual(result.modelCount, 0);
-    assert.strictEqual(countArenaEloEntries(), 0);
+    assert.strictEqual(await countArenaEloEntries(), 0);
   });
 
   it("updates lastSyncTime after successful sync", async () => {
@@ -817,7 +807,7 @@ describe("syncArenaElo()", () => {
 
     await syncArenaElo();
 
-    const status = getArenaEloSyncStatus();
+    const status = await getArenaEloSyncStatus();
     assert.ok(status.lastSync);
     assert.ok(status.lastSyncModelCount > 0);
   });
@@ -843,7 +833,7 @@ describe("syncArenaElo()", () => {
 
     await syncArenaElo();
 
-    const entries = getAllEntries();
+    const entries = await getAllEntries();
     const models = entries.map((e) => String(e.model));
 
     assert.ok(models.includes("claude-opus-4-6-thinking"));
@@ -856,8 +846,8 @@ describe("syncArenaElo()", () => {
 // ═══════════════════════════════════════════════════════════
 
 describe("getArenaEloSyncStatus()", () => {
-  it("returns correct structure with all expected keys", () => {
-    const status = getArenaEloSyncStatus();
+  it("returns correct structure with all expected keys", async () => {
+    const status = await getArenaEloSyncStatus();
 
     assert.ok("enabled" in status);
     assert.ok("lastSync" in status);
@@ -867,40 +857,40 @@ describe("getArenaEloSyncStatus()", () => {
     assert.ok("sources" in status);
   });
 
-  it("returns sources containing 'arena_elo'", () => {
-    const status = getArenaEloSyncStatus();
+  it("returns sources containing 'arena_elo'", async () => {
+    const status = await getArenaEloSyncStatus();
     assert.deepStrictEqual(status.sources, ["arena_elo"]);
   });
 
-  it("returns intervalMs as a positive number", () => {
-    const status = getArenaEloSyncStatus();
+  it("returns intervalMs as a positive number", async () => {
+    const status = await getArenaEloSyncStatus();
     assert.ok(typeof status.intervalMs === "number");
     assert.ok(status.intervalMs > 0);
   });
 
-  it("returns lastSyncModelCount as 0 before any non-dryRun sync completes in this suite context", () => {
+  it("returns lastSyncModelCount as 0 before any non-dryRun sync completes in this suite context", async () => {
     // Module-level lastSyncTime may leak from earlier tests in the suite,
     // but the structural fields are always present.
-    const status = getArenaEloSyncStatus();
+    const status = await getArenaEloSyncStatus();
     assert.ok(typeof status.lastSync === "string" || status.lastSync === null);
     assert.ok(typeof status.lastSyncModelCount === "number");
     assert.ok(typeof status.nextSync === "string" || status.nextSync === null);
   });
 
-  it("reflects ARENA_ELO_SYNC_ENABLED env var (on by default, opt-out)", () => {
+  it("reflects ARENA_ELO_SYNC_ENABLED env var (on by default, opt-out)", async () => {
     const original = process.env.ARENA_ELO_SYNC_ENABLED;
 
     process.env.ARENA_ELO_SYNC_ENABLED = "true";
-    const enabledStatus = getArenaEloSyncStatus();
+    const enabledStatus = await getArenaEloSyncStatus();
     assert.strictEqual(enabledStatus.enabled, true);
 
     process.env.ARENA_ELO_SYNC_ENABLED = "false";
-    const disabledStatus = getArenaEloSyncStatus();
+    const disabledStatus = await getArenaEloSyncStatus();
     assert.strictEqual(disabledStatus.enabled, false);
 
     // Default (unset) is now enabled — only an explicit "false" opts out.
     delete process.env.ARENA_ELO_SYNC_ENABLED;
-    const defaultStatus = getArenaEloSyncStatus();
+    const defaultStatus = await getArenaEloSyncStatus();
     assert.strictEqual(defaultStatus.enabled, true);
 
     if (original !== undefined) {
@@ -910,28 +900,35 @@ describe("getArenaEloSyncStatus()", () => {
     }
   });
 
-  it("reflects dashboard feature flag DB overrides before env values", () => {
+  it("reflects dashboard feature flag DB overrides before env values", async () => {
     process.env.ARENA_ELO_SYNC_ENABLED = "true";
     try {
-      setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "false");
+      await setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "false");
+      await syncFlagSnapshot();
 
-      const status = getArenaEloSyncStatus();
+      const status = await getArenaEloSyncStatus();
       assert.strictEqual(status.enabled, false);
     } finally {
-      removeFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED");
+      await removeFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED");
+      await syncFlagSnapshot();
     }
   });
 
-  it("falls back to the env value if the feature flag store is unavailable", () => {
-    testAdapter.exec("DROP TABLE key_value");
-    process.env.ARENA_ELO_SYNC_ENABLED = "false";
+  it("falls back to the env value if the feature flag store is unavailable", async () => {
+    const backend = getTestBackend();
+    await backend.execute("ALTER TABLE config_entries RENAME TO config_entries_hidden");
+    try {
+      process.env.ARENA_ELO_SYNC_ENABLED = "false";
 
-    const status = getArenaEloSyncStatus();
-    assert.strictEqual(status.enabled, false);
+      const status = await getArenaEloSyncStatus();
+      assert.strictEqual(status.enabled, false);
+    } finally {
+      await backend.execute("ALTER TABLE config_entries_hidden RENAME TO config_entries");
+    }
   });
 
-  it("serves the persisted date after a restart (memory empty)", () => {
-    const FRESH = "2026-10-14 12:00:00";
+  it("serves the persisted date after a restart (memory empty)", async () => {
+    const FRESH = "2026-10-14T12:00:00Z";
     const FRESH_ISO = "2026-10-14T12:00:00.000Z";
     const entries = transformToModelIntelligence(
       makeLeaderboardMap({
@@ -939,96 +936,69 @@ describe("getArenaEloSyncStatus()", () => {
       })
     );
     assert.ok(entries.length > 0);
-    applyArenaEloRefresh(entries);
-    testAdapter
-      .prepare("UPDATE model_intelligence SET synced_at = ? WHERE source = 'arena_elo'")
-      .run(FRESH);
-    const status = getArenaEloSyncStatus();
+    await applyArenaEloRefresh(entries);
+    await setArenaSyncedAt(FRESH);
+    const status = await getArenaEloSyncStatus();
     assert.strictEqual(status.lastSync, FRESH_ISO);
   });
 
-  it("normalizes persisted ISO offsets to UTC", () => {
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
+  it("normalizes persisted ISO offsets to UTC", async () => {
+    await deleteArenaRows();
     const entries = transformToModelIntelligence(
       makeLeaderboardMap({
         text: [makeModelEntry({ model: "offset-model", score: 1300, votes: 5000, rank: 1 })],
       })
     );
     assert.ok(entries.length > 0);
-    applyArenaEloRefresh(entries);
-    testAdapter
-      .prepare("UPDATE model_intelligence SET synced_at = ? WHERE source = 'arena_elo'")
-      .run("2026-10-14T07:20:30-03:00");
-    const status = getArenaEloSyncStatus();
+    await applyArenaEloRefresh(entries);
+    await setArenaSyncedAt("2026-10-14T07:20:30-03:00");
+    const status = await getArenaEloSyncStatus();
     assert.strictEqual(status.lastSync, "2026-10-14T10:20:30.000Z");
   });
 
-  it("falls back to memory when the persisted date is malformed", () => {
-    const before = getArenaEloSyncStatus().lastSync;
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
-    testAdapter
-      .prepare(
-        "INSERT INTO model_intelligence (model, source, category, score, synced_at) VALUES (?, ?, ?, ?, ?)"
-      )
-      .run("invalid-model", "arena_elo", "text", 80, "not-a-date");
-    let status: ReturnType<typeof getArenaEloSyncStatus> | undefined;
-    assert.doesNotThrow(() => {
-      status = getArenaEloSyncStatus();
-    });
-    assert.strictEqual(status!.lastSync, before);
-  });
+  // The SQLite-era "falls back to memory when the persisted date is malformed" case is gone:
+  // synced_at is a timestamptz now, so an unparsable value cannot be stored.
 
-  it("ignores rows from other sources when serving freshness", () => {
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
+  it("ignores rows from other sources when serving freshness", async () => {
+    await deleteArenaRows();
     const entries = transformToModelIntelligence(
       makeLeaderboardMap({
         text: [makeModelEntry({ model: "isolation-model", score: 1300, votes: 5000, rank: 1 })],
       })
     );
     assert.ok(entries.length > 0);
-    applyArenaEloRefresh(entries);
-    testAdapter
-      .prepare("UPDATE model_intelligence SET synced_at = ? WHERE source = 'arena_elo'")
-      .run("2026-10-14 10:20:30");
-    testAdapter
-      .prepare(
-        "INSERT INTO model_intelligence (model, source, category, score, synced_at) VALUES (?, ?, ?, ?, ?)"
-      )
-      .run("other-model", "other-source", "text", 90, "2026-10-15 10:20:30");
-    const status = getArenaEloSyncStatus();
+    await applyArenaEloRefresh(entries);
+    await setArenaSyncedAt("2026-10-14T10:20:30Z");
+    await getTestBackend().execute(
+      "INSERT INTO model_intelligence (model, source, category, score, synced_at) VALUES ($1, $2, $3, $4, $5)",
+      ["other-model", "models_dev_tier", "text", 0.9, "2026-10-15T10:20:30Z"]
+    );
+    const status = await getArenaEloSyncStatus();
     assert.strictEqual(status.lastSync, "2026-10-14T10:20:30.000Z");
   });
 
-  it("falls back to memory without error when no arena_elo row exists", () => {
-    const before = getArenaEloSyncStatus().lastSync;
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
-    let status: ReturnType<typeof getArenaEloSyncStatus> | undefined;
-    assert.doesNotThrow(() => {
-      status = getArenaEloSyncStatus();
-    });
-    assert.strictEqual(status!.lastSync, before);
+  it("falls back to memory without error when no arena_elo row exists", async () => {
+    const before = (await getArenaEloSyncStatus()).lastSync;
+    await deleteArenaRows();
+    const status = await getArenaEloSyncStatus();
+    assert.strictEqual(status.lastSync, before);
   });
 
-  it("falls back to memory without error when arena_elo rows are removed", () => {
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
-    const emptyBaseline = getArenaEloSyncStatus().lastSync;
+  it("falls back to memory without error when arena_elo rows are removed", async () => {
+    await deleteArenaRows();
+    const emptyBaseline = (await getArenaEloSyncStatus()).lastSync;
     const entries = transformToModelIntelligence(
       makeLeaderboardMap({
         text: [makeModelEntry({ model: "removed-model", score: 1300, votes: 5000, rank: 1 })],
       })
     );
     assert.ok(entries.length > 0);
-    applyArenaEloRefresh(entries);
-    testAdapter
-      .prepare("UPDATE model_intelligence SET synced_at = ? WHERE source = 'arena_elo'")
-      .run("2026-10-14 10:20:30");
-    assert.strictEqual(getArenaEloSyncStatus().lastSync, "2026-10-14T10:20:30.000Z");
-    testAdapter.prepare("DELETE FROM model_intelligence WHERE source = 'arena_elo'").run();
-    let status: ReturnType<typeof getArenaEloSyncStatus> | undefined;
-    assert.doesNotThrow(() => {
-      status = getArenaEloSyncStatus();
-    });
-    assert.strictEqual(status!.lastSync, emptyBaseline);
+    await applyArenaEloRefresh(entries);
+    await setArenaSyncedAt("2026-10-14T10:20:30Z");
+    assert.strictEqual((await getArenaEloSyncStatus()).lastSync, "2026-10-14T10:20:30.000Z");
+    await deleteArenaRows();
+    const status = await getArenaEloSyncStatus();
+    assert.strictEqual(status.lastSync, emptyBaseline);
   });
 
   it("public health exposes no arena freshness (liveness only)", async () => {
@@ -1049,11 +1019,13 @@ describe("getArenaEloSyncStatus()", () => {
 describe("stopArenaEloSync()", () => {
   it("initArenaEloSync returns false when disabled by feature flag", async () => {
     try {
-      setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "false");
+      await setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "false");
+      await syncFlagSnapshot();
       const started = await initArenaEloSync();
       assert.strictEqual(started, false);
     } finally {
-      removeFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED");
+      await removeFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED");
+      await syncFlagSnapshot();
     }
   });
 

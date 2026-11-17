@@ -19,48 +19,47 @@ import fs from "node:fs";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-xiaomi-"));
 process.env.DATA_DIR = TMP;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { getMonthlyProviderTokensForConnection } = await import("../../src/lib/usage/usageStats.ts");
 const { __testing } = await import("../../open-sse/services/usage.ts");
 const { getXiaomiMimoUsage } = __testing;
 
 const XIAOMI_LIMIT = 4_100_000_000;
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   tokensIn: number,
   tokensOut: number,
   timestamp: string
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, connectionId, tokensIn, tokensOut, timestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, "timestamp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, connectionId, tokensIn, tokensOut, timestamp]
+  );
 }
 
 describe("xiaomi-mimo self-tracked quota", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
+  before(async () => {
     const now = new Date();
     const thisMonth = now.toISOString();
     const lastMonth = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)
     ).toISOString();
     // current month for conn-x: 1.0M + 0.5M (+ another 0.1M)
-    insertUsage("conn-x", "xiaomi-mimo", 1_000_000, 500_000, thisMonth);
-    insertUsage("conn-x", "xiaomi-mimo", 100_000, 0, thisMonth);
+    await insertUsage("conn-x", "xiaomi-mimo", 1_000_000, 500_000, thisMonth);
+    await insertUsage("conn-x", "xiaomi-mimo", 100_000, 0, thisMonth);
     // last month must NOT count toward the current window
-    insertUsage("conn-x", "xiaomi-mimo", 9_000_000, 9_000_000, lastMonth);
+    await insertUsage("conn-x", "xiaomi-mimo", 9_000_000, 9_000_000, lastMonth);
     // a different connection must not bleed in
-    insertUsage("conn-y", "xiaomi-mimo", 7_000_000, 0, thisMonth);
+    await insertUsage("conn-y", "xiaomi-mimo", 7_000_000, 0, thisMonth);
     // a different provider on the same connection must not bleed in
-    insertUsage("conn-x", "minimax", 8_000_000, 0, thisMonth);
+    await insertUsage("conn-x", "minimax", 8_000_000, 0, thisMonth);
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await resetTestDb();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {
@@ -68,13 +67,16 @@ describe("xiaomi-mimo self-tracked quota", () => {
     }
   });
 
-  it("aggregates only current-month tokens for the given provider+connection", () => {
+  it("aggregates only current-month tokens for the given provider+connection", async () => {
     // 1.0M + 0.5M + 0.1M = 1.6M; excludes last-month, conn-y, and minimax rows.
-    assert.equal(getMonthlyProviderTokensForConnection("xiaomi-mimo", "conn-x"), 1_600_000);
+    assert.equal(
+      await getMonthlyProviderTokensForConnection("xiaomi-mimo", "conn-x"),
+      1_600_000
+    );
   });
 
-  it("returns 0 for an unknown connection (fail-open, no bleed)", () => {
-    assert.equal(getMonthlyProviderTokensForConnection("xiaomi-mimo", "conn-none"), 0);
+  it("returns 0 for an unknown connection (fail-open, no bleed)", async () => {
+    assert.equal(await getMonthlyProviderTokensForConnection("xiaomi-mimo", "conn-none"), 0);
   });
 
   it("getXiaomiMimoUsage returns a monthly quota against the 4.1B limit", async () => {

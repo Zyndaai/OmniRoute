@@ -19,20 +19,22 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const route = await import("../../src/app/api/settings/tier-config/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
+async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  resetStorage();
+test.after(async () => {
+  await resetStorage();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -108,7 +110,7 @@ test("route round-trips cleanly against an already-populated tier_config table (
   // no schema change, so GET/PUT must work unmodified against that row.
   const { saveTierConfig } = await import("../../src/lib/db/tierConfig.ts");
   const { DEFAULT_TIER_CONFIG } = await import("../../open-sse/services/tierConfig.ts");
-  saveTierConfig({
+  await saveTierConfig({
     ...DEFAULT_TIER_CONFIG,
     providerOverrides: [{ provider: "pre-existing-provider", tier: "cheap" }],
   });

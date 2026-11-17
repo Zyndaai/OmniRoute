@@ -13,24 +13,25 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-caveman-test-"))
 process.env.DATA_DIR = testDataDir;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { writeCavemanOutputAnalytics } =
   await import("../../open-sse/handlers/chatCore/cavemanOutputAnalytics.ts");
 
-function rowFor(requestId: string): Record<string, unknown> | undefined {
-  return coreDb
-    .getDbInstance()
-    .prepare(
-      "SELECT mode, engine, original_tokens AS orig, compressed_tokens AS comp, tokens_saved AS saved, output_mode AS om FROM compression_analytics WHERE request_id = ?"
-    )
-    .get(requestId) as Record<string, unknown> | undefined;
+async function rowFor(requestId: string): Promise<Record<string, unknown> | undefined> {
+  return (
+    (await getTestBackend().queryOne<Record<string, unknown>>(
+      "SELECT mode, engine, original_tokens AS orig, compressed_tokens AS comp, tokens_saved AS saved, output_mode AS om FROM compression_analytics WHERE request_id = $1",
+      [requestId]
+    )) ?? undefined
+  );
 }
 
 before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -47,7 +48,7 @@ test("writes a caveman-output analytics row and the promise resolves", async () 
     skillRequestId: "caveman-req-1",
     cavemanOutputModeIntensity: "heavy",
   });
-  const row = rowFor("caveman-req-1");
+  const row = await rowFor("caveman-req-1");
   assert.ok(row, "expected a compression_analytics row");
   assert.equal(row!.mode, "output-caveman");
   assert.equal(row!.engine, "caveman-output");
@@ -58,8 +59,8 @@ test("writes a caveman-output analytics row and the promise resolves", async () 
 });
 
 test("the returned promise never rejects even on a bad write", async () => {
-  // resetting the DB instance makes the dynamic insert path fail; the helper must swallow it
-  coreDb.resetDbInstance();
+  // closing the pool makes the insert path fail; the helper must swallow it
+  await coreDb.resetDbInstance();
   await assert.doesNotReject(
     writeCavemanOutputAnalytics({
       comboName: "combo-x",

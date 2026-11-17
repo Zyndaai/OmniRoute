@@ -4,6 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { after, before, beforeEach, test, type TestContext } from "node:test";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "gemini-catalog-"));
 process.env.DATA_DIR = dataDir;
@@ -99,7 +100,7 @@ before(async () => {
 beforeEach(async () => {
   exposeSocketPeer = false;
   requestOrigin = "http://catalog.example.test";
-  core.resetDbInstance();
+  await resetTestDb();
   keys.resetApiKeyState();
   openai.__resetCatalogBuilderRunsForTest();
   fs.rmSync(dataDir, { recursive: true, force: true });
@@ -113,13 +114,13 @@ beforeEach(async () => {
   const storedKey = (await keys.getApiKeys()).find((entry) => entry.name === "catalog-fixture");
   assert.ok(storedKey);
   apiKey = storedKey.key;
-  await providers.createProviderConnection({
+  const geminiConnection = await providers.createProviderConnection({
     provider: "gemini",
     authType: "apikey",
     apiKey: "synthetic-upstream-key",
     testStatus: "active",
   });
-  await models.replaceSyncedAvailableModelsForConnection("gemini", "fixture-gemini", [
+  await models.replaceSyncedAvailableModelsForConnection("gemini", geminiConnection.id, [
     { id: "gemini-catalog-control", name: "Catalog control" },
   ]);
 });
@@ -129,7 +130,7 @@ after(async () => {
     server.close((error) => (error ? reject(error) : resolve()))
   );
   delete process.env.G16207_PORT;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   keys.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
@@ -166,7 +167,7 @@ async function seedNode(
     apiType: "chat",
     baseUrl: "https://unused.example.test/v1",
   });
-  await providers.createProviderConnection({
+  return providers.createProviderConnection({
     provider: id,
     authType: "apikey",
     apiKey: "synthetic-node-key",
@@ -177,8 +178,8 @@ async function seedNode(
 
 test("P1 synced compatible models expose the configured prefix instead of the node UUID", async () => {
   const id = "openai-compatible-chat-02669115-2545-4896-b003-cb4dac09d441";
-  await seedNode(id, "fixture-openai");
-  await models.replaceSyncedAvailableModelsForConnection(id, "node-connection", [
+  const nodeConnection = await seedNode(id, "fixture-openai");
+  await models.replaceSyncedAvailableModelsForConnection(id, nodeConnection.id, [
     { id: "custom-model", name: "Synced custom" },
   ]);
   const result = await getCatalog({ authorization: `Bearer ${apiKey}` });
@@ -260,7 +261,7 @@ async function makeKeyless(t: TestContext) {
   const stored = await settings.getSettings();
   assert.equal(stored.setupComplete, true);
   assert.equal(stored.password, null);
-  assert.equal(keys.getApiKeysCount(), 0);
+  assert.equal(await keys.getApiKeysCount(), 0);
   assert.equal(process.env.INITIAL_PASSWORD, undefined);
 }
 
@@ -313,8 +314,8 @@ test("P0 built-in provider names remain unchanged", async () => {
 
 test("P3 P9 synced/custom dedup retains custom metadata and Gemini shape", async () => {
   const id = "openai-compatible-metadata";
-  await seedNode(id, "fixture-metadata");
-  await models.replaceSyncedAvailableModelsForConnection(id, "metadata-connection", [
+  const metadataConnection = await seedNode(id, "fixture-metadata");
+  await models.replaceSyncedAvailableModelsForConnection(id, metadataConnection.id, [
     { id: "shared-model", name: "Synced name", inputTokenLimit: 4096, outputTokenLimit: 1024 },
   ]);
   await models.addCustomModel(
@@ -389,9 +390,9 @@ test("P6 independent nodes keep separate identities for the same model", async (
 for (const prefix of [null, "openai"]) {
   test(`P7 node with ${prefix === null ? "missing" : "reserved"} prefix is not advertised by UUID or name`, async () => {
     const id = "openai-compatible-ineligible";
-    await seedNode(id, prefix);
+    const ineligibleConnection = await seedNode(id, prefix);
     await models.addCustomModel(id, "ineligible-only", "Ineligible");
-    await models.replaceSyncedAvailableModelsForConnection(id, "ineligible-connection", [
+    await models.replaceSyncedAvailableModelsForConnection(id, ineligibleConnection.id, [
       { id: "ineligible-synced", name: "Ineligible synced" },
     ]);
     const result = await getCatalog({ authorization: `Bearer ${apiKey}` });
@@ -400,35 +401,16 @@ for (const prefix of [null, "openai"]) {
   });
 }
 
-for (const winnerActive of [true, false]) {
-  test(`P7 collision retains runtime ownership with winner active=${winnerActive}`, async () => {
-    await seedNode("anthropic-compatible-first", "fixture-collision", "anthropic-compatible");
-    await seedNode("openai-compatible-a", "fixture-collision", "openai-compatible", winnerActive);
-    await seedNode("openai-compatible-z", "fixture-collision");
-    for (const [id, model] of [
-      ["anthropic-compatible-first", "anthropic-loser"],
-      ["openai-compatible-a", "winner-only"],
-      ["openai-compatible-z", "openai-loser"],
-    ]) {
-      await models.addCustomModel(id, model, model);
-      await models.replaceSyncedAvailableModelsForConnection(id, `${id}-connection`, [
-        { id: `${model}-synced`, name: model },
-      ]);
-    }
-    const result = await getCatalog({ authorization: `Bearer ${apiKey}` });
-    assert.equal(result.status, 200);
-    assert.deepEqual(
-      result.body.models
-        ?.filter((entry) => entry.name.includes("fixture-collision"))
-        .map((entry) => entry.name)
-        .sort(),
-      winnerActive
-        ? ["models/fixture-collision/winner-only", "models/fixture-collision/winner-only-synced"]
-        : []
-    );
-    assert.ok(!JSON.stringify(result.body).includes("loser"));
-  });
-}
+// The schema forbids two nodes sharing a prefix (provider_nodes_prefix_uq), so the old
+// runtime-ownership collision cases can no longer be seeded. Keep the invariant: a second
+// node cannot claim a prefix already in use.
+test("P7 a second node cannot claim a prefix that is already in use", async () => {
+  await seedNode("anthropic-compatible-first", "fixture-collision", "anthropic-compatible");
+  await assert.rejects(
+    () => seedNode("openai-compatible-a", "fixture-collision"),
+    (error: unknown) => (error as { code?: string }).code === "PROVIDER_NODE_PREFIX_CONFLICT"
+  );
+});
 
 test("P8 changing the configured prefix is visible on the next request", async () => {
   const id = "openai-compatible-rename";

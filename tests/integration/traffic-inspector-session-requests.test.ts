@@ -13,13 +13,11 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ti-session-requests-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { resetDbInstance, getDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  getDbInstance();
+  await resetTestDb();
 }
 
 const sessionsRoute = await import("../../src/app/api/tools/traffic-inspector/sessions/route.ts");
@@ -55,8 +53,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

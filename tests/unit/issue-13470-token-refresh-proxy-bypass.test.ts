@@ -24,6 +24,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 delete process.env.PROXY_FAIL_OPEN;
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -32,7 +33,7 @@ const tokenRefresh = await import("../../src/sse/services/tokenRefresh.ts");
 const tokenHealthCheckProxyGuard = await import("../../src/lib/tokenHealthCheckProxyGuard.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -60,7 +61,7 @@ async function makeConnectionWithDeadAssignedPool(): Promise<string> {
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -68,7 +69,7 @@ test("#13470: background token-refresh fails closed for a dead assigned proxy po
   await resetStorage();
   const connId = await makeConnectionWithDeadAssignedPool();
 
-  assert.equal(proxiesDb.hasBlockingProxyAssignment(connId), true);
+  assert.equal(await proxiesDb.hasBlockingProxyAssignment(connId), true);
 
   // Guarded chat/executor path already fails closed (#6246 regression) for this
   // exact connection state — establishes the baseline the refresh path must match.
@@ -106,7 +107,7 @@ test("#13470: token-refresh proxy resolution stays direct for a connection with 
   });
   const connId = (conn as { id: string }).id;
 
-  assert.equal(proxiesDb.hasBlockingProxyAssignment(connId), false);
+  assert.equal(await proxiesDb.hasBlockingProxyAssignment(connId), false);
 
   // No assignment at all — resolveProxyForCredentials must resolve (fall through
   // to resolveProxyForProvider) rather than reject with the #13470 guard.

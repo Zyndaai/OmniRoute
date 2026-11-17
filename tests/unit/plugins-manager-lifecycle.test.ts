@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 
 const mod = await import("../../src/lib/plugins/manager.ts");
 const db = await import("../../src/lib/db/plugins.ts");
-const { getDbInstance } = await import("../../src/lib/db/core.ts");
 
 function makeTmpPlugin(name: string, manifest: Record<string, unknown> = {}) {
   const tmp = mkdtempSync(join(tmpdir(), "mgr-test-"));
@@ -23,24 +22,15 @@ function makeTmpPlugin(name: string, manifest: Record<string, unknown> = {}) {
   return pluginDir;
 }
 
-function cleanup(name: string) {
-  try {
-    db.deletePlugin(name);
-  } catch {}
-}
-
 describe("pluginManager lifecycle", () => {
   const testPlugins: string[] = [];
 
-  beforeEach(() => {
-    // Ensure migrations ran (creates the `plugins` table via migration 076)
-    // before any lifecycle call touches it — uses the real migration, not an
-    // inline CREATE TABLE, so a missing/renumbered migration fails loudly.
-    getDbInstance();
-    // Clean up test plugins
+  beforeEach(async () => {
+    // Clean up test plugins (the `plugins` table comes from the PostgreSQL migrations of the
+    // isolated test database).
     for (const name of testPlugins) {
       try {
-        db.deletePlugin(name);
+        await db.deletePlugin(name);
       } catch {}
     }
     testPlugins.length = 0;
@@ -54,7 +44,7 @@ describe("pluginManager lifecycle", () => {
         const result = await mod.pluginManager.install(dir);
         assert.ok(result);
         assert.equal(result.name, "install-test");
-        const dbRow = db.getPluginByName("install-test");
+        const dbRow = await db.getPluginByName("install-test");
         assert.ok(dbRow);
         assert.equal(dbRow!.status, "installed");
       } finally {
@@ -79,7 +69,7 @@ describe("pluginManager lifecycle", () => {
       try {
         await mod.pluginManager.install(dir);
         await mod.pluginManager.activate("activate-test");
-        const dbRow = db.getPluginByName("activate-test");
+        const dbRow = await db.getPluginByName("activate-test");
         assert.equal(dbRow!.status, "active");
       } finally {
         // deactivate() is the only path that reaches the loader's cleanup() and kills
@@ -102,7 +92,7 @@ describe("pluginManager lifecycle", () => {
         await mod.pluginManager.install(dir);
         await mod.pluginManager.activate("deactivate-test");
         await mod.pluginManager.deactivate("deactivate-test");
-        const dbRow = db.getPluginByName("deactivate-test");
+        const dbRow = await db.getPluginByName("deactivate-test");
         assert.equal(dbRow!.status, "inactive");
       } finally {
         rmSync(dir.split("/").slice(0, -1).join("/"), {
@@ -126,7 +116,7 @@ describe("pluginManager lifecycle", () => {
       try {
         await mod.pluginManager.install(dir);
         await mod.pluginManager.uninstall("uninstall-test");
-        const dbRow = db.getPluginByName("uninstall-test");
+        const dbRow = await db.getPluginByName("uninstall-test");
         assert.equal(dbRow, null);
       } finally {
         rmSync(dir.split("/").slice(0, -1).join("/"), {

@@ -17,40 +17,37 @@ import path from "node:path";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-quota-fixes-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "quota-sharing-fixes-secret";
 
 const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: unknown) {
-      const e = err as { code?: string };
-      if ((e?.code === "EBUSY" || e?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
+
+/** Pools reference provider connections, and allocations reference API keys, by foreign key. */
+async function seedConnection(connectionId: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    [connectionId, "openai"]
+  );
+}
+
+/** Creates a real API key row and returns its id. */
+async function mkKey(name: string): Promise<string> {
+  const key = await apiKeysDb.createApiKey(name, `machine-${name}`);
+  return key.id as string;
+}
 
 // ─── Fix 2: computeBurnRateFromWindow ─────────────────────────────────────────
 
@@ -96,25 +93,30 @@ test("computeBurnRateFromWindow: rate is consumption / elapsed (not / full windo
 // ─── Fix 3: Weight normalization ──────────────────────────────────────────────
 
 test("upsertAllocations: normalizes zero weights to equal distribution", async () => {
-  const pool = poolsDb.createPool({
+  const keyX = await mkKey("key-x-weights");
+  const keyY = await mkKey("key-y-weights");
+  const keyZ = await mkKey("key-z-weights");
+  await seedConnection("conn-weight-test");
+
+  const pool = await poolsDb.createPool({
     connectionId: "conn-weight-test",
     name: "Weight Test Pool",
     allocations: [
-      { apiKeyId: "key-x", weight: 0, policy: "hard" },
-      { apiKeyId: "key-y", weight: 0, policy: "hard" },
-      { apiKeyId: "key-z", weight: 0, policy: "hard" },
+      { apiKeyId: keyX, weight: 0, policy: "hard" },
+      { apiKeyId: keyY, weight: 0, policy: "hard" },
+      { apiKeyId: keyZ, weight: 0, policy: "hard" },
     ],
   });
 
   // Call upsertAllocations with all-zero weights
-  poolsDb.upsertAllocations(pool.id, [
-    { apiKeyId: "key-x", weight: 0, policy: "hard" },
-    { apiKeyId: "key-y", weight: 0, policy: "hard" },
-    { apiKeyId: "key-z", weight: 0, policy: "hard" },
+  await poolsDb.upsertAllocations(pool.id, [
+    { apiKeyId: keyX, weight: 0, policy: "hard" },
+    { apiKeyId: keyY, weight: 0, policy: "hard" },
+    { apiKeyId: keyZ, weight: 0, policy: "hard" },
   ]);
 
   // Read back — weights should be normalized to ~33.33 each
-  const updated = poolsDb.getPool(pool.id);
+  const updated = await poolsDb.getPool(pool.id);
   assert.ok(updated, "pool should exist");
   assert.equal(updated!.allocations.length, 3);
 
@@ -127,17 +129,21 @@ test("upsertAllocations: normalizes zero weights to equal distribution", async (
 });
 
 test("upsertAllocations: preserves non-zero weights", async () => {
-  const pool = poolsDb.createPool({
+  const keyA = await mkKey("key-a-preserve");
+  const keyB = await mkKey("key-b-preserve");
+  await seedConnection("conn-weight-preserve");
+
+  const pool = await poolsDb.createPool({
     connectionId: "conn-weight-preserve",
     name: "Weight Preserve Pool",
   });
 
-  poolsDb.upsertAllocations(pool.id, [
-    { apiKeyId: "key-a", weight: 70, policy: "hard" },
-    { apiKeyId: "key-b", weight: 30, policy: "soft" },
+  await poolsDb.upsertAllocations(pool.id, [
+    { apiKeyId: keyA, weight: 70, policy: "hard" },
+    { apiKeyId: keyB, weight: 30, policy: "soft" },
   ]);
 
-  const updated = poolsDb.getPool(pool.id);
+  const updated = await poolsDb.getPool(pool.id);
   assert.ok(updated);
   assert.equal(updated!.allocations[0].weight, 70);
   assert.equal(updated!.allocations[1].weight, 30);
@@ -193,15 +199,17 @@ test("storeRateLimitHeaders: ignores non-Anthropic headers gracefully", async ()
 test("poolUsageWithDimensions: returns non-null burn rate for token dimensions", async () => {
   const { SqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
   const store = new SqliteQuotaStore();
+  const keyBr = await mkKey("key-br-1");
+  await seedConnection("conn-burn-rate");
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: "conn-burn-rate",
     name: "Burn Rate Pool",
-    allocations: [{ apiKeyId: "key-br-1", weight: 100, policy: "hard" }],
+    allocations: [{ apiKeyId: keyBr, weight: 100, policy: "hard" }],
   });
 
   const dim = { poolId: pool.id, unit: "tokens" as const, window: "hourly" as const };
-  await store.consume("key-br-1", dim, 5000);
+  await store.consume(keyBr, dim, 5000);
 
   const snapshot = await store.poolUsageWithDimensions(pool.id, [
     { unit: "tokens", window: "hourly", limit: 50000 },
@@ -221,11 +229,13 @@ test("poolUsageWithDimensions: returns non-null burn rate for token dimensions",
 test("poolUsageWithDimensions: no burn rate when consumedTotal is 0", async () => {
   const { SqliteQuotaStore } = await import("../../src/lib/quota/sqliteQuotaStore.ts");
   const store = new SqliteQuotaStore();
+  const keyNb = await mkKey("key-nb-1");
+  await seedConnection("conn-no-burn");
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: "conn-no-burn",
     name: "No Burn Pool",
-    allocations: [{ apiKeyId: "key-nb-1", weight: 100, policy: "hard" }],
+    allocations: [{ apiKeyId: keyNb, weight: 100, policy: "hard" }],
   });
 
   const snapshot = await store.poolUsageWithDimensions(pool.id, [

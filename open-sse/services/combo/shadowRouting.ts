@@ -49,7 +49,8 @@ export function resolveShadowTargets(
   combo: ComboLike,
   config: Record<string, unknown>,
   allCombos: ComboCollectionLike,
-  hiddenModelsByProvider?: HiddenModelsByProvider
+  // Required: the visibility filter keys a WeakMap on it, so `undefined` would throw.
+  hiddenModelsByProvider: HiddenModelsByProvider
 ): ResolvedComboTarget[] {
   const shadowConfig = normalizeShadowRoutingConfig(config);
   if (!shadowConfig.enabled || shadowConfig.targets.length === 0) return [];

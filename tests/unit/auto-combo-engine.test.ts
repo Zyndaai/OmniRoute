@@ -13,8 +13,8 @@ import {
 const healer = getSelfHealingManager();
 const originalRandom = Math.random;
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
 });
 
 function resetHealer() {
@@ -41,7 +41,7 @@ test.afterEach(() => {
   Math.random = originalRandom;
 });
 
-test("selectProvider infers coding intent from prompt messages when taskType is generic", () => {
+test("selectProvider infers coding intent from prompt messages when taskType is generic", async () => {
   const candidates = [
     {
       provider: "codex",
@@ -71,7 +71,7 @@ test("selectProvider infers coding intent from prompt messages when taskType is 
     },
   ];
 
-  const result = selectProvider(baseConfig, candidates, "default", [
+  const result = await selectProvider(baseConfig, candidates, "default", [
     {
       role: "user",
       content: "Refactor this TypeScript function and debug the code path for me.",
@@ -83,8 +83,8 @@ test("selectProvider infers coding intent from prompt messages when taskType is 
   assert.equal(result.isExploration, false);
 });
 
-test("selectProvider falls back to the full candidate list when candidatePool removes everything", () => {
-  const result = selectProvider(
+test("selectProvider falls back to the full candidate list when candidatePool removes everything", async () => {
+  const result = await selectProvider(
     {
       ...baseConfig,
       candidatePool: ["missing-provider"],
@@ -109,11 +109,11 @@ test("selectProvider falls back to the full candidate list when candidatePool re
   assert.deepEqual(result.excluded, []);
 });
 
-test("selectProvider excludes unhealthy providers and disables exploration in incident mode", () => {
+test("selectProvider excludes unhealthy providers and disables exploration in incident mode", async () => {
   healer.updateIncidentMode(["OPEN", "OPEN"]);
   Math.random = () => 0;
 
-  const result = selectProvider(
+  const result = await selectProvider(
     {
       ...baseConfig,
       explorationRate: 1,
@@ -150,8 +150,8 @@ test("selectProvider excludes unhealthy providers and disables exploration in in
   assert.ok(result.excluded.includes("open-provider"));
 });
 
-test("selectProvider degrades to the cheapest candidate when the selected option breaks the budget cap", () => {
-  const result = selectProvider(
+test("selectProvider degrades to the cheapest candidate when the selected option breaks the budget cap", async () => {
+  const result = await selectProvider(
     {
       ...baseConfig,
       budgetCap: 0.001,
@@ -197,17 +197,17 @@ test("selectProvider degrades to the cheapest candidate when the selected option
 // user_override fitness rows (distinct scores for "default" vs "simple") make
 // the two categories diverge in outcome, so this fails on the pre-fix code
 // (which reads "default") and passes on the fix (which reads "simple").
-test("selectProvider classifies a short prompt (≤10 chars) as 'simple', not 'default' (#13386)", () => {
+test("selectProvider classifies a short prompt (≤10 chars) as 'simple', not 'default' (#13386)", async () => {
   // The taskFit delta from the seeded scores alone does not clear
   // ScoreTierRotator's CLEAR_WINNER_THRESHOLD, so the two candidates land in
   // different tiers (top/mid) and the pick is weighted-random by default —
   // pin Math.random so the top tier (the higher-taskFit candidate) always
   // wins, same pattern as the "incident mode" test above.
   Math.random = () => 0;
-  setUserFitnessOverrideEntry("model-default-fit-13386", "default", 0.95);
-  setUserFitnessOverrideEntry("model-default-fit-13386", "simple", 0.1);
-  setUserFitnessOverrideEntry("model-simple-fit-13386", "default", 0.1);
-  setUserFitnessOverrideEntry("model-simple-fit-13386", "simple", 0.95);
+  await setUserFitnessOverrideEntry("model-default-fit-13386", "default", 0.95);
+  await setUserFitnessOverrideEntry("model-default-fit-13386", "simple", 0.1);
+  await setUserFitnessOverrideEntry("model-simple-fit-13386", "default", 0.1);
+  await setUserFitnessOverrideEntry("model-simple-fit-13386", "simple", 0.95);
 
   try {
     const candidates = [
@@ -235,16 +235,16 @@ test("selectProvider classifies a short prompt (≤10 chars) as 'simple', not 'd
       },
     ];
 
-    const result = selectProvider(baseConfig, candidates, "default", [
+    const result = await selectProvider(baseConfig, candidates, "default", [
       { role: "user", content: "olá" },
     ]);
 
     assert.equal(result.provider, "provider-b");
     assert.equal(result.model, "model-simple-fit-13386");
   } finally {
-    deleteUserFitnessOverrideEntry("model-default-fit-13386", "default");
-    deleteUserFitnessOverrideEntry("model-default-fit-13386", "simple");
-    deleteUserFitnessOverrideEntry("model-simple-fit-13386", "default");
-    deleteUserFitnessOverrideEntry("model-simple-fit-13386", "simple");
+    await deleteUserFitnessOverrideEntry("model-default-fit-13386", "default");
+    await deleteUserFitnessOverrideEntry("model-default-fit-13386", "simple");
+    await deleteUserFitnessOverrideEntry("model-simple-fit-13386", "default");
+    await deleteUserFitnessOverrideEntry("model-simple-fit-13386", "simple");
   }
 });

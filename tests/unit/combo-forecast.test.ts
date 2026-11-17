@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-forecast-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -14,6 +15,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
@@ -22,9 +24,27 @@ const route = await import("../../src/app/api/usage/combo-forecast/route.ts");
 const { normalizeComboStep } = await import("../../src/lib/combos/steps.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+/**
+ * Creates a real provider connection and returns its generated id. Quota
+ * snapshots and call logs reference connections by foreign key on Postgres, so
+ * fixtures cannot use made-up connection ids.
+ */
+async function seedConnection(provider: string, name: string): Promise<string> {
+  const connection = await providersDb.createProviderConnection({
+    provider,
+    authType: "apikey",
+    name,
+    apiKey: `sk-${name}`,
+    isActive: true,
+    testStatus: "active",
+    providerSpecificData: {},
+  });
+  return String((connection as { id: string }).id);
 }
 
 async function enableManagementAuth() {
@@ -47,6 +67,8 @@ async function seedPricing() {
 }
 
 async function seedForecastCombo() {
+  const connectionA = await seedConnection("openai", "forecast-a");
+  const connectionB = await seedConnection("openai", "forecast-b");
   const comboInput = {
     name: "combo-forecast-structured",
     strategy: "weighted",
@@ -55,14 +77,14 @@ async function seedForecastCombo() {
         kind: "model",
         providerId: "openai",
         model: "openai/gpt-4o-mini",
-        connectionId: "forecast-conn-a",
+        connectionId: connectionA,
         label: "Forecast A",
       },
       {
         kind: "model",
         providerId: "openai",
         model: "openai/gpt-4o-mini",
-        connectionId: "forecast-conn-b",
+        connectionId: connectionB,
         label: "Forecast B",
       },
     ],
@@ -76,7 +98,7 @@ async function seedForecastCombo() {
     comboName: comboInput.name,
     index: 1,
   });
-  return { combo, comboInput, firstStep, secondStep };
+  return { combo, comboInput, firstStep, secondStep, connectionA, connectionB };
 }
 
 test.beforeEach(async () => {
@@ -85,6 +107,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
@@ -99,7 +122,8 @@ test.after(async () => {
 
 test("combo forecast projects cost and quota risk from combo history", async () => {
   await seedPricing();
-  const { combo, comboInput, firstStep, secondStep } = await seedForecastCombo();
+  const { combo, comboInput, firstStep, secondStep, connectionA, connectionB } =
+    await seedForecastCombo();
   const timestamp = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
   await callLogs.saveCallLog({
@@ -109,7 +133,7 @@ test("combo forecast projects cost and quota risk from combo history", async () 
     model: "openai/gpt-4o-mini",
     requestedModel: comboInput.name,
     provider: "openai",
-    connectionId: "forecast-conn-a",
+    connectionId: connectionA,
     tokens: { prompt_tokens: 1_000, completion_tokens: 500 },
     comboName: comboInput.name,
     comboStepId: firstStep.id,
@@ -122,16 +146,16 @@ test("combo forecast projects cost and quota risk from combo history", async () 
     model: "openai/gpt-4o-mini",
     requestedModel: comboInput.name,
     provider: "openai",
-    connectionId: "forecast-conn-b",
+    connectionId: connectionB,
     tokens: { prompt_tokens: 2_000, completion_tokens: 1_000 },
     comboName: comboInput.name,
     comboStepId: secondStep.id,
     comboExecutionKey: secondStep.id,
   });
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
-    connection_id: "forecast-conn-a",
+    connection_id: connectionA,
     window_key: "daily",
     remaining_percentage: 90,
     is_exhausted: 0,
@@ -139,9 +163,9 @@ test("combo forecast projects cost and quota risk from combo history", async () 
     window_duration_ms: 86_400_000,
     raw_data: null,
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
-    connection_id: "forecast-conn-a",
+    connection_id: connectionA,
     window_key: "daily",
     remaining_percentage: 20,
     is_exhausted: 0,
@@ -216,6 +240,7 @@ test("combo forecast reports credit-metered providers as unpriced, not as a zero
   // A tariff this high makes any token-based charge unmistakable: the row must still
   // come out unpriced, because credits are the bill and `call_logs` carries no cost.
   await settingsDb.updatePricing({ kiro: { "gpt-5.6-luna": { input: 999, output: 999 } } });
+  const creditConnection = await seedConnection("kiro", "forecast-credit");
   const comboInput = {
     name: "combo-forecast-credit",
     strategy: "weighted",
@@ -224,7 +249,7 @@ test("combo forecast reports credit-metered providers as unpriced, not as a zero
         kind: "model",
         providerId: "kiro",
         model: "kiro/gpt-5.6-luna",
-        connectionId: "forecast-credit-conn",
+        connectionId: creditConnection,
         label: "Credit",
       },
     ],
@@ -242,7 +267,7 @@ test("combo forecast reports credit-metered providers as unpriced, not as a zero
     model: "kiro/gpt-5.6-luna",
     requestedModel: comboInput.name,
     provider: "kiro",
-    connectionId: "forecast-credit-conn",
+    connectionId: creditConnection,
     tokens: { prompt_tokens: 1_000_000, completion_tokens: 0 },
     comboName: comboInput.name,
     comboStepId: step.id,

@@ -16,8 +16,7 @@ import { join } from "node:path";
 const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-ccr-9061-"));
 process.env.DATA_DIR = tmpDir;
 
-const core = await import("../../src/lib/db/core.ts");
-core.resetDbInstance();
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const {
   persistCcrBlock,
@@ -32,9 +31,12 @@ const ccrPath = "../../open-sse/services/compression/engines/ccr/index.ts";
 const ccr = await import(ccrPath);
 
 const HOUR = 60 * 60 * 1000;
+// Epoch milliseconds. Postgres timestamp helpers treat values below 1e11 as seconds,
+// so fixtures must use realistic millisecond timestamps.
+const BASE_MS = 1_700_000_000_000;
 
 function row(overrides: Record<string, unknown> = {}) {
-  const now = 1_000_000;
+  const now = BASE_MS;
   return {
     principalId: "principal-a",
     hash: "aaaaaaaaaaaaaaaaaaaaaaaa",
@@ -52,44 +54,50 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ccrBlocks durable store (#9061)", () => {
-  beforeEach(() => {
-    deleteAllCcrBlocks();
+  beforeEach(async () => {
+    await deleteAllCcrBlocks();
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await resetTestDb();
   });
 
-  it("round-trips a block", () => {
-    persistCcrBlock(row());
-    const loaded = loadCcrBlock("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa", 1_000_000);
+  it("round-trips a block", async () => {
+    await persistCcrBlock(row());
+    const loaded = await loadCcrBlock("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa", BASE_MS);
     assert.equal(loaded?.content, "the verbatim block");
     assert.equal(loaded?.contentType, "text/plain");
     assert.equal(loaded?.source, "compression");
   });
 
-  it("scopes by principal, so another cannot read the block", () => {
-    persistCcrBlock(row());
-    assert.equal(loadCcrBlock("principal-b", "aaaaaaaaaaaaaaaaaaaaaaaa", 1_000_000), null);
+  it("scopes by principal, so another cannot read the block", async () => {
+    await persistCcrBlock(row());
+    assert.equal(
+      await loadCcrBlock("principal-b", "aaaaaaaaaaaaaaaaaaaaaaaa", BASE_MS),
+      null
+    );
   });
 
-  it("reads an expired block as a miss and drops the row", () => {
-    persistCcrBlock(row({ expiresAt: 1_000_000 }));
-    assert.equal(loadCcrBlock("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa", 1_000_001), null);
-    assert.equal(countCcrBlocks(), 0);
+  it("reads an expired block as a miss and drops the row", async () => {
+    await persistCcrBlock(row({ expiresAt: BASE_MS }));
+    assert.equal(
+      await loadCcrBlock("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa", BASE_MS + 1),
+      null
+    );
+    assert.equal(await countCcrBlocks(), 0);
   });
 
-  it("prunes only what has expired", () => {
-    persistCcrBlock(row({ hash: "a".repeat(24), expiresAt: 500 }));
-    persistCcrBlock(row({ hash: "b".repeat(24), expiresAt: 9_000_000 }));
-    assert.equal(pruneExpiredCcrBlocks(1_000_000), 1);
-    assert.equal(countCcrBlocks(), 1);
+  it("prunes only what has expired", async () => {
+    await persistCcrBlock(row({ hash: "a".repeat(24), expiresAt: BASE_MS - 1 }));
+    await persistCcrBlock(row({ hash: "b".repeat(24), expiresAt: BASE_MS + HOUR }));
+    assert.equal(await pruneExpiredCcrBlocks(BASE_MS), 1);
+    assert.equal(await countCcrBlocks(), 1);
   });
 
-  it("deletes a single block", () => {
-    persistCcrBlock(row());
-    deleteCcrBlockRow("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa");
-    assert.equal(countCcrBlocks(), 0);
+  it("deletes a single block", async () => {
+    await persistCcrBlock(row());
+    await deleteCcrBlockRow("principal-a", "aaaaaaaaaaaaaaaaaaaaaaaa");
+    assert.equal(await countCcrBlocks(), 0);
   });
 });
 
@@ -98,9 +106,9 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     ccr.resetCcrStore();
   });
 
-  after(() => {
+  after(async () => {
     ccr.resetCcrStore();
-    core.resetDbInstance();
+    await resetTestDb();
   });
 
   it("retrieves a block from a fresh module instance, the way a restart sees it", async () => {
@@ -113,7 +121,7 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     // process has after a restart, and the same state another instance starts in.
     const restarted = await import(`${ccrPath}?restart=9061`);
     assert.equal(
-      restarted.retrieveBlock(stored.hash, "principal-a"),
+      await restarted.retrieveBlock(stored.hash, "principal-a"),
       text,
       "block must come back from the durable tier after the in-memory map is gone"
     );
@@ -137,7 +145,7 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
       0,
       "a fresh instance starts with an empty map"
     );
-    assert.equal(restarted.retrieveBlock(stored.hash, "principal-readmit"), text);
+    assert.equal(await restarted.retrieveBlock(stored.hash, "principal-readmit"), text);
     assert.equal(
       restarted.getCcrStoreStats("principal-readmit").entries,
       1,
@@ -150,7 +158,7 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     const stored = ccr.tryStoreBlock(text, "principal-a");
     await ccr.flushCcrDurableWrites();
     const restarted = await import(`${ccrPath}?restart=9061-scope`);
-    assert.equal(restarted.retrieveBlock(stored.hash, "principal-b"), null);
+    assert.equal(await restarted.retrieveBlock(stored.hash, "principal-b"), null);
   });
 
   it("keeps an oversized block memory-only", async () => {
@@ -161,8 +169,12 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     assert.equal(stored.stored, true);
     await ccr.flushCcrDurableWrites();
 
-    assert.equal(ccr.retrieveBlock(stored.hash, "principal-a"), text, "map still serves it");
-    assert.equal(loadCcrBlock("principal-a", stored.hash, Date.now()), null, "but disk has no row");
+    assert.equal(await ccr.retrieveBlock(stored.hash, "principal-a"), text, "map still serves it");
+    assert.equal(
+      await loadCcrBlock("principal-a", stored.hash, Date.now()),
+      null,
+      "but disk has no row"
+    );
   });
 
   it("writes nothing when COMPRESSION_CCR_DURABLE_STORE is false", async () => {
@@ -171,7 +183,7 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     try {
       const stored = ccr.tryStoreBlock("c".repeat(2_000), "principal-a");
       await ccr.flushCcrDurableWrites();
-      assert.equal(loadCcrBlock("principal-a", stored.hash, Date.now()), null);
+      assert.equal(await loadCcrBlock("principal-a", stored.hash, Date.now()), null);
     } finally {
       if (previous === undefined) delete process.env.COMPRESSION_CCR_DURABLE_STORE;
       else process.env.COMPRESSION_CCR_DURABLE_STORE = previous;
@@ -185,6 +197,6 @@ describe("CCR engine survives losing its in-memory map (#9061)", () => {
     // Persist and delete share one FIFO queue; one flush covers both.
     await ccr.flushCcrDurableWrites();
     const restarted = await import(`${ccrPath}?restart=9061-deleted`);
-    assert.equal(restarted.retrieveBlock(stored.hash, "principal-a"), null);
+    assert.equal(await restarted.retrieveBlock(stored.hash, "principal-a"), null);
   });
 });

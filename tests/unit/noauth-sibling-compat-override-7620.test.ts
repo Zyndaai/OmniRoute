@@ -15,17 +15,17 @@ const { getNoAuthHydrationProviderIds } =
   await import("../../src/sse/services/noAuthProviderSiblings.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 
-test("#7620: isHidden override written under raw 'opencode' stays on the raw key, not the 'opencode-zen' sibling", () => {
-  mergeModelCompatOverride("opencode", "grok-code-fast-1", { isHidden: true });
+test("#7620: isHidden override written under raw 'opencode' stays on the raw key, not the 'opencode-zen' sibling", async () => {
+  await mergeModelCompatOverride("opencode", "grok-code-fast-1", { isHidden: true });
 
-  const rawOverrides = getModelCompatOverrides("opencode");
+  const rawOverrides = await getModelCompatOverrides("opencode");
   const rawEntry = rawOverrides.find((m) => m.id === "grok-code-fast-1");
   assert.ok(rawEntry, "override must be stored on the raw 'opencode' key");
   assert.equal(rawEntry.isHidden, true);
 
   // #10898 regression guard: the write must NOT have been canonicalized onto the
   // APIKEY gateway id. If it had, the raw-keyed hidden reader would miss it.
-  const siblingOverrides = getModelCompatOverrides("opencode-zen");
+  const siblingOverrides = await getModelCompatOverrides("opencode-zen");
   const leaked = siblingOverrides.find((m) => m.id === "grok-code-fast-1");
   assert.equal(
     leaked,
@@ -34,7 +34,7 @@ test("#7620: isHidden override written under raw 'opencode' stays on the raw key
   );
 });
 
-test("getNoAuthHydrationProviderIds never hydrates the retired OpenCode Free sibling", () => {
+test("getNoAuthHydrationProviderIds never hydrates the retired OpenCode Free sibling", async () => {
   // Paid providers hydrate only their own overrides after Free retirement.
   assert.deepEqual(getNoAuthHydrationProviderIds("opencode-zen"), ["opencode-zen"]);
   assert.deepEqual(getNoAuthHydrationProviderIds("opencode-go"), ["opencode-go"]);
@@ -42,24 +42,26 @@ test("getNoAuthHydrationProviderIds never hydrates the retired OpenCode Free sib
   assert.deepEqual(getNoAuthHydrationProviderIds("opencode"), ["opencode"]);
 
   // Raw legacy overrides remain readable without leaking to paid resolution.
-  mergeModelCompatOverride("opencode", "claude-sonnet-5", {
+  await mergeModelCompatOverride("opencode", "claude-sonnet-5", {
     apiFormat: "responses",
     targetFormat: "claude",
     isHidden: true,
   });
-  const merged = getNoAuthHydrationProviderIds("opencode-zen").flatMap((id) =>
-    getModelCompatOverrides(id)
-  );
+  const merged = (
+    await Promise.all(
+      getNoAuthHydrationProviderIds("opencode-zen").map((id) => getModelCompatOverrides(id))
+    )
+  ).flat();
   const resolved = merged.find((m) => m.id === "claude-sonnet-5");
   assert.equal(resolved, undefined, "retired Free overrides must not leak into Zen");
-  const raw = getModelCompatOverrides("opencode").find((m) => m.id === "claude-sonnet-5");
+  const raw = (await getModelCompatOverrides("opencode")).find((m) => m.id === "claude-sonnet-5");
   assert.equal(raw?.isHidden, true);
   assert.equal(raw?.apiFormat, "responses");
   assert.equal(raw?.targetFormat, "claude");
 });
 
 test("getModelInfo('opencode/<model>') still resolves to authenticated Zen and its own overrides", async () => {
-  mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
+  await mergeModelCompatOverride("opencode-zen", "claude-opus-5", {
     apiFormat: "responses",
     targetFormat: "claude",
     supportsVision: true,

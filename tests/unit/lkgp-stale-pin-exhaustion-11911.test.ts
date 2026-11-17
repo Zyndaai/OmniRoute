@@ -24,18 +24,18 @@ const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuit
 const { resetAll: resetAllSemaphores } =
   await import("../../open-sse/services/rateLimitSemaphore.ts");
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   } catch {}
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   resetAllSemaphores();
-  settingsDb.clearAllLKGP();
+  await settingsDb.clearAllLKGP();
 });
 
 function createLog() {

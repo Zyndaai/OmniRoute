@@ -15,9 +15,9 @@ const { classifyTier, classifyTierAsync, setTierConfig } =
 const { estimateRequestCost } = await import("../../open-sse/services/manifestAdapter.ts");
 
 beforeEach(() => setTierConfig({}));
-after(() => {
+after(async () => {
   setTierConfig({});
-  resetDbInstance();
+  await resetDbInstance();
   if (previousDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = previousDataDir;
   rmSync(testDataDir, { recursive: true, force: true });

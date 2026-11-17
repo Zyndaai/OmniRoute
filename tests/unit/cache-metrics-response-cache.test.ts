@@ -12,6 +12,7 @@ process.env.OMNIROUTE_DISABLE_REDIS_AUTH_CACHE = "1";
 const core = await import("../../src/lib/db/core.ts");
 const cache = await import("../../src/lib/usage/analyticsResponseCache.ts");
 const route = await import("../../src/app/api/cache/route.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 function localRequest(url: string, method = "GET"): Request {
   return new Request(url, { method });
@@ -24,52 +25,49 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function insertUsageRow(db: {
-  prepare: (sql: string) => { run: (...args: unknown[]) => void };
-}): void {
-  db.prepare(
+async function insertUsageRow(): Promise<void> {
+  await getTestBackend().execute(
     `INSERT INTO usage_history
        (provider, model, connection_id, api_key_id, api_key_name,
         tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
-        tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "test-provider",
-    "test-model",
-    "conn-1",
-    "key-1",
-    "k",
-    1000,
-    100,
-    900,
-    0,
-    0,
-    "ok",
-    1,
-    123,
-    45,
-    null,
-    new Date(Date.now() - 3_600_000).toISOString()
+        tokens_reasoning, status, success, latency_ms, ttft_ms, error_code, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+    [
+      "test-provider",
+      "test-model",
+      "conn-1",
+      "key-1",
+      "k",
+      1000,
+      100,
+      900,
+      0,
+      0,
+      "ok",
+      true,
+      123,
+      45,
+      null,
+      new Date(Date.now() - 3_600_000).toISOString(),
+    ]
   );
 }
 
 test.before(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
 });
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+test.beforeEach(async () => {
+  await resetTestDb();
   cache.clearAnalyticsResponseCache();
   process.env.OMNIROUTE_ANALYTICS_CACHE_TTL_MS = "60000";
   process.env.OMNIROUTE_CACHE_METRICS_MIN_COMPUTE_MS = "0";
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.OMNIROUTE_ANALYTICS_CACHE_TTL_MS;
   delete process.env.OMNIROUTE_CACHE_METRICS_MIN_COMPUTE_MS;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   delete process.env.DATA_DIR;
   delete process.env.API_KEY_SECRET;
@@ -93,14 +91,14 @@ test("history caching is off by default: unset or invalid env keeps every read l
 
 test("env unset: GET /api/cache reads history live and sets no cache header", async () => {
   delete process.env.OMNIROUTE_CACHE_METRICS_MIN_COMPUTE_MS;
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const first = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(first.status, 200);
   assert.equal(first.headers.get("x-analytics-cache"), null);
   const firstBody = (await first.json()) as { promptCache: { totalRequests: number } };
 
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
   const second = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(second.status, 200);
   assert.equal(second.headers.get("x-analytics-cache"), null);
@@ -203,14 +201,14 @@ test("stored entries stay bounded and prefix invalidation frees them", async () 
 });
 
 test("two close calls share one history computation", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const first = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(first.status, 200);
   assert.equal(first.headers.get("x-analytics-cache"), "miss");
   const firstBody = (await first.json()) as { promptCache: { totalRequests: number } };
 
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
   const second = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(second.status, 200);
   assert.equal(second.headers.get("x-analytics-cache"), "hit");
@@ -219,9 +217,9 @@ test("two close calls share one history computation", async () => {
 });
 
 test("fresh counters stay live while history is served from the cache", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
   const semantic = await import("../../src/lib/semanticCache.ts");
-  semantic.setCachedResponse("fresh-counters-signature", "test-model", { ok: true }, 0);
+  await semantic.setCachedResponse("fresh-counters-signature", "test-model", { ok: true }, 0);
 
   const first = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(first.status, 200);
@@ -232,7 +230,7 @@ test("fresh counters stay live while history is served from the cache", async ()
   assert.equal(firstBody.semanticCache.memoryEntries, 1);
 
   semantic.clearMemoryCache();
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const second = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(second.status, 200);
@@ -246,7 +244,7 @@ test("fresh counters stay live while history is served from the cache", async ()
 });
 
 test("a different trend window computes separately", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const first = await route.GET(localRequest("http://localhost/api/cache?trendHours=24"));
   assert.equal(first.headers.get("x-analytics-cache"), "miss");
@@ -259,7 +257,7 @@ test("a different trend window computes separately", async () => {
 });
 
 test("equivalent windows after clamping share one entry", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const cases = [
     "http://localhost/api/cache",
@@ -285,7 +283,7 @@ test("equivalent windows after clamping share one entry", async () => {
 });
 
 test("a DELETE invalidates the history entry", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
 
   const first = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(first.headers.get("x-analytics-cache"), "miss");
@@ -294,7 +292,7 @@ test("a DELETE invalidates the history entry", async () => {
   const deleted = await route.DELETE(localRequest("http://localhost/api/cache", "DELETE"));
   assert.equal(deleted.status, 200);
 
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
   const second = await route.GET(localRequest("http://localhost/api/cache"));
   assert.equal(second.headers.get("x-analytics-cache"), "miss");
   const secondBody = (await second.json()) as { promptCache: { totalRequests: number } };
@@ -302,7 +300,7 @@ test("a DELETE invalidates the history entry", async () => {
 });
 
 test("a request without rights is refused before any cache read", async () => {
-  insertUsageRow(core.getDbInstance());
+  await insertUsageRow();
   const settingsDb = await import("../../src/lib/db/settings.ts");
   const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
   process.env.JWT_SECRET = "test-jwt-secret-cache-metrics";

@@ -26,6 +26,7 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const { updatePricing } = await import("../../src/lib/db/settings.ts");
 const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { waitForCallLogSaves } = await import("../../src/lib/usage/callLogs.ts");
 const usageLimits = await import("../../src/lib/usage/apiKeyUsageLimits.ts");
 const imageRoute = await import("../../src/app/api/v1/images/generations/route.ts");
@@ -56,7 +57,7 @@ type UsageRow = {
   combo_strategy: string | null;
   tokens_input: number;
   tokens_output: number;
-  success: number;
+  success: boolean;
 };
 
 type CallLogRow = {
@@ -71,9 +72,7 @@ async function resetStorage() {
   assert.equal(await waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
 }
 
@@ -85,7 +84,7 @@ test.after(async () => {
   assert.equal(await waitForCallLogSaves(CALL_LOG_SETTLE_TIMEOUT_MS), true);
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -117,15 +116,12 @@ async function spendOf(key: string) {
   return usageLimits.getApiKeyUsageLimitStatus(metadata);
 }
 
-function usageRows(): UsageRow[] {
-  return core
-    .getDbInstance()
-    .prepare(
-      `SELECT provider, model, api_key_id, connection_id, endpoint, combo_strategy,
-              tokens_input, tokens_output, success
-         FROM usage_history ORDER BY id`
-    )
-    .all() as UsageRow[];
+async function usageRows(): Promise<UsageRow[]> {
+  return getTestBackend().query<UsageRow>(
+    `SELECT provider, model, api_key_id, connection_id, endpoint, combo_strategy,
+            tokens_input, tokens_output, success
+       FROM usage_history ORDER BY id`
+  );
 }
 
 async function callLogRows(pathPrefix: string): Promise<CallLogRow[]> {
@@ -134,13 +130,11 @@ async function callLogRows(pathPrefix: string): Promise<CallLogRow[]> {
     true,
     "call log writes must settle"
   );
-  return core
-    .getDbInstance()
-    .prepare(
-      `SELECT path, status, api_key_id, api_key_name, connection_id
-         FROM call_logs WHERE path LIKE ? ORDER BY timestamp`
-    )
-    .all(`${pathPrefix}%`) as CallLogRow[];
+  return getTestBackend().query<CallLogRow>(
+    `SELECT path, status, api_key_id, api_key_name, connection_id
+       FROM call_logs WHERE path LIKE $1 ORDER BY "timestamp", seq`,
+    [`${pathPrefix}%`]
+  );
 }
 
 function mockOpenAiCompatibleImageUpstream(expectedUrl: string) {
@@ -182,7 +176,7 @@ test("direct /v1/images/generations moves the key's USD spend and the limit then
   const body = (await response.json()) as Record<string, unknown>;
   assert.equal(body.usage, undefined, "client payload shape is unchanged");
 
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1, "one usage_history row per successful image call");
   assert.equal(rows[0].provider, "openai");
   assert.equal(rows[0].model, "gpt-image-2");
@@ -218,7 +212,7 @@ test("image combo generation records usage and call_logs against the key and the
   const response = await imageRoute.POST(generationRequest(key.key, "image-usage-combo"));
   assert.equal(response.status, 200);
 
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].provider, "openai");
   assert.equal(rows[0].model, "gpt-image-2");
@@ -257,7 +251,7 @@ test("/v1/images/edits records usage and call_logs against the key and the selec
   );
   assert.equal(response.status, 200);
 
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].provider, "openrouter");
   assert.equal(rows[0].model, model);
@@ -287,7 +281,7 @@ test("an image call whose upstream reports no usage does not lock a limited key 
 
   const response = await imageRoute.POST(generationRequest(key.key, "openai/gpt-image-2"));
   assert.equal(response.status, 200);
-  assert.deepEqual(usageRows(), []);
+  assert.deepEqual(await usageRows(), []);
   const status = await spendOf(key.key);
   assert.equal(status.weeklyExceeded, false);
   assert.equal(status.weeklyHasUnpricedUsage, false);
@@ -315,7 +309,7 @@ test("an image call with usage but no pricing row is logged without locking the 
 
   const response = await imageRoute.POST(generationRequest(key.key, "openai/gpt-image-2"));
   assert.equal(response.status, 200);
-  assert.deepEqual(usageRows(), []);
+  assert.deepEqual(await usageRows(), []);
   const status = await spendOf(key.key);
   assert.equal(status.weeklySpentUsd, 0);
   assert.equal(status.weeklyExceeded, false);
@@ -340,7 +334,7 @@ test("a failed image call records no successful usage and leaves the key's spend
   const response = await imageRoute.POST(generationRequest(key.key, "openai/gpt-image-2"));
   assert.equal(response.status, 500);
   assert.deepEqual(
-    usageRows().filter((row) => row.success === 1),
+    (await usageRows()).filter((row) => row.success === true),
     []
   );
   assert.equal((await spendOf(key.key)).weeklySpentUsd, 0);
@@ -385,7 +379,7 @@ for (const withUsage of [false, true]) {
     );
     assert.equal(chat.status, 200, await chat.text());
     assert.equal(hits.length, 2);
-    assert.equal(usageRows().filter((row) => row.model === "gpt-image-2").length, 0);
+    assert.equal((await usageRows()).filter((row) => row.model === "gpt-image-2").length, 0);
     const status = await spendOf(key.key);
     assert.equal(status.weeklyHasUnpricedUsage, false);
     const logs = await callLogRows("/v1/images/generations");
@@ -400,8 +394,9 @@ test("pricing store failure preserves reported image usage instead of treating i
     await import("../../src/lib/usage/imageRequestAccounting.ts");
   const connection = await seedConnection("openai");
   const key = await createLimitedKey(100);
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE key_value RENAME TO key_value_pricing_failure_test");
+  const backend = getTestBackend();
+  // Breaks only the pricing lookup: the user-pricing table is renamed away for this test.
+  await backend.execute("ALTER TABLE model_pricing RENAME TO model_pricing_failure_test");
   invalidateDbCache("pricing");
   try {
     const result = await runImageRequestWithAccounting(
@@ -416,13 +411,13 @@ test("pricing store failure preserves reported image usage instead of treating i
       async () => ({ success: true, usage: IMAGE_USAGE })
     );
     assert.equal(result.success, true);
-    const rows = usageRows();
+    const rows = await usageRows();
     assert.equal(rows.length, 1, "failed lookup must keep usage evidence");
     assert.equal(rows[0].api_key_id, key.id);
     assert.equal(rows[0].connection_id, connection.id);
     assert.equal(rows[0].tokens_output, 25_000);
   } finally {
-    db.exec("ALTER TABLE key_value_pricing_failure_test RENAME TO key_value");
+    await backend.execute("ALTER TABLE model_pricing_failure_test RENAME TO model_pricing");
     invalidateDbCache("pricing");
   }
   assert.equal((await spendOf(key.key)).weeklyHasUnpricedUsage, true);
@@ -437,7 +432,7 @@ test("provider-scoped image generation attributes the provider-local model, key 
     params: Promise.resolve({ provider: "openai" }),
   });
   assert.equal(response.status, 200);
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].model, "gpt-image-2");
   assert.equal(rows[0].api_key_id, key.id);
@@ -467,7 +462,7 @@ for (const requestedModel of [
       });
     const response = await call();
     assert.equal(response.status, 200);
-    const rows = usageRows();
+    const rows = await usageRows();
     assert.equal(rows.length, 1);
     assert.equal(rows[0].provider, "together");
     assert.equal(rows[0].model, model);
@@ -483,7 +478,7 @@ for (const requestedModel of [
     assert.equal(blocked.status, 429);
     assert.match((await blocked.json()).error.message, /weekly usage quota/i);
     assert.equal(hits, 1, "over-limit request must not reach upstream");
-    assert.equal(usageRows().length, 1);
+    assert.equal((await usageRows()).length, 1);
   });
 }
 
@@ -511,7 +506,7 @@ test("combo image edits attribute the winning attempt without leaking internal u
   );
   assert.equal(response.status, 200, response.status === 200 ? undefined : await response.text());
   assert.equal((await response.json()).usage, undefined);
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].model, model);
   assert.equal(rows[0].api_key_id, key.id);
@@ -543,7 +538,7 @@ test("Codex dedicated images usage is accounted without changing the release pub
   const response = await imageRoute.POST(generationRequest(key.key, "codex/gpt-image-2"));
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).usage, usage, "Codex release public usage is preserved");
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].provider, "codex");
   assert.equal(rows[0].model, "gpt-image-2");
@@ -579,7 +574,7 @@ test("combo fallback records only the successful target and keeps both call-log 
   const response = await imageRoute.POST(generationRequest(key.key, "image-usage-fallback"));
   assert.equal(response.status, 200);
   assert.equal(hits.length, 2);
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].provider, "openrouter");
   assert.equal(rows[0].connection_id, winner.id);
@@ -643,7 +638,7 @@ test("credential retry accounts only the real successful attempt", async () => {
   });
   assert.equal(result.result.success, true);
   assert.equal(hits, 2);
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].connection_id, second.id);
   assert.equal(rows[0].api_key_id, key.id);
@@ -681,7 +676,7 @@ test("parallel image requests do not cross key or connection attribution", async
     responses.map((response) => response.status),
     [200, 200]
   );
-  const rows = usageRows();
+  const rows = await usageRows();
   assert.equal(rows.length, 2);
   assert.ok(
     rows.some(
@@ -714,8 +709,8 @@ test("same-millisecond priced image attempts each persist usage and spend", asyn
     assert.equal(second.status, 200);
     assert.equal(hits.length, 2);
     assert.equal((await callLogRows("/v1/images/generations")).length, 2);
-    assert.equal(usageRows().length, 2);
-    assert.ok(usageRows().every((row) => row.connection_id === connection.id));
+    assert.equal((await usageRows()).length, 2);
+    assert.ok((await usageRows()).every((row) => row.connection_id === connection.id));
     assert.equal((await spendOf(key.key)).weeklySpentUsd, EXPECTED_CALL_USD * 2);
   } finally {
     t.mock.timers.reset();
@@ -736,7 +731,7 @@ test("real-clock parallel priced image burst persists every physical attempt", a
   assert.ok(responses.every((response) => response.status === 200));
   assert.equal(hits.length, 20);
   assert.equal((await callLogRows("/v1/images/generations")).length, 20);
-  assert.equal(usageRows().length, 20);
+  assert.equal((await usageRows()).length, 20);
   // The quota API rounds the Decimal total; avoid binary multiplication residue.
   assert.equal((await spendOf(key.key)).weeklySpentUsd, 20.005);
 });

@@ -14,7 +14,8 @@ const { FEATURE_FLAG_DEFINITIONS } =
   await import("../../src/shared/constants/featureFlagDefinitions.ts");
 const { setFeatureFlagOverride, clearAllFeatureFlagOverrides } =
   await import("../../src/lib/db/featureFlags.ts");
-const { isServerOwnedToolLoopEnabled } = await import("../../src/shared/utils/featureFlags.ts");
+const { isServerOwnedToolLoopEnabled, refreshFeatureFlagSnapshot } =
+  await import("../../src/shared/utils/featureFlags.ts");
 
 describe("SERVER_OWNED_TOOL_LOOP_ENABLED flag definition", () => {
   it("exists in FEATURE_FLAG_DEFINITIONS", () => {
@@ -28,16 +29,19 @@ describe("SERVER_OWNED_TOOL_LOOP_ENABLED flag definition", () => {
 });
 
 describe("isServerOwnedToolLoopEnabled wrapper", () => {
-  beforeEach(() => {
-    clearAllFeatureFlagOverrides();
+  beforeEach(async () => {
+    await clearAllFeatureFlagOverrides();
+    await refreshFeatureFlagSnapshot();
   });
 
   it("returns false when no override is set (default)", () => {
     assert.equal(isServerOwnedToolLoopEnabled(), false);
   });
 
-  it("returns true when DB override is set to true", () => {
-    setFeatureFlagOverride("SERVER_OWNED_TOOL_LOOP_ENABLED", "true");
+  it("returns true when DB override is set to true", async () => {
+    await setFeatureFlagOverride("SERVER_OWNED_TOOL_LOOP_ENABLED", "true");
+    // Flag reads serve an in-process snapshot of the overrides; refresh it after the write.
+    await refreshFeatureFlagSnapshot();
     assert.equal(isServerOwnedToolLoopEnabled(), true);
   });
 

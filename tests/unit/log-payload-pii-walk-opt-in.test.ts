@@ -24,8 +24,8 @@ const body = {
 };
 
 test("payload PII pass", async (t) => {
-  await t.test("returns the payload untouched by reference when sanitization is off", () => {
-    clearAllFeatureFlagOverrides();
+  await t.test("returns the payload untouched by reference when sanitization is off", async () => {
+    await clearAllFeatureFlagOverrides();
     assert.strictEqual(sanitizePayloadPII(body), body);
     assert.strictEqual(sanitizePayloadPII(body.messages), body.messages);
     assert.equal(sanitizePayloadPII("jane.doe@example.com"), "jane.doe@example.com");

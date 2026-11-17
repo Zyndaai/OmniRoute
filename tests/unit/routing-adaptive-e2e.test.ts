@@ -29,6 +29,8 @@ import { DEFAULT_WEIGHTS } from "../../open-sse/services/autoCombo/scoring.ts";
 import type { ResolvedComboTarget } from "../../open-sse/services/combo/types.ts";
 import type { AutoProviderCandidate } from "../../open-sse/services/combo/types.ts";
 
+type ScoredTargets = Awaited<ReturnType<typeof scoreAutoTargets>>;
+
 function target(provider: string, model: string, weight = 1): ResolvedComboTarget {
   const modelStr = `${provider}/${model}`;
   return {
@@ -91,7 +93,7 @@ function record(
   });
 }
 
-function bestProvider(targets: ReturnType<typeof scoreAutoTargets>): string {
+function bestProvider(targets: ScoredTargets): string {
   return targets[0].target.provider;
 }
 
@@ -101,10 +103,10 @@ function modelOf(t: ResolvedComboTarget): string {
 }
 
 /** Score a set of providers using their live quality-tracker signal. */
-function scoreProviders(
+async function scoreProviders(
   ts: ResolvedComboTarget[],
   weights = DEFAULT_WEIGHTS
-): ReturnType<typeof scoreAutoTargets> {
+): Promise<ScoredTargets> {
   return scoreAutoTargets(
     ts,
     ts.map((t) => candidate(t, qualityScoreFor(t.provider, modelOf(t)))),
@@ -113,7 +115,7 @@ function scoreProviders(
   );
 }
 
-test("healthy provider A is preferred over backup B, cold C stays neutral", () => {
+test("healthy provider A is preferred over backup B, cold C stays neutral", async () => {
   resetQualityTracker();
   // Warm A to high confidence with solid success.
   for (let i = 0; i < 100; i++) record("a", "m");
@@ -127,7 +129,7 @@ test("healthy provider A is preferred over backup B, cold C stays neutral", () =
   const a = target("a", "m");
   const b = target("b", "m");
   const c = target("c", "m");
-  const scored = scoreProviders([a, b, c]);
+  const scored = await scoreProviders([a, b, c]);
 
   assert.equal(bestProvider(scored), "a", "healthy A must be the top pick");
   // Cold C must not be top (neutral 0.5 quality vs A's high quality).
@@ -136,7 +138,7 @@ test("healthy provider A is preferred over backup B, cold C stays neutral", () =
   assert.equal(qualityScoreFor("c", "m"), 0.5);
 });
 
-test("degradation injected into A flips preference to B; recovery flips it back", () => {
+test("degradation injected into A flips preference to B; recovery flips it back", async () => {
   resetQualityTracker();
   // Phase 0: A and B are otherwise identical; both healthy. A is preferred via
   // stable tie-break, and quality is the only differentiator.
@@ -147,13 +149,13 @@ test("degradation injected into A flips preference to B; recovery flips it back"
   const b = target("b", "m");
   const score = () => scoreProviders([a, b]);
 
-  const initial = score();
+  const initial = await score();
   assert.equal(bestProvider(initial), "a", "initially A is preferred (tie-break on equal quality)");
 
   // Phase 1: degrade A — sustained 5xx. A's quality collapses to ~0, so B
   // (identical but healthy) becomes preferred. Gradual: the EWMA smooths the drop.
   for (let i = 0; i < 60; i++) record("a", "m", { outcome: "error", status: 500 });
-  const during = score();
+  const during = await score();
   assert.equal(
     bestProvider(during),
     "b",
@@ -165,7 +167,7 @@ test("degradation injected into A flips preference to B; recovery flips it back"
   // Phase 2: recover A — sustained successes. Quality recovers and A's
   // preference is restored.
   for (let i = 0; i < 200; i++) record("a", "m");
-  const after = score();
+  const after = await score();
   assert.equal(bestProvider(after), "a", "recovery must restore A's preference");
 
   // Phase 3: one isolated failure must not destroy A — its quality stays healthy
@@ -176,7 +178,7 @@ test("degradation injected into A flips preference to B; recovery flips it back"
     qualityAfterBlip > 0.7,
     `one isolated failure must not destroy A's quality, got ${qualityAfterBlip}`
   );
-  const afterBlip = score();
+  const afterBlip = await score();
   const aEntry = afterBlip.find((s) => s.target.provider === "a");
   const bEntry = afterBlip.find((s) => s.target.provider === "b");
   assert.ok(
@@ -185,7 +187,7 @@ test("degradation injected into A flips preference to B; recovery flips it back"
   );
 });
 
-test("a provider with insufficient evidence does not dominate from optimistic init", () => {
+test("a provider with insufficient evidence does not dominate from optimistic init", async () => {
   resetQualityTracker();
   // Solid warm provider.
   for (let i = 0; i < 200; i++) record("solid", "m");
@@ -194,6 +196,6 @@ test("a provider with insufficient evidence does not dominate from optimistic in
 
   const s = target("solid", "m");
   const l = target("lucky", "m");
-  const scored = scoreProviders([s, l]);
+  const scored = await scoreProviders([s, l]);
   assert.equal(bestProvider(scored), "solid", "solid warm provider must beat a lucky cold one");
 });

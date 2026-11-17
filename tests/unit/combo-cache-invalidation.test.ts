@@ -29,9 +29,10 @@ const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const contextHandoffsDb = await import("../../src/lib/db/contextHandoffs.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -57,7 +58,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -149,7 +150,10 @@ test("reorderCombo side effects follow physical writes even when stored JSON is 
     name: "Corrupt Payload",
     models: [{ provider: "openai", model: "gpt-4.1" }],
   });
-  core.getDbInstance().prepare("UPDATE combos SET data = '' WHERE id = ?").run(String(combo.id));
+  // Corrupt the stored payload (jsonb cannot hold '', so store a non-object JSON value).
+  await getTestBackend().execute(`UPDATE combos SET data = '"corrupt"'::jsonb WHERE id = $1`, [
+    String(combo.id),
+  ]);
 
   const before = readCache.getCombosCacheVersion();
   const reordered = await combosDb.reorderCombos([String(combo.id)]);
@@ -168,13 +172,13 @@ test("updateCombo preserves the existing session-pin cleanup contract", async ()
     models: [{ provider: "openai", model: "gpt-4.1" }],
   });
 
-  contextHandoffsDb.recordSessionModelUsage(
+  await contextHandoffsDb.recordSessionModelUsage(
     "session-before",
     "Before Rename",
     "openai/gpt-4.1",
     "openai"
   );
-  contextHandoffsDb.recordSessionModelUsage(
+  await contextHandoffsDb.recordSessionModelUsage(
     "session-after",
     "After Rename",
     "openai/gpt-4.1-mini",
@@ -186,8 +190,11 @@ test("updateCombo preserves the existing session-pin cleanup contract", async ()
     models: [{ provider: "openai", model: "gpt-4.1-mini" }],
   });
 
-  assert.equal(contextHandoffsDb.getLastSessionModel("session-before", "Before Rename"), null);
-  assert.equal(contextHandoffsDb.getLastSessionModel("session-after", "After Rename"), null);
+  assert.equal(
+    await contextHandoffsDb.getLastSessionModel("session-before", "Before Rename"),
+    null
+  );
+  assert.equal(await contextHandoffsDb.getLastSessionModel("session-after", "After Rename"), null);
 });
 
 test("updateCombo does not clear session pins when models are omitted", async () => {
@@ -195,7 +202,7 @@ test("updateCombo does not clear session pins when models are omitted", async ()
     name: "Metadata Only",
     models: [{ provider: "openai", model: "gpt-4.1" }],
   });
-  contextHandoffsDb.recordSessionModelUsage(
+  await contextHandoffsDb.recordSessionModelUsage(
     "session-metadata",
     "Metadata Only",
     "openai/gpt-4.1",
@@ -205,7 +212,7 @@ test("updateCombo does not clear session pins when models are omitted", async ()
   await combosDb.updateCombo(String(combo.id), { description: "metadata change" });
 
   assert.equal(
-    contextHandoffsDb.getLastSessionModel("session-metadata", "Metadata Only"),
+    await contextHandoffsDb.getLastSessionModel("session-metadata", "Metadata Only"),
     "openai/gpt-4.1"
   );
 });

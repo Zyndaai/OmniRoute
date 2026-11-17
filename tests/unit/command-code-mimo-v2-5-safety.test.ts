@@ -29,13 +29,13 @@ const MIMO_V25_CASES: [string, string, boolean][] = [
 ];
 
 for (const [modelId, desc, expected] of MIMO_V25_CASES) {
-  test(`${desc} (${modelId}) → supportsVision=${expected}`, () => {
-    const caps = getResolvedModelCapabilities(modelId);
+  test(`${desc} (${modelId}) → supportsVision=${expected}`, async () => {
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.supportsVision, expected, `${modelId} supportsVision must be ${expected}`);
   });
 }
 
-test("mimo-v2.5 heuristic is correct (base is vision, Pro siblings are not)", () => {
+test("mimo-v2.5 heuristic is correct (base is vision, Pro siblings are not)", async () => {
   // mimo-vl matches "mimo-vl-a3b" on its own fragment
   assert.equal(isVisionModelId("mimo-vl-a3b"), true, "mimo-vl must be detected as vision");
   // #13863 (#13847): the base model is multimodal and is now in the shared heuristic
@@ -46,5 +46,5 @@ test("mimo-v2.5 heuristic is correct (base is vision, Pro siblings are not)", ()
   assert.equal(isVisionModelId("mimo-v2.5-pro"), false, "mimo-v2.5-pro is text-only");
   assert.equal(isVisionModelId("xiaomi-mimo/mimo-v2.5:free"), true);
   // And the resolved capability agrees.
-  assert.equal(getResolvedModelCapabilities("mimo-v2.5").supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities("mimo-v2.5")).supportsVision, true);
 });

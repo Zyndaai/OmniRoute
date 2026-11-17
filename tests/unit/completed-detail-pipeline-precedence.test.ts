@@ -4,20 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { useDecollidedMigrationsDir } from "./helpers/decollidedMigrationsDir.ts";
-
-useDecollidedMigrationsDir();
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-completed-detail-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { writeCallArtifact } = await import("../../src/lib/usage/callLogArtifacts.ts");
 const { maybeEnrichCompletedDetail } =
   await import("../../src/lib/usage/completedRequestDetails.ts");
 
 type PipelinePayloads = { providerResponse?: unknown; clientResponse?: unknown };
 
-function seedRow(id: string, connectionId: string, pipeline: PipelinePayloads | undefined) {
+async function seedRow(id: string, connectionId: string, pipeline: PipelinePayloads | undefined) {
   const relativePath = `precedence/${id}.json`;
   const written = writeCallArtifact(
     {
@@ -32,13 +29,11 @@ function seedRow(id: string, connectionId: string, pipeline: PipelinePayloads | 
   );
   assert.ok(written, "artifact should be written");
 
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, connection_id, detail_state, artifact_relpath)
-       VALUES (@id, @timestamp, 'POST', '/v1/chat/completions', 200, 'openai/gpt-4.1', 'openai', @connectionId, 'ready', @artifact)`
-    )
-    .run({ id, timestamp: new Date().toISOString(), connectionId, artifact: relativePath });
+  await getTestBackend().execute(
+    `INSERT INTO call_logs (id, timestamp, method, path, status, model, provider, connection_id, detail_state, artifact_relpath)
+     VALUES ($1, $2, 'POST', '/v1/chat/completions', 200, 'openai/gpt-4.1', 'openai', $3, 'ready', $4)`,
+    [id, new Date().toISOString(), connectionId, relativePath]
+  );
 }
 
 // maybeEnrichCompletedDetail is fire-and-forget (`void (async () => …)`), so the
@@ -69,7 +64,7 @@ test("completed-detail enrichment prefers the pipeline over the body", async (t)
     // a provider payload shown as the client response, and vice versa.
     const providerResponse = { from: "pipeline.providerResponse" };
     const clientResponse = { from: "pipeline.clientResponse" };
-    seedRow("precedence-both", "conn-both", { providerResponse, clientResponse });
+    await seedRow("precedence-both", "conn-both", { providerResponse, clientResponse });
 
     const detail = await enrich("precedence-both", "conn-both");
 
@@ -80,7 +75,7 @@ test("completed-detail enrichment prefers the pipeline over the body", async (t)
   await t.test("the body still fills a side the pipeline left empty", async () => {
     // The fallback itself must survive: with no pipeline at all, responseBody is
     // the only payload the artifact carries and both sides take it.
-    seedRow("precedence-body-only", "conn-body-only", undefined);
+    await seedRow("precedence-body-only", "conn-body-only", undefined);
 
     const detail = await enrich("precedence-body-only", "conn-body-only");
 
@@ -90,16 +85,17 @@ test("completed-detail enrichment prefers the pipeline over the body", async (t)
 
   await t.test("pending rows do not consume the readable candidate limit", async () => {
     const connectionId = "conn-pending-candidates";
-    seedRow("older-readable", connectionId, { providerResponse: { from: "older-ready" } });
-    const insert = core.getDbInstance().prepare(
-      `INSERT INTO call_logs (id, timestamp, method, model, connection_id, detail_state)
-       VALUES (?, ?, 'POST', 'openai/gpt-4.1', ?, 'pending')`
-    );
+    await seedRow("older-readable", connectionId, { providerResponse: { from: "older-ready" } });
+    const backend = getTestBackend();
     for (let index = 0; index < 5; index++) {
-      insert.run(
-        `newer-pending-${index}`,
-        new Date(Date.now() + index + 1000).toISOString(),
-        connectionId
+      await backend.execute(
+        `INSERT INTO call_logs (id, timestamp, method, model, connection_id, detail_state)
+         VALUES ($1, $2, 'POST', 'openai/gpt-4.1', $3, 'pending')`,
+        [
+          `newer-pending-${index}`,
+          new Date(Date.now() + index + 1000).toISOString(),
+          connectionId,
+        ]
       );
     }
 
@@ -108,7 +104,9 @@ test("completed-detail enrichment prefers the pipeline over the body", async (t)
   });
 
   await t.test("a half-filled pipeline keeps its side and the body fills the other", async () => {
-    seedRow("precedence-half", "conn-half", { providerResponse: { from: "pipeline.provider" } });
+    await seedRow("precedence-half", "conn-half", {
+      providerResponse: { from: "pipeline.provider" },
+    });
 
     const detail = await enrich("precedence-half", "conn-half");
 

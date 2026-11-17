@@ -11,7 +11,6 @@ const MOCK_NINEROUTER_VERSION = "0.5.30";
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Prepend fake bin dir to PATH so our fake `npm` is found by runNpm
 const originalPath = process.env.PATH ?? "";
@@ -53,11 +52,12 @@ execSync("which npm", { env: process.env });
 
 // DB bootstrap (must be before ninerouter import due to db/core eager init)
 const core = await import("../../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('9router', 'not_installed', 20130, 0, 1, 1)`
-).run();
+const { getTestBackend } = await import("../../../helpers/postgres.ts");
+await getTestBackend().execute(
+  `INSERT INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
+   VALUES ('9router', 'not_installed', 20130, false, true, true)
+   ON CONFLICT (tool) DO NOTHING`
+);
 
 const {
   install,
@@ -69,9 +69,9 @@ const {
   NINEROUTER_INSTALL_DIR,
 } = await import("../../../../src/lib/services/installers/ninerouter.ts");
 
-test.after(() => {
+test.after(async () => {
   process.env.PATH = originalPath;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.rmSync(FAKE_BIN_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

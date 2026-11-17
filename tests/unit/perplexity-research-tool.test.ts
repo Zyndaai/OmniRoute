@@ -55,15 +55,15 @@ function handlerOf(server, name) {
 
 const successFrame = { authInfo: { clientId: "owner", scopes: ["manage"] } };
 
-test("the tool is absent unless the switch is on at startup", () => {
+test("the tool is absent unless the switch is on at startup", async () => {
   delete process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED;
-  const server = createMcpServer();
+  const server = await createMcpServer();
   assert.equal(server._registeredTools?.omniroute_perplexity_research, undefined);
 });
 
 test("flipping the switch off after startup rejects the call before any fetch", async () => {
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   delete process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED;
   fetches = 0;
   const result = await handlerOf(server, "omniroute_perplexity_research")(
@@ -77,7 +77,7 @@ test("flipping the switch off after startup rejects the call before any fetch", 
 
 test("a finished report returns ok and the timeout budget reaches the fetch", async () => {
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   fetches = 0;
   const result = await handlerOf(server, "omniroute_perplexity_research")(
     { query: "q", connectionId: "c-ok", maxTotalMinutes: 6 },
@@ -93,7 +93,7 @@ test("a finished report returns ok and the timeout budget reaches the fetch", as
 
 test("a second call on the same connection is busy", async () => {
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const handler = handlerOf(server, "omniroute_perplexity_research");
   let release;
   const gate = new Promise((resolve) => {
@@ -114,7 +114,7 @@ test("a second call on the same connection is busy", async () => {
 test("mcp:connect alone cannot run it, admin can", async () => {
   stubSuccess();
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const handler = handlerOf(server, "omniroute_perplexity_research");
   fetches = 0;
   const narrow = await handler(
@@ -137,7 +137,7 @@ test("mcp:connect alone cannot run it, admin can", async () => {
 test("an http call with no caller identity is refused, a stdio call is not", async () => {
   stubSuccess();
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const handler = handlerOf(server, "omniroute_perplexity_research");
   const { withMcpHttpAuthContext } = await import("../../open-sse/mcp-server/httpAuthContext.ts");
   fetches = 0;
@@ -162,7 +162,7 @@ test("an upstream error does not start the cooldown", async () => {
     body: null,
   }));
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const handler = handlerOf(server, "omniroute_perplexity_research");
   const first = await handler({ query: "q", connectionId: "c-err" }, successFrame);
   assert.equal(JSON.parse(first.content[0].text).error.code, "incomplete_result");
@@ -183,7 +183,7 @@ test("no research run starts when the account has no research runs left", async 
     return { status: 200, headers: new Headers(), text, body: null };
   });
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const server = createMcpServer();
+  const server = await createMcpServer();
   fetches = 0;
   const result = await handlerOf(server, "omniroute_perplexity_research")(
     { query: "q", connectionId: "c-empty" },
@@ -201,9 +201,9 @@ function bodyOf(result) {
   return result.structuredContent ?? JSON.parse(result.content[0].text);
 }
 
-function researchHandler() {
+async function researchHandler() {
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  return handlerOf(createMcpServer(), "omniroute_perplexity_research");
+  return handlerOf(await createMcpServer(), "omniroute_perplexity_research");
 }
 
 async function withStore(store, fn) {
@@ -229,7 +229,7 @@ async function captureWarnings(fn) {
 
 test("a finished report survives a failed cooldown write and frees the lock", async () => {
   stubSuccess();
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const store = {
     getProviderConnectionById: async (id) => pplxConnection(id),
     mergeConnectionProviderSpecificData: async () => {
@@ -254,7 +254,7 @@ test("an exhausted quota sends no research request and frees the lock", async ()
     const text = String(url).includes("rate-limit") ? '{"remaining_research":0}' : "sent";
     return { status: 200, headers: new Headers(), text, body: null };
   });
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const first = bodyOf(await handler({ query: "q", connectionId: "c-quota" }, successFrame));
   assert.equal(first.error.code, "research_quota_exhausted");
   assert.equal(sweepResearchLock("c-quota", Date.now()), "absent");
@@ -268,7 +268,7 @@ test("a quota lookup that throws does not block the run", async () => {
     if (String(url).includes("rate-limit")) throw new Error("tls handshake failed");
     return successFetch(url, opts);
   });
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const body = bodyOf(await handler({ query: "q", connectionId: "c-quota-throw" }, successFrame));
   assert.equal(body.ok, true);
   assert.equal(sweepResearchLock("c-quota-throw", Date.now()), "absent");
@@ -276,7 +276,7 @@ test("a quota lookup that throws does not block the run", async () => {
 
 test("an aborted call returns research_aborted, sends nothing and frees the lock", async () => {
   stubSuccess();
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const controller = new AbortController();
   controller.abort();
   fetches = 0;
@@ -307,7 +307,7 @@ for (const status of [401, 403, 500]) {
   test(`an HTTP ${status} answer frees the lock, logs the status, and a retry works`, async () => {
     const connectionId = `c-http-${status}`;
     stubAsk(async () => ({ status, headers: new Headers(), text: "denied", body: null }));
-    const handler = researchHandler();
+    const handler = await researchHandler();
     const { result, warnings } = await captureWarnings(() =>
       handler({ query: "q", connectionId }, successFrame)
     );
@@ -326,7 +326,7 @@ test("a stream that ends with its end marker but no report frees the lock", asyn
     text: 'data: {"status":"COMPLETED","final_sse_message":true}\n\n',
     body: null,
   }));
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const body = bodyOf(await handler({ query: "q", connectionId: "c-marker" }, successFrame));
   assert.equal(body.error.code, "report_unconfirmed");
   assert.equal(sweepResearchLock("c-marker", Date.now()), "absent");
@@ -339,7 +339,7 @@ test("a stream that stops without its end marker stays busy until deadline and g
     text: 'data: {"status":"PENDING"}\n\n',
     body: null,
   }));
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const started = Date.now();
   const first = bodyOf(
     await handler({ query: "q", connectionId: "c-cut", maxTotalMinutes: 5 }, successFrame)
@@ -361,7 +361,7 @@ test("an abort after the request went out returns research_aborted and stays unc
         if (opts.signal.aborted) reject(new Error("aborted"));
       })
   );
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const { result } = await captureWarnings(() =>
     handler(
       { query: "q", connectionId: "c-late-abort" },
@@ -378,7 +378,7 @@ test("an aborted request that still answers with an HTTP status stays unconfirme
     controller.abort();
     return { status: 500, headers: new Headers(), text: "", body: null };
   });
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const body = bodyOf(
     await handler(
       { query: "q", connectionId: "c-late-abort-500" },
@@ -396,7 +396,7 @@ test("a research request that throws comes back as a failure envelope", async ()
     }
     throw new Error("socket hang up");
   });
-  const handler = researchHandler();
+  const handler = await researchHandler();
   const { result, warnings } = await captureWarnings(() =>
     handler({ query: "q", connectionId: "c-throw" }, successFrame)
   );
@@ -410,7 +410,7 @@ test("a research request that throws comes back as a failure envelope", async ()
 
 test("with no connection store registered the call returns research_unavailable and warns", async () => {
   stubSuccess();
-  const handler = researchHandler();
+  const handler = await researchHandler();
   fetches = 0;
   const { result, warnings } = await captureWarnings(() =>
     withStore(undefined, () => handler({ query: "q", connectionId: "c-nostore" }, successFrame))
@@ -449,7 +449,7 @@ for (const [label, connection] of refusedConnections) {
       sentHeaders = opts?.headers ?? null;
       return successFetch(url, opts);
     });
-    const handler = researchHandler();
+    const handler = await researchHandler();
     const connectionId = connection?.id ?? "c-missing-row";
     fetches = 0;
     const body = bodyOf(
@@ -467,7 +467,7 @@ for (const [label, connection] of refusedConnections) {
 
 test("a call without a connectionId is refused before any fetch", async () => {
   stubSuccess();
-  const handler = researchHandler();
+  const handler = await researchHandler();
   fetches = 0;
   const body = bodyOf(await handler({ query: "q" }, successFrame));
   assert.equal(body.ok, false);
@@ -476,9 +476,9 @@ test("a call without a connectionId is refused before any fetch", async () => {
   assert.equal(sweepResearchLock("default", Date.now()), "absent");
 });
 
-test("the published input schema requires a connectionId", () => {
+test("the published input schema requires a connectionId", async () => {
   process.env.OMNIROUTE_PPLX_RESEARCH_ENABLED = "1";
-  const schema = createMcpServer()._registeredTools.omniroute_perplexity_research.inputSchema;
+  const schema = (await createMcpServer())._registeredTools.omniroute_perplexity_research.inputSchema;
   assert.equal(schema.safeParse({ query: "q" }).success, false);
   assert.equal(schema.safeParse({ query: "q", connectionId: "c1" }).success, true);
 });

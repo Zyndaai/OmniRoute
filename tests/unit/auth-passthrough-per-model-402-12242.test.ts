@@ -16,6 +16,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-402-passt
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const auth = await import("../../src/sse/services/auth.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
@@ -23,13 +24,7 @@ const accountFallback = await import("../../open-sse/services/accountFallback.ts
 const CREDITS_402 = "Add credits to continue, or switch to a free model";
 
 async function resetStorage() {
-  core.resetDbInstance();
-  // maxRetries/retryDelay: closing the better-sqlite3 handle above is
-  // synchronous, but the OS can briefly hold the WAL/SHM files open a beat
-  // longer under concurrent test runs — retry instead of failing the test on
-  // an unrelated filesystem race (ENOTEMPTY).
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function seedOllamaCloud() {
@@ -53,8 +48,8 @@ async function seedSingleCredentialProvider() {
   });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

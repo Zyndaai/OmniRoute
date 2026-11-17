@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it, before, after, mock } from "node:test";
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { describe, it, before, after } from "node:test";
+import { getTestBackend } from "../helpers/postgres.ts";
 import {
   getModelsDevPricing,
   saveModelsDevPricing,
@@ -9,50 +9,68 @@ import {
 } from "../../src/lib/modelsDevSync.ts";
 
 describe("getModelsDevPricing memoization (#8697)", () => {
-  before(() => {
+  before(async () => {
     const pricing: PricingByProvider = {
       openai: {
         "gpt-4o": { input: 2.5, output: 10 },
       },
     };
-    saveModelsDevPricing(pricing);
+    await saveModelsDevPricing(pricing);
   });
 
-  after(() => {
+  after(async () => {
     try {
-      clearModelsDevPricing();
+      await clearModelsDevPricing();
     } catch {
       // ignore
     }
   });
 
-  it("hits the DB once for repeated reads within the same cache version", () => {
-    const db = getDbInstance();
-    const prepareSpy = mock.method(db, "prepare");
-    const callsBefore = prepareSpy.mock.calls.length;
+  it("hits the DB once for repeated reads within the same cache version", async () => {
+    // Count every statement the backend issues while the three reads run.
+    const backend = getTestBackend() as unknown as Record<
+      "query" | "queryOne" | "execute",
+      (sql: string, ...rest: unknown[]) => Promise<unknown>
+    >;
+    const originals = {
+      query: backend.query,
+      queryOne: backend.queryOne,
+      execute: backend.execute,
+    };
+    let statements = 0;
+    for (const name of ["query", "queryOne", "execute"] as const) {
+      const original = originals[name];
+      backend[name] = function (sql: string, ...rest: unknown[]) {
+        statements++;
+        return original.call(backend, sql, ...rest);
+      };
+    }
 
-    getModelsDevPricing();
-    getModelsDevPricing();
-    getModelsDevPricing();
-
-    const callsAfter = prepareSpy.mock.calls.length;
-    prepareSpy.mock.restore();
+    try {
+      await getModelsDevPricing();
+      await getModelsDevPricing();
+      await getModelsDevPricing();
+    } finally {
+      backend.query = originals.query;
+      backend.queryOne = originals.queryOne;
+      backend.execute = originals.execute;
+    }
 
     // The N+1 bug re-runs the SELECT + JSON.parse on every call — memoized,
     // 3 calls should cost at most 1 real DB round-trip (0 if a prior test
     // already warmed the cache at the same version).
     assert.ok(
-      callsAfter - callsBefore <= 1,
-      `expected at most 1 db.prepare() call across 3 reads, got ${callsAfter - callsBefore}`
+      statements <= 1,
+      `expected at most 1 db statement across 3 reads, got ${statements}`
     );
   });
 
-  it("returns fresh data after a write invalidates the cache", () => {
-    getModelsDevPricing(); // warm the cache
-    saveModelsDevPricing({
+  it("returns fresh data after a write invalidates the cache", async () => {
+    await getModelsDevPricing(); // warm the cache
+    await saveModelsDevPricing({
       anthropic: { "claude-x": { input: 1, output: 2 } },
     });
-    const pricing = getModelsDevPricing();
+    const pricing = await getModelsDevPricing();
     assert.ok(pricing.anthropic, "cache should reflect the write, not a stale snapshot");
     assert.equal(pricing.anthropic["claude-x"].input, 1);
   });

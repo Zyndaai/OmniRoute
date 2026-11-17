@@ -13,14 +13,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { resolveComboContextLimit } = await import(
-  "../../open-sse/services/contextManager.ts"
-);
+const { resolveComboContextLimit } = await import("../../open-sse/services/contextManager.ts");
 
-test("explicit combo context_length wins over an unknown provider/model fallback", () => {
+test("explicit combo context_length wins over an unknown provider/model fallback", async () => {
   // openrouter/<custom alias> has no per-model window → resolveTokenLimit()
   // would return the provider default (128000) as a non-specific fallback.
-  const resolved = resolveComboContextLimit({
+  const resolved = await resolveComboContextLimit({
     provider: "openrouter",
     model: "zdr-glm-5.3-flash-max",
     comboTargetLimits: [],
@@ -31,10 +29,10 @@ test("explicit combo context_length wins over an unknown provider/model fallback
   assert.equal(resolved.source, "combo-explicit");
 });
 
-test("explicit combo context_length outranks a registry-specific target window", () => {
+test("explicit combo context_length outranks a registry-specific target window", async () => {
   // The operator's declaration is authoritative: it must win even when the
   // concrete target resolves a specific (registry-known) window.
-  const resolved = resolveComboContextLimit({
+  const resolved = await resolveComboContextLimit({
     provider: "openai",
     model: "gpt-4",
     comboTargetLimits: [200000],
@@ -45,8 +43,8 @@ test("explicit combo context_length outranks a registry-specific target window",
   assert.equal(resolved.source, "combo-explicit");
 });
 
-test("absent combo context_length preserves the pre-existing resolution order", () => {
-  const resolved = resolveComboContextLimit({
+test("absent combo context_length preserves the pre-existing resolution order", async () => {
+  const resolved = await resolveComboContextLimit({
     provider: "openrouter",
     model: "zdr-glm-5.3-flash-max",
     comboTargetLimits: [777000],
@@ -58,8 +56,8 @@ test("absent combo context_length preserves the pre-existing resolution order", 
   assert.equal(resolved.source, "target");
 });
 
-test("combo-min fallback still applies when no explicit value is set", () => {
-  const resolved = resolveComboContextLimit({
+test("combo-min fallback still applies when no explicit value is set", async () => {
+  const resolved = await resolveComboContextLimit({
     provider: "definitely-not-a-registered-provider",
     model: "unknown-model",
     comboTargetLimits: [640000, 900000],
@@ -80,8 +78,8 @@ const INVALID_EXPLICIT_VALUES: Array<number | null | undefined> = [
 ];
 
 for (const value of INVALID_EXPLICIT_VALUES) {
-  test(`invalid combo context_length (${String(value)}) is ignored, not trusted`, () => {
-    const resolved = resolveComboContextLimit({
+  test(`invalid combo context_length (${String(value)}) is ignored, not trusted`, async () => {
+    const resolved = await resolveComboContextLimit({
       provider: "definitely-not-a-registered-provider",
       model: "unknown-model",
       comboTargetLimits: [640000],

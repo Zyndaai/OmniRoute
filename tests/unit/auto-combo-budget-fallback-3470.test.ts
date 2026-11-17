@@ -72,8 +72,8 @@ test.afterEach(() => {
   Math.random = originalRandom;
 });
 
-test("selectProvider throws BudgetExceededError when budgetFallback='strict' and every candidate exceeds budgetCap", () => {
-  assert.throws(
+test("selectProvider throws BudgetExceededError when budgetFallback='strict' and every candidate exceeds budgetCap", async () => {
+  await assert.rejects(
     () =>
       selectProvider(
         { ...baseConfig, budgetCap: 0.001, budgetFallback: "strict" },
@@ -84,9 +84,9 @@ test("selectProvider throws BudgetExceededError when budgetFallback='strict' and
   );
 });
 
-test("BudgetExceededError message reports the cap and the cheapest candidate's cost, no stack leak", () => {
+test("BudgetExceededError message reports the cap and the cheapest candidate's cost, no stack leak", async () => {
   try {
-    selectProvider(
+    await selectProvider(
       { ...baseConfig, budgetCap: 0.001, budgetFallback: "strict" },
       overBudgetCandidates,
       "default"
@@ -99,8 +99,8 @@ test("BudgetExceededError message reports the cap and the cheapest candidate's c
   }
 });
 
-test("selectProvider still falls back to cheapest when budgetFallback is 'cheapest' (default/legacy)", () => {
-  const result = selectProvider(
+test("selectProvider still falls back to cheapest when budgetFallback is 'cheapest' (default/legacy)", async () => {
+  const result = await selectProvider(
     { ...baseConfig, budgetCap: 0.001, budgetFallback: "cheapest" },
     overBudgetCandidates,
     "default"
@@ -108,13 +108,17 @@ test("selectProvider still falls back to cheapest when budgetFallback is 'cheape
   assert.equal(result.provider, "cheap");
 });
 
-test("selectProvider defaults to cheapest fallback when budgetFallback is unset (backward compatible)", () => {
-  const result = selectProvider({ ...baseConfig, budgetCap: 0.001 }, overBudgetCandidates, "default");
+test("selectProvider defaults to cheapest fallback when budgetFallback is unset (backward compatible)", async () => {
+  const result = await selectProvider(
+    { ...baseConfig, budgetCap: 0.001 },
+    overBudgetCandidates,
+    "default"
+  );
   assert.equal(result.provider, "cheap");
 });
 
-test("selectProvider with strict fallback still picks a within-budget candidate normally", () => {
-  const result = selectProvider(
+test("selectProvider with strict fallback still picks a within-budget candidate normally", async () => {
+  const result = await selectProvider(
     { ...baseConfig, budgetCap: 1, budgetFallback: "strict" },
     overBudgetCandidates,
     "default"

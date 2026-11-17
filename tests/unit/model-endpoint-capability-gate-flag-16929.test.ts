@@ -11,12 +11,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createChatPipelineHarness } from "../integration/_chatPipelineHarness.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const FLAG = "MODEL_ENDPOINT_CAPABILITY_GATE_ENABLED";
 delete process.env[FLAG];
 
 const harness = await createChatPipelineHarness("endpoint-capability-gate-16929");
-const { handleChat, buildRequest, resetStorage, seedConnection, core } = harness;
+const { handleChat, buildRequest, resetStorage, seedConnection } = harness;
 
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const { getRequestedModelEndpointMismatch } =
@@ -55,19 +56,34 @@ function withFlag(value: "true" | undefined) {
   else process.env[FLAG] = value;
 }
 
-/** Counts SQL statements that are not the (cached) feature-flag override read. */
+/**
+ * Counts SQL statements that are not the (cached) feature-flag override read. Flag overrides
+ * live in config_entries; every other statement is catalog, combo or connection state.
+ */
 function countNonFlagSql(): { count: () => number; restore: () => void } {
-  const db = core.getDbInstance() as { prepare: (sql: string) => unknown };
-  const original = db.prepare;
-  let n = 0;
-  db.prepare = function (sql: string) {
-    if (!/namespace = \?/.test(sql) || !/key = \?/.test(sql)) n++;
-    return original.call(this, sql);
+  const backend = getTestBackend() as unknown as Record<
+    "query" | "queryOne" | "execute",
+    (sql: string, ...rest: unknown[]) => Promise<unknown>
+  >;
+  const originals = {
+    query: backend.query,
+    queryOne: backend.queryOne,
+    execute: backend.execute,
   };
+  let n = 0;
+  for (const name of ["query", "queryOne", "execute"] as const) {
+    const original = originals[name];
+    backend[name] = function (sql: string, ...rest: unknown[]) {
+      if (!/config_entries/.test(String(sql))) n++;
+      return original.call(backend, sql, ...rest);
+    };
+  }
   return {
     count: () => n,
     restore: () => {
-      db.prepare = original;
+      backend.query = originals.query;
+      backend.queryOne = originals.queryOne;
+      backend.execute = originals.execute;
     },
   };
 }

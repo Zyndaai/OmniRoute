@@ -29,8 +29,8 @@ const { prepareClaudeRequest } = await import("../../open-sse/translator/helpers
 const { DEFAULT_THINKING_CLAUDE_SIGNATURE } =
   await import("../../open-sse/config/defaultThinkingSignature.ts");
 
-test("#12105: thinking block with NO signature field is dropped, not stamped with the default signature", () => {
-  const result = openaiToClaudeRequest(
+test("#12105: thinking block with NO signature field is dropped, not stamped with the default signature", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       messages: [
@@ -71,11 +71,11 @@ test("#12105: thinking block with NO signature field is dropped, not stamped wit
   );
 });
 
-test("#12105: unsigned thinking block on the latest assistant turn with tool_use does not leak a fabricated signature through prepareClaudeRequest", () => {
+test("#12105: unsigned thinking block on the latest assistant turn with tool_use does not leak a fabricated signature through prepareClaudeRequest", async () => {
   // Mirrors the reported combo scenario: the previous turn was served by a
   // non-Anthropic rung (unsigned thinking + tool_use), and this turn routes to
   // an Anthropic-native rung with thinking enabled.
-  const translated = openaiToClaudeRequest(
+  const translated = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       thinking: { type: "enabled", budget_tokens: 4096 },
@@ -139,9 +139,9 @@ test("#12105: unsigned thinking block on the latest assistant turn with tool_use
   );
 });
 
-test("#12105: thinking block with a real signature is still preserved verbatim", () => {
+test("#12105: thinking block with a real signature is still preserved verbatim", async () => {
   const realSig = "ErUBCkYI...real-anthropic-signature...==";
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       messages: [

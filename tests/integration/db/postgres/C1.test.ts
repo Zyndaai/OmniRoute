@@ -37,6 +37,7 @@ const fenceDb = await import("../../../../src/lib/db/skillExecutionFence.ts");
 const fence = await import("../../../../src/lib/skills/toolExecutionFence.ts");
 const apiKeyLimits = await import("../../../../src/lib/usage/apiKeyUsageLimits.ts");
 const teamLimits = await import("../../../../src/lib/usage/teamUsageLimits.ts");
+const { invalidateDbCache } = await import("../../../../src/lib/db/readCache.ts");
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -1398,6 +1399,8 @@ test("team usage limits: committed cost query runs against the schema", async ()
     `INSERT INTO daily_team_usage_summary (team_id, api_key_id, provider, model, date, successful_requests, successful_input_tokens, successful_token_shapes)
      VALUES ('t1', 'tk', 'openai', 'gpt-4o-mini', (now() - interval '3 days')::date, 2, 20, '{"[10,5,0,0,0]": 2}')`
   );
+  // Raw writes bypass teams.ts, so drop the per-key policy cache the first read filled.
+  invalidateDbCache();
   const status = await teamLimits.getTeamUsageLimitStatusForApiKey("tk");
   assert.equal(status?.teamId, "t1");
   assert.equal(status?.maxBudgetUsd, 100);

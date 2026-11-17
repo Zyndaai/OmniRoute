@@ -18,9 +18,11 @@ const ccAliases = await import("../../src/lib/db/ccDiscoveryAliases.ts");
 const featureFlags = await import("../../src/lib/db/featureFlags.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 const openRouterCatalog = await import("../../src/lib/catalog/openrouterCatalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await core.resetDbInstance();
+  await resetTestDb();
   if (fs.existsSync(TEST_DATA_DIR)) {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
@@ -51,12 +53,12 @@ function restoreRealFetch(): void {
   globalThis.fetch = REAL_FETCH;
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   restoreRealFetch();
 });
@@ -127,7 +129,7 @@ test("model alias and compat writes invalidate model-catalog cache version", asy
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  compat.writeCompatList("openai", [
+  await compat.writeCompatList("openai", [
     {
       id: "manual-two",
       normalizeToolCallId: true,
@@ -136,54 +138,54 @@ test("model alias and compat writes invalidate model-catalog cache version", asy
   assert.equal(catalogVersion(), version + 1);
 });
 
-test("Claude Code discovery alias setters invalidate on both write and inherit/delete", () => {
+test("Claude Code discovery alias setters invalidate on both write and inherit/delete", async () => {
   let version = catalogVersion();
 
-  ccAliases.setCcAliasProviderSetting("openai", "on");
+  await ccAliases.setCcAliasProviderSetting("openai", "on");
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  ccAliases.setCcAliasProviderSetting("openai", null);
+  await ccAliases.setCcAliasProviderSetting("openai", null);
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  ccAliases.setCcAliasModelSetting("openai", "gpt-4", "on");
+  await ccAliases.setCcAliasModelSetting("openai", "gpt-4", "on");
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  ccAliases.setCcAliasModelSetting("openai", "gpt-4", null);
+  await ccAliases.setCcAliasModelSetting("openai", "gpt-4", null);
   assert.equal(catalogVersion(), version + 1);
 });
 
 test("feature flag writes invalidate catalog version only for catalog-relevant overrides", async () => {
   const unrelatedBefore = catalogVersion();
-  featureFlags.setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "true");
+  await featureFlags.setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "true");
   assert.equal(catalogVersion(), unrelatedBefore);
 
   let version = catalogVersion();
-  featureFlags.setFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
+  await featureFlags.setFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  featureFlags.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "alias");
+  await featureFlags.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "alias");
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  featureFlags.setFeatureFlagOverride("EXPOSE_CC_DISCOVERY_ALIASES", "true");
+  await featureFlags.setFeatureFlagOverride("EXPOSE_CC_DISCOVERY_ALIASES", "true");
   assert.equal(catalogVersion(), version + 1);
 
   const relevantKeyBeforeRemove = catalogVersion();
-  featureFlags.removeFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES");
+  await featureFlags.removeFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES");
   assert.equal(catalogVersion(), relevantKeyBeforeRemove + 1);
 
-  featureFlags.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "dual");
+  await featureFlags.setFeatureFlagOverride("MODELS_CATALOG_PREFIX_MODE", "dual");
   const irrelevantClearVersion = catalogVersion();
-  featureFlags.setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "true");
-  featureFlags.clearAllFeatureFlagOverrides();
+  await featureFlags.setFeatureFlagOverride("ARENA_ELO_SYNC_ENABLED", "true");
+  await featureFlags.clearAllFeatureFlagOverrides();
   assert.equal(catalogVersion(), irrelevantClearVersion + 1);
 
   const clearNoRelevantBefore = catalogVersion();
-  featureFlags.clearAllFeatureFlagOverrides();
+  await featureFlags.clearAllFeatureFlagOverrides();
   assert.equal(catalogVersion(), clearNoRelevantBefore);
 });
 

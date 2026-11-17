@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sub-feedless-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -18,10 +19,14 @@ const collectionRoute =
   await import("../../src/app/api/v1/management/proxy-subscriptions/route.ts");
 const itemRoute = await import("../../src/app/api/v1/management/proxy-subscriptions/[id]/route.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+async function rowsOf<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+  return getTestBackend().query<T>(sql, params);
 }
 
 function jsonRequest(url: string, body: unknown, method = "POST"): Request {
@@ -112,8 +117,8 @@ function startControlServer(): Promise<{
   });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -132,10 +137,10 @@ test("creates with no url and a control url, with no fetch", async () => {
       assert.equal(created.url, "");
       assert.equal(created.status, "empty");
       assert.equal(created.lastFetchedAt, null);
-      const rows = core
-        .getDbInstance()
-        .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ?")
-        .all(created.id) as Array<{ id: string }>;
+      const rows = await rowsOf<{ id: string }>(
+        "SELECT id FROM proxy_registry WHERE subscription_id = $1",
+        [created.id]
+      );
       assert.equal(rows.length, 0);
     } finally {
       await sub.deleteSubscription(created.id);
@@ -156,10 +161,9 @@ test("creating with no url and no control url is refused", async () => {
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error?: string };
   assert.equal(body.error, "url is required");
-  const rows = core
-    .getDbInstance()
-    .prepare("SELECT id FROM proxy_subscriptions WHERE name = ?")
-    .all(name) as Array<{ id: string }>;
+  const rows = await rowsOf<{ id: string }>("SELECT id FROM proxy_subscriptions WHERE name = $1", [
+    name,
+  ]);
   assert.equal(rows.length, 0);
 });
 
@@ -177,16 +181,16 @@ test("service call with no url and no control url leaves no row", async () => {
     /url is required/
   );
   try {
-    const rows = core
-      .getDbInstance()
-      .prepare("SELECT id FROM proxy_subscriptions WHERE name = ?")
-      .all(name) as Array<{ id: string }>;
+    const rows = await rowsOf<{ id: string }>(
+      "SELECT id FROM proxy_subscriptions WHERE name = $1",
+      [name]
+    );
     assert.equal(rows.length, 0);
   } finally {
-    const leftovers = core
-      .getDbInstance()
-      .prepare("SELECT id FROM proxy_subscriptions WHERE name = ?")
-      .all(name) as Array<{ id: string }>;
+    const leftovers = await rowsOf<{ id: string }>(
+      "SELECT id FROM proxy_subscriptions WHERE name = $1",
+      [name]
+    );
     for (const row of leftovers) {
       await sub.deleteSubscription(row.id);
     }
@@ -236,10 +240,10 @@ test("refreshing a feedless row writes nothing and keeps status", async () => {
       const after = await sub.getSubscriptionById(created.id);
       assert.equal(after!.status, before!.status);
       assert.equal(after!.updatedAt, before!.updatedAt);
-      const registry = core
-        .getDbInstance()
-        .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ?")
-        .all(created.id) as Array<{ id: string }>;
+      const registry = await rowsOf<{ id: string }>(
+        "SELECT id FROM proxy_registry WHERE subscription_id = $1",
+        [created.id]
+      );
       assert.equal(registry.length, 0);
     } finally {
       await sub.deleteSubscription(created.id);
@@ -262,11 +266,8 @@ test("activating a feedless row binds no scope", async () => {
     });
     try {
       await sub.applySubscription(created.id);
-      const assignments = core
-        .getDbInstance()
-        .prepare("SELECT 1 FROM proxy_assignments LIMIT 1")
-        .get();
-      assert.equal(assignments, undefined);
+      const assignments = await rowsOf("SELECT 1 FROM proxy_assignments LIMIT 1");
+      assert.equal(assignments.length, 0);
       assert.deepEqual(scopes.resolveTargetScopes({ mode: "global", url: "" }), []);
     } finally {
       await sub.deleteSubscription(created.id);

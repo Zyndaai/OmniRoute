@@ -66,7 +66,7 @@ async function sessionCookie(): Promise<string> {
   return `auth_token=${jwt}`;
 }
 
-function seedFile(apiKeyId: string | null, label: string) {
+async function seedFile(apiKeyId: string | null, label: string) {
   return createFile({
     bytes: label.length,
     filename: `${label}.jsonl`,
@@ -77,13 +77,13 @@ function seedFile(apiKeyId: string | null, label: string) {
   });
 }
 
-function seedBatch(
+async function seedBatch(
   apiKeyId: string | null,
   label: string,
   status: "validating" | "completed" = "validating"
 ) {
-  const file = seedFile(apiKeyId, label);
-  const batch = createBatch({
+  const file = await seedFile(apiKeyId, label);
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -230,15 +230,15 @@ describe("canAccessOwnedRecord — the shared 3-way ownership rule", () => {
   });
 });
 
-after(() => {
-  resetDbInstance();
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq9g-fpmv)", () => {
   it("(a) no credential at all → 401 on both lists, nothing enumerated", async () => {
     const keyA = await createApiKey("m3hp-a-key", "machine-m3hp-a", []);
-    seedBatch(keyA.id, "m3hp-a-victim");
+    await seedBatch(keyA.id, "m3hp-a-victim");
 
     const files = await listFilesVia({});
     assertAuthRequired401(files.res, files.body, "GET /v1/files");
@@ -251,7 +251,7 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
 
   it("(b) an invalid/rotated bearer → 401 on both lists — even alongside a session cookie", async () => {
     const keyA = await createApiKey("m3hp-b-key", "machine-m3hp-b", []);
-    seedBatch(keyA.id, "m3hp-b-victim");
+    await seedBatch(keyA.id, "m3hp-b-victim");
     const bogus = { Authorization: "Bearer sk-omni-this-key-was-rotated-away-m3hp" };
 
     const files = await listFilesVia(bogus);
@@ -269,9 +269,9 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
   it("(c) key A lists only A's rows — B's and null-owner rows never appear", async () => {
     const keyA = await createApiKey("m3hp-c-key-a", "machine-m3hp-ca", []);
     const keyB = await createApiKey("m3hp-c-key-b", "machine-m3hp-cb", []);
-    const own = seedBatch(keyA.id, "m3hp-c-own");
-    const other = seedBatch(keyB.id, "m3hp-c-other");
-    const unowned = seedBatch(null, "m3hp-c-unowned");
+    const own = await seedBatch(keyA.id, "m3hp-c-own");
+    const other = await seedBatch(keyB.id, "m3hp-c-other");
+    const unowned = await seedBatch(null, "m3hp-c-unowned");
     const headers = { Authorization: `Bearer ${keyA.key}` };
 
     const files = await listFilesVia(headers);
@@ -281,7 +281,9 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
     assert.ok(!fileIds.has(other.file.id), "key B's file must not leak to key A");
     assert.ok(!fileIds.has(unowned.file.id), "the null-owner file must not leak to key A");
     assert.strictEqual(files.body.total_count, files.body.data!.length);
-    assert.ok(files.body.data!.every((f) => getFile(f.id)?.apiKeyId === keyA.id));
+    for (const f of files.body.data!) {
+      assert.strictEqual((await getFile(f.id))?.apiKeyId, keyA.id);
+    }
 
     const batches = await listBatchesVia(headers);
     assert.strictEqual(batches.res.status, 200);
@@ -290,15 +292,17 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
     assert.ok(!batchIds.has(other.batch.id), "key B's batch must not leak to key A");
     assert.ok(!batchIds.has(unowned.batch.id), "the null-owner batch must not leak to key A");
     assert.strictEqual(batches.body.total_count, batches.body.data!.length);
-    assert.ok(batches.body.data!.every((b) => getBatch(b.id)?.apiKeyId === keyA.id));
+    for (const b of batches.body.data!) {
+      assert.strictEqual((await getBatch(b.id))?.apiKeyId, keyA.id);
+    }
   });
 
   it("(d) a dashboard session WITHOUT a key lists the whole instance", async () => {
     const keyA = await createApiKey("m3hp-d-key-a", "machine-m3hp-da", []);
     const keyB = await createApiKey("m3hp-d-key-b", "machine-m3hp-db", []);
-    const a = seedBatch(keyA.id, "m3hp-d-a");
-    const b = seedBatch(keyB.id, "m3hp-d-b");
-    const unowned = seedBatch(null, "m3hp-d-unowned");
+    const a = await seedBatch(keyA.id, "m3hp-d-a");
+    const b = await seedBatch(keyB.id, "m3hp-d-b");
+    const unowned = await seedBatch(null, "m3hp-d-unowned");
     const headers = { cookie: await sessionCookie() };
 
     const files = await listFilesVia(headers);
@@ -319,9 +323,9 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
   it("(e) a request carrying BOTH a session cookie and key A stays scoped to key A (the key wins)", async () => {
     const keyA = await createApiKey("m3hp-e-key-a", "machine-m3hp-ea", []);
     const keyB = await createApiKey("m3hp-e-key-b", "machine-m3hp-eb", []);
-    const own = seedBatch(keyA.id, "m3hp-e-own");
-    const other = seedBatch(keyB.id, "m3hp-e-other");
-    const unowned = seedBatch(null, "m3hp-e-unowned");
+    const own = await seedBatch(keyA.id, "m3hp-e-own");
+    const other = await seedBatch(keyB.id, "m3hp-e-other");
+    const unowned = await seedBatch(null, "m3hp-e-unowned");
     const headers = { Authorization: `Bearer ${keyA.key}`, cookie: await sessionCookie() };
 
     const files = await listFilesVia(headers);
@@ -343,7 +347,7 @@ describe("GET /api/v1/files + GET /api/v1/batches — caller scope (GHSA-m3hp-hq
 describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () => {
   it("(f) files: a null-owner file is 404 (metadata, content, delete) for a foreign key and for anonymous; 200 for a session", async () => {
     const keyB = await createApiKey("2jm2-f-key-b", "machine-2jm2-fb", []);
-    const file = seedFile(null, "2jm2-f-null-owner");
+    const file = await seedFile(null, "2jm2-f-null-owner");
     const foreign = { Authorization: `Bearer ${keyB.key}` };
     const anon = {};
 
@@ -361,9 +365,9 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
 
       const del = await deleteFileVia(headers, file.id);
       assert.strictEqual(del.status, 404, `${label}: DELETE /v1/files/{id}`);
-      assert.ok(getFile(file.id), `${label}: the null-owner file must survive`);
+      assert.ok(await getFile(file.id), `${label}: the null-owner file must survive`);
       assert.strictEqual(
-        getFileContent(file.id)?.toString(),
+        (await getFileContent(file.id))?.toString(),
         "2jm2-f-null-owner",
         `${label}: the null-owner file content must not be nulled`
       );
@@ -377,13 +381,13 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
     assert.strictEqual(await content.text(), "2jm2-f-null-owner");
     const del = await deleteFileVia(session, file.id);
     assert.strictEqual(del.status, 200, "session: DELETE /v1/files/{id}");
-    assert.strictEqual(getFile(file.id), null, "session delete takes effect");
+    assert.strictEqual(await getFile(file.id), null, "session delete takes effect");
   });
 
   it("(f) files: key-owned files keep the owner-only rule — owner 200, foreign key 404, anonymous 404, session 200", async () => {
     const keyA = await createApiKey("2jm2-f2-key-a", "machine-2jm2-f2a", []);
     const keyB = await createApiKey("2jm2-f2-key-b", "machine-2jm2-f2b", []);
-    const file = seedFile(keyA.id, "2jm2-f2-owned");
+    const file = await seedFile(keyA.id, "2jm2-f2-owned");
 
     assert.strictEqual(
       (await getFileVia({ Authorization: `Bearer ${keyA.key}` }, file.id)).status,
@@ -400,13 +404,13 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
       404
     );
     assert.strictEqual((await deleteFileVia({}, file.id)).status, 404);
-    assert.ok(getFile(file.id), "an anonymous delete on a key-owned file is a no-op");
+    assert.ok(await getFile(file.id), "an anonymous delete on a key-owned file is a no-op");
   });
 
   it("(f) batches: a null-owner batch is 404 (get, delete, cancel) for a foreign key and for anonymous; 200 for a session", async () => {
     const keyB = await createApiKey("2jm2-fb-key-b", "machine-2jm2-fbb", []);
-    const terminal = seedBatch(null, "2jm2-fb-null-terminal", "completed");
-    const live = seedBatch(null, "2jm2-fb-null-live", "validating");
+    const terminal = await seedBatch(null, "2jm2-fb-null-terminal", "completed");
+    const live = await seedBatch(null, "2jm2-fb-null-live", "validating");
     const foreign = { Authorization: `Bearer ${keyB.key}` };
 
     for (const [label, headers] of [
@@ -423,33 +427,37 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
         404,
         `${label}: DELETE /v1/batches/{id} on a null-owner batch`
       );
-      assert.ok(getBatch(terminal.batch.id), `${label}: the null-owner batch must survive`);
-      assert.ok(getFile(terminal.file.id), `${label}: its input file must survive`);
+      assert.ok(await getBatch(terminal.batch.id), `${label}: the null-owner batch must survive`);
+      assert.ok(await getFile(terminal.file.id), `${label}: its input file must survive`);
       assert.strictEqual(
         (await cancelBatchVia(headers, live.batch.id)).status,
         404,
         `${label}: POST /v1/batches/{id}/cancel on a null-owner batch`
       );
-      assert.strictEqual(getBatch(live.batch.id)?.status, "validating", `${label}: not cancelled`);
+      assert.strictEqual(
+        (await getBatch(live.batch.id))?.status,
+        "validating",
+        `${label}: not cancelled`
+      );
     }
 
     const session = { cookie: await sessionCookie() };
     assert.strictEqual((await getBatchVia(session, terminal.batch.id)).status, 200);
     assert.strictEqual((await cancelBatchVia(session, live.batch.id)).status, 200);
     assert.strictEqual(
-      getBatch(live.batch.id)?.status,
+      (await getBatch(live.batch.id))?.status,
       "cancelling",
       "session cancel takes effect"
     );
     assert.strictEqual((await deleteBatchVia(session, terminal.batch.id)).status, 200);
-    assert.strictEqual(getBatch(terminal.batch.id), null, "session delete takes effect");
+    assert.strictEqual(await getBatch(terminal.batch.id), null, "session delete takes effect");
   });
 
   it("(g) POST /api/v1/batches: a foreign key or an anonymous caller cannot run a batch over a null-owner input file; the owner and a session can", async () => {
     const keyA = await createApiKey("2jm2-g-key-a", "machine-2jm2-ga", []);
     const keyB = await createApiKey("2jm2-g-key-b", "machine-2jm2-gb", []);
-    const unownedInput = seedFile(null, "2jm2-g-null-input");
-    const ownedInput = seedFile(keyA.id, "2jm2-g-owned-input");
+    const unownedInput = await seedFile(null, "2jm2-g-null-input");
+    const ownedInput = await seedFile(keyA.id, "2jm2-g-owned-input");
 
     for (const [label, headers] of [
       ["foreign key", { Authorization: `Bearer ${keyB.key}` }],
@@ -471,7 +479,7 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
     // The owner can.
     const owner = await createBatchVia({ Authorization: `Bearer ${keyA.key}` }, ownedInput.id);
     assert.strictEqual(owner.res.status, 200, "key A over its own input file");
-    assert.strictEqual(getBatch(owner.body.id!)?.apiKeyId, keyA.id);
+    assert.strictEqual((await getBatch(owner.body.id!))?.apiKeyId, keyA.id);
 
     // The operator's session can — over the null-owner file AND over a key-owned one.
     const session = { cookie: await sessionCookie() };
@@ -484,22 +492,22 @@ describe("single-item routes — null-owner records (GHSA-2jm2-mpx8-6523)", () =
   it("(h) POST /api/v1/batches/{id}/cancel: a dashboard session cancels a KEY-owned batch (#13683); the owner can; a foreign key cannot", async () => {
     const keyA = await createApiKey("2jm2-h-key-a", "machine-2jm2-ha", []);
     const keyB = await createApiKey("2jm2-h-key-b", "machine-2jm2-hb", []);
-    const bySession = seedBatch(keyA.id, "2jm2-h-session", "validating");
-    const byOwner = seedBatch(keyA.id, "2jm2-h-owner", "validating");
+    const bySession = await seedBatch(keyA.id, "2jm2-h-session", "validating");
+    const byOwner = await seedBatch(keyA.id, "2jm2-h-owner", "validating");
 
     assert.strictEqual(
       (await cancelBatchVia({ Authorization: `Bearer ${keyB.key}` }, bySession.batch.id)).status,
       404,
       "a foreign key cannot cancel key A's batch"
     );
-    assert.strictEqual(getBatch(bySession.batch.id)?.status, "validating");
+    assert.strictEqual((await getBatch(bySession.batch.id))?.status, "validating");
 
     const session = await cancelBatchVia({ cookie: await sessionCookie() }, bySession.batch.id);
     assert.strictEqual(session.status, 200, "the operator's dashboard cancels any batch");
-    assert.strictEqual(getBatch(bySession.batch.id)?.status, "cancelling");
+    assert.strictEqual((await getBatch(bySession.batch.id))?.status, "cancelling");
 
     const owner = await cancelBatchVia({ Authorization: `Bearer ${keyA.key}` }, byOwner.batch.id);
     assert.strictEqual(owner.status, 200, "the owning key cancels its own batch");
-    assert.strictEqual(getBatch(byOwner.batch.id)?.status, "cancelling");
+    assert.strictEqual((await getBatch(byOwner.batch.id))?.status, "cancelling");
   });
 });

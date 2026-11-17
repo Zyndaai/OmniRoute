@@ -32,8 +32,7 @@ const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
 const keysRoute = await import("../../src/app/api/keys/[id]/route.ts");
-const jsonImportRoute = await import("../../src/app/api/settings/import-json/route.ts");
-const jsonMigration = await import("../../src/lib/db/jsonMigration.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
 const apiKeyPolicy = await import("../../src/shared/utils/apiKeyPolicy.ts");
 const pageUtils =
@@ -41,19 +40,7 @@ const pageUtils =
 
 async function resetStorage() {
   apiKeys.resetApiKeyState();
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  core.getDbInstance();
+  await resetTestDb();
   catalogCache.__resetCatalogBuilderRunsForTest();
 }
 
@@ -61,7 +48,7 @@ await resetStorage();
 
 test.after(async () => {
   apiKeys.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -207,139 +194,8 @@ test("R3b: provider namespace boundary — ollama-cloud/* denies ollama-cloudx/m
   );
 });
 
-test("R2/R5: JSON import preserves explicit restricted + empty and infers legacy mode", async () => {
-  await resetStorage();
-
-  jsonMigration.runJsonMigration(core.getDbInstance(), {
-    apiKeys: [
-      {
-        id: "json-restricted-empty",
-        name: "JSON Restricted Empty",
-        key: "omni_json_restricted_empty",
-        modelAccessMode: "restricted",
-        allowedModels: [],
-      },
-      {
-        id: "json-legacy-restricted",
-        name: "JSON Legacy Restricted",
-        key: "omni_json_legacy_restricted",
-        allowedModels: ["ollama-cloud/*"],
-      },
-      {
-        id: "json-legacy-all",
-        name: "JSON Legacy All",
-        key: "omni_json_legacy_all",
-        allowedModels: [],
-      },
-    ],
-  });
-  apiKeys.resetApiKeyState();
-
-  const restrictedEmpty = await apiKeys.getApiKeyMetadata("omni_json_restricted_empty");
-  assert.equal(restrictedEmpty?.modelAccessMode, "restricted");
-  assert.deepEqual(restrictedEmpty?.allowedModels, []);
-  assert.equal(
-    await apiKeys.isModelAllowedForKey("omni_json_restricted_empty", "openai/gpt-4.1"),
-    false
-  );
-
-  const legacyRestricted = await apiKeys.getApiKeyMetadata("omni_json_legacy_restricted");
-  assert.equal(legacyRestricted?.modelAccessMode, "restricted");
-  assert.equal(
-    await apiKeys.isModelAllowedForKey("omni_json_legacy_restricted", "ollama-cloud/new-model"),
-    true
-  );
-
-  const legacyAll = await apiKeys.getApiKeyMetadata("omni_json_legacy_all");
-  assert.equal(legacyAll?.modelAccessMode, "all");
-  assert.equal(await apiKeys.isModelAllowedForKey("omni_json_legacy_all", "any/model"), true);
-});
-
-test("R2/R5: startup db.json migration preserves explicit restricted-empty mode", async () => {
-  apiKeys.resetApiKeyState();
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  fs.writeFileSync(
-    path.join(TEST_DATA_DIR, "db.json"),
-    JSON.stringify({
-      apiKeys: [
-        {
-          id: "startup-restricted-empty",
-          name: "Startup Restricted Empty",
-          key: "omni_startup_restricted_empty",
-          modelAccessMode: "restricted",
-          allowedModels: [],
-        },
-      ],
-    })
-  );
-
-  core.getDbInstance();
-  const metadata = await apiKeys.getApiKeyMetadata("omni_startup_restricted_empty");
-  assert.equal(metadata?.modelAccessMode, "restricted");
-  assert.deepEqual(metadata?.allowedModels, []);
-  assert.equal(
-    await apiKeys.isModelAllowedForKey("omni_startup_restricted_empty", "openai/gpt-4.1"),
-    false
-  );
-});
-
-test("R2/R5: dashboard JSON import invalidates warm permission and catalog caches", async () => {
-  await resetStorage();
-  const created = await apiKeys.createApiKey("Import Cache", "ma-provider-import-cache");
-  assert.equal(await apiKeys.isModelAllowedForKey(created.key, "openai/gpt-4.1"), true);
-
-  const catalogRequest = () =>
-    new Request("http://localhost/v1/models", { headers: { Authorization: created.key } });
-  const headers = { corsHeaders: {}, diagnosticHeaders: {} };
-  const catalogPayload = (body: string) => ({
-    body,
-    headers: { "content-type": "application/json" },
-    status: 200,
-    cacheTTL: 60_000,
-  });
-  assert.equal(
-    await (
-      await catalogCache.resolveCachedCatalogResponse(catalogRequest(), headers, async () =>
-        catalogPayload("OLD")
-      )
-    ).text(),
-    "OLD"
-  );
-
-  const response = await jsonImportRoute.POST(
-    new Request("http://localhost/api/settings/import-json", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKeys: [
-          {
-            id: created.id,
-            name: "Import Cache",
-            key: created.key,
-            modelAccessMode: "restricted",
-            allowedModels: [],
-          },
-        ],
-      }),
-    })
-  );
-  assert.equal(response.status, 200);
-  assert.equal(await apiKeys.isModelAllowedForKey(created.key, "openai/gpt-4.1"), false);
-
-  let freshBuilds = 0;
-  const catalogAfterImport = await catalogCache.resolveCachedCatalogResponse(
-    catalogRequest(),
-    headers,
-    async () => {
-      freshBuilds++;
-      return catalogPayload("NEW");
-    }
-  );
-  assert.equal(await catalogAfterImport.text(), "NEW");
-  assert.equal(freshBuilds, 1);
-});
+// The JSON-import cases (runJsonMigration, startup db.json migration, the dashboard JSON import
+// route and its cache invalidation) were removed with the JSON/SQLite import feature.
 
 test("R2/R5: updateApiKeyPermissions persists modelAccessMode on getApiKeyById", async () => {
   await resetStorage();

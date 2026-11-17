@@ -105,7 +105,7 @@ test("pipeline: 2 steps — step 1 gets the original input, step 2 gets step 1's
 });
 
 test("pipeline: skips hidden steps without dispatching them", async () => {
-  modelsDb.mergeModelCompatOverride("p", "hidden-step", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("p", "hidden-step", { isHidden: true });
   const seen: string[] = [];
 
   const res = await handleComboChat({
@@ -125,7 +125,7 @@ test("pipeline: skips hidden steps without dispatching them", async () => {
 });
 
 test("pipeline: preserves explicit providers when filtering structured steps", async () => {
-  modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("nvidia", "openai/gpt-oss-120b", { isHidden: true });
   const seen: string[] = [];
 
   const res = await handleComboChat({

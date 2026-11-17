@@ -3,7 +3,7 @@
  * (open-sse/services/conversationTracker.ts).
  */
 
-import test from "node:test";
+import test, { before } from "node:test";
 import assert from "node:assert/strict";
 
 import { mkdtempSync } from "node:fs";
@@ -22,6 +22,13 @@ process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "conversation-tracker
 const { extractCanonicalTurns, computeFingerprintHash, resolveConversationId, hashTurnContent } =
   await import("../../open-sse/services/conversationTracker.ts");
 const { getConversationTurnPage } = await import("../../src/lib/db/agenticConversations.ts");
+const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+
+before(async () => {
+  await core.ensureDbInitialized();
+  await resetTestDb();
+});
 
 let correlationCounter = 0;
 function nextCorrelationId(): string {
@@ -145,12 +152,14 @@ test("computeFingerprintHash: identical apiKeyId/model/toolNames produce the sam
 });
 
 test("resolveConversationId: disabled tracking skips database access and message parsing", async () => {
-  const { getDbInstance } = await import("../../src/lib/db/core.ts");
-  const db = getDbInstance();
+  const backend = getTestBackend();
   const previous = process.env.OMNIROUTE_DISABLE_CONVERSATION_TRACKING;
-  const prepare = test.mock.method(db, "prepare", () => {
-    throw new Error("disabled tracking must not access SQLite");
-  });
+  const denied = () => {
+    throw new Error("disabled tracking must not access the database");
+  };
+  const queryMock = test.mock.method(backend, "query", denied);
+  const queryOneMock = test.mock.method(backend, "queryOne", denied);
+  const executeMock = test.mock.method(backend, "execute", denied);
   process.env.OMNIROUTE_DISABLE_CONVERSATION_TRACKING = "1";
   try {
     for (const clientSessionIdHeader of [null, "explicit-session"]) {
@@ -167,9 +176,13 @@ test("resolveConversationId: disabled tracking skips database access and message
       });
       assert.deepEqual(result, { conversationId: null, isNewConversation: false });
     }
-    assert.equal(prepare.mock.callCount(), 0);
+    assert.equal(queryMock.mock.callCount(), 0);
+    assert.equal(queryOneMock.mock.callCount(), 0);
+    assert.equal(executeMock.mock.callCount(), 0);
   } finally {
-    prepare.mock.restore();
+    queryMock.mock.restore();
+    queryOneMock.mock.restore();
+    executeMock.mock.restore();
     if (previous === undefined) delete process.env.OMNIROUTE_DISABLE_CONVERSATION_TRACKING;
     else process.env.OMNIROUTE_DISABLE_CONVERSATION_TRACKING = previous;
   }
@@ -300,7 +313,7 @@ test("resolveConversationId: an edited/duplicated mid-history turn mints its own
   assert.equal(request2.isNewConversation, true);
 
   // request1's chain is completely untouched: still exactly its own 9 turns.
-  const tree1 = getConversationTurnPage(request1.conversationId, { limit: 500 }).nodes;
+  const tree1 = (await getConversationTurnPage(request1.conversationId, { limit: 500 })).nodes;
   assert.equal(tree1.length, 9);
   assert.deepEqual(
     tree1.map((n) => n.contentHash).sort(),
@@ -321,7 +334,7 @@ test("resolveConversationId: an edited/duplicated mid-history turn mints its own
   // including its OWN copies of "a" and "b" (different node ids than
   // request1's, since each conversation's chain hashing is scoped to its
   // own conversation id), not references into request1's chain.
-  const tree2 = getConversationTurnPage(request2.conversationId, { limit: 500 }).nodes;
+  const tree2 = (await getConversationTurnPage(request2.conversationId, { limit: 500 })).nodes;
   assert.equal(tree2.length, 12);
   assert.deepEqual(
     tree2.map((n) => n.contentHash).sort(),
@@ -433,7 +446,7 @@ test("resolveConversationId: continuation is detected even when the system promp
   assert.equal(turn2.isNewConversation, false);
 
   // The regenerated system prompt must never appear as a chain node.
-  const tree = getConversationTurnPage(turn1.conversationId, { limit: 500 }).nodes;
+  const tree = (await getConversationTurnPage(turn1.conversationId, { limit: 500 })).nodes;
   for (const node of tree) {
     assert.notEqual(node.role, "system");
   }
@@ -563,7 +576,7 @@ test("resolveConversationId: continuation is detected even when the reconnect tu
   );
   assert.equal(turn2.isNewConversation, false);
 
-  const tree = getConversationTurnPage(turn1.conversationId, { limit: 500 }).nodes;
+  const tree = (await getConversationTurnPage(turn1.conversationId, { limit: 500 })).nodes;
   assert.equal(
     tree.length,
     9,
@@ -622,7 +635,7 @@ test("resolveConversationId: a repeated tool result followed by new content appe
   assert.equal(second.conversationId, first.conversationId);
   assert.equal(second.isNewConversation, false);
 
-  const tree = getConversationTurnPage(first.conversationId, { limit: 500 }).nodes;
+  const tree = (await getConversationTurnPage(first.conversationId, { limit: 500 })).nodes;
   assert.equal(tree.length, 8);
   assert.ok(tree.some((n) => n.contentHash === hashOfPlainTextTurn("assistant", "brand new")));
 });
@@ -664,7 +677,7 @@ test("resolveConversationId: new content without any repeated turn continues the
   assert.equal(second.conversationId, first.conversationId);
   assert.equal(second.isNewConversation, false);
 
-  const tree = getConversationTurnPage(first.conversationId, { limit: 500 }).nodes;
+  const tree = (await getConversationTurnPage(first.conversationId, { limit: 500 })).nodes;
   assert.equal(tree.length, 4);
 });
 
@@ -811,7 +824,7 @@ test("resolveConversationId: a byte-identical repeat of a single-turn request co
   assert.equal(second.conversationId, first.conversationId);
   assert.equal(second.isNewConversation, false);
 
-  const tree = getConversationTurnPage(first.conversationId, { limit: 500 }).nodes;
+  const tree = (await getConversationTurnPage(first.conversationId, { limit: 500 })).nodes;
   assert.equal(tree.length, 1);
 });
 

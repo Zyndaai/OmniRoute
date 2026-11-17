@@ -8,12 +8,31 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-llamacpp-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 
+const CONNECTION_IDS = ["conn-a", "conn-b", "conn-x", "conn-y", "conn-ok", "broken"];
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
+  // Synced model rows reference provider_connections (FK), so each connection needs one.
+  for (const id of CONNECTION_IDS) {
+    await db().execute("INSERT INTO provider_connections (id, provider) VALUES ($1, $2)", [
+      id,
+      "llama-cpp",
+    ]);
+  }
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+async function syncedModelsFor(connectionId: string): Promise<unknown> {
+  const row = await db().queryOne<{ models: unknown }>(
+    "SELECT models FROM connection_model_sync WHERE connection_id = $1",
+    [connectionId]
+  );
+  return row?.models;
 }
 
 test.beforeEach(async () => {
@@ -21,13 +40,11 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("removeSyncedAvailableModel deletes a single model from syncedAvailableModels", async () => {
-  const db = core.getDbInstance();
-
   // Seed two connections with models
   await modelsDb.replaceSyncedAvailableModelsForConnection("llama-cpp", "conn-a", [
     { id: "model-a", name: "Model A" },
@@ -48,25 +65,17 @@ test("removeSyncedAvailableModel deletes a single model from syncedAvailableMode
   assert.deepEqual(ids.sort(), ["model-a", "model-c"]);
 
   // Verify conn-a still has model-a
-  const rowA = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get("llama-cpp:conn-a");
-  const modelsA = JSON.parse(rowA.value);
+  const modelsA = (await syncedModelsFor("conn-a")) as Array<{ id: string }>;
   assert.equal(modelsA.length, 1);
   assert.equal(modelsA[0].id, "model-a");
 
   // Verify conn-b still has model-c
-  const rowB = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get("llama-cpp:conn-b");
-  const modelsB = JSON.parse(rowB.value);
+  const modelsB = (await syncedModelsFor("conn-b")) as Array<{ id: string }>;
   assert.equal(modelsB.length, 1);
   assert.equal(modelsB[0].id, "model-c");
 });
 
-test("removeSyncedAvailableModel deletes the key when a connection becomes empty", async () => {
-  const db = core.getDbInstance();
-
+test("removeSyncedAvailableModel empties a connection once its last model is removed", async () => {
   await modelsDb.replaceSyncedAvailableModelsForConnection("llama-cpp", "conn-x", [
     { id: "only-model", name: "Only Model" },
   ]);
@@ -74,15 +83,14 @@ test("removeSyncedAvailableModel deletes the key when a connection becomes empty
   const removed = await modelsDb.removeSyncedAvailableModel("llama-cpp", "only-model");
   assert.equal(removed, true);
 
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get("llama-cpp:conn-x");
-  assert.equal(row, undefined, "key should be deleted when empty");
+  assert.deepEqual(
+    await syncedModelsFor("conn-x"),
+    [],
+    "the connection keeps no models once its only model is removed"
+  );
 });
 
 test("removeSyncedAvailableModel returns false when model does not exist", async () => {
-  const db = core.getDbInstance();
-
   await modelsDb.replaceSyncedAvailableModelsForConnection("llama-cpp", "conn-y", [
     { id: "model-1", name: "Model 1" },
   ]);
@@ -96,32 +104,25 @@ test("removeSyncedAvailableModel returns false when model does not exist", async
 });
 
 test("removeSyncedAvailableModel skips malformed syncedAvailableModels rows", async () => {
-  const db = core.getDbInstance();
-
   await modelsDb.replaceSyncedAvailableModelsForConnection("llama-cpp", "conn-ok", [
     { id: "model-ok", name: "Model OK" },
     { id: "model-delete", name: "Model Delete" },
   ]);
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "syncedAvailableModels",
-    "llama-cpp:broken",
-    "{not valid json"
+  // The models column is jsonb, so the malformed entry is a valid JSON value that is
+  // not an array (the only shape removal has to skip).
+  await db().execute(
+    "INSERT INTO connection_model_sync (connection_id, provider, models) VALUES ($1, $2, $3::jsonb)",
+    ["broken", "llama-cpp", '{"not":"an array"}']
   );
 
   const removed = await modelsDb.removeSyncedAvailableModel("llama-cpp", "model-delete");
   assert.equal(removed, true);
 
-  const valid = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get("llama-cpp:conn-ok");
-  const validModels = JSON.parse(valid.value);
+  const validModels = (await syncedModelsFor("conn-ok")) as Array<{ id: string }>;
   assert.deepEqual(
     validModels.map((m) => m.id),
     ["model-ok"]
   );
 
-  const malformed = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get("llama-cpp:broken");
-  assert.equal(malformed.value, "{not valid json");
+  assert.deepEqual(await syncedModelsFor("broken"), { not: "an array" });
 });

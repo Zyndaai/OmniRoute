@@ -80,7 +80,7 @@ test("production Responses conversion preserves Kimi K3 reasoning history", () =
   }
 });
 
-test("Responses translation keeps authentic K3 reasoning through OpenAI cleanup", () => {
+test("Responses translation keeps authentic K3 reasoning through OpenAI cleanup", async () => {
   const body = {
     model: "k3",
     input: [
@@ -99,7 +99,7 @@ test("Responses translation keeps authentic K3 reasoning through OpenAI cleanup"
   };
 
   for (const provider of ["kimi-web", "some-other"]) {
-    const translated = translateRequest(
+    const translated = (await translateRequest(
       "openai-responses",
       "openai",
       "k3",
@@ -107,7 +107,7 @@ test("Responses translation keeps authentic K3 reasoning through OpenAI cleanup"
       false,
       {},
       provider
-    ) as { messages: Array<Record<string, unknown>> };
+    )) as { messages: Array<Record<string, unknown>> };
 
     assert.equal(translated.messages[1].reasoning_content, "I should search first.", provider);
   }

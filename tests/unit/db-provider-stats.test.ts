@@ -7,19 +7,13 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-db-provider-stats-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
-const core = await import("../../src/lib/db/core.ts");
 const stats = await import("../../src/lib/db/providerStats.ts");
 const { NOAUTH_PROVIDERS } = await import("../../src/shared/constants/providers.ts");
 
-function insertCallLog(row: Record<string, unknown>) {
-  const db = core.getDbInstance();
+async function insertCallLog(row: Record<string, unknown>) {
   const full = {
     method: "POST",
     path: "/v1/chat/completions",
@@ -45,83 +39,87 @@ function insertCallLog(row: Record<string, unknown>) {
     artifact_relpath: null,
     artifact_size_bytes: null,
     artifact_sha256: null,
-    has_request_body: 0,
-    has_response_body: 0,
-    has_pipeline_details: 0,
+    has_request_body: false,
+    has_response_body: false,
+    has_pipeline_details: false,
     request_summary: null,
     ...row,
     id: row.id ?? `log-${Math.random().toString(16).slice(2)}`,
     timestamp: row.timestamp ?? new Date().toISOString(),
   };
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO call_logs (
-      id, timestamp, method, path, status, model, requested_model, provider, account,
+      id, "timestamp", method, path, status, model, requested_model, provider, account,
       connection_id, duration, tokens_in, tokens_out, cache_source, source_format, target_format,
       api_key_id, api_key_name, combo_name, combo_step_id, combo_execution_key,
       error_summary, detail_state, artifact_relpath, artifact_size_bytes, artifact_sha256,
       has_request_body, has_response_body, has_pipeline_details, request_summary
     ) VALUES (
-      @id, @timestamp, @method, @path, @status, @model, @requested_model, @provider, @account,
-      @connection_id, @duration, @tokens_in, @tokens_out, @cache_source, @source_format, @target_format,
-      @api_key_id, @api_key_name, @combo_name, @combo_step_id, @combo_execution_key,
-      @error_summary, @detail_state, @artifact_relpath, @artifact_size_bytes, @artifact_sha256,
-      @has_request_body, @has_response_body, @has_pipeline_details, @request_summary
-    )`
-  ).run(full);
+      $1, $2, $3, $4, $5, $6, $7, $8, $9,
+      $10, $11, $12, $13, $14, $15, $16,
+      $17, $18, $19, $20, $21,
+      $22, $23, $24, $25, $26,
+      $27, $28, $29, $30::jsonb
+    )`,
+    [
+      full.id,
+      full.timestamp,
+      full.method,
+      full.path,
+      full.status,
+      full.model,
+      full.requested_model,
+      full.provider,
+      full.account,
+      full.connection_id,
+      full.duration,
+      full.tokens_in,
+      full.tokens_out,
+      full.cache_source,
+      full.source_format,
+      full.target_format,
+      full.api_key_id,
+      full.api_key_name,
+      full.combo_name,
+      full.combo_step_id,
+      full.combo_execution_key,
+      full.error_summary,
+      full.detail_state,
+      full.artifact_relpath,
+      full.artifact_size_bytes,
+      full.artifact_sha256,
+      full.has_request_body,
+      full.has_response_body,
+      full.has_pipeline_details,
+      full.request_summary === null ? null : JSON.stringify(full.request_summary),
+    ]
+  );
 }
 
-function insertConnection(id: string, provider: string) {
-  const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    )
-    .run(id, provider, now, now);
+async function insertConnection(id: string, provider: string) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1, $2, now(), now())`,
+    [id, provider]
+  );
 }
 
-function queryPlan(sql: string, params: Record<string, unknown> = {}): string {
-  return (
-    core.getDbInstance().prepare(`EXPLAIN QUERY PLAN ${sql}`).all(params) as Array<{
-      detail: string;
-    }>
-  )
-    .map((r) => r.detail)
-    .join(" | ");
-}
-
-test.before(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
 });
 
-// resetDbInstance alone is not enough: the SQLite file survives in TEST_DATA_DIR,
-// so every test first re-creates a fresh schema over a wiped file.
-test.beforeEach(() => {
-  core.resetDbInstance();
-  for (const name of fs.readdirSync(TEST_DATA_DIR)) {
-    fs.rmSync(path.join(TEST_DATA_DIR, name), { recursive: true, force: true });
-  }
-  core.resetDbInstance();
-});
-
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
-
-test("getProviderCallStats aggregates totals, success and latency per provider", () => {
+test("getProviderCallStats aggregates totals, success and latency per provider", async () => {
   const since = stats.buildProviderStatsSince();
-  insertConnection("conn-openai", "openai");
-  insertConnection("conn-anthropic", "anthropic");
-  insertCallLog({ provider: "openai", status: 200, duration: 100, tokens_in: 10, tokens_out: 20 });
-  insertCallLog({ provider: "openai", status: 500, duration: 300, tokens_in: 5, tokens_out: 0 });
-  insertCallLog({ provider: "anthropic", status: 200, duration: 50, tokens_in: 1, tokens_out: 2 });
+  await insertConnection("conn-openai", "openai");
+  await insertConnection("conn-anthropic", "anthropic");
+  await insertCallLog({ provider: "openai", status: 200, duration: 100, tokens_in: 10, tokens_out: 20 });
+  await insertCallLog({ provider: "openai", status: 500, duration: 300, tokens_in: 5, tokens_out: 0 });
+  await insertCallLog({ provider: "anthropic", status: 200, duration: 50, tokens_in: 1, tokens_out: 2 });
   // excluded: provider '-' / null
-  insertCallLog({ provider: "-", status: 200 });
+  await insertCallLog({ provider: "-", status: 200 });
   // excluded: a provider whose connection is gone (no provider_connections row)
-  insertCallLog({ provider: "ghost-provider", status: 200, model: "ghost/model" });
+  await insertCallLog({ provider: "ghost-provider", status: 200, model: "ghost/model" });
 
-  const rows = stats.getProviderCallStats(since);
+  const rows = await stats.getProviderCallStats(since);
   const openai = rows.find((r) => r.provider === "openai");
   assert.ok(openai, "openai stats present");
   assert.equal(openai.totalRequests, 2);
@@ -135,200 +133,203 @@ test("getProviderCallStats aggregates totals, success and latency per provider",
   assert.equal(rows[0].provider, "openai");
 });
 
-test("getModelCallStats groups by provider+model", () => {
+test("getModelCallStats groups by provider+model", async () => {
   const since = stats.buildProviderStatsSince();
   // a live connection, so its rows are not excluded by the provider guard
-  insertConnection("conn-models", "openai");
-  insertCallLog({ provider: "openai", status: 200, model: "openai/gpt-4.1" });
-  insertCallLog({ provider: "openai", status: 500, model: "openai/gpt-4.1" });
+  await insertConnection("conn-models", "openai");
+  await insertCallLog({ provider: "openai", status: 200, model: "openai/gpt-4.1" });
+  await insertCallLog({ provider: "openai", status: 500, model: "openai/gpt-4.1" });
   // older than the 7-day window: counted by an unbounded query, not by the windowed one
-  insertCallLog({
+  await insertCallLog({
     provider: "openai",
     status: 200,
     model: "openai/gpt-4.1",
     timestamp: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
   });
 
-  const rows = stats.getModelCallStats(since);
+  const rows = await stats.getModelCallStats(since);
   const m = rows.find((r) => r.model === "openai/gpt-4.1" && r.provider === "openai");
   assert.ok(m, "model row present");
-  assert.equal(m.requests, 2); // the windowed rows only, the 10-day-old row is out
-  assert.equal(m.successfulRequests, 1);
+  assert.equal(Number(m.requests), 2); // the windowed rows only, the 10-day-old row is out
+  assert.equal(Number(m.successfulRequests), 1);
 });
 
-test("window: rows older than the window start are excluded", () => {
+test("window: rows older than the window start are excluded", async () => {
   const now = new Date("2026-10-19T00:00:00.000Z");
   const since = stats.buildProviderStatsSince(now);
   const dayMs = 24 * 60 * 60 * 1000;
   assert.equal(since, new Date(now.getTime() - 7 * dayMs).toISOString());
 
-  insertConnection("conn-openai", "openai");
-  insertCallLog({ provider: "openai", status: 200, timestamp: now.toISOString() });
-  insertCallLog({
+  await insertConnection("conn-openai", "openai");
+  await insertCallLog({ provider: "openai", status: 200, timestamp: now.toISOString() });
+  await insertCallLog({
     provider: "openai",
     status: 200,
     timestamp: new Date(now.getTime() - 10 * dayMs).toISOString(),
   });
 
-  const rows = stats.getProviderCallStats(since);
+  const rows = await stats.getProviderCallStats(since);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].provider, "openai");
-  assert.equal(rows[0].totalRequests, 1);
+  assert.equal(Number(rows[0].totalRequests), 1);
 
-  const models = stats.getModelCallStats(since);
+  const models = await stats.getModelCallStats(since);
   assert.equal(models.length, 1);
-  assert.equal(models[0].requests, 1);
+  assert.equal(Number(models[0].requests), 1);
 });
 
-test("a provider without a live connection is excluded from both aggregates", () => {
+test("a provider without a live connection is excluded from both aggregates", async () => {
   const since = stats.buildProviderStatsSince();
-  insertConnection("conn-openai", "openai");
-  insertCallLog({ provider: "openai", status: 200 });
+  await insertConnection("conn-openai", "openai");
+  await insertCallLog({ provider: "openai", status: 200 });
   // orphaned: call_logs rows exist, no provider_connections row
-  insertCallLog({ provider: "ghost-provider", status: 200 });
+  await insertCallLog({ provider: "ghost-provider", status: 200 });
 
-  const rows = stats.getProviderCallStats(since);
+  const rows = await stats.getProviderCallStats(since);
   assert.deepEqual(
     rows.map((r) => r.provider),
     ["openai"]
   );
-  const models = stats.getModelCallStats(since);
+  const models = await stats.getModelCallStats(since);
   assert.ok(!models.some((r) => r.provider === "ghost-provider"));
 });
 
-test("a keyless provider keeps its stats without a connection row", () => {
+test("a keyless provider keeps its stats without a connection row", async () => {
   const since = stats.buildProviderStatsSince();
   // The keyless provider list comes from production: every entry requests
   // through a shared synthetic connection, so none owns a provider_connections row.
   const keylessProvider = Object.keys(NOAUTH_PROVIDERS)[0];
-  insertConnection("conn-openai", "openai");
-  insertCallLog({ provider: "openai", status: 200 });
-  insertCallLog({
+  await insertConnection("conn-openai", "openai");
+  await insertCallLog({ provider: "openai", status: 200 });
+  await insertCallLog({
     provider: keylessProvider,
     status: 200,
     model: `${keylessProvider}/free-model`,
   });
-  insertCallLog({ provider: "ghost-provider", status: 200 });
+  await insertCallLog({ provider: "ghost-provider", status: 200 });
 
-  const providers = stats.getProviderCallStats(since).map((r) => r.provider);
+  const providers = (await stats.getProviderCallStats(since)).map((r) => r.provider);
   assert.deepEqual(providers.sort(), [keylessProvider, "openai"].sort());
 
-  const models = stats.getModelCallStats(since).map((r) => r.provider);
+  const models = (await stats.getModelCallStats(since)).map((r) => r.provider);
   assert.ok(models.includes(keylessProvider), "keyless provider model rows are kept");
   assert.ok(!models.includes("ghost-provider"), "a removed provider stays excluded");
 });
 
-test("planner uses the provider/timestamp indexes, no table scan", () => {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
+test("planner uses an index on call_logs for both aggregates, no sequential scan", async () => {
+  const backend = getTestBackend();
   const dayMs = 24 * 60 * 60 * 1000;
   const recent = new Date(Date.now() - dayMs).toISOString();
   const old = new Date(Date.now() - 10 * dayMs).toISOString();
-  db.transaction(() => {
-    for (let i = 0; i < 100; i++) {
-      db.prepare(
-        `INSERT INTO call_logs (id, timestamp, provider, model, status, duration, tokens_in, tokens_out)
-         VALUES (?, ?, ?, ?, 200, 100, 10, 20)`
-      ).run(`perf-${i}`, i % 2 === 0 ? recent : old, "openai", "openai/gpt-4.1");
-    }
-    db.prepare(
-      `INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?, ?, ?, ?)`
-    ).run("perf-conn", "openai", now, now);
-  })();
+  await backend.execute(
+    `INSERT INTO call_logs (id, "timestamp", provider, model, status, duration, tokens_in, tokens_out)
+     SELECT 'perf-' || g, CASE WHEN g % 2 = 0 THEN $1::timestamptz ELSE $2::timestamptz END,
+            'openai', 'openai/gpt-4.1', 200, 100, 10, 20
+       FROM generate_series(0, 99) AS g`,
+    [recent, old]
+  );
+  await insertConnection("perf-conn", "openai");
+  await backend.execute("ANALYZE call_logs");
   const since = stats.buildProviderStatsSince();
+  const keylessProviderIds = Object.keys(NOAUTH_PROVIDERS);
 
   // The statements under test are the ones the route serves, not a copy of them.
-  const params = {
-    since,
-    keylessProviderIds: JSON.stringify(Object.keys(NOAUTH_PROVIDERS)),
-  };
-  const providerPlan = queryPlan(stats.PROVIDER_CALL_STATS_SQL, params);
-  assert.ok(
-    providerPlan.includes("USING INDEX idx_cl_provider_timestamp"),
-    `provider query must use idx_cl_provider_timestamp, got: ${providerPlan}`
-  );
-  assert.ok(
-    !providerPlan.includes("SCAN TABLE"),
-    `provider query must not table-scan, got: ${providerPlan}`
-  );
+  // Seq scans are discouraged for this transaction only, so the planner has to pick an index
+  // whenever one can serve the predicate; the plan must then read call_logs through an index.
+  const explain = async (sql: string) =>
+    backend.transaction(async (tx) => {
+      await tx.execute("SET LOCAL enable_seqscan = off");
+      const rows = await tx.query<{ "QUERY PLAN": string }>(`EXPLAIN ${sql}`, [
+        since,
+        keylessProviderIds,
+      ]);
+      return rows.map((r) => r["QUERY PLAN"]).join("\n");
+    });
 
-  const modelPlan = queryPlan(stats.MODEL_CALL_STATS_SQL, params);
-  assert.ok(
-    modelPlan.includes("USING COVERING INDEX idx_cl_health_matrix_cover"),
-    `model query must use idx_cl_health_matrix_cover, got: ${modelPlan}`
+  const providerPlan = await explain(stats.PROVIDER_CALL_STATS_SQL);
+  assert.match(
+    providerPlan,
+    /Index.*call_logs|call_logs.*Index/s,
+    `provider query must read call_logs through an index, got: ${providerPlan}`
   );
-  assert.ok(
-    !modelPlan.includes("SCAN TABLE"),
-    `model query must not table-scan, got: ${modelPlan}`
+  assert.doesNotMatch(providerPlan, /Seq Scan on call_logs/);
+
+  const modelPlan = await explain(stats.MODEL_CALL_STATS_SQL);
+  assert.match(
+    modelPlan,
+    /Index.*call_logs|call_logs.*Index/s,
+    `model query must read call_logs through an index, got: ${modelPlan}`
   );
+  assert.doesNotMatch(modelPlan, /Seq Scan on call_logs/);
 });
 
 test("the shipped aggregates keep the window predicate and the keyless exception", () => {
   assert.ok(
-    stats.PROVIDER_CALL_STATS_SQL.includes("c.timestamp >= @since"),
+    stats.PROVIDER_CALL_STATS_SQL.includes('c."timestamp" >= $1::timestamptz'),
     "the provider aggregate must bound the lookback in SQL"
   );
   assert.ok(
-    stats.PROVIDER_CALL_STATS_SQL.includes("json_each(@keylessProviderIds)"),
+    stats.PROVIDER_CALL_STATS_SQL.includes("c.provider = ANY($2::text[])"),
     "the provider aggregate must keep the keyless exception in SQL"
   );
   assert.ok(
-    stats.MODEL_CALL_STATS_SQL.includes("c.timestamp >= @since"),
+    stats.MODEL_CALL_STATS_SQL.includes('c."timestamp" >= $1::timestamptz'),
     "the model aggregate must bound the lookback in SQL"
   );
   assert.ok(
-    stats.MODEL_CALL_STATS_SQL.includes("json_each(@keylessProviderIds)"),
+    stats.MODEL_CALL_STATS_SQL.includes("c.provider = ANY($2::text[])"),
     "the model aggregate must keep the keyless exception in SQL"
   );
 });
 
-test("bounded aggregates stay under the response threshold on a large table", () => {
-  const db = core.getDbInstance();
+test("bounded aggregates stay under the response threshold on a large table", async () => {
+  const backend = getTestBackend();
   const now = new Date();
   const dayMs = 24 * 60 * 60 * 1000;
   const recent = new Date(now.getTime() - dayMs).toISOString();
   const old = new Date(now.getTime() - 10 * dayMs).toISOString();
   const rowCount = 100000;
-  const insert = db.prepare(
-    `INSERT INTO call_logs (id, timestamp, provider, model, status, duration, tokens_in, tokens_out)
-     VALUES (?, ?, 'openai', 'openai/gpt-4.1', 200, 100, 10, 20)`
+  await backend.execute(
+    `INSERT INTO call_logs (id, "timestamp", provider, model, status, duration, tokens_in, tokens_out)
+     SELECT 'big-' || g, CASE WHEN g % 2 = 0 THEN $1::timestamptz ELSE $2::timestamptz END,
+            'openai', 'openai/gpt-4.1', 200, 100, 10, 20
+       FROM generate_series(0, $3::int - 1) AS g`,
+    [recent, old, rowCount]
   );
-  db.transaction(() => {
-    for (let i = 0; i < rowCount; i++) insert.run(`big-${i}`, i % 2 === 0 ? recent : old);
-  })();
-  insertConnection("conn-big", "openai");
+  await insertConnection("conn-big", "openai");
+  await backend.execute("ANALYZE call_logs");
   const since = stats.buildProviderStatsSince();
 
   const started = performance.now();
-  const rows = stats.getProviderCallStats(since);
+  const rows = await stats.getProviderCallStats(since);
   const providerMs = performance.now() - started;
   assert.ok(providerMs < 1500, `bounded provider query took ${providerMs.toFixed(1)} ms`);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].totalRequests, Math.floor(rowCount / 2));
+  assert.equal(Number(rows[0].totalRequests), Math.floor(rowCount / 2));
 
   const startedModel = performance.now();
-  const models = stats.getModelCallStats(since);
+  const models = await stats.getModelCallStats(since);
   const modelMs = performance.now() - startedModel;
   assert.ok(modelMs < 1500, `bounded model query took ${modelMs.toFixed(1)} ms`);
-  assert.equal(models[0].requests, Math.floor(rowCount / 2));
+  assert.equal(Number(models[0].requests), Math.floor(rowCount / 2));
 });
 
-test("a keyless search provider keeps its stats without a connection row", () => {
+test("a keyless search provider keeps its stats without a connection row", async () => {
   const since = stats.buildProviderStatsSince();
   // Keyless search providers (authType: "none") are exempted from the connection
   // guard alongside no-auth AI cards: searxng-search, context7, duckduckgo-free.
   // Their requests run on a shared synthetic connection, so none owns a
   // provider_connections row — yet their call_logs rows must still appear.
-  insertCallLog({ provider: "searxng-search", status: 200, model: "searxng-search/web" });
-  insertCallLog({ provider: "ghost-provider", status: 200 });
+  await insertCallLog({ provider: "searxng-search", status: 200, model: "searxng-search/web" });
+  await insertCallLog({ provider: "ghost-provider", status: 200 });
 
-  const providers = stats.getProviderCallStats(since).map((r) => r.provider);
+  const providers = (await stats.getProviderCallStats(since)).map((r) => r.provider);
   assert.ok(providers.includes("searxng-search"), "keyless search provider is kept");
   assert.ok(!providers.includes("ghost-provider"), "a removed provider stays excluded");
 
-  const models = stats.getModelCallStats(since);
+  const models = await stats.getModelCallStats(since);
   const m = models.find((r) => r.provider === "searxng-search");
   assert.ok(m, "keyless search provider model row is present");
-  assert.equal(m.requests, 1);
+  assert.equal(Number(m.requests), 1);
   assert.equal(m.model, "searxng-search/web");
 });

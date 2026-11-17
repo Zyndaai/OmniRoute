@@ -23,8 +23,8 @@ function toolTurns(count: number, size: number) {
   ]).flat();
 }
 
-function purify(messages: Record<string, unknown>[]) {
-  const result = compressContext(
+async function purify(messages: Record<string, unknown>[]) {
+  const result = await compressContext(
     { model: "any-model", messages },
     {
       maxTokens: 5_000,
@@ -35,8 +35,8 @@ function purify(messages: Record<string, unknown>[]) {
   return (result.body as { messages: Array<Record<string, unknown>> }).messages;
 }
 
-test("purify_history keeps the user task when only tool turns would remain", () => {
-  const messages = purify([
+test("purify_history keeps the user task when only tool turns would remain", async () => {
+  const messages = await purify([
     { role: "system", content: "You are a worker." },
     { role: "user", content: "work kanban task t_1" },
     ...toolTurns(30, 1_900),
@@ -51,8 +51,8 @@ test("purify_history keeps the user task when only tool turns would remain", () 
   assert.notEqual(messages[2].role, "tool");
 });
 
-test("purify_history re-anchors the newest user turn, not the oldest", () => {
-  const messages = purify([
+test("purify_history re-anchors the newest user turn, not the oldest", async () => {
+  const messages = await purify([
     { role: "system", content: "sys" },
     { role: "user", content: "first task" },
     ...toolTurns(10, 1_900),
@@ -63,8 +63,8 @@ test("purify_history re-anchors the newest user turn, not the oldest", () => {
   assert.deepEqual(users, ["second task"]);
 });
 
-test("purify_history does not add a user turn when the tail already has one", () => {
-  const messages = purify([
+test("purify_history does not add a user turn when the tail already has one", async () => {
+  const messages = await purify([
     { role: "system", content: "sys" },
     { role: "user", content: "old" },
     ...toolTurns(20, 1_900),
@@ -74,7 +74,7 @@ test("purify_history does not add a user turn when the tail already has one", ()
   assert.deepEqual(users, ["latest question"]);
 });
 
-test("purify_history with no user turn at all does not invent one", () => {
-  const messages = purify([{ role: "system", content: "sys" }, ...toolTurns(30, 1_900)]);
+test("purify_history with no user turn at all does not invent one", async () => {
+  const messages = await purify([{ role: "system", content: "sys" }, ...toolTurns(30, 1_900)]);
   assert.equal(messages.filter((m) => m.role === "user").length, 0);
 });

@@ -37,7 +37,6 @@ function renderIssue(issue: unknown): string {
 async function compileRuntimeRequireModules(): Promise<string[]> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-webpack-create-require-"));
   const sourcePaths = [
-    "src/lib/db/adapters/runtimeRequire.ts",
     "src/lib/machineToken.ts",
     "open-sse/services/browserPool.ts",
     "open-sse/utils/tlsClient.ts",

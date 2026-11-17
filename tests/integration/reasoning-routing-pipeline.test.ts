@@ -362,7 +362,7 @@ test("reasoning routing filters incompatible combo targets and rejects an empty 
   // becomes true/unknown silently stops exercising this path — assert the premise.
   const INCOMPATIBLE_TARGET = "openai/gpt-4o";
   assert.equal(
-    getResolvedModelCapabilities(INCOMPATIBLE_TARGET).supportsThinking,
+    (await getResolvedModelCapabilities(INCOMPATIBLE_TARGET)).supportsThinking,
     false,
     `${INCOMPATIBLE_TARGET} must declare supportsThinking:false for this test to mean anything`
   );

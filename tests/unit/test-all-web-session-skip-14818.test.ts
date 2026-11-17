@@ -23,9 +23,9 @@ const { evaluateTestAllEntry } =
 
 const originalFetch = globalThis.fetch;
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -58,7 +58,7 @@ test("Test All with autoHideFailed never hides a skipped web-session model", asy
   assert.equal(fetchCalls, 0);
   assert.equal(entry.status, "error");
   assert.notEqual(entry.hidden, true);
-  assert.equal(modelsDb.getModelIsHidden("deepseek-web", "deepseek-v4-pro-think"), false);
+  assert.equal(await modelsDb.getModelIsHidden("deepseek-web", "deepseek-v4-pro-think"), false);
 
   // The dashboard applies the same decision client-side.
   assert.equal(evaluateTestAllEntry(entry as never, true).shouldHide, false);

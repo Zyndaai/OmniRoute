@@ -11,21 +11,22 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { buildAutoCandidates, expandAutoComboCandidatePool } =
   await import("../../open-sse/services/combo.ts");
 const { resolveAutoStrategyOrder } =
   await import("../../open-sse/services/combo/resolveAutoStrategy.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(() => resetStorage());
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -74,9 +75,6 @@ test("restricted catalog expansion uses only active allowed connections and pres
   const anthropicAllowed = await seedConnection("anthropic", "anthropic-allowed");
   const inactiveAllowed = await seedConnection("groq", "groq-inactive", false);
 
-  const db = core.getDbInstance();
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_insert");
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_update");
   const retiredAllowed = await seedConnection("microsoft-designer-web", "retired-designer-allowed");
 
   await modelsDb.replaceSyncedAvailableModelsForConnection("openai", openaiAllowed.id, [
@@ -88,7 +86,7 @@ test("restricted catalog expansion uses only active allowed connections and pres
     { id: "claude-visible", name: "Claude Visible", supportedEndpoints: ["messages"] },
   ]);
   await modelsDb.addCustomModel("microsoft-designer-web", "retired-chat", "Retired Chat");
-  modelsDb.setModelIsHidden("openai", "chat-hidden", true);
+  await modelsDb.setModelIsHidden("openai", "chat-hidden", true);
 
   const scope = [
     openaiAllowed.id,
@@ -347,7 +345,9 @@ test("restricted pool fails closed and logs a sanitized warning when the connect
   const openaiAllowed = await seedConnection("openai", "openai-lookup-failure");
   const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
   invalidateDbCache();
-  core.getDbInstance().exec("DROP TABLE provider_connections");
+  // Simulate a failed connection lookup by moving the table away for this test only.
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE provider_connections RENAME TO provider_connections_hidden");
 
   const warnings: string[] = [];
   const originalWarn = console.warn;
@@ -355,6 +355,7 @@ test("restricted pool fails closed and logs a sanitized warning when the connect
     warnings.push(args.map(String).join(" "));
   };
   try {
+    invalidateDbCache();
     const expanded = await expandAutoComboCandidatePool(
       [target("openai", "model-a")],
       { config: {} },
@@ -363,6 +364,10 @@ test("restricted pool fails closed and logs a sanitized warning when the connect
     assert.deepEqual(expanded, []);
   } finally {
     console.warn = originalWarn;
+    await backend.execute(
+      "ALTER TABLE provider_connections_hidden RENAME TO provider_connections"
+    );
+    invalidateDbCache();
   }
 
   const entry = warnings.find((line) => line.includes("Restricted auto pool"));

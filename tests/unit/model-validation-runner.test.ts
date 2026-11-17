@@ -7,7 +7,7 @@ import { createValidationSnapshot } from "../../src/lib/db/validatedModels.ts";
 import { getProviderCredentials } from "../../src/sse/services/auth.ts";
 import { createProofRunner, requireProofResponse } from "../../src/lib/modelValidation/runner.ts";
 import { GEMINI_ENV_CONNECTION_ID } from "../../src/lib/providers/gemini.ts";
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 import {
   acquireExclusiveConnectionLease,
   releaseExclusiveConnectionLease,
@@ -49,7 +49,7 @@ test("pending credential selection can abort and cannot dispatch when it later r
   const controller = new AbortController();
   const run = await createProofRunner(
     input,
-    createValidationSnapshot(input),
+    await createValidationSnapshot(input),
     controller.signal,
     async () => {
       entered();
@@ -93,7 +93,7 @@ test("stale selected endpoint metadata is rejected against the fresh connection 
   });
   const run = await createProofRunner(
     input,
-    createValidationSnapshot(input),
+    await createValidationSnapshot(input),
     new AbortController().signal,
     async () => stale
   );
@@ -133,7 +133,7 @@ test("environment credential variants cannot replace the explicitly stored conne
   };
   const run = await createProofRunner(
     input,
-    createValidationSnapshot(input),
+    await createValidationSnapshot(input),
     new AbortController().signal,
     async () => selected
   );
@@ -175,10 +175,14 @@ test("a lease-selection status without credentials cannot become a proof", async
   };
   const leaseOwnerId = `vlo_${"D".repeat(43)}`;
   const apiKeyId = "selection-status-owner";
-  const claimed = acquireExclusiveConnectionLease({ ...input, leaseOwnerId, apiKeyId });
+  const claimed = await acquireExclusiveConnectionLease({ ...input, leaseOwnerId, apiKeyId });
   assert.equal(claimed.kind, "ACQUIRED");
   if (claimed.kind !== "ACQUIRED") throw new Error("fixture lease was not acquired");
-  releaseExclusiveConnectionLease({ leaseOwnerId, apiKeyId, generation: claimed.lease.generation });
+  await releaseExclusiveConnectionLease({
+    leaseOwnerId,
+    apiKeyId,
+    generation: claimed.lease.generation,
+  });
   let dispatched = 0;
   globalThis.fetch = async () => {
     dispatched++;
@@ -187,7 +191,7 @@ test("a lease-selection status without credentials cannot become a proof", async
   for (const tokens of [{}, { apiKey: "", accessToken: " \t" }]) {
     const run = await createProofRunner(
       input,
-      createValidationSnapshot(input),
+      await createValidationSnapshot(input),
       new AbortController().signal,
       async () => ({
         ...tokens,
@@ -204,7 +208,7 @@ test("a lease-selection status without credentials cannot become a proof", async
   assert.equal(dispatched, 0);
 });
 
-test("a lease acquired during selection blocks the fresh credential lookup itself", async (context) => {
+test("a lease acquired during selection blocks the fresh credential lookup itself", async () => {
   const connection = await createProviderConnection({
     provider: "openai",
     authType: "apikey",
@@ -233,19 +237,23 @@ test("a lease acquired during selection blocks the fresh credential lookup itsel
     dispatched++;
     throw new Error("unexpected dispatch");
   };
-  const db = getDbInstance();
-  const prepare = db.prepare.bind(db);
-  const spy = context.mock.method(db, "prepare", (sql: string) => {
-    if (generation && sql === "SELECT * FROM provider_connections WHERE id = ?")
+  // Count the fresh connection-row reads issued after the lease is claimed. Those reads go
+  // through the backend's queryOne, so that is the method wrapped for the duration of the run.
+  const backend = getTestBackend() as unknown as {
+    queryOne: (sql: string, ...rest: unknown[]) => Promise<unknown>;
+  };
+  const originalQueryOne = backend.queryOne;
+  backend.queryOne = function (sql: string, ...rest: unknown[]) {
+    if (generation && sql === "SELECT * FROM provider_connections WHERE id = $1")
       postClaimConnectionReads++;
-    return prepare(sql);
-  });
+    return originalQueryOne.call(backend, sql, ...rest);
+  };
   const run = await createProofRunner(
     input,
-    createValidationSnapshot(input),
+    await createValidationSnapshot(input),
     new AbortController().signal,
     async () => {
-      const claimed = acquireExclusiveConnectionLease({
+      const claimed = await acquireExclusiveConnectionLease({
         leaseOwnerId,
         apiKeyId,
         provider: input.provider,
@@ -264,7 +272,7 @@ test("a lease acquired during selection blocks the fresh credential lookup itsel
     assert.equal(postClaimConnectionReads, 0);
     assert.equal(dispatched, 0);
   } finally {
-    spy.mock.restore();
-    if (generation) releaseExclusiveConnectionLease({ leaseOwnerId, apiKeyId, generation });
+    backend.queryOne = originalQueryOne;
+    if (generation) await releaseExclusiveConnectionLease({ leaseOwnerId, apiKeyId, generation });
   }
 });

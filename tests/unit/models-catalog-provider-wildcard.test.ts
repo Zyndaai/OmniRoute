@@ -11,7 +11,6 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-wildcard-
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "wildcard-catalog-test-secret";
 process.env.JWT_SECRET = "wildcard-catalog-test-jwt-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.APP_LOG_TO_FILE = "false";
 
 const core = await import("../../src/lib/db/core.ts");
@@ -26,6 +25,7 @@ const { aiHordeImageCatalog } = await import("../../open-sse/services/aihordeIma
 const { mintDashboardSessionToken, DASHBOARD_SESSION_COOKIE } =
   await import("../../src/shared/utils/dashboardSessionToken.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const catalogSchema = z.object({
   object: z.literal("list"),
@@ -69,7 +69,8 @@ const largeCapabilities: ModelCapabilityEntry = {
 let dashboardHeaders: Headers;
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -92,8 +93,8 @@ test.afterEach(() => {
   assert.deepEqual(unexpectedCatalogNetworkRequests, [], "catalog tests must not use the network");
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -196,7 +197,7 @@ test("nested and mixed wildcards retain concrete-member metadata and first-targe
       supportedThinkingEfforts: ["low", "medium", "high"],
     },
   ]);
-  upsertSyncedCapabilities("groq", {
+  await upsertSyncedCapabilities("groq", {
     "fixture-wild-a": smallCapabilities,
     "fixture-wild-b": largeCapabilities,
   });
@@ -287,7 +288,7 @@ test("wildcards retain static fallback when no active synced catalog is usable",
 
 test("synced additions and removals refresh cached wildcard membership and limits", async () => {
   const connectionId = await seedGroq([{ id: "fixture-wild-b", name: "Fixture B" }]);
-  upsertSyncedCapabilities("groq", {
+  await upsertSyncedCapabilities("groq", {
     "fixture-wild-a": smallCapabilities,
     "fixture-wild-b": largeCapabilities,
   });
@@ -420,7 +421,7 @@ test("hidden members are excluded while inactive and hidden combos stay absent f
     { id: "fixture-wild-a", name: "Fixture A" },
     { id: "fixture-wild-b", name: "Fixture B" },
   ]);
-  upsertSyncedCapabilities("groq", {
+  await upsertSyncedCapabilities("groq", {
     "fixture-wild-a": smallCapabilities,
     "fixture-wild-b": largeCapabilities,
   });
@@ -460,7 +461,7 @@ test("hidden members are excluded while inactive and hidden combos stay absent f
     );
   }
 
-  modelsDb.setModelIsHidden("groq", "fixture-wild-a", true);
+  await modelsDb.setModelIsHidden("groq", "fixture-wild-a", true);
   for (const client of headers) {
     const data = await readCatalog(client);
     const explicit = entryFor(data, "visible-explicit");
@@ -471,7 +472,7 @@ test("hidden members are excluded while inactive and hidden combos stay absent f
       false
     );
   }
-  modelsDb.setModelIsHidden("groq", "fixture-wild-b", true);
+  await modelsDb.setModelIsHidden("groq", "fixture-wild-b", true);
   for (const client of headers) {
     const data = await readCatalog(client);
     assert.equal(
@@ -501,7 +502,7 @@ test("wildcard step connection pins and allowlists preserve scoped reasoning tie
   await modelsDb.replaceSyncedAvailableModelsForConnection("groq", secondId, [
     { id: "fixture-wild-a", name: "Fixture A", supportedThinkingEfforts: ["high"] },
   ]);
-  upsertSyncedCapabilities("groq", { "fixture-wild-a": smallCapabilities });
+  await upsertSyncedCapabilities("groq", { "fixture-wild-a": smallCapabilities });
   for (const { name, scope } of [
     { name: "dynamic", scope: {} },
     { name: "pinned", scope: { connectionId: firstId } },

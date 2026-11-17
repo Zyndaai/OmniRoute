@@ -29,7 +29,7 @@ const { isAlwaysProtectedPath, isLocalOnlyPath } =
 test.after(async () => {
   // Windows cannot delete a data dir whose storage.sqlite is still open.
   const core = await import("../../src/lib/db/core.ts");
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -87,7 +87,7 @@ test("the capability scan finds the routes it is meant to police", () => {
     "/api/shutdown",
     "/api/cli-tools/codex-profiles",
     "/api/cli-tools/letta-settings",
-    "/api/db-backups/exportAll",
+    "/api/log-export/destinations/sample/run",
   ]) {
     assert.ok(routes.has(known), `capability scan no longer detects ${known}`);
   }

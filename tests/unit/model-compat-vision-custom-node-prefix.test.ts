@@ -78,25 +78,25 @@ test.before(async () => {
     apiType: "responses",
   });
   // The live write path: PUT /api/provider-models { provider: <node id>, modelId, supportsVision }
-  modelsDb.mergeModelCompatOverride(NODE_ID, VISION_MODEL, { supportsVision: true });
-  modelsDb.mergeModelCompatOverride(NODE_ID, BLIND_MODEL, { supportsVision: false });
+  await modelsDb.mergeModelCompatOverride(NODE_ID, VISION_MODEL, { supportsVision: true });
+  await modelsDb.mergeModelCompatOverride(NODE_ID, BLIND_MODEL, { supportsVision: false });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
 
-test("node prefix maps back to its internal node id", () => {
-  assert.equal(nodePrefix.getProviderNodeIdByPrefixSync(PREFIX), NODE_ID);
-  assert.equal(nodePrefix.getProviderNodeIdByPrefixSync(PREFIX.toUpperCase()), NODE_ID);
-  assert.equal(nodePrefix.getProviderNodeIdByPrefixSync("no-such-node-prefix"), null);
-  assert.equal(nodePrefix.getProviderNodePrefixSync(NODE_ID), PREFIX);
+test("node prefix maps back to its internal node id", async () => {
+  assert.equal(await nodePrefix.getProviderNodeIdByPrefixSync(PREFIX), NODE_ID);
+  assert.equal(await nodePrefix.getProviderNodeIdByPrefixSync(PREFIX.toUpperCase()), NODE_ID);
+  assert.equal(await nodePrefix.getProviderNodeIdByPrefixSync("no-such-node-prefix"), null);
+  assert.equal(await nodePrefix.getProviderNodePrefixSync(NODE_ID), PREFIX);
 });
 
-test("compat vision override resolves for the node id and for its prefix alike", () => {
+test("compat vision override resolves for the node id and for its prefix alike", async () => {
   const cases = [
     { provider: NODE_ID, model: VISION_MODEL },
     { provider: PREFIX, model: VISION_MODEL },
@@ -108,33 +108,33 @@ test("compat vision override resolves for the node id and for its prefix alike",
 
   for (const input of cases) {
     assert.equal(
-      modelCapabilities.getResolvedModelCapabilities(input).supportsVision,
+      (await modelCapabilities.getResolvedModelCapabilities(input)).supportsVision,
       true,
       JSON.stringify(input)
     );
   }
 });
 
-test("an explicit supportsVision:false on the node reaches the prefix form too", () => {
+test("an explicit supportsVision:false on the node reaches the prefix form too", async () => {
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: NODE_ID, model: BLIND_MODEL })
+    (await modelCapabilities.getResolvedModelCapabilities({ provider: NODE_ID, model: BLIND_MODEL }))
       .supportsVision,
     false
   );
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: PREFIX, model: BLIND_MODEL })
+    (await modelCapabilities.getResolvedModelCapabilities({ provider: PREFIX, model: BLIND_MODEL }))
       .supportsVision,
     false
   );
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: PREFIX, model: UNSET_MODEL })
+    (await modelCapabilities.getResolvedModelCapabilities({ provider: PREFIX, model: UNSET_MODEL }))
       .supportsVision,
     null,
     "a model with no override on this node must stay unknown"
   );
 });
 
-test("prefix-addressed combo target survives the vision filter for an image request", () => {
+test("prefix-addressed combo target survives the vision filter for an image request", async () => {
   const body = imageRequestBody();
   const variants = [
     ["node id + bare model", comboTarget(NODE_ID, PREFIX, VISION_MODEL)],
@@ -145,31 +145,33 @@ test("prefix-addressed combo target survives the vision filter for an image requ
 
   for (const [label, target] of variants) {
     assert.equal(
-      filterTargetsByRequestCompatibility([target], body, log).length,
+      (await filterTargetsByRequestCompatibility([target], body, log)).length,
       1,
       `image request must keep the vision-capable target (${label})`
     );
   }
 
   assert.equal(
-    filterTargetsByRequestCompatibility([comboTarget(PREFIX, PREFIX, BLIND_MODEL)], body, log)
+    (await filterTargetsByRequestCompatibility([comboTarget(PREFIX, PREFIX, BLIND_MODEL)], body, log))
       .length,
     0,
     "an explicitly vision-disabled node model must still be dropped"
   );
 });
 
-test("no cross-provider leak: an unrelated provider keeps its own verdict", () => {
+test("no cross-provider leak: an unrelated provider keeps its own verdict", async () => {
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({
-      provider: "zz-unrelated-provider",
-      model: VISION_MODEL,
-    }).supportsVision,
+    (
+      await modelCapabilities.getResolvedModelCapabilities({
+        provider: "zz-unrelated-provider",
+        model: VISION_MODEL,
+      })
+    ).supportsVision,
     null
   );
   // Static / models.dev catalog targets are untouched by the node mapping.
   assert.equal(
-    modelCapabilities.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" })
+    (await modelCapabilities.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" }))
       .supportsVision,
     true
   );

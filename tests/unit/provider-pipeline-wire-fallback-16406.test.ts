@@ -86,7 +86,7 @@ test("pipeline advances its own wire state when the handler callback only update
 
 test("an ineligible custom candidate cannot fall through to an unapproved raw family sibling", async () => {
   const { setModelIsHidden } = await import("../../src/lib/db/models.ts");
-  setModelIsHidden("anthropic", "claude-opus-5", true, "chat");
+  await setModelIsHidden("anthropic", "claude-opus-5", true, "chat");
   const seenExclusions: boolean[] = [];
   try {
     const { sent } = await runWireCase("claude-opus-5-5", async (_current, tried) => {
@@ -96,6 +96,6 @@ test("an ineligible custom candidate cannot fall through to an unapproved raw fa
     assert.deepEqual(sent, ["claude-opus-5-5"]);
     assert.deepEqual(seenExclusions, [false, true]);
   } finally {
-    setModelIsHidden("anthropic", "claude-opus-5", false, "chat");
+    await setModelIsHidden("anthropic", "claude-opus-5", false, "chat");
   }
 });

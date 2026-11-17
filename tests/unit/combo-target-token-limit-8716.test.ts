@@ -13,8 +13,8 @@ const { parseModel } = await import("../../open-sse/services/model.ts");
 const { getTokenLimit, getComboTargetTokenLimit } =
   await import("../../open-sse/services/contextManager.ts");
 
-test("#8716 getTokenLimit(null provider) throws via toUpperCase (documents crash)", () => {
-  assert.throws(
+test("#8716 getTokenLimit(null provider) rejects via toUpperCase (documents crash)", async () => {
+  await assert.rejects(
     () => getTokenLimit(null as unknown as string, "gpt-4o"),
     (err: unknown) => err instanceof TypeError && String(err.message).includes("toUpperCase")
   );
@@ -26,20 +26,20 @@ test("#8716 parseModel without provider prefix yields null provider", () => {
   assert.equal(parsed.model, "gpt-4o");
 });
 
-test("#8716 getComboTargetTokenLimit falls back to target.provider (no throw)", () => {
+test("#8716 getComboTargetTokenLimit falls back to target.provider (no throw)", async () => {
   assert.equal(typeof getComboTargetTokenLimit, "function");
 
   const parsed = parseModel("gpt-4o");
   assert.equal(parsed.provider, null);
 
-  const limit = getComboTargetTokenLimit({
+  const limit = await getComboTargetTokenLimit({
     modelStr: "gpt-4o",
     provider: "openai",
   });
   assert.ok(Number.isFinite(limit) && limit > 0);
 
   // Same inputs via pre-parsed fields (matches chatCore call shape).
-  const limit2 = getComboTargetTokenLimit({
+  const limit2 = await getComboTargetTokenLimit({
     parsedProvider: parsed.provider,
     parsedModel: parsed.model,
     targetProvider: "openai",
@@ -47,12 +47,12 @@ test("#8716 getComboTargetTokenLimit falls back to target.provider (no throw)", 
   assert.equal(limit2, limit);
 });
 
-test("#8716 getComboTargetTokenLimit prefers parseModel provider when present", () => {
-  const withPrefix = getComboTargetTokenLimit({
+test("#8716 getComboTargetTokenLimit prefers parseModel provider when present", async () => {
+  const withPrefix = await getComboTargetTokenLimit({
     modelStr: "anthropic/claude-sonnet-4-6",
     provider: "openai",
   });
-  const fromParsedOnly = getComboTargetTokenLimit({
+  const fromParsedOnly = await getComboTargetTokenLimit({
     parsedProvider: "anthropic",
     parsedModel: "claude-sonnet-4-6",
     targetProvider: "openai",
@@ -60,12 +60,12 @@ test("#8716 getComboTargetTokenLimit prefers parseModel provider when present", 
   assert.equal(withPrefix, fromParsedOnly);
 });
 
-test("#8716/#14931 getComboTargetTokenLimit returns undefined when only the generic default resolves", () => {
+test("#8716/#14931 getComboTargetTokenLimit returns undefined when only the generic default resolves", async () => {
   // Both providers missing → "unknown" provider + uncataloged model resolves
   // solely to the non-specific 128000 catch-all. #14931: that guess must NOT
   // enter the runtime combo Math.min(); the resolver falls back to it on its
   // own only when every member is unknown.
-  const limit = getComboTargetTokenLimit({
+  const limit = await getComboTargetTokenLimit({
     parsedProvider: null,
     parsedModel: "some-model",
     targetProvider: null,
@@ -73,11 +73,11 @@ test("#8716/#14931 getComboTargetTokenLimit returns undefined when only the gene
   assert.equal(limit, undefined);
 });
 
-test("#14931 specific sources still resolve (name heuristic is a known source)", () => {
+test("#14931 specific sources still resolve (name heuristic is a known source)", async () => {
   // Step 4 of resolveTokenLimit (model-name heuristic) runs regardless of
   // provider known-ness: an uncataloged "gpt*" variant on an unknown provider
   // still resolves specific, while a non-matching name stays unknown.
-  const heuristic = getComboTargetTokenLimit({
+  const heuristic = await getComboTargetTokenLimit({
     parsedProvider: "totally-unknown-provider",
     parsedModel: "gpt-4o-unknown-variant",
     targetProvider: null,
@@ -87,7 +87,7 @@ test("#14931 specific sources still resolve (name heuristic is a known source)",
   // The #14931 incident shape: uncataloged model behind a custom
   // OpenAI-compatible connection has no catalog row, no registry entry and a
   // name that matches no heuristic → unknown, must not fake 128000.
-  const unknownProvider = getComboTargetTokenLimit({
+  const unknownProvider = await getComboTargetTokenLimit({
     parsedProvider: "openai-compatible-chat-d9363e0c",
     parsedModel: "qwen3.8-27b",
     targetProvider: null,

@@ -25,8 +25,8 @@ const agenticConversations = await import("../../src/lib/db/agenticConversations
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const route = await import("../../src/app/api/conversations/route.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   usageHistory.clearPendingRequests();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -35,9 +35,9 @@ test.beforeEach(() => {
   usageHistory.clearPendingRequests();
 });
 
-function seedTwoTurnConversation(id: string) {
-  agenticConversations.createAgenticConversation({ id, apiKeyId: null, fingerprintHash: "fp" });
-  agenticConversations.insertConversationTurnNodes(id, null, [
+async function seedTwoTurnConversation(id: string) {
+  await agenticConversations.createAgenticConversation({ id, apiKeyId: null, fingerprintHash: "fp" });
+  await agenticConversations.insertConversationTurnNodes(id, null, [
     { id: `${id}-n1`, parentId: null, role: "user", contentHash: "h1" },
     { id: `${id}-n2`, parentId: `${id}-n1`, role: "assistant", contentHash: "h2" },
   ]);
@@ -45,7 +45,7 @@ function seedTwoTurnConversation(id: string) {
 
 test("GET /api/conversations: surfaces the in-flight pending request's own id as activeCallLogId", async () => {
   const conversationId = "conv_active_test_1";
-  seedTwoTurnConversation(conversationId);
+  await seedTwoTurnConversation(conversationId);
 
   const pendingId = usageHistory.trackPendingRequest("gpt-4", "openai", "conn-1", true, {
     sessionTag: conversationId,
@@ -66,7 +66,7 @@ test("GET /api/conversations: surfaces the in-flight pending request's own id as
 
 test("GET /api/conversations: activeCallLogId is null for a conversation with no in-flight request", async () => {
   const conversationId = "conv_active_test_2";
-  seedTwoTurnConversation(conversationId);
+  await seedTwoTurnConversation(conversationId);
 
   const res = await route.GET(new Request("http://localhost/api/conversations?limit=50"));
   assert.equal(res.status, 200);

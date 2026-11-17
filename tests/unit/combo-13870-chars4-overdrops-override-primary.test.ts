@@ -25,8 +25,8 @@ const { estimateTokens } = await import("../../open-sse/services/contextManager.
 const { setModelContextOverride, removeModelContextOverride } =
   await import("../../src/lib/db/modelContextOverrides.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {
@@ -35,8 +35,8 @@ test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => {
-  clearModelsDevCapabilities();
+test.beforeEach(async () => {
+  await clearModelsDevCapabilities();
 });
 
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
@@ -93,16 +93,16 @@ function repetitiveAgentBody() {
   return { messages, tools, max_tokens: 32000 };
 }
 
-test("#13870: chars/4 overestimate demotes a real-fitting override primary behind the catalog emergency member", () => {
-  saveModelsDevCapabilities({
+test("#13870: chars/4 overestimate demotes a real-fitting override primary behind the catalog emergency member", async () => {
+  await saveModelsDevCapabilities({
     "unit-13870-primary": { model: capabilityEntry(null) },
     "unit-13870-fallback": { model: capabilityEntry(null) },
     "unit-13870-emergency": { model: capabilityEntry(899_153) },
     "unit-13870-small": { model: capabilityEntry(128_450) },
   });
 
-  setModelContextOverride("unit-13870-primary", "model", 250_000);
-  setModelContextOverride("unit-13870-fallback", "model", 250_000);
+  await setModelContextOverride("unit-13870-primary", "model", 250_000);
+  await setModelContextOverride("unit-13870-fallback", "model", 250_000);
 
   try {
     const body = repetitiveAgentBody();
@@ -120,7 +120,7 @@ test("#13870: chars/4 overestimate demotes a real-fitting override primary behin
       target("unit-13870-small/model"),
     ];
 
-    const out = filterTargetsByRequestCompatibility(targets, body, noopLog);
+    const out = await filterTargetsByRequestCompatibility(targets, body, noopLog);
 
     assert.equal(
       out[0].modelStr,
@@ -130,7 +130,7 @@ test("#13870: chars/4 overestimate demotes a real-fitting override primary behin
         `"collapse to the emergency member" reported in #13870`
     );
   } finally {
-    removeModelContextOverride("unit-13870-primary", "model");
-    removeModelContextOverride("unit-13870-fallback", "model");
+    await removeModelContextOverride("unit-13870-primary", "model");
+    await removeModelContextOverride("unit-13870-fallback", "model");
   }
 });

@@ -140,13 +140,13 @@ test("paired call + output is unchanged", () => {
 });
 
 for (const target of ["openai", "gemini", "claude"]) {
-  test(`translateRequest(openai-responses → ${target}): orphan output reaches the model`, () => {
+  test(`translateRequest(openai-responses → ${target}): orphan output reaches the model`, async () => {
     const body = {
       model: "m",
       previous_response_id: "resp_prev",
       input: [{ type: "function_call_output", call_id: "call_a", output: "weather: sunny" }],
     };
-    const result = translateRequest("openai-responses", target, "m", body, false) as Msg;
+    const result = (await translateRequest("openai-responses", target, "m", body, false)) as Msg;
     assert.ok(allText([result]).includes("weather: sunny"), "tool output preserved");
     if (Array.isArray(result.messages)) {
       const callIds = new Set(

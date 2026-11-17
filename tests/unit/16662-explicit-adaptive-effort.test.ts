@@ -26,63 +26,77 @@ function request(complex = false): Record<string, unknown> {
 }
 
 for (const effort of ["none", "minimal", "low", "medium", "high", "xhigh", "max"]) {
-  test(`adaptive preserves explicit ${effort} despite configured high and complex input`, () => {
+  test(`adaptive preserves explicit ${effort} despite configured high and complex input`, async () => {
     const body = { ...request(true), reasoning_effort: effort };
     const before = structuredClone(body);
-    const result = applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" });
+    const result = await applyThinkingBudget(body, {
+      mode: ThinkingMode.ADAPTIVE,
+      effortLevel: "high",
+    });
     assert.equal(result.reasoning_effort, effort);
     assert.deepEqual(body, before, "client request must not be mutated");
   });
 }
 
-test("adaptive preserves a nested Responses effort without adding a conflicting top-level effort", () => {
+test("adaptive preserves a nested Responses effort without adding a conflicting top-level effort", async () => {
   const body = { ...request(true), reasoning: { effort: "low", summary: "auto" } };
-  const result = applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" });
+  const result = await applyThinkingBudget(body, {
+    mode: ThinkingMode.ADAPTIVE,
+    effortLevel: "high",
+  });
   assert.deepEqual(result.reasoning, body.reasoning);
   assert.equal(result.reasoning_effort, undefined);
 });
 
-test("adaptive preserves explicit high for long content even with configured max", () => {
+test("adaptive preserves explicit high for long content even with configured max", async () => {
   const body = {
     ...request(),
     messages: [{ role: "user", content: "x".repeat(2001) }],
     reasoning_effort: "high",
   };
   assert.equal(
-    applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "max" }).reasoning_effort,
+    (await applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "max" }))
+      .reasoning_effort,
     "high"
   );
 });
 
-test("adaptive without explicit effort still scales and preserves configured max behavior", () => {
+test("adaptive without explicit effort still scales and preserves configured max behavior", async () => {
   const body = { ...request(true), reasoning: {} };
   for (const effortLevel of ["high", "max"]) {
     assert.equal(
-      applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel }).reasoning_effort,
+      (await applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel }))
+        .reasoning_effort,
       "xhigh"
     );
   }
   assert.equal(
-    applyThinkingBudget(
-      { ...request(), reasoning: {} },
-      {
-        mode: ThinkingMode.ADAPTIVE,
-        effortLevel: "max",
-      }
+    (
+      await applyThinkingBudget(
+        { ...request(), reasoning: {} },
+        {
+          mode: ThinkingMode.ADAPTIVE,
+          effortLevel: "max",
+        }
+      )
     ).reasoning_effort,
     "xhigh"
   );
 });
 
-test("explicit effort does not override strip, custom or passthrough mode policy", () => {
+test("explicit effort does not override strip, custom or passthrough mode policy", async () => {
   const body = { ...request(), reasoning_effort: "low" };
-  assert.equal(applyThinkingBudget(body, { mode: ThinkingMode.AUTO }).reasoning_effort, undefined);
   assert.equal(
-    applyThinkingBudget(body, { mode: ThinkingMode.CUSTOM, customBudget: 131072 }).reasoning_effort,
+    (await applyThinkingBudget(body, { mode: ThinkingMode.AUTO })).reasoning_effort,
+    undefined
+  );
+  assert.equal(
+    (await applyThinkingBudget(body, { mode: ThinkingMode.CUSTOM, customBudget: 131072 }))
+      .reasoning_effort,
     "xhigh"
   );
   assert.equal(
-    applyThinkingBudget(body, { mode: ThinkingMode.PASSTHROUGH }).reasoning_effort,
+    (await applyThinkingBudget(body, { mode: ThinkingMode.PASSTHROUGH })).reasoning_effort,
     "low"
   );
 });
@@ -102,7 +116,7 @@ for (const explicit of [true, false]) {
         headers: { "content-type": "application/json" },
       });
     });
-    const translated = translateRequest(
+    const translated = await translateRequest(
       "openai",
       "openai",
       "agnes-2.5-flash",
@@ -127,8 +141,8 @@ for (const explicit of [true, false]) {
 // Additional approved-contract controls: allocation never replaces a meaningful
 // client effort, while missing/non-string hints still take the automatic path.
 for (const hint of [null, 0, false, {}]) {
-  test(`adaptive treats non-string effort ${JSON.stringify(hint)} as automatic`, () => {
-    const result = applyThinkingBudget(
+  test(`adaptive treats non-string effort ${JSON.stringify(hint)} as automatic`, async () => {
+    const result = await applyThinkingBudget(
       { ...request(true), reasoning_effort: hint },
       { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" }
     );
@@ -136,8 +150,8 @@ for (const hint of [null, 0, false, {}]) {
   });
 }
 
-test("adaptive still strips explicit effort for a model without reasoning support", () => {
-  const result = applyThinkingBudget(
+test("adaptive still strips explicit effort for a model without reasoning support", async () => {
+  const result = await applyThinkingBudget(
     { ...request(true), model: "llama-3.3-70b-versatile", reasoning_effort: "high" },
     { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" }
   );
@@ -179,7 +193,7 @@ for (const scenario of [
         headers: { "content-type": "application/json" },
       });
     });
-    const translated = translateRequest(
+    const translated = await translateRequest(
       scenario.source,
       "openai",
       "agnes-2.5-flash",
@@ -200,7 +214,7 @@ for (const scenario of [
   });
 }
 
-test("adaptive honors explicit native Claude effort without reallocating its budget", () => {
+test("adaptive honors explicit native Claude effort without reallocating its budget", async () => {
   const body = {
     ...request(true),
     model: "claude-sonnet-4-6",
@@ -208,14 +222,17 @@ test("adaptive honors explicit native Claude effort without reallocating its bud
     thinking: { type: "enabled", budget_tokens: 1024 },
   };
   const before = structuredClone(body);
-  const result = applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" });
+  const result = await applyThinkingBudget(body, {
+    mode: ThinkingMode.ADAPTIVE,
+    effortLevel: "high",
+  });
   assert.deepEqual(result.thinking, body.thinking);
   assert.deepEqual(result.output_config, body.output_config);
   assert.deepEqual(body, before);
 });
 
-test("adaptive scales native numeric budgets when no discrete effort was requested", () => {
-  const result = applyThinkingBudget(
+test("adaptive scales native numeric budgets when no discrete effort was requested", async () => {
+  const result = await applyThinkingBudget(
     {
       ...request(true),
       model: "claude-sonnet-4-6",
@@ -240,9 +257,12 @@ for (const scenario of [
     gemini: true,
   },
 ]) {
-  test(`adaptive honors explicit ${scenario.name} after level normalization`, () => {
+  test(`adaptive honors explicit ${scenario.name} after level normalization`, async () => {
     const body = { ...request(true), model: "gemini-3.7-flash", ...scenario.hint };
-    const result = applyThinkingBudget(body, { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" });
+    const result = await applyThinkingBudget(body, {
+      mode: ThinkingMode.ADAPTIVE,
+      effortLevel: "high",
+    });
     if (scenario.gemini) {
       assert.deepEqual(result.generationConfig, { thinkingConfig: { thinkingBudget: 4096 } });
     } else {
@@ -251,30 +271,33 @@ for (const scenario of [
   });
 }
 
-test("adaptive preserves explicit thinkingLevel none instead of enabling thinking", () => {
-  const result = applyThinkingBudget(
+test("adaptive preserves explicit thinkingLevel none instead of enabling thinking", async () => {
+  const result = await applyThinkingBudget(
     { ...request(true), model: "gemini-3.7-flash", thinkingLevel: "none" },
     { mode: ThinkingMode.ADAPTIVE, effortLevel: "high" }
   );
   assert.deepEqual(result.thinking, { type: "disabled", budget_tokens: 0 });
 });
 
-test("native effort does not bypass strip or custom mode policy", () => {
+test("native effort does not bypass strip or custom mode policy", async () => {
   const body = {
     ...request(true),
     model: "claude-sonnet-4-6",
     output_config: { effort: "low" },
     thinking: { type: "enabled", budget_tokens: 1024 },
   };
-  const stripped = applyThinkingBudget(body, { mode: ThinkingMode.AUTO });
+  const stripped = await applyThinkingBudget(body, { mode: ThinkingMode.AUTO });
   assert.equal(stripped.thinking, undefined);
   assert.equal(stripped.output_config, undefined);
-  const custom = applyThinkingBudget(body, { mode: ThinkingMode.CUSTOM, customBudget: 8192 });
+  const custom = await applyThinkingBudget(body, {
+    mode: ThinkingMode.CUSTOM,
+    customBudget: 8192,
+  });
   assert.equal(custom.thinking.budget_tokens, 8192);
 });
 
-test("adaptive leaves native max explicit without injecting an automatic budget", () => {
-  const result = applyThinkingBudget(
+test("adaptive leaves native max explicit without injecting an automatic budget", async () => {
+  const result = await applyThinkingBudget(
     { ...request(true), model: "claude-opus-4-7", output_config: { effort: "max" } },
     { mode: ThinkingMode.ADAPTIVE, effortLevel: "medium" }
   );
@@ -288,8 +311,8 @@ for (const scenario of [
   { name: "inherited constructor key", hint: { thinkingLevel: "constructor" } },
   { name: "inherited prototype key", hint: { thinkingLevel: "__proto__" } },
 ]) {
-  test(`malformed native ${scenario.name} does not bypass automatic allocation`, () => {
-    const result = applyThinkingBudget(
+  test(`malformed native ${scenario.name} does not bypass automatic allocation`, async () => {
+    const result = await applyThinkingBudget(
       {
         ...request(true),
         model: "claude-sonnet-4-6",

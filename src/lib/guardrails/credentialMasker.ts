@@ -1,8 +1,14 @@
 import { CREDENTIAL_PATTERNS } from "@omniroute/open-sse/utils/credentialPatterns.ts";
-import { getSettings } from "@/lib/db/settings";
+import { getCachedSettings } from "@/lib/db/readCache";
 import { BaseGuardrail, type GuardrailContext, type GuardrailResult } from "./base";
 
 export { CREDENTIAL_PATTERNS };
+
+/** Opt-in: the env flag or the dashboard setting (read through the 5 s settings cache). */
+async function isRedactionEnabled(): Promise<boolean> {
+  if (process.env.CREDENTIAL_REDACTION_ENABLED === "true") return true;
+  return (await getCachedSettings()).credentialRedactionEnabled === true;
+}
 export type { CredentialPattern } from "@omniroute/open-sse/utils/credentialPatterns.ts";
 
 /**
@@ -139,11 +145,7 @@ export class CredentialMaskerGuardrail extends BaseGuardrail {
     payload: unknown,
     _context: GuardrailContext
   ): Promise<GuardrailResult<unknown> | void> {
-    const _s = await getSettings();
-    if (!(
-      _s.credentialRedactionEnabled === true || process.env.CREDENTIAL_REDACTION_ENABLED === "true"
-    ))
-      return { block: false };
+    if (!(await isRedactionEnabled())) return { block: false };
     const detections: Array<{ type: string; count: number }> = [];
     const { modified, payload: next } = redactPayload(payload, detections);
     if (!modified) return { block: false };
@@ -158,11 +160,7 @@ export class CredentialMaskerGuardrail extends BaseGuardrail {
     response: unknown,
     _context: GuardrailContext
   ): Promise<GuardrailResult<unknown> | void> {
-    const _s = await getSettings();
-    if (!(
-      _s.credentialRedactionEnabled === true || process.env.CREDENTIAL_REDACTION_ENABLED === "true"
-    ))
-      return { block: false };
+    if (!(await isRedactionEnabled())) return { block: false };
     const detections: Array<{ type: string; count: number }> = [];
     const { modified, response: next } = redactResponse(response, detections);
     if (!modified) return { block: false };

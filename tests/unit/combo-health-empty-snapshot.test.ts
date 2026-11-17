@@ -10,23 +10,29 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-combo-health-null-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { buildProviderHealth, buildQuotaHealth } =
   await import("../../src/lib/usage/comboHealth.ts");
 
 async function resetStorage() {
-  coreDb.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  // quota_snapshots.connection_id references provider_connections(id); without the row the
+  // snapshot write is dropped as a foreign-key violation.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    ["conn-1", "openrouter"]
+  );
 }
 
 test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -47,17 +53,17 @@ test("empty snapshots read null, not 0%, and stay non-exhausted", () => {
   assert.equal(h.trend, "stable");
 });
 
-test("all-null percentages read null (B3)", () => {
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
-  const q = buildQuotaHealth(["openrouter"], "1970-01-01T00:00:00.000Z");
+test("all-null percentages read null (B3)", async () => {
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
+  const q = await buildQuotaHealth(["openrouter"], "1970-01-01T00:00:00.000Z");
   assert.equal(q.providers[0].remainingPct, null);
   assert.equal(q.worstRemainingPct, null);
 });
 
-test("worstRemainingPct ignores nulls, null when all null", () => {
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
-  quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: 42.346 });
-  const q = buildQuotaHealth(["openrouter"], "1970-01-01T00:00:00.000Z");
+test("worstRemainingPct ignores nulls, null when all null", async () => {
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
+  await quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: 42.346 });
+  const q = await buildQuotaHealth(["openrouter"], "1970-01-01T00:00:00.000Z");
   assert.equal(q.worstRemainingPct, 42.35);
 });

@@ -15,7 +15,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { handleComboChat, preScreenTargets } = await import("../../open-sse/services/combo.ts");
 const { weightedStickyTargets, rrStickyTargets } =
   await import("../../open-sse/services/combo/rrState.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { resetAllComboMetrics } = await import("../../open-sse/services/comboMetrics.ts");
 const { resetAllCircuitBreakers, getCircuitBreaker } =
@@ -54,7 +54,7 @@ async function cleanupTestDataDir() {
   let lastError;
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      core.resetDbInstance();
+      await resetTestDb();
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       return;
     } catch (error: any) {
@@ -76,7 +76,7 @@ test.beforeEach(async () => {
   await cleanupTestDataDir();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await settingsDb.resetAllPricing();
-  settingsDb.clearAllLKGP();
+  await settingsDb.clearAllLKGP();
 });
 
 test.after(async () => {
@@ -86,7 +86,7 @@ test.after(async () => {
   _resetAllDecks();
   weightedStickyTargets.clear();
   rrStickyTargets.clear();
-  settingsDb.clearAllLKGP();
+  await settingsDb.clearAllLKGP();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {

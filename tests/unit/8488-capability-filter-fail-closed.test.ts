@@ -11,6 +11,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-8488-comp
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { saveModelsDevCapabilities } = await import("../../src/lib/modelsDevSync.ts");
 const {
   filterTargetsByRequestCompatibility,
@@ -65,26 +66,26 @@ const log = {
   debug() {},
 };
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#8488 filter: some tool-capable targets kept (unchanged)", () => {
-  saveModelsDevCapabilities({
+test("#8488 filter: some tool-capable targets kept (unchanged)", async () => {
+  await saveModelsDevCapabilities({
     openai: {
       "with-tools": capabilityEntry(128000, { tool_call: true }),
       "no-tools": capabilityEntry(128000, { tool_call: false }),
     },
   });
 
-  const kept = filterTargetsByRequestCompatibility(
+  const kept = await filterTargetsByRequestCompatibility(
     [target("openai", "openai/with-tools"), target("openai", "openai/no-tools")],
     {
       messages: [{ role: "user", content: "hi" }],
@@ -98,8 +99,8 @@ test("#8488 filter: some tool-capable targets kept (unchanged)", () => {
   );
 });
 
-test("#8488 filter: zero tool-capable targets → empty (fail closed)", () => {
-  saveModelsDevCapabilities({
+test("#8488 filter: zero tool-capable targets → empty (fail closed)", async () => {
+  await saveModelsDevCapabilities({
     openai: {
       "no-tools-a": capabilityEntry(128000, { tool_call: false }),
       "no-tools-b": capabilityEntry(128000, { tool_call: false }),
@@ -111,17 +112,17 @@ test("#8488 filter: zero tool-capable targets → empty (fail closed)", () => {
     messages: [{ role: "user", content: "hi" }],
     tools: [{ type: "function", function: { name: "lookup", parameters: {} } }],
   };
-  const kept = filterTargetsByRequestCompatibility(targets, body, log);
+  const kept = await filterTargetsByRequestCompatibility(targets, body, log);
   assert.equal(kept.length, 0);
 
-  const exhaustion = describeCapabilityFilterExhaustion(targets, body, "tools-combo");
+  const exhaustion = await describeCapabilityFilterExhaustion(targets, body, "tools-combo");
   assert.ok(exhaustion);
   assert.match(exhaustion!.message, /supports tool calling/i);
   assert.equal(exhaustion!.terminalReason, "capability_mismatch");
   assert.ok(exhaustion!.excluded.some((e) => e.reason.includes("tools")));
 });
 
-test("#8488 filter: Gemini Web emulation stays eligible for tools (#5240)", () => {
+test("#8488 filter: Gemini Web emulation stays eligible for tools (#5240)", async () => {
   // Registry honestly tags Gemini Web models toolCalling:false; the prompt
   // shim is what makes tools work. Fail-closed must not hard-reject them.
   assert.equal(providerSupportsEmulatedToolCalling("gemini-web"), true);
@@ -129,7 +130,7 @@ test("#8488 filter: Gemini Web emulation stays eligible for tools (#5240)", () =
   assert.equal(providerSupportsEmulatedToolCalling("claude-web"), false); // toolCalling:"none"
   assert.equal(providerSupportsEmulatedToolCalling("openai"), false);
 
-  const kept = filterTargetsByRequestCompatibility(
+  const kept = await filterTargetsByRequestCompatibility(
     [
       target("gemini-web", "gemini-web/gemini-3.1-pro"),
       target("gemini-web", "gemini-web/gemini-3.7-flash"),
@@ -146,7 +147,7 @@ test("#8488 filter: Gemini Web emulation stays eligible for tools (#5240)", () =
     ["gemini-web/gemini-3.1-pro", "gemini-web/gemini-3.7-flash"]
   );
 
-  const exhaustion = describeCapabilityFilterExhaustion(
+  const exhaustion = await describeCapabilityFilterExhaustion(
     [
       target("gemini-web", "gemini-web/gemini-3.1-pro"),
       target("gemini-web", "gemini-web/gemini-3.7-flash"),
@@ -186,15 +187,15 @@ test("#8488 auto: Gemini Web emulation survives tool pre-filter (#5240)", async 
   }
 });
 
-test("#8488 filter: opt-in compatFilterFailOpen restores full pool", () => {
-  saveModelsDevCapabilities({
+test("#8488 filter: opt-in compatFilterFailOpen restores full pool", async () => {
+  await saveModelsDevCapabilities({
     openai: {
       "no-tools-a": capabilityEntry(128000, { tool_call: false }),
       "no-tools-b": capabilityEntry(128000, { tool_call: false }),
     },
   });
 
-  const kept = filterTargetsByRequestCompatibility(
+  const kept = await filterTargetsByRequestCompatibility(
     [target("openai", "openai/no-tools-a"), target("openai", "openai/no-tools-b")],
     {
       messages: [{ role: "user", content: "hi" }],
@@ -207,14 +208,14 @@ test("#8488 filter: opt-in compatFilterFailOpen restores full pool", () => {
   assert.equal(kept.length, 2);
 });
 
-test("#8488 filter: vision with no confirmed target → empty (fail closed)", () => {
-  saveModelsDevCapabilities({
+test("#8488 filter: vision with no confirmed target → empty (fail closed)", async () => {
+  await saveModelsDevCapabilities({
     openai: {
       "text-only": capabilityEntry(128000, { attachment: false, tool_call: true }),
     },
   });
 
-  const kept = filterTargetsByRequestCompatibility(
+  const kept = await filterTargetsByRequestCompatibility(
     [target("openai", "openai/text-only")],
     {
       messages: [
@@ -233,7 +234,7 @@ test("#8488 filter: vision with no confirmed target → empty (fail closed)", ()
 });
 
 test("#8488 auto: tool pre-filter fail closed returns early 400", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     openai: {
       "no-tools": capabilityEntry(128000, { tool_call: false }),
     },
@@ -264,7 +265,7 @@ test("#8488 auto: tool pre-filter fail closed returns early 400", async () => {
 });
 
 test("#8488 auto: tool pre-filter fail-open opt-in keeps full pool", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     openai: {
       "no-tools": capabilityEntry(128000, { tool_call: false }),
     },
@@ -292,7 +293,7 @@ test("#8488 auto: tool pre-filter fail-open opt-in keeps full pool", async () =>
 });
 
 test("auto context estimate still dispatches when all known limits look too small", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     openai: {
       tiny: capabilityEntry(100, { tool_call: true }),
     },
@@ -321,8 +322,8 @@ test("auto context estimate still dispatches when all known limits look too smal
   assert.deepEqual(dispatches, ["openai/tiny"]);
 });
 
-test("#12229 exhaustion: output_tokens exclusion names max_tokens vs the model ceiling", () => {
-  saveModelsDevCapabilities({
+test("#12229 exhaustion: output_tokens exclusion names max_tokens vs the model ceiling", async () => {
+  await saveModelsDevCapabilities({
     claude: {
       "claude-haiku-4-5-20251001": capabilityEntry(200000, {
         tool_call: true,
@@ -338,7 +339,7 @@ test("#12229 exhaustion: output_tokens exclusion names max_tokens vs the model c
     max_tokens: 100000,
   };
 
-  const exhaustion = describeCapabilityFilterExhaustion(targets, body, "hermes-main");
+  const exhaustion = await describeCapabilityFilterExhaustion(targets, body, "hermes-main");
   assert.ok(exhaustion);
   assert.deepEqual(exhaustion!.unmet, ["output_tokens"]);
   assert.equal(exhaustion!.excluded[0].reason, "output_tokens");

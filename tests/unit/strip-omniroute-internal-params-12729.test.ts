@@ -31,19 +31,17 @@ import test, { after, afterEach } from "node:test";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-strip-internal-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.DARIO_HOST = "127.0.0.1";
 process.env.DARIO_PORT = "9";
 
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-getDbInstance()
-  .prepare(
-    `INSERT OR IGNORE INTO version_manager
-       (tool, status, port, auto_start, auto_update, provider_expose)
-     VALUES ('9router', 'stopped', 20130, 0, 1, 0)`
-  )
-  .run();
+await getTestBackend().execute(
+  `INSERT INTO version_manager
+     (tool, status, port, auto_start, auto_update, provider_expose)
+   VALUES ('9router', 'stopped', 20130, false, true, false)
+   ON CONFLICT (tool) DO NOTHING`
+);
 
 const { registerSupervisor, unregisterSupervisor } =
   await import("../../src/lib/services/registry.ts");
@@ -71,7 +69,6 @@ afterEach(() => {
 
 after(() => {
   unregisterSupervisor("9router");
-  resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 

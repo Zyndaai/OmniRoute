@@ -12,6 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-plugins-e
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const dbPlugins = await import("../../src/lib/db/plugins.ts");
 const { scanPluginDir } = await import("../../src/lib/plugins/scanner.ts");
 const { pluginManager } = await import("../../src/lib/plugins/manager.ts");
@@ -78,31 +79,15 @@ function writeTestPlugin(opts: {
 
 // ── Lifecycle ──
 
-test.beforeEach(() => {
-  core.resetDbInstance();
-  // Clean all existing plugins to prevent UNIQUE constraint failures.
-  // Wrapped in try-catch: when running alongside other test files that load core
-  // before DATA_DIR is set, the SQLITE_FILE may point to the production DB which
-  // may not have the plugins table yet (migration 076 renumbered). The cleanup
-  // is redundant anyway — resetDbInstance() already invalidates the instance,
-  // and rmSync/mkdirSync below gives us a fresh DATA_DIR for next getDbInstance().
-  try {
-    for (const p of dbPlugins.listPlugins()) {
-      dbPlugins.deletePlugin(p.name);
-    }
-  } catch {
-    // Production DB may not have the plugins table — ignore; fresh DB created below.
-  }
+test.beforeEach(async () => {
+  // Every test starts from an empty database (plugins rows included) and no hooks.
+  await resetTestDb();
   resetHooks();
-  // listPlugins() above reopens the DB; release it again so Windows can delete the dir.
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   cleanupSourceDirs();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   cleanupSourceDirs();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -226,7 +211,7 @@ test("manager: deactivate when already inactive is idempotent", async () => {
   try {
     await pluginManager.deactivate(name);
     // If it succeeds, verify status
-    const row = dbPlugins.getPluginByName(name);
+    const row = await dbPlugins.getPluginByName(name);
     assert.ok(row);
   } catch (err: unknown) {
     // If it throws, the message should be clear
@@ -401,8 +386,8 @@ test("hooks: registerHook with different handler refs registers both", () => {
 // DB edge cases
 // ══════════════════════════════════════════
 
-test("db: updatePluginConfig replaces existing config", () => {
-  dbPlugins.insertPlugin({
+test("db: updatePluginConfig replaces existing config", async () => {
+  await dbPlugins.insertPlugin({
     id: "merge-test",
     name: "merge-test",
     version: "1.0.0",
@@ -412,9 +397,9 @@ test("db: updatePluginConfig replaces existing config", () => {
     config: { existing: "value", override: "old" },
   });
 
-  dbPlugins.updatePluginConfig("merge-test", { override: "new", added: "extra" });
+  await dbPlugins.updatePluginConfig("merge-test", { override: "new", added: "extra" });
 
-  const plugin = dbPlugins.getPluginByName("merge-test");
+  const plugin = await dbPlugins.getPluginByName("merge-test");
   const config = JSON.parse(plugin!.config);
   // updatePluginConfig replaces, does not merge
   assert.equal(config.existing, undefined);
@@ -422,8 +407,8 @@ test("db: updatePluginConfig replaces existing config", () => {
   assert.equal(config.added, "extra");
 });
 
-test("db: listPlugins with no status returns all", () => {
-  dbPlugins.insertPlugin({
+test("db: listPlugins with no status returns all", async () => {
+  await dbPlugins.insertPlugin({
     id: "p1",
     name: "alpha",
     version: "1.0.0",
@@ -431,7 +416,7 @@ test("db: listPlugins with no status returns all", () => {
     pluginDir: "/tmp/a",
     manifest: {},
   });
-  dbPlugins.insertPlugin({
+  await dbPlugins.insertPlugin({
     id: "p2",
     name: "beta",
     version: "1.0.0",
@@ -440,15 +425,15 @@ test("db: listPlugins with no status returns all", () => {
     manifest: {},
   });
 
-  const all = dbPlugins.listPlugins();
+  const all = await dbPlugins.listPlugins();
   assert.equal(all.length, 2);
   // Should be sorted by name
   assert.equal(all[0].name, "alpha");
   assert.equal(all[1].name, "beta");
 });
 
-test("db: listPlugins with status filters correctly", () => {
-  dbPlugins.insertPlugin({
+test("db: listPlugins with status filters correctly", async () => {
+  await dbPlugins.insertPlugin({
     id: "f1",
     name: "installed-filter",
     version: "1.0.0",
@@ -456,7 +441,7 @@ test("db: listPlugins with status filters correctly", () => {
     pluginDir: "/tmp/f1",
     manifest: {},
   });
-  dbPlugins.insertPlugin({
+  await dbPlugins.insertPlugin({
     id: "f2",
     name: "active-filter",
     version: "1.0.0",
@@ -464,19 +449,19 @@ test("db: listPlugins with status filters correctly", () => {
     pluginDir: "/tmp/f2",
     manifest: {},
   });
-  dbPlugins.updatePluginStatus("active-filter", "active");
+  await dbPlugins.updatePluginStatus("active-filter", "active");
 
-  const installed = dbPlugins.listPlugins("installed");
+  const installed = await dbPlugins.listPlugins("installed");
   assert.equal(installed.length, 1);
   assert.equal(installed[0].name, "installed-filter");
 
-  const active = dbPlugins.listPlugins("active");
+  const active = await dbPlugins.listPlugins("active");
   assert.equal(active.length, 1);
   assert.equal(active[0].name, "active-filter");
 });
 
-test("db: pluginExists returns true/false correctly", () => {
-  dbPlugins.insertPlugin({
+test("db: pluginExists returns true/false correctly", async () => {
+  await dbPlugins.insertPlugin({
     id: "exists-test",
     name: "exists-test",
     version: "1.0.0",
@@ -485,12 +470,12 @@ test("db: pluginExists returns true/false correctly", () => {
     manifest: {},
   });
 
-  assert.equal(dbPlugins.pluginExists("exists-test"), true);
-  assert.equal(dbPlugins.pluginExists("nope"), false);
+  assert.equal(await dbPlugins.pluginExists("exists-test"), true);
+  assert.equal(await dbPlugins.pluginExists("nope"), false);
 });
 
-test("db: deletePlugin returns true when plugin exists, false when not", () => {
-  dbPlugins.insertPlugin({
+test("db: deletePlugin returns true when plugin exists, false when not", async () => {
+  await dbPlugins.insertPlugin({
     id: "del-test",
     name: "del-test",
     version: "1.0.0",
@@ -499,7 +484,7 @@ test("db: deletePlugin returns true when plugin exists, false when not", () => {
     manifest: {},
   });
 
-  assert.equal(dbPlugins.deletePlugin("del-test"), true);
-  assert.equal(dbPlugins.deletePlugin("del-test"), false);
-  assert.equal(dbPlugins.getPluginByName("del-test"), null);
+  assert.equal(await dbPlugins.deletePlugin("del-test"), true);
+  assert.equal(await dbPlugins.deletePlugin("del-test"), false);
+  assert.equal(await dbPlugins.getPluginByName("del-test"), null);
 });

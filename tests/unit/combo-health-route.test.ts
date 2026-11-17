@@ -16,10 +16,11 @@ const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const comboMetrics = await import("../../open-sse/services/comboMetrics.ts");
 const route = await import("../../src/app/api/usage/combo-health/route.ts");
 const { normalizeComboStep } = await import("../../src/lib/combos/steps.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
   comboMetrics.resetAllComboMetrics();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -28,9 +29,9 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   comboMetrics.resetAllComboMetrics();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -66,7 +67,20 @@ test("combo health route exposes step-level target health for structured combos"
     index: 1,
   });
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  // quota_snapshots.connection_id is a foreign key to provider_connections (PostgreSQL),
+  // so the pinned connections must exist before their snapshots can be saved.
+  const backend = getTestBackend();
+  for (const [id, name] of [
+    ["conn-openai-a", "Account A"],
+    ["conn-openai-b", "Account B"],
+  ]) {
+    await backend.execute(
+      "INSERT INTO provider_connections (id, provider, auth_type, name, is_active) VALUES ($1, 'openai', 'apikey', $2, true)",
+      [id, name]
+    );
+  }
+
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "conn-openai-a",
     window_key: "daily",
@@ -76,7 +90,7 @@ test("combo health route exposes step-level target health for structured combos"
     window_duration_ms: 86_400_000,
     raw_data: null,
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "conn-openai-b",
     window_key: "daily",
@@ -310,10 +324,8 @@ test("combo health route aggregates target history without changing latest targe
       comboExecutionKey: step.id,
     });
   }
-  core
-    .getDbInstance()
-    .prepare("UPDATE call_logs SET duration = NULL WHERE id = ?")
-    .run("combo-aggregate-1");
+  // call_logs.duration is NOT NULL in PostgreSQL, so every row carries a latency and the
+  // average covers all three executions.
 
   const response = await route.GET(
     new Request(`http://localhost/api/usage/combo-health?range=24h&comboId=${combo.id}`)
@@ -325,7 +337,7 @@ test("combo health route aggregates target history without changing latest targe
   assert.equal(target.executionKey, step.id);
   assert.equal(target.requests, 3);
   assert.equal(target.successRate, 67);
-  assert.equal(target.avgLatencyMs, 150);
+  assert.equal(target.avgLatencyMs, 200);
   assert.equal(target.lastStatus, "ok");
   assert.equal(target.lastUsedAt, timestamps[2]);
 });

@@ -9,23 +9,21 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omr-apikey-lifecycl
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 
 const ORIGINAL_OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY;
 const ORIGINAL_ROUTER_API_KEY = process.env.ROUTER_API_KEY;
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.OMNIROUTE_API_KEY;
   delete process.env.ROUTER_API_KEY;
 }
 
-test.beforeEach(() => {
-  reset();
+test.beforeEach(async () => {
+  await reset();
 });
 
 test.after(async () => {
@@ -110,10 +108,10 @@ test("validateApiKey updates last_used_at for persisted keys", async () => {
 
   assert.equal(await apiKeysDb.validateApiKey(created.key), true);
 
-  const db = core.getDbInstance() as {
-    prepare(sql: string): { get(id: string): { last_used_at: string | null } | undefined };
-  };
-  const row = db.prepare("SELECT last_used_at FROM api_keys WHERE id = ?").get(created.id);
+  const row = await getTestBackend().queryOne<{ last_used_at: string | null }>(
+    "SELECT last_used_at FROM api_keys WHERE id = $1",
+    [created.id]
+  );
 
   assert.ok(row?.last_used_at, "last_used_at should be set on successful validation");
   assert.ok(Date.parse(row.last_used_at) > 0, "last_used_at should be an ISO timestamp");

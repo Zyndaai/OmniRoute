@@ -43,8 +43,8 @@ const { DEFAULT_THINKING_CLAUDE_SIGNATURE } = await import(
   "../../open-sse/config/defaultThinkingSignature.ts"
 );
 
-test("#5945: reasoning_content on a plain-text assistant turn (no tool_use, thinking not requested) yields NO redacted_thinking/thinking block", () => {
-  const result = openaiToClaudeRequest(
+test("#5945: reasoning_content on a plain-text assistant turn (no tool_use, thinking not requested) yields NO redacted_thinking/thinking block", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       messages: [
@@ -73,8 +73,8 @@ test("#5945: reasoning_content on a plain-text assistant turn (no tool_use, thin
   );
 });
 
-test("#5945: reasoning_content + tool_use, but thinking NOT enabled on the outbound request, yields NO injection", () => {
-  const result = openaiToClaudeRequest(
+test("#5945: reasoning_content + tool_use, but thinking NOT enabled on the outbound request, yields NO injection", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       messages: [
@@ -109,8 +109,8 @@ test("#5945: reasoning_content + tool_use, but thinking NOT enabled on the outbo
   );
 });
 
-test("#5312: reasoning_content + tool_use + thinking ENABLED still gets a signature-less redacted_thinking precursor (the legitimate #5312 400-fix case)", () => {
-  const result = openaiToClaudeRequest(
+test("#5312: reasoning_content + tool_use + thinking ENABLED still gets a signature-less redacted_thinking precursor (the legitimate #5312 400-fix case)", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       thinking: { type: "enabled", budget_tokens: 4096 },
@@ -156,9 +156,9 @@ test("#5312: reasoning_content + tool_use + thinking ENABLED still gets a signat
   );
 });
 
-test("#5312 RC-D: a REAL thinking signature is preserved verbatim", () => {
+test("#5312 RC-D: a REAL thinking signature is preserved verbatim", async () => {
   const REAL_SIG = "ErUBCkYI... real-anthropic-signature ...xyz==";
-  const result = openaiToClaudeRequest(
+  const result = await openaiToClaudeRequest(
     "claude-opus-4-8",
     {
       messages: [

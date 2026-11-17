@@ -1,46 +1,40 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { registerComboRepositoryConformance } from "../../../helpers/persistence/comboRepositoryConformance.ts";
+import { getTestBackend, resetTestDb } from "../../../helpers/postgres.ts";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-repository-contract-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
-
-const core = await import("../../../../src/lib/db/core.ts");
-const { sqliteComboRepository } =
-  await import("../../../../src/lib/db/repositories/sqliteComboRepository.ts");
-const { sqliteModelComboMappingRepository } =
-  await import("../../../../src/lib/db/repositories/sqliteModelComboMappingRepository.ts");
+const { comboRepository } = await import("../../../../src/lib/db/repositories/comboRepository.ts");
+const { modelComboMappingRepository } =
+  await import("../../../../src/lib/db/repositories/modelComboMappingRepository.ts");
 const combosDb = await import("../../../../src/lib/db/combos.ts");
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 registerComboRepositoryConformance(async () => ({
-  combos: sqliteComboRepository,
-  mappings: sqliteModelComboMappingRepository,
+  combos: comboRepository,
+  mappings: modelComboMappingRepository,
   reset: resetStorage,
   async corruptComboPayload(comboId: string): Promise<void> {
-    core.getDbInstance().prepare("UPDATE combos SET data = ? WHERE id = ?").run("", comboId);
+    // combos.data is jsonb NOT NULL; a non-object payload stands in for the old empty-string corruption.
+    await getTestBackend().execute("UPDATE combos SET data = $1::jsonb WHERE id = $2", [
+      JSON.stringify("corrupt"),
+      comboId,
+    ]);
   },
 }));
 
-test("legacy combo count facade remains synchronous", async () => {
+test("legacy combo count facade resolves to the stored count", async () => {
   await resetStorage();
 
-  assert.equal(typeof combosDb.getCombosCount(), "number");
-  assert.equal(combosDb.getCombosCount(), 0);
-  await sqliteComboRepository.create({ name: "Counted", models: [] });
-  assert.equal(combosDb.getCombosCount(), 1);
+  assert.ok(combosDb.getCombosCount() instanceof Promise);
+  assert.equal(await combosDb.getCombosCount(), 0);
+  await comboRepository.create({ name: "Counted", models: [] });
+  assert.equal(await combosDb.getCombosCount(), 1);
 });
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.after(async () => {
+  await resetTestDb();
 });

@@ -22,14 +22,13 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const overridesDb = await import("../../src/lib/db/autoCandidateOverrides.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 test.beforeEach(async () => {
@@ -37,7 +36,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  await resetStorage();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -134,8 +133,8 @@ test("#7819: fail-open — a DB lookup failure never breaks routing (pool falls 
   // under it — proves the try/catch in virtualFactory.ts actually fires and
   // the candidate pool is still returned unfiltered, not a 500 or an empty
   // pool. (Not the "empty override set" no-op path — that's covered above.)
-  const db = core.getDbInstance();
-  db.exec("DROP TABLE auto_candidate_overrides");
+  // This is the last test of the file: the table is not restored (resetTestDb only empties tables).
+  await getTestBackend().execute("DROP TABLE auto_candidate_overrides");
 
   const combo = await virtualFactory.createVirtualAutoCombo(undefined, undefined, "key-1", "auto");
   const ids = connectionIds(combo);

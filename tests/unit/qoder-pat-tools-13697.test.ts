@@ -8,7 +8,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "qoder-pat-tools-"));
 process.env.DATA_DIR = dataDir;
 process.env.REQUIRE_API_KEY = "false";
 process.env.OMNIROUTE_PLUGINS_DIR = path.join(dataDir, "plugins");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getProviderCredentials } = await import("../../src/sse/services/auth.ts");
 const { createProviderConnection, deleteProviderConnectionsByProvider } =
   await import("../../src/lib/db/providers.ts");
@@ -16,8 +16,8 @@ const { QoderExecutor } = await import("../../open-sse/executors/qoder.ts");
 const { resolveQoderAuthToken, qoderSupportsCallerTools, hasQoderCallerTools } =
   await import("../../open-sse/services/qoderCapabilities.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -205,6 +205,6 @@ test("agent combo skips a pinned PAT leg without spawning CLI and reaches its to
     if (previousBin === undefined) delete process.env.CLI_QODER_BIN;
     else process.env.CLI_QODER_BIN = previousBin;
     delete process.env.QODER_TEST_MARKER;
-    flushProxyLogsSync();
+    await flushProxyLogsSync();
   }
 });

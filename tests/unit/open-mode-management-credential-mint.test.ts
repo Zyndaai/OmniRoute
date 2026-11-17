@@ -44,24 +44,27 @@ const TOKENS_URL = "http://localhost/api/cli/tokens";
 const MACHINE_ID = "machine-open-mode-mint";
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
-function resetStorage() {
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.ALLOW_API_KEY_REVEAL;
   // setupComplete: with INITIAL_PASSWORD set, an unfinished setup forces requireLogin back on.
   await settingsDb.updateSettings({ setupComplete: true, requireLogin: false });
   assert.equal((await settingsDb.getSettings()).requireLogin, false, "open mode must stick");
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[name];
@@ -200,7 +203,7 @@ for (const scope of ["read", "write", "admin"]) {
     await assertUnauthenticated(
       await cliTokensRoute.POST(anonymous(TOKENS_URL, "POST", { name: `anon-${scope}`, scope }))
     );
-    assert.equal(accessTokensDb.listAccessTokens().length, 0, "nothing may be persisted");
+    assert.equal((await accessTokensDb.listAccessTokens()).length, 0, "nothing may be persisted");
   });
 }
 
@@ -229,7 +232,7 @@ test("with login disabled, a manage-scoped key keeps the machine ceiling: write 
     withBearer(TOKENS_URL, key.key, "POST", { name: "machine-admin", scope: "admin" })
   );
   assert.equal(admin.status, 403);
-  const minted = accessTokensDb.listAccessTokens().map((t) => t.scope);
+  const minted = (await accessTokensDb.listAccessTokens()).map((t) => t.scope);
   assert.deepEqual(minted, ["write"]);
 });
 

@@ -25,7 +25,6 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-guardrail-pipeline-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET ||= "test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP ||= "true";
 for (const name of [
   "INJECTION_GUARD_MODE",
   "VISION_BRIDGE_BASE_URL",
@@ -36,7 +35,7 @@ for (const name of [
   delete process.env[name];
 }
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { BaseGuardrail } = await import("../../src/lib/guardrails/base.ts");
 const { GuardrailRegistry, resolveDisabledGuardrails } =
   await import("../../src/lib/guardrails/registry.ts");
@@ -54,8 +53,8 @@ const { resolveSelfLoopBearer } =
 const { getRuntimePorts } = await import("../../src/lib/runtime/ports.ts");
 const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -274,7 +273,7 @@ test("characterization: post-call loses the header channels when clientRawReques
   assert.equal(ctx.endpoint, null);
 });
 
-test("security invariant: caller disable channels cannot bypass mandatory injection block mode", () => {
+test("security invariant: caller disable channels cannot bypass mandatory injection block mode", async () => {
   // The legacy injection middleware intentionally enforces block mode without
   // consulting per-request disabledGuardrails. Only the separate registry
   // accepts those skip lists. This invariant is part of the maintainer's
@@ -286,7 +285,7 @@ test("security invariant: caller disable channels cannot bypass mandatory inject
     { messages: attack, disabledGuardrails: ["prompt-injection"] },
     { messages: attack, metadata: { disabledGuardrails: "prompt-injection" } },
   ]) {
-    assert.equal(guard(body).blocked, true);
+    assert.equal((await guard(body)).blocked, true);
   }
 });
 
@@ -413,10 +412,10 @@ test("generateSignature namespaces the digest with the apiKeyId as a plaintext p
   assert.equal(keyB, `key-b.${anon}`);
 });
 
-test("storeSemanticCacheResponse forwards the apiKeyId into the signature it stores under", () => {
+test("storeSemanticCacheResponse forwards the apiKeyId into the signature it stores under", async () => {
   const signatureArgs: unknown[][] = [];
   const stored: unknown[][] = [];
-  storeSemanticCacheResponse(
+  await storeSemanticCacheResponse(
     {
       enabled: true,
       body: { messages: [{ role: "user", content: "hi" }], temperature: 0 },

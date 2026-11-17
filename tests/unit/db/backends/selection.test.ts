@@ -5,7 +5,15 @@ import {
   getDbBackend,
   initDbBackend,
   resetDbBackendForTests,
+  resolvePoolMax,
 } from "../../../../src/lib/db/backends/selection.ts";
+
+test("pool size defaults to 10 and accepts OMNIROUTE_PG_POOL_MAX between 1 and 100", () => {
+  assert.equal(resolvePoolMax(undefined), 10);
+  assert.equal(resolvePoolMax("20"), 20);
+  assert.equal(resolvePoolMax(" 1 "), 1);
+  for (const bad of ["0", "-3", "101", "4.5", "lots", ""]) assert.equal(resolvePoolMax(bad), 10);
+});
 
 const savedEnv = { ...process.env };
 const savedBackend = globalThis.__omnirouteDbBackend;

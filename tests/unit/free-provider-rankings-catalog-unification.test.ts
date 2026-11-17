@@ -29,9 +29,9 @@ function registryModelIds(providerId: string): string[] {
     .filter((id): id is string => typeof id === "string");
 }
 
-function seedScores(modelIds: string[]): void {
+async function seedScores(modelIds: string[]): Promise<void> {
   for (const model of modelIds) {
-    intelligenceDb.upsertModelIntelligence({
+    await intelligenceDb.upsertModelIntelligence({
       model,
       source: "arena_elo",
       category: "default",
@@ -43,8 +43,8 @@ function seedScores(modelIds: string[]): void {
   }
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -54,7 +54,7 @@ test("ranking excludes providers with a raw free flag but no documented free mod
     assert.equal(providerHasFreeModels(id), false, `${id} must be outside the free catalog`);
   }
   for (const id of outside) {
-    seedScores(registryModelIds(id));
+    await seedScores(registryModelIds(id));
   }
 
   const ranking = await rankings.computeFreeProviderRankings(undefined, 200, {});
@@ -70,7 +70,7 @@ test("ranking keeps catalog providers whose static free flag is off", async () =
     assert.equal(providerHasFreeModels(id), true, `${id} must be in the free catalog`);
   }
   for (const id of cataloged) {
-    seedScores(registryModelIds(id));
+    await seedScores(registryModelIds(id));
   }
 
   const ranking = await rankings.computeFreeProviderRankings(undefined, 200, {});
@@ -83,7 +83,7 @@ test("ranking keeps catalog providers whose static free flag is off", async () =
 test("ranking still lists always-free providers from the free catalog", async () => {
   const id = "aihorde";
   assert.equal(providerHasFreeModels(id), true, `${id} must be in the free catalog`);
-  seedScores(registryModelIds(id));
+  await seedScores(registryModelIds(id));
 
   const ranking = await rankings.computeFreeProviderRankings(undefined, 200, {});
   assert.ok(

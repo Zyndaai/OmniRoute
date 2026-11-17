@@ -22,12 +22,12 @@ function buildBody() {
   };
 }
 
-function translate(
+async function translate(
   provider: string,
   options?: { preserveDeveloperRole?: boolean },
   targetFormat: string = FORMATS.OPENAI
 ) {
-  return translateRequest(
+  return (await translateRequest(
     FORMATS.OPENAI,
     targetFormat,
     "gpt-5.5",
@@ -37,42 +37,42 @@ function translate(
     provider,
     null,
     options
-  ) as { messages?: Array<{ role: string }>; system?: unknown };
+  )) as { messages?: Array<{ role: string }>; system?: unknown };
 }
 
-test("OpenAI → OpenAI keeps developer for the official openai provider", () => {
-  const out = translate("openai");
+test("OpenAI → OpenAI keeps developer for the official openai provider", async () => {
+  const out = await translate("openai");
   assert.equal(out.messages?.[0].role, "developer");
   assert.equal(out.messages?.[1].role, "user");
 });
 
-test("azure-openai keeps developer by default", () => {
-  const out = translate("azure-openai");
+test("azure-openai keeps developer by default", async () => {
+  const out = await translate("azure-openai");
   assert.equal(out.messages?.[0].role, "developer");
 });
 
-test("explicit preserveDeveloperRole=true keeps developer for a custom compatible node", () => {
-  const out = translate("openai-compatible-xyz", { preserveDeveloperRole: true });
+test("explicit preserveDeveloperRole=true keeps developer for a custom compatible node", async () => {
+  const out = await translate("openai-compatible-xyz", { preserveDeveloperRole: true });
   assert.equal(out.messages?.[0].role, "developer");
 });
 
-test("#2281 custom openai-compatible node lowers developer to system by default", () => {
-  const out = translate("openai-compatible-xyz");
+test("#2281 custom openai-compatible node lowers developer to system by default", async () => {
+  const out = await translate("openai-compatible-xyz");
   assert.equal(out.messages?.[0].role, "system");
 });
 
-test("non-allowlisted OpenAI-format provider lowers developer to system by default", () => {
-  const out = translate("deepseek");
+test("non-allowlisted OpenAI-format provider lowers developer to system by default", async () => {
+  const out = await translate("deepseek");
   assert.equal(out.messages?.[0].role, "system");
 });
 
-test("explicit preserveDeveloperRole=false lowers developer for the openai provider", () => {
-  const out = translate("openai", { preserveDeveloperRole: false });
+test("explicit preserveDeveloperRole=false lowers developer for the openai provider", async () => {
+  const out = await translate("openai", { preserveDeveloperRole: false });
   assert.equal(out.messages?.[0].role, "system");
 });
 
-test("Claude target still lifts developer instructions out of messages", () => {
-  const out = translate("claude", undefined, FORMATS.CLAUDE);
+test("Claude target still lifts developer instructions out of messages", async () => {
+  const out = await translate("claude", undefined, FORMATS.CLAUDE);
   const roles = (out.messages ?? []).map((m) => m.role);
   assert.ok(!roles.includes("developer"));
   assert.ok(JSON.stringify(out.system ?? "").includes("Follow the house style."));

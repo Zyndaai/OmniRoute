@@ -150,9 +150,9 @@ test("CodexExecutor forces stream=true for upstream compatibility", () => {
   assert.equal(transformed.stream, true);
 });
 
-test("Claude native messages can be round-tripped through OpenAI into Claude OAuth format", () => {
+test("Claude native messages can be round-tripped through OpenAI into Claude OAuth format", async () => {
   const normalizeOptions = { normalizeToolCallId: false, preserveDeveloperRole: undefined };
-  const openaiBody = translateRequest(
+  const openaiBody = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "claude-sonnet-4-6",
@@ -167,7 +167,7 @@ test("Claude native messages can be round-tripped through OpenAI into Claude OAu
     null,
     normalizeOptions
   );
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "claude-sonnet-4-6",
@@ -480,8 +480,8 @@ test("detectFormatFromEndpoint forces Claude for /v1/messages", () => {
   assert.equal(format, FORMATS.CLAUDE);
 });
 
-test("translateRequest normalizes openai-responses input string into list payload", () => {
-  const translated = translateRequest(
+test("translateRequest normalizes openai-responses input string into list payload", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -501,8 +501,8 @@ test("translateRequest normalizes openai-responses input string into list payloa
   assert.equal(translated.input[0].content[0].text, "hello from responses");
 });
 
-test("translateRequest preserves service_tier when converting openai to openai-responses", () => {
-  const translated = translateRequest(
+test("translateRequest preserves service_tier when converting openai to openai-responses", async () => {
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",

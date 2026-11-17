@@ -9,7 +9,7 @@ import { buildHealthAccount } from "../../src/app/(dashboard)/dashboard/usage/co
 import { displayAccount } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/availabilityDisplay.ts";
 
 const now = Date.parse("2099-01-01T00:00:00Z");
-function fixture(purchased: number, resetAt: string) {
+async function fixture(purchased: number, resetAt: string) {
   const raw = {
     fetchedAt: new Date(now).toISOString(),
     quotas: parseOllamaCloudBalance({
@@ -28,7 +28,7 @@ function fixture(purchased: number, resetAt: string) {
     isActive: true,
     testStatus: "active",
   };
-  const availability = buildConnectionQuotaAvailability(connection, raw, {
+  const availability = await buildConnectionQuotaAvailability(connection, raw, {
     enabled: true,
     defaultThresholdPercent: 2,
     providerWindowDefaults: {},
@@ -43,13 +43,13 @@ function fixture(purchased: number, resetAt: string) {
   );
   return { route, view };
 }
-test("Ollama purchased balance permits use after included allowance is exhausted", () => {
-  const { route, view } = fixture(25, "2099-02-01T00:00:00Z");
+test("Ollama purchased balance permits use after included allowance is exhausted", async () => {
+  const { route, view } = await fixture(25, "2099-02-01T00:00:00Z");
   assert.equal(route.proceed, true);
   assert.equal(view.kind, "ok");
 });
-test("Ollama freshly observed zero balance remains blocked after the billing period ends", () => {
-  const { route, view } = fixture(0, "2098-12-31T00:00:00Z");
+test("Ollama freshly observed zero balance remains blocked after the billing period ends", async () => {
+  const { route, view } = await fixture(0, "2098-12-31T00:00:00Z");
   assert.equal(route.proceed, false);
   assert.equal(view.kind, "cdw");
 });

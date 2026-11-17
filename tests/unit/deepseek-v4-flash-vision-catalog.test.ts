@@ -58,13 +58,13 @@ test("command-code registers deepseek/deepseek-v4-flash-vision-exp with explicit
   assert.equal(row.maxOutputTokens, sibling.maxOutputTokens);
 });
 
-test("resolved capabilities: vision on the exp rows, off on the text-only flash siblings", () => {
+test("resolved capabilities: vision on the exp rows, off on the text-only flash siblings", async () => {
   for (const modelId of [
     "opencode-go/deepseek-v4-flash-vision-exp",
     "command-code/deepseek/deepseek-v4-flash-vision-exp",
   ]) {
     assert.equal(
-      getResolvedModelCapabilities(modelId).supportsVision,
+      (await getResolvedModelCapabilities(modelId)).supportsVision,
       true,
       `${modelId} must resolve supportsVision: true`
     );
@@ -74,7 +74,7 @@ test("resolved capabilities: vision on the exp rows, off on the text-only flash 
     "command-code/deepseek/deepseek-v4-flash",
   ]) {
     assert.notEqual(
-      getResolvedModelCapabilities(modelId).supportsVision,
+      (await getResolvedModelCapabilities(modelId)).supportsVision,
       true,
       `${modelId} is text-only and must not claim vision`
     );

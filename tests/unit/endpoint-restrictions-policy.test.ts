@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ep-policy-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -24,8 +25,8 @@ rateLimiter.setRateLimiterTestMode(true);
 
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await costRules.resetCostData();
+  await coreDb.resetDbInstance();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -77,8 +78,8 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await costRules.resetCostData();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -265,13 +266,13 @@ test("endpoint rejection short-circuits before Team budget lookup", async () => 
 test("Team budget backend failure is fail-closed with a sanitized 503", async (t) => {
   const policy = await loadPolicy("team-budget-store-failure");
   const key = await createKeyWithEndpoints([]);
-  const db = coreDb.getDbInstance();
-  const prepare = db.prepare.bind(db);
-  t.mock.method(db, "prepare", (sql: string) => {
+  const backend = getTestBackend();
+  const queryOne = backend.queryOne.bind(backend);
+  t.mock.method(backend, "queryOne", async (sql: string, params?: unknown[]) => {
     if (sql.includes("FROM api_key_billing_team_history binding")) {
       throw new Error("simulated team budget store failure");
     }
-    return prepare(sql);
+    return queryOne(sql, params as any);
   });
 
   const result = await policy.enforceApiKeyPolicy(

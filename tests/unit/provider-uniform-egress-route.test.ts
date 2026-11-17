@@ -16,26 +16,27 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 delete process.env.INITIAL_PASSWORD;
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const observation = await import("../../src/lib/proxyPoolEgressObservation.ts");
 const { GET } = await import("../../src/app/api/settings/proxies/pool/uniform-egress/route.ts");
 
-function resetStorage() {
+async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
   process.env.PROXY_POOL_EGRESS_OBSERVATION = "true";
   observation.resetUniformEgressRegimeCache();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_POOL_EGRESS_OBSERVATION;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -46,31 +47,29 @@ function request(base: string, query: Record<string, string>): Request {
 
 const REGIME_PATH = "/api/settings/proxies/pool/uniform-egress";
 
-function insertLog(
+async function insertLog(
   provider: string,
   host: string,
   upstreamStatus: number | null,
   ageMs = 30 * 60 * 1000
 ) {
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_logs (id, timestamp, status, proxy_type, proxy_host, proxy_port, provider, target_url, upstream_status)
-       VALUES (?, ?, 'error', 'http', ?, 8080, ?, 'https://api.example.com/v1/chat', ?)`
-    )
-    .run(randomUUID(), new Date(Date.now() - ageMs).toISOString(), host, provider, upstreamStatus);
+  await getTestBackend().execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, proxy_type, proxy_host, proxy_port, provider, target_url, upstream_status)
+     VALUES ($1, $2, 'error', 'http', $3, 8080, $4, 'https://api.example.com/v1/chat', $5)`,
+    [randomUUID(), new Date(Date.now() - ageMs).toISOString(), host, provider, upstreamStatus]
+  );
 }
 
-function seedUniformProvider(provider: string, exits = 15, perExit = 6, failing = 3) {
+async function seedUniformProvider(provider: string, exits = 15, perExit = 6, failing = 3) {
   for (let exit = 0; exit < exits; exit++) {
     for (let n = 0; n < perExit; n++) {
-      insertLog(provider, `10.9.2.${exit + 1}`, n < failing ? 503 : 200);
+      await insertLog(provider, `10.9.2.${exit + 1}`, n < failing ? 503 : 200);
     }
   }
 }
 
 test("returns the regime with exactly the documented keys", async () => {
-  seedUniformProvider("acme");
+  await seedUniformProvider("acme");
   const response = await GET(request(REGIME_PATH, { provider: "acme" }));
   assert.equal(response.status, 200);
   const body = (await response.json()) as Record<string, unknown>;
@@ -93,9 +92,9 @@ test("returns the regime with exactly the documented keys", async () => {
 });
 
 test("a single affected exit reads back as not uniform", async () => {
-  for (let n = 0; n < 6; n++) insertLog("solo-ish", "10.9.3.1", n < 5 ? 503 : 200);
+  for (let n = 0; n < 6; n++) await insertLog("solo-ish", "10.9.3.1", n < 5 ? 503 : 200);
   for (let exit = 2; exit <= 5; exit++) {
-    for (let n = 0; n < 6; n++) insertLog("solo-ish", `10.9.3.${exit}`, 200);
+    for (let n = 0; n < 6; n++) await insertLog("solo-ish", `10.9.3.${exit}`, 200);
   }
   const response = await GET(request(REGIME_PATH, { provider: "solo-ish" }));
   assert.equal(response.status, 200);
@@ -111,20 +110,20 @@ test("an unknown provider reads back as null", async () => {
 });
 
 test("returns null with status 200 when the read fails", async () => {
-  seedUniformProvider("acme");
-  const db = core.getDbInstance();
-  db.exec("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
+  await seedUniformProvider("acme");
+  const b = getTestBackend();
+  await b.execute("ALTER TABLE proxy_logs RENAME TO proxy_logs_hidden");
   try {
     const response = await GET(request(REGIME_PATH, { provider: "acme" }));
     assert.equal(response.status, 200);
     assert.equal(await response.json(), null);
   } finally {
-    db.exec("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
+    await b.execute("ALTER TABLE proxy_logs_hidden RENAME TO proxy_logs");
   }
 });
 
 test("returns null when the feature flag is at its default (off) or turned off", async () => {
-  seedUniformProvider("acme");
+  await seedUniformProvider("acme");
   for (const value of [undefined, "false"]) {
     if (value === undefined) delete process.env.PROXY_POOL_EGRESS_OBSERVATION;
     else process.env.PROXY_POOL_EGRESS_OBSERVATION = value;
@@ -146,7 +145,7 @@ test("rejects a missing or blank provider with 400", async () => {
 });
 
 test("defaults hours to 1 and rejects hours outside 1..24", async () => {
-  seedUniformProvider("acme");
+  await seedUniformProvider("acme");
   const defaulted = await GET(request(REGIME_PATH, { provider: "acme" }));
   assert.equal(((await defaulted.json()) as Record<string, unknown>).windowHours, 1);
   const explicit = await GET(request(REGIME_PATH, { provider: "acme", hours: "3" }));

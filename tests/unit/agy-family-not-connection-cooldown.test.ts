@@ -33,9 +33,9 @@ function mixedWindows() {
   };
 }
 
-test.after(() => {
+test.after(async () => {
   fallback.clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -121,7 +121,7 @@ test("markConnectionQuotaExhausted with a Gemini model locks the family, not the
   markConnectionQuotaExhausted(connId, 24 * 60 * 60 * 1000, "gemini-3.1-flash-lite");
 
   assert.equal(
-    providersDb.isConnectionRateLimited(connId),
+    await providersDb.isConnectionRateLimited(connId),
     false,
     "connection row must stay selectable for the other family"
   );
@@ -129,6 +129,7 @@ test("markConnectionQuotaExhausted with a Gemini model locks the family, not the
   assert.equal(fallback.isModelLocked("agy", connId, "gemini-3.7-flash-high"), true);
   assert.equal(fallback.isModelLocked("agy", connId, "claude-opus-4-6-thinking"), false);
 });
+
 
 test("Antigravity RPM 429 stays exact-model and does not persist a family cooldown", async () => {
   fallback.clearAllModelLockouts();
@@ -228,7 +229,7 @@ test("persisted family cooldown rehydrates after a process-local lockout wipe", 
   );
   assert.equal(fallback.isModelLocked("antigravity", connId, "claude-opus-4"), true);
   assert.equal(fallback.isModelLocked("antigravity", connId, "gemini-3.1-flash-lite"), false);
-  assert.equal(providersDb.isConnectionRateLimited(connId), false);
+  assert.equal(await providersDb.isConnectionRateLimited(connId), false);
 });
 
 test("preflight family lock covers both agy and antigravity spellings", async () => {

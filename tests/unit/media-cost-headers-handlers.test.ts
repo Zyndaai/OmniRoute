@@ -28,9 +28,9 @@ test.afterEach(() => {
   restoreGlobals();
 });
 
-test.after(() => {
+test.after(async () => {
   restoreGlobals();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -124,12 +124,13 @@ test("rerank handler success Response carries cost telemetry headers", async () 
 });
 
 test("rerank NVIDIA-format success Response reflects synthesized search unit in cost header", async () => {
+  // (async: saveSyncedPricing persists to PostgreSQL)
   // NVIDIA-format rerank: transformResponseFromProvider SYNTHESIZES
   // meta.billed_units.search_units = 1 onto `result`, while the raw upstream
   // `data` has NO `meta` at all. The handler must read search units from the
   // transformed `result` (not the raw `data`), otherwise NVIDIA rerank is
   // always priced at $0 even when pricing exists.
-  saveSyncedPricing({
+  await saveSyncedPricing({
     nvidia: {
       // calculateModalCost("rerank","nvidia","nvidia/nv-rerankqa-mistral-4b-v3")
       // first looks up the scoped id, then retries with normalizeModelName

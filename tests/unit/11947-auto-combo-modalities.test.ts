@@ -20,7 +20,8 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "catalog-11947-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+import { resetTestDb } from "../helpers/postgres.ts";
+
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
@@ -34,18 +35,18 @@ type CatalogEntry = {
   context_length?: number;
 };
 
-function resetStorage(): void {
-  core.resetDbInstance();
+async function resetStorage(): Promise<void> {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR) process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
@@ -138,7 +139,7 @@ test("#11947 user-defined combo with vision targets includes modalities in catal
   });
 
   // Seed synced capabilities marking gpt-4o as vision-capable with image modalities.
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     openai: {
       "gpt-4o": {
         tool_call: true,

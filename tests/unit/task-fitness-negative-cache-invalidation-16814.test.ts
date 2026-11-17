@@ -14,17 +14,17 @@ const intel = await import("../../src/lib/db/modelIntelligence.ts");
 const { getTaskFitness, invalidateFitnessCache } =
   await import("../../open-sse/services/autoCombo/taskFitness.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
-test("#16814: an arena_elo row synced after a cached miss is picked up", () => {
+test("#16814: an arena_elo row synced after a cached miss is picked up", async () => {
   invalidateFitnessCache();
   const model = "fitness-neg-cache-probe-model";
-  const before = getTaskFitness(model, "coding");
-  getTaskFitness(model, "coding"); // second call served from the (negative) cache
-  intel.upsertModelIntelligence({
+  const before = await getTaskFitness(model, "coding");
+  await getTaskFitness(model, "coding"); // second call served from the (negative) cache
+  await intel.upsertModelIntelligence({
     model,
     source: "arena_elo",
     category: "coding",
@@ -33,15 +33,15 @@ test("#16814: an arena_elo row synced after a cached miss is picked up", () => {
     confidence: "high",
     expiresAt: null,
   });
-  const after = getTaskFitness(model, "coding");
+  const after = await getTaskFitness(model, "coding");
   assert.notEqual(after, before);
   assert.equal(after, 0.93);
 });
 
-test("#16814: bulk arena refresh and user overrides invalidate cached misses too", () => {
+test("#16814: bulk arena refresh and user overrides invalidate cached misses too", async () => {
   const model = "fitness-neg-cache-probe-model-2";
-  const before = getTaskFitness(model, "default");
-  intel.applyArenaEloRefresh([
+  const before = await getTaskFitness(model, "default");
+  await intel.applyArenaEloRefresh([
     {
       model,
       source: "arena_elo",
@@ -52,8 +52,8 @@ test("#16814: bulk arena refresh and user overrides invalidate cached misses too
       expiresAt: null,
     },
   ]);
-  assert.equal(getTaskFitness(model, "default"), 0.81);
-  intel.setUserFitnessOverrideEntry(model, "default", 0.12);
-  assert.equal(getTaskFitness(model, "default"), 0.12);
+  assert.equal(await getTaskFitness(model, "default"), 0.81);
+  await intel.setUserFitnessOverrideEntry(model, "default", 0.12);
+  assert.equal(await getTaskFitness(model, "default"), 0.12);
   assert.notEqual(before, 0.81);
 });

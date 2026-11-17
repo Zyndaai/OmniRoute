@@ -18,9 +18,12 @@ const apiKeyGroups = await import("../../src/lib/db/apiKeyGroups.ts");
 const models = await import("../../src/lib/db/models.ts");
 const quotaPools = await import("../../src/lib/db/quotaPools.ts");
 const quotaGroups = await import("../../src/lib/db/quotaGroups.ts");
+const providers = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   apiKeys.resetApiKeyState();
 
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -50,8 +53,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -95,9 +98,9 @@ test("isModelAllowedForKey cache recomputes when group permissions change", asyn
 
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, modelId), true);
 
-  const group = apiKeyGroups.createKeyGroup("Model deny", "denies openai");
-  apiKeyGroups.addGroupPermission(group.id, "openai/*", "deny");
-  assert.equal(apiKeyGroups.addKeyToGroup(key.id, group.id), true);
+  const group = await apiKeyGroups.createKeyGroup("Model deny", "denies openai");
+  await apiKeyGroups.addGroupPermission(group.id, "openai/*", "deny");
+  assert.equal(await apiKeyGroups.addKeyToGroup(key.id, group.id), true);
 
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, modelId), false);
   assert.ok(catalogVersion() > 0, "group visibility change increments model catalog generation");
@@ -122,49 +125,56 @@ test("isModelAllowedForKey cache recomputes after custom model visibility change
 
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, modelId), true);
 
-  models.setModelIsHidden("openai", "catalog-cache-repro", true);
+  await models.setModelIsHidden("openai", "catalog-cache-repro", true);
   assert.equal(await apiKeys.isModelAllowedForKey(key.key, modelId), false);
 });
 
 test("API-key group membership only invalidates model catalog on real membership mutations", async () => {
   const key = await apiKeys.createApiKey("Group Membership Key", "machine-cpi-5");
-  const group = apiKeyGroups.createKeyGroup("Model deny", "denies openai");
+  const group = await apiKeyGroups.createKeyGroup("Model deny", "denies openai");
   let version = catalogVersion();
 
-  assert.equal(apiKeyGroups.addKeyToGroup(key.id, group.id), true);
+  assert.equal(await apiKeyGroups.addKeyToGroup(key.id, group.id), true);
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  assert.equal(apiKeyGroups.addKeyToGroup(key.id, group.id), true);
+  assert.equal(await apiKeyGroups.addKeyToGroup(key.id, group.id), true);
   assert.equal(catalogVersion(), version);
 
-  assert.equal(apiKeyGroups.removeKeyFromGroup(key.id, group.id), true);
+  assert.equal(await apiKeyGroups.removeKeyFromGroup(key.id, group.id), true);
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
-  assert.equal(apiKeyGroups.removeKeyFromGroup(key.id, group.id), false);
+  assert.equal(await apiKeyGroups.removeKeyFromGroup(key.id, group.id), false);
   assert.equal(catalogVersion(), version);
 });
 
 test("quota pools and quota-group renames signal model-catalog invalidation as expected", async () => {
+  // Seed the connection first: pool rows reference a real provider connection.
+  const connection = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "Quota Connection",
+    apiKey: "test-quota-connection-key",
+  });
   let version = catalogVersion();
-  const pool = quotaPools.createPool({
-    connectionId: "conn-quota",
+  const pool = await quotaPools.createPool({
+    connectionId: connection.id,
     name: "Quota Pool",
     groupId: "group-demo",
   });
   assert.equal(catalogVersion(), version + 1);
 
-  const group = quotaGroups.createGroup("Quota Group");
+  const group = await quotaGroups.createGroup("Quota Group");
   assert.equal(catalogVersion(), version + 1, "creating quota groups does not invalidate catalog");
 
   version = catalogVersion();
-  const renamed = quotaGroups.renameGroup(group.id, "Renamed Quota Group");
+  const renamed = await quotaGroups.renameGroup(group.id, "Renamed Quota Group");
   assert.equal(renamed, true);
   assert.equal(catalogVersion(), version + 1, "quota-group rename invalidates catalog");
 
   version = catalogVersion();
-  assert.notEqual(quotaPools.updatePool(pool.id, { name: "Quota Pool Updated" }), null);
+  assert.notEqual(await quotaPools.updatePool(pool.id, { name: "Quota Pool Updated" }), null);
   assert.equal(catalogVersion(), version + 1);
 
   version = catalogVersion();
@@ -174,7 +184,13 @@ test("quota pools and quota-group renames signal model-catalog invalidation as e
 });
 
 test("deletePool clears primed key metadata after allowed_quotas rewrite", async () => {
-  const pool = quotaPools.createPool({ connectionId: "conn-meta", name: "Meta Pool" });
+  const connection = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "Meta Connection",
+    apiKey: "test-meta-connection-key",
+  });
+  const pool = await quotaPools.createPool({ connectionId: connection.id, name: "Meta Pool" });
   const key = await apiKeys.createApiKey("Pool Metadata Key", "machine-cpi-4");
 
   await apiKeys.updateApiKeyPermissions(key.id, { allowedQuotas: [pool.id] });

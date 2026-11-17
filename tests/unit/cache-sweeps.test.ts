@@ -221,18 +221,18 @@ test("ipFilter: tempBanIP blocks then expires", async () => {
   );
 
   resetIPFilter();
-  configureIPFilter({ enabled: true, mode: "blacklist" });
+  await configureIPFilter({ enabled: true, mode: "blacklist" });
 
   tempBanIP("10.0.0.1", 50, "test ban");
 
-  const blocked = checkIP("10.0.0.1");
+  const blocked = await checkIP("10.0.0.1");
   assert.equal(blocked.allowed, false);
   assert.ok(blocked.reason?.includes("Temporarily banned"));
 
   // Wait for ban to expire
   await new Promise((r) => setTimeout(r, 80));
 
-  const unblocked = checkIP("10.0.0.1");
+  const unblocked = await checkIP("10.0.0.1");
   assert.equal(unblocked.allowed, true);
 
   resetIPFilter();
@@ -244,13 +244,13 @@ test("ipFilter: removeTempBan immediately lifts ban", async () => {
   );
 
   resetIPFilter();
-  configureIPFilter({ enabled: true, mode: "blacklist" });
+  await configureIPFilter({ enabled: true, mode: "blacklist" });
 
   tempBanIP("10.0.0.2", 60_000, "long ban");
-  assert.equal(checkIP("10.0.0.2").allowed, false);
+  assert.equal((await checkIP("10.0.0.2")).allowed, false);
 
   removeTempBan("10.0.0.2");
-  assert.equal(checkIP("10.0.0.2").allowed, true);
+  assert.equal((await checkIP("10.0.0.2")).allowed, true);
 
   resetIPFilter();
 });
@@ -261,14 +261,14 @@ test("ipFilter: blacklist blocks listed IPs", async () => {
   );
 
   resetIPFilter();
-  configureIPFilter({ enabled: true, mode: "blacklist" });
-  addToBlacklist("192.168.1.100");
+  await configureIPFilter({ enabled: true, mode: "blacklist" });
+  await addToBlacklist("192.168.1.100");
 
-  const result = checkIP("192.168.1.100");
+  const result = await checkIP("192.168.1.100");
   assert.equal(result.allowed, false);
   assert.equal(result.reason, "IP blacklisted");
 
-  assert.equal(checkIP("192.168.1.101").allowed, true);
+  assert.equal((await checkIP("192.168.1.101")).allowed, true);
 
   resetIPFilter();
 });
@@ -279,11 +279,11 @@ test("ipFilter: whitelist mode only allows listed IPs", async () => {
   );
 
   resetIPFilter();
-  configureIPFilter({ enabled: true, mode: "whitelist" });
-  addToWhitelist("10.0.0.5");
+  await configureIPFilter({ enabled: true, mode: "whitelist" });
+  await addToWhitelist("10.0.0.5");
 
-  assert.equal(checkIP("10.0.0.5").allowed, true);
-  assert.equal(checkIP("10.0.0.6").allowed, false);
+  assert.equal((await checkIP("10.0.0.5")).allowed, true);
+  assert.equal((await checkIP("10.0.0.6")).allowed, false);
 
   resetIPFilter();
 });
@@ -294,10 +294,10 @@ test("ipFilter: getIPFilterConfig reflects current state", async () => {
   );
 
   resetIPFilter();
-  configureIPFilter({ enabled: true, mode: "whitelist", whitelist: ["10.0.0.1"] });
+  await configureIPFilter({ enabled: true, mode: "whitelist", whitelist: ["10.0.0.1"] });
   tempBanIP("10.0.0.2", 60_000, "config check");
 
-  const config = getIPFilterConfig();
+  const config = await getIPFilterConfig();
   assert.equal(config.enabled, true);
   assert.equal(config.mode, "whitelist");
   assert.ok(config.whitelist.includes("10.0.0.1"));

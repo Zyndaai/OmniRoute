@@ -18,41 +18,42 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-vertex-"));
 process.env.DATA_DIR = TMP;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { getConnectionSpendUsdSinceAdded } = await import("../../src/lib/usage/usageStats.ts");
 const { __testing } = await import("../../open-sse/services/usage.ts");
 const { getVertexUsage } = __testing;
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   model: string,
   tokensIn: number,
   tokensOut: number,
-  success = 1
+  success = true
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(provider, model, connectionId, tokensIn, tokensOut, success, new Date().toISOString());
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [provider, model, connectionId, tokensIn, tokensOut, success, new Date().toISOString()]
+  );
 }
 
 describe("vertex self-tracked spend", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
+  before(async () => {
+    await core.ensureDbInitialized(); // trigger migrations
     // conn-v: two SUCCESSFUL priced requests across two models.
-    insertUsage("conn-v", "vertex", "gemini-2.5-flash", 1_000_000, 500_000, 1);
-    insertUsage("conn-v", "vertex", "gemini-3-pro-image-preview", 200_000, 100_000, 1);
+    await insertUsage("conn-v", "vertex", "gemini-2.5-flash", 1_000_000, 500_000, true);
+    await insertUsage("conn-v", "vertex", "gemini-3-pro-image-preview", 200_000, 100_000, true);
     // a FAILED request on the same connection must NOT count toward spend.
-    insertUsage("conn-v", "vertex", "gemini-2.5-flash", 5_000_000, 5_000_000, 0);
+    await insertUsage("conn-v", "vertex", "gemini-2.5-flash", 5_000_000, 5_000_000, false);
     // a row with a different provider on the same connection id must NOT bleed in.
-    insertUsage("conn-v", "vertex-partner", "claude-opus-4-7", 9_000_000, 9_000_000, 1);
+    await insertUsage("conn-v", "vertex-partner", "claude-opus-4-7", 9_000_000, 9_000_000, true);
     // a different connection must not bleed in
-    insertUsage("conn-other", "vertex", "gemini-2.5-flash", 9_000_000, 9_000_000, 1);
+    await insertUsage("conn-other", "vertex", "gemini-2.5-flash", 9_000_000, 9_000_000, true);
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {

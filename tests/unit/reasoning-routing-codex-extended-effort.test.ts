@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { cleanupTempDataDir } from "../_setup/tempDataDir.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 // Reasoning-routing rules decided which Codex models accept `max` / `ultra` with a
 // hard-coded gpt-5.6 regex, so GPT-6 models the Codex executor already serves at
@@ -15,7 +16,6 @@ import { cleanupTempDataDir } from "../_setup/tempDataDir.ts";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-reasoning-extended-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const rulesDb = await import("../../src/lib/db/reasoningRoutingRules.ts");
 const policy = await import("../../src/lib/reasoningRouting/policy.ts");
@@ -26,10 +26,8 @@ const { codexModelFamilySupportsExtendedEffort, isCodexExtendedEffortBaseModel }
 
 const ALIAS_MODELS = new Set([...CODEX_MAX_ALIAS_MODELS, ...CODEX_ULTRA_ALIAS_MODELS]);
 
-function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+async function resetStorage() {
+  await resetTestDb();
   rulesDb.invalidateReasoningRoutingRuleCache();
 }
 
@@ -80,13 +78,13 @@ async function removedFromCombo(models: string[], targetEffort: "max" | "ultra")
   const decision = await decide(
     forcedRule(targetEffort, { targetKind: "combo", targetComboId: String(combo.id) })
   );
-  return policy.filterComboForReasoningDecision(decision.targetCombo, decision).removed;
+  return (await policy.filterComboForReasoningDecision(decision.targetCombo, decision)).removed;
 }
 
 test.beforeEach(resetStorage);
 
 test.after(async () => {
-  resetStorage();
+  await resetStorage();
   await cleanupTempDataDir(TEST_DATA_DIR);
 });
 
@@ -105,7 +103,7 @@ test("forced ultra keeps GPT-6 Astra and still drops max-only models", async () 
 
 test("forced max/ultra on a single GPT-6 Astra target is supported", async () => {
   for (const effort of ["max", "ultra"] as const) {
-    resetStorage();
+    await resetStorage();
     const decision = await decide(
       forcedRule(effort, { targetKind: "model", targetModel: "cx/gpt-6-astra" })
     );
@@ -117,7 +115,7 @@ test("every Codex max/ultra alias model passes the gate for its tiers", async ()
   const maxModels = [...CODEX_MAX_ALIAS_MODELS].map((model) => `cx/${model}`);
   assert.deepEqual(await removedFromCombo(maxModels, "max"), []);
 
-  resetStorage();
+  await resetStorage();
   const allModels = [...ALIAS_MODELS];
   const notUltra = allModels
     .filter((model) => !CODEX_ULTRA_ALIAS_MODELS.has(model))

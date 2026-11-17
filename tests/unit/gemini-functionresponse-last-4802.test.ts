@@ -18,16 +18,19 @@ const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
 const {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
   clearGeminiThoughtSignatures,
 } = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const { prefetchThoughtSignatures } = await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
 type GeminiPart = Record<string, unknown>;
 type GeminiContent = { role: string; parts: GeminiPart[] };
 
 const partKind = (p: GeminiPart) => (p.functionResponse ? "functionResponse" : "other");
 
-test("OpenAI -> Gemini: tool result followed by user turn puts functionResponse last", () => {
+test("OpenAI -> Gemini: tool result followed by user turn puts functionResponse last", async () => {
   const body = {
     messages: [
       { role: "user", content: "list files" },
@@ -46,7 +49,7 @@ test("OpenAI -> Gemini: tool result followed by user turn puts functionResponse 
       { role: "user", content: "system reminder here" },
     ],
   };
-  const result = openaiToGeminiRequest("gemini-4-argon", body, false) as {
+  const result = (await openaiToGeminiRequest("gemini-4-argon", body, false)) as {
     contents: GeminiContent[];
   };
 
@@ -61,15 +64,17 @@ test("OpenAI -> Gemini: tool result followed by user turn puts functionResponse 
   assert.equal(fr.name, "read");
 });
 
-test("Claude -> Gemini: tool_result followed by user turn puts functionResponse last", () => {
+test("Claude -> Gemini: tool_result followed by user turn puts functionResponse last", async () => {
   // A cached signature makes the translator emit native functionCall /
   // functionResponse parts instead of the signature-less context-text fallback.
   const ns = "conn-4802";
-  clearGeminiThoughtSignatures();
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "toolu_4802"), "SIG_4802");
-  const result = claudeToGeminiRequest(
-    "gemini-4-argon",
-    {
+  const scopedNs = scopeGeminiThoughtSignatureNamespace(ns, "gemini-4-argon") as string;
+  await clearGeminiThoughtSignatures();
+  await storeGeminiThoughtSignature(
+    buildGeminiThoughtSignatureKey(scopedNs, "toolu_4802"),
+    "SIG_4802"
+  );
+  const claudeBody = {
       messages: [
         { role: "user", content: "list files" },
         {
@@ -89,10 +94,17 @@ test("Claude -> Gemini: tool_result followed by user turn puts functionResponse 
         },
         { role: "user", content: "system reminder here" },
       ],
-    },
-    false,
-    { _signatureNamespace: ns }
-  ) as { contents: GeminiContent[] };
+  };
+  // The translators read only the prefetched signatures (see translator/index.ts).
+  const result = (await claudeToGeminiRequest("gemini-4-argon", claudeBody, false, {
+    _signatureNamespace: scopedNs,
+    _thoughtSignatures: await prefetchThoughtSignatures(
+      FORMATS.GEMINI,
+      "gemini-4-argon",
+      claudeBody,
+      ns
+    ),
+  })) as { contents: GeminiContent[] };
 
   for (let i = 1; i < result.contents.length; i++) {
     assert.notEqual(result.contents[i].role, result.contents[i - 1].role);
@@ -112,7 +124,7 @@ test("Claude -> Gemini: tool_result followed by user turn puts functionResponse 
   assert.equal(fr.response.result, "file contents\nsystem reminder here");
 });
 
-test("mergeConsecutiveSameRoleContents keeps order stable within text and functionResponse groups", () => {
+test("mergeConsecutiveSameRoleContents keeps order stable within text and functionResponse groups", async () => {
   const input: GeminiContent[] = [
     {
       role: "user",
@@ -137,7 +149,7 @@ test("mergeConsecutiveSameRoleContents keeps order stable within text and functi
   assert.equal(input[1].parts.length, 2);
 });
 
-test("mergeConsecutiveSameRoleContents leaves non-merged turns untouched", () => {
+test("mergeConsecutiveSameRoleContents leaves non-merged turns untouched", async () => {
   const input: GeminiContent[] = [
     { role: "user", parts: [{ functionResponse: { name: "a", response: {} } }, { text: "x" }] },
     { role: "model", parts: [{ text: "y" }] },
@@ -146,6 +158,6 @@ test("mergeConsecutiveSameRoleContents leaves non-merged turns untouched", () =>
   assert.deepEqual(merged, input);
 });
 
-test.after(() => {
-  clearGeminiThoughtSignatures();
+test.after(async () => {
+  await clearGeminiThoughtSignatures();
 });

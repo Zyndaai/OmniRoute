@@ -39,7 +39,6 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const costRules = await import("../../src/domain/costRules.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
-const { API_KEY_COLUMN_FALLBACKS } = await import("../../src/lib/db/apiKeyColumnFallbacks.ts");
 const { parseForcedModel } = await import("../../src/lib/db/apiKeys/rowParsers.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
 const { enforceApiKeyPolicy } = await import("../../src/shared/utils/apiKeyPolicy.ts");
@@ -79,17 +78,18 @@ async function routedModel(request: Request, body: { model?: string | null }) {
   return resolveRoutingModel(request, body, await resolveApiKeyForcedModel(request));
 }
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  core.resetDbInstance();
+  await costRules.resetCostData();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("R1: forced_model is a nullable column with no default", () => {
-  const column = API_KEY_COLUMN_FALLBACKS.find((c: { name: string }) => c.name === "forced_model");
-  assert.ok(column, "api_keys must gain a forced_model column");
-  assert.equal(column.definition, "forced_model TEXT");
+  const schemaSql = read("src/lib/db/backends/postgres/migrations/0001_init.sql");
+  const line = schemaSql.split("\n").find((l) => /^\s*forced_model\s/.test(l));
+  assert.ok(line, "api_keys must gain a forced_model column");
+  assert.match(line, /^\s*forced_model\s+text,?\s*$/, "forced_model must be nullable text");
 });
 
 test("R2: the parser trims and maps blank or non-string values to null", () => {
@@ -245,7 +245,7 @@ test("R7c: a pinned combo outside allowedCombos is rejected", async () => {
 test("R7d: a pinned key with an exhausted budget is still rejected", async () => {
   const key = await seedKey({ forcedModel: "openai/gpt-4.1" });
   const meta = await apiKeysDb.getApiKeyMetadata(key.key);
-  costRules.setBudget(meta.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
+  await costRules.setBudget(meta.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
   costRules.recordCost(meta.id, 2);
 
   const request = chatRequest(key.key);

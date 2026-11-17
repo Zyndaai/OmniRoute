@@ -18,7 +18,7 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { saveModelsDevCapabilities, clearModelsDevCapabilities } =
   await import("../../src/lib/modelsDevSync.ts");
@@ -66,20 +66,20 @@ function capabilityEntry(limitContext: unknown, overrides: Record<string, unknow
   };
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   resetAllSemaphores();
-  clearModelsDevCapabilities();
+  await clearModelsDevCapabilities();
 });
 
-test.after(() => {
+test.after(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   resetAllSemaphores();
-  clearModelsDevCapabilities();
-  settingsDb.clearAllLKGP();
-  core.resetDbInstance();
+  await clearModelsDevCapabilities();
+  await settingsDb.clearAllLKGP();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -95,7 +95,7 @@ test(
     // rr-a is tool-INCAPABLE → the tools-requiring request makes the compat
     // pre-filter reject it. rr-b/rr-c are tool-capable → kept, but both are
     // runtime-unavailable. Only the rejected rr-a is actually healthy.
-    saveModelsDevCapabilities({
+    await saveModelsDevCapabilities({
       openai: {
         "rr-a": capabilityEntry(128000, { tool_call: false }),
         "rr-b": capabilityEntry(128000),

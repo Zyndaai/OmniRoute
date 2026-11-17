@@ -9,14 +9,12 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-health-pi
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "task-303-ping-secret";
 
-// Reset before importing so the singleton binds to the temp DATA_DIR.
 const core = await import("../../src/lib/db/core.ts");
-core.resetDbInstance();
 
 const routeModule = await import("../../src/app/api/health/ping/route.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

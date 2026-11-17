@@ -6,8 +6,9 @@ import { join } from "node:path";
 
 const dataDir = mkdtempSync(join(tmpdir(), "antigravity-resync-16237-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+const { setMitmAliasAll } = await import("../../src/lib/db/models/mitmAlias.ts");
 const { replaceSyncedAvailableModelsForConnection, getSyncedAvailableModelsForConnection } =
   await import("../../src/lib/db/models.ts");
 const { AntigravityExecutor } = await import("../../open-sse/executors/antigravity.ts");
@@ -22,23 +23,19 @@ const originalFetch = globalThis.fetch;
 
 type Wire = { model: string; project: string; requestId: string; request: unknown };
 
-function seed(provider: string) {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections
-    (id, provider, is_active, synced_models_at, created_at, updated_at)
-    VALUES (?, ?, 1, ?, ?, ?)`
-  ).run(connectionId, provider, now, now, now);
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace,key,value) VALUES (?, ?, ?)").run(
-    "syncedAvailableModels",
-    `${provider}:${connectionId}`,
-    JSON.stringify([{ id: tiered }])
+async function seed(provider: string) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, synced_models_at)
+     VALUES ($1, $2, true, now())
+     ON CONFLICT (id) DO UPDATE SET
+       provider = EXCLUDED.provider, is_active = true, synced_models_at = now()`,
+    [connectionId, provider]
   );
+  await replaceSyncedAvailableModelsForConnection(provider, connectionId, [{ id: tiered }]);
 }
 
 async function executeResync(provider: string, abortAfterSync = false) {
-  seed(provider);
+  await seed(provider);
   const wires: Wire[] = [];
   const urls: string[] = [];
   const signals: AbortSignal[] = [];
@@ -122,17 +119,11 @@ async function executeResync(provider: string, abortAfterSync = false) {
   }
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   __resetReactiveModelSyncForTests();
   seedAntigravityIdeVersionCache("2.1.1");
-  const db = getDbInstance();
-  db.prepare("DELETE FROM provider_connections").run();
-  db.prepare(
-    "DELETE FROM key_value WHERE namespace IN ('syncedAvailableModels', 'mitmAlias')"
-  ).run();
-  db.prepare(
-    "INSERT INTO key_value (namespace,key,value) VALUES ('mitmAlias','antigravity',?)"
-  ).run(JSON.stringify({ [literal]: `antigravity/${tiered}` }));
+  await resetTestDb();
+  await setMitmAliasAll("antigravity", { [literal]: `antigravity/${tiered}` });
 });
 test.after(() => {
   globalThis.fetch = originalFetch;
@@ -140,7 +131,7 @@ test.after(() => {
   // The real catalog writer schedules reconciliation asynchronously. Let the
   // event loop drain naturally before closing/removing its database.
   process.once("beforeExit", () => {
-    resetDbInstance();
+    void resetDbInstance();
     rmSync(dataDir, { recursive: true, force: true });
   });
 });

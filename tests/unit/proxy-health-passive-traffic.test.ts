@@ -24,14 +24,14 @@ process.env.PROXY_HEALTH_PASSIVE_SKIP = "true";
 delete process.env.PROXY_AUTO_REMOVE;
 delete process.env.PROXY_AUTO_DISABLE;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 const scheduler = await import("../../src/lib/proxyHealth/scheduler.ts");
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_HEALTH_PASSIVE_SKIP;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -74,7 +74,7 @@ test("consecutive attributed production failures keep the live probe", async () 
         error: "connect ECONNREFUSED 127.0.0.1",
       });
     }
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);
@@ -100,7 +100,7 @@ test("transient production errors keep the probe (ECONNRESET is neutral)", async
         error: "read ECONNRESET",
       });
     }
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);
@@ -128,7 +128,7 @@ test("success for one provider never skips the probe others need (cross-provider
       proxy: { type: "http", host: "127.0.0.1", port },
       provider: "provider-b",
     });
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);
@@ -151,7 +151,7 @@ test("single-provider success skips the redundant probe", async () => {
       proxy: { type: "http", host: "127.0.0.1", port },
       provider: "provider-a",
     });
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /0 tested/);
     assert.match(summary, /passive-skipped \(recent success\)/);
@@ -181,7 +181,7 @@ test("mixed window keeps the probe: failure then success", async () => {
       proxy: { type: "http", host: "127.0.0.1", port },
       provider: "acme",
     });
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);
@@ -211,7 +211,7 @@ test("mixed window keeps the probe: success then failure", async () => {
       provider: "acme",
       error: "connect ECONNREFUSED 127.0.0.1",
     });
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);
@@ -238,7 +238,7 @@ test("flag off probes everything despite attributed production failures", async 
         error: "connect ECONNREFUSED 127.0.0.1",
       });
     }
-    proxyLogger.flushProxyLogsSync();
+    await proxyLogger.flushProxyLogsSync();
     const summary = await sweepCapturingSummary();
     assert.match(summary, /1 tested/);
     assert.ok(!summary.includes("passive-skipped"), `no passive skip, got: ${summary}`);

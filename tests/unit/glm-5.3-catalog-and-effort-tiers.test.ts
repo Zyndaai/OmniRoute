@@ -73,13 +73,13 @@ test("GLM family detection covers numeric, Z1, and bare provider model ids", () 
   assert.equal(metadataRegistry.isGlmFamilyModel("llama-3.3"), false);
 });
 
-test("catalog suppresses inferred tiers for every GLM registry entry without a provider contract", () => {
+test("catalog suppresses inferred tiers for every GLM registry entry without a provider contract", async () => {
   let audited = 0;
   for (const [provider, entry] of Object.entries(REGISTRY)) {
     for (const model of entry.models ?? []) {
       if (!metadataRegistry.isGlmFamilyModel(model.id, model.name)) continue;
       audited += 1;
-      const enriched = metadataRegistry.enrichCatalogModelEntry({
+      const enriched = await metadataRegistry.enrichCatalogModelEntry({
         id: `${provider}/${model.id}`,
         object: "model",
         owned_by: provider,
@@ -100,7 +100,7 @@ test("catalog suppresses inferred tiers for every GLM registry entry without a p
   assert.ok(audited > 0);
 });
 
-test("catalog exposes only GLM effort tiers that each provider can route", () => {
+test("catalog exposes only GLM effort tiers that each provider can route", async () => {
   const routedTiers = new Map<string, string[]>([
     ["glm-5.3-flash", ["low", "high", "max"]],
     ["glm-5.3", ["low", "high", "max"]],
@@ -118,7 +118,7 @@ test("catalog exposes only GLM effort tiers that each provider can route", () =>
 
   for (const provider of ["glm", "glm-cn", "glmt", "zcode"]) {
     for (const model of getRegistryEntry(provider)!.models ?? []) {
-      const enriched = metadataRegistry.enrichCatalogModelEntry({
+      const enriched = await metadataRegistry.enrichCatalogModelEntry({
         id: `${provider}/${model.id}`,
         object: "model",
         owned_by: provider,
@@ -203,9 +203,9 @@ test("GLM_PRICING covers the GLM-5.3 ids with GLM-5.2-parity rates and GLM-5.3-F
   }
 });
 
-test("GlmExecutor resolves glm-5.3-high to reasoning_effort=high on the OpenAI coding transport", () => {
+test("GlmExecutor resolves glm-5.3-high to reasoning_effort=high on the OpenAI coding transport", async () => {
   const executor = new GlmExecutor("glm");
-  const transformed = executor.transformForTransport(
+  const transformed = await executor.transformForTransport(
     "glm-5.3-high",
     { messages: [{ role: "user", content: "hi" }] },
     false,
@@ -218,9 +218,9 @@ test("GlmExecutor resolves glm-5.3-high to reasoning_effort=high on the OpenAI c
   assert.equal(transformed.thinking?.type, "enabled");
 });
 
-test("GlmExecutor resolves glm-5.3-low to reasoning_effort=low with thinking enabled", () => {
+test("GlmExecutor resolves glm-5.3-low to reasoning_effort=low with thinking enabled", async () => {
   const executor = new GlmExecutor("glm");
-  const transformed = executor.transformForTransport(
+  const transformed = await executor.transformForTransport(
     "glm-5.3-low",
     { messages: [{ role: "user", content: "hi" }] },
     false,
@@ -233,9 +233,9 @@ test("GlmExecutor resolves glm-5.3-low to reasoning_effort=low with thinking ena
   assert.equal(transformed.thinking?.type, "enabled");
 });
 
-test("GlmExecutor resolves glm-5.3-max to an explicit reasoning_effort=max (pins the tier even if the upstream default changes)", () => {
+test("GlmExecutor resolves glm-5.3-max to an explicit reasoning_effort=max (pins the tier even if the upstream default changes)", async () => {
   const executor = new GlmExecutor("glm");
-  const transformed = executor.transformForTransport(
+  const transformed = await executor.transformForTransport(
     "glm-5.3-max",
     { messages: [{ role: "user", content: "hi" }] },
     false,
@@ -247,9 +247,9 @@ test("GlmExecutor resolves glm-5.3-max to an explicit reasoning_effort=max (pins
   assert.equal(transformed.reasoning_effort, "max");
   assert.equal(transformed.thinking?.type, "enabled");
 });
-test("GlmExecutor leaves base glm-5.3 without an injected reasoning_effort (upstream default = max)", () => {
+test("GlmExecutor leaves base glm-5.3 without an injected reasoning_effort (upstream default = max)", async () => {
   const executor = new GlmExecutor("glm");
-  const transformed = executor.transformForTransport(
+  const transformed = await executor.transformForTransport(
     "glm-5.3",
     { model: "glm-5.3", messages: [{ role: "user", content: "hi" }] },
     false,
@@ -293,9 +293,9 @@ test("GLM-5.3 effort tiers execute on the OpenAI coding transport (no Anthropic-
   }
 });
 
-test("GLM-5.2 effort tiers still pin the Anthropic transport (effort beta header) — regression guard", () => {
+test("GLM-5.2 effort tiers still pin the Anthropic transport (effort beta header) — regression guard", async () => {
   const executor = new GlmExecutor("glm");
-  const transformed = executor.transformForTransport(
+  const transformed = await executor.transformForTransport(
     "glm-5.2-max",
     { messages: [{ role: "user", content: "hi" }] },
     false,

@@ -12,34 +12,13 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lkgp-8887-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const lkgpDb = await import("../../src/lib/db/settings/lkgp.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      break;
-    } catch (error: unknown) {
-      const code =
-        error && typeof error === "object" && "code" in error
-          ? String((error as { code?: unknown }).code)
-          : "";
-
-      if ((code === "EBUSY" || code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
 async function createConnection(provider: string, name: string): Promise<string> {
@@ -58,8 +37,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -144,12 +123,9 @@ test("#8887: provider-level LKGP pins without connectionId are preserved", async
 
 test("#8887: legacy LKGP values are preserved during connection cleanup", async () => {
   const doomedId = await createConnection("berry", "legacy");
-  const db = core.getDbInstance();
 
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('lkgp', ?, ?)").run(
-    "legacy:model-x",
-    "berry"
-  );
+  // A pin written before connection ids were recorded: provider only, no connection.
+  await lkgpDb.setLKGP("legacy", "model-x", "berry");
 
   assert.equal(await providersDb.deleteProviderConnection(doomedId), true);
   assert.deepEqual(await lkgpDb.getLKGP("legacy", "model-x"), { provider: "berry" });

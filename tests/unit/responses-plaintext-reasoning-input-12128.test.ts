@@ -15,7 +15,7 @@ test("#12128: resolveReasoningTransport identifies openai-compatible-responses a
   assert.equal(resolveReasoningTransport("codex"), "opaque");
 });
 
-test("#12128: translateRequest to Responses target strips plaintext reasoning.content for opaque responses providers", () => {
+test("#12128: translateRequest to Responses target strips plaintext reasoning.content for opaque responses providers", async () => {
   const chatBody = {
     model: "gpt-5.6-codex",
     messages: [
@@ -29,7 +29,7 @@ test("#12128: translateRequest to Responses target strips plaintext reasoning.co
     ],
   };
 
-  const translated = translateRequest(
+  const translated = (await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.6-codex",
@@ -37,7 +37,7 @@ test("#12128: translateRequest to Responses target strips plaintext reasoning.co
     false,
     null,
     "openai-compatible-responses-codex"
-  ) as Record<string, unknown>;
+  )) as Record<string, unknown>;
 
   assert.ok(Array.isArray(translated.input), "translated.input must be an array");
 

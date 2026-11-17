@@ -3,25 +3,24 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const moduleDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-model-capability-overrides-"));
 process.env.DATA_DIR = moduleDataDir;
 
-const coreDb = await import("../../src/lib/db/core.ts");
 const caps = await import("../../src/lib/modelCapabilities.ts");
 const overrides = await import("../../src/lib/db/modelCapabilityOverrides.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
 const route = await import("../../src/app/api/model-capability-overrides/route.ts");
 
-beforeEach(() => {
-  coreDb.resetDbInstance();
+beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(moduleDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(moduleDataDir, { recursive: true });
-  coreDb.getDbInstance();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await resetTestDb();
   fs.rmSync(moduleDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -36,19 +35,18 @@ function patchOverride(key: string, value: unknown) {
 }
 
 describe("model capability overrides", () => {
-  it("stores, lists, removes, and applies an exact max_output_tokens override", () => {
-    const withoutOverride = caps.getResolvedModelCapabilities({
-      provider: "openai",
-      model: "gpt-4o",
-    }).maxOutputTokens;
+  it("stores, lists, removes, and applies an exact max_output_tokens override", async () => {
+    const withoutOverride = (
+      await caps.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" })
+    ).maxOutputTokens;
     const distinct = (withoutOverride ?? 0) + 12345;
 
     assert.equal(
-      overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", distinct),
+      await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", distinct),
       true
     );
     assert.deepEqual(
-      overrides.listModelCapabilityOverrides().map((entry) => ({
+      (await overrides.listModelCapabilityOverrides()).map((entry) => ({
         target: entry.target,
         key: entry.key,
         value: entry.value,
@@ -56,31 +54,40 @@ describe("model capability overrides", () => {
       [{ target: "openai/gpt-4o", key: "max_output_tokens", value: distinct }]
     );
     assert.equal(
-      caps.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" }).maxOutputTokens,
+      (await caps.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" }))
+        .maxOutputTokens,
       distinct
     );
     assert.notEqual(
-      caps.getResolvedModelCapabilities({ provider: "anthropic", model: "gpt-4o" }).maxOutputTokens,
+      (await caps.getResolvedModelCapabilities({ provider: "anthropic", model: "gpt-4o" }))
+        .maxOutputTokens,
       distinct
     );
     assert.equal(
-      overrides.removeModelCapabilityOverride("openai/gpt-4o", "max_output_tokens"),
+      await overrides.removeModelCapabilityOverride("openai/gpt-4o", "max_output_tokens"),
       true
     );
     assert.equal(
-      caps.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" }).maxOutputTokens,
+      (await caps.getResolvedModelCapabilities({ provider: "openai", model: "gpt-4o" }))
+        .maxOutputTokens,
       withoutOverride
     );
   });
 
-  it("uses exact input/output overrides, clamps input to context, and isolates effort variants", () => {
+  it("uses exact input/output overrides, clamps input to context, and isolates effort variants", async () => {
     const target = "codex/gpt-5.6";
     const variant = "codex/gpt-5.6-high";
-    assert.equal(contextOverrides.setModelContextOverride("codex", "gpt-5.6", 372000), true);
-    assert.equal(overrides.setModelCapabilityOverride(target, "max_input_tokens", 999999), true);
-    assert.equal(overrides.setModelCapabilityOverride(target, "max_output_tokens", 123456), true);
+    assert.equal(await contextOverrides.setModelContextOverride("codex", "gpt-5.6", 372000), true);
+    assert.equal(
+      await overrides.setModelCapabilityOverride(target, "max_input_tokens", 999999),
+      true
+    );
+    assert.equal(
+      await overrides.setModelCapabilityOverride(target, "max_output_tokens", 123456),
+      true
+    );
 
-    const base = caps.getResolvedModelCapabilities(target);
+    const base = await caps.getResolvedModelCapabilities(target);
     assert.deepEqual(
       {
         contextWindow: base.contextWindow,
@@ -89,30 +96,34 @@ describe("model capability overrides", () => {
       },
       { contextWindow: 372000, maxInputTokens: 372000, maxOutputTokens: 123456 }
     );
-    assert.equal(overrides.removeModelCapabilityOverride(target, "max_output_tokens"), true);
-    assert.notEqual(caps.getResolvedModelCapabilities(target).maxOutputTokens, 123456);
+    assert.equal(
+      await overrides.removeModelCapabilityOverride(target, "max_output_tokens"),
+      true
+    );
+    assert.notEqual((await caps.getResolvedModelCapabilities(target)).maxOutputTokens, 123456);
 
-    const effort = caps.getResolvedModelCapabilities(variant);
+    const effort = await caps.getResolvedModelCapabilities(variant);
     assert.notEqual(effort.contextWindow, 372000);
     assert.notEqual(effort.maxInputTokens, 372000);
     assert.notEqual(effort.maxOutputTokens, 123456);
   });
 
-  it("applies overrides stored under provider-scoped model aliases", () => {
+  it("applies overrides stored under provider-scoped model aliases", async () => {
     assert.equal(
-      overrides.setModelCapabilityOverride("github/claude-opus-4.5", "max_output_tokens", 77777),
+      await overrides.setModelCapabilityOverride("github/claude-opus-4.5", "max_output_tokens", 77777),
       true
     );
     assert.equal(
-      caps.getResolvedModelCapabilities({ provider: "github", model: "claude-opus-4.5" })
-        .maxOutputTokens,
+      (
+        await caps.getResolvedModelCapabilities({ provider: "github", model: "claude-opus-4.5" })
+      ).maxOutputTokens,
       77777
     );
   });
 
   it("accepts exactly the three public token-limit keys through the API", async () => {
     assert.equal(
-      contextOverrides.setModelContextOverride("codex", "gpt-5.6", 272000, "auto:discovery"),
+      await contextOverrides.setModelContextOverride("codex", "gpt-5.6", 272000, "auto:discovery"),
       true
     );
     const discoveredResponse = await route.GET(
@@ -161,11 +172,11 @@ describe("model capability overrides", () => {
     );
 
     assert.equal(
-      contextOverrides.getModelContextOverrideRecord("codex", "gpt-5.6")?.source,
+      (await contextOverrides.getModelContextOverrideRecord("codex", "gpt-5.6"))?.source,
       "manual"
     );
 
-    const resolved = caps.getResolvedModelCapabilities("codex/gpt-5.6");
+    const resolved = await caps.getResolvedModelCapabilities("codex/gpt-5.6");
     assert.deepEqual(
       {
         contextWindow: resolved.contextWindow,
@@ -182,7 +193,7 @@ describe("model capability overrides", () => {
       )
     );
     assert.equal(removed.status, 200);
-    assert.equal(contextOverrides.getModelContextOverride("codex", "gpt-5.6"), null);
+    assert.equal(await contextOverrides.getModelContextOverride("codex", "gpt-5.6"), null);
 
     const rejectedDelete = await route.DELETE(
       new Request(
@@ -194,7 +205,7 @@ describe("model capability overrides", () => {
   });
 
   it("stores exact reasoning_efforts through the API and preserves native max/ultra", async () => {
-    const before = caps.getResolvedModelCapabilities("codex/gpt-5.6");
+    const before = await caps.getResolvedModelCapabilities("codex/gpt-5.6");
     const accepted = await patchOverride("reasoning_efforts", "﻿​ low\r\n, medium, max‍, ultra⁠");
     assert.equal(accepted.status, 200);
 
@@ -205,14 +216,14 @@ describe("model capability overrides", () => {
     assert.ok(listed);
     assert.equal(listed.target, "codex/gpt-5.6");
     assert.deepEqual(listed.value, ["low", "medium", "max", "ultra"]);
-    assert.deepEqual(overrides.getReasoningEffortsOverride("codex", "gpt-5.6"), [
+    assert.deepEqual(await overrides.getReasoningEffortsOverride("codex", "gpt-5.6"), [
       "low",
       "medium",
       "max",
       "ultra",
     ]);
 
-    const resolved = caps.getResolvedModelCapabilities("codex/gpt-5.6");
+    const resolved = await caps.getResolvedModelCapabilities("codex/gpt-5.6");
     assert.equal(resolved.supportsThinking, true);
     assert.equal(resolved.reasoningEffortsOverride, true);
     assert.deepEqual(resolved.supportedThinkingEfforts, ["low", "medium", "max", "ultra"]);
@@ -238,66 +249,25 @@ describe("model capability overrides", () => {
       )
     );
     assert.equal(removed.status, 200);
-    assert.equal(overrides.getReasoningEffortsOverride("codex", "gpt-5.6"), null);
-    const after = caps.getResolvedModelCapabilities("codex/gpt-5.6");
+    assert.equal(await overrides.getReasoningEffortsOverride("codex", "gpt-5.6"), null);
+    const after = await caps.getResolvedModelCapabilities("codex/gpt-5.6");
     assert.equal(after.reasoningEffortsOverride, false);
     assert.deepEqual(after.supportedThinkingEfforts, before.supportedThinkingEfforts);
   });
 
-  it("rejects invalid targets and non-positive values", () => {
-    assert.equal(overrides.setModelCapabilityOverride("gpt-4o", "max_output_tokens", 1000), false);
+  it("rejects invalid targets and non-positive values", async () => {
     assert.equal(
-      overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 0),
+      await overrides.setModelCapabilityOverride("gpt-4o", "max_output_tokens", 1000),
       false
     );
     assert.equal(
-      overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 1.5),
+      await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 0),
       false
     );
-    assert.deepEqual(overrides.listModelCapabilityOverrides(), []);
-  });
-
-  it("migrates legacy max_token rows without replacing a modern output override", () => {
-    const db = coreDb.getDbInstance();
-    const insert = db.prepare(
-      "INSERT INTO model_capability_overrides " +
-        "(provider, model_id, override_key, override_value, refreshed_at) VALUES (?, ?, ?, ?, ?)"
+    assert.equal(
+      await overrides.setModelCapabilityOverride("openai/gpt-4o", "max_output_tokens", 1.5),
+      false
     );
-    insert.run("legacy", "legacy-only", "max_token", "64000", "2026-01-01 00:00:00");
-    insert.run("legacy", "collision", "max_token", "64000", "2026-01-01 00:00:00");
-    insert.run("legacy", "collision", "max_output_tokens", "128000", "2026-02-01 00:00:00");
-
-    const migration = fs.readFileSync(
-      path.resolve("src/lib/db/migrations/135_migrate_model_capability_max_token.sql"),
-      "utf8"
-    );
-    db.exec(migration);
-    db.exec(migration);
-
-    assert.deepEqual(
-      db
-        .prepare(
-          "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-            "FROM model_capability_overrides WHERE provider = 'legacy' " +
-            "ORDER BY model_id, override_key"
-        )
-        .all(),
-      [
-        {
-          provider: "legacy",
-          model_id: "collision",
-          override_key: "max_output_tokens",
-          override_value: "128000",
-          refreshed_at: "2026-02-01 00:00:00",
-        },
-        {
-          provider: "legacy",
-          model_id: "legacy-only",
-          override_key: "max_output_tokens",
-          override_value: "64000",
-          refreshed_at: "2026-01-01 00:00:00",
-        },
-      ]
-    );
+    assert.deepEqual(await overrides.listModelCapabilityOverrides(), []);
   });
 });

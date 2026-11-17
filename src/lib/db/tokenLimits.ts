@@ -12,6 +12,7 @@
  */
 
 import { db, ts, type DbExecutor } from "./pg";
+import { invalidateApiKeyPolicyCache, loadApiKeyPolicyConfig } from "./readCache";
 import { getBudgetWindow, type BudgetResetInterval } from "@/domain/costRules";
 
 export type TokenLimitScopeType = "model" | "provider" | "global";
@@ -96,7 +97,8 @@ function rowToTokenLimit(row: unknown): TokenLimit {
     tokenLimit: toNumber(r.token_limit),
     resetInterval: normalizeResetInterval(r.reset_interval),
     // `time` columns arrive as 'HH:MM:SS'; the API has always exposed 'HH:MM'.
-    resetTime: typeof r.reset_time === "string" && r.reset_time ? r.reset_time.slice(0, 5) : "00:00",
+    resetTime:
+      typeof r.reset_time === "string" && r.reset_time ? r.reset_time.slice(0, 5) : "00:00",
     enabled: r.enabled !== false,
     createdAt: typeof r.created_at === "string" ? r.created_at : "",
     updatedAt: typeof r.updated_at === "string" ? r.updated_at : "",
@@ -203,7 +205,13 @@ async function insertOrMergeTokenLimit(
 export async function upsertTokenLimit(input: UpsertTokenLimitInput): Promise<TokenLimit> {
   const row = normalizeUpsertInput(input);
   const requestedId = input.id?.trim();
-  return requestedId ? updateTokenLimitById(requestedId, row) : insertOrMergeTokenLimit(row);
+  try {
+    return requestedId
+      ? await updateTokenLimitById(requestedId, row)
+      : await insertOrMergeTokenLimit(row);
+  } finally {
+    invalidateApiKeyPolicyCache();
+  }
 }
 
 /** List all token limits for an API key (ordered most-specific first: model, provider, global). */
@@ -220,31 +228,36 @@ export async function listTokenLimits(apiKeyId: string): Promise<TokenLimit[]> {
 /**
  * Return the enabled limits that apply to a given request: the model-scoped row
  * (scope_value === model), the provider-scoped row (scope_value === provider),
- * and the global row. Used by the enforcement read.
+ * and the global row. Used by the enforcement read (before and after every request), so
+ * cached per key/provider/model (see loadApiKeyPolicyConfig); the writers here invalidate it.
  */
 export async function getTokenLimitsForRequest(
   apiKeyId: string,
   provider: string,
   model: string
 ): Promise<TokenLimit[]> {
-  const rows = await db().query(
-    `SELECT * FROM api_key_token_limits
-     WHERE api_key_id = $1
-       AND enabled
-       AND (
-         (scope_type = 'global')
-         OR (scope_type = 'model' AND scope_value = $2)
-         OR (scope_type = 'provider' AND scope_value = $3)
-       )`,
-    [apiKeyId, model || "", provider || ""]
-  );
-  return rows.map(rowToTokenLimit);
+  const cacheKey = `token-limits:${apiKeyId}\u0000${provider || ""}\u0000${model || ""}`;
+  return loadApiKeyPolicyConfig(cacheKey, async () => {
+    const rows = await db().query(
+      `SELECT * FROM api_key_token_limits
+       WHERE api_key_id = $1
+         AND enabled
+         AND (
+           (scope_type = 'global')
+           OR (scope_type = 'model' AND scope_value = $2)
+           OR (scope_type = 'provider' AND scope_value = $3)
+         )`,
+      [apiKeyId, model || "", provider || ""]
+    );
+    return rows.map(rowToTokenLimit);
+  });
 }
 
 /** Delete a token limit by id (counters and reset logs go with it through their FKs). */
 export async function deleteTokenLimit(id: string): Promise<boolean> {
   if (!UUID_RE.test(id)) return false;
   const info = await db().execute("DELETE FROM api_key_token_limits WHERE id = $1", [id]);
+  invalidateApiKeyPolicyCache();
   return info.changes > 0;
 }
 

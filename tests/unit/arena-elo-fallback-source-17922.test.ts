@@ -8,7 +8,7 @@ const dataDir = mkdtempSync(join(tmpdir(), "arena-fallback-17922-"));
 process.env.DATA_DIR = dataDir;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 const core = await import("../../src/lib/db/core.ts");
-core.resetDbInstance();
+await core.resetDbInstance();
 const {
   fetchArenaLeaderboards,
   transformToModelIntelligence,
@@ -17,9 +17,9 @@ const {
 } = await import("../../src/lib/arenaEloSync.ts");
 
 const originalFetch = globalThis.fetch;
-after(() => {
+after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -87,7 +87,7 @@ test("#17922: failed sync is surfaced in GET status (lastError / lastFailedAt)",
   globalThis.fetch = (async () => new Response("", { status: 404 })) as typeof fetch;
   const result = await syncArenaElo();
   assert.equal(result.success, false);
-  const status = getArenaEloSyncStatus() as Record<string, unknown>;
+  const status = (await getArenaEloSyncStatus()) as unknown as Record<string, unknown>;
   assert.ok(status.lastError, "status exposes lastError");
   assert.ok(status.lastFailedAt, "status exposes lastFailedAt");
 });

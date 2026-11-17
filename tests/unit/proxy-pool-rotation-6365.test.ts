@@ -25,12 +25,12 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-poo
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const proxiesDb = await import("../../src/lib/db/proxies.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -59,7 +59,7 @@ async function makeConnection(): Promise<string> {
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -118,7 +118,7 @@ test("all-dead pool on a connection → fail-closed (#6246), never direct egress
   const resolved = await proxiesDb.resolveProxyForConnectionFromRegistry(connId);
   assert.equal(resolved, null, "an all-dead pool must not resolve to a live proxy");
   assert.equal(
-    proxiesDb.hasBlockingProxyAssignment(connId),
+    await proxiesDb.hasBlockingProxyAssignment(connId),
     true,
     "an all-dead assigned pool must block, not leak the real IP via direct egress"
   );

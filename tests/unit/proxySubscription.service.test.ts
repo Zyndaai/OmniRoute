@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-sub-svc-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -12,8 +13,8 @@ const core = await import("../../src/lib/db/core.ts");
 const proxies = await import("../../src/lib/db/proxies.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -22,39 +23,53 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function insertSubscription(
-  db: ReturnType<typeof core.getDbInstance>,
+async function insertSubscription(
   id: string,
   mode: "global" | "rule",
   opts: { enabled?: boolean; ruleProviders?: string[] } = {}
 ) {
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO proxy_subscriptions
       (id, name, url, enabled, mode, rule_providers, update_interval_minutes, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'empty', ?, ?)`
-  ).run(
-    id,
-    `sub-${id}`,
-    `https://example.com/${id}`,
-    opts.enabled === false ? 0 : 1,
-    mode,
-    opts.ruleProviders ? JSON.stringify(opts.ruleProviders) : null,
-    60,
-    nowIso(),
-    nowIso()
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'empty', $8, $9)`,
+    [
+      id,
+      `sub-${id}`,
+      `https://example.com/${id}`,
+      opts.enabled !== false,
+      mode,
+      opts.ruleProviders ? JSON.stringify(opts.ruleProviders) : null,
+      60,
+      nowIso(),
+      nowIso(),
+    ]
   );
 }
 
-test.after(() => {
-  core.resetDbInstance();
+// Feature flags and settings live in config_entries (jsonb values).
+async function readProxyEnabled(): Promise<unknown> {
+  const row = await getTestBackend().queryOne<{ value: unknown }>(
+    "SELECT value FROM config_entries WHERE namespace='settings' AND key='proxyEnabled'"
+  );
+  return row?.value;
+}
+
+async function insertProviderConnection(id: string, provider: string) {
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES ($1,$2,$3,$4)",
+    [id, provider, nowIso(), nowIso()]
+  );
+}
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("global subscription binds its pool to the global scope and is resolvable", async () => {
   await reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "s1", "global", { enabled: true });
-  const created = await proxies.createProxy({
+  await insertSubscription("s1", "global", { enabled: true });
+  await proxies.createProxy({
     name: "node1",
     type: "http",
     host: "10.0.0.1",
@@ -70,27 +85,20 @@ test("global subscription binds its pool to the global scope and is resolvable",
   assert.ok(resolved, "expected a global proxy to be resolved");
   assert.equal(resolved?.proxy.host, "10.0.0.1");
 
-  const flag = db
-    .prepare("SELECT value FROM key_value WHERE namespace='settings' AND key='proxyEnabled'")
-    .get() as { value: string };
-  assert.equal(JSON.parse(flag.value), true);
+  assert.equal(await readProxyEnabled(), true);
 
   // Unapply -> proxy removed from global scope, proxyEnabled recomputed to false.
   await sub.unapplySubscription("s1");
   const resolved2 = await proxies.resolveProxyForConnectionFromRegistry("conn-xyz");
   assert.equal(resolved2, null, "expected direct (no proxy) after unapply");
 
-  const flag2 = db
-    .prepare("SELECT value FROM key_value WHERE namespace='settings' AND key='proxyEnabled'")
-    .get() as { value: string };
-  assert.equal(JSON.parse(flag2.value), false);
+  assert.equal(await readProxyEnabled(), false);
 });
 
 test("rule subscription binds only the selected provider scope", async () => {
   await reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "s2", "rule", { enabled: true, ruleProviders: ["provA"] });
-  const created = await proxies.createProxy({
+  await insertSubscription("s2", "rule", { enabled: true, ruleProviders: ["provA"] });
+  await proxies.createProxy({
     name: "node2",
     type: "http",
     host: "10.0.0.2",
@@ -102,12 +110,8 @@ test("rule subscription binds only the selected provider scope", async () => {
 
   await sub.applySubscription("s2");
 
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?,?,?,?)"
-  ).run("connA", "provA", nowIso(), nowIso());
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?,?,?,?)"
-  ).run("connB", "provB", nowIso(), nowIso());
+  await insertProviderConnection("connA", "provA");
+  await insertProviderConnection("connB", "provB");
 
   const rA = await proxies.resolveProxyForConnectionFromRegistry("connA");
   assert.ok(rA, "provider A should resolve the rule proxy");
@@ -119,8 +123,7 @@ test("rule subscription binds only the selected provider scope", async () => {
 
 test("fail-closed: a dead subscription proxy blocks the connection instead of leaking", async () => {
   await reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "s3", "global", { enabled: true });
+  await insertSubscription("s3", "global", { enabled: true });
   await proxies.createProxy({
     name: "deadnode",
     type: "http",
@@ -133,24 +136,20 @@ test("fail-closed: a dead subscription proxy blocks the connection instead of le
 
   await sub.applySubscription("s3");
 
-  const flag = db
-    .prepare("SELECT value FROM key_value WHERE namespace='settings' AND key='proxyEnabled'")
-    .get() as { value: string };
-  assert.equal(JSON.parse(flag.value), true);
+  assert.equal(await readProxyEnabled(), true);
 
   // Dead proxy is excluded from resolution -> request would go direct.
   const resolved = await proxies.resolveProxyForConnectionFromRegistry("connZ");
   assert.equal(resolved, null);
 
   // But the operator assigned a (now dead) proxy, so this must be blocked.
-  const blocked = proxies.hasBlockingProxyAssignment("connZ");
+  const blocked = await proxies.hasBlockingProxyAssignment("connZ");
   assert.equal(blocked, true);
 });
 
 test("deleteSubscription unbinds and removes its proxy rows", async () => {
   await reset();
-  const db = core.getDbInstance();
-  insertSubscription(db, "s4", "global", { enabled: true });
+  await insertSubscription("s4", "global", { enabled: true });
   await proxies.createProxy({
     name: "node4",
     type: "http",
@@ -165,25 +164,27 @@ test("deleteSubscription unbinds and removes its proxy rows", async () => {
   const ok = await sub.deleteSubscription("s4");
   assert.equal(ok, true);
 
-  const rows = db
-    .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ?")
-    .all("s4") as Array<{ id: string }>;
+  const rows = await getTestBackend().query<{ id: string }>(
+    "SELECT id FROM proxy_registry WHERE subscription_id = $1",
+    ["s4"]
+  );
   assert.equal(rows.length, 0, "subscription proxy rows should be removed");
 
-  const assignments = db
-    .prepare(
-      "SELECT 1 FROM proxy_assignments a JOIN proxy_registry p ON p.id=a.proxy_id WHERE p.source='subscription' LIMIT 1"
-    )
-    .get();
-  assert.equal(assignments, undefined, "no subscription proxy should remain assigned");
+  const assignments = await getTestBackend().queryOne(
+    "SELECT 1 FROM proxy_assignments a JOIN proxy_registry p ON p.id=a.proxy_id WHERE p.source='subscription' LIMIT 1"
+  );
+  assert.ok(!assignments, "no subscription proxy should remain assigned");
 
-  const subRow = db.prepare("SELECT 1 FROM proxy_subscriptions WHERE id='s4'").get();
-  assert.equal(subRow, undefined);
+  const subRow = await getTestBackend().queryOne("SELECT 1 FROM proxy_subscriptions WHERE id='s4'");
+  assert.ok(!subRow, "subscription row should be deleted");
 });
 
 test("global→rule switch re-evaluates binding: drops global, binds the selected provider scope", async () => {
   await reset();
-  const db = core.getDbInstance();
+
+  // Start in GLOBAL mode and bind the pool to the global scope.
+  // The subscription row must exist before its proxy rows (proxy_registry FK).
+  await insertSubscription("s5", "global", { enabled: true });
 
   // Seed a proxy node directly (avoids a network fetch for this part).
   await proxies.createProxy({
@@ -195,9 +196,6 @@ test("global→rule switch re-evaluates binding: drops global, binds the selecte
     subscriptionId: "s5",
     status: "active",
   });
-
-  // Start in GLOBAL mode and bind the pool to the global scope.
-  insertSubscription(db, "s5", "global", { enabled: true });
   await sub.applySubscription("s5");
 
   const before = await proxies.resolveProxyForConnectionFromRegistry("connAny");
@@ -225,9 +223,7 @@ test("global→rule switch re-evaluates binding: drops global, binds the selecte
   assert.equal(afterGlobal, null, "global binding should be dropped after switching to rule mode");
 
   // The provider-scope binding must now resolve the node.
-  db.prepare(
-    "INSERT INTO provider_connections (id, provider, created_at, updated_at) VALUES (?,?,?,?)"
-  ).run("connA", "provA", nowIso(), nowIso());
+  await insertProviderConnection("connA", "provA");
   const afterRule = await proxies.resolveProxyForConnectionFromRegistry("connA");
   assert.ok(afterRule, "rule mode should bind the node to provider provA");
   assert.equal(afterRule?.proxy.host, "10.0.0.5");

@@ -14,14 +14,10 @@ import { randomUUID } from "node:crypto";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ti-sessions-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { resetDbInstance, getDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  // Re-initialize db
-  getDbInstance();
+  await resetTestDb();
 }
 
 const sessionsRoute = await import("../../src/app/api/tools/traffic-inspector/sessions/route.ts");
@@ -157,7 +153,7 @@ test("GET /sessions/[id]: returns session with requests", async () => {
     responseSize: 0,
     timestamp: new Date().toISOString(),
   });
-  appendSessionRequest(session.id, payload);
+  await appendSessionRequest(session.id, payload);
 
   const getRes = await sessionDetailRoute.GET(new Request("http://localhost/"), {
     params: Promise.resolve({ id: session.id }),
@@ -178,7 +174,7 @@ test("DELETE /sessions/[id]: cascades requests", async () => {
   );
   const session = (await createRes.json()) as { id: string };
 
-  appendSessionRequest(session.id, JSON.stringify({ note: "test" }));
+  await appendSessionRequest(session.id, JSON.stringify({ note: "test" }));
 
   const delRes = await sessionDetailRoute.DELETE(new Request("http://localhost/"), {
     params: Promise.resolve({ id: session.id }),
@@ -217,7 +213,7 @@ test("GET /sessions/[id]/export.har: returns HAR file", async () => {
     responseSize: 0,
     timestamp: new Date().toISOString(),
   };
-  appendSessionRequest(session.id, JSON.stringify(reqPayload));
+  await appendSessionRequest(session.id, JSON.stringify(reqPayload));
 
   const harRes = await sessionHarRoute.GET(new Request("http://localhost/"), {
     params: Promise.resolve({ id: session.id }),

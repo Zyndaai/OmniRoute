@@ -8,7 +8,6 @@ import ts from "typescript";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-affinity-logs-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.OMNIROUTE_SESSION_AFFINITY_STORE;
 delete process.env.REDIS_URL;
 const core = await import("../../src/lib/db/core.ts");
@@ -18,8 +17,8 @@ const pin = await import("../../src/sse/services/sessionAffinityPin.ts");
 const abortReasons = await import("../../open-sse/services/combo/comboAbortReasons.ts");
 const affinity = await import("../../src/lib/db/sessionAccountAffinity.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -53,7 +52,7 @@ for (const initial of ["miss", "reuse", "obsolete"] as const) {
     const trace: string[] = [];
     const store = sqlite.sqliteSessionAffinityStore;
     if (initial !== "miss")
-      sqlite.upsertSessionAccountAffinity(
+      await sqlite.upsertSessionAccountAffinity(
         key,
         "glm",
         initial === "reuse" ? "A" : "old",
@@ -97,9 +96,9 @@ for (const initial of ["miss", "reuse", "obsolete"] as const) {
             "upsert",
             "usage",
           ];
-    const immediate = [...trace];
+    // The store is asynchronous now, so the mutations land after the first await rather than
+    // synchronously inside select(); only the final ordered trace is asserted.
     await pending;
-    assert.deepEqual(immediate, beforeYield);
     assert.deepEqual(trace, [
       ...beforeYield,
       initial === "reuse"
@@ -109,20 +108,20 @@ for (const initial of ["miss", "reuse", "obsolete"] as const) {
   });
 }
 
-test("request eviction returns a synchronous SQLite result", () => {
-  sqlite.upsertSessionAccountAffinity("synthetic-request", "glm", "A", Date.now(), 60_000);
+test("request eviction resolves to true for a SQLite pin", async () => {
+  await sqlite.upsertSessionAccountAffinity("synthetic-request", "glm", "A", Date.now(), 60_000);
   assert.equal(
-    affinity.evictSessionAccountAffinityForConnectionAsync("synthetic-request", "glm", "A"),
+    await affinity.evictSessionAccountAffinityForConnectionAsync("synthetic-request", "glm", "A"),
     true
   );
 });
 
-test("combo timeout helper returns the legacy SQLite result synchronously", () => {
+test("combo timeout helper resolves to true and clears the SQLite pin", async () => {
   const controller = new AbortController();
   controller.abort(new Error(abortReasons.COMBO_PER_MODEL_TIMEOUT_REASON));
-  sqlite.upsertSessionAccountAffinity("synthetic-combo", "glm", "A", Date.now(), 60_000);
+  await sqlite.upsertSessionAccountAffinity("synthetic-combo", "glm", "A", Date.now(), 60_000);
   assert.equal(
-    pin.evictSessionAffinityOnComboTimeoutAsync({
+    await pin.evictSessionAffinityOnComboTimeoutAsync({
       sessionKey: "synthetic-combo",
       provider: "glm",
       connectionId: "A",
@@ -130,5 +129,5 @@ test("combo timeout helper returns the legacy SQLite result synchronously", () =
     }),
     true
   );
-  assert.equal(sqlite.getSessionAccountAffinity("synthetic-combo", "glm", 60_000), null);
+  assert.equal(await sqlite.getSessionAccountAffinity("synthetic-combo", "glm", 60_000), null);
 });

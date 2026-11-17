@@ -8,7 +8,7 @@ import { once } from "node:events";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cost-responsive-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const { getProviderWindowCostBreakdown } =
   await import("../../src/lib/usage/providerWindowCosts.ts");
@@ -17,25 +17,35 @@ const { RecordedCostMatcher } = await import("../../src/lib/usage/recordedCostMa
 const now = Date.parse("2026-06-28T12:00:00Z");
 
 async function seed(count: number, extraCost: boolean) {
-  const db = core.getDbInstance();
-  db.exec("DELETE FROM usage_history; DELETE FROM domain_cost_history;");
+  const b = getTestBackend();
+  await b.execute("DELETE FROM usage_history");
+  await b.execute("DELETE FROM domain_cost_history");
   await updatePricing({ codex: { "test-model": { input: 1, output: 1 } } });
-  const usage = db.prepare(`INSERT INTO usage_history
-    (provider, model, connection_id, api_key_id, api_key_name, tokens_input, timestamp)
-    VALUES ('codex', 'test-model', 'synthetic-connection', 'synthetic-key', 'Synthetic', 1000000, ?)`);
-  const cost = db.prepare(
-    "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES ('synthetic-key', 2, ?)"
+  // One usage row and one recorded cost per request, one second apart. Generated in SQL
+  // so a few thousand rows seed in one round trip each.
+  const first = now - 86400000;
+  await b.execute(
+    `INSERT INTO usage_history
+       (provider, model, connection_id, api_key_id, api_key_name, tokens_input, timestamp)
+     SELECT 'codex', 'test-model', 'synthetic-connection', 'synthetic-key', 'Synthetic', 1000000,
+            to_timestamp(($1::bigint + g.i * 1000) / 1000.0)
+     FROM generate_series(0, $2::int - 1) AS g(i)`,
+    [first, count]
   );
-  db.transaction(() => {
-    for (let i = 0; i < count; i++) {
-      const at = now - 86400000 + i * 1000;
-      usage.run(new Date(at).toISOString());
-      cost.run(at);
-    }
-    // The same key can have costs from another provider/connection. Force the
-    // detailed branch without creating an extra usage row in this selection.
-    if (extraCost) cost.run(now - 1000);
-  })();
+  await b.execute(
+    `INSERT INTO domain_cost_history (api_key_id, cost, timestamp)
+     SELECT 'synthetic-key', 2, to_timestamp(($1::bigint + g.i * 1000) / 1000.0)
+     FROM generate_series(0, $2::int - 1) AS g(i)`,
+    [first, count]
+  );
+  // The same key can have costs from another provider/connection. Force the
+  // detailed branch without creating an extra usage row in this selection.
+  if (extraCost) {
+    await b.execute(
+      "INSERT INTO domain_cost_history (api_key_id, cost, timestamp) VALUES ('synthetic-key', 2, $1)",
+      [new Date(now - 1000).toISOString()]
+    );
+  }
 }
 
 const breakdown = () =>
@@ -45,8 +55,12 @@ const breakdown = () =>
     now,
   });
 
-test.after(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await resetTestDb();
+});
+
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -105,29 +119,36 @@ test("mismatched cost counts yield to an HTTP heartbeat before analytics complet
 
 test("aggregate-only calculation never loads detailed cost records", async () => {
   await seed(16, false);
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare;
+  const b = getTestBackend() as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const methods = ["query", "queryOne", "execute"] as const;
+  const originals = Object.fromEntries(methods.map((m) => [m, b[m]])) as Record<
+    (typeof methods)[number],
+    (...args: unknown[]) => Promise<unknown>
+  >;
   const detailedQueries: string[] = [];
-  db.prepare = (sql) => {
-    if (/id as rowId/i.test(sql) && /FROM domain_cost_history/i.test(sql))
-      detailedQueries.push(sql);
-    return originalPrepare.call(db, sql);
-  };
+  for (const m of methods) {
+    const real = originals[m].bind(b);
+    b[m] = (sql: unknown, ...rest: unknown[]) => {
+      const text = String(sql);
+      if (/id as "?rowId"?/i.test(text) && /FROM domain_cost_history/i.test(text))
+        detailedQueries.push(text);
+      return real(sql, ...rest);
+    };
+  }
   try {
     const result = await breakdown();
     assert.equal(result.totalCostUsd, 32);
     assert.equal(detailedQueries.length, 0);
   } finally {
-    db.prepare = originalPrepare;
+    for (const m of methods) b[m] = originals[m];
   }
 });
 
 test("partial recorded history falls back to pricing only for the unmatched usage row", async () => {
   await seed(2, false);
-  core
-    .getDbInstance()
-    .prepare("DELETE FROM domain_cost_history WHERE timestamp = ?")
-    .run(now - 86400000 + 1000);
+  await getTestBackend().execute("DELETE FROM domain_cost_history WHERE timestamp = $1", [
+    new Date(now - 86400000 + 1000).toISOString(),
+  ]);
   const result = await breakdown();
   assert.equal(result.rows[0].requests, 2);
   assert.equal(result.totalCostUsd, 3); // recorded $2 once, then calculated $1
@@ -135,14 +156,12 @@ test("partial recorded history falls back to pricing only for the unmatched usag
 
 test("matching is request-local and respects the selected provider connection", async () => {
   await seed(4, true);
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO usage_history
-    (provider, model, connection_id, api_key_id, api_key_name, tokens_input, timestamp)
-    VALUES ('codex', 'test-model', 'other-connection', 'synthetic-key', 'Synthetic', 1000000, ?)`
-    )
-    .run(new Date(now - 1000).toISOString());
+  await getTestBackend().execute(
+    `INSERT INTO usage_history
+       (provider, model, connection_id, api_key_id, api_key_name, tokens_input, timestamp)
+     VALUES ('codex', 'test-model', 'other-connection', 'synthetic-key', 'Synthetic', 1000000, $1)`,
+    [new Date(now - 1000).toISOString()]
+  );
   const [first, second] = await Promise.all([breakdown(), breakdown()]);
   for (const result of [first, second]) {
     assert.equal(result.rows[0].requests, 4);

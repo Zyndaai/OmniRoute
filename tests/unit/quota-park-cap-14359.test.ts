@@ -15,11 +15,12 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-quota-park-cap
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 // Dynamic imports are required: DATA_DIR must be set before the db modules
-// open SQLite, so static imports would initialize against the wrong data dir
+// resolve their connection settings, so static imports would initialize against the wrong data dir
 // (same pattern as tests/unit/quota-cache-hydrate-5015.test.ts).
 const coreDb = await import("../../src/lib/db/core.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 // The park window under test (30 minutes — mirrors EXHAUSTED_MAX_PARK_MS).
 const MAX_PARK_MS = 30 * 60 * 1000;
@@ -30,8 +31,18 @@ function farQuotas() {
   return { weekly: { remainingPercentage: 0, resetAt: FAR_RESET } };
 }
 
-test.after(() => {
-  coreDb.resetDbInstance();
+// quota_snapshots.connection_id references provider_connections (ON DELETE CASCADE):
+// a snapshot for a connection that does not exist is dropped by saveQuotaSnapshot.
+async function seedConnection(id: string) {
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, auth_type, is_active)
+     VALUES ($1, 'qwen-cloud-token-plan', 'apikey', true) ON CONFLICT (id) DO NOTHING`,
+    [id]
+  );
+}
+
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -69,9 +80,10 @@ test("#14359 the quota monitor cannot re-anchor the park while the exhausted str
   );
 });
 
-test("#14359 hydration caps the park from the snapshot age — an old snapshot must not block", () => {
+test("#14359 hydration caps the park from the snapshot age — an old snapshot must not block", async () => {
   quotaCache.__clearForTests();
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await seedConnection("hyd-14359");
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "qwen-cloud-token-plan",
     connection_id: "hyd-14359",
     window_key: "weekly",
@@ -82,12 +94,12 @@ test("#14359 hydration caps the park from the snapshot age — an old snapshot m
     raw_data: null,
   });
   // The snapshot was observed 2 hours ago — older than any park window.
-  const db = coreDb.getDbInstance();
-  db.prepare("UPDATE quota_snapshots SET created_at = ? WHERE connection_id = ?").run(
+  await getTestBackend().execute("UPDATE quota_snapshots SET created_at = $1 WHERE connection_id = $2", [
     new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    "hyd-14359"
-  );
+    "hyd-14359",
+  ]);
 
+  await quotaCache.hydrateQuotaCacheFromSnapshots("hyd-14359");
   assert.equal(
     quotaCache.isAccountQuotaExhausted("hyd-14359"),
     false,
@@ -100,9 +112,10 @@ test("#14359 hydration caps the park from the snapshot age — an old snapshot m
   );
 });
 
-test("#14359 a fresh exhausted snapshot still parks after hydration (cap not a bypass)", () => {
+test("#14359 a fresh exhausted snapshot still parks after hydration (cap not a bypass)", async () => {
   quotaCache.__clearForTests();
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await seedConnection("hyd-fresh-14359");
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "qwen-cloud-token-plan",
     connection_id: "hyd-fresh-14359",
     window_key: "weekly",
@@ -113,6 +126,9 @@ test("#14359 a fresh exhausted snapshot still parks after hydration (cap not a b
     raw_data: null,
   });
 
+  // The predicates are synchronous and only hydrate in the background on a cold
+  // cache, so wait for the stored snapshot to be loaded first.
+  await quotaCache.hydrateQuotaCacheFromSnapshots("hyd-fresh-14359");
   assert.equal(
     quotaCache.isAccountQuotaExhausted("hyd-fresh-14359"),
     true,

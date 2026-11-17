@@ -22,7 +22,7 @@ function bigTurn(n: number) {
   return { role: "user", content: `turn ${n}: ${"x".repeat(4_000)}` };
 }
 
-function requestWithNTurns(n: number) {
+async function requestWithNTurns(n: number) {
   const body = {
     model: "any-model",
     messages: [
@@ -34,9 +34,9 @@ function requestWithNTurns(n: number) {
   return compressContext(body, { maxTokens: 5_000, reserveTokens: 0 });
 }
 
-test("issue #14600: purify_history notice must be byte-stable across requests on a growing conversation (prefix-cache anchor)", () => {
-  const resultA = requestWithNTurns(13);
-  const resultB = requestWithNTurns(14);
+test("issue #14600: purify_history notice must be byte-stable across requests on a growing conversation (prefix-cache anchor)", async () => {
+  const resultA = await requestWithNTurns(13);
+  const resultB = await requestWithNTurns(14);
 
   assert.equal(resultA.compressed, true, "request A must trigger purify_history");
   assert.equal(resultB.compressed, true, "request B must trigger purify_history");

@@ -13,31 +13,43 @@ const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
 const overrides = await import("../../src/lib/db/modelContextOverrides.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const providers = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { runContextWindowReconcile } = await import("../../src/lib/contextWindowResolver.ts");
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  // Each case needs an empty catalog: a leftover connection or override from the
+  // previous case would be counted by the next pass.
+  await resetTestDb();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("runContextWindowReconcile retains an auto override across repeated synced discovery", async () => {
   // gpt-4o's static catalog window is 128K; discovery reports a real 372K.
   // This uses the live DB discovery and resolver seams, not injected pure deps.
-  await models.replaceSyncedAvailableModelsForConnection("openai", "reconcile-test", [
+  // The synced-model write needs a real connection row (FK); a missing one is dropped.
+  const connection = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    apiKey: "sk-reconcile-persisted-1",
+    isActive: true,
+  });
+  await models.replaceSyncedAvailableModelsForConnection("openai", connection.id, [
     { id: "gpt-4o", inputTokenLimit: 372000 },
   ]);
 
   const first = await runContextWindowReconcile();
   assert.deepEqual(first, { scanned: 1, written: 1, removed: 0, skippedManual: 0 });
   assert.deepEqual(
-    (() => {
-      const record = overrides.getModelContextOverrideRecord("openai", "gpt-4o");
+    await (async () => {
+      const record = await overrides.getModelContextOverrideRecord("openai", "gpt-4o");
       return record && { realContext: record.realContext, source: record.source };
     })(),
     { realContext: 372000, source: "auto:discovery" }
@@ -46,8 +58,8 @@ test("runContextWindowReconcile retains an auto override across repeated synced 
   const second = await runContextWindowReconcile();
   assert.deepEqual(second, { scanned: 1, written: 0, removed: 0, skippedManual: 0 });
   assert.deepEqual(
-    (() => {
-      const record = overrides.getModelContextOverrideRecord("openai", "gpt-4o");
+    await (async () => {
+      const record = await overrides.getModelContextOverrideRecord("openai", "gpt-4o");
       return record && { realContext: record.realContext, source: record.source };
     })(),
     { realContext: 372000, source: "auto:discovery" },
@@ -59,7 +71,13 @@ test("runContextWindowReconcile bumps the model catalog cache once per pass, not
   // Every bump invalidates catalog-version memos (e.g. the synced vision verdict
   // map), so a per-override bump rebuilt them once per written model: with
   // thousands of synced models that blocked the event loop for 10-20 s per pass.
-  await models.replaceSyncedAvailableModelsForConnection("openai", "reconcile-test", [
+  const connection = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    apiKey: "sk-reconcile-persisted-2",
+    isActive: true,
+  });
+  await models.replaceSyncedAvailableModelsForConnection("openai", connection.id, [
     { id: "gpt-4o", inputTokenLimit: 371001 },
     { id: "gpt-4o-mini", inputTokenLimit: 371002 },
     { id: "o3", inputTokenLimit: 371003 },

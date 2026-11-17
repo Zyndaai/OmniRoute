@@ -16,7 +16,7 @@ const imageRegistry = await import("../../open-sse/config/imageRegistry.ts");
 
 test.after(async () => {
   const core = await import("../../src/lib/db/core.ts");
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -41,16 +41,21 @@ test("without a registered resolver the bridge falls back to the env var only", 
 
 test("loading featureFlags registers the DB-aware resolver (DB override wins over env)", async () => {
   // First load of featureFlags in this process (the previous test cleared the bridge).
-  await import("../../src/shared/utils/featureFlags.ts");
+  const { refreshFeatureFlagSnapshot } =
+    await import("../../src/shared/utils/featureFlags.ts");
   const { setFeatureFlagOverride, removeFeatureFlagOverride } =
     await import("../../src/lib/db/featureFlags.ts");
 
-  setFeatureFlagOverride("GROK_SUBSCRIPTION_IMAGES_ENABLED", "true");
+  // Flag reads are synchronous and served from an in-process snapshot of the DB
+  // overrides, so the snapshot must be reloaded after each write for the new value to show.
+  await setFeatureFlagOverride("GROK_SUBSCRIPTION_IMAGES_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
   try {
     assert.equal(imageRegistry.isGrokSubscriptionImagesEnabled(), true);
     assert.ok(imageRegistry.getImageProvider("xai-oauth"), "subscription provider visible");
   } finally {
-    removeFeatureFlagOverride("GROK_SUBSCRIPTION_IMAGES_ENABLED");
+    await removeFeatureFlagOverride("GROK_SUBSCRIPTION_IMAGES_ENABLED");
+    await refreshFeatureFlagSnapshot();
   }
   assert.equal(imageRegistry.isGrokSubscriptionImagesEnabled(), false);
   assert.equal(imageRegistry.getImageProvider("xai-oauth") ?? null, null);

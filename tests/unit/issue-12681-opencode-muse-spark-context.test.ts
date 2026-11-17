@@ -11,6 +11,6 @@ test("#12681: opencode-zen registry declares an explicit real contextLength for 
   assert.notEqual(museSparkFree?.contextLength, undefined);
 });
 
-test("#12681: contextManager.getTokenLimit resolves muse-spark-1.2-contributor-free to its real 1M+ window, not the 200000 provider default", () => {
-  assert.equal(getTokenLimit("opencode-zen", "muse-spark-1.2-contributor-free"), 1048576);
+test("#12681: contextManager.getTokenLimit resolves muse-spark-1.2-contributor-free to its real 1M+ window, not the 200000 provider default", async () => {
+  assert.equal(await getTokenLimit("opencode-zen", "muse-spark-1.2-contributor-free"), 1048576);
 });

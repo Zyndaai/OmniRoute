@@ -11,7 +11,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const ORIGINAL_API_KEY_SECRET = process.env.API_KEY_SECRET;
 process.env.API_KEY_SECRET = "test-usage-analytics-model-dedup-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const analyticsRoute = await import("../../src/app/api/usage/analytics/route.ts");
@@ -21,16 +21,16 @@ function makeRequest(url: string) {
   return new Request(url, { method: "GET" });
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
@@ -42,13 +42,12 @@ test.after(() => {
 });
 
 test("#7535: byModel must not list the same logical model twice under one raw/one prefixed id", async () => {
-  const db = core.getDbInstance();
   const now = new Date();
+  const backend = getTestBackend();
+  const insertSql = `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`;
 
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+  await backend.execute(insertSql, [
     "zai",
     "glm-5.2",
     "test-conn",
@@ -56,14 +55,11 @@ test("#7535: byModel must not list the same logical model twice under one raw/on
     "Primary Key",
     100,
     50,
-    1,
+    true,
     200,
-    now.toISOString()
-  );
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, api_key_id, api_key_name, tokens_input, tokens_output, success, latency_ms, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+    now.toISOString(),
+  ]);
+  await backend.execute(insertSql, [
     "zai",
     "z-ai/glm-5.2",
     "test-conn",
@@ -71,10 +67,10 @@ test("#7535: byModel must not list the same logical model twice under one raw/on
     "Primary Key",
     80,
     40,
-    1,
+    true,
     150,
-    new Date(now.getTime() - 60_000).toISOString()
-  );
+    new Date(now.getTime() - 60_000).toISOString(),
+  ]);
 
   assert.equal(normalizeModelName("glm-5.2"), "glm-5.2");
   assert.equal(normalizeModelName("z-ai/glm-5.2"), "glm-5.2");

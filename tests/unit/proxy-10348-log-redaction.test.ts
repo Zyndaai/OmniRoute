@@ -13,15 +13,15 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
-function resetStorage() {
-  proxyLogger.clearProxyLogs();
-  core.closeDbInstance();
+async function resetStorage() {
+  await proxyLogger.clearProxyLogs();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => resetStorage());
-test.after(() => resetStorage());
+test.beforeEach(async () => resetStorage());
+test.after(async () => resetStorage());
 
 test("[10348] default ProxyEgress console line redacts client IP, egress IP, and account prefix", () => {
   const captured: string[] = [];

@@ -32,6 +32,7 @@ const modelComboMappingsDb = await import("../../src/lib/db/modelComboMappings.t
 const costRules = await import("../../src/domain/costRules.ts");
 const rateLimiter = await import("../../src/shared/utils/rateLimiter.ts");
 const tokenLimitsDb = await import("../../src/lib/db/tokenLimits.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 rateLimiter.setRateLimiterTestMode(true);
 
@@ -43,8 +44,8 @@ function getFsErrorCode(error: unknown): string | undefined {
 
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await costRules.resetCostData();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -139,8 +140,8 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  costRules.resetCostData();
-  coreDb.resetDbInstance();
+  await costRules.resetCostData();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -518,7 +519,7 @@ test("enforceApiKeyPolicy rejects disallowed models and exhausted budgets", asyn
   assert.match(await readErrorMessage(disallowed.rejection), /not allowed/);
 
   const budgetMeta = await apiKeysDb.getApiKeyMetadata(budgetedKey.key);
-  costRules.setBudget(budgetMeta.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
+  await costRules.setBudget(budgetMeta.id, { dailyLimitUsd: 1, warningThreshold: 0.5 });
   costRules.recordCost(budgetMeta.id, 2);
 
   const overBudget = await policy.enforceApiKeyPolicy(
@@ -541,7 +542,7 @@ test("enforceApiKeyPolicy rejects disallowed models and exhausted budgets", asyn
 test("enforceApiKeyPolicy returns the token-limit reset instant", async () => {
   const limitedKey = await createKeyWithPolicy();
   const metadata = await apiKeysDb.getApiKeyMetadata(limitedKey.key);
-  const limit = tokenLimitsDb.upsertTokenLimit({
+  const limit = await tokenLimitsDb.upsertTokenLimit({
     apiKeyId: metadata.id,
     scopeType: "global",
     tokenLimit: 10,
@@ -549,7 +550,7 @@ test("enforceApiKeyPolicy returns the token-limit reset instant", async () => {
     resetTime: "00:00",
   });
   const { windowStart } = tokenLimitsDb.resetWindowIfElapsed(limit);
-  tokenLimitsDb.incrementWindowTokens(limit.id, windowStart, 10);
+  await tokenLimitsDb.incrementWindowTokens(limit.id, windowStart, 10);
   const policy = await loadPolicy("token-limit-reset");
 
   const result = await policy.enforceApiKeyPolicy(

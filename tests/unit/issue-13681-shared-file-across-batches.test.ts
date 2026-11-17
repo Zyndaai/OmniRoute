@@ -24,14 +24,14 @@ const { createBatch, getBatch, deleteCompletedBatches, deleteBatch } =
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
 describe("#13681 — shared file reference survives a sibling batch's deletion", () => {
-  after(() => {
-    resetDbInstance();
+  after(async () => {
+    await resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it("deleteCompletedBatches must NOT null a file still referenced by a surviving in_progress batch", () => {
+  it("deleteCompletedBatches must NOT null a file still referenced by a surviving in_progress batch", async () => {
     const apiKeyId = "key_shared_13681";
-    const sharedFile = createFile({
+    const sharedFile = await createFile({
       bytes: 8,
       filename: "shared-input.jsonl",
       purpose: "batch",
@@ -40,7 +40,7 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
     });
 
     // Batch A: completed, will be swept and deleted.
-    const batchA = createBatch({
+    const batchA = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: sharedFile.id,
@@ -50,7 +50,7 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
 
     // Batch B: still in progress, reuses the SAME input file id, and is never
     // touched by this sweep call.
-    const batchB = createBatch({
+    const batchB = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: sharedFile.id,
@@ -58,26 +58,26 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
       apiKeyId,
     });
 
-    const result = deleteCompletedBatches({ apiKeyId });
+    const result = await deleteCompletedBatches({ apiKeyId });
 
-    assert.strictEqual(getBatch(batchA.id), null, "the completed batch is swept as expected");
-    assert.ok(getBatch(batchB.id), "the in-progress batch must survive the sweep");
+    assert.strictEqual(await getBatch(batchA.id), null, "the completed batch is swept as expected");
+    assert.ok(await getBatch(batchB.id), "the in-progress batch must survive the sweep");
     assert.strictEqual(result.deletedBatches, 1, "only the completed batch counted as deleted");
 
     // Expected/correct behavior: batch B is alive and still points at
     // sharedFile.id, so the sweep must NOT have soft-deleted that file just
     // because batch A (also swept) referenced the same file id.
-    assert.ok(getFile(sharedFile.id), "the shared file must survive — batch B still references it");
+    assert.ok(await getFile(sharedFile.id), "the shared file must survive — batch B still references it");
     assert.notStrictEqual(
-      getFileContent(sharedFile.id),
+      await getFileContent(sharedFile.id),
       null,
       "the shared file's content must survive — batch B still references it"
     );
   });
 
-  it("deleteBatch (single) must NOT null a file still referenced by a sibling batch", () => {
+  it("deleteBatch (single) must NOT null a file still referenced by a sibling batch", async () => {
     const apiKeyId = "key_shared_single_13681";
-    const sharedFile = createFile({
+    const sharedFile = await createFile({
       bytes: 8,
       filename: "shared-input-2.jsonl",
       purpose: "batch",
@@ -85,14 +85,14 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
       apiKeyId,
     });
 
-    const batchA = createBatch({
+    const batchA = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: sharedFile.id,
       status: "completed",
       apiKeyId,
     });
-    const batchB = createBatch({
+    const batchB = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: sharedFile.id,
@@ -100,20 +100,20 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
       apiKeyId,
     });
 
-    const deleted = deleteBatch(batchA.id);
+    const deleted = await deleteBatch(batchA.id);
 
     assert.strictEqual(deleted, true, "deleteBatch reports success for batch A");
-    assert.ok(getBatch(batchB.id), "batch B is untouched by deleteBatch(batchA.id)");
+    assert.ok(await getBatch(batchB.id), "batch B is untouched by deleteBatch(batchA.id)");
     assert.notStrictEqual(
-      getFileContent(sharedFile.id),
+      await getFileContent(sharedFile.id),
       null,
       "the shared file's content must survive — batch B still references it"
     );
   });
 
-  it("deleteCompletedBatches DOES delete the file once the LAST referencing batch is gone (no regression toward never-delete)", () => {
+  it("deleteCompletedBatches DOES delete the file once the LAST referencing batch is gone (no regression toward never-delete)", async () => {
     const apiKeyId = "key_last_ref_13681";
-    const file = createFile({
+    const file = await createFile({
       bytes: 8,
       filename: "last-ref.jsonl",
       purpose: "batch",
@@ -121,7 +121,7 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
       apiKeyId,
     });
 
-    const onlyBatch = createBatch({
+    const onlyBatch = await createBatch({
       endpoint: "/v1/chat/completions",
       completionWindow: "24h",
       inputFileId: file.id,
@@ -129,15 +129,15 @@ describe("#13681 — shared file reference survives a sibling batch's deletion",
       apiKeyId,
     });
 
-    const result = deleteCompletedBatches({ apiKeyId });
+    const result = await deleteCompletedBatches({ apiKeyId });
 
-    assert.strictEqual(getBatch(onlyBatch.id), null);
+    assert.strictEqual(await getBatch(onlyBatch.id), null);
     assert.strictEqual(result.deletedBatches, 1);
     assert.strictEqual(
       result.deletedFiles,
       1,
       "the file had no other referencing batch, so it must be deleted"
     );
-    assert.strictEqual(getFile(file.id), null, "the file is gone once nothing else references it");
+    assert.strictEqual(await getFile(file.id), null, "the file is gone once nothing else references it");
   });
 });

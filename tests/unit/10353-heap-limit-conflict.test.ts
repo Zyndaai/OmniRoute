@@ -34,7 +34,7 @@ test("#10353 dual-set disagree → warn + OMNIROUTE_MEMORY_MB wins", () => {
   const env = {
     NODE_OPTIONS: "--max-old-space-size=512",
     OMNIROUTE_MEMORY_MB: "2048",
-  };
+  } as NodeJS.ProcessEnv;
   assert.equal(warnConflictingHeapLimits(env, 2048, (m: string) => messages.push(m)), true);
   assert.match(messages[0], /OMNIROUTE_MEMORY_MB=2048/);
   assert.match(messages[0], /--max-old-space-size=512/);
@@ -68,6 +68,6 @@ test("#10353 only one knob set → no conflict warn", () => {
 });
 
 test("#10353 unset OMNIROUTE_MEMORY_MB keeps NODE_OPTIONS heap", () => {
-  const env = { NODE_OPTIONS: "--max-old-space-size=8192" };
+  const env = { NODE_OPTIONS: "--max-old-space-size=8192" } as NodeJS.ProcessEnv;
   assert.equal(buildStandaloneNodeOptions(env, 512), "--max-old-space-size=8192");
 });

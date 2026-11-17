@@ -3,10 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lease-test-isolation-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_DISABLE_CREDENTIAL_HEALTH_CHECK = "true";
 
 let externalCalls = 0;
@@ -25,27 +25,35 @@ const codexResetCredits = await import("../../src/lib/usage/codexResetCredits.ts
 
 const OWNER = "vlo_TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT";
 
-test.after(() => {
+async function insertConnection(input: {
+  id: string;
+  provider: string;
+  name: string;
+  apiKey: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections
+     (id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at)
+     VALUES ($1, $2, 'apikey', $3, $4, true, 'active', $5, $6)`,
+    [input.id, input.provider, input.name, input.apiKey, now, now]
+  );
+}
+
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("connection verification skips an ACTIVE exclusive lease before any probe or mutation", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO provider_connections
-     (id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at)
-     VALUES (?, ?, 'apikey', ?, ?, 1, 'active', ?, ?)`
-  ).run(
-    "leased-test-connection",
-    "openai",
-    "leased test connection",
-    "synthetic-key",
-    new Date().toISOString(),
-    new Date().toISOString()
-  );
-  const acquired = leases.acquireExclusiveConnectionLease({
+  await insertConnection({
+    id: "leased-test-connection",
+    provider: "openai",
+    name: "leased test connection",
+    apiKey: "synthetic-key",
+  });
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: OWNER,
     apiKeyId: "managed-key",
     provider: "openai",
@@ -59,13 +67,14 @@ test("connection verification skips an ACTIVE exclusive lease before any probe o
   assert.equal(result.skipped, true);
   assert.equal(result.diagnosis?.code, "exclusive_lease_active");
   assert.equal(externalCalls, 0);
-  const row = db
-    .prepare("SELECT test_status, last_tested, last_error FROM provider_connections WHERE id = ?")
-    .get("leased-test-connection") as {
+  const row = await getTestBackend().queryOne<{
     test_status: string;
     last_tested: string | null;
     last_error: string | null;
-  };
+  }>("SELECT test_status, last_tested, last_error FROM provider_connections WHERE id = $1", [
+    "leased-test-connection",
+  ]);
+  assert.ok(row, "connection row should exist");
   assert.equal(row.test_status, "active");
   assert.equal(row.last_tested, null);
   assert.equal(row.last_error, null);
@@ -89,20 +98,13 @@ test("model discovery and reset-credit paths reject ACTIVE leased connections", 
 });
 
 test("quota refresh proceeds on an ACTIVE leased usage-supported connection", async () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO provider_connections
-     (id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at)
-     VALUES (?, ?, 'apikey', ?, ?, 1, 'active', ?, ?)`
-  ).run(
-    "leased-quota-connection",
-    "deepseek",
-    "leased quota connection",
-    "synthetic-deepseek-key",
-    new Date().toISOString(),
-    new Date().toISOString()
-  );
-  const acquired = leases.acquireExclusiveConnectionLease({
+  await insertConnection({
+    id: "leased-quota-connection",
+    provider: "deepseek",
+    name: "leased quota connection",
+    apiKey: "synthetic-deepseek-key",
+  });
+  const acquired = await leases.acquireExclusiveConnectionLease({
     leaseOwnerId: "vlo_QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
     apiKeyId: "managed-quota-key",
     provider: "deepseek",

@@ -20,8 +20,8 @@ process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "omniroute-video-reasoning-"))
 process.env.API_KEY_SECRET ||= "reasoning-cache-video-test-secret";
 
 describe("Reasoning Replay Cache — video transcript retention", () => {
-  it("never caches reasoning echoed by a transcript-observed response", () => {
-    clearReasoningCacheAll();
+  it("never caches reasoning echoed by a transcript-observed response", async () => {
+    await clearReasoningCacheAll();
     const context = { videoTranscriptSensitive: true };
     const cached = cacheReasoningFromAssistantMessage(
       {
@@ -37,8 +37,8 @@ describe("Reasoning Replay Cache — video transcript retention", () => {
     assert.equal(lookupReasoning("call_private_video_reasoning"), null);
   });
 
-  it("does not replay a previously cached transcript into observed video requests", () => {
-    clearReasoningCacheAll();
+  it("does not replay a previously cached transcript into observed video requests", async () => {
+    await clearReasoningCacheAll();
     const callId = "call_private_video_replay";
     const cached = "PRIVATE_VIDEO_REPLAY_SENTINEL";
     cacheReasoning(callId, "deepseek", "deepseek-v4-flash", cached);
@@ -58,7 +58,7 @@ describe("Reasoning Replay Cache — video transcript retention", () => {
     };
 
     for (const target of [FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES]) {
-      const result = translateRequest(
+      const result = await translateRequest(
         FORMATS.OPENAI,
         target,
         "deepseek-v4-flash",
@@ -72,7 +72,7 @@ describe("Reasoning Replay Cache — video transcript retention", () => {
       assert.equal(JSON.stringify(result).includes(cached), false, `${target} should not replay`);
     }
 
-    const claude = translateRequest(
+    const claude = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.CLAUDE,
       "k3-256k",
@@ -107,7 +107,7 @@ describe("Reasoning Replay Cache — video transcript retention", () => {
       "deepseek-v4-flash",
       cached
     );
-    const plain = translateRequest(
+    const plain = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.OPENAI,
       "deepseek-v4-flash",
@@ -119,6 +119,6 @@ describe("Reasoning Replay Cache — video transcript retention", () => {
       { reasoningCacheScope: scope, videoTranscriptSensitive: true }
     );
     assert.equal(JSON.stringify(plain).includes(cached), false, "plain turn should not replay");
-    assert.equal(getReasoningCacheServiceStats().replays, 0);
+    assert.equal((await getReasoningCacheServiceStats()).replays, 0);
   });
 });

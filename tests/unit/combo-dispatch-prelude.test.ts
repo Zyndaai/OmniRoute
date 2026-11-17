@@ -87,8 +87,8 @@ function setup(combo: ComboInput) {
   };
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -158,6 +158,7 @@ test("tryFusionDispatch: falls through for non-fusion strategies but still emits
     config: ctx.config,
     strategy: "priority",
     allCombos: [],
+    hiddenModelsByProvider: new Map(),
     handleSingleModel: async () => okResponse("x"),
     handleSingleModelWithTimeout: async () => okResponse("x"),
     log: ctx.log,
@@ -167,6 +168,30 @@ test("tryFusionDispatch: falls through for non-fusion strategies but still emits
   const warns = ctx.records.filter((r) => r.level === "warn" && r.msg.includes("judgeModel"));
   assert.equal(warns.length, 1);
   assert.match(warns[0].msg, /#6455/);
+});
+
+test("tryFusionDispatch: a judgeModel without a caller hidden-models map does not throw", async () => {
+  // The judge visibility check keys a WeakMap on the map; `undefined` used to throw
+  // "Invalid value used as weak map key" before the strategy check ran.
+  const ctx = setup({
+    name: "judge-no-hidden-map",
+    strategy: "priority",
+    models: [{ model: "p/a" }],
+    config: { judgeModel: "p/judge" },
+  });
+  const res = await tryFusionDispatch({
+    body: ctx.body,
+    combo: ctx.combo,
+    cfg: ctx.config as unknown as Record<string, unknown>,
+    config: ctx.config,
+    strategy: "priority",
+    allCombos: [],
+    handleSingleModel: async () => okResponse("x"),
+    handleSingleModelWithTimeout: async () => okResponse("x"),
+    log: ctx.log,
+    runCombo: async () => okResponse("recursed"),
+  });
+  assert.equal(res, null);
 });
 
 test("tryFusionDispatch: silent fall-through when a non-fusion combo sets no fusion keys", async () => {
@@ -183,6 +208,7 @@ test("tryFusionDispatch: silent fall-through when a non-fusion combo sets no fus
     config: ctx.config,
     strategy: "priority",
     allCombos: [],
+    hiddenModelsByProvider: new Map(),
     handleSingleModel: async () => okResponse("x"),
     handleSingleModelWithTimeout: async () => okResponse("x"),
     log: ctx.log,
@@ -211,6 +237,7 @@ test("tryFusionDispatch: owns the request and synthesizes for the fusion strateg
     config: ctx.config,
     strategy: "fusion",
     allCombos: [],
+    hiddenModelsByProvider: new Map(),
     handleSingleModel: async () => okResponse("x"),
     handleSingleModelWithTimeout: async (_body, modelStr) => {
       dispatched.push(modelStr);
@@ -615,7 +642,7 @@ test("tryRuntimeUnitDispatch: sticky weighted keeps quota-only fallback dormant"
     ],
   };
   const ctx = setup(combo);
-  const units = resolveComboRuntimeUnits(ctx.combo, [ctx.combo, LEAF_A, LEAF_B], "execute", 3);
+  const units = await resolveComboRuntimeUnits(ctx.combo, [ctx.combo, LEAF_A, LEAF_B], "execute", 3);
   const protectedUnit = units.find(
     (unit) => unit.kind === "combo-ref" && unit.fallbackOnlyOnQuotaExhaustion === true
   );
@@ -685,7 +712,7 @@ test("tryRuntimeUnitDispatch: protected execute response validation returns loca
 test("tryRuntimeUnitDispatch: weighted honors a previously recorded sticky unit", async () => {
   const combo = twoRefCombo("weighted-sticky", "weighted", { stickyWeightedLimit: 5 });
   const ctx = setup(combo);
-  const units = resolveComboRuntimeUnits(ctx.combo, [ctx.combo, LEAF_A, LEAF_B], "execute", 3);
+  const units = await resolveComboRuntimeUnits(ctx.combo, [ctx.combo, LEAF_A, LEAF_B], "execute", 3);
   const second = units.find((u) => u.kind === "combo-ref" && u.comboName === "leafB");
   assert.ok(second, "fixture must resolve two combo-ref units");
 

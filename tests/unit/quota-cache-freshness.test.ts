@@ -5,9 +5,8 @@ import os from "node:os";
 import path from "node:path";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-quota-freshness-"));
 process.env.DATA_DIR = dir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 delete process.env.QUOTA_WINDOW_BOUNDED_PARK;
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const snapshots = await import("../../src/lib/db/quotaSnapshots.ts");
 const quota = await import("../../src/domain/quotaCache.ts");
 const state = await import("../../src/domain/quotaCacheState.ts");
@@ -41,9 +40,9 @@ function seedParkElapsed(id: string) {
 test.afterEach(() => {
   quota.__clearForTests();
 });
-test.after(() => {
+test.after(async () => {
   quota.stopBackgroundRefresh();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -93,18 +92,18 @@ test("flag on: the window policy honours a passed bounded park deadline", () => 
   });
 });
 
-test("flag on: a fresh persisted exhausted snapshot still blocks after cache hydration", () => {
+test("flag on: a fresh persisted exhausted snapshot still blocks after cache hydration", async () => {
+  await snapshots.saveQuotaSnapshot({
+    provider: "codex",
+    connection_id: "hydrated",
+    window_key: "session",
+    remaining_percentage: 0,
+    is_exhausted: 1,
+    next_reset_at: resetAt,
+    window_duration_ms: null,
+    raw_data: null,
+  });
   withFlag(true, () => {
-    snapshots.saveQuotaSnapshot({
-      provider: "codex",
-      connection_id: "hydrated",
-      window_key: "session",
-      remaining_percentage: 0,
-      is_exhausted: 1,
-      next_reset_at: resetAt,
-      window_duration_ms: null,
-      raw_data: null,
-    });
     assert.equal(quota.getQuotaWindowStatus("hydrated", "session")?.reachedThreshold, true);
   });
 });

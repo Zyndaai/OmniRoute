@@ -17,36 +17,30 @@ import http from "node:http";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-supervisor-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 // Adoption is intentionally opt-in after GHSA-wg9p-6m2g-4v27. These tests
 // exercise the explicit adoption path, so enable it for this isolated process.
 process.env.OMNIROUTE_ADOPT_EXISTING_SERVICE = "1";
 
 // Import DB core first to trigger migration (creates version_manager with new columns)
 const core = await import("../../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../../helpers/postgres.ts");
 
 // Seed the tool rows needed by tests
-const db = core.getDbInstance();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('test-svc', 'stopped', 29999, 0, 0, 0)`
-).run();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('test-crash', 'stopped', 29998, 0, 0, 0)`
-).run();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('test-lock', 'stopped', 29997, 0, 0, 0)`
-).run();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('test-adopt', 'stopped', 29996, 0, 0, 0)`
-).run();
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('test-adopt-deny', 'stopped', 29994, 0, 0, 0)`
-).run();
+const seededTools: Array<[string, number]> = [
+  ["test-svc", 29999],
+  ["test-crash", 29998],
+  ["test-lock", 29997],
+  ["test-adopt", 29996],
+  ["test-adopt-deny", 29994],
+];
+for (const [tool, port] of seededTools) {
+  await getTestBackend().execute(
+    `INSERT INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
+     VALUES ($1, 'stopped', $2, false, false, false)
+     ON CONFLICT (tool) DO NOTHING`,
+    [tool, port]
+  );
+}
 
 const { ServiceSupervisor } = await import("../../../src/lib/services/ServiceSupervisor.ts");
 
@@ -75,8 +69,8 @@ function tickConfig(tool: string, port: number) {
   };
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

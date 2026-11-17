@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,18 +8,21 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-compressi
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { getDbInstance, resetDbInstance } = await import("../../../src/lib/db/core.ts");
+const { ensureDbInitialized, resetDbInstance } = await import("../../../src/lib/db/core.ts");
 const { getCompressionSettings, updateCompressionSettings } =
   await import("../../../src/lib/db/compression.ts");
+const { getTestBackend, resetTestDb } = await import("../../helpers/postgres.ts");
 
-function freshDir() {
-  resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+before(async () => {
+  await ensureDbInitialized();
+});
 
-after(() => {
-  resetDbInstance();
+beforeEach(async () => {
+  await resetTestDb();
+});
+
+after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -28,19 +31,19 @@ after(() => {
   }
 });
 
+async function setRow(key: string, valueJson: string) {
+  await getTestBackend().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('compression', $1, $2::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, valueJson]
+  );
+}
+
 test("migration backfills engines map from prior defaultMode + default combo", async () => {
-  freshDir();
-  const db = getDbInstance(); // runs migrations incl. 102
   // simulate a pre-102 install: master on, defaultMode 'standard', caveman enabled
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value(namespace,key,value) VALUES('compression','enabled','true')"
-  ).run();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value(namespace,key,value) VALUES('compression','defaultMode','\"standard\"')"
-  ).run();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value(namespace,key,value) VALUES('compression','cavemanConfig','{\"enabled\":true}')"
-  ).run();
+  await setRow("enabled", "true");
+  await setRow("defaultMode", '"standard"');
+  await setRow("cavemanConfig", '{"enabled":true}');
   const cfg = await getCompressionSettings();
   assert.equal(cfg.engines.caveman.enabled, true);
   assert.equal(cfg.activeComboId, null);
@@ -49,8 +52,6 @@ test("migration backfills engines map from prior defaultMode + default combo", a
 });
 
 test("engines map persists round-trip + activeComboId", async () => {
-  freshDir();
-  getDbInstance();
   await updateCompressionSettings({
     enabled: true,
     engines: {

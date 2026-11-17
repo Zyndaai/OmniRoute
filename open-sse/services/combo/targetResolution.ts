@@ -355,7 +355,8 @@ async function resolveWeightedSelection(
         expandedAllCombos,
         stickyWeightedKey,
         weightedEligibleKeys,
-        stepGroups
+        // Always set when weightedSteps is true; `?? []` only satisfies the type.
+        stepGroups ?? []
       )
     : null;
   return { weightedResolution, stickyWeightedKey, exclusions };
@@ -580,16 +581,10 @@ async function applyContinuityFilters(
     (settings as { outputLimitAdvisory?: unknown } | null | undefined)?.outputLimitAdvisory ===
       true;
   const preCompatTargets = orderedTargets;
-  orderedTargets = await filterTargetsByRequestCompatibility(
-    orderedTargets,
-    body,
-    log,
-    undefined,
-    {
-      failOpen: compatFilterFailOpen,
-      outputLimitAdvisory,
-    }
-  );
+  orderedTargets = await filterTargetsByRequestCompatibility(orderedTargets, body, log, undefined, {
+    failOpen: compatFilterFailOpen,
+    outputLimitAdvisory,
+  });
   // #6238: keep the targets the compat pre-filter rejected so the dispatch loop
   // can probe them as a last-resort fallback tier when every compat-kept target
   // later turns out runtime-unavailable (mirrors the round-robin path).

@@ -38,13 +38,15 @@ const CTX = costRules.buildCostCtx(
   null
 );
 
-function giveDailyBudget(limitUsd: number) {
-  costRules.resetCostData();
-  costRules.setBudget(KEY, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
+async function giveDailyBudget(limitUsd: number) {
+  await costRules.resetCostData();
+  await costRules.setBudget(KEY, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
 }
 
-function chargeUnpriced() {
-  costRules.recordChatCallCost({ id: KEY }, 0, CTX, true, true);
+// Awaited directly: the chat path fires this write without waiting, so the
+// test calls the same function and waits for the write to land.
+async function chargeUnpriced() {
+  await costRules.recordUnpricedBudgetUsage(KEY, CTX);
 }
 
 async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
@@ -54,103 +56,105 @@ async function waitFor(pred: () => boolean, timeoutMs = 2000): Promise<void> {
   }
 }
 
-test.after(() => {
-  costRules.resetCostData();
-  core.resetDbInstance();
+test.after(async () => {
+  await costRules.resetCostData();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("an unpriced metered charge closes the budget for the rest of its period", () => {
-  giveDailyBudget(1);
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
+test("an unpriced metered charge closes the budget for the rest of its period", async () => {
+  await giveDailyBudget(1);
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
 
-  chargeUnpriced();
+  await chargeUnpriced();
 
-  const check = costRules.checkBudget(KEY);
+  const check = await costRules.checkBudget(KEY);
   assert.equal(check.allowed, false);
   assert.match(String(check.reason), /without a price/i);
   assert.equal(check.periodUsed, 0, "no fabricated spend is recorded");
-  assert.equal(policy.checkMeteredBudgetForProvider(KEY, METERED).allowed, false);
+  assert.equal((await policy.checkMeteredBudgetForProvider(KEY, METERED)).allowed, false);
   // The budget does not pay for flat-rate plans, so they stay eligible.
-  assert.equal(policy.checkMeteredBudgetForProvider(KEY, FLAT_RATE).allowed, true);
+  assert.equal((await policy.checkMeteredBudgetForProvider(KEY, FLAT_RATE)).allowed, true);
 });
 
-test("a priced charge of $0 (a genuinely free model) leaves the budget open", () => {
-  giveDailyBudget(1);
+test("a priced charge of $0 (a genuinely free model) leaves the budget open", async () => {
+  await giveDailyBudget(1);
   costRules.recordChatCallCost({ id: KEY }, 0, CTX, true, false);
   costRules.recordChatCallCost({ id: KEY }, 0, CTX, true);
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
 });
 
-test("priced spend over the limit still reports the spend, not the unpriced reason", () => {
-  giveDailyBudget(1);
-  chargeUnpriced();
+test("priced spend over the limit still reports the spend, not the unpriced reason", async () => {
+  await giveDailyBudget(1);
+  await chargeUnpriced();
   costRules.recordChatCallCost({ id: KEY }, 5, CTX, true);
-  const check = costRules.checkBudget(KEY);
+  await waitFor(() => false, 50);
+  const check = await costRules.checkBudget(KEY);
   assert.equal(check.allowed, false);
   assert.match(String(check.reason), /budget exceeded/i);
 });
 
-test("USAGE_LIMIT_IGNORE_UNPRICED=true counts unpriced usage as $0, as it does for the usage limit", () => {
+test("USAGE_LIMIT_IGNORE_UNPRICED=true counts unpriced usage as $0, as it does for the usage limit", async () => {
   const previous = process.env.USAGE_LIMIT_IGNORE_UNPRICED;
   process.env.USAGE_LIMIT_IGNORE_UNPRICED = "true";
   try {
-    giveDailyBudget(1);
-    chargeUnpriced();
-    assert.equal(costRules.checkBudget(KEY).allowed, true);
+    await giveDailyBudget(1);
+    await chargeUnpriced();
+    assert.equal((await costRules.checkBudget(KEY)).allowed, true);
     // Priced spend is still enforced under the opt-out.
     costRules.recordChatCallCost({ id: KEY }, 5, CTX, true);
-    assert.equal(costRules.checkBudget(KEY).allowed, false);
+    await waitFor(() => false, 50);
+    assert.equal((await costRules.checkBudget(KEY)).allowed, false);
   } finally {
     if (previous === undefined) delete process.env.USAGE_LIMIT_IGNORE_UNPRICED;
     else process.env.USAGE_LIMIT_IGNORE_UNPRICED = previous;
   }
 });
 
-test("a key without a budget, or with a zero (no-limit) budget, is not affected", () => {
-  costRules.resetCostData();
-  chargeUnpriced();
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
-  assert.equal(costRules.getBudget(KEY), null, "no budget is created as a side effect");
-  assert.equal(domainState.loadBudgetUnpricedPeriodStart(KEY), null);
+test("a key without a budget, or with a zero (no-limit) budget, is not affected", async () => {
+  await costRules.resetCostData();
+  await chargeUnpriced();
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
+  assert.equal(await costRules.getBudget(KEY), null, "no budget is created as a side effect");
+  assert.equal(await domainState.loadBudgetUnpricedPeriodStart(KEY), null);
 
-  costRules.setBudget(KEY, { dailyLimitUsd: 0, resetInterval: "daily" });
-  chargeUnpriced();
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
+  await costRules.setBudget(KEY, { dailyLimitUsd: 0, resetInterval: "daily" });
+  await chargeUnpriced();
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
 });
 
-test("the closure lives in storage with its budget period, so a restart keeps it", () => {
-  giveDailyBudget(1);
-  chargeUnpriced();
+test("the closure lives in storage with its budget period, so a restart keeps it", async () => {
+  await giveDailyBudget(1);
+  await chargeUnpriced();
   const { periodStartAt } = costRules.getBudgetWindow("daily", "00:00");
-  assert.equal(domainState.loadBudgetUnpricedPeriodStart(KEY), periodStartAt);
+  assert.equal(await domainState.loadBudgetUnpricedPeriodStart(KEY), periodStartAt);
 
   // A closure written by an earlier process is enforced as well.
-  giveDailyBudget(1);
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
-  domainState.saveBudgetUnpricedPeriodStart(KEY, periodStartAt);
-  assert.equal(costRules.checkBudget(KEY).allowed, false);
+  await giveDailyBudget(1);
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
+  await domainState.saveBudgetUnpricedPeriodStart(KEY, periodStartAt);
+  assert.equal((await costRules.checkBudget(KEY)).allowed, false);
 });
 
-test("a closure left by an earlier period does not block the current one", () => {
-  giveDailyBudget(1);
+test("a closure left by an earlier period does not block the current one", async () => {
+  await giveDailyBudget(1);
   const { periodStartAt } = costRules.getBudgetWindow("daily", "00:00");
-  domainState.saveBudgetUnpricedPeriodStart(KEY, periodStartAt - 24 * 60 * 60 * 1000);
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
+  await domainState.saveBudgetUnpricedPeriodStart(KEY, periodStartAt - 24 * 60 * 60 * 1000);
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
 });
 
-test("saving the budget again (an operator action) reopens it, and deleting it clears the closure", () => {
-  giveDailyBudget(1);
-  chargeUnpriced();
-  assert.equal(costRules.checkBudget(KEY).allowed, false);
+test("saving the budget again (an operator action) reopens it, and deleting it clears the closure", async () => {
+  await giveDailyBudget(1);
+  await chargeUnpriced();
+  assert.equal((await costRules.checkBudget(KEY)).allowed, false);
 
-  costRules.setBudget(KEY, { dailyLimitUsd: 1, resetInterval: "daily" });
-  assert.equal(costRules.checkBudget(KEY).allowed, true);
-  assert.equal(domainState.loadBudgetUnpricedPeriodStart(KEY), null);
+  await costRules.setBudget(KEY, { dailyLimitUsd: 1, resetInterval: "daily" });
+  assert.equal((await costRules.checkBudget(KEY)).allowed, true);
+  assert.equal(await domainState.loadBudgetUnpricedPeriodStart(KEY), null);
 
-  chargeUnpriced();
-  costRules.deleteBudget(KEY);
-  assert.equal(domainState.loadBudgetUnpricedPeriodStart(KEY), null);
+  await chargeUnpriced();
+  await costRules.deleteBudget(KEY);
+  assert.equal(await domainState.loadBudgetUnpricedPeriodStart(KEY), null);
 });
 
 test("isUnpricedMeteredCost: only a metered provider with no price behind the estimate", () => {

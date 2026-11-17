@@ -30,8 +30,8 @@ const TARGETS: Array<[string, string]> = [
 ];
 
 for (const [provider, model] of TARGETS) {
-  test(`${provider}/${model}: assistant turn with both reasoning and reasoning_content forwards only reasoning_content (9router#4841)`, () => {
-    const result = translateRequest(
+  test(`${provider}/${model}: assistant turn with both reasoning and reasoning_content forwards only reasoning_content (9router#4841)`, async () => {
+    const result = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.OPENAI,
       model,
@@ -46,8 +46,8 @@ for (const [provider, model] of TARGETS) {
     assert.equal("reasoning" in assistant, false, "alias `reasoning` must not be forwarded");
   });
 
-  test(`${provider}/${model}: reasoning-only assistant turn is still promoted to reasoning_content (9router#4841)`, () => {
-    const result = translateRequest(
+  test(`${provider}/${model}: reasoning-only assistant turn is still promoted to reasoning_content (9router#4841)`, async () => {
+    const result = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.OPENAI,
       model,

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Switch outcome persistence: a refused switch writes a standing
 // SELECTOR_SWITCH_FAILED warning on the subscription row that survives the
@@ -20,8 +21,8 @@ proxyHealth.__setProxyHealthTcpCheckForTesting(async () => true);
 const trigger = await import("../../src/lib/proxySubscription/selectorTrigger.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   trigger.__resetSelectorTriggerForTesting();
@@ -128,23 +129,23 @@ async function seedWarnSubscription(
 // resolves to "ok" and the standing switch warning rides on `error` while
 // the status stays green.
 
-function readWarning(id: string): { status: string; error: string | null } {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT status, error FROM proxy_subscriptions WHERE id = ?")
-    .get(id) as { status: string; error: string | null };
-  return row;
+async function readWarning(id: string): Promise<{ status: string; error: string | null }> {
+  const rows = await getTestBackend().query<{ status: string; error: string | null }>(
+    "SELECT status, error FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  );
+  return rows[0];
 }
 
 test("refused switch writes a standing warning that survives the next sync", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore({ failPut: true });
   const { id, feedClose } = await seedWarnSubscription(fake.base);
   try {
     trigger.__resetSelectorTriggerForTesting();
     const res = await trigger.maybeSwitchOnSetAside(KEY_NODE1);
     assert.equal(res.switched, false);
-    let row = readWarning(id);
+    let row = await readWarning(id);
     assert.equal(row.status, "ok");
     assert.ok(row.error, "error must carry the warning right after the failed switch");
     assert.ok(
@@ -152,7 +153,7 @@ test("refused switch writes a standing warning that survives the next sync", asy
       `warning code, got ${row.error}`
     );
     await sub.syncSubscription(id);
-    row = readWarning(id);
+    row = await readWarning(id);
     assert.equal(row.status, "ok");
     assert.ok(
       row.error && JSON.parse(row.error).code === "SELECTOR_SWITCH_FAILED",
@@ -166,7 +167,7 @@ test("refused switch writes a standing warning that survives the next sync", asy
 });
 
 test("successful switch clears the standing warning", async () => {
-  reset();
+  await reset();
   const failing = await startFakeCore({ failPut: true });
   const passing = await startFakeCore({ failPut: false });
   const { id, feedClose } = await seedWarnSubscription(failing.base);
@@ -174,13 +175,13 @@ test("successful switch clears the standing warning", async () => {
     trigger.__resetSelectorTriggerForTesting();
     const bad = await trigger.maybeSwitchOnSetAside(KEY_NODE1);
     assert.equal(bad.switched, false);
-    assert.ok(readWarning(id).error, "warning present after failure");
+    assert.ok((await readWarning(id)).error, "warning present after failure");
     await sub.updateSubscription(id, { controlUrl: passing.base });
     trigger.__resetSelectorTriggerForTesting();
     const good = await trigger.maybeSwitchOnSetAside(KEY_NODE1);
     assert.equal(good.switched, true, JSON.stringify(good));
     await sub.syncSubscription(id);
-    const row = readWarning(id);
+    const row = await readWarning(id);
     assert.equal(row.error, null, `warning cleared after success, got ${row.error}`);
     await sub.deleteSubscription(id);
   } finally {
@@ -191,7 +192,7 @@ test("successful switch clears the standing warning", async () => {
 });
 
 test("concurrent triggers on one selector collapse to a single control call", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore({ failPut: false });
   const { id, feedClose } = await seedWarnSubscription(fake.base);
   try {
@@ -210,14 +211,14 @@ test("concurrent triggers on one selector collapse to a single control call", as
   }
 });
 
-test.after(() => {
+test.after(async () => {
   proxyHealth.__setProxyHealthTcpCheckForTesting(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("successful switch persists the refusal kind that fired it", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore({ failPut: false });
   const { id, feedClose } = await seedWarnSubscription(fake.base);
   try {
@@ -226,15 +227,14 @@ test("successful switch persists the refusal kind that fired it", async () => {
     // with the set-aside record); the trigger never re-reads it here.
     const good = await trigger.maybeSwitchOnSetAside(KEY_NODE1, { kind: "transport" });
     assert.equal(good.switched, true, JSON.stringify(good));
-    const row = core
-      .getDbInstance()
-      .prepare(
-        "SELECT selector_last_switch_kind, selector_last_switch_member FROM proxy_subscriptions WHERE id = ?"
-      )
-      .get(id) as {
+    const rows = await getTestBackend().query<{
       selector_last_switch_kind: string | null;
       selector_last_switch_member: string | null;
-    };
+    }>(
+      "SELECT selector_last_switch_kind, selector_last_switch_member FROM proxy_subscriptions WHERE id = $1",
+      [id]
+    );
+    const row = rows[0];
     assert.equal(row.selector_last_switch_kind, "transport");
     assert.ok(row.selector_last_switch_member, "member recorded alongside the kind");
     const listed = await sub.getSubscriptionById(id);

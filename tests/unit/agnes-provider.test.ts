@@ -28,8 +28,8 @@ const { resolveChatCoreTargetFormat } =
 const { resolveModelAlias } = await import("../../open-sse/services/modelDeprecation.ts");
 const dbCore = await import("../../src/lib/db/core.ts");
 
-test.after(() => {
-  dbCore.closeDbInstance();
+test.after(async () => {
+  await dbCore.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

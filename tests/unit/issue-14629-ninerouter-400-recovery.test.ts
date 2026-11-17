@@ -11,17 +11,14 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ninerouter-14629-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
-core
-  .getDbInstance()
-  .prepare(
-    `INSERT OR IGNORE INTO version_manager
+const { getTestBackend } = await import("../helpers/postgres.ts");
+await getTestBackend().execute(
+  `INSERT INTO version_manager
        (tool, status, port, auto_start, auto_update, provider_expose)
-     VALUES ('9router', 'stopped', 20130, 0, 1, 0)`
-  )
-  .run();
+     VALUES ('9router', 'stopped', 20130, false, true, false)
+     ON CONFLICT (tool) DO NOTHING`
+);
 
 const { registerSupervisor, unregisterSupervisor } =
   await import("../../src/lib/services/registry.ts");

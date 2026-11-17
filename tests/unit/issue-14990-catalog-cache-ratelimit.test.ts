@@ -38,9 +38,10 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const rateLimitDb = await import("../../src/lib/db/providers/rateLimit.ts");
 const codexStateDb = await import("../../src/lib/db/providers/codexAccountState.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -62,7 +63,7 @@ test("#14990 setConnectionRateLimitUntil does NOT bust the model catalog cache",
 
   const versionBefore = readCache.getModelCatalogCacheVersion();
 
-  rateLimitDb.setConnectionRateLimitUntil(connectionId, Date.now() + 60_000);
+  await rateLimitDb.setConnectionRateLimitUntil(connectionId, Date.now() + 60_000);
 
   assert.equal(
     readCache.getModelCatalogCacheVersion(),
@@ -84,13 +85,13 @@ test("#14990 clearing a rate limit (codex child-cooldown strip) does NOT bust th
   const connectionId = await createConnection("codex", {
     codexScopeRateLimitedUntil: { codex: new Date(Date.now() + 60_000).toISOString() },
   });
-  rateLimitDb.setConnectionRateLimitUntil(connectionId, Date.now() + 60_000);
+  await rateLimitDb.setConnectionRateLimitUntil(connectionId, Date.now() + 60_000);
 
   const versionBefore = readCache.getModelCatalogCacheVersion();
 
   // null → stripCodexChildCooldownsFromConnection(alsoClearTopLevel) writes
   // provider_specific_data + rate_limited_until — still routing-only fields.
-  rateLimitDb.setConnectionRateLimitUntil(connectionId, null);
+  await rateLimitDb.setConnectionRateLimitUntil(connectionId, null);
 
   assert.equal(readCache.getModelCatalogCacheVersion(), versionBefore);
 });
@@ -99,16 +100,14 @@ test("#14990 clearStaleCrashCooldowns does NOT bust the model catalog cache", as
   const connectionId = await createConnection();
   // Plant a stale (already-past) cooldown directly — the public writer guards
   // against past timestamps, which is what this startup sweeper cleans up.
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { run: (...p: unknown[]) => unknown };
-  };
-  db.prepare(
-    "UPDATE provider_connections SET rate_limited_until = ?, test_status = ?, updated_at = ? WHERE id = ?"
-  ).run(Date.now() - 60_000, "unavailable", new Date().toISOString(), connectionId);
+  await getTestBackend().execute(
+    "UPDATE provider_connections SET rate_limited_until = $1, test_status = $2, updated_at = $3 WHERE id = $4",
+    [new Date(Date.now() - 60_000).toISOString(), "unavailable", new Date().toISOString(), connectionId]
+  );
 
   const versionBefore = readCache.getModelCatalogCacheVersion();
 
-  const result = rateLimitDb.clearStaleCrashCooldowns();
+  const result = await rateLimitDb.clearStaleCrashCooldowns();
 
   assert.equal(result.cleared, 1, "the stale cooldown must be swept");
   assert.equal(
@@ -165,7 +164,7 @@ test("#14990 codex scoped quota/cooldown writes do NOT bust the model catalog ca
     "codex-scope cooldown keys are routing metadata — the catalog never reads them"
   );
 
-  const lifted = codexStateDb.liftCodexScopeCooldownOnHeadroom(connectionId, "codex");
+  const lifted = await codexStateDb.liftCodexScopeCooldownOnHeadroom(connectionId, "codex");
   assert.equal(lifted, true, "the fallback-sourced cooldown must lift");
 
   assert.equal(

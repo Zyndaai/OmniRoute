@@ -35,7 +35,7 @@ function seed(
     nextResetAt: at(1800000),
   });
 }
-test("AGY mixed independent pools retain a usable account and partial warning", () => {
+test("AGY mixed independent pools retain a usable account and partial warning", async () => {
   const c = { id: "probe-mixed", provider: "antigravity", isActive: true, testStatus: "active" };
   const q = (remainingPercentage: number) => ({ remainingPercentage, resetAt: at(3600000) });
   const usage = {
@@ -59,7 +59,7 @@ test("AGY mixed independent pools retain a usable account and partial warning", 
       { provider: c.provider, requestedModel: "claude-sonnet-4-5" }
     );
     assert.equal(route.proceed, true);
-    const verdict = buildConnectionQuotaAvailability(c, usage, policy);
+    const verdict = await buildConnectionQuotaAvailability(c, usage, policy);
     const a = buildHealthAccount(c, { raw: usage }, {}, now, {
       availability: verdict,
       availabilityObservedAt: now,
@@ -80,7 +80,7 @@ test("AGY mixed independent pools retain a usable account and partial warning", 
     getQuotaCacheState().cache.delete(c.id);
   }
 });
-test("AGY scoped exhaustion explains only windows applicable to that pool", () => {
+test("AGY scoped exhaustion explains only windows applicable to that pool", async () => {
   const c = { id: "probe-reset", provider: "antigravity", isActive: true };
   const quotas = {
     gemini_session: { remainingPercentage: 0, resetAt: at(3600000), windowSeconds: 18000 },
@@ -97,7 +97,7 @@ test("AGY scoped exhaustion explains only windows applicable to that pool", () =
   seed(c.id, quotas);
   try {
     assert.equal(isQuotaExhaustedForRequest(c.id, c.provider, "gemini-3-flash"), true);
-    const verdict = buildConnectionQuotaAvailability(c, usage, {
+    const verdict = await buildConnectionQuotaAvailability(c, usage, {
       ...policy,
       enabled: false,
     });
@@ -158,7 +158,7 @@ test("unchanged runtime deadline remains monotonic when lastErrorAt is updated",
   assert.equal(after.kind, before.kind);
   assert.ok(after.fill! >= before.fill!);
 });
-test("Kimi simultaneous 5h and weekly exhaustion waits for the weekly reset", () => {
+test("Kimi simultaneous 5h and weekly exhaustion waits for the weekly reset", async () => {
   const c = { id: "probe-kimi", provider: "kimi-coding", isActive: true, testStatus: "active" };
   const usage = {
     fetchedAt: at(0),
@@ -177,7 +177,7 @@ test("Kimi simultaneous 5h and weekly exhaustion waits for the weekly reset", ()
     nextResetAt: at(1800000),
   });
   try {
-    const verdict = buildConnectionQuotaAvailability(c, usage, policy);
+    const verdict = await buildConnectionQuotaAvailability(c, usage, policy);
     const a = buildHealthAccount(c, { raw: usage }, {}, now, {
       availability: verdict,
       availabilityObservedAt: now,
@@ -193,7 +193,7 @@ test("Kimi simultaneous 5h and weekly exhaustion waits for the weekly reset", ()
     getQuotaCacheState().cache.delete(c.id);
   }
 });
-test("control: healthy generic cached windows produce a usable account", () => {
+test("control: healthy generic cached windows produce a usable account", async () => {
   const c = { id: "control-healthy", provider: "kimi-coding", isActive: true };
   const usage = {
     fetchedAt: at(0),
@@ -202,7 +202,7 @@ test("control: healthy generic cached windows produce a usable account", () => {
       code_7d: { remainingPercentage: 80, resetAt: at(6 * 86400000) },
     },
   };
-  const verdict = buildConnectionQuotaAvailability(c, usage, policy);
+  const verdict = await buildConnectionQuotaAvailability(c, usage, policy);
   assert.equal(verdict.account.usable, true);
   assert.equal(
     displayAccount(
@@ -215,7 +215,7 @@ test("control: healthy generic cached windows produce a usable account", () => {
     "ok"
   );
 });
-test("control: isolated weekly exhaustion identifies the weekly deadline", () => {
+test("control: isolated weekly exhaustion identifies the weekly deadline", async () => {
   const c = { id: "control-weekly", provider: "kimi-coding", isActive: true };
   const usage = {
     fetchedAt: at(0),
@@ -224,7 +224,7 @@ test("control: isolated weekly exhaustion identifies the weekly deadline", () =>
       code_7d: { remainingPercentage: 0, resetAt: at(6 * 86400000) },
     },
   };
-  const verdict = buildConnectionQuotaAvailability(c, usage, policy);
+  const verdict = await buildConnectionQuotaAvailability(c, usage, policy);
   const view = displayAccount(
     buildHealthAccount(c, { raw: usage }, {}, now, {
       availability: verdict,

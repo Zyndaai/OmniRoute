@@ -20,7 +20,8 @@ const usage = {
   fetchedAt: iso(0),
   quotas: { session: { remainingPercentage: 80, resetAt: iso(3600000) } },
 };
-const availability = buildConnectionQuotaAvailability(connection, usage, {
+// buildConnectionQuotaAvailability is async (it reads quota state from the database).
+const availability = await buildConnectionQuotaAvailability(connection, usage, {
   enabled: false,
   defaultThresholdPercent: 2,
   providerWindowDefaults: {},

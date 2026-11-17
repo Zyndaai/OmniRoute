@@ -4,12 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-models-dev-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 
 const modulePath = path.join(process.cwd(), "src/lib/modelsDevSync.ts");
 const originalFetch = globalThis.fetch;
@@ -99,8 +101,8 @@ function restoreEnv() {
   process.env.DATA_DIR = TEST_DATA_DIR;
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -125,7 +127,7 @@ function mockFetchWith(body, status = 200, statusText = "OK") {
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
 });
 
 test.afterEach(async () => {
@@ -137,11 +139,11 @@ test.afterEach(async () => {
   loadedModules.clear();
   globalThis.fetch = originalFetch;
   restoreEnv();
-  core.resetDbInstance();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -242,61 +244,60 @@ test.describe("modelsDevSync-extended", { concurrency: 1 }, async () => {
     const modelsDev = await importFresh("pricing-storage");
     const pricing = modelsDev.transformModelsDevToPricing(MOCK_MODELS_DEV_DATA);
 
-    modelsDev.saveModelsDevPricing(pricing);
-    const saved = modelsDev.getModelsDevPricing();
+    await modelsDev.saveModelsDevPricing(pricing);
+    const saved = await modelsDev.getModelsDevPricing();
     assert.equal(saved.openai["gpt-4o"].input, 2.5);
     assert.equal(saved.cx["gpt-4o"].cache_creation, 2.5);
 
-    const db = core.getDbInstance();
-    db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-      "models_dev_pricing",
-      "corrupted",
-      "{oops"
+    // A stored row whose models payload is not an object (jsonb keeps the shape, so a
+    // corrupt row is one with a scalar payload) must be skipped on read.
+    await getTestBackend().execute(
+      "INSERT INTO model_pricing (source, provider, models) VALUES ('models_dev', 'corrupted', '\"oops\"'::jsonb)"
     );
+    invalidateDbCache("pricing");
 
-    const withCorruption = modelsDev.getModelsDevPricing();
+    const withCorruption = await modelsDev.getModelsDevPricing();
     assert.equal(withCorruption.corrupted, undefined);
 
-    modelsDev.clearModelsDevPricing();
-    assert.deepEqual(modelsDev.getModelsDevPricing(), {});
+    await modelsDev.clearModelsDevPricing();
+    assert.deepEqual(await modelsDev.getModelsDevPricing(), {});
   });
 
   test("getModelsDevPricing memoizes until save/clear (#9685)", async () => {
     const modelsDev = await importFresh("pricing-memo");
     const pricing = modelsDev.transformModelsDevToPricing(MOCK_MODELS_DEV_DATA);
-    modelsDev.saveModelsDevPricing(pricing);
+    await modelsDev.saveModelsDevPricing(pricing);
 
-    const first = modelsDev.getModelsDevPricing();
-    const second = modelsDev.getModelsDevPricing();
+    const first = await modelsDev.getModelsDevPricing();
+    const second = await modelsDev.getModelsDevPricing();
     assert.equal(first, second, "repeated reads must return the same memoized object");
 
     // Mutating DB under the cache must not be visible until invalidation.
-    const db = core.getDbInstance();
-    db.prepare("DELETE FROM key_value WHERE namespace = 'models_dev_pricing'").run();
+    await getTestBackend().execute("DELETE FROM model_pricing WHERE source = 'models_dev'");
     assert.equal(
-      modelsDev.getModelsDevPricing(),
+      await modelsDev.getModelsDevPricing(),
       first,
       "raw SQL without save/clear must not bypass the memo"
     );
 
-    modelsDev.clearModelsDevPricing();
-    assert.deepEqual(modelsDev.getModelsDevPricing(), {});
+    await modelsDev.clearModelsDevPricing();
+    assert.deepEqual(await modelsDev.getModelsDevPricing(), {});
 
-    modelsDev.saveModelsDevPricing(pricing);
-    const afterSave = modelsDev.getModelsDevPricing();
+    await modelsDev.saveModelsDevPricing(pricing);
+    const afterSave = await modelsDev.getModelsDevPricing();
     assert.notEqual(afterSave, first, "save must invalidate the memo");
     assert.equal(afterSave.openai["gpt-4o"].input, 2.5);
 
-    // Copilot review: DB reset must invalidate the memo so import/restore doesn't serve stale pricing.
-    const beforeReset = modelsDev.getModelsDevPricing();
-    core.resetDbInstance();
-    const afterReset = modelsDev.getModelsDevPricing();
+    // Copilot review: a DB pool reset must invalidate the memo so import/restore doesn't serve stale pricing.
+    const beforeReset = await modelsDev.getModelsDevPricing();
+    await core.resetDbInstance();
+    const afterReset = await modelsDev.getModelsDevPricing();
     assert.notEqual(
       afterReset,
       beforeReset,
       "resetDbInstance must invalidate the memo (Copilot #10055)"
     );
-    // Data is still on disk after resetDbInstance(), but the cache was cleared and re-read from fresh DB.
+    // Data is still in the database after resetDbInstance(), but the cache was cleared and re-read.
     assert.equal(afterReset.openai["gpt-4o"].input, 2.5, "DB reset re-reads from fresh connection");
   });
 
@@ -304,11 +305,11 @@ test.describe("modelsDevSync-extended", { concurrency: 1 }, async () => {
     const modelsDev = await importFresh("capabilities-storage");
     const capabilities = modelsDev.transformModelsDevToCapabilities(MOCK_MODELS_DEV_DATA);
 
-    modelsDev.ensureCapabilitiesTable();
-    modelsDev.saveModelsDevCapabilities(capabilities);
+    await modelsDev.ensureCapabilitiesTable();
+    await modelsDev.saveModelsDevCapabilities(capabilities);
 
-    const allCaps = modelsDev.getSyncedCapabilities();
-    const openaiOnly = modelsDev.getSyncedCapabilities("openai", "gpt-4o");
+    const allCaps = await modelsDev.getSyncedCapabilities();
+    const openaiOnly = await modelsDev.getSyncedCapabilities("openai", "gpt-4o");
 
     assert.equal(allCaps.openai["gpt-4o"].tool_call, true);
     assert.equal(allCaps.anthropic["claude-sonnet-4-20250514"].attachment, true);
@@ -316,114 +317,88 @@ test.describe("modelsDevSync-extended", { concurrency: 1 }, async () => {
     assert.equal(openaiOnly.openai["gpt-4o"].limit_context, 128000);
     assert.equal("getModelContextLimit" in modelsDev, false);
 
-    modelsDev.clearModelsDevCapabilities();
-    assert.deepEqual(modelsDev.getSyncedCapabilities(), {});
+    await modelsDev.clearModelsDevCapabilities();
+    assert.deepEqual(await modelsDev.getSyncedCapabilities(), {});
   });
 
-  test("modelsDev capability helpers coerce false/null values and ignore malformed rows", async () => {
+  test("modelsDev capability rows with NULL values round-trip as null and empty modality lists", async () => {
+    // Replaces the SQLite-era "coerce false/null values and ignore malformed rows" case: the
+    // PostgreSQL columns are typed (boolean, integer, jsonb), so values such as 0 in a boolean
+    // column or a null provider cannot be stored. What remains to check is that the nullable
+    // columns and the NOT NULL modality columns read back as the in-memory shape.
     const modelsDev = await importFresh("capabilities-malformed");
-    const db = core.getDbInstance();
-    const originalPrepare = db.prepare.bind(db);
-    db.prepare = (sql) => {
-      if (String(sql).includes("SELECT * FROM model_capabilities")) {
-        return {
-          all: () => [
-            123,
-            { provider: null, model_id: "missing-provider" },
-            {
-              provider: "openai",
-              model_id: "coerced-model",
-              tool_call: 0,
-              reasoning: null,
-              attachment: 0,
-              structured_output: 0,
-              temperature: 0,
-              modalities_input: null,
-              modalities_output: 42,
-              knowledge_cutoff: 77,
-              release_date: 88,
-              last_updated: 99,
-              status: 123,
-              family: 456,
-              open_weights: null,
-              limit_context: "bad",
-              limit_input: 4096,
-              limit_output: "nope",
-              interleaved_field: 321,
-            },
-          ],
-        };
-      }
-      return originalPrepare(sql);
-    };
+    await modelsDev.saveModelsDevCapabilities({
+      openai: {
+        "coerced-model": {
+          tool_call: false,
+          reasoning: null,
+          attachment: false,
+          structured_output: false,
+          temperature: false,
+          modalities_input: "[]",
+          modalities_output: "[]",
+          knowledge_cutoff: null,
+          release_date: null,
+          last_updated: null,
+          status: null,
+          family: null,
+          open_weights: null,
+          limit_context: null,
+          limit_input: 4096,
+          limit_output: null,
+          interleaved_field: null,
+        },
+      },
+    });
 
-    try {
-      const openai = modelsDev.getSyncedCapabilities("openai");
-      assert.deepEqual(openai.openai["coerced-model"], {
-        tool_call: false,
-        reasoning: null,
-        attachment: false,
-        structured_output: false,
-        temperature: false,
-        modalities_input: "[]",
-        modalities_output: "[]",
-        knowledge_cutoff: null,
-        release_date: null,
-        last_updated: null,
-        status: null,
-        family: null,
-        open_weights: null,
-        limit_context: null,
-        limit_input: 4096,
-        limit_output: null,
-        interleaved_field: null,
-        reasoning_efforts: null,
-      });
-
-      const all = modelsDev.getSyncedCapabilities();
-      assert.equal(all["7"], undefined);
-      assert.equal(all.openai["missing-provider"], undefined);
-    } finally {
-      db.prepare = originalPrepare;
-    }
+    const openai = await modelsDev.getSyncedCapabilities("openai");
+    assert.deepEqual(openai.openai["coerced-model"], {
+      tool_call: false,
+      reasoning: null,
+      attachment: false,
+      structured_output: false,
+      temperature: false,
+      modalities_input: "[]",
+      modalities_output: "[]",
+      knowledge_cutoff: null,
+      release_date: null,
+      last_updated: null,
+      status: null,
+      family: null,
+      open_weights: null,
+      limit_context: null,
+      limit_input: 4096,
+      limit_output: null,
+      interleaved_field: null,
+    });
   });
 
-  test("modelsDev pricing helpers ignore malformed sqlite rows without crashing", async () => {
+  test("modelsDev pricing helpers ignore malformed stored rows without crashing", async () => {
     const modelsDev = await importFresh("pricing-malformed");
-    const db = core.getDbInstance();
-    const originalPrepare = db.prepare.bind(db);
-    db.prepare = (sql) => {
-      if (String(sql).includes("SELECT key, value FROM key_value")) {
-        return {
-          all: () => [
-            123,
-            { key: 123, value: JSON.stringify({ ignored: true }) },
-            { key: "missing-value", value: 456 },
-            { key: "broken", value: "{oops" },
-            { key: "openai", value: JSON.stringify({ "gpt-4o": { input: 2.5, output: 10 } }) },
-          ],
-        };
-      }
-      return originalPrepare(sql);
-    };
+    await modelsDev.saveModelsDevPricing({
+      openai: { "gpt-4o": { input: 2.5, output: 10 } },
+    });
+    // A non-object payload and an array payload both fail the record check and are skipped.
+    await getTestBackend().execute(
+      `INSERT INTO model_pricing (source, provider, models) VALUES
+         ('models_dev', 'broken', '"{oops"'::jsonb),
+         ('models_dev', 'list-shaped', '[1, 2]'::jsonb)`
+    );
+    invalidateDbCache("pricing");
 
-    try {
-      assert.deepEqual(modelsDev.getModelsDevPricing(), {
-        openai: {
-          "gpt-4o": {
-            input: 2.5,
-            output: 10,
-          },
+    assert.deepEqual(await modelsDev.getModelsDevPricing(), {
+      openai: {
+        "gpt-4o": {
+          input: 2.5,
+          output: 10,
         },
-      });
-    } finally {
-      db.prepare = originalPrepare;
-    }
+      },
+    });
   });
 
   test("saveModelsDevCapabilities round-trips false and null booleans", async () => {
     const modelsDev = await importFresh("capabilities-roundtrip-falsey");
-    modelsDev.saveModelsDevCapabilities({
+    await modelsDev.saveModelsDevCapabilities({
       openai: {
         "gpt-falsey": {
           tool_call: false,
@@ -447,7 +422,7 @@ test.describe("modelsDevSync-extended", { concurrency: 1 }, async () => {
       },
     });
 
-    assert.deepEqual(modelsDev.getSyncedCapabilities("openai", "gpt-falsey"), {
+    assert.deepEqual(await modelsDev.getSyncedCapabilities("openai", "gpt-falsey"), {
       openai: {
         "gpt-falsey": {
           tool_call: false,
@@ -481,14 +456,16 @@ test.describe("modelsDevSync-extended", { concurrency: 1 }, async () => {
     assert.equal(dryRun.dryRun, true);
     assert.equal(dryRun.capabilityCount, 0);
     assert.ok(dryRun.data.pricing.openai["gpt-4o"]);
-    assert.deepEqual(modelsDev.getModelsDevPricing(), {});
+    assert.deepEqual(await modelsDev.getModelsDevPricing(), {});
 
     const persisted = await modelsDev.syncModelsDev();
     assert.equal(persisted.success, true);
     assert.equal(persisted.dryRun, false);
     assert.ok(persisted.modelCount > 0);
-    assert.ok(modelsDev.getModelsDevPricing().anthropic["claude-sonnet-4-20250514"]);
-    assert.ok(modelsDev.getSyncedCapabilities().openai["gpt-4o"]);
+    const pricingAfterSync = await modelsDev.getModelsDevPricing();
+    assert.ok(pricingAfterSync.anthropic["claude-sonnet-4-20250514"]);
+    const capsAfterSync = await modelsDev.getSyncedCapabilities();
+    assert.ok(capsAfterSync.openai["gpt-4o"]);
     assert.ok(modelsDev.getSyncStatus().lastSync);
     assert.ok(modelsDev.getSyncStatus().lastSyncModelCount > 0);
 
@@ -795,9 +772,9 @@ test("MODELS_DEV_SYNC_ENABLED=0 is a hard kill switch that wins over the setting
     mockFetchWith(MOCK_MODELS_DEV_DATA);
 
     const pricing = modelsDev.transformModelsDevToPricing(MOCK_MODELS_DEV_DATA);
-    modelsDev.saveModelsDevPricing(pricing);
+    await modelsDev.saveModelsDevPricing(pricing);
     assert.deepEqual(
-      modelsDev.getModelsDevPricing(),
+      await modelsDev.getModelsDevPricing(),
       {},
       "kill switch skips the SQL/JSON pricing scan entirely"
     );

@@ -26,7 +26,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-zai-parti
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "zai-partial-discovery-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { replaceSyncedAvailableModelsForConnection } = await import("../../src/lib/db/models.ts");
 const { getModelInfo } = await import("../../src/sse/services/model.ts");
 const { zaiProvider } = await import("../../open-sse/config/providers/registry/zai/index.ts");
@@ -56,12 +56,11 @@ function registryModel(id: string) {
 }
 
 async function seedPartialDiscovery(): Promise<void> {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run(CONNECTION_ID, PROVIDER, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, true, now(), now())`,
+    [CONNECTION_ID, PROVIDER]
+  );
 
   await replaceSyncedAvailableModelsForConnection(
     PROVIDER,
@@ -71,15 +70,15 @@ async function seedPartialDiscovery(): Promise<void> {
 }
 
 test.beforeEach(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
   await seedPartialDiscovery();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -145,12 +144,11 @@ test("a tagged provider without the opt-in flag keeps discovery gating", async (
   assert.ok(taggedModel, "precondition: openai registry has a targetFormat-tagged model");
   assert.notEqual(openaiProvider.registryDispatchUnion, true);
 
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_connections (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, 1, ?, ?)`
-  ).run("openai-no-union-flag", "openai", now, now);
+  await getTestBackend().execute(
+    `INSERT INTO provider_connections (id, provider, is_active, created_at, updated_at)
+     VALUES ($1, $2, true, now(), now())`,
+    ["openai-no-union-flag", "openai"]
+  );
   const discoveredIds = openaiProvider.models
     .filter((model) => model.id !== taggedModel.id)
     .map((model) => ({ id: model.id, name: model.name, source: "imported" }));

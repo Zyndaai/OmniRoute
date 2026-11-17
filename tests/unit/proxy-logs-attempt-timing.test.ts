@@ -14,38 +14,39 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 // the flag-off tests flip it off locally and restore it.
 process.env.PROXY_LOG_FIRST_CHUNK_TIMING = "true";
 
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogsDb = await import("../../src/lib/db/proxyLogs.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
-test.after(() => {
-  core.closeDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("new timing columns default to null and accept a deferred update", () => {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms)
+test("new timing columns default to null and accept a deferred update", async () => {
+  const b = getTestBackend();
+  await b.execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, level, latency_ms)
      VALUES ('timing-legacy', '2026-09-26T00:00:00.000Z', 'success', 'direct', 5)`
-  ).run();
-  const legacy = db
-    .prepare("SELECT headers_ms, first_chunk_ms FROM proxy_logs WHERE id = 'timing-legacy'")
-    .get() as { headers_ms: number | null; first_chunk_ms: number | null };
-  assert.equal(legacy.headers_ms, null);
-  assert.equal(legacy.first_chunk_ms, null);
+  );
+  const legacy = await b.queryOne<{ headers_ms: number | null; first_chunk_ms: number | null }>(
+    "SELECT headers_ms, first_chunk_ms FROM proxy_logs WHERE id = 'timing-legacy'"
+  );
+  assert.equal(legacy?.headers_ms, null);
+  assert.equal(legacy?.first_chunk_ms, null);
 
-  db.prepare(
-    `INSERT INTO proxy_logs (id, timestamp, status, level, latency_ms, headers_ms, first_chunk_ms)
+  await b.execute(
+    `INSERT INTO proxy_logs (id, "timestamp", status, level, latency_ms, headers_ms, first_chunk_ms)
      VALUES ('timing-new', '2026-09-26T00:00:01.000Z', 'success', 'direct', 5, 120, NULL)`
-  ).run();
-  const updated = proxyLogsDb.updateAttemptTiming("timing-new", { firstChunkMs: 4800 });
+  );
+  const updated = await proxyLogsDb.updateAttemptTiming("timing-new", { firstChunkMs: 4800 });
   assert.equal(updated, true);
-  const row = db
-    .prepare("SELECT headers_ms, first_chunk_ms FROM proxy_logs WHERE id = 'timing-new'")
-    .get() as { headers_ms: number | null; first_chunk_ms: number | null };
-  assert.equal(row.headers_ms, 120);
-  assert.equal(row.first_chunk_ms, 4800);
+  const row = await b.queryOne<{ headers_ms: number | null; first_chunk_ms: number | null }>(
+    "SELECT headers_ms, first_chunk_ms FROM proxy_logs WHERE id = 'timing-new'"
+  );
+  assert.equal(row?.headers_ms, 120);
+  assert.equal(row?.first_chunk_ms, 4800);
 });
 
 test("the journal timing pair sanitizes each send record", async () => {
@@ -75,12 +76,15 @@ test("the journal timing pair sanitizes each send record", async () => {
   });
 });
 
-test("deferred update rejects unknown ids and non-integer values", () => {
-  assert.equal(proxyLogsDb.updateAttemptTiming("timing-missing", { firstChunkMs: 10 }), false);
-  assert.equal(proxyLogsDb.updateAttemptTiming("timing-missing", { headersMs: -3 }), false);
+test("deferred update rejects unknown ids and non-integer values", async () => {
+  assert.equal(
+    await proxyLogsDb.updateAttemptTiming("timing-missing", { firstChunkMs: 10 }),
+    false
+  );
+  assert.equal(await proxyLogsDb.updateAttemptTiming("timing-missing", { headersMs: -3 }), false);
 });
 
-test("the pending registry settles through its caller and returns to its size", () => {
+test("the pending registry settles through its caller and returns to its size", async () => {
   const startSize = proxyLogger.pendingFirstChunkSizeForTests();
   const entry = proxyLogger.logProxyEvent({
     status: "success",
@@ -105,12 +109,12 @@ test("the pending registry settles through its caller and returns to its size", 
     assert.equal(proxyLogger.pendingFirstChunkSizeForTests(), startSize);
     assert.equal(entry.firstChunkMs, 4800);
   } finally {
-    proxyLogger.clearProxyLogs();
+    await proxyLogger.clearProxyLogs();
   }
   assert.equal(proxyLogger.pendingFirstChunkSizeForTests(), startSize);
 });
 
-test("the pending registry holds its cap under flood", () => {
+test("the pending registry holds its cap under flood", async () => {
   const startSize = proxyLogger.pendingFirstChunkSizeForTests();
   const probe = (n: number) =>
     proxyLogger.logProxyEvent({
@@ -130,7 +134,7 @@ test("the pending registry holds its cap under flood", () => {
     );
     assert.equal(entries[0].firstChunkMs, null);
   } finally {
-    proxyLogger.clearProxyLogs();
+    await proxyLogger.clearProxyLogs();
   }
   assert.equal(proxyLogger.pendingFirstChunkSizeForTests(), startSize);
 });
@@ -361,6 +365,6 @@ test("with first-chunk timing off the journal registers no deferred patch", asyn
     await withFirstChunkTiming("true", () => logProxyJournal(journal("timing-on")));
     assert.equal(proxyLogger.pendingFirstChunkSizeForTests(), startSize + 1);
   } finally {
-    proxyLogger.clearProxyLogs();
+    await proxyLogger.clearProxyLogs();
   }
 });

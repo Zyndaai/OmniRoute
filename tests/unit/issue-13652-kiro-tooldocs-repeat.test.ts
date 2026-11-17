@@ -26,12 +26,12 @@ function bigTool(length: number) {
   ];
 }
 
-test("issue #13652: relocated tool doc is not re-prepended to a later turn once already delivered", () => {
+test("issue #13652: relocated tool doc is not re-prepended to a later turn once already delivered", async () => {
   const tools = bigTool(12000);
 
   // Turn 1: client sends only the first user message.
   const turn1Messages = [{ role: "user", content: "hello, please help" }];
-  const payload1 = buildKiroPayload(
+  const payload1 = await buildKiroPayload(
     "claude-sonnet-4.5",
     { messages: turn1Messages, tools },
     true,
@@ -53,7 +53,7 @@ test("issue #13652: relocated tool doc is not re-prepended to a later turn once 
     { role: "assistant", content: "Sure, how can I help?" },
     { role: "user", content: "what is 2+2?" },
   ];
-  const payload2 = buildKiroPayload(
+  const payload2 = await buildKiroPayload(
     "claude-sonnet-4.5",
     { messages: turn2Messages, tools },
     true,

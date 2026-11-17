@@ -58,20 +58,20 @@ const CLAUDE_VARIANTS: Array<[string, Record<string, unknown>]> = [
   ['output_config effort "high"', { output_config: { effort: "high" } }],
 ];
 
-function openai(model: string, extra: Record<string, unknown>): GeminiResult {
-  return openaiToGeminiRequest(
+async function openai(model: string, extra: Record<string, unknown>): Promise<GeminiResult> {
+  return (await openaiToGeminiRequest(
     model,
     { messages: [{ role: "user", content: "hi" }], ...extra },
     false
-  ) as GeminiResult;
+  )) as GeminiResult;
 }
 
-function claude(model: string, extra: Record<string, unknown>): GeminiResult {
-  return claudeToGeminiRequest(
+async function claude(model: string, extra: Record<string, unknown>): Promise<GeminiResult> {
+  return (await claudeToGeminiRequest(
     model,
     { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }], ...extra },
     false
-  ) as GeminiResult;
+  )) as GeminiResult;
 }
 
 test("geminiModelRejectsThinkingConfig matches the verified no-thinking families", () => {
@@ -94,26 +94,26 @@ test("geminiModelRejectsThinkingConfig leaves thinking-capable models alone", ()
 
 for (const model of REJECTING_MODELS) {
   for (const [label, extra] of OPENAI_VARIANTS) {
-    test(`openai→gemini: ${model} gets no thinkingConfig (${label})`, () => {
-      assert.equal(openai(model, extra).generationConfig.thinkingConfig, undefined);
+    test(`openai→gemini: ${model} gets no thinkingConfig (${label})`, async () => {
+      assert.equal((await openai(model, extra)).generationConfig.thinkingConfig, undefined);
     });
   }
   for (const [label, extra] of CLAUDE_VARIANTS) {
-    test(`claude→gemini: ${model} gets no thinkingConfig (${label})`, () => {
-      assert.equal(claude(model, extra).generationConfig.thinkingConfig, undefined);
+    test(`claude→gemini: ${model} gets no thinkingConfig (${label})`, async () => {
+      assert.equal((await claude(model, extra)).generationConfig.thinkingConfig, undefined);
     });
   }
 }
 
-test("controls: thinking-capable models still get a thinkingConfig by default", () => {
+test("controls: thinking-capable models still get a thinkingConfig by default", async () => {
   for (const model of THINKING_MODELS) {
-    assert.ok(openai(model, {}).generationConfig.thinkingConfig, model);
+    assert.ok((await openai(model, {})).generationConfig.thinkingConfig, model);
   }
 });
 
-test('controls: reasoning_effort "none" keeps the explicit zero-budget contract (#6813)', () => {
+test('controls: reasoning_effort "none" keeps the explicit zero-budget contract (#6813)', async () => {
   assert.deepEqual(
-    openai("gemini-2.5-flash", { reasoning_effort: "none" }).generationConfig.thinkingConfig,
+    (await openai("gemini-2.5-flash", { reasoning_effort: "none" })).generationConfig.thinkingConfig,
     {
       thinkingBudget: 0,
       includeThoughts: false,
@@ -121,15 +121,15 @@ test('controls: reasoning_effort "none" keeps the explicit zero-budget contract 
   );
   // Flash-Lite keeps its own exception: the zero budget is dropped, not the config.
   assert.deepEqual(
-    openai("gemini-flash-lite-latest", { reasoning_effort: "none" }).generationConfig
+    (await openai("gemini-flash-lite-latest", { reasoning_effort: "none" })).generationConfig
       .thinkingConfig,
     { includeThoughts: false }
   );
 });
 
-test("controls: Claude-style thinking still reaches thinking-capable models", () => {
+test("controls: Claude-style thinking still reaches thinking-capable models", async () => {
   assert.ok(
-    claude("gemini-2.5-flash", { thinking: { type: "enabled", budget_tokens: 4096 } })
+    (await claude("gemini-2.5-flash", { thinking: { type: "enabled", budget_tokens: 4096 } }))
       .generationConfig.thinkingConfig
   );
 });

@@ -37,7 +37,6 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const managementPassword = await import("../../src/lib/auth/managementPassword.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const settingsRoute = await import("../../src/app/api/settings/route.ts");
-const importJsonRoute = await import("../../src/app/api/settings/import-json/route.ts");
 const { inferRequiredScope } = await import("../../src/server/authz/accessScopes.ts");
 const { requireManagementAuth } = await import("../../src/lib/api/requireManagementAuth.ts");
 const securitySettings = await import("../../src/shared/constants/securityImpactingSettings.ts");
@@ -72,12 +71,12 @@ const SEEDED_POLICY: Record<string, unknown> = {
 await settingsDb.updateSettings(SEEDED_POLICY);
 const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-settings", ["manage"]);
 const adminKey = await apiKeysDb.createApiKey("admin-automation", "machine-settings", ["admin"]);
-const adminToken = accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
-const writeToken = accessTokensDb.createAccessToken({ name: "remote-write", scope: "write" });
+const adminToken = await accessTokensDb.createAccessToken({ name: "remote-admin", scope: "admin" });
+const writeToken = await accessTokensDb.createAccessToken({ name: "remote-write", scope: "write" });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -114,10 +113,10 @@ async function keepingSeededPolicy(run: () => Promise<void>) {
   }
 }
 
-function failureReasons(): string[] {
-  return compliance
-    .getAuditLog({ action: "settings.update_failed", limit: 100 })
-    .map((row) => (row.details as { reason?: string } | null)?.reason ?? "");
+async function failureReasons(): Promise<string[]> {
+  return (await compliance.getAuditLog({ action: "settings.update_failed", limit: 100 })).map(
+    (row) => (row.details as { reason?: string } | null)?.reason ?? ""
+  );
 }
 
 // ─── B1: access-token scope — settings mutations are admin, reads stay read ────────────
@@ -182,28 +181,6 @@ test("corsOrigins and bruteForceProtection are security-impacting and stripped b
   }
 });
 
-test("import-json does not write corsOrigins or bruteForceProtection", () =>
-  keepingSeededPolicy(async () => {
-    // The import is management-authenticated but has no password re-auth of its own, which is
-    // exactly why it must drop these keys even for the operator's own session.
-    const response = await importJsonRoute.POST(
-      await makeManagementSessionRequest("http://localhost:20128/api/settings/import-json", {
-        method: "POST",
-        body: {
-          settings: {
-            corsOrigins: SECURITY_POLICY_CHANGES.corsOrigins,
-            bruteForceProtection: SECURITY_POLICY_CHANGES.bruteForceProtection,
-            settingsOperatorBenignKey: "kept",
-          },
-        },
-      })
-    );
-    assert.equal(response.status, 200, await response.clone().text());
-    assert.equal(await stored("settingsOperatorBenignKey"), "kept");
-    assert.equal(await stored("corsOrigins"), SEEDED_POLICY.corsOrigins);
-    assert.equal(await stored("bruteForceProtection"), SEEDED_POLICY.bruteForceProtection);
-  }));
-
 // ─── B2: machine credentials cannot touch security policy, even with the password ─────
 
 const MACHINE_CREDENTIALS: Array<{ label: string; token: string }> = [
@@ -247,13 +224,13 @@ test("a write oma_ access token is refused on PATCH /api/settings (scope), secur
 
 test("a refused machine credential is audited as settings.update_failed / OPERATOR_REQUIRED", () =>
   keepingSeededPolicy(async () => {
-    const before = failureReasons().filter((r) => r === "OPERATOR_REQUIRED").length;
+    const before = (await failureReasons()).filter((r) => r === "OPERATOR_REQUIRED").length;
     const response = await patch(
       { bruteForceProtection: false, currentPassword: PASSWORD },
       { authorization: `Bearer ${manageKey.key}` }
     );
     assert.equal(response.status, 403);
-    const after = failureReasons().filter((r) => r === "OPERATOR_REQUIRED").length;
+    const after = (await failureReasons()).filter((r) => r === "OPERATOR_REQUIRED").length;
     assert.equal(after, before + 1);
   }));
 

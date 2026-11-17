@@ -51,8 +51,8 @@ const modelsPath = () => path.join(ompDir(), "models.yml");
 const configPath = () => path.join(ompDir(), "config.yml");
 const backupDir = () => path.join(TEST_DATA_DIR, "backups", "omp");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   os.homedir = originalHomedir;
   for (const [key, value] of Object.entries(savedEnv)) {
     if (value === undefined) delete process.env[key];

@@ -3,7 +3,7 @@
  * build with no caching, causing ~3 GB native memory growth per build.
  *
  * Verifies that the in-memory cache returns the same object reference on
- * subsequent calls (proving SQLite is not hit again), and that the cache
+ * subsequent calls (proving the database is not hit again), and that the cache
  * is invalidated on save/clear.
  */
 
@@ -47,7 +47,7 @@ describe("getModelsDevPricing caching (#9300)", () => {
     modelsDev = await importFresh("9300-cache");
 
     // Seed pricing data into DB
-    modelsDev.saveModelsDevPricing(
+    await modelsDev.saveModelsDevPricing(
       PRICING_DATA as Record<string, Record<string, Record<string, number>>>
     );
 
@@ -55,9 +55,9 @@ describe("getModelsDevPricing caching (#9300)", () => {
     // (saveModelsDevPricing clears the cache, so next get will load from DB)
   });
 
-  after(() => {
+  after(async () => {
     // Clean up DB handles
-    dbCore.resetDbInstance();
+    await dbCore.resetDbInstance();
     try {
       fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {
@@ -65,8 +65,8 @@ describe("getModelsDevPricing caching (#9300)", () => {
     }
   });
 
-  it("returns correct pricing data from DB on first call", () => {
-    const result = modelsDev.getModelsDevPricing();
+  it("returns correct pricing data from DB on first call", async () => {
+    const result = await modelsDev.getModelsDevPricing();
     assert.ok(result.openai, "openai provider should be present");
     assert.equal(result.openai["gpt-4o"].input, 2.5);
     assert.equal(result.openai["gpt-4o"].output, 10);
@@ -74,29 +74,29 @@ describe("getModelsDevPricing caching (#9300)", () => {
     assert.equal(result.google["gemini-2.5-pro"].input, 1.25);
   });
 
-  it("returns the same object reference on second call (cache hit, no SQLite re-query)", () => {
-    const first = modelsDev.getModelsDevPricing();
-    const second = modelsDev.getModelsDevPricing();
+  it("returns the same object reference on second call (cache hit, no database re-query)", async () => {
+    const first = await modelsDev.getModelsDevPricing();
+    const second = await modelsDev.getModelsDevPricing();
     // Same object reference proves the cache returned the stored object
     // instead of re-loading from SQLite and building a new object.
     assert.strictEqual(first, second, "should return cached object reference");
   });
 
-  it("returns the same object reference on third call (cache still valid)", () => {
-    const first = modelsDev.getModelsDevPricing();
-    const third = modelsDev.getModelsDevPricing();
+  it("returns the same object reference on third call (cache still valid)", async () => {
+    const first = await modelsDev.getModelsDevPricing();
+    const third = await modelsDev.getModelsDevPricing();
     assert.strictEqual(first, third, "should return cached object reference on third call");
   });
 
-  it("invalidates cache after saveModelsDevPricing", () => {
-    const beforeSave = modelsDev.getModelsDevPricing();
+  it("invalidates cache after saveModelsDevPricing", async () => {
+    const beforeSave = await modelsDev.getModelsDevPricing();
 
     // Save updated pricing
-    modelsDev.saveModelsDevPricing({
+    await modelsDev.saveModelsDevPricing({
       openai: { "gpt-4o": { input: 5, output: 20 } },
     } as Record<string, Record<string, Record<string, number>>>);
 
-    const afterSave = modelsDev.getModelsDevPricing();
+    const afterSave = await modelsDev.getModelsDevPricing();
     // Must be a different object (cache was invalidated, re-loaded from DB)
     assert.notStrictEqual(beforeSave, afterSave, "cache should be invalidated after save");
     // And the new data must be correct
@@ -104,11 +104,11 @@ describe("getModelsDevPricing caching (#9300)", () => {
     assert.equal(afterSave.openai["gpt-4o"].output, 20);
   });
 
-  it("invalidates cache after clearModelsDevPricing", () => {
-    modelsDev.getModelsDevPricing(); // warm cache
-    modelsDev.clearModelsDevPricing();
+  it("invalidates cache after clearModelsDevPricing", async () => {
+    await modelsDev.getModelsDevPricing(); // warm cache
+    await modelsDev.clearModelsDevPricing();
 
-    const afterClear = modelsDev.getModelsDevPricing();
+    const afterClear = await modelsDev.getModelsDevPricing();
     // After clear, pricing should be empty
     assert.deepEqual(afterClear, {}, "pricing should be empty after clear");
   });

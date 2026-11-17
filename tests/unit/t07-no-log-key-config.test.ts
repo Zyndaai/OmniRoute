@@ -19,9 +19,10 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const schemas = await import("../../src/shared/validation/schemas.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -32,7 +33,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
@@ -78,7 +79,7 @@ test("API key no_log persists and updates compliance state", async () => {
 
   const initial = await apiKeysDb.getApiKeyById(created.id);
   assert.equal(initial?.noLog, false);
-  assert.equal(compliance.isNoLog(created.id), false);
+  assert.equal(await compliance.isNoLog(created.id), false);
 
   const updated = await apiKeysDb.updateApiKeyPermissions(created.id, { noLog: true });
   assert.equal(updated, true);
@@ -88,11 +89,11 @@ test("API key no_log persists and updates compliance state", async () => {
 
   const metadata = await apiKeysDb.getApiKeyMetadata(created.key);
   assert.equal(metadata?.noLog, true);
-  assert.equal(compliance.isNoLog(created.id), true);
+  assert.equal(await compliance.isNoLog(created.id), true);
 
   const reverted = await apiKeysDb.updateApiKeyPermissions(created.id, { noLog: false });
   assert.equal(reverted, true);
-  assert.equal(compliance.isNoLog(created.id), false);
+  assert.equal(await compliance.isNoLog(created.id), false);
 });
 
 test("call logs omit payloads when key no_log is enabled and redact PII otherwise", async () => {

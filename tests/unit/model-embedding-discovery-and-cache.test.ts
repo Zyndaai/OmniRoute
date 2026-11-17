@@ -174,28 +174,19 @@ test("test-embedding route automatically resolves connection details from DB whe
     t.skip(`Lemonade server not reachable at ${LEMONADE_TEST_BASE_URL}`);
     return;
   }
-  const { getDbInstance } = await import("@/lib/db/core");
+  const { createProviderConnection } = await import("@/lib/db/providers");
   const testEmbeddingRoute =
     await import("../../src/app/api/settings/cache-config/test-embedding/route.ts");
 
-  const db = getDbInstance();
-  db.prepare(
-    `
-    INSERT OR REPLACE INTO provider_connections (
-      id, provider, name, auth_type, api_key, provider_specific_data, is_active, created_at, updated_at
-    ) VALUES (
-      'test-conn-lemonade-1',
-      'lemonade',
-      'Lemonade Local Server',
-      'apikey',
-      'lemonade',
-      '{"baseUrl":"http://192.168.31.147:13305/"}',
-      1,
-      CURRENT_TIMESTAMP,
-      CURRENT_TIMESTAMP
-    )
-  `
-  ).run();
+  await createProviderConnection({
+    id: "test-conn-lemonade-1",
+    provider: "lemonade",
+    name: "Lemonade Local Server",
+    authType: "apikey",
+    apiKey: "lemonade",
+    providerSpecificData: { baseUrl: "http://192.168.31.147:13305/" },
+    isActive: true,
+  });
 
   // Omit baseUrl and apiKey from payload
   const req = new Request("http://localhost/api/settings/cache-config/test-embedding", {

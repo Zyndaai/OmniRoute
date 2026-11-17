@@ -6,7 +6,9 @@ import { normalizeResponsesReasoningEffort } from "@omniroute/open-sse/translato
 import { FORMATS } from "@omniroute/open-sse/translator/formats.ts";
 import { translateRequest } from "@omniroute/open-sse/translator/index.ts";
 
-test.after(() => resetDbInstance());
+test.after(async () => {
+  await resetDbInstance();
+});
 
 const responsesBody = (effort: string) => ({
   input: "Reply OK",
@@ -108,8 +110,8 @@ test("Responses -> Chat keeps max on the pivot when the target is Claude", () =>
   assert.equal(toOpenAI.reasoning_effort, "xhigh");
 });
 
-test("Responses -> Claude sends output_config.effort max upstream for Opus 5.5", () => {
-  const translated = translateRequest(
+test("Responses -> Claude sends output_config.effort max upstream for Opus 5.5", async () => {
+  const translated = (await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "claude-opus-5-5",
@@ -117,12 +119,12 @@ test("Responses -> Claude sends output_config.effort max upstream for Opus 5.5",
     true,
     null,
     "claude"
-  ) as { output_config?: { effort?: string } };
+  )) as { output_config?: { effort?: string } };
   assert.equal(translated.output_config?.effort, "max");
 });
 
-test("Responses -> Claude still sends xhigh for Sonnet 5.5", () => {
-  const translated = translateRequest(
+test("Responses -> Claude still sends xhigh for Sonnet 5.5", async () => {
+  const translated = (await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "claude-sonnet-5-5",
@@ -130,12 +132,12 @@ test("Responses -> Claude still sends xhigh for Sonnet 5.5", () => {
     true,
     null,
     "claude"
-  ) as { output_config?: { effort?: string } };
+  )) as { output_config?: { effort?: string } };
   assert.equal(translated.output_config?.effort, "xhigh");
 });
 
-test("Responses -> Claude does not send max upstream for Opus 4.5", () => {
-  const translated = translateRequest(
+test("Responses -> Claude does not send max upstream for Opus 4.5", async () => {
+  const translated = (await translateRequest(
     FORMATS.OPENAI_RESPONSES,
     FORMATS.CLAUDE,
     "claude-opus-4-5-20251101",
@@ -143,7 +145,7 @@ test("Responses -> Claude does not send max upstream for Opus 4.5", () => {
     true,
     null,
     "claude"
-  ) as { output_config?: unknown; thinking?: { type?: string } };
+  )) as { output_config?: unknown; thinking?: { type?: string } };
   // max -> xhigh here, then openai-to-claude lowers xhigh to the high thinking budget.
   assert.equal(translated.output_config, undefined);
   assert.equal(translated.thinking?.type, "enabled");

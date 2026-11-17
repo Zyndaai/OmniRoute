@@ -15,16 +15,16 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-9router-reveal-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.NODE_ENV = "test";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 // Bootstrap DB and seed service row
 const core = await import("../../../../src/lib/db/core.ts");
-const db = core.getDbInstance();
+const { getTestBackend } = await import("../../../helpers/postgres.ts");
 
-db.prepare(
-  `INSERT OR IGNORE INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
-   VALUES ('9router', 'stopped', 20130, 0, 1, 1)`
-).run();
+await getTestBackend().execute(
+  `INSERT INTO version_manager (tool, status, port, auto_start, auto_update, provider_expose)
+   VALUES ('9router', 'stopped', 20130, false, true, true)
+   ON CONFLICT (tool) DO NOTHING`
+);
 
 const { updateVersionManagerTool } = await import("../../../../src/lib/db/versionManager.ts");
 await updateVersionManagerTool("9router", {
@@ -44,8 +44,8 @@ function makeRequest(url: string, headers?: Record<string, string>): Request {
   return new Request(url, { headers });
 }
 
-after(() => {
-  core.resetDbInstance();
+after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -95,7 +95,7 @@ describe("GET /api/services/9router/status", () => {
   });
 
   it("reveal logs an audit entry with action=service.reveal_api_key", async () => {
-    const countBefore = countAuditLog({ action: "service.reveal_api_key" });
+    const countBefore = await countAuditLog({ action: "service.reveal_api_key" });
 
     const req = makeRequest("http://localhost/api/services/9router/status?reveal=key", {
       "X-Reveal-Confirm": "yes",
@@ -103,7 +103,7 @@ describe("GET /api/services/9router/status", () => {
     const res = await GET(req);
     assert.equal(res.status, 200);
 
-    const countAfter = countAuditLog({ action: "service.reveal_api_key" });
+    const countAfter = await countAuditLog({ action: "service.reveal_api_key" });
     assert.equal(
       countAfter,
       countBefore + 1,

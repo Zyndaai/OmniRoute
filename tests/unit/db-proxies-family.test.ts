@@ -1,13 +1,12 @@
-import { describe, it, after } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { resetDbInstance, getDbInstance } from "../../src/lib/db/core";
+import { resetTestDb } from "../helpers/postgres.ts";
 import { createProxy, getProxyById } from "../../src/lib/db/proxies";
 
 describe("proxies CRUD carries family", () => {
-  after(() => resetDbInstance());
+  before(() => resetTestDb());
 
   it("persists and returns family=ipv6", async () => {
-    getDbInstance();
     const created = await createProxy({
       name: "ipv6-proxy",
       type: "http",
@@ -23,7 +22,6 @@ describe("proxies CRUD carries family", () => {
   });
 
   it("defaults family to auto when omitted", async () => {
-    getDbInstance();
     const created = await createProxy({
       name: "default-proxy",
       type: "http",

@@ -24,13 +24,26 @@ const core = await import("../../src/lib/db/core.ts");
 const models = await import("../../src/lib/db/models.ts");
 const resolver = await import("../../src/lib/contextWindowResolver.ts");
 const persistence = await import("../../src/lib/db/models/syncedAvailableModelPersistence.ts");
+const providers = await import("../../src/lib/db/providers.ts");
+
+// connection_model_sync rows reference provider_connections, so every synced list needs a real
+// connection row (the persistence layer drops writes for unknown connection ids).
+async function createConnection(name: string): Promise<string> {
+  const connection = await providers.createProviderConnection({
+    provider: "openai",
+    authType: "api_key",
+    name,
+    apiKey: "sk-test",
+  });
+  return connection.id as string;
+}
 
 const CONNECTIONS = 10;
 const MODELS_PER_CONNECTION = 200;
 const BLOCK_BUDGET_MS = 1500;
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -42,7 +55,8 @@ test("reconcile after a 10-connection sync does not block the event loop (#18048
       name: `model-${i}`,
       contextWindow: 8192 + (i % 7) * 1024,
     }));
-    await models.replaceSyncedAvailableModelsForConnection(provider, `conn-${c}`, list);
+    const connectionId = await createConnection(`perf-conn-${c}`);
+    await models.replaceSyncedAvailableModelsForConnection(provider, connectionId, list);
   }
   // let the opportunistic reconciles scheduled by the writes drain before measuring
   await new Promise((r) => setTimeout(r, 50));
@@ -84,15 +98,19 @@ test("post-sync scheduling collapses a burst into one debounced, provider-scoped
   assert.deepEqual(persistence.getPendingPostSyncReconcileProviders(), []);
 });
 
-test("a changed write schedules only its provider; a window-neutral write schedules nothing (#18048)", () => {
+test("a changed write schedules only its provider; a window-neutral write schedules nothing (#18048)", async () => {
   persistence.cancelPendingPostSyncReconcile();
   const norm = (m: unknown) => (Array.isArray(m) ? (m as { id: string }[]) : []);
-  const key = "solo-provider:conn-1";
-  persistence.persistCanonicalSyncedAvailableModels(key, [{ id: "m1", contextWindow: 4096 }], norm);
+  const key = `solo-provider:${await createConnection("solo-conn")}`;
+  await persistence.persistCanonicalSyncedAvailableModels(
+    key,
+    [{ id: "m1", contextWindow: 4096 }],
+    norm
+  );
   assert.deepEqual(persistence.getPendingPostSyncReconcileProviders(), ["solo-provider"]);
   persistence.cancelPendingPostSyncReconcile();
   // same windows, extra model without a window: catalog changes but no window did
-  persistence.persistCanonicalSyncedAvailableModels(
+  await persistence.persistCanonicalSyncedAvailableModels(
     key,
     [{ id: "m1", contextWindow: 4096 }, { id: "m2" }],
     norm

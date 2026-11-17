@@ -1,18 +1,48 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { claudeToGeminiRequest } =
+const { claudeToGeminiRequest: translateClaudeToGemini } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
+const { prefetchThoughtSignatures } = await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { DEFAULT_SAFETY_SETTINGS } =
   await import("../../open-sse/translator/helpers/geminiHelper.ts");
 const {
   buildGeminiThoughtSignatureKey,
+  scopeGeminiThoughtSignatureNamespace,
   storeGeminiThoughtSignature,
   clearGeminiThoughtSignatures,
 } = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 
-test.beforeEach(() => {
-  clearGeminiThoughtSignatures();
+// The Claude->Gemini translator reads thought signatures from the prefetched map the
+// production caller passes as `_thoughtSignatures`; prefetch them here the same way.
+// The namespace is family-scoped (`<conn>:gemini`) before it reaches the translator, as
+// translateRequest does (translator/index.ts), so store and lookup keys agree (#4136).
+async function claudeToGeminiRequest(
+  model: string,
+  body: any,
+  stream: boolean,
+  credentials: Record<string, unknown> | null = null
+) {
+  const rawNamespace =
+    typeof credentials?._signatureNamespace === "string" ? credentials._signatureNamespace : null;
+  const _thoughtSignatures = await prefetchThoughtSignatures(
+    FORMATS.GEMINI,
+    model,
+    body,
+    rawNamespace
+  );
+  return translateClaudeToGemini(model, body, stream, {
+    ...(credentials ?? {}),
+    ...(rawNamespace
+      ? { _signatureNamespace: scopeGeminiThoughtSignatureNamespace(rawNamespace, model) }
+      : {}),
+    _thoughtSignatures,
+  });
+}
+
+test.beforeEach(async () => {
+  await clearGeminiThoughtSignatures();
 });
 
 type UnknownRecord = Record<string, unknown>;
@@ -47,19 +77,19 @@ function getFunctionResponse(part: unknown) {
 
 type TestGeminiTurn = { role: string; parts: unknown[] };
 
-function translateToolResultTurn(
+async function translateToolResultTurn(
   toolUseId: string,
   trailingBlocks: UnknownRecord[] = [],
   trailingMessages: Array<{ role: string; content: string }> = [],
   toolResultContent: unknown = "found"
-): TestGeminiTurn {
+): Promise<TestGeminiTurn> {
   const namespace = `conn-${toolUseId}`;
-  storeGeminiThoughtSignature(
-    buildGeminiThoughtSignatureKey(namespace, toolUseId),
+  await storeGeminiThoughtSignature(
+    buildGeminiThoughtSignatureKey(`${namespace}:gemini`, toolUseId),
     "SIG_TOOL_RESULT"
   );
 
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-3.8-flash",
     {
       messages: [
@@ -91,8 +121,8 @@ function assertFunctionResponseTurn(turn: TestGeminiTurn, expectedResult: string
   assert.equal(getFunctionResponse(turn.parts[0]).response.result, expectedResult);
 }
 
-test("Claude -> Gemini keeps text after tool_result inside the function response", () => {
-  const turn = translateToolResultTurn("tu_trailing_text", [
+test("Claude -> Gemini keeps text after tool_result inside the function response", async () => {
+  const turn = await translateToolResultTurn("tu_trailing_text", [
     { type: "text", text: "first attachment note" },
     { type: "text", text: "second attachment note" },
   ]);
@@ -100,8 +130,8 @@ test("Claude -> Gemini keeps text after tool_result inside the function response
   assertFunctionResponseTurn(turn, "found\nfirst attachment note\nsecond attachment note");
 });
 
-test("Claude -> Gemini keeps trailing text with an image-bearing tool result", () => {
-  const turn = translateToolResultTurn(
+test("Claude -> Gemini keeps trailing text with an image-bearing tool result", async () => {
+  const turn = await translateToolResultTurn(
     "tu_image_trailing_text",
     [{ type: "text", text: "attachment note" }],
     [],
@@ -124,16 +154,16 @@ test("Claude -> Gemini keeps trailing text with an image-bearing tool result", (
   });
 });
 
-test("Claude -> Gemini attaches text between parallel tool results to the preceding response", () => {
+test("Claude -> Gemini attaches text between parallel tool results to the preceding response", async () => {
   const namespace = "conn-tu_parallel_text";
   for (const toolUseId of ["tu_parallel_first", "tu_parallel_second"]) {
-    storeGeminiThoughtSignature(
-      buildGeminiThoughtSignatureKey(namespace, toolUseId),
+    await storeGeminiThoughtSignature(
+      buildGeminiThoughtSignatureKey(`${namespace}:gemini`, toolUseId),
       `SIG_${toolUseId}`
     );
   }
 
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-3.8-flash",
     {
       messages: [
@@ -168,8 +198,8 @@ test("Claude -> Gemini attaches text between parallel tool results to the preced
   assert.equal(getFunctionResponse(turn.parts[1]).response.result, "second result");
 });
 
-test("Claude -> Gemini keeps a trailing system message inside the function response", () => {
-  const turn = translateToolResultTurn(
+test("Claude -> Gemini keeps a trailing system message inside the function response", async () => {
+  const turn = await translateToolResultTurn(
     "tu_trailing_system",
     [],
     [{ role: "system", content: "attachment note" }]
@@ -178,18 +208,21 @@ test("Claude -> Gemini keeps a trailing system message inside the function respo
   assertFunctionResponseTurn(turn, "found\nattachment note");
 });
 
-test("Claude -> Gemini leaves a tool response unchanged without trailing text", () => {
-  const turn = translateToolResultTurn("tu_no_trailing_text");
+test("Claude -> Gemini leaves a tool response unchanged without trailing text", async () => {
+  const turn = await translateToolResultTurn("tu_no_trailing_text");
 
   assertFunctionResponseTurn(turn, "found");
 });
 
-test("Claude -> Gemini maps system, thinking, tool use, tool result and tools", () => {
+test("Claude -> Gemini maps system, thinking, tool use, tool result and tools", async () => {
   // Native functionCall requires a cached thoughtSignature (#8979 / #3688).
   const ns = "conn-claude-gemini-map";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_1"), "SIG_MAP_WEATHER");
+  await storeGeminiThoughtSignature(
+    buildGeminiThoughtSignatureKey(`${ns}:gemini`, "tu_1"),
+    "SIG_MAP_WEATHER"
+  );
 
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       system: [{ text: "Rules" }],
@@ -268,8 +301,8 @@ test("Claude -> Gemini maps system, thinking, tool use, tool result and tools", 
   });
 });
 
-test("Claude -> Gemini clamps maxOutputTokens to the model cap", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini clamps maxOutputTokens to the model cap", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
@@ -283,8 +316,8 @@ test("Claude -> Gemini clamps maxOutputTokens to the model cap", () => {
   assert.equal(result.generationConfig.maxOutputTokens, 65536);
 });
 
-test("Claude -> Gemini preserves requested maxOutputTokens when the model cap is unknown", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini preserves requested maxOutputTokens when the model cap is unknown", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
@@ -296,8 +329,8 @@ test("Claude -> Gemini preserves requested maxOutputTokens when the model cap is
   assert.equal(result.generationConfig.maxOutputTokens, 32000);
 });
 
-test("Claude -> Gemini converts text and base64 images to Gemini parts", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini converts text and base64 images to Gemini parts", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -324,11 +357,11 @@ test("Claude -> Gemini converts text and base64 images to Gemini parts", () => {
   ]);
 });
 
-test("Claude -> Gemini omits unsigned functionCall instead of injecting a fake thoughtSignature (#8979)", () => {
+test("Claude -> Gemini omits unsigned functionCall instead of injecting a fake thoughtSignature (#8979)", async () => {
   // After #1410 / #8979: never inject a fake signature. Without a cached
   // thoughtSignature, native functionCall parts are omitted (context mode)
   // so Gemini 3+ does not return HTTP 400.
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -359,13 +392,16 @@ test("Claude -> Gemini omits unsigned functionCall instead of injecting a fake t
   );
 });
 
-test("Claude -> Gemini sanitizes long tool names and exposes a restore map", () => {
+test("Claude -> Gemini sanitizes long tool names and exposes a restore map", async () => {
   const longToolName =
     "mcp__filesystem__read_multiple_files_with_validation_and_metadata_bundle_v2";
   const ns = "conn-claude-gemini-long";
-  storeGeminiThoughtSignature(buildGeminiThoughtSignatureKey(ns, "tu_long_1"), "SIG_LONG_TOOL");
+  await storeGeminiThoughtSignature(
+    buildGeminiThoughtSignatureKey(`${ns}:gemini`, "tu_long_1"),
+    "SIG_LONG_TOOL"
+  );
 
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [
@@ -414,15 +450,15 @@ test("Claude -> Gemini sanitizes long tool names and exposes a restore map", () 
   assert.equal(parameters.properties?.path?.["x-ui"], undefined);
 });
 
-test("Claude -> Gemini handles empty bodies without producing invalid content", () => {
-  const result = claudeToGeminiRequest("gemini-2.5-flash", {}, false);
+test("Claude -> Gemini handles empty bodies without producing invalid content", async () => {
+  const result = await claudeToGeminiRequest("gemini-2.5-flash", {}, false);
 
   assert.deepEqual(result.contents, []);
   assert.deepEqual(result.generationConfig, {});
   assert.deepEqual(result.safetySettings, DEFAULT_SAFETY_SETTINGS);
 });
 
-test("Claude -> Gemini maps output_config.effort to thinkingConfig when thinking absent", () => {
+test("Claude -> Gemini maps output_config.effort to thinkingConfig when thinking absent", async () => {
   // NOTE: max/xhigh previously asserted 131072, but that locked in the OLD
   // no-cap behavior — gemini-2.5-pro is unregistered, so the raw budget sailed
   // to the upstream and 400'd ("thinking_budget must be in the range"). The
@@ -438,7 +474,7 @@ test("Claude -> Gemini maps output_config.effort to thinkingConfig when thinking
   ];
 
   for (const { effort, expected } of cases) {
-    const result = claudeToGeminiRequest(
+    const result = await claudeToGeminiRequest(
       "gemini-2.5-pro",
       {
         messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -458,8 +494,8 @@ test("Claude -> Gemini maps output_config.effort to thinkingConfig when thinking
 // Gemini model's real thinking-budget cap. gemini-2.5-flash's true max is 24576;
 // the previous unclamped 32768 made the upstream return HTTP 400. Pro-tier
 // (gemini-2.5-pro, real cap 32768) is asserted untouched by the test above.
-test("Claude -> Gemini clamps output_config.effort=high to gemini-2.5-flash cap (#3842)", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini clamps output_config.effort=high to gemini-2.5-flash cap (#3842)", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -472,8 +508,8 @@ test("Claude -> Gemini clamps output_config.effort=high to gemini-2.5-flash cap 
   assert.equal(budget, 24576);
 });
 
-test("Claude -> Gemini prefers thinking.budget_tokens over output_config.effort", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini prefers thinking.budget_tokens over output_config.effort", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -489,8 +525,8 @@ test("Claude -> Gemini prefers thinking.budget_tokens over output_config.effort"
   });
 });
 
-test("Claude -> Gemini skips thinkingConfig for output_config.effort=none", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini skips thinkingConfig for output_config.effort=none", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -504,9 +540,9 @@ test("Claude -> Gemini skips thinkingConfig for output_config.effort=none", () =
 
 // Regression for #3842: thinking.budget_tokens must be capped by the model's
 // thinkingBudgetCap, matching the output_config.effort path behavior.
-test("Claude -> Gemini thinking.budget_tokens is capped by model thinkingBudgetCap (#3842)", () => {
+test("Claude -> Gemini thinking.budget_tokens is capped by model thinkingBudgetCap (#3842)", async () => {
   // gemini-2.5-flash has thinkingBudgetCap: 24576
-  const result = claudeToGeminiRequest(
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "think hard" }] }],
@@ -525,8 +561,8 @@ test("Claude -> Gemini thinking.budget_tokens is capped by model thinkingBudgetC
 // tests/unit/claude-to-gemini-budget-tokens-zero-6813.test.ts for the canonical
 // regression). This mirrors that contract for a model with an explicit
 // thinkingBudgetCap.
-test("Claude -> Gemini thinking.budget_tokens=0 preserves dynamic-thinking sentinel after cap (#6813)", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini thinking.budget_tokens=0 preserves dynamic-thinking sentinel after cap (#6813)", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "no thinking" }] }],
@@ -542,8 +578,8 @@ test("Claude -> Gemini thinking.budget_tokens=0 preserves dynamic-thinking senti
 
 // Guard: models with thinkingBudgetCap=0 (e.g. gemini-3-flash) must NOT
 // receive thinkingConfig even when the caller explicitly sends budget_tokens.
-test("Claude -> Gemini skips thinkingConfig for model with thinkingBudgetCap=0", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini skips thinkingConfig for model with thinkingBudgetCap=0", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
@@ -560,8 +596,8 @@ test("Claude -> Gemini skips thinkingConfig for model with thinkingBudgetCap=0",
 
 // Guard: models with thinkingBudgetCap=0 must not receive thinkingConfig
 // via the output_config.effort path either.
-test("Claude -> Gemini skips effort thinkingConfig for model with thinkingBudgetCap=0", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini skips effort thinkingConfig for model with thinkingBudgetCap=0", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-3-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
@@ -577,8 +613,8 @@ test("Claude -> Gemini skips effort thinkingConfig for model with thinkingBudget
 });
 
 // Guard: models not in MODEL_SPECS (thinkingBudgetCap=undefined) default to allowed.
-test("Claude -> Gemini allows thinkingConfig for unknown model (no spec)", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini allows thinkingConfig for unknown model (no spec)", async () => {
+  const result = await claudeToGeminiRequest(
     "some-unknown-gemini-model",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
@@ -595,8 +631,8 @@ test("Claude -> Gemini allows thinkingConfig for unknown model (no spec)", () =>
 // Effort budgets must be capped by the model's thinkingBudgetCap.
 // gemini-2.5-flash has thinkingBudgetCap:24576; effort "high" sends 32768
 // which must be capped to 24576.
-test("Claude -> Gemini effort budget is capped by thinkingBudgetCap", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini effort budget is capped by thinkingBudgetCap", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -612,8 +648,8 @@ test("Claude -> Gemini effort budget is capped by thinkingBudgetCap", () => {
 
 // Non-numeric budget_tokens (e.g. string "auto") must fall through to the
 // effort path, not be treated as a numeric budget.
-test("Claude -> Gemini non-numeric budget_tokens falls through to effort path", () => {
-  const result = claudeToGeminiRequest(
+test("Claude -> Gemini non-numeric budget_tokens falls through to effort path", async () => {
+  const result = await claudeToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -629,8 +665,8 @@ test("Claude -> Gemini non-numeric budget_tokens falls through to effort path", 
   });
 });
 
-test("Claude -> Gemini maps stop_sequences and stop to generationConfig.stopSequences", () => {
-  const result1 = claudeToGeminiRequest(
+test("Claude -> Gemini maps stop_sequences and stop to generationConfig.stopSequences", async () => {
+  const result1 = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -640,7 +676,7 @@ test("Claude -> Gemini maps stop_sequences and stop to generationConfig.stopSequ
   );
   assert.deepEqual(result1.generationConfig.stopSequences, ["STOP", "\nHuman:"]);
 
-  const result2 = claudeToGeminiRequest(
+  const result2 = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
@@ -650,7 +686,7 @@ test("Claude -> Gemini maps stop_sequences and stop to generationConfig.stopSequ
   );
   assert.deepEqual(result2.generationConfig.stopSequences, ["SINGLE_STOP"]);
 
-  const result3 = claudeToGeminiRequest(
+  const result3 = await claudeToGeminiRequest(
     "gemini-2.5-pro",
     {
       messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],

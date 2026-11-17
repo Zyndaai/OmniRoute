@@ -13,7 +13,7 @@ import { openaiToClaudeRequest } from "../../open-sse/translator/request/openai-
 // dotted "claude-haiku-4.5" — a spelling mismatch (not a missing spec) means
 // capMaxOutputTokens() resolves no cap for zed-hosted, so fitThinkingToMaxTokens
 // adds the requested budget instead of fitting it under the model's real ceiling.
-test("zed-hosted/claude-haiku-4-5 thinking+tools must not inflate max_tokens past the real 64000 output cap", () => {
+test("zed-hosted/claude-haiku-4-5 thinking+tools must not inflate max_tokens past the real 64000 output cap", async () => {
   const body = {
     model: "claude-haiku-4-5",
     max_tokens: 16000,
@@ -28,7 +28,7 @@ test("zed-hosted/claude-haiku-4-5 thinking+tools must not inflate max_tokens pas
   };
   const credentials = { _provider: "zed-hosted" };
 
-  const result = openaiToClaudeRequest("claude-haiku-4-5", body, false, credentials);
+  const result = await openaiToClaudeRequest("claude-haiku-4-5", body, false, credentials);
   const claudeHaiku45OutputCap = 64000; // src/shared/constants/modelSpecs.ts "claude-haiku-4-5-20251001"
 
   assert.ok(

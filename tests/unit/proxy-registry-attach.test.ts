@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // A manual registry row can be attached to an existing subscription by update,
 // and detached again with null. Sync leaves manual rows alone.
@@ -17,28 +18,27 @@ const schema = await import("../../src/shared/validation/schemas/proxy.ts");
 const stale = await import("../../src/lib/proxySubscription/staleNodes.ts");
 const sub = await import("../../src/lib/proxySubscription/index.ts");
 const { handleProxyUpdate } = await import("../../src/lib/api/proxyRegistryRouteHandlers.ts");
+const { db } = await import("../../src/lib/db/pg.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function insertSubscription(id: string, url: string) {
+async function insertSubscription(id: string, url: string) {
   const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT INTO proxy_subscriptions
-        (id, name, url, enabled, mode, rule_providers, update_interval_minutes, status, created_at, updated_at)
-       VALUES (?, ?, ?, 1, 'global', NULL, 60, 'empty', ?, ?)`
-    )
-    .run(id, `sub-${id}`, url, now, now);
+  await getTestBackend().execute(
+    `INSERT INTO proxy_subscriptions
+      (id, name, url, enabled, mode, rule_providers, update_interval_minutes, status, created_at, updated_at)
+     VALUES ($1, $2, $3, true, 'global', NULL, 60, 'empty', $4, $5)`,
+    [id, `sub-${id}`, url, now, now]
+  );
 }
 
 function startFeedServer(body: string): Promise<{ url: string; close: () => Promise<void> }> {
@@ -91,7 +91,7 @@ test("update schema accepts an existing subscription id and null detaches", () =
 });
 
 test("attaching a manual proxy keeps its identity and assignments", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const manual = await proxies.createProxy({
     name: "manual",
@@ -113,7 +113,7 @@ test("attaching a manual proxy keeps its identity and assignments", async () => 
   const before = await proxies.getProxyById(manual.id, { includeSecrets: true });
   const server = await startFeedServer(feed("node", port + 2000));
   try {
-    insertSubscription("sub-attach", server.url);
+    await insertSubscription("sub-attach", server.url);
     const updated = await attachProxy(manual.id, "sub-attach");
 
     assert.equal(updated?.subscriptionId, "sub-attach");
@@ -136,7 +136,7 @@ test("attaching a manual proxy keeps its identity and assignments", async () => 
 });
 
 test("attaching to an unknown subscription fails without writing", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -148,11 +148,11 @@ test("attaching to an unknown subscription fails without writing", async () => {
 });
 
 test("sync import of a known subscription never fails the existence check", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const server = await startFeedServer(feed("node", port));
   try {
-    insertSubscription("sub-sync", server.url);
+    await insertSubscription("sub-sync", server.url);
     const created = await proxies.upsertProxy({
       name: "synced",
       type: "http",
@@ -180,7 +180,7 @@ test("sync import of a known subscription never fails the existence check", asyn
 });
 
 test("a manual proxy with the same tuple is left alone by sync", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const manual = await proxies.createProxy({
     name: "manual",
@@ -193,7 +193,7 @@ test("a manual proxy with the same tuple is left alone by sync", async () => {
   const before = await proxies.getProxyById(manual.id, { includeSecrets: true });
   const server = await startFeedServer(feed("feed-node", port));
   try {
-    insertSubscription("sub-skip", server.url);
+    await insertSubscription("sub-skip", server.url);
     const result = await sub.syncSubscription("sub-skip");
 
     assert.deepEqual(await proxies.getProxyById(manual.id, { includeSecrets: true }), before);
@@ -204,7 +204,7 @@ test("a manual proxy with the same tuple is left alone by sync", async () => {
 });
 
 test("an assigned attach via the assign path fails closed on an unknown subscription", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -222,7 +222,7 @@ test("an assigned attach via the assign path fails closed on an unknown subscrip
 });
 
 test("an attached row joins the pool on the next apply", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const manual = await proxies.createProxy({
     name: "manual",
@@ -232,24 +232,22 @@ test("an attached row joins the pool on the next apply", async () => {
   });
   const server = await startFeedServer(feed("other", port + 5000));
   try {
-    insertSubscription("sub-apply", server.url);
+    await insertSubscription("sub-apply", server.url);
     await attachProxy(manual.id, "sub-apply");
     await sub.applySubscription("sub-apply");
 
-    const pooled = core
-      .getDbInstance()
-      .prepare(
-        "SELECT COUNT(*) AS n FROM proxy_assignments WHERE proxy_id = ? AND scope = 'global'"
-      )
-      .get(manual.id) as { n: number };
-    assert.equal(pooled.n, 1);
+    const pooled = await getTestBackend().queryOne<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM proxy_assignments WHERE proxy_id = $1 AND scope = 'global'",
+      [manual.id]
+    );
+    assert.equal(Number(pooled?.n), 1);
   } finally {
     await server.close();
   }
 });
 
 test("a sync keeps an attached manual row attached and still prunes stale synced rows", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -263,7 +261,7 @@ test("a sync keeps an attached manual row attached and still prunes stale synced
   );
   const server = await startFeedServer(feed("node", nextPort()));
   try {
-    insertSubscription("sub-stale", server.url);
+    await insertSubscription("sub-stale", server.url);
     await attachProxy(manual.id, "sub-stale");
     const staleSynced = await proxies.createProxy({
       name: "gone-from-feed",
@@ -297,7 +295,7 @@ test("a sync keeps an attached manual row attached and still prunes stale synced
       subscriptionId: "sub-stale",
       source: "subscription",
     });
-    await stale.removeStaleSubscriptionNodes(core.getDbInstance(), "sub-stale", []);
+    await stale.removeStaleSubscriptionNodes(db(), "sub-stale", []);
     assert.equal(await proxies.getProxyById(synced.id), null);
     kept = await proxies.getProxyById(manual.id);
     assert.equal(kept?.subscriptionId, "sub-stale");
@@ -308,7 +306,7 @@ test("a sync keeps an attached manual row attached and still prunes stale synced
 });
 
 test("a feed node matching an attached manual row does not convert it into a synced row", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const manual = await proxies.createProxy({
     name: "manual",
@@ -319,7 +317,7 @@ test("a feed node matching an attached manual row does not convert it into a syn
   });
   const server = await startFeedServer(feed("feed-node", port));
   try {
-    insertSubscription("sub-same", server.url);
+    await insertSubscription("sub-same", server.url);
     await attachProxy(manual.id, "sub-same");
     const before = await proxies.getProxyById(manual.id, { includeSecrets: true });
 
@@ -327,7 +325,7 @@ test("a feed node matching an attached manual row does not convert it into a syn
     assert.deepEqual(await proxies.getProxyById(manual.id, { includeSecrets: true }), before);
 
     // Even after the feed drops the node, the manual row stays put.
-    await stale.removeStaleSubscriptionNodes(core.getDbInstance(), "sub-same", []);
+    await stale.removeStaleSubscriptionNodes(db(), "sub-same", []);
     const kept = await proxies.getProxyById(manual.id);
     assert.equal(kept?.source, "manual");
     assert.equal(kept?.subscriptionId, "sub-same");
@@ -337,7 +335,7 @@ test("a feed node matching an attached manual row does not convert it into a syn
 });
 
 test("the update route rejects an empty subscription id and answers 404 for an unknown one", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -369,7 +367,7 @@ test("the update route rejects an empty subscription id and answers 404 for an u
 });
 
 test("deleting a subscription detaches a manual row and deletes a subscription row", async () => {
-  reset();
+  await reset();
   const port = nextPort();
   const manual = await proxies.createProxy({
     name: "manual",
@@ -384,7 +382,7 @@ test("deleting a subscription detaches a manual row and deletes a subscription r
   );
   const server = await startFeedServer(feed("node", nextPort()));
   try {
-    insertSubscription("sub-delete", server.url);
+    await insertSubscription("sub-delete", server.url);
     await attachProxy(manual.id, "sub-delete");
     const synced = await proxies.createProxy({
       name: "synced",
@@ -410,7 +408,7 @@ test("deleting a subscription detaches a manual row and deletes a subscription r
 });
 
 test("unapply keeps the assignments of an attached manual row", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -424,7 +422,7 @@ test("unapply keeps the assignments of an attached manual row", async () => {
   );
   const server = await startFeedServer(feed("node", nextPort()));
   try {
-    insertSubscription("sub-unapply", server.url);
+    await insertSubscription("sub-unapply", server.url);
     await attachProxy(manual.id, "sub-unapply");
     await sub.applySubscription("sub-unapply");
     await sub.unapplySubscription("sub-unapply");
@@ -437,7 +435,7 @@ test("unapply keeps the assignments of an attached manual row", async () => {
 });
 
 test("adopting a row through the update route survives a subscription delete", async () => {
-  reset();
+  await reset();
   const manual = await proxies.createProxy({
     name: "manual",
     type: "http",
@@ -451,7 +449,7 @@ test("adopting a row through the update route survives a subscription delete", a
   );
   const server = await startFeedServer(feed("node", nextPort()));
   try {
-    insertSubscription("sub-route", server.url);
+    await insertSubscription("sub-route", server.url);
     const response = await handleProxyUpdate(
       new Request("http://localhost/api/v1/management/proxies", {
         method: "PATCH",

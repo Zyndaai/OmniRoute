@@ -31,7 +31,7 @@ const { reloadResourcePressureRuntime } = await import("../../open-sse/utils/res
 const { getProviderConnectionById } = await import("../../src/lib/db/providers.ts");
 const { getCircuitBreaker, resetAllCircuitBreakers, STATE } =
   await import("../../src/shared/utils/circuitBreaker.ts");
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const relayProxies = await import("../../src/lib/db/relayProxies.ts");
 
 const chatCompletionsRoute = await import("../../src/app/api/v1/chat/completions/route.ts");
@@ -129,20 +129,20 @@ function geminiBody(label: string) {
   };
 }
 
-function insertRelayToken(rawToken: string) {
-  const db = core.getDbInstance();
+async function insertRelayToken(rawToken: string) {
   const id = "rl_admission_matrix";
-  const now = Math.floor(Date.now() / 1000);
+  const now = new Date().toISOString();
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-  db.prepare(
+  await getTestBackend().execute(
     `
     INSERT INTO relay_tokens (id, name, token_hash, token_prefix, description, combo_id, allowed_models,
       max_tokens_per_request, max_requests_per_minute, max_requests_per_day, max_cost_per_day,
       enabled, created_at, updated_at, expires_at, metadata)
-    VALUES (?, ?, ?, ?, '', NULL, '["*"]', 128000, 1000, 100000, 0, 1, ?, ?, NULL, '{}')
-  `
-  ).run(id, "admission-matrix-relay", tokenHash, "rl_matrix", now, now);
-  const token = relayProxies.getRelayToken(id);
+    VALUES ($1, $2, $3, $4, '', NULL, '["*"]', 128000, 1000, 100000, 0, true, $5, $5, NULL, '{}')
+  `,
+    [id, "admission-matrix-relay", tokenHash, "rl_matrix", now]
+  );
+  const token = await relayProxies.getRelayToken(id);
   if (!token) throw new Error("failed to insert matrix relay token");
   return { token, rawToken };
 }
@@ -354,7 +354,7 @@ test(
     assert.equal(beforeBreaker.state, STATE.CLOSED);
 
     const rawRelayToken = `relay_matrix_${createHash("sha256").update("admission").digest("hex").slice(0, 24)}`;
-    insertRelayToken(rawRelayToken);
+    await insertRelayToken(rawRelayToken);
     process.env.OMNIROUTE_RELAY_BACKEND = "ts";
 
     const cases: RouteCase[] = ROUTE_CASES.map((routeCase) => {

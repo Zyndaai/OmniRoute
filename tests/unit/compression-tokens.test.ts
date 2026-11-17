@@ -9,32 +9,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const root = path.resolve(import.meta.dirname, "../..");
-
-async function freshImport(modulePath: string) {
-  return import(`${modulePath}?q=${Date.now()}-${Math.random().toString(16).slice(2)}`);
-}
-
 function setupTempDataDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-comp"));
   process.env.DATA_DIR = dir;
-  process.env.OMNIROUTE_MIGRATIONS_DIR = path.join(root, "src/lib/db/migrations");
-  process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
   return dir;
 }
 
 test("tokensCompressed round-trips through saveCallLog → getCallLogs", async () => {
   const dir = setupTempDataDir();
-  let core: { resetDbInstance: () => void; getDbInstance: () => unknown } | undefined;
+  // The isolated PostgreSQL database of this test process is already migrated.
+  const core = await import("../../src/lib/db/core.ts");
   try {
-    core = await freshImport("../../src/lib/db/core.ts");
-    core.resetDbInstance();
-
-    const db = core.getDbInstance();
-    const runner = await freshImport("../../src/lib/db/migrationRunner.ts");
-    runner.runMigrations(db);
-
-    const callLogs = await freshImport("../../src/lib/usage/callLogs.ts");
+    await core.ensureDbInitialized();
+    const callLogs = await import("../../src/lib/usage/callLogs.ts");
 
     // Log without compression
     await callLogs.saveCallLog({
@@ -82,10 +69,7 @@ test("tokensCompressed round-trips through saveCallLog → getCallLogs", async (
     assert.equal(logComp.tokens?.in, 1000);
     assert.equal(logComp.tokens?.out, 500);
   } finally {
-    // Windows cannot delete a SQLite file that is still open. callLogs.ts opens the DB
-    // through the plain (non-fresh) core module, so close that instance too.
-    core?.resetDbInstance();
-    (await import("../../src/lib/db/core.ts")).resetDbInstance();
+    await core.resetDbInstance();
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

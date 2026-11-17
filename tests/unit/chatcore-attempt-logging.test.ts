@@ -15,6 +15,7 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-attempt-logging-
 process.env.DATA_DIR = testDataDir;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getCallLogById, getCallLogs } = await import("../../src/lib/usage/callLogs.ts");
 const { persistAttemptLogs } = await import("../../open-sse/handlers/chatCore/attemptLogging.ts");
 const { getAuditLog } = await import("../../src/lib/compliance/index.ts");
@@ -83,12 +84,24 @@ function getCodexAccountRotation(value: unknown) {
   return getOmniRouteMeta(value)?.codexAccountRotation;
 }
 
+// logAuditEvent is async and fire-and-forget from persistAttemptLogs, so audit rows are
+// polled rather than read straight after the call.
+async function pollForAudit(filter: Parameters<typeof getAuditLog>[0], expected: number) {
+  const deadline = Date.now() + CALL_LOG_SETTLE_TIMEOUT_MS;
+  let rows = await getAuditLog(filter);
+  while (rows.length < expected && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await getAuditLog(filter);
+  }
+  return rows;
+}
+
 before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await resetTestDb();
   fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -200,13 +213,12 @@ function duplicateHeartbeatBody() {
   };
 }
 
-test("duplicate tool_calls in the assembled body writes provider.spec_violation audit", () => {
+test("duplicate tool_calls in the assembled body writes provider.spec_violation audit", async () => {
   persistAttemptLogs(
     { status: 200, responseBody: duplicateHeartbeatBody() },
     baseCtx({ pendingRequestId: "attempt-spec-violation-1", skillRequestId: "skill-spec-1" })
   );
-  // logAuditEvent is synchronous; do not wait on the fire-and-forget saveCallLog.
-  const rows = getAuditLog({ action: "provider.spec_violation", requestId: "skill-spec-1" });
+  const rows = await pollForAudit({ action: "provider.spec_violation", requestId: "skill-spec-1" }, 1);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]?.resourceType, "provider_spec_violation");
   const details = rows[0]?.details;
@@ -217,7 +229,7 @@ test("duplicate tool_calls in the assembled body writes provider.spec_violation 
   );
 });
 
-test("video-observed duplicate tool calls retain an audit verdict without retaining the tool name", () => {
+test("video-observed duplicate tool calls retain an audit verdict without retaining the tool name", async () => {
   const privateName = "PRIVATE_VIDEO_TRANSCRIPT_IN_TOOL_NAME";
   persistAttemptLogs(
     {
@@ -241,7 +253,10 @@ test("video-observed duplicate tool calls retain an audit verdict without retain
       videoContentRemoved: true,
     })
   );
-  const rows = getAuditLog({ action: "provider.spec_violation", requestId: "skill-spec-video-1" });
+  const rows = await pollForAudit(
+    { action: "provider.spec_violation", requestId: "skill-spec-video-1" },
+    1
+  );
   assert.equal(rows.length, 1);
   const details = rows[0]?.details;
   assert.ok(details && typeof details === "object");
@@ -249,7 +264,7 @@ test("video-observed duplicate tool calls retain an audit verdict without retain
   assert.equal(JSON.stringify(rows).includes(privateName), false);
 });
 
-test("unique tool_calls do not write provider.spec_violation audit", () => {
+test("unique tool_calls do not write provider.spec_violation audit", async () => {
   persistAttemptLogs(
     {
       status: 200,
@@ -268,7 +283,9 @@ test("unique tool_calls do not write provider.spec_violation audit", () => {
     },
     baseCtx({ pendingRequestId: "attempt-spec-clean-1", skillRequestId: "skill-spec-clean-1" })
   );
-  const rows = getAuditLog({
+  // Nothing to poll for: give the fire-and-forget audit write time to land before asserting absence.
+  await new Promise((r) => setTimeout(r, 100));
+  const rows = await getAuditLog({
     action: "provider.spec_violation",
     requestId: "skill-spec-clean-1",
   });

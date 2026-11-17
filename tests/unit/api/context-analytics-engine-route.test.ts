@@ -26,11 +26,13 @@ const settingsDb = await import("../../../src/lib/db/settings.ts");
 const { insertCompressionAnalyticsRow } =
   await import("../../../src/lib/db/compressionAnalytics.ts");
 const engineRoute = await import("../../../src/app/api/context/analytics/engine/route.ts");
+const { resetTestDb } = await import("../../helpers/postgres.ts");
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 async function setupAuth(): Promise<void> {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   await settingsDb.updateSettings({
@@ -47,12 +49,12 @@ test.beforeEach(async () => {
   await setupAuth();
 });
 
-test.after(() => {
+test.after(async () => {
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
   if (originalJwtSecret === undefined) delete process.env.JWT_SECRET;
   else process.env.JWT_SECRET = originalJwtSecret;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -69,7 +71,7 @@ test("GET /api/context/analytics/engine returns 400 when engineId is missing", a
 test("GET /api/context/analytics/engine returns 200 with correct aggregation for headroom", async () => {
   const now = new Date().toISOString();
 
-  insertCompressionAnalyticsRow({
+  await insertCompressionAnalyticsRow({
     timestamp: now,
     mode: "stacked",
     engine: "headroom",
@@ -77,7 +79,7 @@ test("GET /api/context/analytics/engine returns 200 with correct aggregation for
     compressed_tokens: 800,
     tokens_saved: 200,
   });
-  insertCompressionAnalyticsRow({
+  await insertCompressionAnalyticsRow({
     timestamp: now,
     mode: "stacked",
     engine: "headroom",
@@ -86,7 +88,7 @@ test("GET /api/context/analytics/engine returns 200 with correct aggregation for
     tokens_saved: 150,
   });
   // caveman row — must NOT appear in headroom result
-  insertCompressionAnalyticsRow({
+  await insertCompressionAnalyticsRow({
     timestamp: now,
     mode: "stacked",
     engine: "caveman",

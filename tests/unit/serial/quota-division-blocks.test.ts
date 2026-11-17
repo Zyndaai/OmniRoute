@@ -40,8 +40,11 @@ import path from "node:path";
 // ── Set DATA_DIR BEFORE any DB import (resolved as module-level constant) ───
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-division-blocks-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
+process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "quota-division-blocks-test-secret";
 
 // ── Imports ──────────────────────────────────────────────────────────────────
+const providersDb = await import("../../../src/lib/db/providers.ts");
+const apiKeysDb = await import("../../../src/lib/db/apiKeys.ts");
 const providerPlans = await import("../../../src/lib/db/providerPlans.ts");
 const quotaPools = await import("../../../src/lib/db/quotaPools.ts");
 const { SqliteQuotaStore } = await import("../../../src/lib/quota/sqliteQuotaStore.ts");
@@ -49,8 +52,8 @@ const { enforceQuotaShare } = await import("../../../src/lib/quota/enforce.ts");
 const core = await import("../../../src/lib/db/core.ts");
 
 // ── Suite cleanup ─────────────────────────────────────────────────────────────
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (fs.existsSync(TEST_DATA_DIR)) {
     try {
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -64,6 +67,28 @@ test.after(() => {
 const LIMIT = 100; // per-account plan limit; accountCount=1 → effectiveLimit=100
 const store = new SqliteQuotaStore();
 
+// quota_allocations reference api_keys on Postgres: every allocated key must be a real row.
+async function seedApiKey(name: string): Promise<string> {
+  const key = (await apiKeysDb.createApiKey(name, "quota-division-blocks-test")) as {
+    id: string;
+  };
+  return String(key.id);
+}
+
+// provider_plans and quota pools reference provider_connections on Postgres, so each scenario
+// needs a real connection row; its id is what the plan and pool are keyed by.
+async function seedConnection(provider: string, name: string): Promise<string> {
+  const connection = (await providersDb.createProviderConnection({
+    provider,
+    authType: "apikey",
+    name,
+    apiKey: `${name}-key`,
+    isActive: true,
+    testStatus: "active",
+  })) as Record<string, unknown>;
+  return String(connection.id);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Single suite: both scenarios share a DB, isolated by distinct pool/conn IDs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,13 +96,13 @@ const store = new SqliteQuotaStore();
 await test("quota-division-blocks: countable-unit enforcement (block + allow)", async (t) => {
   // ── Scenario A: pool total > effectiveLimit → block ──────────────────────
   await t.test("[A] pool total > effectiveLimit → block (global-saturated)", async () => {
-    const CONN = "conn-block-a";
     const PROV = "test-provider-a2-block";
-    const KEY_A = "key-block-a1";
-    const KEY_B = "key-block-b1";
+    const CONN = await seedConnection(PROV, "block-account");
+    const KEY_A = await seedApiKey("block-a");
+    const KEY_B = await seedApiKey("block-b");
 
     // Seed plan: requests/hourly/limit=100
-    providerPlans.upsertPlan(
+    await providerPlans.upsertPlan(
       CONN,
       PROV,
       [{ unit: "requests", window: "hourly", limit: LIMIT }],
@@ -85,7 +110,7 @@ await test("quota-division-blocks: countable-unit enforcement (block + allow)", 
     );
 
     // Create pool: 2 allocations at 50/50 hard
-    const pool = quotaPools.createPool({
+    const pool = await quotaPools.createPool({
       connectionId: CONN,
       name: "Block Pool A",
       allocations: [
@@ -116,13 +141,13 @@ await test("quota-division-blocks: countable-unit enforcement (block + allow)", 
 
   // ── Scenario B: pool total < effectiveLimit, key under fair-share → allow ─
   await t.test("[B] pool total < effectiveLimit and key under fair-share → allow", async () => {
-    const CONN = "conn-allow-b";
     const PROV = "test-provider-a2-allow";
-    const KEY_A = "key-allow-a1";
-    const KEY_B = "key-allow-b1";
+    const CONN = await seedConnection(PROV, "allow-account");
+    const KEY_A = await seedApiKey("allow-a");
+    const KEY_B = await seedApiKey("allow-b");
 
     // Seed plan for separate connection: requests/hourly/limit=100
-    providerPlans.upsertPlan(
+    await providerPlans.upsertPlan(
       CONN,
       PROV,
       [{ unit: "requests", window: "hourly", limit: LIMIT }],
@@ -130,7 +155,7 @@ await test("quota-division-blocks: countable-unit enforcement (block + allow)", 
     );
 
     // Create pool: distinct from Scenario A (different poolId + connection)
-    const pool = quotaPools.createPool({
+    const pool = await quotaPools.createPool({
       connectionId: CONN,
       name: "Allow Pool B",
       allocations: [

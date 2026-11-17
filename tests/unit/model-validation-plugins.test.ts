@@ -73,7 +73,7 @@ test("delayed request work retains its guard after the operation returns", async
 });
 
 test("a swallowed hook rejection stays latched after the plugin is unregistered", async () => {
-  const fence = createValidationPluginFence();
+  const fence = await createValidationPluginFence();
   fence.assertIdle();
   let calls = 0;
   registerHook("onError", "validation-swallowed", () => {

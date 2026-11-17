@@ -7,8 +7,7 @@ import path from "node:path";
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-18120-"));
 process.env.DATA_DIR = DIR;
 
-const { injectMemoryAndSkills } =
-  await import("../../open-sse/handlers/chatCore/memorySkillsInjection.ts");
+const { injectSkills } = await import("../../open-sse/handlers/chatCore/memorySkillsInjection.ts");
 const { prepareUpstreamBody } = await import("../../open-sse/handlers/chatCore/upstreamBody.ts");
 const { setDetectedToolLimit } = await import("../../open-sse/services/toolLimitDetector.ts");
 const core = await import("../../src/lib/db/core.ts");
@@ -16,8 +15,8 @@ const core = await import("../../src/lib/db/core.ts");
 test.before(async () => {
   await core.ensureDbInitialized();
 });
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -45,10 +44,10 @@ const mcpNames = (n: number) =>
   Array.from({ length: n }, (_, i) => `mcp__ctx__ctx_tool_${String(i).padStart(3, "0")}`);
 
 async function run(tools: unknown[], provider: string, targetFormat: string, warns?: string[]) {
-  const injected = await injectMemoryAndSkills({
+  const injected = await injectSkills({
     body: { model: "m", messages: [], tools },
-    memoryOwnerId: null,
-    provider,
+    skillsOwnerId: null,
+    skillsEnabled: false,
     effectiveModel: "m",
     sourceFormat: targetFormat,
     targetFormat,

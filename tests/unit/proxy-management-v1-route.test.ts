@@ -7,6 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-v1-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const proxyV1Route = await import("../../src/app/api/v1/management/proxies/route.ts");
@@ -63,33 +64,53 @@ async function withEnv(name, value, fn) {
 
 async function resetStorage() {
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-async function withPrepareFailure(match, message, fn) {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql, ...args) => {
-    const sqlText = String(sql);
-    const matched = typeof match === "function" ? match(sqlText) : sqlText.includes(match);
-    if (matched) {
-      throw new Error(message);
+// Makes every statement whose SQL matches `match` throw `thrown`, on the shared
+// backend and inside transactions opened while it is active.
+async function withSqlThrow(match, thrown, fn) {
+  const b = getTestBackend();
+  const matches = (sql) =>
+    typeof match === "function" ? match(String(sql)) : String(sql).includes(match);
+  const methods = ["execute", "query", "queryOne"];
+  const originals = Object.fromEntries(methods.map((m) => [m, b[m]]));
+  const originalTransaction = b.transaction;
+  const instrument = (target) => {
+    for (const m of methods) {
+      const real = target[m].bind(target);
+      target[m] = (sql, ...rest) => {
+        if (matches(sql)) throw thrown;
+        return real(sql, ...rest);
+      };
     }
-    return originalPrepare(sql, ...args);
   };
-
+  instrument(b);
+  b.transaction = (work, ...rest) =>
+    originalTransaction.call(
+      b,
+      (tx) => {
+        instrument(tx);
+        return work(tx);
+      },
+      ...rest
+    );
   try {
     return await fn();
   } finally {
-    db.prepare = originalPrepare;
+    for (const m of methods) b[m] = originals[m];
+    b.transaction = originalTransaction;
   }
 }
 
+async function withPrepareFailure(match, message, fn) {
+  return withSqlThrow(match, new Error(message), fn);
+}
+
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -360,7 +381,7 @@ test("v1 management proxies main route returns server errors when persistence fa
   await resetStorage();
 
   await withPrepareFailure(
-    "ORDER BY datetime(updated_at) DESC, name ASC",
+    "FROM proxy_registry ORDER BY updated_at DESC, name ASC",
     "list proxy failure",
     async () => {
       const response = await proxyV1Route.GET(
@@ -589,7 +610,7 @@ test("v1 management health endpoint aggregates proxy log metrics", async () => {
   // logProxyEvent only enqueues for the 1s/100-entry background batch; the health
   // route below aggregates persisted proxy_logs synchronously, so flush first or
   // the seeded rows are not yet on disk (timing-flaky otherwise).
-  proxyLogger.flushProxyLogsSync();
+  await proxyLogger.flushProxyLogsSync();
 
   const healthRes = await proxyHealthV1Route.GET(
     new Request("http://localhost/api/v1/management/proxies/health?hours=24")
@@ -865,25 +886,21 @@ test("each assignment write endpoint reports its own failure message", async () 
   ] as const;
   for (const [handler, url, expectedMessage] of cases) {
     await resetStorage();
-    const db = core.getDbInstance();
-    const originalPrepare = db.prepare.bind(db);
     // A thrown value without a message falls back to the per-route failure message.
-    db.prepare = (sql, ...args) => {
-      if (String(sql).includes("DELETE FROM proxy_assignments")) throw {};
-      return originalPrepare(sql, ...args);
-    };
-    try {
-      const response = await handler(
-        new Request(url, {
-          method: "PUT",
-          body: JSON.stringify({ scope: "global", proxyId: null }),
-        })
-      );
-      assert.equal(response.status, 500);
-      const payload = (await response.json()) as { error: { message: string } };
-      assert.equal(payload.error.message, expectedMessage);
-    } finally {
-      db.prepare = originalPrepare;
-    }
+    await withSqlThrow(
+      (sql) => sql.includes("DELETE FROM proxy_assignments"),
+      {},
+      async () => {
+        const response = await handler(
+          new Request(url, {
+            method: "PUT",
+            body: JSON.stringify({ scope: "global", proxyId: null }),
+          })
+        );
+        assert.equal(response.status, 500);
+        const payload = (await response.json()) as { error: { message: string } };
+        assert.equal(payload.error.message, expectedMessage);
+      }
+    );
   }
 });

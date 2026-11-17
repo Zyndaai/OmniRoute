@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // The operator-provided egress observation store: dated observed addresses per pool member.
 // These tests pin the contracts the reader and the push route rely on: idempotent upsert,
@@ -27,21 +28,29 @@ async function knownMember(host: string, port: number): Promise<void> {
   await proxiesDb.createProxy({ name: `op-egress ${host}:${port}`, type: "http", host, port });
 }
 
-function resetStorage() {
+async function countRows(where = "", params: unknown[] = []): Promise<number> {
+  const row = await getTestBackend().queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM proxy_operator_egress ${where}`,
+    params
+  );
+  return Number(row?.n ?? 0);
+}
+
+async function resetStorage() {
   delete process.env.PROXY_OPERATOR_EGRESS_WINDOW_HOURS;
   store.__resetOperatorEgressWarnedForTesting?.();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
+test.after(async () => {
   delete process.env.PROXY_OPERATOR_EGRESS_WINDOW_HOURS;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -57,17 +66,17 @@ test("upsert is idempotent: the same row twice stays one row", async () => {
   await knownMember("203.0.113.1", 8080);
   const now = Date.now();
   const at = iso(now);
-  assert.deepEqual(push("203.0.113.1", 8080, ["198.51.100.1"], at), {
+  assert.deepEqual(await push("203.0.113.1", 8080, ["198.51.100.1"], at), {
     stored: 1,
     ignored: 0,
     rejected: [],
   });
-  assert.deepEqual(push("203.0.113.1", 8080, ["198.51.100.1"], at), {
+  assert.deepEqual(await push("203.0.113.1", 8080, ["198.51.100.1"], at), {
     stored: 1,
     ignored: 0,
     rejected: [],
   });
-  const read = store.readOperatorEgressForMember("203.0.113.1", 8080, now);
+  const read = await store.readOperatorEgressForMember("203.0.113.1", 8080, now);
   assert.deepEqual([...read.addresses], ["198.51.100.1"]);
   assert.equal(read.freshest?.address, "198.51.100.1");
 });
@@ -78,13 +87,19 @@ test("the freshest observation wins in both orders", async () => {
   const now = Date.now();
   const older = iso(now, HOUR_MS);
   const newer = iso(now);
-  push("203.0.113.2", 8081, ["198.51.100.2"], older);
-  push("203.0.113.2", 8081, ["198.51.100.2"], newer);
-  assert.equal(store.readOperatorEgressForMember("203.0.113.2", 8081, now).freshest?.at, newer);
+  await push("203.0.113.2", 8081, ["198.51.100.2"], older);
+  await push("203.0.113.2", 8081, ["198.51.100.2"], newer);
+  assert.equal(
+    (await store.readOperatorEgressForMember("203.0.113.2", 8081, now)).freshest?.at,
+    newer
+  );
 
-  push("203.0.113.3", 8082, ["198.51.100.3"], newer);
-  push("203.0.113.3", 8082, ["198.51.100.3"], older);
-  assert.equal(store.readOperatorEgressForMember("203.0.113.3", 8082, now).freshest?.at, newer);
+  await push("203.0.113.3", 8082, ["198.51.100.3"], newer);
+  await push("203.0.113.3", 8082, ["198.51.100.3"], older);
+  assert.equal(
+    (await store.readOperatorEgressForMember("203.0.113.3", 8082, now)).freshest?.at,
+    newer
+  );
 });
 
 test("concurrent pushes of the same member keep the freshest row", async () => {
@@ -93,21 +108,27 @@ test("concurrent pushes of the same member keep the freshest row", async () => {
   const older = iso(now, HOUR_MS);
   const newer = iso(now);
   await Promise.all([
-    Promise.resolve().then(() => push("203.0.113.4", 8083, ["198.51.100.4"], older)),
-    Promise.resolve().then(() => push("203.0.113.4", 8083, ["198.51.100.4"], newer)),
+    push("203.0.113.4", 8083, ["198.51.100.4"], older),
+    push("203.0.113.4", 8083, ["198.51.100.4"], newer),
   ]);
-  assert.equal(store.readOperatorEgressForMember("203.0.113.4", 8083, now).freshest?.at, newer);
+  assert.equal(
+    (await store.readOperatorEgressForMember("203.0.113.4", 8083, now)).freshest?.at,
+    newer
+  );
 });
 
 test("a row older than the window is absent; a row inside the +5 min tolerance is fresh", async () => {
   await knownMember("203.0.113.5", 8084);
   await knownMember("203.0.113.6", 8085);
   const now = Date.now();
-  push("203.0.113.5", 8084, ["198.51.100.5"], iso(now, 25 * HOUR_MS));
-  assert.deepEqual([...store.readOperatorEgressForMember("203.0.113.5", 8084, now).addresses], []);
-  push("203.0.113.6", 8085, ["198.51.100.6"], new Date(now + 4 * 60_000).toISOString());
+  await push("203.0.113.5", 8084, ["198.51.100.5"], iso(now, 25 * HOUR_MS));
   assert.deepEqual(
-    [...store.readOperatorEgressForMember("203.0.113.6", 8085, now).addresses],
+    [...(await store.readOperatorEgressForMember("203.0.113.5", 8084, now)).addresses],
+    []
+  );
+  await push("203.0.113.6", 8085, ["198.51.100.6"], new Date(now + 4 * 60_000).toISOString());
+  assert.deepEqual(
+    [...(await store.readOperatorEgressForMember("203.0.113.6", 8085, now)).addresses],
     ["198.51.100.6"]
   );
 });
@@ -116,14 +137,17 @@ test("the window is adjustable, bounded, and never throws", async () => {
   await knownMember("203.0.113.7", 8086);
   const now = Date.now();
   const at = iso(now, 2 * HOUR_MS);
-  push("203.0.113.7", 8086, ["198.51.100.7"], at);
+  await push("203.0.113.7", 8086, ["198.51.100.7"], at);
   assert.deepEqual(
-    [...store.readOperatorEgressForMember("203.0.113.7", 8086, now).addresses],
+    [...(await store.readOperatorEgressForMember("203.0.113.7", 8086, now)).addresses],
     ["198.51.100.7"]
   );
 
   process.env.PROXY_OPERATOR_EGRESS_WINDOW_HOURS = "1";
-  assert.deepEqual([...store.readOperatorEgressForMember("203.0.113.7", 8086, now).addresses], []);
+  assert.deepEqual(
+    [...(await store.readOperatorEgressForMember("203.0.113.7", 8086, now)).addresses],
+    []
+  );
 
   for (const invalid of ["banana", "0", "9999", ""]) {
     store.__resetOperatorEgressWarnedForTesting?.();
@@ -134,7 +158,7 @@ test("the window is adjustable, bounded, and never throws", async () => {
     };
     try {
       process.env.PROXY_OPERATOR_EGRESS_WINDOW_HOURS = invalid;
-      const read = store.readOperatorEgressForMember("203.0.113.7", 8086, now);
+      const read = await store.readOperatorEgressForMember("203.0.113.7", 8086, now);
       assert.deepEqual([...read.addresses], ["198.51.100.7"]);
     } finally {
       console.warn = original;
@@ -148,9 +172,9 @@ test("a member keeps at most its 10 freshest addresses", async () => {
   const now = Date.now();
   const addresses = Array.from({ length: 12 }, (_, i) => `198.51.100.${10 + i}`);
   const at = iso(now);
-  const result = push("203.0.113.8", 8087, addresses, at);
+  const result = await push("203.0.113.8", 8087, addresses, at);
   assert.equal(result.rejected.filter((r) => r.reason === "cap-evicted").length, 2);
-  const read = store.readOperatorEgressForMember("203.0.113.8", 8087, now);
+  const read = await store.readOperatorEgressForMember("203.0.113.8", 8087, now);
   assert.equal(read.addresses.size, 10);
 });
 
@@ -170,55 +194,44 @@ test("beyond 2000 fresh rows the oldest rows are evicted first, counted as rejec
   }));
   const totals = { stored: 0, rejected: 0 };
   for (const chunk of chunkBy(members, 25)) {
-    const result = store.upsertOperatorEgress(chunk);
+    const result = await store.upsertOperatorEgress(chunk);
     totals.stored += result.stored;
     totals.rejected += result.rejected.length;
   }
   assert.ok(totals.rejected > 0, "surplus rows are counted, never a batch error");
-  const db = core.getDbInstance();
-  const count = db.prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress").get() as {
-    n: number;
-  };
-  assert.ok(count.n <= 2000, `total stays bounded, got ${count.n}`);
+  const count = await countRows();
+  assert.ok(count <= 2000, `total stays bounded, got ${count}`);
 });
 
 test("stale rows are purged on write", async () => {
   await knownMember("203.0.113.9", 8088);
   await knownMember("203.0.113.10", 8089);
   const now = Date.now();
-  push("203.0.113.9", 8088, ["198.51.100.9"], iso(now, 25 * HOUR_MS));
-  push("203.0.113.10", 8089, ["198.51.100.10"], iso(now));
-  const stale = store.readOperatorEgressForMember("203.0.113.9", 8088, now);
+  await push("203.0.113.9", 8088, ["198.51.100.9"], iso(now, 25 * HOUR_MS));
+  await push("203.0.113.10", 8089, ["198.51.100.10"], iso(now));
+  const stale = await store.readOperatorEgressForMember("203.0.113.9", 8088, now);
   assert.deepEqual([...stale.addresses], []);
-  const db = core.getDbInstance();
-  const rows = db
-    .prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress WHERE host = ?")
-    .get("203.0.113.9") as { n: number };
-  assert.equal(rows.n, 0);
+  assert.equal(await countRows("WHERE host = $1", ["203.0.113.9"]), 0);
 });
 
-test("rows for an unknown member are kept while fresh and purged at expiry", () => {
+test("rows for an unknown member are kept while fresh and purged at expiry", async () => {
   const now = Date.now();
   // 203.0.113.250 is documentation range: never in the test registry.
-  push("203.0.113.250", 8999, ["198.51.100.250"], iso(now));
+  await push("203.0.113.250", 8999, ["198.51.100.250"], iso(now));
   assert.deepEqual(
-    [...store.readOperatorEgressForMember("203.0.113.250", 8999, now).addresses],
+    [...(await store.readOperatorEgressForMember("203.0.113.250", 8999, now)).addresses],
     ["198.51.100.250"]
   );
-  push("203.0.113.251", 8998, ["198.51.100.251"], iso(now));
-  const db = core.getDbInstance();
-  const kept = db
-    .prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress WHERE host = ?")
-    .get("203.0.113.250") as { n: number };
-  assert.equal(kept.n, 1);
+  await push("203.0.113.251", 8998, ["198.51.100.251"], iso(now));
+  assert.equal(await countRows("WHERE host = $1", ["203.0.113.250"]), 1);
 });
 
 test("every returned address passes the shared ranking normalization", async () => {
   await knownMember("203.0.113.11", 8090);
   const now = Date.now();
   const at = iso(now);
-  push("203.0.113.11", 8090, ["::ffff:198.51.100.11"], at);
-  const read = store.readOperatorEgressForMember("203.0.113.11", 8090, now);
+  await push("203.0.113.11", 8090, ["::ffff:198.51.100.11"], at);
+  const read = await store.readOperatorEgressForMember("203.0.113.11", 8090, now);
   assert.deepEqual([...read.addresses], ["198.51.100.11"]);
 });
 

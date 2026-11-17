@@ -36,7 +36,6 @@ const isolatedRoot = mkdtempSync(join(tmpdir(), "omniroute-local-backends-drain-
 const devinHome = join(process.cwd(), ".sandbox", "local-backends-drain", "home");
 process.env.HOME = devinHome;
 process.env.DATA_DIR = join(isolatedRoot, "data");
-process.env.SQLITE_FILE = join(isolatedRoot, "data", "storage.sqlite");
 process.env.DEVIN_AGENTIC_HOME = devinHome;
 fs.mkdirSync(devinHome, { recursive: true });
 fs.mkdirSync(process.env.DATA_DIR, { recursive: true });
@@ -57,10 +56,10 @@ function setDraining(shuttingDown: boolean) {
 
 test.beforeEach(() => setDraining(false));
 
-test.after(() => {
+test.after(async () => {
   delete globalThis.__omnirouteShutdown;
-  // Close the SQLite handle first: Windows cannot delete an open database file.
-  core.resetDbInstance();
+  // Close the database pool before removing the data directory.
+  await core.resetDbInstance();
   fs.rmSync(isolatedRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

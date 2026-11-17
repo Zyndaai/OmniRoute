@@ -13,7 +13,7 @@ const ORIGINAL_JWT_SECRET = process.env.JWT_SECRET;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -41,7 +41,7 @@ async function resetStorage() {
   comboMetrics.resetAllComboMetrics();
   clearAllModelLockouts();
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -140,7 +140,18 @@ async function seedAutoCombo(comboOverrides: Record<string, unknown> = {}) {
     });
   }
 
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  // quota_snapshots.connection_id references provider_connections(id); the writes are dropped without the rows.
+  const db = getTestBackend();
+  for (const [id, provider] of [
+    ["scoring-conn-fast", "openai"],
+    ["scoring-conn-slow", "anthropic"],
+  ] as const) {
+    await db.execute(
+      "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [id, provider]
+    );
+  }
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "openai",
     connection_id: "scoring-conn-fast",
     window_key: "daily",
@@ -150,7 +161,7 @@ async function seedAutoCombo(comboOverrides: Record<string, unknown> = {}) {
     window_duration_ms: 86_400_000,
     raw_data: null,
   });
-  quotaSnapshotsDb.saveQuotaSnapshot({
+  await quotaSnapshotsDb.saveQuotaSnapshot({
     provider: "anthropic",
     connection_id: "scoring-conn-slow",
     window_key: "daily",
@@ -287,7 +298,7 @@ test("configured auto preview uses live evaluation scores and zero quota contrib
     combos: [combo],
     skipAutopilot: true,
   });
-  const resolvedTargets = resolveComboTargets(combo as never, [combo] as never);
+  const resolvedTargets = await resolveComboTargets(combo as never, [combo] as never);
   const evaluation = await evaluateAutoCandidates({
     targets: resolvedTargets,
     comboName: combo.name,

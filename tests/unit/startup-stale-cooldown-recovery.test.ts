@@ -26,9 +26,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -51,7 +52,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -88,7 +89,7 @@ test("clearStaleCrashCooldowns PRESERVES future transient cooldown on restart", 
     "connection should have a future rate_limited_until before recovery"
   );
 
-  const result = providersDb.clearStaleCrashCooldowns();
+  const result = await providersDb.clearStaleCrashCooldowns();
   assert.equal(result.cleared, 0, "future cooldown must NOT be cleared on startup");
 
   const updated = await providersDb.getProviderConnectionById(conn.id);
@@ -114,7 +115,7 @@ test("clearStaleCrashCooldowns clears past-dated transient cooldown on restart",
     backoffLevel: 1,
   });
 
-  const result = providersDb.clearStaleCrashCooldowns();
+  const result = await providersDb.clearStaleCrashCooldowns();
 
   assert.ok(result.cleared >= 1, `expected at least 1 cleared, got ${result.cleared}`);
 
@@ -143,7 +144,7 @@ test("clearStaleCrashCooldowns does NOT clear terminal states (banned)", async (
     backoffLevel: 5,
   });
 
-  const result = providersDb.clearStaleCrashCooldowns();
+  const result = await providersDb.clearStaleCrashCooldowns();
 
   const updated = await providersDb.getProviderConnectionById(conn.id);
   assert.equal(updated?.testStatus, "banned", "banned connection must not be touched");
@@ -168,7 +169,7 @@ test("clearStaleCrashCooldowns does NOT clear terminal states (expired)", async 
     backoffLevel: 2,
   });
 
-  providersDb.clearStaleCrashCooldowns();
+  await providersDb.clearStaleCrashCooldowns();
 
   const updated = await providersDb.getProviderConnectionById(conn.id);
   assert.equal(updated?.testStatus, "expired", "expired connection must not be touched");
@@ -189,7 +190,7 @@ test("clearStaleCrashCooldowns does NOT clear terminal states (credits_exhausted
     backoffLevel: 4,
   });
 
-  providersDb.clearStaleCrashCooldowns();
+  await providersDb.clearStaleCrashCooldowns();
 
   const updated = await providersDb.getProviderConnectionById(conn.id);
   assert.equal(
@@ -207,7 +208,7 @@ test("clearStaleCrashCooldowns returns cleared=0 when no transient cooldowns exi
     apiKey: "ai-key",
   });
 
-  const result = providersDb.clearStaleCrashCooldowns();
+  const result = await providersDb.clearStaleCrashCooldowns();
 
   assert.equal(result.cleared, 0, "no cooldowns to clear");
 });
@@ -255,7 +256,7 @@ test("clearStaleCrashCooldowns handles mixed transient + terminal connections co
     backoffLevel: 5,
   });
 
-  const result = providersDb.clearStaleCrashCooldowns();
+  const result = await providersDb.clearStaleCrashCooldowns();
 
   assert.equal(result.cleared, 1, "only 1 past transient connection cleared");
 

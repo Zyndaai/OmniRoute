@@ -24,9 +24,10 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const cloudAgentDb = await import("../../src/lib/cloudAgent/db.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -154,18 +155,18 @@ function makeTaskRow(
   };
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   cloudAgentDb.createCloudAgentTaskTable();
 });
 
-test("insertCloudAgentTask emits agent.task.updated {source: cloud-agent, state: queued}", () => {
+test("insertCloudAgentTask emits agent.task.updated {source: cloud-agent, state: queued}", async () => {
   const row = makeTaskRow({ status: "queued" });
 
   const events: AgentTaskUpdatedPayload[] = [];
   const unsubscribe = on("agent.task.updated", (payload) => events.push(payload));
   try {
-    cloudAgentDb.insertCloudAgentTask(row);
+    await cloudAgentDb.insertCloudAgentTask(row);
 
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "cloud-agent");
@@ -176,14 +177,14 @@ test("insertCloudAgentTask emits agent.task.updated {source: cloud-agent, state:
   }
 });
 
-test("updateCloudAgentTask emits agent.task.updated with the new status", () => {
+test("updateCloudAgentTask emits agent.task.updated with the new status", async () => {
   const row = makeTaskRow({ status: "queued" });
-  cloudAgentDb.insertCloudAgentTask(row);
+  await cloudAgentDb.insertCloudAgentTask(row);
 
   const events: AgentTaskUpdatedPayload[] = [];
   const unsubscribe = on("agent.task.updated", (payload) => events.push(payload));
   try {
-    cloudAgentDb.updateCloudAgentTask(row.id, { status: "running" });
+    await cloudAgentDb.updateCloudAgentTask(row.id, { status: "running" });
 
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "cloud-agent");
@@ -194,15 +195,15 @@ test("updateCloudAgentTask emits agent.task.updated with the new status", () => 
   }
 });
 
-test("updateCloudAgentTask without a status field emits the row's current status", () => {
+test("updateCloudAgentTask without a status field emits the row's current status", async () => {
   const row = makeTaskRow({ status: "queued" });
-  cloudAgentDb.insertCloudAgentTask(row);
-  cloudAgentDb.updateCloudAgentTask(row.id, { status: "running" });
+  await cloudAgentDb.insertCloudAgentTask(row);
+  await cloudAgentDb.updateCloudAgentTask(row.id, { status: "running" });
 
   const events: AgentTaskUpdatedPayload[] = [];
   const unsubscribe = on("agent.task.updated", (payload) => events.push(payload));
   try {
-    cloudAgentDb.updateCloudAgentTask(row.id, { result: "partial output" });
+    await cloudAgentDb.updateCloudAgentTask(row.id, { result: "partial output" });
 
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "cloud-agent");
@@ -213,11 +214,11 @@ test("updateCloudAgentTask without a status field emits the row's current status
   }
 });
 
-test("updateCloudAgentTask on an unknown id does not emit (nothing was written)", () => {
+test("updateCloudAgentTask on an unknown id does not emit (nothing was written)", async () => {
   const events: AgentTaskUpdatedPayload[] = [];
   const unsubscribe = on("agent.task.updated", (payload) => events.push(payload));
   try {
-    cloudAgentDb.updateCloudAgentTask("task-does-not-exist", { result: "partial output" });
+    await cloudAgentDb.updateCloudAgentTask("task-does-not-exist", { result: "partial output" });
 
     assert.equal(events.length, 0);
   } finally {
@@ -225,14 +226,14 @@ test("updateCloudAgentTask on an unknown id does not emit (nothing was written)"
   }
 });
 
-test("updateCloudAgentTask with no valid fields does not emit (no-op write)", () => {
+test("updateCloudAgentTask with no valid fields does not emit (no-op write)", async () => {
   const row = makeTaskRow({ status: "queued" });
-  cloudAgentDb.insertCloudAgentTask(row);
+  await cloudAgentDb.insertCloudAgentTask(row);
 
   const events: AgentTaskUpdatedPayload[] = [];
   const unsubscribe = on("agent.task.updated", (payload) => events.push(payload));
   try {
-    cloudAgentDb.updateCloudAgentTask(row.id, {});
+    await cloudAgentDb.updateCloudAgentTask(row.id, {});
 
     assert.equal(events.length, 0);
   } finally {
@@ -240,14 +241,14 @@ test("updateCloudAgentTask with no valid fields does not emit (no-op write)", ()
   }
 });
 
-test("a throwing agent.task.updated listener does not break insertCloudAgentTask", () => {
+test("a throwing agent.task.updated listener does not break insertCloudAgentTask", async () => {
   const row = makeTaskRow({ status: "queued" });
   const unsubscribe = on("agent.task.updated", () => {
     throw new Error("listener boom");
   });
   try {
-    assert.doesNotThrow(() => cloudAgentDb.insertCloudAgentTask(row));
-    assert.equal(cloudAgentDb.getCloudAgentTaskById(row.id)?.id, row.id);
+    await assert.doesNotReject(() => cloudAgentDb.insertCloudAgentTask(row));
+    assert.equal((await cloudAgentDb.getCloudAgentTaskById(row.id))?.id, row.id);
   } finally {
     unsubscribe();
   }

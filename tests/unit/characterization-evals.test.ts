@@ -23,15 +23,15 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-char-evals-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const runner = await import("../../src/lib/evals/evalRunner.ts");
 const runtime = await import("../../src/lib/evals/runtime.ts");
 const builtins = await import("../../src/lib/evals/evalRunner/builtinSuites.ts");
 const evalsDb = await import("../../src/lib/db/evals.ts");
 
-test.after(() => {
+test.after(async () => {
   runner.resetSuites();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -75,10 +75,10 @@ test("surface: evals module runtime exports", () => {
   );
 });
 
-test("surface: built-in suites registered at load (id, name, source, caseCount)", () => {
-  const listed = runner
-    .listSuites()
-    .map((s) => [s.id, s.name, s.source, s.caseCount] as [string, string, string, number]);
+test("surface: built-in suites registered at load (id, name, source, caseCount)", async () => {
+  const listed = (await runner.listSuites()).map(
+    (s) => [s.id, s.name, s.source, s.caseCount] as [string, string, string, number]
+  );
   assert.deepEqual(listed, [
     ["golden-set", "OmniRoute Golden Set", "built-in", 10],
     ["coding-proficiency", "Coding Proficiency", "built-in", 5],
@@ -138,10 +138,10 @@ const MINI_SUITE = {
   ],
 };
 
-test("runSuite: fake-judge suite → per-case results + rounded summary", () => {
+test("runSuite: fake-judge suite → per-case results + rounded summary", async () => {
   runner.registerSuite(MINI_SUITE);
   judgeCalls.length = 0;
-  const run = runner.runSuite(
+  const run = await runner.runSuite(
     "char-mini",
     { c1: "the answer is 42", c2: "no idea", c3: "It is paris.", c4: "[ERROR] upstream error" },
     { c1: { durationMs: 12.6 }, c4: { durationMs: -5, error: "upstream error" } }
@@ -169,9 +169,9 @@ test("runSuite: fake-judge suite → per-case results + rounded summary", () => 
   assert.deepEqual(run.summary, { total: 4, passed: 2, failed: 2, passRate: 50 });
 });
 
-test("runSuite: missing output is graded as the empty string", () => {
+test("runSuite: missing output is graded as the empty string", async () => {
   judgeCalls.length = 0;
-  const run = runner.runSuite("char-mini", {});
+  const run = await runner.runSuite("char-mini", {});
   assert.deepEqual(
     judgeCalls.map((c) => c.output),
     ["", ""]
@@ -179,8 +179,8 @@ test("runSuite: missing output is graded as the empty string", () => {
   assert.deepEqual(run.summary, { total: 4, passed: 0, failed: 4, passRate: 0 });
 });
 
-test("createScorecard: aggregates runs; empty input → zeros", () => {
-  const a = runner.runSuite("char-mini", { c1: "42", c3: "paris" });
+test("createScorecard: aggregates runs; empty input → zeros", async () => {
+  const a = await runner.runSuite("char-mini", { c1: "42", c3: "paris" });
   const card = runner.createScorecard([a, { ...a, suiteId: "x", suiteName: "X" }]);
   assert.deepEqual(card, {
     suites: 2,
@@ -201,15 +201,15 @@ test("createScorecard: aggregates runs; empty input → zeros", () => {
   });
 });
 
-test("resetSuites: drops runtime-registered suites, keeps the built-ins", () => {
-  assert.ok(runner.getSuite("char-mini"));
+test("resetSuites: drops runtime-registered suites, keeps the built-ins", async () => {
+  assert.ok(await runner.getSuite("char-mini"));
   runner.resetSuites();
-  assert.equal(runner.getSuite("char-mini"), null);
-  assert.equal(runner.listSuites().length, 7);
+  assert.equal(await runner.getSuite("char-mini"), null);
+  assert.equal((await runner.listSuites()).length, 7);
 });
 
-test("custom suites persisted in the DB are listed (source=custom) and runnable", () => {
-  evalsDb.saveCustomEvalSuite({
+test("custom suites persisted in the DB are listed (source=custom) and runnable", async () => {
+  await evalsDb.saveCustomEvalSuite({
     id: "char-custom",
     name: "Char Custom",
     cases: [
@@ -222,11 +222,11 @@ test("custom suites persisted in the DB are listed (source=custom) and runnable"
       },
     ],
   });
-  const listed = runner.listSuites().find((s) => s.id === "char-custom");
+  const listed = (await runner.listSuites()).find((s) => s.id === "char-custom");
   assert.equal(listed?.source, "custom");
   assert.equal(listed?.caseCount, 1);
-  assert.equal(runner.getSuite("char-custom")?.name, "Char Custom");
-  const run = runner.runSuite("char-custom", { k1: "Hello there" });
+  assert.equal((await runner.getSuite("char-custom"))?.name, "Char Custom");
+  const run = await runner.runSuite("char-custom", { k1: "Hello there" });
   assert.deepEqual(run.summary, { total: 1, passed: 1, failed: 0, passRate: 100 });
 });
 
@@ -304,11 +304,11 @@ test("evaluateCase: a case without `expected` is caught and reported, not thrown
   assert.match(String(r.error), /Cannot read properties of undefined/);
 });
 
-test("runSuite: unknown suite id throws 'Suite not found: <id>'", () => {
-  assert.throws(() => runner.runSuite("does-not-exist", {}), {
+test("runSuite: unknown suite id throws 'Suite not found: <id>'", async () => {
+  await assert.rejects(runner.runSuite("does-not-exist", {}), {
     message: "Suite not found: does-not-exist",
   });
-  assert.equal(runner.getSuite("does-not-exist"), null);
+  assert.equal(await runner.getSuite("does-not-exist"), null);
 });
 
 // ─── (b) Contracts — runtime helpers ─────────────────────────────────────────

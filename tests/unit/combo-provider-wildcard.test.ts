@@ -35,8 +35,9 @@ const { replaceSyncedAvailableModelsForConnection, getSyncedAvailableModels } =
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 const core = await import("../../src/lib/db/core.ts");
-core.getDbInstance(); // initialise DB + run migrations
+await core.ensureDbInitialized(); // initialise DB + run migrations
 
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { normalizeComboRecord } = await import("../../src/lib/combos/steps.ts");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,21 +53,21 @@ async function seedSyncedModels(
   modelIds: string[],
   isActive = true
 ) {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
 
   // Upsert, not REPLACE: REPLACE deletes+reinserts the whole row, silently wiping
   // provider_specific_data on connections pre-created via createProviderConnection()
   // (which the Alibaba drained-models test depends on).
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO provider_connections
        (id, provider, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT(id) DO UPDATE SET
-       provider = excluded.provider,
-       is_active = excluded.is_active,
-       updated_at = excluded.updated_at`
-  ).run(connectionId, providerId, isActive ? 1 : 0, now, now);
+       provider = EXCLUDED.provider,
+       is_active = EXCLUDED.is_active,
+       updated_at = EXCLUDED.updated_at`,
+    [connectionId, providerId, isActive, now, now]
+  );
 
   await replaceSyncedAvailableModelsForConnection(
     providerId,

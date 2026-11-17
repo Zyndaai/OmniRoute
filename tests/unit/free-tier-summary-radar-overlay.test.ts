@@ -29,6 +29,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-free-tier-summary-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -37,9 +38,11 @@ process.env.JWT_SECRET = "test-jwt-secret-for-free-tier-summary-tests";
 process.env.INITIAL_PASSWORD = "test-bootstrap-password-for-free-tier-summary-tests";
 delete process.env.RADAR_ENABLED;
 
-const core = await import("../../src/lib/db/core.ts");
 const { clearAllFeatureFlagOverrides, setFeatureFlagOverride } =
   await import("../../src/lib/db/featureFlags.ts");
+// Flag reads are synchronous and served from an in-process snapshot of the DB overrides,
+// so the snapshot is reloaded after every override write (as the dashboard route does).
+const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
 const radarDb = await import("../../src/lib/db/radar.ts");
 const { GET } = await import("../../src/app/api/free-tier/summary/route.ts");
 const { computeFreeModelTotals } = await import("../../open-sse/config/freeModelCatalog.ts");
@@ -116,7 +119,7 @@ function feedPayload(tier: "community" | "live") {
   };
 }
 
-function seedGatedCache() {
+async function seedGatedCache() {
   const payload = feedPayload("community");
   payload.models.push({
     provider: "test-radar",
@@ -134,7 +137,7 @@ function seedGatedCache() {
     enabled: true,
     eligibilityGate: "regional-identity",
   } as (typeof payload.models)[number]);
-  radarDb.setRadarCache({
+  await radarDb.setRadarCache({
     version: "2026.08.25.1",
     generatedAt: GEN_AT,
     tier: "community",
@@ -144,21 +147,15 @@ function seedGatedCache() {
   });
 }
 
-function resetState() {
-  core.resetDbInstance();
-  try {
-    if (fs.existsSync(TEST_DATA_DIR))
-      fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  } catch {
-    // ignore
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+async function resetState() {
+  await resetTestDb();
   delete process.env.RADAR_ENABLED;
-  clearAllFeatureFlagOverrides();
+  await clearAllFeatureFlagOverrides();
+  await refreshFeatureFlagSnapshot();
 }
 
-function seedCache(tier: "community" | "live", opts: { generatedAt?: string | null } = {}) {
-  radarDb.setRadarCache({
+async function seedCache(tier: "community" | "live", opts: { generatedAt?: string | null } = {}) {
+  await radarDb.setRadarCache({
     version: "2026.08.25.1",
     generatedAt: "generatedAt" in opts ? (opts.generatedAt ?? undefined) : GEN_AT,
     tier,
@@ -181,7 +178,7 @@ async function getBody(authenticated = false): Promise<Record<string, unknown>> 
 // --- zero-delta default ------------------------------------------------------
 
 test("flag off => the baseline answers, unchanged contract, honest source tag", async () => {
-  resetState();
+  await resetState();
   const body = await getBody();
 
   const expected = computeFreeModelTotals();
@@ -192,7 +189,7 @@ test("flag off => the baseline answers, unchanged contract, honest source tag", 
 });
 
 test("excludeTosAvoid still filters on the baseline path", async () => {
-  resetState();
+  await resetState();
   const res = await GET(new Request("https://omni.test/api/free-tier/summary?excludeTosAvoid=1"));
   assert.equal(res.status, 200);
   const body = (await res.json()) as Record<string, unknown>;
@@ -205,9 +202,10 @@ test("excludeTosAvoid still filters on the baseline path", async () => {
 // --- community tier: the free public feed serves everyone --------------------
 
 test("community tier, anonymous caller => the overlay answers, honestly dated", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community");
 
   const body = await getBody(false);
 
@@ -225,9 +223,10 @@ test("community tier, anonymous caller => the overlay answers, honestly dated", 
 });
 
 test("community tier, authenticated caller => same overlay", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community");
 
   const body = await getBody(true);
 
@@ -236,9 +235,10 @@ test("community tier, authenticated caller => same overlay", async () => {
 });
 
 test("an entry the feed disables is excluded from the served totals", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community");
 
   const body = await getBody(false);
 
@@ -251,9 +251,10 @@ test("an entry the feed disables is excluded from the served totals", async () =
 });
 
 test("a pre-migration cache row serves the overlay with an UNKNOWN date, not the fetch time", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: undefined });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: undefined });
 
   const body = await getBody(false);
 
@@ -266,9 +267,10 @@ test("a pre-migration cache row serves the overlay with an UNKNOWN date, not the
 // --- live tier: paid content stays behind this instance's sessions ----------
 
 test("live tier, ANONYMOUS caller => the baseline answers, never the premium feed", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("live");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("live");
 
   const body = await getBody(false);
 
@@ -278,9 +280,10 @@ test("live tier, ANONYMOUS caller => the baseline answers, never the premium fee
 });
 
 test("live tier, authenticated caller => this install's earned overlay", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("live");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("live");
 
   const body = await getBody(true);
 
@@ -295,9 +298,10 @@ test("live tier, authenticated caller => this install's earned overlay", async (
 // --- resilience --------------------------------------------------------------
 
 test("corrupt cache => baseline fallback with the baseline contract", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  radarDb.setRadarCache({
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await radarDb.setRadarCache({
     version: "broken",
     generatedAt: GEN_AT,
     tier: "community",
@@ -316,9 +320,10 @@ test("corrupt cache => baseline fallback with the baseline contract", async () =
 // --- freshness guard: never answer from a feed built before the shipped catalog ---
 
 test("overlay older than the shipped catalog => the baseline answers", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: STALE_GEN_AT });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: STALE_GEN_AT });
 
   const body = await getBody();
 
@@ -327,9 +332,10 @@ test("overlay older than the shipped catalog => the baseline answers", async () 
 });
 
 test("overlay with an unknown build date => the baseline answers", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: null });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: null });
 
   const body = await getBody();
 
@@ -338,9 +344,10 @@ test("overlay with an unknown build date => the baseline answers", async () => {
 });
 
 test("overlay built on the curation day itself => the overlay answers", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: `${FREE_CATALOG_CURATED_AT}T00:30:00.000Z` });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: `${FREE_CATALOG_CURATED_AT}T00:30:00.000Z` });
 
   const body = await getBody();
 
@@ -348,9 +355,10 @@ test("overlay built on the curation day itself => the overlay answers", async ()
 });
 
 test("overlay newer than the shipped catalog still answers", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community");
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community");
 
   const body = await getBody();
 
@@ -361,13 +369,14 @@ test("overlay newer than the shipped catalog still answers", async () => {
 // --- the stale fallback keeps the operator's own decisions ---
 
 test("stale overlay => a tombstoned model stays out of the totals", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: STALE_GEN_AT });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: STALE_GEN_AT });
 
   const target = FREE_MODEL_BUDGETS[0];
   const withoutTombstone = await getBody();
-  radarDb.setRadarModelTombstone(target.provider, target.modelId, true);
+  await radarDb.setRadarModelTombstone(target.provider, target.modelId, true);
   const withTombstone = await getBody();
 
   assert.equal(withTombstone.catalogSource, "baseline");
@@ -378,13 +387,14 @@ test("stale overlay => a tombstoned model stays out of the totals", async () => 
 });
 
 test("stale overlay => a locally disabled model stays out of the totals", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedCache("community", { generatedAt: STALE_GEN_AT });
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedCache("community", { generatedAt: STALE_GEN_AT });
 
   const baselineBody = await getBody();
   const target = FREE_MODEL_BUDGETS[0];
-  radarDb.setRadarLocalModelOverride(target.provider, target.modelId, { enabled: false });
+  await radarDb.setRadarLocalModelOverride(target.provider, target.modelId, { enabled: false });
   const disabledBody = await getBody();
 
   assert.equal(disabledBody.catalogSource, "baseline");
@@ -397,9 +407,10 @@ test("stale overlay => a locally disabled model stays out of the totals", async 
 // --- eligibility-gated entries from the feed stay out of the headline --------
 
 test("a gated overlay entry lands in gatedRecurringTokens, never in the steady headline", async () => {
-  resetState();
-  setFeatureFlagOverride("RADAR_ENABLED", "true");
-  seedGatedCache();
+  await resetState();
+  await setFeatureFlagOverride("RADAR_ENABLED", "true");
+  await refreshFeatureFlagSnapshot();
+  await seedGatedCache();
 
   const body = await getBody(false);
 

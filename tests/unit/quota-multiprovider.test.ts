@@ -40,6 +40,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 // ── DB harness ───────────────────────────────────────────────────────────────
 // Use a stable per-file temp dir so DATA_DIR is set ONCE before any module
@@ -58,36 +59,24 @@ const { syncQuotaCombos } = await import("../../src/lib/quota/quotaCombos.ts");
 const { isQuotaModelName, parseQuotaModelName, quotaModelName } =
   await import("../../src/lib/quota/quotaModelNaming.ts");
 const { PROVIDER_MODELS } = await import("../../open-sse/config/providerModels.ts");
-
-// Trigger migration once at module load so the schema is ready for the first
-// beforeEach without a slow per-test full migration run.
-core.getDbInstance();
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-// Tables touched by this test suite.  Cleared via SQL between tests to avoid
-// the slow per-test full-migration race that fires under --test-force-exit
-// with high concurrency (the rmSync approach also corrupts the module-level
-// SQLITE_FILE pointer shared across concurrent test files).
-const CLEAR_TABLES = [
-  "quota_pool_connections",
-  "quota_allocations",
-  "quota_pools",
-  "provider_connections",
-  "combos",
-];
+// Each test starts from a fresh database (tables emptied, migration seed rows restored).
+async function resetStorage() {
+  await resetTestDb();
+}
 
-function resetStorage() {
-  const db = core.getDbInstance();
-  for (const table of CLEAR_TABLES) {
-    db.prepare(`DELETE FROM ${table}`).run();
-  }
-  // Re-seed the default quota group removed by the cascading delete on quota_pools.
-  db.prepare(
-    "INSERT OR IGNORE INTO quota_groups (id, name) VALUES ('group-demo', 'GroupDemo')"
-  ).run();
+// quota_allocations.api_key_id references api_keys: seed the key row first.
+async function seedApiKey(id: string) {
+  await getTestBackend().execute(
+    `INSERT INTO api_keys (id, name, key, key_hash) VALUES ($1, $1, 'test', $2)
+     ON CONFLICT (id) DO NOTHING`,
+    [id, createHash("sha256").update(id).digest("hex")]
+  );
 }
 
 /**
@@ -106,12 +95,12 @@ async function flushPendingSyncs(): Promise<void> {
   }
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -161,7 +150,7 @@ test("D2.1: resolveQuotaKeyScope — pool with 2 same-provider connections retur
   const idB = (connB as Record<string, unknown>).id as string;
 
   // Create a pool with BOTH same-provider connections.
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "SameProviderPool D21",
     connectionIds: [idA, idB],
@@ -200,7 +189,7 @@ test("D2.2: resolveQuotaKeyScope — pool with empty connectionIds falls back to
 
   // Create the pool normally (legacy style, single connectionId, no connectionIds arg).
   // getPool will return connectionIds = [connectionId] via the defensive fallback.
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: connId,
     name: "LegacyFallbackPool D22",
   });
@@ -256,7 +245,7 @@ test("D2.3: enforceQuotaShare — input connectionId matching a non-primary memb
   const idB = (connB as Record<string, unknown>).id as string;
 
   // Pool with BOTH same-provider connections.
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "EnforceMultiPool D23",
     connectionIds: [idA, idB],
@@ -264,10 +253,11 @@ test("D2.3: enforceQuotaShare — input connectionId matching a non-primary memb
 
   // Assign an API key to the pool.
   const API_KEY_ID = "test-key-d23";
-  poolsDb.upsertAllocations(pool.id, [{ apiKeyId: API_KEY_ID, weight: 50, policy: "hard" }]);
+  await seedApiKey(API_KEY_ID);
+  await poolsDb.upsertAllocations(pool.id, [{ apiKeyId: API_KEY_ID, weight: 50, policy: "hard" }]);
 
   // Confirm allocation exists.
-  const allocations = listAllocationsForApiKey(API_KEY_ID);
+  const allocations = await listAllocationsForApiKey(API_KEY_ID);
   assert.equal(allocations.length, 1, "API key should have 1 pool allocation");
   assert.equal(allocations[0].poolId, pool.id);
 
@@ -312,14 +302,15 @@ test("D2.4: enforceQuotaShare — input connectionId matching the PRIMARY member
   const idA = (connA as Record<string, unknown>).id as string;
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "PrimaryRegressionPool D24",
     connectionIds: [idA, idB],
   });
 
   const API_KEY_ID = "test-key-d24";
-  poolsDb.upsertAllocations(pool.id, [{ apiKeyId: API_KEY_ID, weight: 50, policy: "hard" }]);
+  await seedApiKey(API_KEY_ID);
+  await poolsDb.upsertAllocations(pool.id, [{ apiKeyId: API_KEY_ID, weight: 50, policy: "hard" }]);
 
   // Enforce with connA (the primary).
   const resultA = await enforceQuotaShare({
@@ -362,7 +353,7 @@ test("D2.5: syncQuotaCombos — 2-connection same-provider pool creates one comb
 
   assert.ok(modelsA.length > 0, `${PROVIDER_A} must have models in registry`);
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "SameProviderComboPool D25",
     connectionIds: [idA, idB],
@@ -447,7 +438,7 @@ test("D2.6: syncQuotaCombos — after removing connB from same-provider pool, re
 
   const modelsA = (PROVIDER_MODELS[PROVIDER_A] ?? []).map((m) => m.id);
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "PruneAfterRemovalPool D26",
     connectionIds: [idA, idB],
@@ -477,7 +468,7 @@ test("D2.6: syncQuotaCombos — after removing connB from same-provider pool, re
   }
 
   // Remove connB from the pool — now only connA remains.
-  poolsDb.updatePool(pool.id, { connectionIds: [idA] });
+  await poolsDb.updatePool(pool.id, { connectionIds: [idA] });
 
   // Drain the fire-and-forget from updatePool so it cannot overwrite the
   // 1-step result that the following explicit sync will produce.

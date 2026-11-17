@@ -5,21 +5,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), "omni-cache-binding-14484-"));
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
-const { updateDatabaseSettings, getUserDatabaseSettings } =
-  await import("../../src/lib/db/databaseSettings.ts");
+const { getDatabaseSettingsSection } = await import("../../src/lib/db/databaseSettingsSections.ts");
+const { setConfigValue } = await import("../../src/lib/db/configEntries.ts");
+const { encryptCacheValue } = await import("../../src/lib/db/cacheSecrets.ts");
+const { ensureSemanticCacheDbBridge, refreshSemanticCacheDbBridge } =
+  await import("../../src/lib/cache/semanticCacheDbBridge.ts");
 const { PUT } = await import("../../src/app/api/settings/cache-config/route.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 test.after(() => resetDbInstance());
 
+/** Writes cache settings the way the cache-config route does, then refreshes the resolver snapshot. */
+async function setCacheSettings(cache: Record<string, unknown>) {
+  await ensureSemanticCacheDbBridge();
+  for (const [key, value] of Object.entries(cache)) {
+    await setConfigValue("databaseSettings", `cache.${key}`, encryptCacheValue(key, value));
+  }
+  await refreshSemanticCacheDbBridge();
+}
+
 for (const key of [undefined, "********"]) {
   test(`changing provider cannot transfer the previous explicit key (${key ?? "omitted"})`, async () => {
-    updateDatabaseSettings({
-      cache: {
-        semanticCacheEmbeddingProvider: "fixture-provider-a",
-        semanticCacheEmbeddingBaseUrl: "",
-        semanticCacheEmbeddingApiKey: "fixture-only-key-a",
-      },
+    await setCacheSettings({
+      semanticCacheEmbeddingProvider: "fixture-provider-a",
+      semanticCacheEmbeddingBaseUrl: "",
+      semanticCacheEmbeddingApiKey: "fixture-only-key-a",
     });
     const response = await PUT(
       new Request("http://localhost/api/settings/cache-config", {
@@ -33,7 +42,7 @@ for (const key of [undefined, "********"]) {
     );
     assert.equal(response.status, 400);
     assert.equal(
-      getUserDatabaseSettings().cache.semanticCacheEmbeddingProvider,
+      (await getDatabaseSettingsSection("cache")).semanticCacheEmbeddingProvider,
       "fixture-provider-a"
     );
   });

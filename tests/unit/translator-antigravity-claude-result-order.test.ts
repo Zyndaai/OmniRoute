@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openaiToAntigravityRequest } from "../../open-sse/translator/request/openai-to-gemini.ts";
 
 for (const model of ["claude-opus-5-5-high", "claude-sonnet-5-5-high", "gemini-4-argon"]) {
-  test(`${model}: merged tool response and follow-up retain model-specific order`, () => {
+  test(`${model}: merged tool response and follow-up retain model-specific order`, async () => {
     const body = {
       messages: [
         { role: "user", content: "Run check" },
@@ -19,7 +19,9 @@ for (const model of ["claude-opus-5-5-high", "claude-sonnet-5-5-high", "gemini-4
         { role: "user", content: "More context" },
       ],
     };
-    const result = openaiToAntigravityRequest(model, body, false, { projectId: "test-project" });
+    const result = await openaiToAntigravityRequest(model, body, false, {
+      projectId: "test-project",
+    });
     const contents = result.request.contents;
     assert.deepEqual(
       contents.map((c) => c.role),

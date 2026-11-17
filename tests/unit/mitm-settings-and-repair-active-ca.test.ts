@@ -58,8 +58,8 @@ async function withFlag<T>(flag: string | undefined, fn: () => Promise<T>): Prom
   }
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(certDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -180,7 +180,7 @@ test("settings/mitm regenerate: legacy-leaf install still re-mints server.crt/se
 test("repair plan: root-CA model untrusts ca.crt (and the leftover legacy leaf)", async () => {
   writeCertFiles({ ca: true, leaf: true });
   await withFlag(undefined, async () => {
-    const plan = repair.buildRepairPlan();
+    const plan = await repair.buildRepairPlan();
     assert.equal(plan.removeCert, true);
     assert.ok(
       plan.certPathsToUntrust.includes(caCrt),
@@ -194,20 +194,20 @@ test("repair plan: root-CA model untrusts ca.crt (and the leftover legacy leaf)"
 test("repair plan: root-CA model with only ca.crt untrusts exactly ca.crt", async () => {
   writeCertFiles({ ca: true });
   await withFlag(undefined, async () => {
-    assert.deepEqual(repair.buildRepairPlan().certPathsToUntrust, [caCrt]);
+    assert.deepEqual((await repair.buildRepairPlan()).certPathsToUntrust, [caCrt]);
   });
 });
 
 test("repair plan: legacy-leaf install untrusts exactly server.crt (unchanged)", async () => {
   writeCertFiles({ leaf: true });
   await withFlag(undefined, async () => {
-    assert.deepEqual(repair.buildRepairPlan().certPathsToUntrust, [serverCrt]);
+    assert.deepEqual((await repair.buildRepairPlan()).certPathsToUntrust, [serverCrt]);
   });
 });
 
 test("repair plan: nothing on disk means nothing to untrust", async () => {
   writeCertFiles({});
   await withFlag(undefined, async () => {
-    assert.deepEqual(repair.buildRepairPlan().certPathsToUntrust, []);
+    assert.deepEqual((await repair.buildRepairPlan()).certPathsToUntrust, []);
   });
 });

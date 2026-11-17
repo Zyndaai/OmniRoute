@@ -1,28 +1,17 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { resetTestDb } from "../../helpers/postgres.ts";
 
-const tmpDir = mkdtempSync(join(tmpdir(), "omniroute-rt-"));
-process.env.DATA_DIR = tmpDir;
-
-const core = await import("../../../src/lib/db/core.ts");
-core.resetDbInstance();
-const {
-  insertCompressionRunTelemetryRow,
-  getCompressionRunTelemetrySummary,
-} = await import("../../../src/lib/db/compressionRunTelemetry.ts");
-const { getDbInstance } = core;
+const { insertCompressionRunTelemetryRow, getCompressionRunTelemetrySummary } =
+  await import("../../../src/lib/db/compressionRunTelemetry.ts");
 
 describe("compressionRunTelemetry", () => {
-  beforeEach(() => {
-    const db = getDbInstance();
-    db.exec("DROP TABLE IF EXISTS compression_run_telemetry");
+  beforeEach(async () => {
+    await resetTestDb();
   });
 
-  it("persists a run record and summarizes savings + applied styles", () => {
-    insertCompressionRunTelemetryRow({
+  it("persists a run record and summarizes savings + applied styles", async () => {
+    await insertCompressionRunTelemetryRow({
       requestId: "req-1",
       model: "gpt-4o",
       provider: "openai",
@@ -33,7 +22,7 @@ describe("compressionRunTelemetry", () => {
       outputStyles: [{ id: "terse-prose", level: "full" }],
       outputTokens: 320,
     });
-    insertCompressionRunTelemetryRow({
+    await insertCompressionRunTelemetryRow({
       requestId: "req-2",
       model: "gpt-4o",
       provider: "openai",
@@ -44,7 +33,7 @@ describe("compressionRunTelemetry", () => {
       outputStyleBypass: "security_warning",
     });
 
-    const summary = getCompressionRunTelemetrySummary();
+    const summary = await getCompressionRunTelemetrySummary();
     assert.equal(summary.totalRuns, 2);
     assert.equal(summary.totalTokensSaved, 300); // (1000-700) + (500-500)
     assert.equal(summary.runsWithStyles, 1);
@@ -52,8 +41,8 @@ describe("compressionRunTelemetry", () => {
     assert.deepEqual(summary.appliedStyleCounts, { "terse-prose": 1 });
   });
 
-  it("never throws on a malformed row; outputStyles is optional", () => {
-    assert.doesNotThrow(() =>
+  it("never throws on a malformed row; outputStyles is optional", async () => {
+    await assert.doesNotReject(() =>
       insertCompressionRunTelemetryRow({
         requestId: "req-3",
         model: "m",
@@ -64,6 +53,6 @@ describe("compressionRunTelemetry", () => {
         ratio: 0,
       })
     );
-    assert.equal(getCompressionRunTelemetrySummary().totalRuns, 1);
+    assert.equal((await getCompressionRunTelemetrySummary()).totalRuns, 1);
   });
 });

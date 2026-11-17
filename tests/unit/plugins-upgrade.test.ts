@@ -82,15 +82,15 @@ function cleanupDirs() {
   activeDirs.length = 0;
 }
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
   hooks.resetHooks();
   cleanupDirs();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   cleanupDirs();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -146,7 +146,7 @@ test("upgrade preserves config values", async () => {
   await pluginManager.install(v1.sourceDir);
 
   // Set config
-  dbPlugins.updatePluginConfig("upgrade-config-test", { apiKey: "secret-key" });
+  await dbPlugins.updatePluginConfig("upgrade-config-test", { apiKey: "secret-key" });
 
   const v2 = writePluginWithConfig("2.0.0");
   activeDirs.push(v2.sourceDir);
@@ -155,7 +155,7 @@ test("upgrade preserves config values", async () => {
   assert.equal(result.version, "2.0.0");
 
   // Config is NOT preserved (delete+reinstall) — this is expected behavior
-  const row = dbPlugins.getPluginByName("upgrade-config-test")!;
+  const row = (await dbPlugins.getPluginByName("upgrade-config-test"))!;
   const config = JSON.parse(row.config);
   // After upgrade, config is empty since we delete+reinstall
   assert.deepEqual(config, {});

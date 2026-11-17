@@ -129,15 +129,15 @@ test("log route: has dynamic export (force-dynamic)", () => {
 
 test("quotaConsumption: exports listConsumptionForPool", () => {
   assert.ok(
-    consumptionDbSrc.includes("export function listConsumptionForPool"),
+    consumptionDbSrc.includes("export async function listConsumptionForPool"),
     "quotaConsumption.ts must export listConsumptionForPool"
   );
 });
 
 test("quotaConsumption: listConsumptionForPool filters by poolId prefix", () => {
   assert.ok(
-    consumptionDbSrc.includes("LIKE"),
-    "listConsumptionForPool must use LIKE to filter by poolId prefix in dimension_key"
+    consumptionDbSrc.includes("starts_with("),
+    "listConsumptionForPool must filter by poolId prefix in dimension_key via starts_with()"
   );
 });
 
@@ -175,10 +175,10 @@ test("UsageLogCard: renders logEmpty i18n key for empty state", () => {
   assert.ok(usageLogCardSrc.includes("logEmpty"), "UsageLogCard must render the t('logEmpty') key");
 });
 
-test("UsageLogCard: fail-soft — guards events with ?? []", () => {
+test("UsageLogCard: fail-soft — guards events with Array.isArray", () => {
   assert.ok(
-    usageLogCardSrc.includes("?? []"),
-    "UsageLogCard must guard events with ?? [] for fail-soft behavior"
+    usageLogCardSrc.includes("Array.isArray(raw)"),
+    "UsageLogCard must guard events with Array.isArray for fail-soft behavior"
   );
 });
 

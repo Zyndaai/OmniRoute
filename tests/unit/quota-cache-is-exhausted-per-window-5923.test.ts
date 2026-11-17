@@ -24,21 +24,41 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const coreDb = await import("../../src/lib/db/core.ts");
 const quotaSnapshotsDb = await import("../../src/lib/db/quotaSnapshots.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#5923 setQuotaCache writes is_exhausted per-window, not the connection-wide AND aggregate", () => {
+/** setQuotaCache persists snapshots fire-and-forget; poll until both window rows exist. */
+async function waitForSnapshots(connectionId: string) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const rows = await quotaSnapshotsDb.getLatestQuotaSnapshotsForConnection(connectionId);
+    const keys = rows.map((s: any) => s.windowKey ?? s.window_key);
+    if ((keys.includes("session") && keys.includes("weekly")) || Date.now() > deadline) {
+      return rows;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+test("#5923 setQuotaCache writes is_exhausted per-window, not the connection-wide AND aggregate", async () => {
   const connectionId = "conn-per-window-5923";
+  // quota_snapshots references provider_connections; a missing connection makes the
+  // persisted rows get dropped as a foreign-key violation, so seed the connection first.
+  await getTestBackend().execute(
+    "INSERT INTO provider_connections (id, provider) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+    [connectionId, "anthropic"]
+  );
 
   quotaCache.setQuotaCache(connectionId, "anthropic", {
     session: { remainingPercentage: 0, resetAt: null },
     weekly: { remainingPercentage: 50, resetAt: null },
   });
 
-  const snapshots = quotaSnapshotsDb.getLatestQuotaSnapshotsForConnection(connectionId);
+  const snapshots = await waitForSnapshots(connectionId);
 
   const sessionRow = snapshots.find((s: any) => (s.windowKey ?? s.window_key) === "session");
   const weeklyRow = snapshots.find((s: any) => (s.windowKey ?? s.window_key) === "weekly");

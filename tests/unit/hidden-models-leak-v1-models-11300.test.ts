@@ -31,6 +31,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 // which answers 503 catalog_build_timeout instead of the catalog under test.
 process.env.CATALOG_BUILD_TIMEOUT_MS = process.env.CATALOG_BUILD_TIMEOUT_MS || "120000";
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
@@ -38,7 +39,7 @@ const { mergeModelCompatOverride } = await import("@/lib/db/models");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   v1ModelsCatalog.__resetCatalogBuilderRunsForTest();
@@ -49,7 +50,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -83,7 +84,7 @@ test("#11300 A: hiding a static model under its ALIAS (cc) excludes it under bot
 
   // Operator hides the model on the provider page, whose route param is the
   // alias "cc" (not the canonical "claude").
-  mergeModelCompatOverride("cc", "claude-opus-5", { isHidden: true });
+  await mergeModelCompatOverride("cc", "claude-opus-5", { isHidden: true });
 
   ids = await fetchCatalogIds();
   assert.ok(
@@ -117,7 +118,7 @@ test('#11300 B: hiding a codex-native unprefixed model under "openai" excludes t
 
   // Hidden via the "openai" provider page (codex native models are commonly
   // reached through the shared openai-compatible connection).
-  mergeModelCompatOverride("openai", nativeModelId, { isHidden: true });
+  await mergeModelCompatOverride("openai", nativeModelId, { isHidden: true });
 
   ids = await fetchCatalogIds();
   assert.ok(
@@ -168,7 +169,7 @@ test("#11300 C: hiding a compatible-node synced model under its configured PREFI
 
   // Operator hides the model via the node's page, which is keyed by the
   // configured prefix rather than the internal node UUID.
-  mergeModelCompatOverride(PREFIX, modelId, { isHidden: true });
+  await mergeModelCompatOverride(PREFIX, modelId, { isHidden: true });
 
   ids = await fetchCatalogIds();
   assert.ok(

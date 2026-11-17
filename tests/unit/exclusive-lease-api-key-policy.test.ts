@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-lease-key-policy-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "exclusive-lease-key-policy-test-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../src/lib/db/core.ts");
 const apiKeys = await import("../../src/lib/db/apiKeys.ts");
@@ -15,15 +15,15 @@ const keysRoute = await import("../../src/app/api/keys/[id]/route.ts");
 const CONNECTION = "00000000-0000-4000-8000-000000000001";
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(resetStorage);
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   apiKeys.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -36,12 +36,14 @@ test("managed API key create requires and atomically stores an explicit allowlis
   const created = await apiKeys.createApiKey("valid managed", "test", ["lease:exclusive"], {
     allowedConnections: [CONNECTION],
   });
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT scopes, allowed_connections FROM api_keys WHERE id = ?")
-    .get(created.id) as { scopes: string; allowed_connections: string };
-  assert.deepEqual(JSON.parse(row.scopes), ["lease:exclusive"]);
-  assert.deepEqual(JSON.parse(row.allowed_connections), [CONNECTION]);
+  const row = await getTestBackend().queryOne<{ scopes: string[]; allowed_connections: string[] }>(
+    "SELECT scopes, allowed_connections FROM api_keys WHERE id = $1",
+    [created.id]
+  );
+  assert.ok(row, "created key row should exist");
+  // jsonb columns come back as parsed values.
+  assert.deepEqual(row.scopes, ["lease:exclusive"]);
+  assert.deepEqual(row.allowed_connections, [CONNECTION]);
 });
 
 test("partial domain mutations enforce the stored-row plus requested-policy invariant", async () => {
@@ -69,18 +71,18 @@ test("partial domain mutations enforce the stored-row plus requested-policy inva
 
 test("unrelated permission updates retain the ordinary non-transactional path", async () => {
   const ordinary = await apiKeys.createApiKey("ordinary update", "test");
-  const db = core.getDbInstance();
-  const originalExec = db.exec.bind(db);
-  let beginImmediateCalls = 0;
-  db.exec = ((sql: string) => {
-    if (sql === "BEGIN IMMEDIATE") beginImmediateCalls += 1;
-    return originalExec(sql);
-  }) as typeof db.exec;
+  const backend = getTestBackend();
+  const originalTransaction = backend.transaction.bind(backend);
+  let transactionCalls = 0;
+  backend.transaction = ((fn: Parameters<typeof backend.transaction>[0]) => {
+    transactionCalls += 1;
+    return originalTransaction(fn);
+  }) as typeof backend.transaction;
   try {
     assert.equal(await apiKeys.updateApiKeyPermissions(ordinary.id, { name: "renamed" }), true);
-    assert.equal(beginImmediateCalls, 0);
+    assert.equal(transactionCalls, 0);
   } finally {
-    db.exec = originalExec;
+    backend.transaction = originalTransaction;
   }
 });
 

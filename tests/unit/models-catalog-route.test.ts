@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-model-catalog-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "catalog-test-secret";
 process.env.CATALOG_BUILD_TIMEOUT_MS = process.env.CATALOG_BUILD_TIMEOUT_MS || "120000"; // #12627 bound flakes a cold tsx build; 12627-catalog-inflight-timeout owns it
 
-const core = await import("../../src/lib/db/core.ts");
+const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
@@ -22,8 +23,26 @@ const contextWindowResolver = await import("../../src/lib/contextWindowResolver.
 const syncedPersistence =
   await import("../../src/lib/db/models/syncedAvailableModelPersistence.ts");
 
+// Fails every read of the provider model catalog snapshot with `error`. Custom models, compat
+// overrides and provider aliases share that one bulk read. Returns the restore function.
+function failCatalogSnapshotReads(error: Error): () => void {
+  const backend = getTestBackend() as unknown as {
+    query: (sql: string, ...rest: unknown[]) => Promise<unknown>;
+  };
+  const originalQuery = backend.query;
+  const catalogSnapshotSql =
+    "SELECT provider, custom_models, compat_overrides, provider_aliases FROM provider_model_catalog ORDER BY provider";
+  backend.query = function (sql: string, ...rest: unknown[]) {
+    if (String(sql) === catalogSnapshotSql) return Promise.reject(error);
+    return originalQuery.call(backend, sql, ...rest);
+  };
+  return () => {
+    backend.query = originalQuery;
+  };
+}
+
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -75,7 +94,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -187,7 +206,7 @@ test("v1 models catalog includes display names by default", async () => {
 });
 
 test("v1 models catalog omits display names when the feature flag is disabled", async () => {
-  featureFlagsDb.setFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
+  await featureFlagsDb.setFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES", "false");
 
   try {
     const response = await v1ModelsCatalog.getUnifiedModelsResponse(
@@ -201,7 +220,7 @@ test("v1 models catalog omits display names when the feature flag is disabled", 
     assert.equal("name" in model, false);
     assert.equal(model.root, "turboderp/Qwen3.8-27B-exl3");
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES");
+    await featureFlagsDb.removeFeatureFlagOverride("MODEL_CATALOG_INCLUDE_NAMES");
   }
 });
 
@@ -268,7 +287,7 @@ test("v1 models catalog includes combos and custom models while excluding hidden
     accessToken: "kiro-access",
   });
 
-  modelsDb.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openai", "gpt-4o-mini", { isHidden: true });
   await modelsDb.addCustomModel("kiro", "custom-kiro", "Custom Kiro");
   await combosDb.createCombo({
     name: "team-router",
@@ -338,7 +357,7 @@ test("v1 models catalog keeps only visible combos when no providers are active",
 
 test("v1 models catalog derives combo metadata from known targets conservatively", async () => {
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       openai: {
         "combo-alpha": capability({
           tool_call: true,
@@ -399,13 +418,13 @@ test("v1 models catalog derives combo metadata from known targets conservatively
     assert.equal("top_provider" in combo, false);
     assert.equal("supported_parameters" in combo, false);
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
 test("v1 models catalog lets explicit combo context override derived context", async () => {
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       openai: {
         "context-alpha": capability({
           modalities_input: JSON.stringify(["text"]),
@@ -444,7 +463,7 @@ test("v1 models catalog lets explicit combo context override derived context", a
     assert.equal(listed.max_input_tokens, 700);
     assert.equal(listed.max_output_tokens, 90);
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
@@ -473,7 +492,7 @@ test("v1 models catalog keeps unknown combo targets visible without guessed meta
 
 test("v1 models catalog aggregates nested combos and keeps hidden child combos unlisted", async () => {
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       openai: {
         "nested-alpha": capability({
           modalities_input: JSON.stringify(["text"]),
@@ -521,13 +540,13 @@ test("v1 models catalog aggregates nested combos and keeps hidden child combos u
       false
     );
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
 test("v1 models catalog resolves provider aliases without corrupting slashful model ids", async () => {
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       claude: {
         "alias-model": capability({
           modalities_input: JSON.stringify(["text"]),
@@ -569,7 +588,7 @@ test("v1 models catalog resolves provider aliases without corrupting slashful mo
     assert.equal(combo.max_input_tokens, 1500);
     assert.equal(combo.max_output_tokens, 150);
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
@@ -786,7 +805,7 @@ test("v1 models catalog includes synced Gemini models and duplicates audio model
       },
     ]
   );
-  modelsDb.mergeModelCompatOverride("gemini", "gemini-hidden", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("gemini", "gemini-hidden", { isHidden: true });
 
   const response = await v1ModelsCatalog.getUnifiedModelsResponse(
     new Request("http://localhost/api/v1/models")
@@ -939,7 +958,7 @@ test("v1 models catalog preserves GLM-5.2 limits alongside GitHub Copilot Astra"
     },
   ]);
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       huggingface: {
         "zai-org/GLM-5.2": capability({ limit_context: 128000, limit_input: 128000 }),
       },
@@ -979,7 +998,7 @@ test("v1 models catalog preserves GLM-5.2 limits alongside GitHub Copilot Astra"
       assert.equal(model.max_input_tokens, expectedContext, id);
     }
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
@@ -1124,39 +1143,6 @@ test("v1 models catalog exposes image model input and output modalities for adva
   assert.deepEqual((byId.get("topaz/topaz-enhance") as any).output_modalities, ["image"]);
 });
 
-test("v1 models catalog tolerates custom model lookup failures and keeps builtin models available", async () => {
-  await seedConnection("openai", { name: "openai-custom-failure" });
-
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-  const originalLog = console.log;
-  const logs = [];
-
-  db.prepare = (sql) => {
-    if (String(sql) === "SELECT key, value FROM key_value WHERE namespace = 'customModels'") {
-      throw new Error("custom models offline");
-    }
-    return originalPrepare(sql);
-  };
-  console.log = (...args) => {
-    logs.push(args.map((arg) => String(arg)).join(" "));
-  };
-
-  try {
-    const response = await v1ModelsCatalog.getUnifiedModelsResponse(
-      new Request("http://localhost/api/v1/models")
-    );
-    const body = (await response.json()) as any;
-
-    assert.equal(response.status, 200);
-    assert.ok(body.data.some((item) => item.id === "openai/gpt-4o-2024-11-20"));
-    assert.ok(logs.some((entry) => entry.includes("Could not fetch custom models")));
-  } finally {
-    db.prepare = originalPrepare;
-    console.log = originalLog;
-  }
-});
-
 test("v1 models catalog exposes provider-prefixed custom models, filters by raw model permissions, and skips hidden or Gemini custom rows", async () => {
   await seedConnection("cline", {
     authType: "oauth",
@@ -1174,28 +1160,33 @@ test("v1 models catalog exposes provider-prefixed custom models, filters by raw 
   });
   await modelsDb.addCustomModel("gemini", "gemini-custom-only", "Gemini Custom");
 
-  const db = core.getDbInstance();
-  db.prepare("UPDATE key_value SET value = ? WHERE namespace = 'customModels' AND key = ?").run(
-    JSON.stringify([
-      {
-        id: "demo-custom",
-        name: "Demo Custom",
-        apiFormat: "responses",
-        supportedEndpoints: ["images"],
-        inputTokenLimit: 1234,
-      },
-      {
-        id: "hidden-custom",
-        name: "Hidden Custom",
-        isHidden: true,
-      },
-      {
-        name: "Missing Id",
-      },
-      null,
-    ]),
-    "cline"
+  // Raw rows that the domain writers would not produce (a hidden row, an id-less row and a null
+  // entry), so the catalog's tolerance for them is exercised directly.
+  await getTestBackend().execute(
+    "UPDATE provider_model_catalog SET custom_models = $2::jsonb WHERE provider = $1",
+    [
+      "cline",
+      JSON.stringify([
+        {
+          id: "demo-custom",
+          name: "Demo Custom",
+          apiFormat: "responses",
+          supportedEndpoints: ["images"],
+          inputTokenLimit: 1234,
+        },
+        {
+          id: "hidden-custom",
+          name: "Hidden Custom",
+          isHidden: true,
+        },
+        {
+          name: "Missing Id",
+        },
+        null,
+      ]),
+    ]
   );
+  invalidateDbCache("model-capabilities");
 
   const key = await apiKeysDb.createApiKey("catalog-root-filter", "machine-root-filter");
   await apiKeysDb.updateApiKeyPermissions(key.id, {
@@ -1228,7 +1219,7 @@ test("v1 models catalog uses synced models.dev limits instead of provider defaul
   await seedConnection("openai", { name: "openai-models-dev" });
 
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       openai: {
         "gpt-5.5": {
           tool_call: true,
@@ -1264,7 +1255,7 @@ test("v1 models catalog uses synced models.dev limits instead of provider defaul
     assert.equal(model.max_input_tokens, 1050000);
     assert.equal(model.max_output_tokens, 128000);
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
@@ -1301,7 +1292,7 @@ test("v1 models catalog lets provider-specific synced limits beat global static 
   });
 
   try {
-    modelsDevSync.saveModelsDevCapabilities({
+    await modelsDevSync.saveModelsDevCapabilities({
       github: {
         "gpt-5.6-sol": {
           tool_call: true,
@@ -1337,44 +1328,19 @@ test("v1 models catalog lets provider-specific synced limits beat global static 
     assert.equal(model.max_input_tokens, 400000);
     assert.equal(model.max_output_tokens, 128000);
   } finally {
-    modelsDevSync.saveModelsDevCapabilities({});
+    await modelsDevSync.saveModelsDevCapabilities({});
   }
 });
 
 test("v1 models catalog returns 500 when model compatibility lookup crashes", async () => {
   await seedConnection("openai", { name: "openai-compat-crash" });
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
   const originalLog = console.log;
   const logs = [];
 
-  db.prepare = (sql) => {
-    const statement = originalPrepare(sql);
-    // #9147: the catalog builder now resolves hidden models via a single bulk
-    // read (`getHiddenModelsByProvider()`, src/lib/db/models.ts) instead of the
-    // old per-provider `SELECT value FROM key_value WHERE namespace = ? AND
-    // key = ?` / readCompatList() lookup — intercept the bulk query's `.all()`
-    // call so this test still exercises "DB read for model visibility crashes
-    // -> catalog endpoint surfaces 500" against the current implementation.
-    if (
-      String(sql) !==
-      "SELECT namespace, key, value FROM key_value WHERE namespace IN ('modelCompatOverrides', 'customModels')"
-    ) {
-      return statement;
-    }
-
-    return new Proxy(statement, {
-      get(target, prop, receiver) {
-        if (prop === "all") {
-          return (...args) => {
-            throw new Error("compat lookup boom");
-          };
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    });
-  };
+  // The compat overrides are read from the same provider model catalog snapshot as the custom
+  // models, so a failing read of that snapshot is the "model visibility lookup crashes" case.
+  const restoreCatalogReads = failCatalogSnapshotReads(new Error("compat lookup boom"));
   console.log = (...args) => {
     logs.push(args.map((arg) => String(arg)).join(" "));
   };
@@ -1390,7 +1356,7 @@ test("v1 models catalog returns 500 when model compatibility lookup crashes", as
     assert.match(body.error.message, /compat lookup boom/i);
     assert.ok(logs.some((entry) => entry.includes("Error fetching models:")));
   } finally {
-    db.prepare = originalPrepare;
+    restoreCatalogReads();
     console.log = originalLog;
   }
 });
@@ -1448,7 +1414,7 @@ test("v1 models catalog adds managed fallback models for Claude-compatible provi
       modelsPath: "/v1/models",
     },
   });
-  modelsDb.mergeModelCompatOverride("anthropic-compatible-cc-demo", "claude-sonnet-4-6", {
+  await modelsDb.mergeModelCompatOverride("anthropic-compatible-cc-demo", "claude-sonnet-4-6", {
     isHidden: true,
   });
 

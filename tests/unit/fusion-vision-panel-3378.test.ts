@@ -77,19 +77,19 @@ const imageRequestBody = {
   ],
 };
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   resetAllSemaphores();
-  clearModelsDevCapabilities();
+  await clearModelsDevCapabilities();
 });
 
-test.after(() => {
+test.after(async () => {
   resetAllComboMetrics();
   resetAllCircuitBreakers();
   resetAllSemaphores();
-  clearModelsDevCapabilities();
-  core.resetDbInstance();
+  await clearModelsDevCapabilities();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
@@ -107,7 +107,7 @@ test(
     // resolves supportsVision to something other than `true`, exactly like the
     // "unknown id silently treated as no vision" failure mode from the upstream
     // report.
-    saveModelsDevCapabilities({
+    await saveModelsDevCapabilities({
       openai: {
         "fusion-vision-a": capabilityEntry({ attachment: true }),
       },

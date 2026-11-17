@@ -24,7 +24,7 @@ process.env.API_KEY_SECRET = "relay-mint-operator-api-key-secret";
 process.env.JWT_SECRET = "relay-mint-operator-jwt-secret";
 process.env.INITIAL_PASSWORD = "relay-mint-operator-password";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const relayDb = await import("../../src/lib/db/relayProxies.ts");
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
@@ -36,7 +36,6 @@ const manageKey = await apiKeysDb.createApiKey("manage-automation", "machine-rel
 
 test.after(() => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
     if (value === undefined) delete process.env[key];
@@ -75,7 +74,7 @@ for (const requireLogin of [true, false]) {
       assert.ok(!text.includes("rawToken"), "a denied mint must not return a token");
       assert.ok(!text.includes("at /"), "403 body must not leak a stack trace");
       assert.equal(
-        relayDb.getRelayTokens().some((t) => t.name === name),
+        (await relayDb.getRelayTokens()).some((t) => t.name === name),
         false,
         "a denied mint must not persist a token"
       );
@@ -123,13 +122,13 @@ test("minting with a malformed JSON body answers 400 without echoing the parser 
 
 test("an unexpected failure while minting answers 500 with a sanitized message", async (t) => {
   const secret = "sk-live-0123456789abcdefghijklmnopqrstuvwxyz";
-  const db = core.getDbInstance();
-  const original = db.prepare.bind(db);
-  t.mock.method(db, "prepare", (sql: string) => {
+  const backend = getTestBackend();
+  const originalQueryOne = backend.queryOne.bind(backend);
+  t.mock.method(backend, "queryOne", (sql: string, params?: unknown[]) => {
     if (/INSERT INTO relay_tokens/i.test(sql)) {
       throw new Error(`disk failure while writing ${secret} at /srv/omniroute/db.sqlite`);
     }
-    return original(sql);
+    return originalQueryOne(sql, params);
   });
   const response = await collection.POST(
     await makeManagementSessionRequest(URL_, { method: "POST", body: { name: "boom" } })

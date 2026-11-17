@@ -27,14 +27,15 @@ const rerankRoute = await import("../../src/app/api/v1/rerank/route.ts");
 const speechRoute = await import("../../src/app/api/v1/audio/speech/route.ts");
 const imageRoute = await import("../../src/app/api/v1/images/generations/route.ts");
 
+const { resetTestDb } = await import("../helpers/postgres.ts");
+
 const originalFetch = globalThis.fetch;
 
 async function resetStorage() {
   await waitForCallLogSaves(10_000);
   globalThis.fetch = originalFetch;
-  costRules.resetCostData();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -47,7 +48,7 @@ test.after(async () => {
   await waitForCallLogSaves(10_000);
   globalThis.fetch = originalFetch;
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -66,7 +67,7 @@ async function seedConnection(provider: string) {
 async function keyWithDailyBudget(limitUsd: number) {
   const created = await apiKeysDb.createApiKey("Budgeted media key", "machine-budget-modal");
   apiKeysDb.clearApiKeyCaches();
-  costRules.setBudget(created.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
+  await costRules.setBudget(created.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
   return created;
 }
 
@@ -78,8 +79,8 @@ function post(url: string, key: string, body: unknown) {
   });
 }
 
-function spent(apiKeyId: string): number {
-  return Number(costRules.checkBudget(apiKeyId).periodUsed) || 0;
+async function spent(apiKeyId: string): Promise<number> {
+  return Number((await costRules.checkBudget(apiKeyId)).periodUsed) || 0;
 }
 
 test("rerank: a priced call charges the key's dollar budget", async () => {
@@ -106,7 +107,8 @@ test("rerank: a priced call charges the key's dollar budget", async () => {
     })
   );
   assert.equal(response.status, 200, await response.clone().text());
-  assert.ok(Math.abs(spent(key.id) - 1.5) < 1e-9, `expected $1.5 charged, got ${spent(key.id)}`);
+  const charged = await spent(key.id);
+  assert.ok(Math.abs(charged - 1.5) < 1e-9, `expected $1.5 charged, got ${charged}`);
 });
 
 test("audio speech: a priced call charges the key's dollar budget", async () => {
@@ -132,7 +134,8 @@ test("audio speech: a priced call charges the key's dollar budget", async () => 
     {}
   );
   assert.equal(response.status, 200, await response.clone().text());
-  assert.ok(Math.abs(spent(key.id) - 1) < 1e-9, `expected $1 charged, got ${spent(key.id)}`);
+  const charged = await spent(key.id);
+  assert.ok(Math.abs(charged - 1) < 1e-9, `expected $1 charged, got ${charged}`);
 });
 
 test("image generation: a priced call charges the key's dollar budget per delivered image", async () => {
@@ -157,7 +160,8 @@ test("image generation: a priced call charges the key's dollar budget per delive
     })
   );
   assert.equal(response.status, 200, await response.clone().text());
-  assert.ok(Math.abs(spent(key.id) - 0.5) < 1e-9, `expected $0.5 charged, got ${spent(key.id)}`);
+  const charged = await spent(key.id);
+  assert.ok(Math.abs(charged - 0.5) < 1e-9, `expected $0.5 charged, got ${charged}`);
 });
 
 test("video/music responses charge the budget of the key they were made for", async () => {
@@ -175,7 +179,8 @@ test("video/music responses charge the budget of the key they were made for", as
     apiKeyId: key.id,
   });
   assert.equal(response.status, 200);
-  assert.ok(Math.abs(spent(key.id) - 0.4) < 1e-9, `expected $0.4 charged, got ${spent(key.id)}`);
+  const charged = await spent(key.id);
+  assert.ok(Math.abs(charged - 0.4) < 1e-9, `expected $0.4 charged, got ${charged}`);
 });
 
 test("recordModalCallCost: flat-rate providers, zero costs and keyless calls charge nothing", async () => {
@@ -183,7 +188,7 @@ test("recordModalCallCost: flat-rate providers, zero costs and keyless calls cha
   costRules.recordModalCallCost(key.id, { provider: "opencode-go", model: "m", costUsd: 3 });
   costRules.recordModalCallCost(key.id, { provider: "openai", model: "m", costUsd: 0 });
   costRules.recordModalCallCost(null, { provider: "openai", model: "m", costUsd: 3 });
-  assert.equal(spent(key.id), 0);
+  assert.equal(await spent(key.id), 0);
   costRules.recordModalCallCost(key.id, { provider: "openai", model: "m", costUsd: 0.75 });
-  assert.ok(Math.abs(spent(key.id) - 0.75) < 1e-9);
+  assert.ok(Math.abs((await spent(key.id)) - 0.75) < 1e-9);
 });

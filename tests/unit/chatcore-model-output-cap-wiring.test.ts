@@ -13,6 +13,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const overridesDb = await import("../../src/lib/db/modelCapabilityOverrides.ts");
 const featureFlagsDb = await import("../../src/lib/db/featureFlags.ts");
+const { refreshFeatureFlagSnapshot } = await import("../../src/shared/utils/featureFlags.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
 
 const PROVIDER = "capwire-testprov";
@@ -50,14 +51,22 @@ function buildRequest(maxTokens: number, content = "hello") {
   };
 }
 
-test.before(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await core.resetDbInstance();
   assert.equal(
-    overridesDb.setModelCapabilityOverride(`${PROVIDER}/${MODEL}`, "max_output_tokens", OUTPUT_CAP),
+    await overridesDb.setModelCapabilityOverride(
+      `${PROVIDER}/${MODEL}`,
+      "max_output_tokens",
+      OUTPUT_CAP
+    ),
     true
   );
   assert.equal(
-    overridesDb.setModelCapabilityOverride(`${PROVIDER}/${MODEL}`, "max_input_tokens", INPUT_CAP),
+    await overridesDb.setModelCapabilityOverride(
+      `${PROVIDER}/${MODEL}`,
+      "max_input_tokens",
+      INPUT_CAP
+    ),
     true
   );
   globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -76,10 +85,10 @@ test.before(() => {
   };
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
-  core.resetDbInstance();
+  await featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -120,27 +129,31 @@ test("handleChatCore dispatches input within the model input cap", async () => {
 test("DISABLE_CONTEXT_WINDOW_CHECKS lets direct-model input exceed the declared input cap", async () => {
   dispatchedBody = null;
   fetchCalls = 0;
-  featureFlagsDb.setFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
+  await featureFlagsDb.setFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
+  await refreshFeatureFlagSnapshot();
   try {
     const result = await handleChatCore(buildRequest(1, "x".repeat(200)));
     assert.equal(result.success, true);
     assert.equal(fetchCalls, 1, "disabled context checks must let the upstream decide");
     assert.ok(dispatchedBody, "oversized input must reach the upstream when the flag is enabled");
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+    await featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+    await refreshFeatureFlagSnapshot();
   }
 });
 
 test("DISABLE_CONTEXT_WINDOW_CHECKS keeps the direct model output cap active", async () => {
   dispatchedBody = null;
   fetchCalls = 0;
-  featureFlagsDb.setFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
+  await featureFlagsDb.setFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS", "true");
+  await refreshFeatureFlagSnapshot();
   try {
     const result = await handleChatCore(buildRequest(REQUESTED_MAX_TOKENS, "x".repeat(200)));
     assert.equal(result.success, true);
     assert.equal(fetchCalls, 1);
     assert.equal(dispatchedBody?.max_tokens, OUTPUT_CAP);
   } finally {
-    featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+    await featureFlagsDb.removeFeatureFlagOverride("DISABLE_CONTEXT_WINDOW_CHECKS");
+    await refreshFeatureFlagSnapshot();
   }
 });

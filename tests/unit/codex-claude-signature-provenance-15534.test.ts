@@ -102,8 +102,8 @@ test("#15534: an unsigned thinking block from the codex leg is dropped by the Cl
   );
 });
 
-test("#15534: openai→claude request translation drops unsigned thinking and never fabricates a signature", () => {
-  const result = openaiToClaudeRequest(
+test("#15534: openai→claude request translation drops unsigned thinking and never fabricates a signature", async () => {
+  const result = await openaiToClaudeRequest(
     "claude-opus-5-5",
     {
       messages: [

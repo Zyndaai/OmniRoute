@@ -4,7 +4,13 @@ import {
   parseAndValidatePublicUrl,
 } from "@/shared/network/outboundUrlGuard";
 import { getProviderValidationGuard } from "@/shared/network/outboundUrlGuardPolicy";
-import { getGuardedDispatcher } from "../utils/connectGuardDispatcher.ts";
+import {
+  getGuardedDispatcher,
+  getGuardedRetryDispatcher,
+  isReplayableBody,
+  isStaleSocketError,
+  type ConnectGuardMode,
+} from "../utils/connectGuardDispatcher.ts";
 import {
   hasAmbientProxyContext,
   isDirectFetchContext,
@@ -91,5 +97,21 @@ export function dispatchGuarded(
   ) {
     return fetch(url, init);
   }
-  return fetch(url, { ...init, dispatcher: getGuardedDispatcher(guard) } as RequestInit);
+  return fetchGuarded(url, init, guard);
+}
+
+/** One retry on a fresh guarded socket when a pooled one turns out to be closed (#4252 policy). */
+async function fetchGuarded(
+  url: string,
+  init: RequestInit,
+  guard: ConnectGuardMode
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, dispatcher: getGuardedDispatcher(guard) } as RequestInit);
+  } catch (error) {
+    if (init.signal?.aborted || !isStaleSocketError(error) || !isReplayableBody(init.body)) {
+      throw error;
+    }
+    return fetch(url, { ...init, dispatcher: getGuardedRetryDispatcher(guard) } as RequestInit);
+  }
 }

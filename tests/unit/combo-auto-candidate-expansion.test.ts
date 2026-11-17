@@ -17,17 +17,18 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const combo = await import("../../open-sse/services/combo.ts");
 const providerModels = await import("../../open-sse/config/providerModels.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(() => resetStorage());
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -75,19 +76,19 @@ test("expandAutoComboCandidatePool ignores malformed custom rows while keeping c
   // customModels is persisted as operator-writable JSON. A malformed row must not
   // abort the whole expansion or cause the static catalogue to replace the
   // explicitly visible custom chat model.
-  core
-    .getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run(
-      "customModels",
+  await getTestBackend().execute(
+    `INSERT INTO provider_model_catalog (provider, custom_models) VALUES ($1, $2::jsonb)
+     ON CONFLICT (provider) DO UPDATE SET custom_models = EXCLUDED.custom_models`,
+    [
       "openai",
       JSON.stringify([
         null,
         "not-an-object",
         { name: "Missing Id" },
         { id: "gpt-custom", supportedEndpoints: ["chat"] },
-      ])
-    );
+      ]),
+    ]
+  );
 
   const expanded = await combo.expandAutoComboCandidatePool([], { config: {} });
 
@@ -99,12 +100,6 @@ test("expandAutoComboCandidatePool ignores malformed custom rows while keeping c
 });
 
 test("expandAutoComboCandidatePool excludes retired Qwen rows with synced models", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    DROP TRIGGER provider_connections_retire_qwen_web_insert;
-    DROP TRIGGER provider_connections_retire_qwen_web_update;
-  `);
-
   const qwenWeb = await providersDb.createProviderConnection({
     provider: "qwen-web",
     authType: "apikey",
@@ -148,11 +143,6 @@ test("expandAutoComboCandidatePool excludes retired Qwen rows with synced models
 });
 
 test("expandAutoComboCandidatePool includes clean-room ChatGPT Web and excludes its legacy alias", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_insert;
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_update;
-  `);
   for (const provider of ["chatgpt-web", "cgpt-web"]) {
     const model = provider === "chatgpt-web" ? "gpt-5-5-thinking" : "gpt-5.5";
     const credential =
@@ -173,11 +163,13 @@ test("expandAutoComboCandidatePool includes clean-room ChatGPT Web and excludes 
             origins: [],
           })
         : `sk-${provider}-restored-expansion`;
-    db.prepare(
-      "INSERT INTO provider_connections " +
-        "(id, provider, auth_type, name, api_key, is_active, test_status, created_at, updated_at) " +
-        "VALUES (?, ?, 'apikey', ?, ?, 1, 'active', datetime('now'), datetime('now'))"
-    ).run(`${provider}-restored-expansion`, provider, `${provider} restored expansion`, credential);
+    await providersDb.createProviderConnection({
+      provider,
+      authType: "apikey",
+      name: `${provider} restored expansion`,
+      apiKey: credential,
+      isActive: true,
+    });
     await modelsDb.addCustomModel(provider, model, `${provider} model fixture`);
   }
 
@@ -338,9 +330,6 @@ test("expandAutoComboCandidatePool does not duplicate an already-present modelSt
 
 test("expandAutoComboCandidatePool excludes trigger-bypassed Microsoft Designer providers", async () => {
   await core.ensureDbInitialized();
-  const db = core.getDbInstance();
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_insert");
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_update");
 
   for (const provider of ["microsoft-designer-web", "msdesigner", "openai"]) {
     await providersDb.createProviderConnection({

@@ -17,12 +17,12 @@ const { getResolvedModelCapabilities, createModelCapabilityResolutionSnapshot } 
 const { enrichCatalogModelEntry } = await import("../../src/lib/modelMetadataRegistry.ts");
 const { getModelTargetFormat } = await import("../../open-sse/config/providerModels.ts");
 const { getTokenLimit } = await import("../../open-sse/services/contextManager.ts");
-test.after(() => {
+test.after(async () => {
   for (const [name, value] of savedContextEnv) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -44,16 +44,16 @@ const limits: readonly (readonly [string, number, number])[] = [
 ];
 
 for (const [model, context, output] of limits) {
-  test(`#16579 ${model} exposes exact Go limits without models.dev sync`, () => {
-    const snapshot = createModelCapabilityResolutionSnapshot();
+  test(`#16579 ${model} exposes exact Go limits without models.dev sync`, async () => {
+    const snapshot = await createModelCapabilityResolutionSnapshot();
     assert.equal(Object.keys(snapshot.synced).length, 0);
-    const caps = getResolvedModelCapabilities(
+    const caps = await getResolvedModelCapabilities(
       { provider: "opencode-go", model },
       undefined,
       snapshot
     );
     assert.equal(caps.contextWindow, context);
-    assert.equal(getTokenLimit("opencode-go", model, snapshot), context);
+    assert.equal(await getTokenLimit("opencode-go", model, snapshot), context);
     assert.equal(caps.maxOutputTokens, output);
     const imported: Record<string, unknown> = {
       id: `opencode-go/${model}`,
@@ -61,7 +61,7 @@ for (const [model, context, output] of limits) {
       owned_by: "opencode-go",
       name: model,
     };
-    const row = enrichCatalogModelEntry(imported, undefined, {
+    const row = await enrichCatalogModelEntry(imported, undefined, {
       modelsDevPricing: {},
       userPricing: {},
       capabilityResolutionSnapshot: snapshot,
@@ -71,13 +71,13 @@ for (const [model, context, output] of limits) {
   });
 }
 
-test("#16579 explicit input ceilings stay narrower than the full context", () => {
-  const snapshot = createModelCapabilityResolutionSnapshot();
+test("#16579 explicit input ceilings stay narrower than the full context", async () => {
+  const snapshot = await createModelCapabilityResolutionSnapshot();
   for (const [model, expected] of [
     ["gpt-6-luna", 922000],
     ["space-bunny", 524288],
   ] as const) {
-    const caps = getResolvedModelCapabilities(
+    const caps = await getResolvedModelCapabilities(
       { provider: "opencode-go", model },
       undefined,
       snapshot
@@ -86,7 +86,7 @@ test("#16579 explicit input ceilings stay narrower than the full context", () =>
   }
 });
 
-test("#16579 synced and persisted context/output overrides retain precedence", () => {
+test("#16579 synced and persisted context/output overrides retain precedence", async () => {
   const row: ModelCapabilityEntry = {
     tool_call: null,
     reasoning: null,
@@ -107,10 +107,10 @@ test("#16579 synced and persisted context/output overrides retain precedence", (
     interleaved_field: null,
   };
   const snapshot = {
-    ...createModelCapabilityResolutionSnapshot(),
+    ...(await createModelCapabilityResolutionSnapshot()),
     synced: { "opencode-go": { "grok-4.7": row } },
   };
-  const caps = getResolvedModelCapabilities("opencode-go/grok-4.7", undefined, snapshot);
+  const caps = await getResolvedModelCapabilities("opencode-go/grok-4.7", undefined, snapshot);
   assert.equal(caps.contextWindow, 345678);
   assert.equal(caps.maxOutputTokens, 12000);
   assert.equal(caps.maxInputTokens, 300000);
@@ -120,7 +120,7 @@ test("#16579 synced and persisted context/output overrides retain precedence", (
     maxTokenOverrides: new Map([["opencode-go", new Map([["grok-4.7", 16000]])]]),
     maxInputTokenOverrides: new Map([["opencode-go", new Map([["grok-4.7", 200000]])]]),
   };
-  const overridden = getResolvedModelCapabilities(
+  const overridden = await getResolvedModelCapabilities(
     "opencode-go/grok-4.7",
     undefined,
     operatorSnapshot
@@ -142,16 +142,16 @@ test("#16579 catalog rows preserve the documented Go request formats", () => {
     assert.equal(getModelTargetFormat("opencode-go", model), format, model);
 });
 
-test("#16579 undocumented models do not inherit a guessed family window", () => {
-  const snapshot = createModelCapabilityResolutionSnapshot();
-  const caps = getResolvedModelCapabilities("opencode-go/omen-alpha", undefined, snapshot);
+test("#16579 undocumented models do not inherit a guessed family window", async () => {
+  const snapshot = await createModelCapabilityResolutionSnapshot();
+  const caps = await getResolvedModelCapabilities("opencode-go/omen-alpha", undefined, snapshot);
   assert.equal(caps.contextWindow, null);
 });
 
-test("#16579 explicit environment limits still override catalog context", () => {
+test("#16579 explicit environment limits still override catalog context", async () => {
   process.env.CONTEXT_LENGTH_OPENCODE_GO = "123456";
   try {
-    assert.equal(getTokenLimit("opencode-go", "grok-4.7"), 123456);
+    assert.equal(await getTokenLimit("opencode-go", "grok-4.7"), 123456);
   } finally {
     delete process.env.CONTEXT_LENGTH_OPENCODE_GO;
   }

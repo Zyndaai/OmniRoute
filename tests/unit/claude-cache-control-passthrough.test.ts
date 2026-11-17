@@ -206,8 +206,8 @@ describe("Claude cache_control passthrough", () => {
       assert.deepEqual(result.tools[0].cache_control, { type: "ephemeral" });
     });
 
-    test(`${provider} uses the five-minute default through the full translation path`, () => {
-      const result = translateRequest(
+    test(`${provider} uses the five-minute default through the full translation path`, async () => {
+      const result = await translateRequest(
         FORMATS.OPENAI,
         FORMATS.CLAUDE,
         "claude-3-7-sonnet",

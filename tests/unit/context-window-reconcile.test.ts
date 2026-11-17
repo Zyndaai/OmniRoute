@@ -21,18 +21,18 @@ function makeDeps(catalog: Record<string, number | null>, existing: Record<strin
 }
 
 describe("reconcileContextWindows (5004)", () => {
-  it("writes an auto override when the discovered window diverges from the catalog", () => {
+  it("writes an auto override when the discovered window diverges from the catalog", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 400000 },
     ];
     const { deps, writes } = makeDeps({ "openai/gpt-x": 128000 });
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, [["openai", "gpt-x", 400000]]);
     assert.equal(r.written, 1);
     assert.equal(r.scanned, 1);
   });
 
-  it("does not rewrite an auto override that already holds the discovered window", () => {
+  it("does not rewrite an auto override that already holds the discovered window", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 400000 },
     ];
@@ -41,13 +41,13 @@ describe("reconcileContextWindows (5004)", () => {
       { "openai/gpt-x": "auto:discovery" }
     );
     deps.getExistingWindow = () => 400000;
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.deepEqual(removes, []);
     assert.equal(r.written, 0);
   });
 
-  it("rewrites an auto override whose stored window differs from the discovered one", () => {
+  it("rewrites an auto override whose stored window differs from the discovered one", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 400000 },
     ];
@@ -56,23 +56,23 @@ describe("reconcileContextWindows (5004)", () => {
       { "openai/gpt-x": "auto:discovery" }
     );
     deps.getExistingWindow = () => 256000;
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, [["openai", "gpt-x", 400000]]);
     assert.equal(r.written, 1);
   });
 
-  it("does nothing when the discovered window already matches the catalog", () => {
+  it("does nothing when the discovered window already matches the catalog", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 128000 },
     ];
     const { deps, writes, removes } = makeDeps({ "openai/gpt-x": 128000 });
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.deepEqual(removes, []);
     assert.equal(r.written, 0);
   });
 
-  it("self-heals: removes a stale auto override once the catalog catches up", () => {
+  it("self-heals: removes a stale auto override once the catalog catches up", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 128000 },
     ];
@@ -80,12 +80,12 @@ describe("reconcileContextWindows (5004)", () => {
       { "openai/gpt-x": 128000 },
       { "openai/gpt-x": "auto:discovery" }
     );
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(removes, [["openai", "gpt-x"]]);
     assert.equal(r.removed, 1);
   });
 
-  it("never overwrites or removes a manual override", () => {
+  it("never overwrites or removes a manual override", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "gpt-x", window: 999999 },
     ];
@@ -93,14 +93,14 @@ describe("reconcileContextWindows (5004)", () => {
       { "openai/gpt-x": 128000 },
       { "openai/gpt-x": "manual" }
     );
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.deepEqual(removes, []);
     assert.equal(r.skippedManual, 1);
     assert.equal(r.written, 0);
   });
 
-  it("skips invalid windows and empty keys", () => {
+  it("skips invalid windows and empty keys", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "openai", modelId: "a", window: 0 },
       { provider: "openai", modelId: "b", window: -5 },
@@ -110,23 +110,23 @@ describe("reconcileContextWindows (5004)", () => {
       { provider: "openai", modelId: "", window: 100000 },
     ];
     const { deps, writes } = makeDeps({});
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.equal(r.scanned, 6);
     assert.equal(r.written, 0);
   });
 
-  it("writes an override when the catalog does not know the model (catalog null)", () => {
+  it("writes an override when the catalog does not know the model (catalog null)", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "local", modelId: "my-7b", window: 131072 },
     ];
     const { deps, writes } = makeDeps({}); // catalog null for everything
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, [["local", "my-7b", 131072]]);
     assert.equal(r.written, 1);
   });
 
-  it("removes a stale auto:discovery pin when discovery omits the window", () => {
+  it("removes a stale auto:discovery pin when discovery omits the window", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "grok-cli", modelId: "grok-4.6", window: null },
     ];
@@ -134,13 +134,13 @@ describe("reconcileContextWindows (5004)", () => {
       { "grok-cli/grok-4.6": 256000 },
       { "grok-cli/grok-4.6": "auto:discovery" }
     );
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.equal(r.removed, 1);
     assert.equal(r.written, 0);
   });
 
-  it("keeps a manual override when discovery omits the window", () => {
+  it("keeps a manual override when discovery omits the window", async () => {
     const discovered: DiscoveredWindow[] = [
       { provider: "grok-cli", modelId: "grok-4.6", window: null },
     ];
@@ -148,7 +148,7 @@ describe("reconcileContextWindows (5004)", () => {
       { "grok-cli/grok-4.6": 256000 },
       { "grok-cli/grok-4.6": "manual" }
     );
-    const r = reconcileContextWindows(discovered, deps);
+    const r = await reconcileContextWindows(discovered, deps);
     assert.deepEqual(writes, []);
     assert.equal(r.removed, 0);
   });

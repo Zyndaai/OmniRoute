@@ -82,30 +82,78 @@ function compatibleGuardedDispatcher(agent: Dispatcher): Dispatcher {
   })(agent);
 }
 
-const guardedDispatchers = new Map<ConnectGuardMode, Dispatcher>();
+const guardedDispatchers = new Map<string, Dispatcher>();
+
+function buildGuardedDispatcher(guard: ConnectGuardMode, reuseSockets: boolean): Dispatcher {
+  const options = getDispatcherOptions();
+  const agent = new Agent({
+    ...options,
+    ...(reuseSockets ? {} : { keepAliveTimeout: 1, keepAliveMaxTimeout: 1 }),
+    pipelining: 0,
+    connect: {
+      ...(options.connect as object),
+      lookup: createGuardedLookup(guard),
+    } as never,
+  });
+  return compatibleGuardedDispatcher(agent);
+}
 
 /**
  * Shared direct-egress dispatcher whose connections are validated by {@link createGuardedLookup}.
  * One instance per guard mode (the validation is per connect, so hosts can share it). Sockets are
- * not kept alive: this dispatcher bypasses the patched fetch's stale-socket retry, and a socket
- * that is never reused cannot be stale.
+ * kept alive like the ordinary direct dispatcher: a reused socket is to an address that was
+ * validated when it connected, and undici pools per origin, so no other host can reuse it. Without
+ * reuse every request paid DNS + TCP + TLS. A stale pooled socket is handled by
+ * {@link getGuardedRetryDispatcher}.
  */
 export function getGuardedDispatcher(guard: ConnectGuardMode): Dispatcher {
   let dispatcher = guardedDispatchers.get(guard);
   if (!dispatcher) {
-    const options = getDispatcherOptions();
-    dispatcher = new Agent({
-      ...options,
-      keepAliveTimeout: 1,
-      keepAliveMaxTimeout: 1,
-      pipelining: 0,
-      connect: {
-        ...(options.connect as object),
-        lookup: createGuardedLookup(guard),
-      } as never,
-    });
-    dispatcher = compatibleGuardedDispatcher(dispatcher);
+    dispatcher = buildGuardedDispatcher(guard, true);
     guardedDispatchers.set(guard, dispatcher);
   }
   return dispatcher;
+}
+
+/**
+ * Same guard, but every socket is fresh: used once to retry a request whose pooled socket had
+ * been closed by the upstream (the direct path's #4252 policy).
+ */
+export function getGuardedRetryDispatcher(guard: ConnectGuardMode): Dispatcher {
+  const key = `${guard}:retry`;
+  let dispatcher = guardedDispatchers.get(key);
+  if (!dispatcher) {
+    dispatcher = buildGuardedDispatcher(guard, false);
+    guardedDispatchers.set(key, dispatcher);
+  }
+  return dispatcher;
+}
+
+const STALE_SOCKET_CODES = new Set(["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"]);
+
+/**
+ * True for the errors a reused keep-alive socket produces when the upstream closed it while it sat
+ * idle. Never true for a guard refusal, which must not be retried.
+ */
+export function isStaleSocketError(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && typeof e === "object" && depth < 3; depth++) {
+    const { code, message } = e as { code?: unknown; message?: unknown };
+    if (code === CONNECT_GUARD_BLOCKED_CODE) return false;
+    if (typeof code === "string" && STALE_SOCKET_CODES.has(code)) return true;
+    if (typeof message === "string" && message.includes("other side closed")) return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** A body fetch can send twice: absent, a string, bytes, form params or a Blob — not a stream. */
+export function isReplayableBody(body: unknown): boolean {
+  return (
+    body == null ||
+    typeof body === "string" ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    body instanceof URLSearchParams ||
+    (typeof Blob !== "undefined" && body instanceof Blob)
+  );
 }

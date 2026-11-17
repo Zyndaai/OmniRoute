@@ -321,15 +321,15 @@ async function resetStorage() {
   resetPayloadRulesConfigForTests();
   register(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, originalResponsesToOpenAI, null);
   invalidateCacheControlSettingsCache();
-  clearCache();
+  await clearCache();
   clearIdempotency();
   clearInflight();
-  clearModelsDevCapabilities();
+  await clearModelsDevCapabilities();
   clearReasoningCacheAll();
   setBackgroundDegradationConfig(originalBackgroundConfig);
   resetBackgroundStats();
   globalThis.setTimeout = originalSetTimeout;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -972,7 +972,7 @@ test("chatCore replays streamed DeepSeek Responses reasoning across a Chat tool 
 test("chatCore replays no-tool reasoning across public Responses turns", async () => {
   // Direct DeepSeek now speaks Responses upstream. Keep this regression on a
   // Chat-compatible DeepSeek host so it continues to exercise the Responses-to-Chat replay path.
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     siliconflow: {
       "deepseek-v4-pro": {
         ...capabilityEntry(128_000),
@@ -1051,7 +1051,7 @@ test("chatCore replays no-tool reasoning across public Responses turns", async (
   assert.equal(second.call.body.messages[1].reasoning_content, "Authentic upstream reasoning");
 });
 test("chatCore captures streaming no-tool reasoning for Responses replay", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     siliconflow: {
       "deepseek-v4-pro": {
         ...capabilityEntry(128_000),
@@ -2740,7 +2740,7 @@ test("chatCore does not substitute an OpenAI model after model-unavailable", asy
   assert.equal(calls.length, 1);
 });
 test("chatCore does not substitute an OpenAI model after context overflow", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     unknown: {
       "gpt-5": capabilityEntry(128_000),
       "gpt-5-mini": capabilityEntry(64_000),
@@ -3492,7 +3492,7 @@ test("chatCore skips streaming cache when X-OmniRoute-No-Cache header is set", a
 
   // Verify nothing was cached
   const sig = generateSignature("gpt-4o-mini", sharedBody.messages, 0, 1);
-  const cached = getCachedResponse(sig);
+  const cached = await getCachedResponse(sig);
   assert.equal(cached, null, "response should not be cached when no-cache header is set");
 
   const second = await invokeChatCore({

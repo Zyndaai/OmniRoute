@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-metadata-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET ||= "combo-metadata-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
@@ -20,8 +20,8 @@ const { getComboBuilderOptions } = await import("../../src/lib/combos/builderOpt
 const { buildGlobalModelList, buildManualComboModelStep } =
   await import("../../src/lib/combos/builderDraft.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -48,7 +48,7 @@ test("builder-saved provider-node combos preserve metadata with a public model p
   await modelsDb.replaceSyncedAvailableModelsForConnection(nodeId, connection.id, [
     { id: modelId, name: "Builder Model" },
   ]);
-  capabilityOverrides.setModelCapabilityOverride(
+  await capabilityOverrides.setModelCapabilityOverride(
     `${nodeId}/${modelId}`,
     "reasoning_efforts",
     "low,high"
@@ -150,7 +150,10 @@ test("single-target combo preserves its direct model metadata", async () => {
 test("single-target Codex combo advertises a larger model context override", async () => {
   const modelId = "gpt-5.6-terra";
   const contextWindow = 500000;
-  assert.equal(contextOverrides.setModelContextOverride("codex", modelId, contextWindow), true);
+  assert.equal(
+    await contextOverrides.setModelContextOverride("codex", modelId, contextWindow),
+    true
+  );
 
   try {
     await providersDb.createProviderConnection({
@@ -184,7 +187,7 @@ test("single-target Codex combo advertises a larger model context override", asy
     // min(872000, 500000) = 500000.
     assert.equal(combo?.max_input_tokens, 500000);
   } finally {
-    contextOverrides.removeModelContextOverride("codex", modelId);
+    await contextOverrides.removeModelContextOverride("codex", modelId);
   }
 });
 
@@ -222,7 +225,7 @@ test("reasoning_efforts overrides project exact native tiers to direct models an
   const openaiTarget = "openai/gpt-4o";
   const anthropicTarget = "anthropic/claude-sonnet-4-5";
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await capabilityOverrides.setModelCapabilityOverride(
       openaiTarget,
       "reasoning_efforts",
       "low,max,ultra"
@@ -230,7 +233,7 @@ test("reasoning_efforts overrides project exact native tiers to direct models an
     true
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await capabilityOverrides.setModelCapabilityOverride(
       anthropicTarget,
       "reasoning_efforts",
       "medium,max,ultra"
@@ -281,8 +284,8 @@ test("reasoning_efforts overrides project exact native tiers to direct models an
       "ultra",
     ]);
   } finally {
-    capabilityOverrides.removeModelCapabilityOverride(openaiTarget, "reasoning_efforts");
-    capabilityOverrides.removeModelCapabilityOverride(anthropicTarget, "reasoning_efforts");
+    await capabilityOverrides.removeModelCapabilityOverride(openaiTarget, "reasoning_efforts");
+    await capabilityOverrides.removeModelCapabilityOverride(anthropicTarget, "reasoning_efforts");
   }
 });
 
@@ -322,7 +325,7 @@ test("compatible provider-node override reaches direct and combo metadata throug
     })
   );
   assert.equal(patch.status, 200);
-  assert.deepEqual(capabilityOverrides.getReasoningEffortsOverride(nodeId, modelId), [
+  assert.deepEqual(await capabilityOverrides.getReasoningEffortsOverride(nodeId, modelId), [
     "low",
     "max",
     "ultra",
@@ -388,10 +391,21 @@ test("single-target combo reflects unblocked Antigravity Gemini reasoning", asyn
 });
 
 test("malformed connection catalog rows are marked for strict fail-closed consumers", async () => {
-  core
-    .getDbInstance()
-    .prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run("syncedAvailableModels", "malformed-provider:malformed-connection", "{not-json");
+  // A synced list stored as a non-array JSON value is the malformed case. The row needs a real
+  // connection (connection_model_sync references provider_connections).
+  const malformed = await providersDb.createProviderConnection({
+    provider: "malformed-provider",
+    authType: "apikey",
+    name: "malformed-connection",
+    apiKey: "malformed-test-key",
+    isActive: true,
+  });
+  await getTestBackend().execute(
+    `INSERT INTO connection_model_sync (connection_id, provider, models)
+     VALUES ($1, 'malformed-provider', '{"notAnArray": true}'::jsonb)
+     ON CONFLICT (connection_id) DO UPDATE SET models = EXCLUDED.models`,
+    [String(malformed.id)]
+  );
 
   const byConnection = await modelsDb.getSyncedAvailableModelsByConnection("malformed-provider");
   assert.equal(byConnection[modelsDb.SYNCED_AVAILABLE_MODELS_MALFORMED], true);
@@ -737,7 +751,7 @@ test("vision-flagged combo derives input modalities from the merged vision verdi
     true
   );
   const { saveModelsDevCapabilities } = await import("../../src/lib/modelsDevSync.ts");
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     "vision-head-provider-12798": {
       "custom-vision-head": {
         tool_call: true,
@@ -745,8 +759,10 @@ test("vision-flagged combo derives input modalities from the merged vision verdi
         attachment: null,
         structured_output: true,
         temperature: true,
-        modalities_input: null,
-        modalities_output: null,
+        // "No modality data" is stored as an empty JSON list: model_capabilities.modalities_*
+        // are NOT NULL, and the models.dev transform writes "[]" for an absent modality set.
+        modalities_input: "[]",
+        modalities_output: "[]",
         knowledge_cutoff: null,
         release_date: null,
         last_updated: null,

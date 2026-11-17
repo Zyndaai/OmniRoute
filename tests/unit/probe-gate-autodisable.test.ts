@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-probe-gate-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { createProviderConnection, deleteProviderConnection } =
   await import("../../src/lib/db/providers.ts");
 const { runSingleModelTest, buildInternalChatRequest } =
@@ -28,21 +28,14 @@ test.beforeEach(() => {
 
 test.after(() => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function readConnectionRow(connId: string) {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => {
-      get: (id: string) => Record<string, unknown> | undefined;
-    };
-  };
-  return db
-    .prepare(
-      "SELECT is_active, test_status, rate_limited_until, last_error, refresh_token, access_token FROM provider_connections WHERE id = ?"
-    )
-    .get(connId);
+async function readConnectionRow(connId: string) {
+  return getTestBackend().queryOne<Record<string, unknown>>(
+    "SELECT is_active, test_status, rate_limited_until, last_error, refresh_token, access_token FROM provider_connections WHERE id = $1",
+    [connId]
+  );
 }
 
 async function createConnection(provider = "openai", extra: Record<string, unknown> = {}) {
@@ -79,13 +72,13 @@ function mockUpstream(status: number, message: string): void {
     });
 }
 
-const ASSERT_NO_COOLDOWN = (connId: string, label: string) => {
-  const row = readConnectionRow(connId);
-  assert.equal(row?.is_active, 1, `${label}: connection stays active`);
+const ASSERT_NO_COOLDOWN = async (connId: string, label: string) => {
+  const row = await readConnectionRow(connId);
+  assert.equal(row?.is_active, true, `${label}: connection stays active`);
   assert.notEqual(row?.test_status, "banned", `${label}: no terminal banned status`);
   assert.notEqual(row?.test_status, "deactivated", `${label}: no deactivated status`);
   assert.notEqual(row?.test_status, "credits_exhausted", `${label}: no credits_exhausted`);
-  assert.equal(row?.rate_limited_until, null, `${label}: no persisted cooldown`);
+  assert.equal(row?.rate_limited_until ?? null, null, `${label}: no persisted cooldown`);
   assert.ok(row?.last_error, `${label}: probe failure is recorded for visibility`);
 };
 
@@ -100,7 +93,7 @@ test("GEO_BLOCKED (403 region) probe records but never persists the 24h cooldown
     timeoutMs: 10_000,
   });
   assert.equal(result.status, "error");
-  ASSERT_NO_COOLDOWN(connId, "GEO probe");
+  await ASSERT_NO_COOLDOWN(connId, "GEO probe");
 });
 
 test("QUOTA_EXHAUSTED (402) probe records but never writes the terminal credits state", async () => {
@@ -114,7 +107,7 @@ test("QUOTA_EXHAUSTED (402) probe records but never writes the terminal credits 
     timeoutMs: 10_000,
   });
   assert.equal(result.status, "error");
-  ASSERT_NO_COOLDOWN(connId, "QUOTA probe");
+  await ASSERT_NO_COOLDOWN(connId, "QUOTA probe");
 });
 
 test("MODEL_NOT_FOUND (404) probe does not lock the model for real traffic", async () => {
@@ -128,7 +121,7 @@ test("MODEL_NOT_FOUND (404) probe does not lock the model for real traffic", asy
     timeoutMs: 10_000,
   });
   assert.equal(failed.status, "error");
-  ASSERT_NO_COOLDOWN(connId, "404 probe");
+  await ASSERT_NO_COOLDOWN(connId, "404 probe");
 
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "OK" } }] }), {
@@ -171,10 +164,10 @@ test("401 probe never consumes the OAuth refresh token (no executor refresh call
     1,
     "exactly one upstream call — the refresh executor must never run for a probe"
   );
-  const row = readConnectionRow(connId);
+  const row = await readConnectionRow(connId);
   assert.equal(row?.refresh_token, "gh-probe-refresh", "refresh token untouched");
   assert.equal(row?.access_token, "gh-probe-access", "access token untouched");
-  ASSERT_NO_COOLDOWN(connId, "401 probe");
+  await ASSERT_NO_COOLDOWN(connId, "401 probe");
   // Remove this connection so the stale-token test below runs with exactly
   // one github connection (the chatCore fallback would otherwise try the
   // second github account, inflating its upstream fetch count).
@@ -211,7 +204,7 @@ test("probe with a stale token never runs the PROACTIVE refresh (base.ts execute
     1,
     "stale-token probe must skip the proactive refresh rotation (no extra fetch)"
   );
-  ASSERT_NO_COOLDOWN(connId, "stale-token probe");
+  await ASSERT_NO_COOLDOWN(connId, "stale-token probe");
 });
 
 test("gitlab stale-token probe never runs its own execute() refresh override", async () => {
@@ -241,7 +234,7 @@ test("gitlab stale-token probe never runs its own execute() refresh override", a
     1,
     "GitLabExecutor.execute must not consume a refresh rotation under a probe"
   );
-  ASSERT_NO_COOLDOWN(connId, "gitlab stale-token probe");
+  await ASSERT_NO_COOLDOWN(connId, "gitlab stale-token probe");
 });
 
 test("codex 429 probe never runs the account-rotation failover (no persisted cooldown)", async () => {
@@ -261,7 +254,7 @@ test("codex 429 probe never runs the account-rotation failover (no persisted coo
     timeoutMs: 10_000,
   });
   assert.equal(result.status, "rate_limited");
-  ASSERT_NO_COOLDOWN(connId, "codex 429 probe");
+  await ASSERT_NO_COOLDOWN(connId, "codex 429 probe");
 });
 
 test("upstream-timeout probe keeps the breaker and the connection intact", async () => {
@@ -294,8 +287,8 @@ test("upstream-timeout probe keeps the breaker and the connection intact", async
   assert.equal(probe.status, "error");
   assert.equal(breaker.failureCount, 0, "probe failure must not degrade the breaker");
   assert.equal(
-    readConnectionRow(connId)?.is_active,
-    1,
+    (await readConnectionRow(connId))?.is_active,
+    true,
     "probe timeout keeps the connection active"
   );
 });

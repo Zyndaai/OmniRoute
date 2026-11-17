@@ -4,21 +4,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Regression guard: PUT /api/settings/cache-config persisted
-// `alwaysPreserveClientCache` into the databaseSettings "cache" section, but
-// the runtime (getCacheControlSettings → getSettings) reads the FLAT general
-// settings key — so the endpoint accepted the value, GET echoed it back, and
-// the router never changed behavior. This test proves the value written
-// through the route is the one the cache-control policy actually consumes.
+// Regression guard: PUT /api/settings/cache-config must persist
+// `alwaysPreserveClientCache` into the FLAT general settings key, which is the
+// one the runtime (getCacheControlSettings → getSettings) reads. This test proves
+// the value written through the route is the one the cache-control policy consumes.
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-cache-config-flat-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -31,12 +28,12 @@ function makeJsonRequest(method: string, body?: unknown): Request {
   });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  resetStorage();
+test.after(async () => {
+  await resetStorage();
 });
 
 test("alwaysPreserveClientCache set via cache-config reaches the runtime read path", async (t) => {
@@ -52,8 +49,6 @@ test("alwaysPreserveClientCache set via cache-config reaches the runtime read pa
     assert.equal(putResponse.status, 200);
 
     // The runtime read path: getCacheControlSettings() → getSettings() (flat).
-    // RED before the fix: the route wrote databaseSettings "cache" instead,
-    // so both of these still reported the default "auto".
     const flatSettings = await getSettings();
     assert.equal(flatSettings.alwaysPreserveClientCache, "always");
 
@@ -92,11 +87,9 @@ test("alwaysPreserveClientCache set via cache-config reaches the runtime read pa
 
   await t.test("GET reports the flat value, not the ignored cache-section copy", async () => {
     // Seed a stale value in the databaseSettings "cache" section — the store
-    // the runtime never reads. GET must not surface it.
-    const { updateDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
-    updateDatabaseSettings({
-      cache: { alwaysPreserveClientCache: "never" },
-    } as Parameters<typeof updateDatabaseSettings>[0]);
+    // the runtime never reads for this key. GET must not surface it.
+    const { setConfigValue } = await import("../../src/lib/db/configEntries.ts");
+    await setConfigValue("databaseSettings", "cache.alwaysPreserveClientCache", "never");
 
     const putResponse = await cacheConfigRoute.PUT(
       makeJsonRequest("PUT", { alwaysPreserveClientCache: "always" }) as never

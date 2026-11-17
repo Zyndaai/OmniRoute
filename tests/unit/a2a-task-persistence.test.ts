@@ -55,6 +55,10 @@ function makeFakePersistence(overrides: Partial<A2APersistence> = {}) {
   return { persistence, upsertCalls, appendEventCalls, purgeCalls };
 }
 
+// Persistence is fire-and-forget (`void this.persist(...)`), and `persist` awaits the upsert
+// before calling appendEvent, so the event write lands one microtask later. Let it settle.
+const flushPersistence = () => new Promise((resolve) => setImmediate(resolve));
+
 const managers: A2ATaskManager[] = [];
 function createManager(ttlMinutes: number, persistence: A2APersistence) {
   const manager = new A2ATaskManager(ttlMinutes, persistence);
@@ -70,7 +74,7 @@ test.afterEach(() => {
 
 // ── createTask ────────────────────────────────────────────────────────────────────────────
 
-test("createTask persists an upsert + appendEvent with state:submitted", () => {
+test("createTask persists an upsert + appendEvent with state:submitted", async () => {
   const { persistence, upsertCalls, appendEventCalls } = makeFakePersistence();
   const tm = createManager(5, persistence);
 
@@ -78,6 +82,7 @@ test("createTask persists an upsert + appendEvent with state:submitted", () => {
     skill: "smart-routing",
     messages: [{ role: "user", content: "hello" }],
   });
+  await flushPersistence();
 
   assert.equal(upsertCalls.length, 1);
   const row = upsertCalls[0];
@@ -111,7 +116,7 @@ test("createTask maps owner to apiKeyId", () => {
 
 // ── updateTask ────────────────────────────────────────────────────────────────────────────
 
-test("updateTask persists state:<state> with message JSON on appendEvent", () => {
+test("updateTask persists state:<state> with message JSON on appendEvent", async () => {
   const { persistence, upsertCalls, appendEventCalls } = makeFakePersistence();
   const tm = createManager(5, persistence);
   const task = tm.createTask({
@@ -120,6 +125,7 @@ test("updateTask persists state:<state> with message JSON on appendEvent", () =>
   });
 
   tm.updateTask(task.id, "working", undefined, "starting work");
+  await flushPersistence();
 
   assert.equal(upsertCalls.length, 2);
   assert.equal(upsertCalls[1].state, "working");
@@ -159,7 +165,7 @@ test("updateTask with artifacts persists outputJson as JSON of the accumulated a
   assert.equal(row.outputJson, JSON.stringify(updated.artifacts));
 });
 
-test("cancelTask (via updateTask) persists state:cancelled as terminal", () => {
+test("cancelTask (via updateTask) persists state:cancelled as terminal", async () => {
   const { persistence, upsertCalls, appendEventCalls } = makeFakePersistence();
   const tm = createManager(5, persistence);
   const task = tm.createTask({
@@ -168,6 +174,7 @@ test("cancelTask (via updateTask) persists state:cancelled as terminal", () => {
   });
 
   const cancelled = tm.cancelTask(task.id);
+  await flushPersistence();
 
   const row = upsertCalls[upsertCalls.length - 1];
   assert.equal(row.state, "cancelled");
@@ -177,7 +184,7 @@ test("cancelTask (via updateTask) persists state:cancelled as terminal", () => {
 
 // ── cleanupExpired TTL branch ────────────────────────────────────────────────────────────
 
-test("cleanupExpired persists state:failed with 'TTL expired' message on TTL expiry", () => {
+test("cleanupExpired persists state:failed with 'TTL expired' message on TTL expiry", async () => {
   const { persistence, upsertCalls, appendEventCalls } = makeFakePersistence();
   const tm = createManager(5, persistence);
   const task = tm.createTask({
@@ -187,6 +194,7 @@ test("cleanupExpired persists state:failed with 'TTL expired' message on TTL exp
   task.expiresAt = new Date(Date.now() - 1_000).toISOString();
 
   (tm as unknown as { cleanupExpired(): void }).cleanupExpired();
+  await flushPersistence();
 
   const row = upsertCalls[upsertCalls.length - 1];
   assert.equal(row.state, "failed");

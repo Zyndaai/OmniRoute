@@ -24,14 +24,14 @@ const TEST_DATA_DIR = fs.mkdtempSync(
 );
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
 const providerModelsRoute = await import("../../src/app/api/provider-models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -41,7 +41,6 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -78,7 +77,7 @@ test("PUT with contextWindowOverride persists a manual override that wins over t
   assert.equal(putBody.contextWindowOverride, 131072);
 
   // Persisted as a "manual" source in the Feature-5004 table.
-  const record = contextOverrides.getModelContextOverrideRecord(
+  const record = await contextOverrides.getModelContextOverrideRecord(
     "openai-compatible-demo",
     "misreported-model"
   );
@@ -88,7 +87,7 @@ test("PUT with contextWindowOverride persists a manual override that wins over t
 
   // getModelContextLimit is what combo.ts's context-window filter reads — the
   // manual override must win over the (wrong) 1M value on the custom-model row.
-  const limit = modelCapabilities.getModelContextLimit(
+  const limit = await modelCapabilities.getModelContextLimit(
     "openai-compatible-demo",
     "misreported-model"
   );
@@ -97,7 +96,7 @@ test("PUT with contextWindowOverride persists a manual override that wins over t
 
 test("GET surfaces contextWindowOverride on the custom model row", async () => {
   await modelsDb.addCustomModel("openai-compatible-demo", "m1", "M1");
-  contextOverrides.setModelContextOverride("openai-compatible-demo", "m1", 200000, "manual");
+  await contextOverrides.setModelContextOverride("openai-compatible-demo", "m1", 200000, "manual");
 
   const getRes = await providerModelsRoute.GET(
     new Request("http://localhost/api/provider-models?provider=openai-compatible-demo")
@@ -118,7 +117,7 @@ test("GET surfaces contextWindowOverride on the custom model row", async () => {
 
 test("PUT with contextWindowOverride: null clears a previously set override", async () => {
   await modelsDb.addCustomModel("openai-compatible-demo", "m2", "M2");
-  contextOverrides.setModelContextOverride("openai-compatible-demo", "m2", 50000, "manual");
+  await contextOverrides.setModelContextOverride("openai-compatible-demo", "m2", 50000, "manual");
 
   const putRes = await providerModelsRoute.PUT(
     buildRequest("PUT", {
@@ -129,13 +128,16 @@ test("PUT with contextWindowOverride: null clears a previously set override", as
   );
   assert.equal(putRes.status, 200);
 
-  const record = contextOverrides.getModelContextOverrideRecord("openai-compatible-demo", "m2");
+  const record = await contextOverrides.getModelContextOverrideRecord(
+    "openai-compatible-demo",
+    "m2"
+  );
   assert.equal(record, null);
 });
 
 test("default behavior unchanged: no override means getModelContextLimit falls back to the catalog", async () => {
   await modelsDb.addCustomModel("openai-compatible-demo", "m3", "M3");
-  const limit = modelCapabilities.getModelContextLimit("openai-compatible-demo", "m3");
+  const limit = await modelCapabilities.getModelContextLimit("openai-compatible-demo", "m3");
   // No override, no catalog entry for this unknown custom model → null (not dropped
   // by the combo prefilter, which treats unknown context as "include to be safe").
   assert.equal(limit, null);

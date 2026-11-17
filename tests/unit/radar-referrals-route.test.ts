@@ -64,8 +64,8 @@ function mockGetRequest(
   return new Request(url, { method: "GET", headers });
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await core.resetDbInstance();
   try {
     if (fs.existsSync(TEST_DATA_DIR)) {
       fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -90,7 +90,7 @@ function baseReferralsFeed(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 test("GET /api/radar/referrals: flag off => 404", async () => {
-  resetStorage();
+  await resetStorage();
   delete process.env.RADAR_ENABLED;
 
   const { GET } = await import("../../src/app/api/radar/referrals/route.ts");
@@ -103,7 +103,7 @@ test("GET /api/radar/referrals: flag off => 404", async () => {
 });
 
 test("GET /api/radar/referrals: flag on, no auth => 401", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { GET } = await import("../../src/app/api/radar/referrals/route.ts");
@@ -116,7 +116,7 @@ test("GET /api/radar/referrals: flag on, no auth => 401", async () => {
 });
 
 test("GET /api/radar/referrals: flag on, authenticated, no cache => 200 empty shape (sync-on-read no-ops: opt-in false)", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const { GET } = await import("../../src/app/api/radar/referrals/route.ts");
@@ -130,7 +130,7 @@ test("GET /api/radar/referrals: flag on, authenticated, no cache => 200 empty sh
 });
 
 test("GET /api/radar/referrals: flag on, authenticated, cached referrals feed => returns fixed/campaigns/tier", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const feed = {
@@ -149,7 +149,7 @@ test("GET /api/radar/referrals: flag on, authenticated, cached referrals feed =>
       campaigns: [],
     },
   };
-  radarDb.setRadarReferralsCache({
+  await radarDb.setRadarReferralsCache({
     generatedAt: feed.generatedAt as string,
     tier: "live",
     payload: JSON.stringify(feed),
@@ -172,7 +172,7 @@ test("GET /api/radar/referrals: flag on, authenticated, cached referrals feed =>
 });
 
 test("GET /api/radar/referrals: stale cached referrals feed still served (sync-on-read triggers but opt-in false => no-op, cache untouched)", async () => {
-  resetStorage();
+  await resetStorage();
   process.env.RADAR_ENABLED = "true";
 
   const feed = {
@@ -192,7 +192,7 @@ test("GET /api/radar/referrals: stale cached referrals feed still served (sync-o
     },
   };
   const staleFetchedAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(); // 2h ago
-  radarDb.setRadarReferralsCache({
+  await radarDb.setRadarReferralsCache({
     generatedAt: feed.generatedAt as string,
     tier: "community",
     payload: JSON.stringify(feed),
@@ -210,7 +210,7 @@ test("GET /api/radar/referrals: stale cached referrals feed still served (sync-o
   assert.equal(body.tier, "community");
 
   // The no-op sync must never have overwritten fetchedAt/cache contents.
-  const cacheAfter = radarDb.getRadarReferralsCache();
+  const cacheAfter = await radarDb.getRadarReferralsCache();
   assert.equal(cacheAfter?.fetchedAt, staleFetchedAt);
 });
 

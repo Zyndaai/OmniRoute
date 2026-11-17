@@ -17,7 +17,7 @@ process.env.STREAM_READINESS_STALL_RETRY_ENABLED = "false";
 // #16438: the recovery under test is opt-in; flag-off tests below flip it per test.
 process.env.EMPTY_STREAM_SIBLING_RECOVERY_ENABLED = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
@@ -264,14 +264,14 @@ test.afterEach(async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   flushProxyLogsSync();
   clearInflight();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

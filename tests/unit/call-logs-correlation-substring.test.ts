@@ -9,24 +9,30 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
+// The primary key is (id, timestamp): a fixed timestamp keeps the repeated seeding idempotent.
+const SEED_TIMESTAMP = new Date().toISOString();
+
+const INSERT_LOG_SQL = `INSERT INTO call_logs (id, "timestamp", method, path, status, model, provider, account, duration, tokens_in, tokens_out, correlation_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (id, "timestamp") DO NOTHING`;
+
 // Seed test data
-function seedLogs() {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR REPLACE INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, correlation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+async function seedLogs() {
+  const db = getTestBackend();
+  const now = SEED_TIMESTAMP;
+  const path = "/v1/chat/completions";
+  await db.execute(INSERT_LOG_SQL, [
     "log-1",
     now,
     "POST",
-    "/v1/chat/completions",
+    path,
     200,
     "gpt-4",
     "openai",
@@ -34,16 +40,13 @@ function seedLogs() {
     100,
     10,
     20,
-    "abc123-def456-ghi789"
-  );
-  db.prepare(
-    `INSERT OR REPLACE INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, correlation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+    "abc123-def456-ghi789",
+  ]);
+  await db.execute(INSERT_LOG_SQL, [
     "log-2",
     now,
     "POST",
-    "/v1/chat/completions",
+    path,
     200,
     "claude-3",
     "anthropic",
@@ -51,16 +54,13 @@ function seedLogs() {
     200,
     15,
     30,
-    "xyz999-uvw888-tsr777"
-  );
-  db.prepare(
-    `INSERT OR REPLACE INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, correlation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+    "xyz999-uvw888-tsr777",
+  ]);
+  await db.execute(INSERT_LOG_SQL, [
     "log-3",
     now,
     "POST",
-    "/v1/chat/completions",
+    path,
     500,
     "gpt-4",
     "openai",
@@ -68,14 +68,14 @@ function seedLogs() {
     50,
     0,
     0,
-    null
-  );
+    null,
+  ]);
 }
 
 // ── Exact match ───────────────────────────────────────────────────────────
 
 test("correlationId exact match returns single entry", async () => {
-  seedLogs();
+  await seedLogs();
   const results = await callLogs.getCallLogs({ correlationId: "abc123-def456-ghi789" });
   assert.equal(results.length, 1);
   assert.equal(results[0].correlationId, "abc123-def456-ghi789");
@@ -84,36 +84,32 @@ test("correlationId exact match returns single entry", async () => {
 // ── Substring match ───────────────────────────────────────────────────────
 
 test("correlationId substring match (prefix)", async () => {
-  seedLogs();
+  await seedLogs();
   const results = await callLogs.getCallLogs({ correlationId: "abc123" });
   assert.equal(results.length, 1);
   assert.equal(results[0].id, "log-1");
 });
 
 test("correlationId substring match (middle)", async () => {
-  seedLogs();
+  await seedLogs();
   const results = await callLogs.getCallLogs({ correlationId: "def456" });
   assert.equal(results.length, 1);
   assert.equal(results[0].id, "log-1");
 });
 
 test("correlationId substring match (suffix)", async () => {
-  seedLogs();
+  await seedLogs();
   const results = await callLogs.getCallLogs({ correlationId: "ghi789" });
   assert.equal(results.length, 1);
   assert.equal(results[0].id, "log-1");
 });
 
 test("correlationId substring match returns multiple when shared", async () => {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
+  await seedLogs();
   // Add another log sharing a substring
-  db.prepare(
-    `INSERT OR REPLACE INTO call_logs (id, timestamp, method, path, status, model, provider, account, duration, tokens_in, tokens_out, correlation_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+  await getTestBackend().execute(INSERT_LOG_SQL, [
     "log-4",
-    now,
+    SEED_TIMESTAMP,
     "POST",
     "/v1/chat/completions",
     200,
@@ -123,8 +119,8 @@ test("correlationId substring match returns multiple when shared", async () => {
     100,
     10,
     20,
-    "abc123-RETRY-suffix"
-  );
+    "abc123-RETRY-suffix",
+  ]);
 
   const results = await callLogs.getCallLogs({ correlationId: "abc123" });
   assert.equal(results.length, 2);
@@ -135,7 +131,7 @@ test("correlationId substring match returns multiple when shared", async () => {
 // ── No match ──────────────────────────────────────────────────────────────
 
 test("correlationId no match returns empty", async () => {
-  seedLogs();
+  await seedLogs();
   const results = await callLogs.getCallLogs({ correlationId: "nonexistent" });
   assert.equal(results.length, 0);
 });
@@ -143,7 +139,7 @@ test("correlationId no match returns empty", async () => {
 // ── Null/empty correlationId rows excluded ─────────────────────────────────
 
 test("rows with null correlationId are excluded from substring search", async () => {
-  seedLogs();
+  await seedLogs();
   // Search for a unique substring that only matches log-1
   const results = await callLogs.getCallLogs({ correlationId: "ghi789" });
   const ids = results.map((r: { id: string }) => r.id);

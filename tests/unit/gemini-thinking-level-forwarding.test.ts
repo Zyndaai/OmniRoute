@@ -27,31 +27,31 @@ const base = (extra: Record<string, unknown>) => ({
   ...extra,
 });
 
-test("thinkingLevel supplied via generationConfig.thinkingConfig is forwarded, no thinkingBudget", () => {
+test("thinkingLevel supplied via generationConfig.thinkingConfig is forwarded, no thinkingBudget", async () => {
   const body = base({
     generationConfig: {
       thinkingConfig: { thinkingLevel: "high" },
       maxOutputTokens: 16384,
     },
   });
-  const r = openaiToGeminiRequest("gemini-3.7-flash", body, true) as GeminiReq;
+  const r = (await openaiToGeminiRequest("gemini-3.7-flash", body, true)) as GeminiReq;
   assert.equal(r.generationConfig?.thinkingConfig?.thinkingLevel, "high");
   assert.equal("thinkingBudget" in (r.generationConfig?.thinkingConfig ?? {}), false);
 });
 
-test("no thinkingLevel: default thinkingBudget injection is unchanged (regression guard)", () => {
-  const r = openaiToGeminiRequest("gemini-3.7-flash", base({}), false) as GeminiReq;
+test("no thinkingLevel: default thinkingBudget injection is unchanged (regression guard)", async () => {
+  const r = (await openaiToGeminiRequest("gemini-3.7-flash", base({}), false)) as GeminiReq;
   assert.equal(r.generationConfig?.thinkingConfig?.includeThoughts, true);
   assert.ok((r.generationConfig?.thinkingConfig?.thinkingBudget ?? 0) > 0);
   assert.equal("thinkingLevel" in (r.generationConfig?.thinkingConfig ?? {}), false);
 });
 
-test("reasoning_effort high still maps to a numeric budget when no explicit level is set", () => {
-  const r = openaiToGeminiRequest(
+test("reasoning_effort high still maps to a numeric budget when no explicit level is set", async () => {
+  const r = (await openaiToGeminiRequest(
     "gemini-3.7-flash",
     base({ reasoning_effort: "high" }),
     false
-  ) as GeminiReq;
+  )) as GeminiReq;
   assert.ok((r.generationConfig?.thinkingConfig?.thinkingBudget ?? 0) > 0);
   assert.equal("thinkingLevel" in (r.generationConfig?.thinkingConfig ?? {}), false);
 });

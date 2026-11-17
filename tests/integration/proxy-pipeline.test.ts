@@ -85,7 +85,7 @@ describe("Chat Pipeline — cost accounting", () => {
     try {
       if (harness) {
         const { flushProxyLogsSync } = await import("../../src/lib/proxyLogger.ts");
-        flushProxyLogsSync();
+        await flushProxyLogsSync();
         await harness.cleanup();
       }
     } finally {
@@ -130,8 +130,8 @@ describe("Chat Pipeline — cost accounting", () => {
       );
       assert.equal(response.status, 200);
       assert.match(await response.text(), /cost recorded/);
-      const summary = await harness.waitFor(() => {
-        const current = costRules.getCostSummary(key.id);
+      const summary = await harness.waitFor(async () => {
+        const current = await costRules.getCostSummary(key.id);
         return current.totalEntries > 0 ? current : null;
       });
       assert.ok(summary, "completed chat must appear in the key's public cost summary");
@@ -355,39 +355,6 @@ describe("Plugin Architecture — plugins/hooks.ts", () => {
 });
 
 // ═══════════════════════════════════════════════════
-// 4. Prompt Template Versioning (L-6)
-// ═══════════════════════════════════════════════════
-
-describe("Prompt Template Versioning — prompts.ts module existence", () => {
-  it("prompts.ts should exist", () => {
-    const full = join(ROOT, "src", "lib", "db", "prompts.ts");
-    assert.ok(existsSync(full), "prompts.ts should exist");
-  });
-
-  it("should export CRUD functions", () => {
-    const src = readFileSync(join(ROOT, "src", "lib", "db", "prompts.ts"), "utf8");
-    assert.match(src, /export function savePrompt/);
-    assert.match(src, /export function getActivePrompt/);
-    assert.match(src, /export function getPromptVersion/);
-    assert.match(src, /export function listPromptVersions/);
-    assert.match(src, /export function listPrompts/);
-    assert.match(src, /export function rollbackPrompt/);
-    assert.match(src, /export function renderPrompt/);
-  });
-
-  it("should define PromptTemplate interface", () => {
-    const src = readFileSync(join(ROOT, "src", "lib", "db", "prompts.ts"), "utf8");
-    assert.match(src, /export interface PromptTemplate/);
-  });
-
-  it("should use content hashing for deduplication", () => {
-    const src = readFileSync(join(ROOT, "src", "lib", "db", "prompts.ts"), "utf8");
-    assert.match(src, /content_hash/);
-    assert.match(src, /sha256/);
-  });
-});
-
-// ═══════════════════════════════════════════════════
 // 5. Eval cleanup (Task 28)
 // ═══════════════════════════════════════════════════
 
@@ -395,29 +362,6 @@ describe("Eval cleanup — orphaned scheduler module", () => {
   it("scheduler.ts should remain deleted", () => {
     const full = join(ROOT, "src", "lib", "evals", "scheduler.ts");
     assert.equal(existsSync(full), false, "scheduler.ts should stay removed");
-  });
-});
-
-// ═══════════════════════════════════════════════════
-// 6. Migration Runner (E-5)
-// ═══════════════════════════════════════════════════
-
-describe("Migration System — files exist", () => {
-  it("migrationRunner.ts should exist", () => {
-    const full = join(ROOT, "src", "lib", "db", "migrationRunner.ts");
-    assert.ok(existsSync(full), "migrationRunner.ts should exist");
-  });
-
-  it("001_initial_schema.sql should exist", () => {
-    const full = join(ROOT, "src", "lib", "db", "migrations", "001_initial_schema.sql");
-    assert.ok(existsSync(full), "001_initial_schema.sql should exist");
-  });
-
-  it("core.ts should reference migration runner", () => {
-    const src = readSrc("lib/db/core.ts");
-    assert.ok(src);
-    assert.match(src, /runMigrations/);
-    assert.match(src, /_omniroute_migrations/);
   });
 });
 

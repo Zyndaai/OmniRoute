@@ -12,7 +12,7 @@ const mockLog = {
 };
 
 describe("Context Requirements Integration", () => {
-  it("should filter and sort targets with full context requirements", () => {
+  it("should filter and sort targets with full context requirements", async () => {
     // Mix a catalog-known model (gpt-4o ~128k) with unknowns so strict mode has
     // at least one known-good survivor and does not fail-open to the unknowns.
     const targets = [
@@ -27,7 +27,7 @@ describe("Context Requirements Integration", () => {
       contextFilterMode: "strict" as const,
     };
 
-    const result = applyContextRequirements(targets, requirements, mockLog);
+    const result = await applyContextRequirements(targets, requirements, mockLog);
     assert.ok(result.length < targets.length);
     assert.ok(
       result.every((target) => targets.some((original) => original.modelStr === target.modelStr)),
@@ -43,29 +43,29 @@ describe("Context Requirements Integration", () => {
     );
   });
 
-  it("should not filter when no requirements specified", () => {
+  it("should not filter when no requirements specified", async () => {
     const targets = [
       { modelStr: "gpt-3.5-turbo", provider: "openai", weight: 1 },
       { modelStr: "gpt-4", provider: "openai", weight: 1 },
     ];
 
-    const result = applyContextRequirements(targets, undefined, mockLog);
+    const result = await applyContextRequirements(targets, undefined, mockLog);
     assert.equal(result.length, targets.length);
     assert.equal(result, targets); // Same reference
   });
 
-  it("should handle empty targets array", () => {
+  it("should handle empty targets array", async () => {
     const targets: ResolvedComboTarget[] = [];
     const requirements = {
       minContextWindow: 32000,
       preferLargeContext: true,
     };
 
-    const result = applyContextRequirements(targets, requirements, mockLog);
+    const result = await applyContextRequirements(targets, requirements, mockLog);
     assert.equal(result.length, 0);
   });
 
-  it("should filter targets above maxContextWindow in strict mode", () => {
+  it("should filter targets above maxContextWindow in strict mode", async () => {
     const targets = [
       { modelStr: "claude-opus-4-5", provider: "anthropic", weight: 1 }, // 200k
       { modelStr: "claude-sonnet-4-5", provider: "anthropic", weight: 1 }, // 200k
@@ -78,7 +78,7 @@ describe("Context Requirements Integration", () => {
       contextFilterMode: "strict" as const,
     };
 
-    const result = applyContextRequirements(targets, requirements, mockLog);
+    const result = await applyContextRequirements(targets, requirements, mockLog);
     assert.equal(result.length, 2);
     assert.ok(
       result.every(
@@ -88,7 +88,7 @@ describe("Context Requirements Integration", () => {
     );
   });
 
-  it("should handle lenient mode with unknown context models", () => {
+  it("should handle lenient mode with unknown context models", async () => {
     const targets = [
       { modelStr: "gpt-4o", provider: "openai", weight: 1 },
       { modelStr: "unknown-model", provider: "custom", weight: 1 },
@@ -99,7 +99,7 @@ describe("Context Requirements Integration", () => {
       contextFilterMode: "lenient" as const,
     };
 
-    const result = applyContextRequirements(targets, requirements, mockLog);
+    const result = await applyContextRequirements(targets, requirements, mockLog);
 
     // Should include unknown-model in lenient mode
     assert.ok(
@@ -108,7 +108,7 @@ describe("Context Requirements Integration", () => {
     );
   });
 
-  it("should handle strict mode with unknown context models", () => {
+  it("should handle strict mode with unknown context models", async () => {
     // Known-good survivor required — otherwise #8786 fail-open would restore unknowns.
     const targets = [
       { modelStr: "gpt-4o", provider: "openai", weight: 1 },
@@ -120,7 +120,7 @@ describe("Context Requirements Integration", () => {
       contextFilterMode: "strict" as const,
     };
 
-    const result = applyContextRequirements(targets, requirements, mockLog);
+    const result = await applyContextRequirements(targets, requirements, mockLog);
 
     assert.ok(
       !result.some((t) => t.modelStr === "unknown-model"),

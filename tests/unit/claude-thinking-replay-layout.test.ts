@@ -11,7 +11,7 @@ import { FORMATS } from "../../open-sse/translator/formats.ts";
 
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-test("request preparation keeps restored signed blocks throughout the active tool cycle", () => {
+test("request preparation keeps restored signed blocks throughout the active tool cycle", async () => {
   clearClaudeThinkingStore();
   const model = "claude-opus-5-5";
   const first = { type: "thinking", thinking: "SYNTHETIC_A", signature: "SYNTHETIC_SIG_A" };
@@ -28,7 +28,7 @@ test("request preparation keeps restored signed blocks throughout the active too
       true
     );
   }
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     model,
@@ -96,7 +96,7 @@ import {
 } from "../../open-sse/services/claudeThinkingStore.ts";
 
 for (const completed of [false, true]) {
-  test(`restored block scope: completed history=${completed}`, () => {
+  test(`restored block scope: completed history=${completed}`, async () => {
     clearClaudeThinkingStore();
     const model = "claude-opus-5-5";
     const block = {
@@ -158,7 +158,7 @@ for (const completed of [false, true]) {
         },
       ],
     };
-    const result = prepareClaudeRequest(body, "claude");
+    const result = await prepareClaudeRequest(body, "claude");
     const first = result.messages![1].content as Array<Record<string, unknown>>;
     assert.equal(first[0].type, completed ? "redacted_thinking" : "thinking");
     if (!completed)

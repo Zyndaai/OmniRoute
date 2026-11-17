@@ -12,43 +12,46 @@ interface PricingWithSourcesPayload {
   sourceMap: Record<string, Record<string, "default" | "litellm" | "modelsDev" | "user">>;
 }
 
-const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const pricingRoute = await import("../../src/app/api/pricing/route.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("pricing GET keeps legacy payload by default and exposes source metadata on demand", async () => {
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "pricing_synced",
-    "route-provider",
-    JSON.stringify({
-      "model-litellm": { prompt: 1 },
-      "model-user": { prompt: 2 },
-    })
+  await backend.execute(
+    "INSERT INTO model_pricing (source, provider, models) VALUES ('litellm', $1, $2::jsonb)",
+    [
+      "route-provider",
+      JSON.stringify({
+        "model-litellm": { prompt: 1 },
+        "model-user": { prompt: 2 },
+      }),
+    ]
   );
-  db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    "models_dev_pricing",
-    "route-provider",
-    JSON.stringify({
-      "model-modelsdev": { prompt: 3 },
-      "model-user": { completion: 4 },
-    })
+  await backend.execute(
+    "INSERT INTO model_pricing (source, provider, models) VALUES ('models_dev', $1, $2::jsonb)",
+    [
+      "route-provider",
+      JSON.stringify({
+        "model-modelsdev": { prompt: 3 },
+        "model-user": { completion: 4 },
+      }),
+    ]
   );
 
   await settingsDb.updatePricing({

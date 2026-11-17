@@ -18,10 +18,10 @@ describe("getModelPreserveVideoUrl", () => {
   it("translator import resolves correctly", async () => {
     const mod = await import("@/lib/db/models/modelPreserveVideoUrl");
     // Calling with unknown provider/model returns undefined (no compat override)
-    const result = mod.getModelPreserveVideoUrl("test_provider", "test_model");
+    const result = await mod.getModelPreserveVideoUrl("test_provider", "test_model");
     equal(result, undefined);
     // Calling with known hardcoded defaults also returns undefined (no compat row)
-    const result2 = mod.getModelPreserveVideoUrl("moonshot", "moonshot-v1");
+    const result2 = await mod.getModelPreserveVideoUrl("moonshot", "moonshot-v1");
     equal(result2, undefined);
   });
 
@@ -32,23 +32,26 @@ describe("getModelPreserveVideoUrl", () => {
     const PROVIDER = "test_provider_9248v3";
     const MODEL = "test_model_qwen_vl";
     try {
-      mergeModelCompatOverride(PROVIDER, MODEL, { preserveVideoUrl: true });
-      equal(getModelPreserveVideoUrl(PROVIDER, MODEL), true);
+      await mergeModelCompatOverride(PROVIDER, MODEL, { preserveVideoUrl: true });
+      equal(await getModelPreserveVideoUrl(PROVIDER, MODEL), true);
     } finally {
-      removeModelCompatOverride(PROVIDER, MODEL);
+      await removeModelCompatOverride(PROVIDER, MODEL);
     }
   });
 
-  it("translateRequest resolves preserveVideoUrl with the routed model", async () => {
+  it("translateRequest honours the preserveVideoUrl the caller resolves for the routed model", async () => {
     const { mergeModelCompatOverride, removeModelCompatOverride } =
       await import("@/lib/db/models/compat");
+    const { getModelPreserveVideoUrl } = await import("@/lib/db/models/modelPreserveVideoUrl");
     const { translateRequest } = await import("@omniroute/open-sse/translator/index.ts");
     const provider = "test-provider-video-override";
     const model = "test-model-video-override";
 
-    mergeModelCompatOverride(provider, model, { preserveVideoUrl: true });
+    await mergeModelCompatOverride(provider, model, { preserveVideoUrl: true });
     try {
-      const translated = translateRequest(
+      // The chat handler resolves the compat override and passes it in options (chatCore.ts).
+      const preserveVideoUrl = await getModelPreserveVideoUrl(provider, model);
+      const translated = (await translateRequest(
         "openai",
         "openai",
         model,
@@ -67,15 +70,17 @@ describe("getModelPreserveVideoUrl", () => {
         },
         false,
         null,
-        provider
-      ) as { messages: Array<{ content: Array<{ type: string }> }> };
+        provider,
+        null,
+        { preserveVideoUrl }
+      )) as { messages: Array<{ content: Array<{ type: string }> }> };
 
       deepEqual(
         translated.messages[0].content.map((part) => part.type),
         ["video_url"]
       );
     } finally {
-      removeModelCompatOverride(provider, model);
+      await removeModelCompatOverride(provider, model);
     }
   });
 

@@ -101,16 +101,16 @@ test("the request-wide cap is shared across schemas of one request", () => {
   );
 });
 
-test("response_format fan-out is rejected during translation, before any provider call", () => {
-  assert.throws(
+test("response_format fan-out is rejected during translation, before any provider call", async () => {
+  await assert.rejects(
     () => openaiToGeminiRequest("gemini-2.5-flash", chatBody(fanOutSchema(20)), false),
     (error: unknown) => error instanceof SchemaPreparationError
   );
 });
 
-test("tool schema fan-out is rejected during translation too", () => {
+test("tool schema fan-out is rejected during translation too", async () => {
   const tools = [{ type: "function", function: { name: "boom", parameters: fanOutSchema(20) } }];
-  assert.throws(
+  await assert.rejects(
     () =>
       openaiToGeminiRequest(
         "gemini-2.5-flash",
@@ -124,7 +124,7 @@ test("tool schema fan-out is rejected during translation too", () => {
 test("chatCore maps the schema error to a sanitized 400 that skips account cooldown", async () => {
   let caught: unknown;
   try {
-    openaiToGeminiRequest("gemini-2.5-flash", chatBody(fanOutSchema(20)), false);
+    await openaiToGeminiRequest("gemini-2.5-flash", chatBody(fanOutSchema(20)), false);
   } catch (error) {
     caught = error;
   }

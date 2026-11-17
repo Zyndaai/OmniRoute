@@ -108,11 +108,11 @@ const UNREGISTERED_GPT6_MODELS = [
   "gpt-6-luna-high",
 ];
 
-function outboundBody(
+async function outboundBody(
   executor: GheCopilotExecutor,
   model: string,
   credentials: ProviderCredentials
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const bare = model.startsWith("ghe-copilot/") ? model.slice("ghe-copilot/".length) : model;
   const { targetFormat } = resolveChatCoreTargetFormat({
     provider: "ghe-copilot",
@@ -122,7 +122,7 @@ function outboundBody(
     customModelTargetFormat: undefined,
     providerSpecificData: credentials.providerSpecificData,
   });
-  const translated = translateRequest(
+  const translated = await translateRequest(
     "openai",
     targetFormat,
     bare,
@@ -135,10 +135,13 @@ function outboundBody(
     credentials,
     "ghe-copilot"
   );
-  return executor.transformRequest(model, translated, true, credentials) as Record<string, unknown>;
+  return (await executor.transformRequest(model, translated, true, credentials)) as Record<
+    string,
+    unknown
+  >;
 }
 
-test("GPT-6 requests routed to /responses send a Responses body, not chat completions", () => {
+test("GPT-6 requests routed to /responses send a Responses body, not chat completions", async () => {
   const executor = new GheCopilotExecutor({
     gheUrl: "https://ghe.company.com",
     clientId: "test-client",
@@ -154,7 +157,7 @@ test("GPT-6 requests routed to /responses send a Responses body, not chat comple
       "https://ghe.company.com/responses",
       `${model} URL`
     );
-    const sent = outboundBody(executor, model, credentials);
+    const sent = await outboundBody(executor, model, credentials);
     assert.ok(
       Array.isArray(sent.input),
       `${model} must send Responses input, got keys ${Object.keys(sent).join(",")}`
@@ -165,7 +168,7 @@ test("GPT-6 requests routed to /responses send a Responses body, not chat comple
   }
 });
 
-test("models this PR did not move keep chat-completions bodies and URLs", () => {
+test("models this PR did not move keep chat-completions bodies and URLs", async () => {
   const executor = new GheCopilotExecutor({
     gheUrl: "https://ghe.company.com",
     clientId: "test-client",
@@ -180,7 +183,7 @@ test("models this PR did not move keep chat-completions bodies and URLs", () => 
       executor.buildUrl(model, true, 0, credentials),
       "https://ghe.company.com/chat/completions"
     );
-    const sent = outboundBody(executor, model, credentials);
+    const sent = await outboundBody(executor, model, credentials);
     assert.ok(Array.isArray(sent.messages), `${model} must keep chat-completions messages`);
     assert.equal(sent.input, undefined, `${model} must not be rewritten to Responses input`);
   }

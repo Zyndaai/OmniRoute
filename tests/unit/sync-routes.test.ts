@@ -21,23 +21,24 @@ const syncTokensRoute = await import("../../src/app/api/sync/tokens/route.ts");
 const syncTokenByIdRoute = await import("../../src/app/api/sync/tokens/[id]/route.ts");
 const syncBundleRoute = await import("../../src/app/api/sync/bundle/route.ts");
 const { updateSettings } = await import("@/lib/db/settings");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const localDb = { updateSettings };
 
-function resetStorage() {
+async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(async () => {
-  resetStorage();
+  await resetStorage();
   await localDb.updateSettings({ requireLogin: true, password: "" });
 });
 
-test.after(() => {
+test.after(async () => {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 
   if (ORIGINAL_DATA_DIR === undefined) {
@@ -164,7 +165,7 @@ test("sync token routes issue, list, use and revoke dedicated tokens", async () 
   );
   assert.equal(revokedBundleResponse.status, 401);
 
-  const auditActions = compliance.getAuditLog().map((entry) => entry.action);
+  const auditActions = (await compliance.getAuditLog()).map((entry) => entry.action);
   assert.equal(auditActions.includes("sync.token.created"), true);
   assert.equal(auditActions.includes("sync.token.revoked"), true);
 });

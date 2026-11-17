@@ -15,17 +15,19 @@ const modelsDb = await import("../../src/lib/db/models.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
 const { getNextEligibleFamilyFallback, getContextFamilyFallback } =
   await import("../../open-sse/services/modelFamilyFallback.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const CONNECTION_ID = "family-fallback-connection";
 
 async function resetStorage(): Promise<void> {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   accountFallback.clearAllModelLockouts();
 }
 
-function nextAntigravityFallback(tried = new Set<string>()): string | null {
+async function nextAntigravityFallback(tried = new Set<string>()): Promise<string | null> {
   return getNextEligibleFamilyFallback("agy/gemini-3.8-flash-high", tried, "agy", CONNECTION_ID);
 }
 
@@ -33,16 +35,16 @@ test.beforeEach(resetStorage);
 
 test.after(async () => {
   accountFallback.clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
 
 test("family fallback skips a hidden regular model", async () => {
-  modelsDb.setModelIsHidden("anthropic", "claude-opus-4.8", true, "chat");
+  await modelsDb.setModelIsHidden("anthropic", "claude-opus-4.8", true, "chat");
 
-  const next = getNextEligibleFamilyFallback(
+  const next = await getNextEligibleFamilyFallback(
     "anthropic/claude-opus-5",
     new Set(["anthropic/claude-opus-5"]),
     "anthropic",
@@ -53,12 +55,12 @@ test("family fallback skips a hidden regular model", async () => {
 });
 
 test("family fallback skips a hidden passthrough model using its provider alias", async () => {
-  modelsDb.setModelIsHidden("antigravity", "gemini-3.8-flash-medium", true, "chat");
+  await modelsDb.setModelIsHidden("antigravity", "gemini-3.8-flash-medium", true, "chat");
 
-  assert.equal(nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
+  assert.equal(await nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
 });
 
-test("family fallback skips a model with an active connection-scoped lockout", () => {
+test("family fallback skips a model with an active connection-scoped lockout", async () => {
   accountFallback.lockExactModel(
     "agy",
     CONNECTION_ID,
@@ -67,15 +69,15 @@ test("family fallback skips a model with an active connection-scoped lockout", (
     60_000
   );
 
-  assert.equal(nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
+  assert.equal(await nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
 });
 
 test("family fallback advances past both hidden and locked siblings to an eligible model", async () => {
-  modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
+  await modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
   accountFallback.lockExactModel("claude", CONNECTION_ID, "claude-opus-4-7", "rate_limit", 60_000);
 
   assert.equal(
-    getNextEligibleFamilyFallback(
+    await getNextEligibleFamilyFallback(
       "claude/claude-opus-5",
       new Set(["claude/claude-opus-5"]),
       "claude",
@@ -86,11 +88,11 @@ test("family fallback advances past both hidden and locked siblings to an eligib
 });
 
 test("family fallback applies hidden and lockout checks across provider aliases", async () => {
-  modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
+  await modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
   accountFallback.lockExactModel("claude", CONNECTION_ID, "claude-opus-4-7", "rate_limit", 60_000);
 
   assert.equal(
-    getNextEligibleFamilyFallback(
+    await getNextEligibleFamilyFallback(
       "cc/claude-opus-5",
       new Set(["cc/claude-opus-5"]),
       "cc",
@@ -101,7 +103,7 @@ test("family fallback applies hidden and lockout checks across provider aliases"
 });
 
 test("family fallback restores eligibility after a lockout expires", async () => {
-  modelsDb.getHiddenModelsByProvider();
+  await modelsDb.getHiddenModelsByProvider();
   accountFallback.lockExactModel(
     "agy",
     CONNECTION_ID,
@@ -109,10 +111,10 @@ test("family fallback restores eligibility after a lockout expires", async () =>
     "rate_limit",
     100
   );
-  assert.equal(nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
+  assert.equal(await nextAntigravityFallback(), "agy/gemini-3.8-flash-low");
 
   await new Promise((resolve) => setTimeout(resolve, 120));
-  assert.equal(nextAntigravityFallback(), "agy/gemini-3.8-flash-medium");
+  assert.equal(await nextAntigravityFallback(), "agy/gemini-3.8-flash-medium");
 });
 
 test("family fallback returns null when every sibling is hidden", async () => {
@@ -122,57 +124,57 @@ test("family fallback returns null when every sibling is hidden", async () => {
     "gemini-3.8-flash-tiered",
     "gemini-3.8-flash",
   ]) {
-    modelsDb.setModelIsHidden("antigravity", model, true, "chat");
+    await modelsDb.setModelIsHidden("antigravity", model, true, "chat");
   }
 
-  assert.equal(nextAntigravityFallback(), null);
+  assert.equal(await nextAntigravityFallback(), null);
 });
 
-test("eligible family fallback keeps the existing preferred model order", () => {
-  assert.equal(nextAntigravityFallback(), "agy/gemini-3.8-flash-medium");
+test("eligible family fallback keeps the existing preferred model order", async () => {
+  assert.equal(await nextAntigravityFallback(), "agy/gemini-3.8-flash-medium");
 });
 
-test("bare family wire ids retain the explicit provider for visibility", () => {
-  modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
+test("bare family wire ids retain the explicit provider for visibility", async () => {
+  await modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
   assert.equal(
-    getNextEligibleFamilyFallback("claude-opus-5", new Set(), "claude", CONNECTION_ID),
+    await getNextEligibleFamilyFallback("claude-opus-5", new Set(), "claude", CONNECTION_ID),
     "claude-opus-4-7"
   );
 });
 
-test("a hidden sibling on another provider does not remove this provider's candidate", () => {
-  modelsDb.setModelIsHidden("anthropic", "claude-opus-4.8", true, "chat");
+test("a hidden sibling on another provider does not remove this provider's candidate", async () => {
+  await modelsDb.setModelIsHidden("anthropic", "claude-opus-4.8", true, "chat");
   assert.equal(
-    getNextEligibleFamilyFallback("claude/claude-opus-5", new Set(), "claude", CONNECTION_ID),
+    await getNextEligibleFamilyFallback("claude/claude-opus-5", new Set(), "claude", CONNECTION_ID),
     "claude/claude-opus-4-8"
   );
 });
 
-test("context fallback retains eligible ordering and skips hidden or locked siblings", () => {
-  modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
+test("context fallback retains eligible ordering and skips hidden or locked siblings", async () => {
+  await modelsDb.setModelIsHidden("claude", "claude-opus-4-8", true, "chat");
   accountFallback.lockExactModel("claude", CONNECTION_ID, "claude-opus-4-7", "rate_limit", 60_000);
   assert.equal(
-    getContextFamilyFallback("claude/claude-opus-5", new Set(), "claude", CONNECTION_ID),
+    await getContextFamilyFallback("claude/claude-opus-5", new Set(), "claude", CONNECTION_ID),
     "claude/claude-sonnet-5"
   );
 });
 
-test("context fallback cannot escape an empty request allowlist", () => {
+test("context fallback cannot escape an empty request allowlist", async () => {
   assert.equal(
-    getContextFamilyFallback("agy/gemini-3.8-flash-high", new Set(), "agy", CONNECTION_ID, []),
+    await getContextFamilyFallback("agy/gemini-3.8-flash-high", new Set(), "agy", CONNECTION_ID, []),
     null
   );
 });
 
-test("context fallback uses only permitted untried siblings", () => {
+test("context fallback uses only permitted untried siblings", async () => {
   const current = "agy/gemini-3.8-flash-high";
   const permitted = "agy/gemini-3.8-flash-low";
   assert.equal(
-    getContextFamilyFallback(current, new Set(), "agy", CONNECTION_ID, [permitted]),
+    await getContextFamilyFallback(current, new Set(), "agy", CONNECTION_ID, [permitted]),
     permitted
   );
   assert.equal(
-    getContextFamilyFallback(current, new Set([permitted]), "agy", CONNECTION_ID, [permitted]),
+    await getContextFamilyFallback(current, new Set([permitted]), "agy", CONNECTION_ID, [permitted]),
     null
   );
 });

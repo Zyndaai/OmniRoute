@@ -12,7 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-conn-spee
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "conn-speed-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const usageHistory = await import("../../src/lib/usage/usageHistory.ts");
 const speedStats = await import("../../src/lib/usage/connectionSpeedStats.ts");
 const { summarizeConnectionSpeed } = await import("../../src/lib/usage/usageHistory/helpers.ts");
@@ -22,23 +22,23 @@ const usageDb = await import("../../src/lib/usageDb.ts");
 
 const originalFetch = globalThis.fetch;
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   usageHistory.clearPendingRequests();
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -151,7 +151,7 @@ const CONN_B_ROWS: SeedRow[] = [
 test("getConnectionSpeedStats aggregates only the target connection's successful rows, by model", async () => {
   await seed([...CONN_A_ROWS, ...CONN_B_ROWS]);
 
-  const stats = speedStats.getConnectionSpeedStats("conn-a");
+  const stats = await speedStats.getConnectionSpeedStats("conn-a");
   assert.ok(stats, "expected speed stats for conn-a");
   assert.equal(stats.samples, 4);
   assert.equal(stats.lastTps, 200);
@@ -175,7 +175,7 @@ test("getConnectionSpeedStats aggregates only the target connection's successful
   assert.equal(y.avgTps, 200);
   assert.equal(y.avgTtftMs, 200);
 
-  const other = speedStats.getConnectionSpeedStats("conn-b");
+  const other = await speedStats.getConnectionSpeedStats("conn-b");
   assert.ok(other);
   assert.equal(other.samples, 1);
   assert.equal(other.lastTps, 9000);
@@ -186,7 +186,7 @@ test("getConnectionSpeedStats honours the row limit (newest first) and returns n
 
   // Failed rows never count toward the limit; the 3 newest successful rows are
   // sub-300 ms (skipped) / model-x 200 tok/s / model-y 200 tok/s.
-  const limited = speedStats.getConnectionSpeedStats("conn-a", { limit: 3 });
+  const limited = await speedStats.getConnectionSpeedStats("conn-a", { limit: 3 });
   assert.ok(limited);
   assert.equal(limited.samples, 2);
   assert.equal(limited.lastTps, 200);
@@ -195,23 +195,22 @@ test("getConnectionSpeedStats honours the row limit (newest first) and returns n
     ["model-x", "model-y"]
   );
 
-  assert.equal(speedStats.getConnectionSpeedStats("conn-missing"), null);
-  assert.equal(speedStats.getConnectionSpeedStats(""), null);
+  assert.equal(await speedStats.getConnectionSpeedStats("conn-missing"), null);
+  assert.equal(await speedStats.getConnectionSpeedStats(""), null);
   // Only the sub-300 ms row fits -> no usable sample.
-  assert.equal(speedStats.getConnectionSpeedStats("conn-a", { limit: 1 }), null);
+  assert.equal(await speedStats.getConnectionSpeedStats("conn-a", { limit: 1 }), null);
 });
 
-test("connection_id lookups are served by an index, not a table scan", () => {
-  const db = core.getDbInstance();
-  const plan = db
-    .prepare(
-      `EXPLAIN QUERY PLAN SELECT model FROM usage_history
-       WHERE connection_id = ? AND success = 1 ORDER BY timestamp DESC LIMIT 20`
-    )
-    .all("conn-a") as Array<{ detail: string }>;
-  const details = plan.map((row) => row.detail).join(" | ");
-  assert.match(details, /idx_uh_connection_timestamp/);
-  assert.doesNotMatch(details, /USE TEMP B-TREE FOR ORDER BY/);
+test("connection_id lookups are backed by an index leading on (connection_id, timestamp)", async () => {
+  // The planner always scans tiny test tables, so instead of asserting a plan this
+  // checks the index that serves the lookup exists with the right leading columns.
+  const indexes = await getTestBackend().query<{ indexdef: string }>(
+    "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'usage_history'"
+  );
+  const connectionIndex = indexes.find((row) =>
+    /\(connection_id, "timestamp"\)/.test(row.indexdef)
+  );
+  assert.ok(connectionIndex, "expected a usage_history index on (connection_id, timestamp)");
 });
 
 test("summarizeConnectionSpeed is a pure reducer over newest-first rows", () => {
@@ -229,7 +228,7 @@ test("summarizeConnectionSpeed is a pure reducer over newest-first rows", () => 
   );
 });
 
-test("attachConnectionSpeedStats decorates cache entries and fails open", () => {
+test("attachConnectionSpeedStats decorates cache entries and fails open", async () => {
   const caches = {
     a: { plan: "pro", fetchedAt: "2099-01-01T00:00:00.000Z" },
     b: { plan: "free" },
@@ -237,24 +236,24 @@ test("attachConnectionSpeedStats decorates cache entries and fails open", () => 
   const fakeStats = summarizeConnectionSpeed([
     { model: "m", latency_ms: 1100, ttft_ms: 100, tokens_output: 50, tokens_reasoning: 0 },
   ]);
-  const decorated = speedStats.attachConnectionSpeedStats(caches, (id) =>
+  const decorated = await speedStats.attachConnectionSpeedStats(caches, async (id) =>
     id === "a" ? fakeStats : null
   );
   assert.deepEqual(decorated.a, { ...caches.a, speed: fakeStats });
   assert.deepEqual(decorated.b, caches.b);
   assert.equal("speed" in caches.a, false, "input caches must not be mutated");
 
-  const failOpen = speedStats.attachConnectionSpeedStats(caches, () => {
+  const failOpen = await speedStats.attachConnectionSpeedStats(caches, async () => {
     throw new Error("db locked");
   });
   assert.deepEqual(failOpen, caches);
 
   assert.deepEqual(
-    speedStats.withConnectionSpeedStats("a", { quotas: {} }, () => fakeStats),
+    await speedStats.withConnectionSpeedStats("a", { quotas: {} }, async () => fakeStats),
     { quotas: {}, speed: fakeStats }
   );
   assert.deepEqual(
-    speedStats.withConnectionSpeedStats("a", { quotas: {} }, () => {
+    await speedStats.withConnectionSpeedStats("a", { quotas: {} }, async () => {
       throw new Error("db locked");
     }),
     { quotas: {} }

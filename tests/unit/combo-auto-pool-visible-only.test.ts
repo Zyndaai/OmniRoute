@@ -21,17 +21,18 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
 const combo = await import("../../open-sse/services/combo.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 test.beforeEach(() => resetStorage());
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
@@ -190,14 +191,14 @@ test("virtual auto-combo pool survives a malformed customModels row", async () =
   await modelsDb.replaceSyncedAvailableModelsForConnection("openai", connectionId, [
     { id: "gpt-4o-mini", name: "GPT-4o mini", source: "imported" as const },
   ]);
-  core
-    .getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run(
-      "customModels",
+  await getTestBackend().execute(
+    `INSERT INTO provider_model_catalog (provider, custom_models) VALUES ($1, $2::jsonb)
+     ON CONFLICT (provider) DO UPDATE SET custom_models = EXCLUDED.custom_models`,
+    [
       "openai",
-      JSON.stringify([null, "not-an-object", { name: "Missing Id" }, { id: "operator-custom" }])
-    );
+      JSON.stringify([null, "not-an-object", { name: "Missing Id" }, { id: "operator-custom" }]),
+    ]
+  );
 
   const prepared = await virtualFactory.prepareVirtualAutoComboInputs();
   const openaiCandidates = prepared.regularCandidates.filter((c) => c.provider === "openai");

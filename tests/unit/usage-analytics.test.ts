@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-usage-analytics-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { updatePricing } = await import("@/lib/db/settings");
 const localDb = { updatePricing };
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
@@ -23,28 +23,46 @@ const { calculateCost, getCodexFastCostMultiplier } =
 const clearPendingRequests = usageHistory.clearPendingRequests;
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   clearPendingRequests();
 }
 
-async function withPrepareFailure(match: string, fn: () => Promise<void>) {
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
-
-  db.prepare = (sql, ...args) => {
+/** Makes every statement whose text contains `match` throw while `fn` runs. */
+async function withQueryFailure(match: string, fn: () => Promise<void>) {
+  const backend = getTestBackend();
+  const originals = {
+    query: backend.query,
+    queryOne: backend.queryOne,
+    execute: backend.execute,
+  };
+  const guard = (sql: unknown) => {
     if (String(sql).includes(match)) {
       throw new Error("full history scan should not run");
     }
-    return originalPrepare(sql, ...args);
   };
+
+  backend.query = ((sql: string, params?: unknown[]) => {
+    guard(sql);
+    return originals.query.call(backend, sql, params);
+  }) as typeof backend.query;
+  backend.queryOne = ((sql: string, params?: unknown[]) => {
+    guard(sql);
+    return originals.queryOne.call(backend, sql, params);
+  }) as typeof backend.queryOne;
+  backend.execute = ((sql: string, params?: unknown[]) => {
+    guard(sql);
+    return originals.execute.call(backend, sql, params);
+  }) as typeof backend.execute;
 
   try {
     await fn();
   } finally {
-    db.prepare = originalPrepare;
+    backend.query = originals.query;
+    backend.queryOne = originals.queryOne;
+    backend.execute = originals.execute;
   }
 }
 
@@ -52,8 +70,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
@@ -308,7 +326,7 @@ test("getUsageStats avoids loading the entire usage_history table", async () => 
     timestamp: new Date().toISOString(),
   });
 
-  await withPrepareFailure("SELECT * FROM usage_history ORDER BY timestamp ASC", async () => {
+  await withQueryFailure("SELECT * FROM usage_history", async () => {
     const stats = await usageStats.getUsageStats();
     assert.equal(stats.totalRequests, 1);
     assert.equal(stats.totalPromptTokens, 10);
@@ -317,20 +335,21 @@ test("getUsageStats avoids loading the entire usage_history table", async () => 
 });
 
 test("getUsageStats groups renamed API key usage by stable ID", async () => {
-  const db = core.getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO api_keys (id, name, key, machine_id, allowed_models, no_log, created_at, key_prefix)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "api-key-rename",
-    "Current Name",
-    "omni-test-key",
-    "machine1234567890",
-    "[]",
-    0,
-    now,
-    "omni-test-ke"
+  await getTestBackend().execute(
+    `INSERT INTO api_keys (id, name, key, key_hash, machine_id, allowed_models, no_log, created_at, key_prefix)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
+    [
+      "api-key-rename",
+      "Current Name",
+      "omni-test-key",
+      "a".repeat(64),
+      "machine1234567890",
+      "[]",
+      false,
+      now,
+      "omni-test-ke",
+    ]
   );
 
   await usageHistory.saveRequestUsage({
@@ -525,29 +544,25 @@ test("clearPendingRequests allows fresh tracking after clearing", () => {
 });
 
 test("getUsageSummary counts total_requests from daily_usage_summary, not 1-per-row (#usage-stats-fix)", async () => {
-  const db = core.getDbInstance();
+  const backend = getTestBackend();
 
   // Insert a daily_usage_summary row with total_requests=50, 1000 input, 500 output.
   // With the old COUNT(*) query this would count as 1 request; with SUM(requests)
   // it must count as 50.
-  db.prepare(
-    `
-    INSERT INTO daily_usage_summary (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-    VALUES ('openai', 'gpt-4', '2024-01-10', 50, 1000, 500, 0.02)
-  `
-  ).run();
+  await backend.execute(
+    `INSERT INTO daily_usage_summary (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
+     VALUES ('openai', 'gpt-4', '2024-01-10', 50, 1000, 500, 0.02)`
+  );
 
   // Also insert one raw row so we can verify the UNION merges both legs.
-  db.prepare(
-    `
-    INSERT INTO usage_history (timestamp, provider, model, tokens_input, tokens_output, success, latency_ms, service_tier)
-    VALUES ('2024-01-20T10:00:00.000Z', 'openai', 'gpt-4', 100, 50, 1, 200, 'standard')
-  `
-  ).run();
+  await backend.execute(
+    `INSERT INTO usage_history ("timestamp", provider, model, tokens_input, tokens_output, success, latency_ms, service_tier)
+     VALUES ('2024-01-20T10:00:00.000Z', 'openai', 'gpt-4', 100, 50, true, 200, 'standard')`
+  );
 
   // Build a unified source with rawCutoffDate BETWEEN the two rows so both
   // legs are exercised: aggregated leg gets the Jan 10 row, raw leg gets the Jan 20 row.
-  const { buildUnifiedSource } = await import("../../src/lib/db/usageAnalytics/sources.ts");
+  const { buildUnifiedSource } = await import("../../src/lib/db/usageAnalytics/unifiedSources.ts");
   const { getUsageSummary } = await import("../../src/lib/db/usageAnalytics.ts");
   const { unifiedSource, unifiedParams } = buildUnifiedSource({
     sinceIso: "2024-01-01T00:00:00.000Z",
@@ -557,7 +572,7 @@ test("getUsageSummary counts total_requests from daily_usage_summary, not 1-per-
     apiKeyParams: {},
   });
 
-  const summary = getUsageSummary(unifiedSource, unifiedParams);
+  const summary = await getUsageSummary(unifiedSource, unifiedParams);
 
   // 50 from daily_usage_summary + 1 from raw usage_history = 51
   assert.equal(

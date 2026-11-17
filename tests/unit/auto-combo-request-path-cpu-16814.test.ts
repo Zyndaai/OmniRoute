@@ -12,6 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-auto-cpu-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { PROVIDER_MODELS, getProviderModel } =
   await import("../../open-sse/config/providerModels.ts");
 const { getTaskFitness, invalidateFitnessCache } =
@@ -20,8 +21,8 @@ const { resolveScoresAs } = await import("../../open-sse/services/autoCombo/scor
 const { computeAdvertisedLimits } =
   await import("../../open-sse/services/autoCombo/advertisedLimits.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
@@ -36,27 +37,35 @@ function sampleModelIds(count: number): Array<{ provider: string; id: string }> 
   return out;
 }
 
-function countDbPrepares<T>(fnUnderTest: () => T): { result: T; prepares: number } {
-  const db = core.getDbInstance() as unknown as { prepare: (sql: string) => unknown };
-  const original = db.prepare.bind(db);
+/** Counts the statements (and transactions) the process backend receives while `fnUnderTest` runs. */
+async function countDbStatements<T>(
+  fnUnderTest: () => Promise<T>
+): Promise<{ result: T; prepares: number }> {
+  const backend = getTestBackend() as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const names = ["query", "queryOne", "execute", "transaction"];
+  const originals = new Map<string, (...args: unknown[]) => unknown>();
   let prepares = 0;
-  db.prepare = (sql: string) => {
-    prepares++;
-    return original(sql);
-  };
+  for (const name of names) {
+    const original = backend[name];
+    originals.set(name, original);
+    backend[name] = (...args: unknown[]) => {
+      prepares++;
+      return original.apply(backend, args);
+    };
+  }
   try {
-    return { result: fnUnderTest(), prepares };
+    return { result: await fnUnderTest(), prepares };
   } finally {
-    db.prepare = original;
+    for (const [name, original] of originals) backend[name] = original;
   }
 }
 
-test("#16814: getTaskFitness answers a repeated lookup from memory (no DB round-trip per call)", () => {
+test("#16814: getTaskFitness answers a repeated lookup from memory (no DB round-trip per call)", async () => {
   invalidateFitnessCache();
   const [{ id }] = sampleModelIds(1);
-  getTaskFitness(id, "default"); // first call may hit the DB and warm one-off state
-  const { prepares } = countDbPrepares(() => {
-    for (let i = 0; i < 50; i++) getTaskFitness(id, "default");
+  await getTaskFitness(id, "default"); // first call may hit the DB and warm one-off state
+  const { prepares } = await countDbStatements(async () => {
+    for (let i = 0; i < 50; i++) await getTaskFitness(id, "default");
   });
   assert.equal(prepares, 0, `50 repeat getTaskFitness(${id}) issued ${prepares} DB statements`);
 });
@@ -116,10 +125,10 @@ test("getProviderModel sees a provider added after the id was looked up", () => 
   assert.equal(getProviderModel("no-such-provider", modelId), undefined);
 });
 
-test("#16814: computeAdvertisedLimits does not issue per-candidate DB statements on the request path", () => {
+test("#16814: computeAdvertisedLimits does not issue per-candidate DB statements on the request path", async () => {
   const pool = sampleModelIds(120).map(({ provider, id }) => ({ provider, model: id }));
-  computeAdvertisedLimits(pool.slice(0, 1)); // warm one-off init
-  const { prepares } = countDbPrepares(() => computeAdvertisedLimits(pool));
+  await computeAdvertisedLimits(pool.slice(0, 1)); // warm one-off init
+  const { prepares } = await countDbStatements(() => computeAdvertisedLimits(pool));
   assert.ok(
     prepares < 10,
     `computeAdvertisedLimits over ${pool.length} candidates issued ${prepares} DB statements`

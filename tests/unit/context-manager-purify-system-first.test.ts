@@ -16,7 +16,7 @@ function bigTurn(n: number) {
   return { role: "user", content: `turn ${n}: ${"x".repeat(4_000)}` };
 }
 
-function run(body: Record<string, unknown>) {
+async function run(body: Record<string, unknown>) {
   // ~30k tokens of history vs a small target forces Layer-3 purify_history.
   return compressContext(body, { maxTokens: 5_000, reserveTokens: 0 });
 }
@@ -25,7 +25,7 @@ function systemIndices(messages: Array<{ role: string }>) {
   return messages.map((m, i) => (m.role === "system" ? i : -1)).filter((i) => i >= 0);
 }
 
-test("purify_history merges dropped-notice into existing leading system message", () => {
+test("purify_history merges dropped-notice into existing leading system message", async () => {
   const body = {
     model: "any-model",
     messages: [
@@ -33,7 +33,7 @@ test("purify_history merges dropped-notice into existing leading system message"
       ...Array.from({ length: 12 }, (_, i) => bigTurn(i)),
     ],
   };
-  const result = run(body);
+  const result = await run(body);
   assert.equal(result.compressed, true);
   const messages = (result.body as { messages: Array<Record<string, unknown>> }).messages;
   assert.deepEqual(systemIndices(messages as Array<{ role: string }>).slice(1), []);
@@ -44,19 +44,19 @@ test("purify_history merges dropped-notice into existing leading system message"
   assert.match(text, /You are a helpful assistant\./);
 });
 
-test("purify_history prepends a single system notice when no system message exists", () => {
+test("purify_history prepends a single system notice when no system message exists", async () => {
   const body = {
     model: "any-model",
     messages: Array.from({ length: 12 }, (_, i) => bigTurn(i)),
   };
-  const result = run(body);
+  const result = await run(body);
   assert.equal(result.compressed, true);
   const messages = (result.body as { messages: Array<Record<string, unknown>> }).messages;
   assert.deepEqual(systemIndices(messages as Array<{ role: string }>), [0]);
   assert.match(String(messages[0].content), /Context compressed: earlier messages removed/);
 });
 
-test("purify_history merges into leading developer message without adding a second one", () => {
+test("purify_history merges into leading developer message without adding a second one", async () => {
   const body = {
     model: "any-model",
     messages: [
@@ -64,7 +64,7 @@ test("purify_history merges into leading developer message without adding a seco
       ...Array.from({ length: 12 }, (_, i) => bigTurn(i)),
     ],
   };
-  const result = run(body);
+  const result = await run(body);
   assert.equal(result.compressed, true);
   const messages = (result.body as { messages: Array<Record<string, unknown>> }).messages;
   assert.deepEqual(
@@ -76,7 +76,7 @@ test("purify_history merges into leading developer message without adding a seco
   assert.match(String(messages[0].content), /dev instructions/);
 });
 
-test("no compression means no notice and untouched history", () => {
+test("no compression means no notice and untouched history", async () => {
   const body = {
     model: "any-model",
     messages: [
@@ -84,7 +84,7 @@ test("no compression means no notice and untouched history", () => {
       { role: "user", content: "hi" },
     ],
   };
-  const result = run(body);
+  const result = await run(body);
   assert.equal(result.compressed, false);
   const messages = (result.body as { messages: unknown[] }).messages;
   assert.equal(messages.length, 2);

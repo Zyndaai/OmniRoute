@@ -6,14 +6,13 @@ import path from "node:path";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-unpriced-route-"));
 process.env.DATA_DIR = dataDir;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.INITIAL_PASSWORD = "isolated-unpriced-route-password";
 // Hermetic secret: API key creation needs API_KEY_SECRET for its CRC, and the
 // train/CI shells do not export one. Restore the caller's value in test.after.
 const originalApiKeySecret = process.env.API_KEY_SECRET;
 process.env.API_KEY_SECRET = "unpriced-route-isolated-api-key-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const keys = await import("../../src/lib/db/apiKeys.ts");
 const accessTokens = await import("../../src/lib/db/accessTokens.ts");
 const usage = await import("../../src/lib/usage/usageHistory.ts");
@@ -27,8 +26,8 @@ function request(token?: string): Request {
   });
 }
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   keys.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (originalApiKeySecret === undefined) delete process.env.API_KEY_SECRET;
@@ -50,7 +49,7 @@ test("unpriced report rejects anonymous and inference-only keys, accepts managem
   assert.deepEqual(report.models, []);
 
   // The latest management guard also supports scoped CLI access tokens.
-  const { secret } = accessTokens.createAccessToken({ name: "report-reader", scope: "read" });
+  const { secret } = await accessTokens.createAccessToken({ name: "report-reader", scope: "read" });
   assert.equal((await GET(request(secret))).status, 200);
   assert.equal((await GET(request("oma_live_invalid_report_token"))).status, 401);
 });
@@ -109,14 +108,11 @@ test("rows with a provider-reported cost are not reported as unpriced, matching 
     timestamp: new Date(now).toISOString(),
     success: true,
   });
-  core
-    .getDbInstance()
-    .prepare(
-      `UPDATE usage_history SET provider_cost_usd = 0.25
-       WHERE model = 'metered-only'
-          OR (model = 'metered-and-plain' AND tokens_input = 100)`
-    )
-    .run();
+  await getTestBackend().execute(
+    `UPDATE usage_history SET provider_cost_usd = 0.25
+      WHERE model = 'metered-only'
+         OR (model = 'metered-and-plain' AND tokens_input = 100)`
+  );
   const report = await getUnpricedUsageReport({ now: () => now });
   const labels = report.models
     .filter((m) => m.provider === "unpriced-route-metered-fixture")
@@ -127,8 +123,9 @@ test("rows with a provider-reported cost are not reported as unpriced, matching 
 });
 
 test("report failures return a fixed error without stack traces or storage paths", async () => {
-  const { secret } = accessTokens.createAccessToken({ name: "failure-reader", scope: "read" });
-  core.getDbInstance().exec("ALTER TABLE usage_history RENAME TO usage_history_offline");
+  const { secret } = await accessTokens.createAccessToken({ name: "failure-reader", scope: "read" });
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE usage_history RENAME TO usage_history_offline");
   try {
     const response = await GET(request(secret));
     assert.equal(response.status, 500);
@@ -136,6 +133,6 @@ test("report failures return a fixed error without stack traces or storage paths
     assert.deepEqual(body, { error: "Failed to build unpriced usage report" });
     assert.doesNotMatch(JSON.stringify(body), /at \/|storage\.sqlite|usage_history/);
   } finally {
-    core.getDbInstance().exec("ALTER TABLE usage_history_offline RENAME TO usage_history");
+    await backend.execute("ALTER TABLE usage_history_offline RENAME TO usage_history");
   }
 });

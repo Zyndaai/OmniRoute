@@ -60,34 +60,34 @@ test.afterEach(() => {
   comboMetrics.resetAllComboMetrics();
 });
 
-test("gemini thought signature store handles invalid input, memory TTL and max-size pruning", () => {
-  signatureStore.storeGeminiThoughtSignature("", "sig");
-  signatureStore.storeGeminiThoughtSignature("call-empty", "");
-  assert.equal(signatureStore.getGeminiThoughtSignature(""), null);
-  assert.equal(signatureStore.getGeminiThoughtSignature("call-empty"), null);
+test("gemini thought signature store handles invalid input, memory TTL and max-size pruning", async () => {
+  await signatureStore.storeGeminiThoughtSignature("", "sig");
+  await signatureStore.storeGeminiThoughtSignature("call-empty", "");
+  assert.equal(await signatureStore.getGeminiThoughtSignature(""), null);
+  assert.equal(await signatureStore.getGeminiThoughtSignature("call-empty"), null);
 
   let now = 1_000;
   Date.now = () => now;
 
-  signatureStore.storeGeminiThoughtSignature("call-live", "sig-live");
-  assert.equal(signatureStore.getGeminiThoughtSignature("call-live"), "sig-live");
+  await signatureStore.storeGeminiThoughtSignature("call-live", "sig-live");
+  assert.equal(await signatureStore.getGeminiThoughtSignature("call-live"), "sig-live");
 
   now += 60 * 60 * 1000 + 1;
   assert.equal(signatureStore.getGeminiThoughtSignatureMemorySizeForTests(), 0);
-  assert.equal(signatureStore.getGeminiThoughtSignature("call-live"), "sig-live");
+  assert.equal(await signatureStore.getGeminiThoughtSignature("call-live"), "sig-live");
 
   now = 10_000;
   for (let index = 0; index < 1002; index++) {
-    signatureStore.storeGeminiThoughtSignature(`call-${index}`, `sig-${index}`);
+    await signatureStore.storeGeminiThoughtSignature(`call-${index}`, `sig-${index}`);
     now += 1;
   }
 
   assert.equal(signatureStore.getGeminiThoughtSignatureMemorySizeForTests(), 1000);
-  assert.equal(signatureStore.getGeminiThoughtSignature("call-0"), "sig-0");
-  assert.equal(signatureStore.getGeminiThoughtSignature("call-1001"), "sig-1001");
+  assert.equal(await signatureStore.getGeminiThoughtSignature("call-0"), "sig-0");
+  assert.equal(await signatureStore.getGeminiThoughtSignature("call-1001"), "sig-1001");
 });
 
-test("model capability helpers cover denylist, empty input and default-safe paths", () => {
+test("model capability helpers cover denylist, empty input and default-safe paths", async () => {
   providerModels.PROVIDER_ID_TO_ALIAS.synthetic = "synthetic";
   providerModels.PROVIDER_MODELS.synthetic = [
     { id: "tool-safe", toolCalling: true, supportsReasoning: true },
@@ -95,27 +95,30 @@ test("model capability helpers cover denylist, empty input and default-safe path
     { id: "tool-unknown" },
   ];
 
-  assert.equal(modelCapabilities.supportsToolCalling("synthetic/tool-safe"), true);
-  assert.equal(modelCapabilities.supportsToolCalling("synthetic/tool-blocked"), false);
-  assert.equal(modelCapabilities.supportsReasoning("synthetic/tool-safe"), true);
-  assert.equal(modelCapabilities.supportsReasoning("synthetic/tool-blocked"), false);
-  assert.equal(modelCapabilities.supportsToolCalling("synthetic/tool-unknown"), true);
-  assert.equal(modelCapabilities.supportsReasoning("synthetic/tool-unknown"), true);
-  assert.equal(modelCapabilities.supportsToolCalling("missing-provider/tool"), true);
-  assert.equal(modelCapabilities.supportsReasoning("missing-provider/tool"), true);
+  assert.equal(await modelCapabilities.supportsToolCalling("synthetic/tool-safe"), true);
+  assert.equal(await modelCapabilities.supportsToolCalling("synthetic/tool-blocked"), false);
+  assert.equal(await modelCapabilities.supportsReasoning("synthetic/tool-safe"), true);
+  assert.equal(await modelCapabilities.supportsReasoning("synthetic/tool-blocked"), false);
+  assert.equal(await modelCapabilities.supportsToolCalling("synthetic/tool-unknown"), true);
+  assert.equal(await modelCapabilities.supportsReasoning("synthetic/tool-unknown"), true);
+  assert.equal(await modelCapabilities.supportsToolCalling("missing-provider/tool"), true);
+  assert.equal(await modelCapabilities.supportsReasoning("missing-provider/tool"), true);
 
-  assert.equal(modelCapabilities.supportsToolCalling(""), false);
-  assert.equal(modelCapabilities.supportsToolCalling("openai/gpt-oss-120b"), true);
-  assert.equal(modelCapabilities.supportsToolCalling("deepseek-reasoner"), true);
+  assert.equal(await modelCapabilities.supportsToolCalling(""), false);
+  assert.equal(await modelCapabilities.supportsToolCalling("openai/gpt-oss-120b"), true);
+  assert.equal(await modelCapabilities.supportsToolCalling("deepseek-reasoner"), true);
   assert.equal(
-    modelCapabilities.supportsToolCalling("openai/nonexistent-default-safe-model"),
+    await modelCapabilities.supportsToolCalling("openai/nonexistent-default-safe-model"),
     true
   );
 
-  assert.equal(modelCapabilities.supportsReasoning(""), true);
-  assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4-6"), true);
-  assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4"), true);
-  assert.equal(modelCapabilities.supportsReasoning("openai/nonexistent-default-safe-model"), true);
+  assert.equal(await modelCapabilities.supportsReasoning(""), true);
+  assert.equal(await modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4-6"), true);
+  assert.equal(await modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4"), true);
+  assert.equal(
+    await modelCapabilities.supportsReasoning("openai/nonexistent-default-safe-model"),
+    true
+  );
 });
 
 test("combo agent middleware covers system override, tool filtering, tag stripping and pin propagation", () => {

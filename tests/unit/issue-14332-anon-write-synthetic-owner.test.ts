@@ -66,8 +66,8 @@ async function anonUpload() {
 }
 
 describe("issue #14332 — anonymous write is stamped with the synthetic anonymous owner", () => {
-  after(() => {
-    resetDbInstance();
+  after(async () => {
+    await resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   });
 
@@ -77,7 +77,7 @@ describe("issue #14332 — anonymous write is stamped with the synthetic anonymo
     assert.strictEqual(res.status, 200, `anonymous upload should succeed: ${JSON.stringify(body)}`);
     assert.ok(body.id, "response must carry the created file id");
 
-    const row = getFile(body.id);
+    const row = await getFile(body.id);
     assert.ok(row, "file row must exist in the DB");
     assert.strictEqual(
       row?.apiKeyId,
@@ -147,8 +147,8 @@ describe("issue #14332 — anonymous write is stamped with the synthetic anonymo
     );
   });
 
-  it("tenant isolation: an authenticated tenant's key can never read/delete the anonymous owner's file", () => {
-    const anonFile = createFile({
+  it("tenant isolation: an authenticated tenant's key can never read/delete the anonymous owner's file", async () => {
+    const anonFile = await createFile({
       filename: "anon.jsonl",
       purpose: "batch",
       bytes: 10,
@@ -163,8 +163,8 @@ describe("issue #14332 — anonymous write is stamped with the synthetic anonymo
     );
   });
 
-  it("tenant isolation: the anonymous owner can never read/delete an authenticated tenant's file", () => {
-    const tenantFile = createFile({
+  it("tenant isolation: the anonymous owner can never read/delete an authenticated tenant's file", async () => {
+    const tenantFile = await createFile({
       filename: "tenant.jsonl",
       purpose: "batch",
       bytes: 10,

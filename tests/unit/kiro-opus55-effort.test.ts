@@ -13,9 +13,9 @@ const efforts = ["low", "medium", "high", "xhigh", "max"];
 test.after(() => resetDbInstance());
 
 for (const effort of efforts) {
-  test(`Kiro Opus 5.5 forwards adaptive ${effort} effort`, () => {
+  test(`Kiro Opus 5.5 forwards adaptive ${effort} effort`, async () => {
     assert.equal(supportsKiroAdaptiveThinking("claude-opus-5.5"), true);
-    const payload = buildKiroPayload(
+    const payload = await buildKiroPayload(
       "claude-opus-5.5",
       {
         messages: [{ role: "user", content: "Reply OK" }],
@@ -41,17 +41,17 @@ for (const effort of efforts) {
     );
   });
 
-  test(`Responses preserves Kiro Opus 5.5 ${effort} through all conversion paths`, () => {
+  test(`Responses preserves Kiro Opus 5.5 ${effort} through all conversion paths`, async () => {
     const body = { model: "claude-opus-5.5", input: "Reply OK", reasoning: { effort } };
     const converted = convertResponsesApiFormat(body, null, "kiro");
     const hub = openaiResponsesToOpenAIRequest("claude-opus-5.5", body, true, {
       _targetFormat: FORMATS.KIRO,
     });
     for (const request of [converted, hub]) {
-      const payload = buildKiroPayload("claude-opus-5.5", request, true, null);
+      const payload = await buildKiroPayload("claude-opus-5.5", request, true, null);
       assert.equal(payload.additionalModelRequestFields?.output_config?.effort, effort);
     }
-    const translated = translateRequest(
+    const translated = await translateRequest(
       FORMATS.OPENAI_RESPONSES,
       FORMATS.KIRO,
       "claude-opus-5.5",
@@ -64,8 +64,8 @@ for (const effort of efforts) {
   });
 }
 
-test("Kiro Opus 5.5 leaves thinking disabled when not requested", () => {
-  const payload = buildKiroPayload(
+test("Kiro Opus 5.5 leaves thinking disabled when not requested", async () => {
+  const payload = await buildKiroPayload(
     "claude-opus-5.5",
     {
       messages: [{ role: "user", content: "Reply OK" }],
@@ -76,7 +76,7 @@ test("Kiro Opus 5.5 leaves thinking disabled when not requested", () => {
   assert.equal(payload.additionalModelRequestFields, undefined);
 });
 
-test("Kiro max preservation is scoped to the qualified model and provider", () => {
+test("Kiro max preservation is scoped to the qualified model and provider", async () => {
   for (const model of [
     "kiro/claude-opus-5.5",
     "kr/claude-opus-5.5",

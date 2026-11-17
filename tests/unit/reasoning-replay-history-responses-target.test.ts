@@ -72,13 +72,13 @@ const CLAUDE_TOOLS = [
  * turn, keep the transcript `translateRequest` reports, then capture the upstream
  * response's reasoning against that transcript.
  */
-function translateAndCapture(
+async function translateAndCapture(
   sourceFormat: string,
   body: JsonRecord,
   assistantResponse: JsonRecord
-): { translated: JsonRecord; history: unknown[] | null; keysWritten: number } {
+): Promise<{ translated: JsonRecord; history: unknown[] | null; keysWritten: number }> {
   let history: unknown[] | null = null;
-  const translated = translateRequest(
+  const translated = (await translateRequest(
     sourceFormat,
     FORMATS.OPENAI_RESPONSES,
     MODEL,
@@ -93,7 +93,7 @@ function translateAndCapture(
         history = messages;
       },
     }
-  ) as JsonRecord;
+  )) as JsonRecord;
   const historyMessages = Array.isArray(translated.messages)
     ? (translated.messages as unknown[])
     : history;
@@ -109,8 +109,8 @@ function translateAndCapture(
   return { translated, history, keysWritten };
 }
 
-function translateFollowUp(sourceFormat: string, body: JsonRecord): JsonRecord[] {
-  const translated = translateRequest(
+async function translateFollowUp(sourceFormat: string, body: JsonRecord): Promise<JsonRecord[]> {
+  const translated = (await translateRequest(
     sourceFormat,
     FORMATS.OPENAI_RESPONSES,
     MODEL,
@@ -120,7 +120,7 @@ function translateFollowUp(sourceFormat: string, body: JsonRecord): JsonRecord[]
     PROVIDER,
     null,
     { reasoningCacheScope: SCOPE }
-  ) as { input: JsonRecord[] };
+  )) as { input: JsonRecord[] };
   return translated.input;
 }
 
@@ -133,18 +133,18 @@ function reasoningTexts(input: JsonRecord[]): string[] {
 }
 
 describe("reasoning replay history for Responses targets (opencode-go/deepseek-v4-flash)", () => {
-  before(() => {
-    clearModelsDevCapabilities();
-    clearReasoningCacheAll();
+  before(async () => {
+    await clearModelsDevCapabilities();
+    await clearReasoningCacheAll();
   });
 
-  after(() => {
-    clearReasoningCacheAll();
-    clearModelsDevCapabilities();
+  after(async () => {
+    await clearReasoningCacheAll();
+    await clearModelsDevCapabilities();
   });
 
-  it("replays a plain assistant turn for an OpenAI Chat client", () => {
-    clearReasoningCacheAll();
+  it("replays a plain assistant turn for an OpenAI Chat client", async () => {
+    await clearReasoningCacheAll();
     const turn1 = {
       model: MODEL,
       tools: OPENAI_TOOLS,
@@ -153,18 +153,22 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
         { role: "user", content: "Say hi first, no tools." },
       ],
     };
-    const { translated, history, keysWritten } = translateAndCapture(FORMATS.OPENAI, turn1, {
-      role: "assistant",
-      content: "Hi!",
-      reasoning_content: PLAIN_REASONING,
-    });
+    const { translated, history, keysWritten } = await translateAndCapture(
+      FORMATS.OPENAI,
+      turn1,
+      {
+        role: "assistant",
+        content: "Hi!",
+        reasoning_content: PLAIN_REASONING,
+      }
+    );
 
     assert.equal(translated.messages, undefined, "Responses body carries input, not messages");
     assert.ok(Array.isArray(history), "translateRequest reports the transcript it digested");
     assert.equal(keysWritten, 1);
 
     // Turn 2: the client replays history without reasoning_content (default OpenAI client).
-    const input = translateFollowUp(FORMATS.OPENAI, {
+    const input = await translateFollowUp(FORMATS.OPENAI, {
       model: MODEL,
       tools: OPENAI_TOOLS,
       messages: [
@@ -181,8 +185,8 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     assert.ok(reasoningIndex < assistantIndex, "reasoning precedes the assistant message");
   });
 
-  it("replays a tool-call turn for an Anthropic Messages client", () => {
-    clearReasoningCacheAll();
+  it("replays a tool-call turn for an Anthropic Messages client", async () => {
+    await clearReasoningCacheAll();
     const toolUseId = "call_read_readme_1";
     // Turn 1 response (already translated to Chat shape by the response translator)
     // is captured under the tool_call id, as chatCore does.
@@ -201,7 +205,7 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     );
 
     // Turn 2: Claude client sends tool_use / tool_result history without a thinking block.
-    const input = translateFollowUp(FORMATS.CLAUDE, {
+    const input = await translateFollowUp(FORMATS.CLAUDE, {
       model: MODEL,
       max_tokens: 1024,
       tools: CLAUDE_TOOLS,
@@ -225,8 +229,8 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     assert.ok(reasoningIndex < functionCallIndex, "reasoning precedes the function_call");
   });
 
-  it("replays a plain assistant turn for an Anthropic Messages client", () => {
-    clearReasoningCacheAll();
+  it("replays a plain assistant turn for an Anthropic Messages client", async () => {
+    await clearReasoningCacheAll();
     const turn1 = {
       model: MODEL,
       max_tokens: 1024,
@@ -234,7 +238,7 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
       system: "You are helpful.",
       messages: [{ role: "user", content: "Say hi first, no tools." }],
     };
-    const { history, keysWritten } = translateAndCapture(FORMATS.CLAUDE, turn1, {
+    const { history, keysWritten } = await translateAndCapture(FORMATS.CLAUDE, turn1, {
       role: "assistant",
       content: "Hi!",
       reasoning_content: PLAIN_REASONING,
@@ -242,7 +246,7 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     assert.ok(Array.isArray(history));
     assert.equal(keysWritten, 1);
 
-    const input = translateFollowUp(FORMATS.CLAUDE, {
+    const input = await translateFollowUp(FORMATS.CLAUDE, {
       ...turn1,
       messages: [
         ...turn1.messages,
@@ -253,9 +257,9 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     assert.deepEqual(reasoningTexts(input), [PLAIN_REASONING]);
   });
 
-  it("keeps the reported transcript out of the upstream body and off Chat targets", () => {
+  it("keeps the reported transcript out of the upstream body and off Chat targets", async () => {
     let responsesHistory: unknown[] | null = null;
-    const responsesBody = translateRequest(
+    const responsesBody = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.OPENAI_RESPONSES,
       MODEL,
@@ -280,7 +284,7 @@ describe("reasoning replay history for Responses targets (opencode-go/deepseek-v
     );
 
     let chatHistoryCalls = 0;
-    const chatBody = translateRequest(
+    const chatBody = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.OPENAI,
       MODEL,

@@ -27,7 +27,7 @@ type CatalogPricing = {
 // defaults, then asserts enrichCatalogModelEntry() surfaces it.
 
 describe("catalog pricing LiteLLM gap (#9364)", () => {
-  before(() => {
+  before(async () => {
     // Seed ONLY the LiteLLM namespace with a model that is absent from both
     // models.dev and hardcoded defaults (babbage-002 is not in default-pricing
     // and not registered in the provider registry, so neither layer can match).
@@ -36,7 +36,7 @@ describe("catalog pricing LiteLLM gap (#9364)", () => {
         "babbage-002": { input: 0.4, output: 0.4 },
       },
     };
-    saveSyncedPricing(synced);
+    await saveSyncedPricing(synced);
 
     // Ensure models_dev_pricing has a different model so we prove the LiteLLM
     // layer is being consulted, not accidentally overlapping with models.dev.
@@ -45,20 +45,20 @@ describe("catalog pricing LiteLLM gap (#9364)", () => {
         "gpt-4o": { input: 2.5, output: 10 },
       },
     };
-    saveModelsDevPricing(modelsDev);
+    await saveModelsDevPricing(modelsDev);
   });
 
-  after(() => {
+  after(async () => {
     try {
-      clearSyncedPricing();
-      clearModelsDevPricing();
+      await clearSyncedPricing();
+      await clearModelsDevPricing();
     } catch {
       // ignore
     }
   });
 
-  it("attaches LiteLLM-synced pricing onto catalog entries absent from models.dev and defaults", () => {
-    const entry = enrichCatalogModelEntry({
+  it("attaches LiteLLM-synced pricing onto catalog entries absent from models.dev and defaults", async () => {
+    const entry = await enrichCatalogModelEntry({
       id: "openai/babbage-002",
       owned_by: "openai",
       root: "babbage-002",
@@ -68,8 +68,8 @@ describe("catalog pricing LiteLLM gap (#9364)", () => {
     assert.equal((entry.pricing as CatalogPricing).output, 0.4);
   });
 
-  it("still resolves models.dev pricing when present (precedence preserved)", () => {
-    const entry = enrichCatalogModelEntry({
+  it("still resolves models.dev pricing when present (precedence preserved)", async () => {
+    const entry = await enrichCatalogModelEntry({
       id: "openai/gpt-4o",
       owned_by: "openai",
       root: "gpt-4o",

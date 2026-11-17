@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 // Throttled switch persistence: a second set-aside inside the throttle gap
 // records "throttled" on the subscription row so the list shows why nothing
@@ -23,8 +24,8 @@ const sub = await import("../../src/lib/proxySubscription/index.ts");
 const { readStaleSwitchWarning } =
   await import("../../src/lib/proxySubscription/subscriptionService.ts");
 
-function reset() {
-  core.resetDbInstance();
+async function reset() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   trigger.__resetSelectorTriggerForTesting();
@@ -102,25 +103,24 @@ function startFakeCore(): Promise<{
 
 const KEY_NODE1 = "socks5://@127.0.0.1:1080";
 
-function readSwitchRow(id: string): {
+async function readSwitchRow(id: string): Promise<{
   selector_last_switch_result: string | null;
   selector_last_switch_kind: string | null;
   error: string | null;
-} {
-  return core
-    .getDbInstance()
-    .prepare(
-      "SELECT selector_last_switch_result, selector_last_switch_kind, error FROM proxy_subscriptions WHERE id = ?"
-    )
-    .get(id) as {
+}> {
+  const rows = await getTestBackend().query<{
     selector_last_switch_result: string | null;
     selector_last_switch_kind: string | null;
     error: string | null;
-  };
+  }>(
+    "SELECT selector_last_switch_result, selector_last_switch_kind, error FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  );
+  return rows[0];
 }
 
 test("second switch inside the gap window records throttled without a standing warning", async () => {
-  reset();
+  await reset();
   const fake = await startFakeCore();
   const feedSrv = await startFeedServer();
   const created = await sub.createSubscription({
@@ -144,18 +144,18 @@ test("second switch inside the gap window records throttled without a standing w
     const second = await trigger.maybeSwitchOnSetAside(KEY_NODE1, { nowMs: t0 + 30_000 });
     assert.equal(second.switched, false);
     assert.equal(second.reason, "throttled");
-    let row = readSwitchRow(id);
+    let row = await readSwitchRow(id);
     assert.equal(row.selector_last_switch_result, "throttled");
     // The throttled repeat keeps the propagated motive of the first outcome
     // instead of falling back to the live snapshot or the hard default.
     assert.equal(row.selector_last_switch_kind, "transport");
-    assert.equal(readStaleSwitchWarning(id), null);
+    assert.equal(await readStaleSwitchWarning(id), null);
     assert.equal(row.error, null);
     await sub.syncSubscription(id);
-    row = readSwitchRow(id);
+    row = await readSwitchRow(id);
     assert.equal(row.selector_last_switch_result, "throttled");
     assert.equal(row.selector_last_switch_kind, "transport");
-    assert.equal(readStaleSwitchWarning(id), null);
+    assert.equal(await readStaleSwitchWarning(id), null);
     assert.equal(row.error, null);
   } finally {
     await sub.deleteSubscription(id);
@@ -164,8 +164,8 @@ test("second switch inside the gap window records throttled without a standing w
   }
 });
 
-test.after(() => {
+test.after(async () => {
   proxyHealth.__setProxyHealthTcpCheckForTesting(null);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

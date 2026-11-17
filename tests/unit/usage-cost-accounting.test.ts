@@ -26,13 +26,12 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "usage-cost-accounting-"));
 process.env.DATA_DIR = dir;
 process.env.API_KEY_SECRET = "unit-test-only";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { saveRequestUsage } = await import("../../src/lib/usage/usageHistory.ts");
 const { getUsageStats, getConnectionSpendUsdSinceAdded } =
   await import("../../src/lib/usage/usageStats.ts");
 const { getApiKeyUsageLimitStatus } = await import("../../src/lib/usage/apiKeyUsageLimits.ts");
 const { rollupUsageHistoryBeforeDate } = await import("../../src/lib/usage/aggregateHistory.ts");
-const { updateDatabaseSettings } = await import("../../src/lib/db/databaseSettings.ts");
 const { updatePricing } = await import("../../src/lib/db/settings/pricing.ts");
 const { createApiKey } = await import("../../src/lib/db/apiKeys.ts");
 const { calculateCost } = await import("../../src/lib/usage/costCalculator.ts");
@@ -41,7 +40,7 @@ const { closeCallLogSaves } = await import("../../src/lib/usage/callLogs.ts");
 
 test.after(async () => {
   await closeCallLogSaves();
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -65,12 +64,10 @@ test("a reported USD cost persists for any provider while token-only usage stays
     tokens: { prompt_tokens: 200000 },
   });
 
-  const rows = core
-    .getDbInstance()
-    .prepare(
-      "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = ? ORDER BY tokens_input"
-    )
-    .all(key.id);
+  const rows = await getTestBackend().query(
+    "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = $1 ORDER BY tokens_input",
+    [key.id]
+  );
   assert.deepEqual(rows, [
     { provider_cost_usd: 0.01, provider_credits: null },
     { provider_cost_usd: null, provider_credits: null },
@@ -105,12 +102,10 @@ test("a credit-metered provider is never priced by tokens, measured or not", asy
     tokens: { prompt_tokens: 100000 },
   });
 
-  const stored = core
-    .getDbInstance()
-    .prepare(
-      "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = ? ORDER BY timestamp"
-    )
-    .all(key.id);
+  const stored = await getTestBackend().query(
+    "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = $1 ORDER BY timestamp",
+    [key.id]
+  );
   assert.deepEqual(stored, [
     { provider_cost_usd: 0.01, provider_credits: 0.5 },
     { provider_cost_usd: null, provider_credits: null },
@@ -136,10 +131,10 @@ test("credits are only persisted for credit-metered providers", async () => {
     apiKeyId: key.id,
     tokens: { prompt_tokens: 10, provider_credits: 3, cost_in_usd_ticks: 50000000 },
   });
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = ?")
-    .get(key.id);
+  const row = await getTestBackend().queryOne(
+    "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = $1",
+    [key.id]
+  );
   assert.deepEqual(row, { provider_cost_usd: 0.005, provider_credits: null });
 });
 
@@ -159,12 +154,10 @@ test("OpenRouter's normalized cost_usd persists as the reported cost; xAI ticks 
     timestamp: new Date(Date.now() + 1000).toISOString(),
     tokens: { prompt_tokens: 20, cost_in_usd_ticks: 10000000, cost_usd: 99 },
   });
-  const rows = core
-    .getDbInstance()
-    .prepare(
-      "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = ? ORDER BY tokens_input"
-    )
-    .all(key.id);
+  const rows = await getTestBackend().query(
+    "SELECT provider_cost_usd, provider_credits FROM usage_history WHERE api_key_id = $1 ORDER BY tokens_input",
+    [key.id]
+  );
   // Same precedence as costCalculator's extractExactCostUsd: ticks first, then cost_usd.
   assert.deepEqual(rows, [
     { provider_cost_usd: 0.0042, provider_credits: null },
@@ -188,18 +181,17 @@ test("a failed request from a token-billed provider still costs its tokens", asy
     status: "502",
   });
 
-  const stored = core
-    .getDbInstance()
-    .prepare("SELECT provider_cost_usd FROM usage_history WHERE api_key_id = ?")
-    .get(key.id);
+  const stored = await getTestBackend().queryOne(
+    "SELECT provider_cost_usd FROM usage_history WHERE api_key_id = $1",
+    [key.id]
+  );
   assert.deepEqual(stored, { provider_cost_usd: null });
   assert.equal((await getUsageStats()).byApiKey[`id:${key.id}`].cost, 0.25);
 });
 
 test("a retention rollup archives reported costs and prices only unreported requests", async () => {
-  updateDatabaseSettings({
-    aggregation: { enabled: true, rawDataRetentionDays: 30, granularity: "daily" },
-  });
+  // Aggregation is enabled by default (DEFAULT_DATABASE_SETTINGS.aggregation), so the
+  // rollup runs without any settings write.
   await updatePricing({ "rollup-example": { "old-model": { input: 1, output: 0 } } });
   const key = await createApiKey("Rolled-up surfaces", "machine-rolled");
   const timestamp = new Date(Date.now() - 400 * 86_400_000).toISOString();
@@ -221,16 +213,17 @@ test("a retention rollup archives reported costs and prices only unreported requ
   });
 
   assert.equal((await rollupUsageHistoryBeforeDate("2100-01-01")).errors, 0);
-  const summary = core
-    .getDbInstance()
-    .prepare(
-      "SELECT total_requests, total_input_tokens, total_cost FROM daily_usage_summary WHERE provider = 'rollup-example' AND model = 'old-model'"
-    )
-    .get() as { total_requests: number; total_input_tokens: number; total_cost: number };
-  assert.equal(summary.total_requests, 2);
-  assert.equal(summary.total_input_tokens, 200000);
+  const summary = await getTestBackend().queryOne<{
+    total_requests: number;
+    total_input_tokens: number;
+    total_cost: number;
+  }>(
+    "SELECT total_requests, total_input_tokens, total_cost FROM daily_usage_summary WHERE provider = 'rollup-example' AND model = 'old-model'"
+  );
+  assert.equal(summary?.total_requests, 2);
+  assert.equal(summary?.total_input_tokens, 200000);
   // $0.10 priced + $0.03 reported.
-  assert.ok(Math.abs(summary.total_cost - 0.13) < 1e-9);
+  assert.ok(Math.abs(summary!.total_cost - 0.13) < 1e-9);
 });
 
 test("the metered budget is charged the exact cost of a credit-metered request", async () => {

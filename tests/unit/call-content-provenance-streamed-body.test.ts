@@ -9,25 +9,31 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-streamed-body-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 const { saveCallLog } = await import("../../src/lib/usage/callLogs.ts");
 const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 const { createSSEStream } = await import("../../open-sse/utils/stream.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function rowFor(id: string) {
-  return getDbInstance().prepare("SELECT has_content FROM call_logs WHERE id = ?").get(id) as {
-    has_content: number | null;
-  };
+// has_content is a boolean column; the assertions below keep the 1 / 0 / null vocabulary.
+async function rowFor(id: string) {
+  const row = await getTestBackend().queryOne<{ has_content: boolean | null }>(
+    "SELECT has_content FROM call_logs WHERE id = $1",
+    [id]
+  );
+  assert.ok(row, `call_logs row ${id} must exist`);
+  return { has_content: row.has_content === null ? null : row.has_content ? 1 : 0 };
 }
 
-function cleanup(ids: string[]) {
-  const stmt = getDbInstance().prepare("DELETE FROM call_logs WHERE id = ?");
-  for (const id of ids) stmt.run(id);
+async function cleanup(ids: string[]) {
+  for (const id of ids) {
+    await getTestBackend().execute("DELETE FROM call_logs WHERE id = $1", [id]);
+  }
 }
 
 const textEncoder = new TextEncoder();
@@ -99,9 +105,9 @@ test("streamed reply journaled from the production stream body counts as content
     clientResponse: clientPayload,
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -119,9 +125,9 @@ test("streamed reply journaled from the aggregated body alone counts as content"
     clientResponse: responseBody,
   });
   try {
-    assert.equal(rowFor(id).has_content, 1);
+    assert.equal((await rowFor(id)).has_content, 1);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });
 
@@ -144,8 +150,8 @@ test("streamed reply carrying reasoning only counts as no content", async () => 
     clientResponse: responseBody,
   });
   try {
-    assert.equal(rowFor(id).has_content, 0);
+    assert.equal((await rowFor(id)).has_content, 0);
   } finally {
-    cleanup([id]);
+    await cleanup([id]);
   }
 });

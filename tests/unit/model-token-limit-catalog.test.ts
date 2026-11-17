@@ -18,15 +18,15 @@ const overrideRoute = await import("../../src/app/api/model-capability-overrides
 const TARGET = "openai/gpt-5.6";
 const LIMITS = { context: 372000, input: 353400, output: 128000 };
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   catalog.__resetCatalogBuilderRunsForTest();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -40,13 +40,16 @@ async function getModel(target = TARGET) {
 }
 
 test("v1 model catalog projects effective context, input, and output overrides and invalidates on delete", async () => {
-  assert.equal(contextOverrides.setModelContextOverride("openai", "gpt-5.6", LIMITS.context), true);
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(TARGET, "max_input_tokens", LIMITS.input),
+    await contextOverrides.setModelContextOverride("openai", "gpt-5.6", LIMITS.context),
     true
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(TARGET, "max_output_tokens", LIMITS.output),
+    await capabilityOverrides.setModelCapabilityOverride(TARGET, "max_input_tokens", LIMITS.input),
+    true
+  );
+  assert.equal(
+    await capabilityOverrides.setModelCapabilityOverride(TARGET, "max_output_tokens", LIMITS.output),
     true
   );
   await providers.createProviderConnection({
@@ -73,12 +76,12 @@ test("v1 model catalog projects effective context, input, and output overrides a
 
   const sentinelOutput = 111111;
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(TARGET, "max_output_tokens", sentinelOutput),
+    await capabilityOverrides.setModelCapabilityOverride(TARGET, "max_output_tokens", sentinelOutput),
     true
   );
   assert.equal((await getModel())?.max_output_tokens, sentinelOutput);
   assert.equal(
-    capabilityOverrides.removeModelCapabilityOverride(TARGET, "max_output_tokens"),
+    await capabilityOverrides.removeModelCapabilityOverride(TARGET, "max_output_tokens"),
     true
   );
   assert.notEqual((await getModel())?.max_output_tokens, sentinelOutput);
@@ -104,15 +107,15 @@ test("v1 model catalog projects a synced Codex context to both public aliases", 
     },
   ]);
   assert.equal(
-    contextOverrides.setModelContextOverride("codex", "gpt-5.6-sol", LIMITS.context),
+    await contextOverrides.setModelContextOverride("codex", "gpt-5.6-sol", LIMITS.context),
     true
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(target, "max_input_tokens", LIMITS.input),
+    await capabilityOverrides.setModelCapabilityOverride(target, "max_input_tokens", LIMITS.input),
     true
   );
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(target, "max_output_tokens", LIMITS.output),
+    await capabilityOverrides.setModelCapabilityOverride(target, "max_output_tokens", LIMITS.output),
     true
   );
 
@@ -142,7 +145,7 @@ test("v1 model catalog projects a synced Codex context to both public aliases", 
   assert.ok(Array.isArray(image?.supported_sizes));
   assert.equal(image?.context_length, undefined, "chat overrides must not leak to the image ID");
 
-  assert.equal(contextOverrides.removeModelContextOverride("codex", "gpt-5.6-sol"), true);
+  assert.equal(await contextOverrides.removeModelContextOverride("codex", "gpt-5.6-sol"), true);
   assert.equal(
     (await getModel("codex/gpt-5.6-sol-image"))?.context_length,
     undefined,
@@ -154,7 +157,10 @@ test("v1 model catalog projects a synced Codex context to both public aliases", 
 
 test("v1 model catalog projects an exact raw-alias context override", async () => {
   const target = "github/claude-opus-4.8";
-  assert.equal(contextOverrides.setModelContextOverride("github", "claude-opus-4.8", 333333), true);
+  assert.equal(
+    await contextOverrides.setModelContextOverride("github", "claude-opus-4.8", 333333),
+    true
+  );
   await providers.createProviderConnection({
     provider: "github",
     authType: "api_key",
@@ -206,7 +212,7 @@ test("v1 model catalog projects a compatible provider prefix override stored und
   );
   assert.equal(patch.status, 200);
   assert.equal(
-    contextOverrides.getModelContextOverrideRecord(nodeId, modelId)?.realContext,
+    (await contextOverrides.getModelContextOverrideRecord(nodeId, modelId))?.realContext,
     contextWindow,
     "the public prefix target must persist under the internal provider node id"
   );
@@ -262,14 +268,17 @@ test("v1 model catalog overlays same-id custom metadata before final overrides",
   assert.equal(customProjected.max_output_tokens, 32000);
 
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await capabilityOverrides.setModelCapabilityOverride(
       `${prefix}/${modelId}`,
       "max_output_tokens",
       64000
     ),
     true
   );
-  assert.equal(contextOverrides.setModelContextOverride(providerId, modelId, 500000), true);
+  assert.equal(
+    await contextOverrides.setModelContextOverride(providerId, modelId, 500000),
+    true
+  );
 
   const projected = await getModel(`${prefix}/${modelId}`);
   assert.ok(projected);

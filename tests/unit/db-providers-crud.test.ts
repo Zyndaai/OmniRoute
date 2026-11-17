@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-providers-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -11,7 +12,7 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
@@ -36,7 +37,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -366,19 +367,20 @@ test("deleteProviderConnections with empty array returns 0", async () => {
 });
 
 test("provider node CRUD supports filter, update and delete", async () => {
+  // provider_nodes.type is constrained to the two compatible kinds in the PostgreSQL schema.
   const customNode = await providersDb.createProviderNode({
-    type: "custom",
+    type: "openai-compatible",
     name: "Custom Gateway",
     prefix: "custom-",
     baseUrl: "https://custom.example.com",
   });
   const openAiNode = await providersDb.createProviderNode({
-    type: "openai",
-    name: "OpenAI Native",
-    baseUrl: "https://api.openai.com",
+    type: "anthropic-compatible",
+    name: "Anthropic Native",
+    baseUrl: "https://api.anthropic.com",
   });
 
-  const filtered = await providersDb.getProviderNodes({ type: "custom" });
+  const filtered = await providersDb.getProviderNodes({ type: "openai-compatible" });
   const updated = await providersDb.updateProviderNode((customNode as any).id, {
     name: "Custom Gateway v2",
     chatPath: "/v1/chat/completions",
@@ -406,20 +408,21 @@ test("rate-limit helpers persist cooldown state in the database", async () => {
   });
   const future = Date.now() + 90_000;
 
-  providersDb.setConnectionRateLimitUntil((connection as any).id, future);
+  await providersDb.setConnectionRateLimitUntil((connection as any).id, future);
 
-  assert.equal(providersDb.isConnectionRateLimited((connection as any).id), true);
+  assert.equal(await providersDb.isConnectionRateLimited((connection as any).id), true);
   assert.deepEqual(
-    providersDb
-      .getRateLimitedConnections("openai")
-      .map((entry) => ({ ...entry, rateLimitedUntil: Number(entry.rateLimitedUntil) })),
+    (await providersDb.getRateLimitedConnections("openai")).map((entry) => ({
+      ...entry,
+      rateLimitedUntil: Number(entry.rateLimitedUntil),
+    })),
     [{ id: connection.id, rateLimitedUntil: future }]
   );
 
-  providersDb.setConnectionRateLimitUntil((connection as any).id, null);
+  await providersDb.setConnectionRateLimitUntil((connection as any).id, null);
 
-  assert.equal(providersDb.isConnectionRateLimited((connection as any).id), false);
-  assert.deepEqual(providersDb.getRateLimitedConnections("openai"), []);
+  assert.equal(await providersDb.isConnectionRateLimited((connection as any).id), false);
+  assert.deepEqual(await providersDb.getRateLimitedConnections("openai"), []);
 });
 
 test("quota helpers zero stale windows and format countdowns", () => {
@@ -432,6 +435,7 @@ test("quota helpers zero stale windows and format countdowns", () => {
   assert.match(providersDb.formatResetCountdown(future), /1m \d+s/);
   assert.equal(providersDb.formatResetCountdown(past), null);
 });
+
 test("getProviderConnections supports authType filter and column projection", async () => {
   const oauth = await providersDb.createProviderConnection({
     provider: "openai",
@@ -538,7 +542,7 @@ test("getProviderConnections rejects column names outside the real provider_conn
 test("getProviderConnections supports limit/offset pagination", async () => {
   // Create 5 connections
   for (let i = 5; i >= 1; i--) {
-    const conn = await providersDb.createProviderConnection({
+    await providersDb.createProviderConnection({
       provider: "openai",
       authType: "apikey",
       name: `Pageable conn ${i}`,

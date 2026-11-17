@@ -52,8 +52,8 @@ type ChatOut = {
   _namespaceToolIdentityMap: Map<string, { namespace: string; name: string }>;
 };
 
-function toChat(body: Record<string, unknown>): ChatOut {
-  return translateRequest(
+async function toChat(body: Record<string, unknown>): Promise<ChatOut> {
+  return (await translateRequest(
     "openai-responses",
     "openai",
     "gpt-6-luna",
@@ -62,31 +62,31 @@ function toChat(body: Record<string, unknown>): ChatOut {
     null,
     null,
     null
-  ) as unknown as ChatOut;
+  )) as unknown as ChatOut;
 }
 
-test("#17890: functions namespace keeps bare leaf names; other namespaces stay prefixed", () => {
-  const out = toChat(CODEX_BODY);
+test("#17890: functions namespace keeps bare leaf names; other namespaces stay prefixed", async () => {
+  const out = await toChat(CODEX_BODY);
   const names = out.tools.map((t) => t.function.name);
   assert.deepEqual(names, ["exec", "wait", "mcp__cua_repl__js", "mcp__cua_repl__js_reset"]);
 });
 
-test("#17890: replayed history call in `functions` uses the bare name", () => {
-  const out = toChat(CODEX_BODY);
+test("#17890: replayed history call in `functions` uses the bare name", async () => {
+  const out = await toChat(CODEX_BODY);
   const call = out.messages.flatMap((m) => m.tool_calls ?? [])[0];
   assert.equal(call.function.name, "wait");
 });
 
-test("#17890: identity map restores {functions, exec} for the bare name", () => {
-  const out = toChat(CODEX_BODY);
+test("#17890: identity map restores {functions, exec} for the bare name", async () => {
+  const out = await toChat(CODEX_BODY);
   const map = out._namespaceToolIdentityMap;
   assert.deepEqual(map.get("exec"), { namespace: "functions", name: "exec" });
 });
 
-test("#17890: flat `exec` + functions.exec collision never yields duplicate Chat names", () => {
+test("#17890: flat `exec` + functions.exec collision never yields duplicate Chat names", async () => {
   const body: Record<string, unknown> = structuredClone(CODEX_BODY);
   body.tools = [{ type: "function", name: "exec", description: "flat", parameters: params }];
-  const out = toChat(body);
+  const out = await toChat(body);
   const names = out.tools.map((t) => t.function.name);
   assert.equal(new Set(names).size, names.length, `duplicate names: ${names.join(",")}`);
 });

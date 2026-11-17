@@ -9,6 +9,8 @@
  *   3. the legacy JSON import, which must not write the security-impacting keys that
  *      `PATCH /api/settings` only accepts after password re-authentication.
  *
+ * (Layer 3, the legacy JSON import, was removed with the SQLite-to-PostgreSQL migration.)
+ *
  * The inventory test at the bottom is the drift guard: every LOCAL_ONLY prefix must be
  * either refused by the deny-list or explicitly reviewed below as bypass-eligible, so a
  * newly added LOCAL_ONLY route cannot silently become whitelistable.
@@ -26,7 +28,7 @@ process.env.API_KEY_SECRET = "bypass-denylist-api-key-secret";
 process.env.JWT_SECRET = "bypass-denylist-jwt-secret";
 
 const core = await import("../../../src/lib/db/core.ts");
-const { updateSettings, getSettings } = await import("../../../src/lib/db/settings.ts");
+const { updateSettings } = await import("../../../src/lib/db/settings.ts");
 const runtimeSettings = await import("../../../src/lib/config/runtimeSettings.ts");
 const {
   LOCAL_ONLY_API_PREFIXES,
@@ -36,7 +38,6 @@ const {
   isLocalOnlyBypassableByManageScope,
 } = await import("../../../src/server/authz/routeGuard.ts");
 const { updateSettingsSchema } = await import("../../../src/shared/validation/settingsSchemas.ts");
-const importJsonRoute = await import("../../../src/app/api/settings/import-json/route.ts");
 
 await updateSettings({ requireLogin: false });
 
@@ -163,46 +164,7 @@ for (const { prefix, sample } of CODE_EXEC_ROUTES) {
   });
 }
 
-// ─── Layer 3: legacy JSON import ─────────────────────────────────────────────
-
-test("import-json does not write the password-gated security settings", async () => {
-  const before = await getSettings();
-  const response = await importJsonRoute.POST(
-    new Request("http://localhost:20128/api/settings/import-json", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        settings: {
-          localOnlyManageScopeBypassEnabled: true,
-          localOnlyManageScopeBypassPrefixes: ["/api/middleware/", "/api/copilot/"],
-          requireLogin: true,
-          password: "imported-hash",
-          oidcEnabled: true,
-          oidcDisablePasswordLogin: true,
-          oidcClientSecret: "imported-secret",
-          newPassword: "imported-new-password",
-          showQuickStartOnHome: false,
-        },
-      }),
-    })
-  );
-  assert.equal(response.status, 200);
-
-  const after = await getSettings();
-  assert.deepEqual(
-    after.localOnlyManageScopeBypassPrefixes,
-    before.localOnlyManageScopeBypassPrefixes
-  );
-  assert.equal(after.localOnlyManageScopeBypassEnabled, before.localOnlyManageScopeBypassEnabled);
-  assert.equal(after.requireLogin, false);
-  assert.equal(after.password, before.password);
-  assert.equal(after.oidcEnabled, before.oidcEnabled);
-  assert.equal(after.oidcDisablePasswordLogin, before.oidcDisablePasswordLogin);
-  assert.equal(after.oidcClientSecret, before.oidcClientSecret);
-  assert.equal(after.newPassword, undefined);
-  // Non-security settings still import.
-  assert.equal(after.showQuickStartOnHome, false);
-});
+// Layer 3 (legacy JSON import guard) was removed with the JSON settings import route.
 
 // ─── Drift guard: every LOCAL_ONLY entry is classified ───────────────────────
 

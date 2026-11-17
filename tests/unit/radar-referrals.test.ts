@@ -147,9 +147,9 @@ test("findDefaultReferral: empty array => null", () => {
 // getRadarReferrals() -- flag/cache gating, never throws
 // ---------------------------------------------------------------------------
 
-test("getRadarReferrals: flag off => empty, cache never read", () => {
+test("getRadarReferrals: flag off => empty, cache never read", async () => {
   let cacheReadCount = 0;
-  const result = getRadarReferrals({
+  const result = await getRadarReferrals({
     getFlag: () => false,
     getCache: () => {
       cacheReadCount += 1;
@@ -160,13 +160,13 @@ test("getRadarReferrals: flag off => empty, cache never read", () => {
   assert.equal(cacheReadCount, 0);
 });
 
-test("getRadarReferrals: flag on, no cache => empty", () => {
-  const result = getRadarReferrals({ getFlag: () => true, getCache: () => null });
+test("getRadarReferrals: flag on, no cache => empty", async () => {
+  const result = await getRadarReferrals({ getFlag: () => true, getCache: () => null });
   assert.deepEqual(result, { fixed: [], campaigns: [] });
 });
 
-test("getRadarReferrals: flag on, corrupt cache payload => empty (defensive, never throws)", () => {
-  const result = getRadarReferrals({
+test("getRadarReferrals: flag on, corrupt cache payload => empty (defensive, never throws)", async () => {
+  const result = await getRadarReferrals({
     getFlag: () => true,
     getCache: () => ({
       generatedAt: "x",
@@ -178,8 +178,8 @@ test("getRadarReferrals: flag on, corrupt cache payload => empty (defensive, nev
   assert.deepEqual(result, { fixed: [], campaigns: [] });
 });
 
-test("getRadarReferrals: flag on, cached payload fails schema validation => empty (defensive)", () => {
-  const result = getRadarReferrals({
+test("getRadarReferrals: flag on, cached payload fails schema validation => empty (defensive)", async () => {
+  const result = await getRadarReferrals({
     getFlag: () => true,
     getCache: () => ({
       generatedAt: "x",
@@ -192,12 +192,12 @@ test("getRadarReferrals: flag on, cached payload fails schema validation => empt
   assert.deepEqual(result, { fixed: [], campaigns: [] });
 });
 
-test("getRadarReferrals: flag on, cached referrals feed => returns them", () => {
+test("getRadarReferrals: flag on, cached referrals feed => returns them", async () => {
   const feed = {
     ...baseReferralsFeed(),
     referrals: { fixed: [makeReferral()], campaigns: [] },
   };
-  const result = getRadarReferrals({
+  const result = await getRadarReferrals({
     getFlag: () => true,
     getCache: () => cacheRowFor(feed),
   });
@@ -209,7 +209,7 @@ test("getRadarReferrals: default getCache reads from getRadarReferralsCache (mod
   // Confirms the accessor's default dep is the NEW referrals cache reader,
   // not the old catalog cache -- exercised via the flag-off short-circuit
   // (no DB touch needed) so this stays a pure unit test.
-  const result = getRadarReferrals({ getFlag: () => false });
+  const result = await getRadarReferrals({ getFlag: () => false });
   assert.deepEqual(result, { fixed: [], campaigns: [] });
 });
 
@@ -217,12 +217,12 @@ test("getRadarReferrals: default getCache reads from getRadarReferralsCache (mod
 // getDefaultReferralFor()
 // ---------------------------------------------------------------------------
 
-test("getDefaultReferralFor: flag off => null", () => {
-  const result = getDefaultReferralFor("groq", { getFlag: () => false, getCache: () => null });
+test("getDefaultReferralFor: flag off => null", async () => {
+  const result = await getDefaultReferralFor("groq", { getFlag: () => false, getCache: () => null });
   assert.equal(result, null);
 });
 
-test("getDefaultReferralFor: returns the fixed default referral, ignoring campaigns", () => {
+test("getDefaultReferralFor: returns the fixed default referral, ignoring campaigns", async () => {
   const feed = {
     ...baseReferralsFeed(),
     referrals: {
@@ -230,16 +230,16 @@ test("getDefaultReferralFor: returns the fixed default referral, ignoring campai
       campaigns: [makeReferral({ provider: "groq", kind: "campanha", isDefault: true })],
     },
   };
-  const result = getDefaultReferralFor("groq", {
+  const result = await getDefaultReferralFor("groq", {
     getFlag: () => true,
     getCache: () => cacheRowFor(feed),
   });
   assert.equal(result?.kind, "fixo");
 });
 
-test("getDefaultReferralFor: provider with no default referral => null", () => {
+test("getDefaultReferralFor: provider with no default referral => null", async () => {
   const feed = { ...baseReferralsFeed(), referrals: { fixed: [], campaigns: [] } };
-  const result = getDefaultReferralFor("groq", {
+  const result = await getDefaultReferralFor("groq", {
     getFlag: () => true,
     getCache: () => cacheRowFor(feed),
   });

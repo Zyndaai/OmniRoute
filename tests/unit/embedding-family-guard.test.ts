@@ -15,7 +15,7 @@ const { findEmbeddingComboDimensionConflict } = await import(
   "../../src/lib/embeddings/familyGuard.ts"
 );
 
-test("getEmbeddingDimension resolves known dimensions from the registry", () => {
+test("getEmbeddingDimension resolves known dimensions from the registry", async () => {
   assert.equal(getEmbeddingDimension("openai/text-embedding-3-small"), 1536);
   assert.equal(getEmbeddingDimension("openai/text-embedding-3-large"), 3072);
   assert.equal(getEmbeddingDimension("nebius/Qwen/Qwen3-Embedding-8B"), 4096);
@@ -26,12 +26,12 @@ test("getEmbeddingDimension resolves known dimensions from the registry", () => 
   assert.equal(getEmbeddingDimension("openrouter/openai/text-embedding-3-small"), 1536);
 });
 
-test("getEmbeddingDimension returns undefined for unknown/local models", () => {
+test("getEmbeddingDimension returns undefined for unknown/local models", async () => {
   assert.equal(getEmbeddingDimension("localembed/my-model"), undefined);
   assert.equal(getEmbeddingDimension("mystery/whatever"), undefined);
 });
 
-test("detectEmbeddingDimensionConflict flags mixed vector spaces", () => {
+test("detectEmbeddingDimensionConflict flags mixed vector spaces", async () => {
   const res = detectEmbeddingDimensionConflict([
     "openai/text-embedding-3-small", // 1536
     "nebius/Qwen/Qwen3-Embedding-8B", // 4096
@@ -40,7 +40,7 @@ test("detectEmbeddingDimensionConflict flags mixed vector spaces", () => {
   assert.deepEqual(res.distinct, [1536, 4096]);
 });
 
-test("detectEmbeddingDimensionConflict accepts a uniform dimension", () => {
+test("detectEmbeddingDimensionConflict accepts a uniform dimension", async () => {
   const res = detectEmbeddingDimensionConflict([
     "openai/text-embedding-3-small", // 1536
     "openrouter/openai/text-embedding-3-small", // 1536
@@ -49,7 +49,7 @@ test("detectEmbeddingDimensionConflict accepts a uniform dimension", () => {
   assert.deepEqual(res.distinct, [1536]);
 });
 
-test("detectEmbeddingDimensionConflict ignores unknown dimensions (no false positive)", () => {
+test("detectEmbeddingDimensionConflict ignores unknown dimensions (no false positive)", async () => {
   const res = detectEmbeddingDimensionConflict([
     "openai/text-embedding-3-small", // 1536 (known)
     "localembed/unknown", // undefined (ignored)
@@ -58,7 +58,7 @@ test("detectEmbeddingDimensionConflict ignores unknown dimensions (no false posi
   assert.deepEqual(res.distinct, [1536]);
 });
 
-test("detectEmbeddingDimensionConflict is a no-op for empty / all-unknown lists", () => {
+test("detectEmbeddingDimensionConflict is a no-op for empty / all-unknown lists", async () => {
   assert.equal(detectEmbeddingDimensionConflict([]).conflict, false);
   assert.equal(
     detectEmbeddingDimensionConflict(["localembed/a", "localembed/b"]).conflict,
@@ -66,7 +66,7 @@ test("detectEmbeddingDimensionConflict is a no-op for empty / all-unknown lists"
   );
 });
 
-test("findEmbeddingComboDimensionConflict flags a mixed-dimension embedding combo", () => {
+test("findEmbeddingComboDimensionConflict flags a mixed-dimension embedding combo", async () => {
   const combo = {
     name: "mixed-embeds",
     models: [
@@ -74,12 +74,12 @@ test("findEmbeddingComboDimensionConflict flags a mixed-dimension embedding comb
       { model: "nebius/Qwen/Qwen3-Embedding-8B" }, // 4096
     ],
   };
-  const res = findEmbeddingComboDimensionConflict(combo, [combo]);
+  const res = await findEmbeddingComboDimensionConflict(combo, [combo]);
   assert.equal(res.conflict, true);
   assert.deepEqual(res.distinct, [1536, 4096]);
 });
 
-test("findEmbeddingComboDimensionConflict passes a uniform embedding combo", () => {
+test("findEmbeddingComboDimensionConflict passes a uniform embedding combo", async () => {
   const combo = {
     name: "uniform-embeds",
     models: [
@@ -87,11 +87,11 @@ test("findEmbeddingComboDimensionConflict passes a uniform embedding combo", () 
       { model: "openrouter/openai/text-embedding-3-small" }, // 1536
     ],
   };
-  const res = findEmbeddingComboDimensionConflict(combo, [combo]);
+  const res = await findEmbeddingComboDimensionConflict(combo, [combo]);
   assert.equal(res.conflict, false);
 });
 
-test("findEmbeddingComboDimensionConflict expands nested combos before checking", () => {
+test("findEmbeddingComboDimensionConflict expands nested combos before checking", async () => {
   const child = {
     name: "child-embeds",
     models: [
@@ -100,7 +100,7 @@ test("findEmbeddingComboDimensionConflict expands nested combos before checking"
     ],
   };
   const parent = { name: "parent-embeds", models: [{ model: "child-embeds" }] };
-  const res = findEmbeddingComboDimensionConflict(parent, [parent, child]);
+  const res = await findEmbeddingComboDimensionConflict(parent, [parent, child]);
   assert.equal(res.conflict, true);
   assert.deepEqual(res.distinct, [1536, 4096]);
 });

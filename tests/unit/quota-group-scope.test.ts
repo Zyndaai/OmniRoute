@@ -33,39 +33,39 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const { resolveQuotaKeyScope } = await import("../../src/lib/quota/quotaKey.ts");
 const { filterModelsToQuotaPools } = await import("../../src/lib/quota/quotaCombos.ts");
 const { quotaGroupSlug } = await import("../../src/lib/quota/quotaModelNaming.ts");
+const { deleteProviderConnection } = await import("../../src/lib/db/providers/deletion.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 // ---------------------------------------------------------------------------
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
 
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (error: unknown) {
-      const err = error as NodeJS.ErrnoException;
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw error;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
+
+/**
+ * A pool whose only connection no longer exists. Pools reference provider connections by
+ * foreign key, so the connection is created, the pool attached to it, and the connection
+ * then deleted: the pool-connection link cascades away and the pool is left orphaned.
+ */
+async function createOrphanPool(name: string, groupId: string): Promise<{ id: string }> {
+  const conn = await providersDb.createProviderConnection({
+    provider: "openrouter",
+    authType: "apikey",
+    name: `${name}-conn`,
+    apiKey: `sk-${name}`,
+  });
+  const connectionId = (conn as Record<string, unknown>).id as string;
+  const pool = await poolsDb.createPool({ connectionId, name, groupId });
+  await deleteProviderConnection(connectionId);
+  return pool;
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -73,7 +73,7 @@ test.after(async () => {
 
 test("resolveQuotaKeyScope: key in pool A sees ALL connections/providers of group G (pool A + pool B)", async () => {
   // Create group G
-  const groupG = groupsDb.createGroup("GroupG");
+  const groupG = await groupsDb.createGroup("GroupG");
 
   // Create connections for each pool
   const connA = await providersDb.createProviderConnection({
@@ -92,8 +92,8 @@ test("resolveQuotaKeyScope: key in pool A sees ALL connections/providers of grou
   const idB = (connB as Record<string, unknown>).id as string;
 
   // Create pool A and pool B, both in group G
-  const poolA = poolsDb.createPool({ connectionId: idA, name: "Pool A", groupId: groupG.id });
-  const poolB = poolsDb.createPool({ connectionId: idB, name: "Pool B", groupId: groupG.id });
+  const poolA = await poolsDb.createPool({ connectionId: idA, name: "Pool A", groupId: groupG.id });
+  const poolB = await poolsDb.createPool({ connectionId: idB, name: "Pool B", groupId: groupG.id });
 
   // Key is allocated ONLY to pool A
   const scope = await resolveQuotaKeyScope([poolA.id]);
@@ -121,8 +121,8 @@ test("resolveQuotaKeyScope: key in pool A sees ALL connections/providers of grou
 
 test("resolveQuotaKeyScope: key in pool from group H does NOT see group G models", async () => {
   // Create two groups
-  const groupG = groupsDb.createGroup("GroupG2");
-  const groupH = groupsDb.createGroup("GroupH2");
+  const groupG = await groupsDb.createGroup("GroupG2");
+  const groupH = await groupsDb.createGroup("GroupH2");
 
   const connG = await providersDb.createProviderConnection({
     provider: "openrouter",
@@ -139,8 +139,16 @@ test("resolveQuotaKeyScope: key in pool from group H does NOT see group G models
   const idG = (connG as Record<string, unknown>).id as string;
   const idH = (connH as Record<string, unknown>).id as string;
 
-  const poolInG = poolsDb.createPool({ connectionId: idG, name: "Pool G2", groupId: groupG.id });
-  const poolInH = poolsDb.createPool({ connectionId: idH, name: "Pool H2", groupId: groupH.id });
+  const poolInG = await poolsDb.createPool({
+    connectionId: idG,
+    name: "Pool G2",
+    groupId: groupG.id,
+  });
+  const poolInH = await poolsDb.createPool({
+    connectionId: idH,
+    name: "Pool H2",
+    groupId: groupH.id,
+  });
 
   // Key only has pool from group H
   const scope = await resolveQuotaKeyScope([poolInH.id]);
@@ -161,7 +169,7 @@ test("resolveQuotaKeyScope: key in pool from group H does NOT see group G models
 });
 
 test("resolveQuotaKeyScope: two pools in the same group expand once (deduplicated group slug)", async () => {
-  const groupG = groupsDb.createGroup("GroupGDedup");
+  const groupG = await groupsDb.createGroup("GroupGDedup");
 
   const connA = await providersDb.createProviderConnection({
     provider: "openrouter",
@@ -178,8 +186,16 @@ test("resolveQuotaKeyScope: two pools in the same group expand once (deduplicate
   const idA = (connA as Record<string, unknown>).id as string;
   const idB = (connB as Record<string, unknown>).id as string;
 
-  const poolA = poolsDb.createPool({ connectionId: idA, name: "Pool Dedup A", groupId: groupG.id });
-  const poolB = poolsDb.createPool({ connectionId: idB, name: "Pool Dedup B", groupId: groupG.id });
+  const poolA = await poolsDb.createPool({
+    connectionId: idA,
+    name: "Pool Dedup A",
+    groupId: groupG.id,
+  });
+  const poolB = await poolsDb.createPool({
+    connectionId: idB,
+    name: "Pool Dedup B",
+    groupId: groupG.id,
+  });
 
   // Key has BOTH pools from the same group
   const scope = await resolveQuotaKeyScope([poolA.id, poolB.id]);
@@ -195,7 +211,7 @@ test("resolveQuotaKeyScope: two pools in the same group expand once (deduplicate
 });
 
 test("filterModelsToQuotaPools: keeps both providers' qtSd/<group>/... models from scope", async () => {
-  const groupG = groupsDb.createGroup("GroupGFilter");
+  const groupG = await groupsDb.createGroup("GroupGFilter");
   const groupSlug = quotaGroupSlug(groupG.name); // e.g. "groupgfilter"
 
   const models = [
@@ -218,14 +234,10 @@ test("filterModelsToQuotaPools: keeps both providers' qtSd/<group>/... models fr
 });
 
 test("resolveQuotaKeyScope: orphan pool (no valid connections) — group slug excluded if no valid conn in group", async () => {
-  const groupG = groupsDb.createGroup("GroupGOrphan");
+  const groupG = await groupsDb.createGroup("GroupGOrphan");
 
-  // Pool with a non-existent connection
-  const orphanPool = poolsDb.createPool({
-    connectionId: "conn-does-not-exist-orphan",
-    name: "Orphan Pool G",
-    groupId: groupG.id,
-  });
+  // Pool whose connection no longer exists
+  const orphanPool = await createOrphanPool("Orphan Pool G", groupG.id);
 
   const scope = await resolveQuotaKeyScope([orphanPool.id]);
 
@@ -236,7 +248,7 @@ test("resolveQuotaKeyScope: orphan pool (no valid connections) — group slug ex
 });
 
 test("resolveQuotaKeyScope: orphan pool in group that also has a valid pool — group slug included", async () => {
-  const groupG = groupsDb.createGroup("GroupGPartial");
+  const groupG = await groupsDb.createGroup("GroupGPartial");
 
   // One valid connection pool
   const connValid = await providersDb.createProviderConnection({
@@ -246,18 +258,14 @@ test("resolveQuotaKeyScope: orphan pool in group that also has a valid pool — 
     apiKey: "sk-partial-valid",
   });
   const idValid = (connValid as Record<string, unknown>).id as string;
-  const validPool = poolsDb.createPool({
+  const validPool = await poolsDb.createPool({
     connectionId: idValid,
     name: "Valid Pool G",
     groupId: groupG.id,
   });
 
   // One orphan pool in the same group
-  const orphanPool = poolsDb.createPool({
-    connectionId: "conn-orphan-partial",
-    name: "Orphan Pool G2",
-    groupId: groupG.id,
-  });
+  const orphanPool = await createOrphanPool("Orphan Pool G2", groupG.id);
 
   // Key is allocated only to the ORPHAN pool, but the group has the valid pool
   const scope = await resolveQuotaKeyScope([orphanPool.id]);

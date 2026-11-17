@@ -147,13 +147,13 @@ for (const [label, convert] of converters) {
   });
 }
 
-test("the tool output survives translateRequest's tool-call normalization", () => {
+test("the tool output survives translateRequest's tool-call normalization", async () => {
   const body = {
     contents: structuredClone(singleCall),
     tools: [{ functionDeclarations: [{ name: "get_weather", parameters: { type: "object" } }] }],
   };
-  const viaTranslator = translateRequest(FORMATS.GEMINI, FORMATS.OPENAI, "gpt-4o", body, false);
-  const viaV1beta = translateRequest(
+  const viaTranslator = await translateRequest(FORMATS.GEMINI, FORMATS.OPENAI, "gpt-4o", body, false);
+  const viaV1beta = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI,
     "gpt-4o",

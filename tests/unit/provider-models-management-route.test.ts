@@ -12,13 +12,13 @@ const ORIGINAL_API_KEY_SECRET = process.env.API_KEY_SECRET;
 const API_KEY_SECRET = "provider-models-management-route-test-secret";
 process.env.API_KEY_SECRET = API_KEY_SECRET;
 
-const core = await import("../../src/lib/db/core.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const providerModelsRoute = await import("../../src/app/api/provider-models/route.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -51,7 +51,7 @@ test.beforeEach(async () => {
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_API_KEY_SECRET === undefined) delete process.env.API_KEY_SECRET;
@@ -230,7 +230,7 @@ test("provider-models PATCH persists visibility overrides for catalog models", a
   assert.equal(response.status, 200);
   assert.equal(body.ok, true);
 
-  const overrides = modelsDb.getModelCompatOverrides("claude");
+  const overrides = await modelsDb.getModelCompatOverrides("claude");
   assert.equal(overrides.find((model) => model.id === "claude-sonnet-4-6")?.isHidden, true);
 });
 
@@ -253,7 +253,7 @@ test("provider-models PATCH supports bulk visibility updates", async () => {
   assert.equal(response.status, 200);
   assert.equal(body.updated, 2);
 
-  const overrides = modelsDb.getModelCompatOverrides("claude");
+  const overrides = await modelsDb.getModelCompatOverrides("claude");
   assert.equal(overrides.find((model) => model.id === "claude-opus-4-6")?.isHidden, false);
   assert.equal(overrides.find((model) => model.id === "claude-sonnet-4-6")?.isHidden, false);
 });
@@ -277,7 +277,7 @@ test("provider-models DELETE all=true clears modelCompatOverrides as well as cus
       { isHidden: true }
     )
   );
-  assert.equal(modelsDb.getModelCompatOverrides("agy").length, 1);
+  assert.equal((await modelsDb.getModelCompatOverrides("agy")).length, 1);
 
   const deleteResponse = await providerModelsRoute.DELETE(
     new Request("http://localhost/api/provider-models?provider=agy&all=true", {
@@ -285,7 +285,7 @@ test("provider-models DELETE all=true clears modelCompatOverrides as well as cus
     })
   );
   assert.equal(deleteResponse.status, 200);
-  assert.deepEqual(modelsDb.getModelCompatOverrides("agy"), []);
+  assert.deepEqual(await modelsDb.getModelCompatOverrides("agy"), []);
 
   const getResponse = await providerModelsRoute.GET(
     buildGetRequest("http://localhost/api/provider-models?provider=agy")

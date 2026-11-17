@@ -12,7 +12,7 @@ const MODELS_PER_PROVIDER = 34;
 const ITERATIONS = 500;
 
 describe("catalog pricing lookup index (#8697 second bottleneck — findInsensitive)", () => {
-  before(() => {
+  before(async () => {
     // Mixed-case keys force the case-insensitive fallback scan in
     // findInsensitive() — mirrors real models.dev data where provider/model
     // casing does not always match the catalog's, and a large provider count
@@ -26,19 +26,19 @@ describe("catalog pricing lookup index (#8697 second bottleneck — findInsensit
       }
     }
     pricing.Openai = { "Gpt-4o": { input: 2.5, output: 10 } };
-    saveModelsDevPricing(pricing);
+    await saveModelsDevPricing(pricing);
   });
 
-  after(() => {
+  after(async () => {
     try {
-      clearModelsDevPricing();
+      await clearModelsDevPricing();
     } catch {
       // ignore
     }
   });
 
-  it("resolves case-insensitive pricing correctly for every provider/model pair", () => {
-    const entry = enrichCatalogModelEntry({
+  it("resolves case-insensitive pricing correctly for every provider/model pair", async () => {
+    const entry = await enrichCatalogModelEntry({
       id: "provider42/model7",
       owned_by: "provider42",
       root: "model7",
@@ -47,7 +47,7 @@ describe("catalog pricing lookup index (#8697 second bottleneck — findInsensit
     assert.equal((entry.pricing as { input: number }).input, 42.07);
   });
 
-  it("does not rescan the pricing tables per lookup (regression guard for O(providers*models) scans)", () => {
+  it("does not rescan the pricing tables per lookup (regression guard for O(providers*models) scans)", async () => {
     // `provider`/`gpt-4o` always resolve through the same fast metadata path
     // (real registered provider) so both scenarios below pay an identical
     // getCanonicalModelMetadata cost — isolating the delta to pricing
@@ -67,8 +67,8 @@ describe("catalog pricing lookup index (#8697 second bottleneck — findInsensit
       });
 
     // Warm up (index build, module init) outside the measured window.
-    entryWithPricingPreset();
-    entryNeedingPricingResolution();
+    await entryWithPricingPreset();
+    await entryNeedingPricingResolution();
 
     const originalEntries = Object.entries;
     let calls = 0;
@@ -81,11 +81,11 @@ describe("catalog pricing lookup index (#8697 second bottleneck — findInsensit
     let withPricingCalls: number;
     try {
       calls = 0;
-      for (let i = 0; i < ITERATIONS; i++) entryWithPricingPreset();
+      for (let i = 0; i < ITERATIONS; i++) await entryWithPricingPreset();
       baselineCalls = calls;
 
       calls = 0;
-      for (let i = 0; i < ITERATIONS; i++) entryNeedingPricingResolution();
+      for (let i = 0; i < ITERATIONS; i++) await entryNeedingPricingResolution();
       withPricingCalls = calls;
     } finally {
       Object.entries = originalEntries;

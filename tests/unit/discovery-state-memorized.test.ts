@@ -15,14 +15,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-discovery-memorized-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.JWT_SECRET = "test-jwt-secret-for-discovery-state-memorized";
 process.env.INITIAL_PASSWORD = "admin-secret";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 const discoveryRoute = await import("../../src/app/api/providers/[id]/models/route.ts");
@@ -36,11 +35,9 @@ const { getRegistryEntry } = await import("../../open-sse/config/providerRegistr
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const originalFetch = globalThis.fetch;
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   globalThis.fetch = originalFetch;
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
 async function createConnection(
@@ -92,16 +89,17 @@ async function listConnections(provider: string) {
 
 test.beforeEach(resetStorage);
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
   globalThis.fetch = originalFetch;
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("a failed discovery is remembered for its connection", () => {
-  const connection = { provider: "aimlapi", connectionId: "conn-1" };
+test("a failed discovery is remembered for its connection", async () => {
+  const saved = await createConnection("aimlapi", "remember-me");
+  const connection = { provider: "aimlapi", connectionId: saved.id };
 
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     ...connection,
     degraded: true,
     error: "HTTP 500",
@@ -109,10 +107,10 @@ test("a failed discovery is remembered for its connection", () => {
     warning: "API unavailable — using cached catalog",
   });
 
-  const states = discoveryStateDb.getDiscoveryStatesForConnections([
+  const states = await discoveryStateDb.getDiscoveryStatesForConnections([
     { provider: connection.provider, id: connection.connectionId },
   ]);
-  const stored = states.get("aimlapi:conn-1");
+  const stored = states.get(`aimlapi:${saved.id}`);
   assert.equal(stored?.status, "degraded");
   assert.equal(stored?.cause, "HTTP 500");
   assert.ok(Number.isFinite(Date.parse(stored?.at ?? "")));
@@ -123,7 +121,7 @@ test("a later read does not erase the remembered failure", async () => {
   // discovery, so it has no outcome of its own to record. (With auto-fetch on, a
   // plain read is a live discovery and legitimately records its own outcome.)
   const connection = await createConnection("aimlapi", "remembered", { autoFetchModels: false });
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     provider: "aimlapi",
     connectionId: connection.id,
     degraded: true,
@@ -146,7 +144,7 @@ test("a later read does not erase the remembered failure", async () => {
 
 test("a successful discovery makes the remembered outcome healthy again", async () => {
   const connection = await createConnection("openai", "recovered");
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     provider: "openai",
     connectionId: connection.id,
     degraded: true,
@@ -172,7 +170,7 @@ test("two connections of one provider keep their own outcome", async () => {
   const degraded = await createConnection("aimlapi", "degraded");
   const healthy = await createConnection("aimlapi", "healthy");
 
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     provider: "aimlapi",
     connectionId: degraded.id,
     degraded: true,
@@ -194,32 +192,33 @@ test("a connection that was never refreshed reads as unknown, never as healthy",
   assert.equal(row.discoveryState, null);
 });
 
-test("a local condition keeps the previous outcome and its own date", () => {
-  const connection = { provider: "aimlapi", connectionId: "conn-local" };
-  recordDiscoveryOutcome({
+test("a local condition keeps the previous outcome and its own date", async () => {
+  const saved = await createConnection("aimlapi", "local-condition");
+  const connection = { provider: "aimlapi", connectionId: saved.id };
+  await recordDiscoveryOutcome({
     ...connection,
     degraded: true,
     error: "HTTP 500",
     source: "cache",
   });
-  const before = discoveryStateDb
-    .getDiscoveryStatesForConnections([
+  const before = (
+    await discoveryStateDb.getDiscoveryStatesForConnections([
       { provider: connection.provider, id: connection.connectionId },
     ])
-    .get("aimlapi:conn-local");
+  ).get(`aimlapi:${saved.id}`);
 
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     ...connection,
     degraded: true,
     error: "NO_CREDENTIAL",
     source: "local_catalog",
   });
 
-  const after = discoveryStateDb
-    .getDiscoveryStatesForConnections([
+  const after = (
+    await discoveryStateDb.getDiscoveryStatesForConnections([
       { provider: connection.provider, id: connection.connectionId },
     ])
-    .get("aimlapi:conn-local");
+  ).get(`aimlapi:${saved.id}`);
   assert.equal(after?.status, "degraded");
   assert.equal(after?.cause, "HTTP 500");
   assert.equal(after?.at, before?.at);
@@ -312,7 +311,7 @@ test("a no-auth provider whose live catalog fails is remembered too", async () =
 
 test("deleting a connection drops its remembered outcome", async () => {
   const connection = await createConnection("aimlapi", "deleted");
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     provider: "aimlapi",
     connectionId: connection.id,
     degraded: true,
@@ -320,23 +319,29 @@ test("deleting a connection drops its remembered outcome", async () => {
     source: "cache",
   });
   assert.equal(
-    discoveryStateDb.getDiscoveryStatesForConnections([{ provider: "aimlapi", id: connection.id }])
-      .size,
+    (
+      await discoveryStateDb.getDiscoveryStatesForConnections([
+        { provider: "aimlapi", id: connection.id },
+      ])
+    ).size,
     1
   );
 
   await deletion.deleteProviderConnection(connection.id);
 
   assert.equal(
-    discoveryStateDb.getDiscoveryStatesForConnections([{ provider: "aimlapi", id: connection.id }])
-      .size,
+    (
+      await discoveryStateDb.getDiscoveryStatesForConnections([
+        { provider: "aimlapi", id: connection.id },
+      ])
+    ).size,
     0
   );
 });
 
 test("a failed purge of the stored outcome leaves a trace and never fails the deletion", async () => {
   const connection = await createConnection("aimlapi", "purge-failure");
-  recordDiscoveryOutcome({
+  await recordDiscoveryOutcome({
     provider: "aimlapi",
     connectionId: connection.id,
     degraded: true,
@@ -344,24 +349,16 @@ test("a failed purge of the stored outcome leaves a trace and never fails the de
     source: "cache",
   });
 
-  const db = core.getDbInstance();
-  type Prepare = typeof db.prepare;
-  const originalPrepare = db.prepare;
-  const realPrepare = originalPrepare.bind(db) as unknown as (...args: unknown[]) => unknown;
-  // Only the store of the discovery outcomes fails: every other write of the
-  // deletion path (the provider limits cache included) still works.
-  (db as unknown as { prepare: Prepare }).prepare = ((sql: string) => {
-    const statement = realPrepare(sql);
-    if (typeof sql !== "string" || !sql.includes("DELETE FROM key_value")) return statement;
-    return {
-      run: (...params: unknown[]) => {
-        if (params[0] === "discoveryState") {
-          throw new Error("the discovery outcome store is unavailable");
-        }
-        return (statement.run as (...args: unknown[]) => unknown)(...params);
-      },
-    };
-  }) as unknown as Prepare;
+  // Only the purge of the discovery outcomes fails: a statement-level trigger
+  // makes every UPDATE of connection_model_sync raise, and nothing else of the
+  // deletion path touches that statement. Removed again in `finally`.
+  const backend = getTestBackend();
+  await backend.execute(`
+    CREATE OR REPLACE FUNCTION test_fail_discovery_purge() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN RAISE EXCEPTION 'the discovery outcome store is unavailable'; END $$`);
+  await backend.execute(`
+    CREATE TRIGGER test_fail_discovery_purge BEFORE UPDATE ON connection_model_sync
+    FOR EACH STATEMENT EXECUTE FUNCTION test_fail_discovery_purge()`);
 
   const errors: unknown[][] = [];
   const log = console.error;
@@ -373,7 +370,8 @@ test("a failed purge of the stored outcome leaves a trace and never fails the de
     deleted = await deletion.deleteProviderConnection(connection.id);
   } finally {
     console.error = log;
-    (db as unknown as { prepare: Prepare }).prepare = originalPrepare;
+    await backend.execute("DROP TRIGGER IF EXISTS test_fail_discovery_purge ON connection_model_sync");
+    await backend.execute("DROP FUNCTION IF EXISTS test_fail_discovery_purge()");
   }
 
   assert.equal(deleted, true, "a failed purge must not fail the deletion");

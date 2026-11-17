@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { translateRequest } from "../../open-sse/translator/index.ts";
 import { FORMATS } from "../../open-sse/translator/formats.ts";
 
-test("#13948: mid-array system message keeps its chronological position after claude->openai translation for a strict provider", () => {
+test("#13948: mid-array system message keeps its chronological position after claude->openai translation for a strict provider", async () => {
   const body = {
     model: "mimo-v2.5",
     system: [{ type: "text", text: "You are a coding assistant." }],
@@ -14,7 +14,7 @@ test("#13948: mid-array system message keeps its chronological position after cl
     ],
   };
 
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "mimo-v2.5",

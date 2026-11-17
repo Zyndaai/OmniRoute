@@ -46,8 +46,8 @@ type Event = {
 };
 
 for (const target of ["gemini", "antigravity"]) {
-  test(`${target}: both namespace identities and sanitizer aliases survive chatCore extraction`, () => {
-    const body = translateRequest(
+  test(`${target}: both namespace identities and sanitizer aliases survive chatCore extraction`, async () => {
+    const body = await translateRequest(
       "openai-responses",
       target,
       request.model,
@@ -71,8 +71,8 @@ for (const target of ["gemini", "antigravity"]) {
     assert(!serialized.includes("_namespaceToolIdentityMap"));
   });
 
-  test(`${target}: sanitized colliding MCP names return exact Responses namespace/name pairs`, () => {
-    const body = translateRequest(
+  test(`${target}: sanitized colliding MCP names return exact Responses namespace/name pairs`, async () => {
+    const body = await translateRequest(
       "openai-responses",
       target,
       request.model,
@@ -156,12 +156,12 @@ test("namespace-only metadata never becomes a string alias map", () => {
   assert.equal(metadata.requestToolIdentityMap, identity);
 });
 
-test("parallel native MCP calls after reasoning keep distinct output identities", () => {
+test("parallel native MCP calls after reasoning keep distinct output identities", async () => {
   const expected = [
     { namespace: "mcp__graft", name: "graft_check_freshness" },
     { namespace: "mcp__openviking_memory", name: "health" },
   ];
-  const body = translateRequest(
+  const body = await translateRequest(
     "openai-responses",
     "antigravity",
     request.model,
@@ -260,11 +260,11 @@ test("alias-only extraction remains compatible and empty requests have no metada
 });
 
 for (const target of ["gemini", "antigravity"]) {
-  test(`${target}: tool-result replay does not grow collision hashes over repeated turns`, () => {
+  test(`${target}: tool-result replay does not grow collision hashes over repeated turns`, async () => {
     const input: Array<Record<string, unknown>> = [{ role: "user", content: "Use the first tool" }];
     let previousWireNames: string[] | undefined;
     for (let turn = 0; turn < 4; turn++) {
-      const body = translateRequest(
+      const body = await translateRequest(
         "openai-responses",
         target,
         request.model,

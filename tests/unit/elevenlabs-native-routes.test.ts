@@ -8,8 +8,9 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-elevenlab
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "elevenlabs-native-route-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const voicesRoute = await import("../../src/app/api/v1/voices/route.ts");
 const speechRoute = await import("../../src/app/api/v1/text-to-speech/[voiceId]/route.ts");
 const transcriptionRoute = await import("../../src/app/api/v1/speech-to-text/route.ts");
@@ -17,39 +18,36 @@ const { nativeGenerationRoutes } = await import("./helpers/elevenLabsGenerationR
 const originalFetch = globalThis.fetch;
 const API_KEY = "test-elevenlabs-key";
 
-function seedCredential() {
-  const now = new Date().toISOString();
-  core
-    .getDbInstance()
-    .prepare(
-      `INSERT OR REPLACE INTO provider_connections
-         (id, provider, auth_type, is_active, api_key, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run("elevenlabs-native-test", "elevenlabs", "apikey", 1, API_KEY, now, now);
+async function seedCredential() {
+  await providersDb.createProviderConnection({
+    provider: "elevenlabs",
+    authType: "apikey",
+    name: "elevenlabs-native-test",
+    apiKey: API_KEY,
+    isActive: true,
+  });
   readCache.invalidateDbCache("connections");
 }
 
-function clearCredentials() {
-  core
-    .getDbInstance()
-    .prepare("DELETE FROM provider_connections WHERE provider = ?")
-    .run("elevenlabs");
+async function clearCredentials() {
+  await getTestBackend().execute("DELETE FROM provider_connections WHERE provider = $1", [
+    "elevenlabs",
+  ]);
   readCache.invalidateDbCache("connections");
 }
 
 test.beforeEach(async () => {
-  await core.ensureDbInitialized();
-  seedCredential();
+  await resetTestDb();
+  await seedCredential();
 });
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -130,7 +128,7 @@ test("POST /v1/speech-to-text forwards multipart body, query, status and error b
 
 test("native ElevenLabs routes reject missing credentials and traversal", async (t) => {
   await t.test("missing credential", async () => {
-    clearCredentials();
+    await clearCredentials();
     let fetched = false;
     globalThis.fetch = (async () => {
       fetched = true;
@@ -144,7 +142,7 @@ test("native ElevenLabs routes reject missing credentials and traversal", async 
   });
 
   await t.test("traversal voice ID", async () => {
-    seedCredential();
+    await seedCredential();
     let fetched = false;
     globalThis.fetch = (async () => {
       fetched = true;
@@ -234,7 +232,7 @@ for (const { path: routePath, route, body } of nativeGenerationRoutes) {
       );
       assert.equal(response.status, 400);
     }
-    clearCredentials();
+    await clearCredentials();
     const response = await route.POST(
       new Request(`http://localhost${routePath}`, { method: "POST", body: JSON.stringify(body) })
     );

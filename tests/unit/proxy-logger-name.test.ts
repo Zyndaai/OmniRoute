@@ -7,26 +7,28 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-logger-name-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
-function resetStorage() {
+async function resetStorage() {
   // Batched persistence: logProxyEvent() enqueues and flushes on a timer, so a
   // queued entry from a previous test would otherwise be written into the fresh
   // DB after the reset. Drain the queue (and stop the timer) before clearing.
-  proxyLogger.flushProxyLogsSync();
-  proxyLogger.clearProxyLogs();
-  core.closeDbInstance();
+  await proxyLogger.flushProxyLogsSync();
+  await proxyLogger.clearProxyLogs();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  resetStorage();
+test.after(async () => {
+  await resetStorage();
+  await core.resetDbInstance();
 });
 
 test("proxy logs carry the registry name on the proxy entry", () => {
@@ -44,7 +46,7 @@ test("proxy logs carry the registry name on the proxy entry", () => {
   assert.equal(log.proxy.host, "gw-eu.murphyproxies.com");
 });
 
-test("registry name survives SQLite persist + hydrate", () => {
+test("registry name survives database persist + hydrate", async () => {
   proxyLogger.logProxyEvent({
     status: "success",
     provider: "nous-research",
@@ -52,11 +54,11 @@ test("registry name survives SQLite persist + hydrate", () => {
   });
 
   // logProxyEvent() enqueues writes on the batched persistence path; force the
-  // flush to SQLite before inspecting the raw row.
-  proxyLogger.flushProxyLogsSync();
-  core.closeDbInstance();
-  const db = core.getDbInstance();
-  const rows = db.prepare("SELECT proxy_name, proxy_host FROM proxy_logs").all();
+  // flush to the database before inspecting the raw row.
+  await proxyLogger.flushProxyLogsSync();
+  const rows = await getTestBackend().query<{ proxy_name: string; proxy_host: string }>(
+    "SELECT proxy_name, proxy_host FROM proxy_logs"
+  );
   assert.equal(rows.length, 1);
   assert.equal(rows[0].proxy_name, "murphy-eu-de");
   assert.equal(rows[0].proxy_host, "gw-eu.murphyproxies.com");

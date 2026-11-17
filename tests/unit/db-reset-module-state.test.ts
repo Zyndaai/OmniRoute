@@ -1,46 +1,32 @@
 // TDD — 6A.1 triagem do órfão compression-preview-auth.test.ts (503 em vez de 403).
-// Causa-raiz: resetDbInstance()/closeDbInstance() NÃO disparava os resetters do
-// registry stateReset.ts (só o restore de backup.ts disparava). Módulos com estado
-// amarrado à conexão (ex.: apiKeys.ts `_schemaChecked` + prepared statements)
-// ficavam apontando para o schema/conexão antiga: após um segundo reset com DB
-// recriado do zero, ensureApiKeysColumns era pulado (memo de processo) e o
-// re-prepare explodia com "no such column: is_active" → 503 em vez de 403.
-// O mesmo caminho atinge produção via restore de DB antigo sem as colunas-fallback.
+// Causa-raiz: resetar a conexão do banco NÃO disparava os resetters do registry
+// stateReset.ts. Módulos com estado amarrado à conexão (ex.: apiKeys.ts memo de schema +
+// prepared statements) ficavam apontando para um estado antigo: após um segundo reset com
+// o banco recriado do zero, o módulo ainda reutilizava o memo e a consulta falhava com
+// 503 em vez de 403.
+// No PostgreSQL o banco de cada processo de teste é isolado (tests/_setup/isolatePostgres.ts);
+// resetTestDb() esvazia as tabelas e recarrega o seed das migrations, e este teste garante
+// que a validação de API key continua correta depois de resets repetidos.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-db-reset-state-"));
-const originalDataDir = process.env.DATA_DIR;
-process.env.DATA_DIR = TEST_DATA_DIR;
+import { resetTestDb } from "../helpers/postgres.ts";
 
-const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { isValidApiKey } = await import("../../src/sse/services/auth.ts");
 
-async function recreateDataDirFromScratch(): Promise<void> {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  // Primeiro acesso recria o DB do zero (migrations + colunas-fallback).
+async function recreateDataFromScratch(): Promise<void> {
+  await resetTestDb();
+  // Primeiro acesso após o reset (seed das migrations preservado).
   await settingsDb.updateSettings({ requireLogin: true, setupComplete: true });
 }
 
-test("api-key validation survives a second resetDbInstance with a recreated DB (module state resetters fire)", async () => {
-  await recreateDataDirFromScratch();
+test("api-key validation survives a second reset with recreated data (module state resetters fire)", async () => {
+  await recreateDataFromScratch();
   assert.equal(await isValidApiKey("not-a-real-key"), false);
 
-  // Segundo ciclo: sem o wiring resetDbInstance→resetAllDbModuleState, o memo de
-  // schema de apiKeys.ts sobrevive ao reset e o prepare lança "no such column".
-  await recreateDataDirFromScratch();
+  // Segundo ciclo: sem o wiring de reset → resetAllDbModuleState, o memo de estado
+  // do módulo de API keys sobrevive ao reset e a consulta falha.
+  await recreateDataFromScratch();
   assert.equal(await isValidApiKey("not-a-real-key"), false);
-});
-
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  if (originalDataDir === undefined) delete process.env.DATA_DIR;
-  else process.env.DATA_DIR = originalDataDir;
 });

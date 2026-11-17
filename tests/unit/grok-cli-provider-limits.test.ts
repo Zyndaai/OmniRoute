@@ -7,13 +7,13 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-grok-limits-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.STORAGE_ENCRYPTION_KEY = "grok-provider-limits-test-key-32-bytes-minimum";
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { getUsageForProvider, USAGE_FETCHER_PROVIDERS } =
   await import("../../open-sse/services/usage.ts");
 const { __testing: grokTesting } = await import("../../open-sse/services/usage/grokCli.ts");
 const providerLimitsDb = await import("../../src/lib/db/providerLimits.ts");
+const providersDb = await import("../../src/lib/db/providers.ts");
 const { mergeProviderLimitsCacheEntry } =
   await import("../../src/lib/usage/providerLimitsCache.ts");
 
@@ -221,9 +221,9 @@ test.afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -565,8 +565,16 @@ test("grok-cli keeps valid fields across sparse partial failures and bounded mal
   assert.equal(oversized.quotas, undefined);
 });
 
-test("Provider Limits cache persists only the public Grok billing contract", () => {
-  const cached = providerLimitsDb.setProviderLimitsCache("grok-connection", {
+test("Provider Limits cache persists only the public Grok billing contract", async () => {
+  // The cache row has a foreign key to provider_connections and is only written
+  // while its connection exists, so create one first.
+  const connection = (await providersDb.createProviderConnection({
+    provider: "grok-cli",
+    authType: "oauth",
+    name: `Grok Cache ${Date.now()}`,
+    accessToken: "fixture-access-token",
+  })) as { id: string };
+  const cached = await providerLimitsDb.setProviderLimitsCache(connection.id, {
     quotas: { weekly: { remainingPercentage: 62.75 } },
     plan: "Future Experimental Tier",
     message: null,
@@ -594,7 +602,7 @@ test("Provider Limits cache persists only the public Grok billing contract", () 
     autoTopUp: { available: true, enabled: true, amountMinorUnits: 2000 },
     additionalCreditsUrl: "https://grok.com/build?_s=usage",
   });
-  assert.deepEqual(providerLimitsDb.getProviderLimitsCache("grok-connection"), cached);
+  assert.deepEqual(await providerLimitsDb.getProviderLimitsCache(connection.id), cached);
   assert.equal(JSON.stringify(cached).includes("secret"), false);
 });
 

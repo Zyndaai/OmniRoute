@@ -29,7 +29,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-vis
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { addCustomModel } = await import("../../src/lib/db/models.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const { getResolvedModelCapabilities } = await import("../../src/lib/modelCapabilities.ts");
@@ -120,33 +120,36 @@ test.beforeEach(() => {
   resetAllSemaphores();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (ORIGINAL_DATA_DIR === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = ORIGINAL_DATA_DIR;
 });
 
-test("control: the bare and string forms already honor the custom vision row", () => {
+test("control: the bare and string forms already honor the custom vision row", async () => {
   assert.equal(
-    getResolvedModelCapabilities({ provider: "codex", model: MODEL_ID }).supportsVision,
+    (await getResolvedModelCapabilities({ provider: "codex", model: MODEL_ID })).supportsVision,
     true
   );
-  assert.equal(getResolvedModelCapabilities(`cx/${MODEL_ID}`).supportsVision, true);
+  assert.equal((await getResolvedModelCapabilities(`cx/${MODEL_ID}`)).supportsVision, true);
 });
 
 for (const providerId of ["codex", "cx"]) {
-  test(`object form {${providerId}, cx/<id>} resolves like the string form`, () => {
-    const caps = getResolvedModelCapabilities({ provider: providerId, model: `cx/${MODEL_ID}` });
+  test(`object form {${providerId}, cx/<id>} resolves like the string form`, async () => {
+    const caps = await getResolvedModelCapabilities({
+      provider: providerId,
+      model: `cx/${MODEL_ID}`,
+    });
     assert.equal(caps.provider, "codex");
     assert.equal(caps.model, MODEL_ID, "the alias prefix of the same provider must be stripped");
     assert.equal(caps.supportsVision, true, "Custom Models 'Vision capable' must apply");
   });
 
-  test(`combo filter keeps a prefixed step {${providerId}, cx/<id>} for an image request`, () => {
+  test(`combo filter keeps a prefixed step {${providerId}, cx/<id>} for an image request`, async () => {
     const step = target(providerId, `cx/${MODEL_ID}`);
-    assert.equal(isVisionIncompatibleTarget(step, visionRequirements), false);
-    const kept = filterTargetsByRequestCompatibility([step], toolImageBody, log);
+    assert.equal(await isVisionIncompatibleTarget(step, visionRequirements), false);
+    const kept = await filterTargetsByRequestCompatibility([step], toolImageBody, log);
     assert.deepEqual(
       kept.map((t) => t.modelStr),
       [`cx/${MODEL_ID}`]
@@ -154,36 +157,42 @@ for (const providerId of ["codex", "cx"]) {
   });
 }
 
-test("the codex/<id> prefix form is treated the same as cx/<id>", () => {
-  const caps = getResolvedModelCapabilities({ provider: "codex", model: `codex/${MODEL_ID}` });
+test("the codex/<id> prefix form is treated the same as cx/<id>", async () => {
+  const caps = await getResolvedModelCapabilities({
+    provider: "codex",
+    model: `codex/${MODEL_ID}`,
+  });
   assert.equal(caps.model, MODEL_ID);
   assert.equal(caps.supportsVision, true);
 });
 
-test("explicit supportsVision:false on a prefixed step still wins", () => {
-  const caps = getResolvedModelCapabilities({
+test("explicit supportsVision:false on a prefixed step still wins", async () => {
+  const caps = await getResolvedModelCapabilities({
     provider: "codex",
     model: `cx/${TEXT_ONLY_MODEL_ID}`,
   });
   assert.equal(caps.supportsVision, false);
   assert.equal(
-    isVisionIncompatibleTarget(target("codex", `cx/${TEXT_ONLY_MODEL_ID}`), visionRequirements),
+    await isVisionIncompatibleTarget(
+      target("codex", `cx/${TEXT_ONLY_MODEL_ID}`),
+      visionRequirements
+    ),
     true
   );
 });
 
-test("a slash in a native model id is not stripped when the prefix is another provider", () => {
+test("a slash in a native model id is not stripped when the prefix is another provider", async () => {
   // nvidia's registry id starts with `nvidia/`, but openrouter-style and
   // namespaced ids (`meta/…`, `openai/…`) under a different provider must keep
   // their full path: the first segment is part of the provider's model id.
-  const openrouter = getResolvedModelCapabilities({
+  const openrouter = await getResolvedModelCapabilities({
     provider: "openrouter",
     model: "meta-llama/llama-3.3-70b-instruct",
   });
   assert.equal(openrouter.provider, "openrouter");
   assert.equal(openrouter.model, "meta-llama/llama-3.3-70b-instruct");
 
-  const crossProvider = getResolvedModelCapabilities({
+  const crossProvider = await getResolvedModelCapabilities({
     provider: "nvidia",
     model: `cx/${MODEL_ID}`,
   });
@@ -196,8 +205,8 @@ test("a slash in a native model id is not stripped when the prefix is another pr
   assert.notEqual(crossProvider.supportsVision, true, "codex's custom row must not leak to nvidia");
 });
 
-test("a provider whose native ids carry its own name keeps resolving (#12112)", () => {
-  const caps = getResolvedModelCapabilities({
+test("a provider whose native ids carry its own name keeps resolving (#12112)", async () => {
+  const caps = await getResolvedModelCapabilities({
     provider: "nvidia",
     model: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
   });
@@ -219,7 +228,10 @@ test("a custom row stored under the verbatim prefixed id keeps matching", async 
     {},
     true
   );
-  const caps = getResolvedModelCapabilities({ provider: "codex", model: `cx/${verbatimOnly}` });
+  const caps = await getResolvedModelCapabilities({
+    provider: "codex",
+    model: `cx/${verbatimOnly}`,
+  });
   assert.equal(caps.supportsVision, true);
 });
 

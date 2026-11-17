@@ -39,18 +39,18 @@ function routeReRunsValidateApiKey(src: string): boolean {
   return VALIDATE_API_KEY_CALL_RE.test(src.replace(STRIP_COMMENTS_RE, ""));
 }
 
-function seedCompletedBatch(apiKeyId: string | null, tag: string) {
+async function seedCompletedBatch(apiKeyId: string | null, tag: string) {
   // The file carries the batch's owner, as an upload through that key does in production.
   // #13374 (SEC-C) scopes the file half of a key sweep to files the caller owns, so an
   // unowned file referenced by the caller's batch is deliberately left intact.
-  const file = createFile({
+  const file = await createFile({
     bytes: 10,
     filename: `wvxc-${tag}.jsonl`,
     purpose: "batch",
     content: Buffer.from("{}"),
     apiKeyId,
   });
-  const batch = createBatch({
+  const batch = await createBatch({
     endpoint: "/v1/chat/completions",
     completionWindow: "24h",
     inputFileId: file.id,
@@ -64,44 +64,44 @@ function seedCompletedBatch(apiKeyId: string | null, tag: string) {
 // A bare string or an omitted argument throws instead of widening the sweep, so every call
 // below states its scope. The assertions are the original #13211 ones, unchanged.
 describe("deleteCompletedBatches — ownership scoping (GHSA-wvxc-jp3v-5mg5)", () => {
-  it("scoped to one key deletes ONLY that key's completed batches", () => {
-    const a = seedCompletedBatch(KEY_A, "a1");
-    const b = seedCompletedBatch(KEY_B, "b1");
+  it("scoped to one key deletes ONLY that key's completed batches", async () => {
+    const a = await seedCompletedBatch(KEY_A, "a1");
+    const b = await seedCompletedBatch(KEY_B, "b1");
 
-    const result = deleteCompletedBatches({ apiKeyId: KEY_A });
+    const result = await deleteCompletedBatches({ apiKeyId: KEY_A });
 
-    assert.equal(getBatch(a.batch.id), null, "the caller's own batch should be gone");
-    assert.ok(getBatch(b.batch.id), "another key's batch must survive");
+    assert.equal(await getBatch(a.batch.id), null, "the caller's own batch should be gone");
+    assert.ok(await getBatch(b.batch.id), "another key's batch must survive");
     assert.equal(result.deletedBatches, 1, "must report only what it actually deleted");
   });
 
-  it("scoped deletion does not touch another key's file contents", () => {
-    const a = seedCompletedBatch(KEY_A, "a2");
-    const b = seedCompletedBatch(KEY_B, "b2");
+  it("scoped deletion does not touch another key's file contents", async () => {
+    const a = await seedCompletedBatch(KEY_A, "a2");
+    const b = await seedCompletedBatch(KEY_B, "b2");
 
-    deleteCompletedBatches({ apiKeyId: KEY_A });
+    await deleteCompletedBatches({ apiKeyId: KEY_A });
 
-    assert.equal(getFile(a.file.id), null, "the caller's own file should be gone");
-    assert.ok(getFile(b.file.id), "another key's file must survive with its content intact");
+    assert.equal(await getFile(a.file.id), null, "the caller's own file should be gone");
+    assert.ok(await getFile(b.file.id), "another key's file must survive with its content intact");
   });
 
-  it("a key with no completed batches deletes nothing at all", () => {
-    const b = seedCompletedBatch(KEY_B, "b3");
+  it("a key with no completed batches deletes nothing at all", async () => {
+    const b = await seedCompletedBatch(KEY_B, "b3");
 
-    const result = deleteCompletedBatches({ apiKeyId: "key-wvxc-with-nothing" });
+    const result = await deleteCompletedBatches({ apiKeyId: "key-wvxc-with-nothing" });
 
     assert.equal(result.deletedBatches, 0);
     assert.equal(result.deletedFiles, 0);
-    assert.ok(getBatch(b.batch.id), "an unrelated key's batch must survive");
+    assert.ok(await getBatch(b.batch.id), "an unrelated key's batch must survive");
   });
 
-  it("unscoped (dashboard session) still clears the whole instance", () => {
+  it("unscoped (dashboard session) still clears the whole instance", async () => {
     // The operator's own dashboard legitimately cleans up everything; that is
     // the ONLY caller allowed to ask for allTenants. Preserved deliberately.
-    seedCompletedBatch(KEY_A, "a4");
-    seedCompletedBatch(KEY_B, "b4");
+    await seedCompletedBatch(KEY_A, "a4");
+    await seedCompletedBatch(KEY_B, "b4");
 
-    const result = deleteCompletedBatches({ allTenants: true });
+    const result = await deleteCompletedBatches({ allTenants: true });
 
     assert.ok(
       result.deletedBatches >= 2,

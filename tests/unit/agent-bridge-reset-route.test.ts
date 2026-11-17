@@ -31,19 +31,20 @@ const stateDb = await import("../../src/lib/db/agentBridgeState.ts");
 const mappingsDb = await import("../../src/lib/db/agentBridgeMappings.ts");
 const resetRoute = await import("../../src/app/api/tools/agent-bridge/agents/[id]/reset/route.ts");
 const { checkDNSEntryForAgent } = await import("../../src/mitm/dns/dnsConfig.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -94,18 +95,22 @@ test("POST .../[id]/reset: error responses do not leak stack traces", async () =
 // ── Success path ─────────────────────────────────────────────────────────
 
 test("POST .../[id]/reset: clears mappings, resets dns_enabled/setup_completed for that agent only", async () => {
-  stateDb.upsertAgentBridgeState({
+  await stateDb.upsertAgentBridgeState({
     agent_id: "antigravity",
     dns_enabled: true,
     setup_completed: true,
   });
-  mappingsDb.setMappings("antigravity", [
+  await mappingsDb.setMappings("antigravity", [
     { source: "gemini-pro", target: "anthropic/claude-sonnet-4" },
   ]);
 
   // A second, unrelated agent must be left untouched by resetting antigravity.
-  stateDb.upsertAgentBridgeState({ agent_id: "cursor", dns_enabled: true, setup_completed: true });
-  mappingsDb.setMappings("cursor", [{ source: "gpt-4o", target: "openai/gpt-4o" }]);
+  await stateDb.upsertAgentBridgeState({
+    agent_id: "cursor",
+    dns_enabled: true,
+    setup_completed: true,
+  });
+  await mappingsDb.setMappings("cursor", [{ source: "gpt-4o", target: "openai/gpt-4o" }]);
 
   const res = await resetRoute.POST(makeRequest("antigravity"), {
     params: Promise.resolve({ id: "antigravity" }),
@@ -134,20 +139,20 @@ test("POST .../[id]/reset: clears mappings, resets dns_enabled/setup_completed f
   // cursor is still dns_enabled=true -> reset must report other agents remain active.
   assert.equal(body.otherAgentsStillActive, true);
 
-  const antigravityState = stateDb.getAgentBridgeState("antigravity");
+  const antigravityState = await stateDb.getAgentBridgeState("antigravity");
   assert.equal(antigravityState?.dns_enabled, false);
   assert.equal(antigravityState?.setup_completed, false);
-  assert.deepEqual(mappingsDb.getMappingsForAgent("antigravity"), []);
+  assert.deepEqual(await mappingsDb.getMappingsForAgent("antigravity"), []);
 
   // cursor's own state and mappings must be untouched by resetting antigravity.
-  const cursorState = stateDb.getAgentBridgeState("cursor");
+  const cursorState = await stateDb.getAgentBridgeState("cursor");
   assert.equal(cursorState?.dns_enabled, true);
   assert.equal(cursorState?.setup_completed, true);
-  assert.equal(mappingsDb.getMappingsForAgent("cursor").length, 1);
+  assert.equal((await mappingsDb.getMappingsForAgent("cursor")).length, 1);
 });
 
 test("POST .../[id]/reset: otherAgentsStillActive is false once the last active agent is reset", async () => {
-  stateDb.upsertAgentBridgeState({ agent_id: "antigravity", dns_enabled: true });
+  await stateDb.upsertAgentBridgeState({ agent_id: "antigravity", dns_enabled: true });
 
   const res = await resetRoute.POST(makeRequest("antigravity"), {
     params: Promise.resolve({ id: "antigravity" }),

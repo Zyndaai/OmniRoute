@@ -30,7 +30,7 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-ctx-rescue-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const contextOverrides = await import("../../src/lib/db/modelContextOverrides.ts");
 const capabilityOverrides = await import("../../src/lib/db/modelCapabilityOverrides.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
@@ -70,8 +70,8 @@ function buildRequest(isCombo: boolean, content: string) {
   };
 }
 
-test.before(() => {
-  core.resetDbInstance();
+test.before(async () => {
+  await resetTestDb();
   globalThis.fetch = async () => {
     fetchCalls += 1;
     return new Response(
@@ -87,22 +87,28 @@ test.before(() => {
   };
 });
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   fetchCalls = 0;
   // Isolate each scenario: clear any overrides a prior test wrote so ordering does
   // not couple the assertions.
-  contextOverrides.removeModelContextOverride(PROVIDER, MODEL);
-  capabilityOverrides.removeModelCapabilityOverride(`${PROVIDER}/${MODEL}`, "max_input_tokens");
+  await contextOverrides.removeModelContextOverride(PROVIDER, MODEL);
+  await capabilityOverrides.removeModelCapabilityOverride(
+    `${PROVIDER}/${MODEL}`,
+    "max_input_tokens"
+  );
 });
 
 test("raw-alias combo request rescued by an exact context override dispatches", async () => {
-  assert.equal(contextOverrides.setModelContextOverride(PROVIDER, MODEL, CONTEXT_OVERRIDE), true);
+  assert.equal(
+    await contextOverrides.setModelContextOverride(PROVIDER, MODEL, CONTEXT_OVERRIDE),
+    true
+  );
   // The prompt exceeds the catalog input hint but fits the context override. A combo
   // request must NOT be rejected at the gate — the upstream fetch must fire.
   const result = await handleChatCore(buildRequest(true, BIG_PROMPT));
@@ -117,9 +123,12 @@ test("raw-alias combo request rescued by an exact context override dispatches", 
 test("an exact raw-alias max_input_tokens override is enforced even in a combo", async () => {
   // An explicit max_input_tokens capability override must NEVER be bypassed by a
   // context override — combo included.
-  assert.equal(contextOverrides.setModelContextOverride(PROVIDER, MODEL, CONTEXT_OVERRIDE), true);
   assert.equal(
-    capabilityOverrides.setModelCapabilityOverride(
+    await contextOverrides.setModelContextOverride(PROVIDER, MODEL, CONTEXT_OVERRIDE),
+    true
+  );
+  assert.equal(
+    await capabilityOverrides.setModelCapabilityOverride(
       `${PROVIDER}/${MODEL}`,
       "max_input_tokens",
       1000

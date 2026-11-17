@@ -14,8 +14,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getDbInstance, resetDbInstance } from "../../src/lib/db/core.ts";
 import { createProviderConnection, getRawProviderConnections } from "../../src/lib/db/providers.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 import {
   getCircuitBreaker,
   resetAllCircuitBreakers,
@@ -276,14 +276,19 @@ test("windowMs=invalid (NaN) returns 400", async () => {
 // --- Partial degradation ------------------------------------------------------------
 
 test("when database throws, response has empty connections + meta.degraded includes database", async () => {
-  // Force DB errors by closing the instance so getRawProviderConnections throws.
-  const db = getDbInstance();
-  db.close();
-  const body = await json(await GET(makeReq()));
-  assert.equal(body.connections.length, 0, "connections should be empty on db failure");
-  assert.ok(body.meta.degraded.includes("database"), "degraded should include database");
-  // restore
-  resetDbInstance();
+  // Force DB errors by failing every query on the shared backend so getRawProviderConnections throws.
+  const backend = getTestBackend();
+  const originalQuery = backend.query;
+  backend.query = async () => {
+    throw new Error("database unavailable");
+  };
+  try {
+    const body = await json(await GET(makeReq()));
+    assert.equal(body.connections.length, 0, "connections should be empty on db failure");
+    assert.ok(body.meta.degraded.includes("database"), "degraded should include database");
+  } finally {
+    backend.query = originalQuery;
+  }
 });
 
 // --- Window metadata ----------------------------------------------------------------
@@ -422,14 +427,13 @@ test("error response uses buildErrorBody (no raw stack)", async () => {
 
 // --- Reset shared state between tests ----------------------------------------------
 
-test.beforeEach(() => {
-  resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   resetAllCircuitBreakers();
   clearAllModelLockouts();
 });
 
-test.after(() => {
-  resetDbInstance();
+test.after(async () => {
   resetAllCircuitBreakers();
   clearAllModelLockouts();
 });

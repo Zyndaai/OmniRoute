@@ -53,8 +53,8 @@ test.before(async () => {
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -174,7 +174,7 @@ test("flag on: ?includeHidden=1 still lists provider rows and the hidden model (
   assert.ok(target, "fixture must expose a second openai model with the flag off");
   const modelId = target.id.slice("openai/".length);
 
-  modelsDb.mergeModelCompatOverride("openai", modelId, { isHidden: true, modality: "chat" });
+  await modelsDb.mergeModelCompatOverride("openai", modelId, { isHidden: true, modality: "chat" });
   try {
     await settingsDb.updateSettings({ exposeCombosOnly: true, hideAutoCombos: false });
     const res = await managementCatalogRoute.GET(
@@ -195,6 +195,9 @@ test("flag on: ?includeHidden=1 still lists provider rows and the hidden model (
     assert.ok(hiddenRow, `hidden model ${target.id} must be listed with includeHidden=1`);
     assert.equal(hiddenRow.hidden, true);
   } finally {
-    modelsDb.mergeModelCompatOverride("openai", modelId, { isHidden: false, modality: "chat" });
+    await modelsDb.mergeModelCompatOverride("openai", modelId, {
+      isHidden: false,
+      modality: "chat",
+    });
   }
 });

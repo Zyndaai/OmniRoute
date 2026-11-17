@@ -52,7 +52,7 @@ test("PR #2: direct chatCore request with tools returns 400 error guard", () => 
   assert.ok(checkTools.message?.includes("does not support tool calling"));
 });
 
-test("PR #2: combo/auto keeps perplexity-web eligible (emulated tool-calling), so unsupportedParams stripping is what protects the request", () => {
+test("PR #2: combo/auto keeps perplexity-web eligible (emulated tool-calling), so unsupportedParams stripping is what protects the request", async () => {
   // Real ResolvedComboTarget shape, as produced by the routing layer.
   const candidateTargets: ResolvedComboTarget[] = [
     buildResolvedTarget("openai", "gpt-4"),
@@ -69,7 +69,7 @@ test("PR #2: combo/auto keeps perplexity-web eligible (emulated tool-calling), s
   // providers (web-cookie.ts, #5240) eligible even when the request carries `tools`,
   // so this pre-filter alone does NOT drop perplexity-web from the candidate list —
   // both targets stay.
-  const filteredWithTools = filterTargetsByRequestCompatibility(
+  const filteredWithTools = await filterTargetsByRequestCompatibility(
     candidateTargets,
     bodyWithTools,
     console
@@ -81,7 +81,7 @@ test("PR #2: combo/auto keeps perplexity-web eligible (emulated tool-calling), s
     model: "auto",
     messages: [{ role: "user", content: "hello" }],
   };
-  const filteredNoTools = filterTargetsByRequestCompatibility(
+  const filteredNoTools = await filterTargetsByRequestCompatibility(
     candidateTargets,
     bodyNoTools,
     console

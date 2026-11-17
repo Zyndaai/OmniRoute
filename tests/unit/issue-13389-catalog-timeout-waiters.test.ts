@@ -11,16 +11,16 @@ Object.assign(process.env, {
   DATA_DIR: dataDir,
   OMNIROUTE_PLUGINS_DIR: path.join(dataDir, "plugins"),
   API_KEY_SECRET: "13389-waiters-fixture-only",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   APP_LOG_TO_FILE: "false",
   CATALOG_BUILD_TIMEOUT_MS: "100",
 });
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
 
 test("#13389 one timeout wave of twenty clients does not duplicate the still-live catalog build", async () => {
-  // Initialize temporary storage before the clock used by the cache experiment.
-  core.getDbInstance();
+  // Give the cache experiment a migrated, empty PostgreSQL database before the clock starts.
+  await resetTestDb();
   catalogCache.__resetCatalogBuilderRunsForTest();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -74,7 +74,7 @@ test("#13389 one timeout wave of twenty clients does not duplicate the still-liv
   );
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

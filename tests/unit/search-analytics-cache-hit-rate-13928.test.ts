@@ -37,8 +37,8 @@ const core = await import("../../src/lib/db/core.ts");
 const { saveCallLog } = await import("../../src/lib/usage/callLogs.ts");
 const { getSearchAggregateStats } = await import("../../src/lib/db/callLogStats.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -117,7 +117,7 @@ test("issue #13928: getSearchAggregateStats counts cache hits via cache_source, 
     responseBody: { results_count: 1, cached: false },
   });
 
-  const stats = getSearchAggregateStats(todayStartIso());
+  const stats = await getSearchAggregateStats(todayStartIso());
   assert.equal(stats.total, 4);
   assert.equal(
     stats.cached,

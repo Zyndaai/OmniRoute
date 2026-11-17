@@ -23,32 +23,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const poolsDb = await import("../../src/lib/db/quotaPools.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
-
-async function resetStorage() {
-  core.resetDbInstance();
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      if (fs.existsSync(TEST_DATA_DIR)) {
-        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-      }
-      break;
-    } catch (err: any) {
-      if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 9) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-      } else {
-        throw err;
-      }
-    }
-  }
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 test.beforeEach(async () => {
-  await resetStorage();
+  await resetTestDb();
 });
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -71,7 +53,7 @@ test("createPool with two different-provider connections throws /single provider
   const idA = (a as any).id as string;
   const idB = (b as any).id as string;
 
-  assert.throws(
+  await assert.rejects(
     () =>
       poolsDb.createPool({
         connectionId: idA,
@@ -101,7 +83,7 @@ test("createPool with two same-provider connections succeeds with connectionIds.
   const idA = (a as any).id as string;
   const idC = (c as any).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     connectionIds: [idA, idC],
     name: "SameType",
@@ -132,13 +114,13 @@ test("updatePool replacing connectionIds with mixed providers throws /single pro
   const idB = (b as any).id as string;
 
   // Create a valid single-connection pool first.
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "StartSingle",
   });
 
   // Try updating to mixed-provider set → should throw.
-  assert.throws(
+  await assert.rejects(
     () => poolsDb.updatePool(pool.id, { connectionIds: [idA, idB] }),
     /same provider|single provider/i
   );
@@ -163,12 +145,12 @@ test("updatePool replacing connectionIds with same-provider connections succeeds
   const idA = (a as any).id as string;
   const idC = (c as any).id as string;
 
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId: idA,
     name: "StartSingle",
   });
 
-  const updated = poolsDb.updatePool(pool.id, { connectionIds: [idA, idC] });
+  const updated = await poolsDb.updatePool(pool.id, { connectionIds: [idA, idC] });
 
   assert.ok(updated, "updatePool should return updated pool");
   assert.equal(updated!.connectionIds.length, 2, "should have 2 connectionIds after update");

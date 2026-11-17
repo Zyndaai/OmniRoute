@@ -16,8 +16,8 @@ type PairedGeminiPart = {
 };
 type PairedGeminiContent = { role?: string; parts?: PairedGeminiPart[] };
 
-test("OpenAI -> Gemini pairs tool calls and responses per turn without cross-turn ID collision mismatch", () => {
-  const result = openaiToCloudCodeGeminiRequest(
+test("OpenAI -> Gemini pairs tool calls and responses per turn without cross-turn ID collision mismatch", async () => {
+  const result = (await openaiToCloudCodeGeminiRequest(
     "gemini-3.8-flash-high",
     {
       messages: [
@@ -59,7 +59,7 @@ test("OpenAI -> Gemini pairs tool calls and responses per turn without cross-tur
       ],
     },
     false
-  ) as { contents: PairedGeminiContent[] };
+  )) as { contents: PairedGeminiContent[] };
 
   // Verify Turn 1 functionCall and functionResponse
   const turn1Model = result.contents.find((c) =>
@@ -109,8 +109,8 @@ test("OpenAI -> Gemini pairs tool calls and responses per turn without cross-tur
   );
 });
 
-test("OpenAI -> Gemini pairs tool calls and responses in context mode without ID collision mismatch", () => {
-  const result = openaiToGeminiRequest(
+test("OpenAI -> Gemini pairs tool calls and responses in context mode without ID collision mismatch", async () => {
+  const result = (await openaiToGeminiRequest(
     "gemini-2.5-flash",
     {
       messages: [
@@ -154,7 +154,7 @@ test("OpenAI -> Gemini pairs tool calls and responses in context mode without ID
     false,
     null,
     { signaturelessToolCallMode: "context" }
-  ) as { contents: PairedGeminiContent[] };
+  )) as { contents: PairedGeminiContent[] };
 
   // In context mode without thought signatures, tool responses are emitted as context text
   const textParts = result.contents.flatMap((c) =>

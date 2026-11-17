@@ -98,7 +98,7 @@ test("7023: injectOptionalEnumOmissionForTools passes non-plain-object entries t
   assert.deepEqual(result, tools);
 });
 
-test("7023: translateRequest applies the injection only for targetFormat OPENAI_RESPONSES", () => {
+test("7023: translateRequest applies the injection only for targetFormat OPENAI_RESPONSES", async () => {
   const body = {
     model: "gpt-5.1-codex",
     messages: [{ role: "user", content: "hi" }],
@@ -117,7 +117,7 @@ test("7023: translateRequest applies the injection only for targetFormat OPENAI_
     ],
   };
 
-  const toResponses = translateRequest(
+  const toResponses = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.OPENAI_RESPONSES,
     "gpt-5.1-codex",
@@ -129,7 +129,7 @@ test("7023: translateRequest applies the injection only for targetFormat OPENAI_
   const responsesParams = responsesTool.parameters ?? responsesTool.function?.parameters;
   assert.ok(responsesParams.properties.isolation.enum.includes(null));
 
-  const toClaude = translateRequest(
+  const toClaude = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.CLAUDE,
     "claude-3-7-sonnet",

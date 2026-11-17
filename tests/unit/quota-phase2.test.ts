@@ -15,10 +15,10 @@ const { getActiveQuotaResetItems, resetExpiredQuotaWindows } =
   await import("../../src/lib/quota/quotaResetTimers");
 const { recordProviderQuotaUsage, getProviderQuota } =
   await import("../../src/lib/quota/providerQuotaState");
-const { getDbInstance } = coreDb;
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
 async function resetStorage() {
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -27,8 +27,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  coreDb.resetDbInstance();
+test.after(async () => {
+  await coreDb.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -60,7 +60,7 @@ test("parseProviderQuotaHeaders: parses Anthropic rate limit headers", () => {
   assert.equal(parsed?.windowResetMs, 30000);
 });
 
-test("applyQuotaHeadersToState & getQuotaAnalyticsSummary: records and aggregates quota analytics", () => {
+test("applyQuotaHeadersToState & getQuotaAnalyticsSummary: records and aggregates quota analytics", async () => {
   const connId = "test-conn-p2-01";
   const model = "gpt-4o";
   const headers = {
@@ -69,32 +69,44 @@ test("applyQuotaHeadersToState & getQuotaAnalyticsSummary: records and aggregate
     "x-ratelimit-reset-tokens": "120s",
   };
 
-  applyQuotaHeadersToState(connId, model, headers, "openai");
+  await applyQuotaHeadersToState(connId, model, headers, "openai");
 
-  const snapshot = getProviderQuota(connId, model);
+  const snapshot = await getProviderQuota(connId, model);
   assert.ok(snapshot);
   assert.equal(snapshot?.tokensUsed, 80000);
   assert.equal(snapshot?.tokenLimit, 100000);
 
-  const analytics = getQuotaAnalyticsSummary();
+  const analytics = await getQuotaAnalyticsSummary();
   assert.ok(analytics.totalConnectionsTracked > 0);
   assert.ok(analytics.connections.some((c) => c.connectionId === connId));
 });
 
-test("quotaResetTimers: tracks active reset items and purges expired windows", () => {
+test("quotaResetTimers: tracks active reset items and purges expired windows", async () => {
   const connId = "test-conn-expired";
   const model = "claude-sonnet-4-6";
   const now = Date.now();
 
   // Seed an already-expired window directly (recordProviderQuotaUsage always
   // computes windows from Date.now(), so it cannot create a past window).
-  const db = getDbInstance();
-  db.prepare(
-    `INSERT OR REPLACE INTO provider_quota_state
+  await getTestBackend().execute(
+    `INSERT INTO provider_quota_state
      (connection_id, model, tokens_used, token_limit, window_start, window_reset, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(connId, model, 5000, 5000, now - 10_000, now - 1_000, new Date().toISOString());
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (connection_id, model) DO UPDATE SET
+       tokens_used = EXCLUDED.tokens_used, token_limit = EXCLUDED.token_limit,
+       window_start = EXCLUDED.window_start, window_reset = EXCLUDED.window_reset,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      connId,
+      model,
+      5000,
+      5000,
+      new Date(now - 10_000).toISOString(),
+      new Date(now - 1_000).toISOString(),
+      new Date().toISOString(),
+    ]
+  );
 
-  const expiredCount = resetExpiredQuotaWindows();
+  const expiredCount = await resetExpiredQuotaWindows();
   assert.ok(expiredCount >= 1);
 });

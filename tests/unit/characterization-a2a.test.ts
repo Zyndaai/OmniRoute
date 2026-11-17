@@ -11,19 +11,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import "../_setup/isolateDataDir.ts";
 
-process.env.DISABLE_SQLITE_AUTO_BACKUP ||= "true";
 // Hermetic env: the devbox shell may export these and they change auth/card behavior.
-for (const name of [
-  "OMNIROUTE_API_KEY",
-  "REQUIRE_API_KEY",
-  "CONDUCTOR_HUB_URL",
-  "OMNIROUTE_A2A_MEMORY_HITS",
-]) {
+for (const name of ["OMNIROUTE_API_KEY", "REQUIRE_API_KEY", "CONDUCTOR_HUB_URL"]) {
   delete process.env[name];
 }
 process.env.OMNIROUTE_BASE_URL = "http://a2a-char.test";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const taskManagerModule = await import("../../src/lib/a2a/taskManager.ts");
 const taskExecutionModule = await import("../../src/lib/a2a/taskExecution.ts");
 const authenticateModule = await import("../../src/lib/a2a/authenticate.ts");
@@ -32,10 +26,9 @@ const routingLoggerModule = await import("../../src/lib/a2a/routingLogger.ts");
 const agentCardV03 = await import("../../src/app/.well-known/agent.json/route.ts");
 const agentCardV10 = await import("../../src/app/.well-known/agent-card.json/route.ts");
 const { APP_CONFIG } = await import("../../src/shared/constants/appConfig.ts");
-const memory = await import("../../src/lib/memory/index.ts");
 
 const { A2ATaskManager, getTaskManager } = taskManagerModule;
-const { A2A_SKILL_HANDLERS, executeA2ATaskWithState, collectMemoryHits } = taskExecutionModule;
+const { A2A_SKILL_HANDLERS, executeA2ATaskWithState } = taskExecutionModule;
 
 type Persisted = { upserts: unknown[]; events: Array<[string, string, string | undefined]> };
 
@@ -61,10 +54,10 @@ function newManager() {
   return { tm, persistence };
 }
 
-test.after(() => {
+test.after(async () => {
   for (const tm of managers) tm.destroy();
   getTaskManager().destroy();
-  core.resetDbInstance();
+  await resetTestDb();
 });
 
 // ─── (a) Public surface snapshot ─────────────────────────────────────────────
@@ -90,12 +83,7 @@ test("a2a modules consumed outside src/lib/a2a export exactly this surface", () 
         "createHeartbeat",
         "formatSSE",
       ],
-      taskExecution: [
-        "A2A_SKILL_HANDLERS",
-        "MEMORY_RECALL_TIMEOUT_MS",
-        "collectMemoryHits",
-        "executeA2ATaskWithState",
-      ],
+      taskExecution: ["A2A_SKILL_HANDLERS", "executeA2ATaskWithState"],
       taskManager: ["A2ATaskManager", "getTaskManager", "historyRetentionDays"],
     }
   );
@@ -110,7 +98,6 @@ test("A2A_SKILL_HANDLERS registers exactly the six built-in skills", () => {
     "quota-management",
     "smart-routing",
   ]);
-  assert.equal(taskExecutionModule.MEMORY_RECALL_TIMEOUT_MS, 1500);
   assert.equal(taskManagerModule.historyRetentionDays(), 30);
 });
 
@@ -190,7 +177,7 @@ test("list-capabilities handler returns a markdown catalog artifact and coverage
   assert.ok(metadata.totalSkills > 0);
 });
 
-test("executeA2ATaskWithState: working → completed with the handler artifacts; memory hits recorded", async () => {
+test("executeA2ATaskWithState: working → completed with the handler artifacts", async () => {
   const { tm } = newManager();
   const task = tm.createTask(
     { skill: "char", messages: [{ role: "user", content: "remember the deploy" }] },
@@ -198,28 +185,15 @@ test("executeA2ATaskWithState: working → completed with the handler artifacts;
   );
   tm.updateTask(task.id, "working");
 
-  const events: Array<[string, string, string | undefined]> = [];
-  const result = await executeA2ATaskWithState(
-    tm,
-    task,
-    async () => ({ artifacts: [{ type: "text", content: "done" }], metadata: {} }),
-    {
-      search: async (cfg) => {
-        assert.deepEqual(cfg, { query: "remember the deploy", apiKeyId: "owner-1", limit: 5 });
-        return [{ id: "m1", key: "deploy", type: "factual", content: "x".repeat(300) }];
-      },
-      appendEvent: (id, type, data) => events.push([id, type, data]),
-    }
-  );
+  const result = await executeA2ATaskWithState(tm, task, async () => ({
+    artifacts: [{ type: "text", content: "done" }],
+    metadata: {},
+  }));
 
   assert.deepEqual(result.artifacts, [{ type: "text", content: "done" }]);
   const stored = tm.getTask(task.id, "owner-1");
   assert.equal(stored?.state, "completed");
   assert.deepEqual(stored?.artifacts, [{ type: "text", content: "done" }]);
-  const hits = stored?.metadata.memoryHits as Array<{ snippet: string }>;
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].snippet.length, 200, "snippet is truncated to 200 chars");
-  assert.equal(events[0][1], "memory_hits");
 });
 
 test("executeA2ATaskWithState: a throwing handler marks the task failed with an error artifact and rethrows", async () => {
@@ -239,7 +213,7 @@ test("executeA2ATaskWithState: a throwing handler marks the task failed with an 
   assert.equal(stored?.events.at(-1)?.message, "skill blew up");
 });
 
-test("task manager: lifecycle events, owner scoping, stats and persistence calls", () => {
+test("task manager: lifecycle events, owner scoping, stats and persistence calls", async () => {
   const { tm, persistence } = newManager();
   const mine = tm.createTask({ skill: "a", messages: [] }, "owner-a");
   const open = tm.createTask({ skill: "b", messages: [] });
@@ -265,6 +239,8 @@ test("task manager: lifecycle events, owner scoping, stats and persistence calls
     failed: 0,
     cancelled: 0,
   });
+  // Persistence is awaited inside the manager (upsert, then appendEvent); let it settle.
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(
     persistence.events.map(([, type]) => type),
     ["state:submitted", "state:submitted", "state:working", "state:completed"]
@@ -325,61 +301,4 @@ test("task manager rejects unknown tasks and invalid transitions", () => {
 
 test("unknown skill ids have no handler (route-level 'skill not found' is the caller's job)", () => {
   assert.equal(A2A_SKILL_HANDLERS["not-a-skill"], undefined);
-});
-
-test("collectMemoryHits returns [] for empty input, the kill-switch, and backend failures", async () => {
-  const { tm } = newManager();
-  const empty = tm.createTask({ skill: "x", messages: [{ role: "assistant", content: "hi" }] });
-  assert.deepEqual(await collectMemoryHits(empty, { search: async () => [] }), []);
-
-  const task = tm.createTask({ skill: "x", messages: [{ role: "user", content: "query" }] });
-  assert.deepEqual(
-    await collectMemoryHits(task, {
-      search: async () => {
-        throw new Error("backend down");
-      },
-    }),
-    []
-  );
-
-  process.env.OMNIROUTE_A2A_MEMORY_HITS = "0";
-  try {
-    let called = false;
-    await collectMemoryHits(task, {
-      search: async () => {
-        called = true;
-        return [];
-      },
-    });
-    assert.equal(called, false);
-  } finally {
-    delete process.env.OMNIROUTE_A2A_MEMORY_HITS;
-  }
-});
-
-test("collectMemoryHits recalls from the default SQLite backend (#16184)", async () => {
-  // A keyless task (owner undefined → "mcp") whose query matches a stored "mcp" memory.
-  const created = await memory.createMemory({
-    apiKeyId: "mcp",
-    sessionId: "",
-    type: memory.MemoryType.FACTUAL,
-    key: "char:a2a-hit",
-    content: "The staging cluster is called aurora",
-    metadata: {},
-    expiresAt: null,
-  });
-  // Direct recall proves the memory is retrievable…
-  const direct = await memory.retrieveMemories("mcp", { query: "aurora staging" });
-  assert.equal(direct.length, 1);
-
-  // The adapter retains its default budget when A2A requests recall without maxTokens.
-  const { tm } = newManager();
-  const task = tm.createTask({
-    skill: "x",
-    messages: [{ role: "user", content: "aurora staging" }],
-  });
-  assert.deepEqual(await collectMemoryHits(task), [
-    { id: created.id, key: created.key, type: created.type, snippet: created.content },
-  ]);
-  await new Promise((resolve) => setImmediate(resolve));
 });

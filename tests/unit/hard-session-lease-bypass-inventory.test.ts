@@ -39,9 +39,6 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     "open-sse/services/videoCombo.ts": 2,
     "src/app/api/compression/compare/verify/route.ts": 1,
     "src/app/api/internal/codex-responses-ws/route.ts": 1,
-    // PR #11390: rerank listing endpoint probes configured credentials so the
-    // dashboard rerank selector only offers providers that can actually serve.
-    "src/app/api/memory/rerank-providers/route.ts": 1,
     "src/app/api/search/providers/route.ts": 3,
     "src/app/api/v1/_shared/elevenLabsProxy.ts": 1,
     "src/app/api/v1/_shared/fishAudioProxy.ts": 1,
@@ -95,10 +92,6 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     // before running (chat's #9057 rule) — one extra scoped lookup per site.
     "src/lib/embeddings/service.ts": 5,
     "src/lib/images/adobeFireflyEdit.ts": 1,
-    // PR #11390: second site is the generic derived-provider listing fallback —
-    // read-only key presence probe used to decide whether a configured chat
-    // provider may appear in the memory embedding-source dropdown.
-    "src/lib/memory/embedding/index.ts": 2,
     "src/lib/search/executeWebSearch.ts": 2,
     "src/lib/skills/webFetchExecution.ts": 1,
     "src/sse/handlers/chat.ts": 2,
@@ -248,7 +241,8 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     // #11698/#11720 retirement PRs' combined getProviderConnectionById
     // fallback in the three write-path functions): not introduced by this PR.
     // #15485: the priority-0 move-to-top edit re-reads the row by id after reorderConnections (3 -> 4).
-    "src/lib/db/providers.ts": 4,
+    // Postgres port (8435e220): the row-by-id call count in providers.ts is now 3 (lines 476, 1011, 1032).
+    "src/lib/db/providers.ts": 3,
     "src/lib/db/readCache.ts": 2,
     // #16472: guarded session-affinity eviction resolves the failed connection's shared
     // account identity before a compare-and-delete on the optional Redis store. Read-only
@@ -400,6 +394,17 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
+function isSqlTextArgument(arg: ts.Expression | undefined): boolean {
+  return (
+    arg !== undefined &&
+    (ts.isStringLiteral(arg) ||
+      ts.isNoSubstitutionTemplateLiteral(arg) ||
+      ts.isTemplateExpression(arg) ||
+      // a named SQL constant, e.g. executor.execute(UPDATE_SECRET_SQL, [...])
+      (ts.isIdentifier(arg) && /SQL$/.test(arg.text)))
+  );
+}
+
 function countCalls(): Record<InventoryKind, Record<string, number>> {
   const actual: Record<InventoryKind, Record<string, number>> = {
     connection: {},
@@ -449,7 +454,12 @@ function countCalls(): Record<InventoryKind, Record<string, number>> {
           ts.isIdentifier(expression.expression) &&
           ["executor", "fallbackExecutor", "providerExecutor", "streamExecutor"].includes(
             expression.expression.text
-          )
+          ) &&
+          // Postgres port (8435e220): the DB layer's DbExecutor is also named `executor`
+          // and runs `executor.execute(<SQL text>, params)`. Those calls are not provider
+          // dispatch, so a SQL-text first argument is excluded. Provider executors take an
+          // input object or a variable.
+          !isSqlTextArgument(node.arguments[0])
         ) {
           increment("executor");
         }
@@ -517,9 +527,11 @@ test("managed request surfaces are fenced centrally or rejected before independe
     "utf8"
   );
   assert.match(eprSource, /assertManagedLeaseFence\(attemptConnectionId\)/);
+  // The streaming leg's retry path now reads the credentials into `retryFenceCredentials`
+  // before fencing them (streamingResponse.ts ~L713); the fence on the connection id is unchanged.
   assert.match(
     streamingLeg,
-    /assertManagedLeaseFence\(getExecutionConnectionId\(getExecutionCredentials\(\)\)\)/
+    /assertManagedLeaseFence\(getExecutionConnectionId\(retryFenceCredentials\)\)/
   );
   // #12867 (d6f315018) extracted codex 429 / antigravity 422 account rotation out
   // of chatCore.ts into the provider execution pipeline. The managed-lease fence was

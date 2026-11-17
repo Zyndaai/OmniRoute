@@ -11,15 +11,15 @@ const { saveCallLog, closeCallLogSaves } = await import("../../src/lib/usage/cal
 const { buildCallLogListRows } = await import("../../src/app/api/usage/call-logs/route.ts");
 const { clearCompletedDetails } = await import("../../src/lib/usage/completedRequestDetails.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
-const { getDbInstance } = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { persistAttemptLogs } = await import("../../open-sse/handlers/chatCore/attemptLogging.ts");
 
 // Exercise the persistence admission gate without writing request artifacts.
 await closeCallLogSaves();
 
-test.after(() => {
+test.after(async () => {
   clearCompletedDetails();
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -57,7 +57,10 @@ for (const finalizeFirst of [false, true]) {
     assert.equal(row.tokens.cacheRead, 43000);
     assert.equal(row.tokens.reasoning, 100);
     assert.equal(row.tokens.cacheCreation, null);
-    assert.equal(getDbInstance().prepare("SELECT count(*) AS n FROM call_logs").get().n, 0);
+    const count = await getTestBackend().queryOne<{ n: number }>(
+      "SELECT count(*) AS n FROM call_logs"
+    );
+    assert.equal(Number(count?.n), 0);
   });
 }
 
@@ -140,11 +143,10 @@ test("late artifact enrichment does not erase usage recorded after finalization"
     } as never,
     artifactPath
   );
-  getDbInstance()
-    .prepare(
-      "INSERT INTO call_logs (id, timestamp, model, connection_id, artifact_relpath, detail_state) VALUES (?, ?, ?, ?, ?, 'ready')"
-    )
-    .run(`artifact-${id}`, timestamp, "enrichment-model", "connection", artifactPath);
+  await getTestBackend().execute(
+    "INSERT INTO call_logs (id, \"timestamp\", model, connection_id, artifact_relpath, detail_state) VALUES ($1, $2, $3, $4, $5, 'ready')",
+    [`artifact-${id}`, timestamp, "enrichment-model", "connection", artifactPath]
+  );
 
   // Finalization starts asynchronous artifact recovery with a pre-usage snapshot.
   history.finalizePendingRequestById(id, { status: 200 });

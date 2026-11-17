@@ -37,8 +37,8 @@ function buildChatBody() {
   };
 }
 
-function translateFor(provider: string) {
-  return translateRequest(
+async function translateFor(provider: string) {
+  return (await translateRequest(
     "openai",
     "openai",
     "openai/gpt-6-luna",
@@ -48,24 +48,24 @@ function translateFor(provider: string) {
     provider,
     null,
     {}
-  ) as {
+  )) as {
     messages: Array<{ content: Array<Record<string, unknown>> }>;
     prompt_cache_options?: unknown;
   };
 }
 
 describe("OpenAI prompt_cache_breakpoint passthrough", () => {
-  test("openai and openrouter keep the breakpoint on content parts", () => {
+  test("openai and openrouter keep the breakpoint on content parts", async () => {
     for (const provider of ["openai", "openrouter"]) {
-      const out = translateFor(provider);
+      const out = await translateFor(provider);
       assert.deepEqual(out.messages[0].content[0].prompt_cache_breakpoint, BREAKPOINT, provider);
       assert.deepEqual(out.messages[1].content[0].prompt_cache_breakpoint, {}, provider);
       assert.deepEqual(out.prompt_cache_options, { mode: "explicit" }, provider);
     }
   });
 
-  test("other fields stay stripped (#16384 contract)", () => {
-    const out = translateFor("openai");
+  test("other fields stay stripped (#16384 contract)", async () => {
+    const out = await translateFor("openai");
     assert.deepEqual(out.messages[1].content[0], {
       type: "text",
       text: "hello",
@@ -73,9 +73,9 @@ describe("OpenAI prompt_cache_breakpoint passthrough", () => {
     });
   });
 
-  test("strict OpenAI-compatible providers do not receive the field", () => {
+  test("strict OpenAI-compatible providers do not receive the field", async () => {
     for (const provider of ["groq", "cerebras", "mistral", "alibaba"]) {
-      const out = translateFor(provider);
+      const out = await translateFor(provider);
       assert.equal(
         JSON.stringify(out.messages).includes("prompt_cache_breakpoint"),
         false,

@@ -20,47 +20,46 @@ import fs from "node:fs";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-xai-usage-"));
 process.env.DATA_DIR = TMP;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { getMonthlyProviderTokensForConnection } = await import("../../src/lib/usage/usageStats.ts");
 const { __testing, USAGE_FETCHER_PROVIDERS, getUsageForProvider } =
   await import("../../open-sse/services/usage.ts");
 const { getXaiUsage } = __testing;
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   tokensIn: number,
   tokensOut: number,
   timestamp: string
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, connectionId, tokensIn, tokensOut, timestamp);
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, "timestamp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, connectionId, tokensIn, tokensOut, timestamp]
+  );
 }
 
 describe("xAI self-tracked usage", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
+  before(async () => {
     const now = new Date();
     const inWindow = now.toISOString();
     const outOfWindow = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15)
     ).toISOString();
     // in-window usage for conn-x: 2.0M + 0.3M
-    insertUsage("conn-x", "xai", 2_000_000, 0, inWindow);
-    insertUsage("conn-x", "xai", 0, 300_000, inWindow);
+    await insertUsage("conn-x", "xai", 2_000_000, 0, inWindow);
+    await insertUsage("conn-x", "xai", 0, 300_000, inWindow);
     // out-of-window usage must NOT count toward the current aggregate
-    insertUsage("conn-x", "xai", 9_000_000, 9_000_000, outOfWindow);
+    await insertUsage("conn-x", "xai", 9_000_000, 9_000_000, outOfWindow);
     // a different connection must not bleed in
-    insertUsage("conn-y", "xai", 5_000_000, 0, inWindow);
+    await insertUsage("conn-y", "xai", 5_000_000, 0, inWindow);
     // a different provider on the same connection must not bleed in
-    insertUsage("conn-x", "minimax", 8_000_000, 0, inWindow);
+    await insertUsage("conn-x", "minimax", 8_000_000, 0, inWindow);
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await resetTestDb();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {
@@ -75,13 +74,13 @@ describe("xAI self-tracked usage", () => {
     );
   });
 
-  it("aggregates only in-window tokens for the given provider+connection", () => {
+  it("aggregates only in-window tokens for the given provider+connection", async () => {
     // 2.0M + 0.3M = 2.3M; excludes out-of-window, conn-y, and minimax rows.
-    assert.equal(getMonthlyProviderTokensForConnection("xai", "conn-x"), 2_300_000);
+    assert.equal(await getMonthlyProviderTokensForConnection("xai", "conn-x"), 2_300_000);
   });
 
-  it("returns 0 for an unknown connection (fail-open, no bleed)", () => {
-    assert.equal(getMonthlyProviderTokensForConnection("xai", "conn-none"), 0);
+  it("returns 0 for an unknown connection (fail-open, no bleed)", async () => {
+    assert.equal(await getMonthlyProviderTokensForConnection("xai", "conn-none"), 0);
   });
 
   it("getXaiUsage returns a cumulative unlimited quota scoped to the connection", async () => {

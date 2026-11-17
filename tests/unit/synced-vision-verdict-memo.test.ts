@@ -3,8 +3,7 @@
  * provider catalog on every resolution.
  *
  * The memo is gated on the shared model-catalog cache version and rebuilt
- * after each catalog write. An injected database bypasses the memo, and a
- * failed bulk read is never stored.
+ * after each catalog write. A failed bulk read is never stored.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,56 +13,61 @@ import test from "node:test";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-synced-vision-memo-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
-process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const models = await import("../../src/lib/db/models.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
 const vision = await import("../../src/lib/db/models/syncedAvailableModelVision.ts");
 
-let prepareCalls = 0;
-let trackedDb: { prepare: (sql: string) => unknown } | null = null;
+// Counts the reads of the synced-catalog table issued through the process backend.
+let catalogReads = 0;
+let trackedBackend: ReturnType<typeof getTestBackend> | null = null;
 
-function patchPrepare() {
-  const db = core.getDbInstance() as unknown as {
-    prepare: (sql: string) => { all: (...args: unknown[]) => unknown[] };
-  };
-  if (trackedDb === db) return;
-  const original = db.prepare.bind(db);
-  db.prepare = ((sql: string, ...rest: unknown[]) => {
-    if (typeof sql === "string" && sql.includes("syncedAvailableModels")) prepareCalls += 1;
+function patchQueryCounter() {
+  const backend = getTestBackend();
+  if (trackedBackend === backend) return;
+  const original = backend.query.bind(backend);
+  backend.query = ((sql: string, ...rest: unknown[]) => {
+    if (typeof sql === "string" && sql.includes("connection_model_sync")) catalogReads += 1;
     return (original as (...args: unknown[]) => unknown)(sql, ...rest);
-  }) as typeof db.prepare;
-  trackedDb = db as unknown as { prepare: (sql: string) => unknown };
+  }) as typeof backend.query;
+  trackedBackend = backend;
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  trackedDb = null;
-  prepareCalls = 0;
+  // Synced catalog rows belong to a provider connection (foreign key), so the
+  // connection ids used below must exist.
+  for (const id of ["conn-a", "conn-b", "keep", "stale"]) {
+    await getTestBackend().execute(
+      "INSERT INTO provider_connections (id, provider, auth_type) VALUES ($1, 'acme', 'apikey') ON CONFLICT (id) DO NOTHING",
+      [id]
+    );
+  }
+  catalogReads = 0;
   vision.resetSyncedVisionVerdictMemoForTests();
-  patchPrepare();
+  patchQueryCounter();
 }
 
-function seedSynced(providerId: string, connectionId: string, value: unknown) {
-  core
-    .getDbInstance()
-    .prepare("INSERT INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)")
-    .run(`${providerId}:${connectionId}`, JSON.stringify(value));
+async function seedSynced(providerId: string, connectionId: string, value: unknown) {
+  await models.replaceSyncedAvailableModelsForConnection(
+    providerId,
+    connectionId,
+    value as Parameters<typeof models.replaceSyncedAvailableModelsForConnection>[2]
+  );
 }
 
 function memoEntries(): number {
   return vision.getSyncedVisionVerdictMemoSizeForTests();
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
 test.after(() => {
-  core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -72,18 +76,18 @@ test("serves repeated lookups from one read after the first", async () => {
     { id: "vision-model", name: "Vision Model", supportsVision: true },
     { id: "plain-model", name: "Plain Model" },
   ]);
-  prepareCalls = 0;
+  catalogReads = 0;
 
   const lookups = 5;
   for (let i = 0; i < lookups; i += 1) {
-    assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
-    assert.equal(vision.getSyncedAvailableModelVision("acme", "plain-model"), null);
+    assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
+    assert.equal(await vision.getSyncedAvailableModelVision("acme", "plain-model"), null);
   }
 
-  assert.equal(prepareCalls, 1);
+  assert.equal(catalogReads, 1);
   assert.equal(memoEntries(), 1);
-  assert.equal(vision.getSyncedAvailableModelVision("", "vision-model"), null);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", ""), null);
+  assert.equal(await vision.getSyncedAvailableModelVision("", "vision-model"), null);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", ""), null);
 });
 
 test("refreshes the verdict after every writer path", async () => {
@@ -92,79 +96,48 @@ test("refreshes the verdict after every writer path", async () => {
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(read(), true);
+  assert.equal(await read(), true);
 
   assert.equal(await models.removeSyncedAvailableModel("acme", "vision-model"), true);
-  assert.equal(read(), null);
+  assert.equal(await read(), null);
 
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(read(), true);
+  assert.equal(await read(), true);
   await models.deleteSyncedAvailableModelsForConnection("acme", "conn-a");
-  assert.equal(read(), null);
+  assert.equal(await read(), null);
 
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(read(), true);
+  assert.equal(await read(), true);
   assert.equal(await models.deleteSyncedAvailableModelsForProvider("acme"), 1);
-  assert.equal(read(), null);
+  assert.equal(await read(), null);
 
   await models.replaceSyncedAvailableModelsForConnection("acme", "keep", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  seedSynced("acme", "stale", [{ id: "vision-model", name: "Vision Model" }]);
+  await seedSynced("acme", "stale", [{ id: "vision-model", name: "Vision Model" }]);
   assert.equal(await models.pruneStaleSyncedAvailableModelsForProvider("acme", ["keep"]), 1);
-  assert.equal(read(), true);
+  assert.equal(await read(), true);
 });
 
 test("serves a stale verdict when a write bypasses the shared exit", async () => {
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
 
-  core
-    .getDbInstance()
-    .prepare("UPDATE key_value SET value = ? WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .run(JSON.stringify([{ id: "vision-model", name: "Vision Model" }]), "acme:conn-a");
+  await getTestBackend().execute(
+    "UPDATE connection_model_sync SET models = $1::jsonb WHERE connection_id = $2",
+    [JSON.stringify([{ id: "vision-model", name: "Vision Model" }]), "conn-a"]
+  );
 
   assert.equal(
-    vision.getSyncedAvailableModelVision("acme", "vision-model"),
+    await vision.getSyncedAvailableModelVision("acme", "vision-model"),
     true,
     "unbumped direct write must keep serving the stored verdict"
-  );
-});
-
-test("ignores the memo for an injected database", async () => {
-  await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
-    { id: "vision-model", name: "Vision Model", supportsVision: true },
-  ]);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
-
-  prepareCalls = 0;
-  const stored = await models.getSyncedAvailableModels("acme");
-  prepareCalls = 0;
-  const injectedRows = [{ key: "acme:conn-a", value: JSON.stringify(stored) }];
-  const injected = {
-    prepare: () => ({
-      all: () => injectedRows,
-      get: () => injectedRows[0],
-      run: () => ({ changes: 0, lastInsertRowid: 0 }),
-    }),
-  };
-  assert.equal(
-    vision.getSyncedAvailableModelVision("acme", "vision-model", undefined, {
-      getDatabase: () => injected,
-    }),
-    true
-  );
-  assert.equal(prepareCalls, 0, "injected reads must not touch the singleton counter");
-  assert.equal(
-    vision.getSyncedAvailableModelVision("acme", "vision-model"),
-    true,
-    "stored verdict must survive an injected read"
   );
 });
 
@@ -172,71 +145,52 @@ test("does not store failed singleton reads", async () => {
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
   vision.resetSyncedVisionVerdictMemoForTests();
   const versionBefore = readCache.getModelCatalogCacheVersion();
 
-  core.getDbInstance().prepare("DROP TABLE key_value").run();
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), null);
-  assert.equal(vision.getSyncedVisionVerdictMemoSizeForTests(), 0);
-  assert.equal(readCache.getModelCatalogCacheVersion(), versionBefore);
+  // Make the bulk read fail by moving the table away, then restore it.
+  const backend = getTestBackend();
+  await backend.execute("ALTER TABLE connection_model_sync RENAME TO connection_model_sync_hidden");
+  try {
+    assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), null);
+    assert.equal(vision.getSyncedVisionVerdictMemoSizeForTests(), 0);
+    assert.equal(readCache.getModelCatalogCacheVersion(), versionBefore);
+  } finally {
+    await backend.execute(
+      "ALTER TABLE connection_model_sync_hidden RENAME TO connection_model_sync"
+    );
+  }
 
-  resetStorage();
+  await resetStorage();
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
   assert.equal(vision.getSyncedVisionVerdictMemoSizeForTests(), 1);
 });
 
-test("does not store failed injected reads", async () => {
-  const versionBefore = readCache.getModelCatalogCacheVersion();
-  const failing = {
-    prepare: () => ({
-      all: () => {
-        throw new Error("closed database");
-      },
-      get: () => {
-        throw new Error("closed database");
-      },
-      run: () => {
-        throw new Error("closed database");
-      },
-    }),
-  };
+test("bypasses the memo for an empty bulk map and stores the empty map", async () => {
   assert.equal(
-    vision.getSyncedAvailableModelVision("acme", "vision-model", undefined, {
-      getDatabase: () => failing,
-    }),
+    await vision.getSyncedAvailableModelVision("acme", "vision-model", new Map()),
     null
   );
-  assert.equal(readCache.getModelCatalogCacheVersion(), versionBefore);
-  assert.equal(memoEntries(), 0);
 
-  seedSynced("acme", "conn-a", [
-    { id: "vision-model", name: "Vision Model", supportsVision: true },
-  ]);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), true);
-});
-
-test("bypasses the memo for an empty bulk map and stores the empty map", async () => {
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model", new Map()), null);
-
-  prepareCalls = 0;
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "vision-model"), null);
-  assert.equal(vision.getSyncedAvailableModelVision("acme", "other-model"), null);
-  assert.equal(prepareCalls, 1);
+  catalogReads = 0;
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", "vision-model"), null);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme", "other-model"), null);
+  assert.equal(catalogReads, 1);
   assert.equal(memoEntries(), 1);
 });
 
-test("resolves a wildcard provider id exactly", () => {
-  seedSynced("acme", "conn-a", [
-    { id: "vision-model", name: "Vision Model", supportsVision: true },
+test("resolves a wildcard provider id exactly", async () => {
+  await seedSynced("acme", "conn-a", [{ id: "vision-model", name: "Vision Model", supportsVision: true }]);
+  await seedSynced("acme%", "conn-b", [
+    { id: "other-model", name: "Other Model", supportsVision: true },
   ]);
-  seedSynced("acme%", "conn-a", [{ id: "other-model", name: "Other Model", supportsVision: true }]);
 
-  assert.equal(vision.getSyncedAvailableModelVision("acme%", "vision-model"), null);
-  assert.equal(vision.getSyncedAvailableModelVision("acme%", "other-model"), true);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme%", "vision-model"), null);
+  assert.equal(await vision.getSyncedAvailableModelVision("acme%", "other-model"), true);
 });
 
 test("keeps a single stored generation after reads and writes", async () => {
@@ -244,14 +198,14 @@ test("keeps a single stored generation after reads and writes", async () => {
     { id: "vision-model", name: "Vision Model", supportsVision: true },
   ]);
   for (let i = 0; i < 5; i += 1) {
-    vision.getSyncedAvailableModelVision("acme", "vision-model");
+    await vision.getSyncedAvailableModelVision("acme", "vision-model");
   }
   await models.replaceSyncedAvailableModelsForConnection("acme", "conn-a", [
     { id: "vision-model", name: "Vision Model", supportsVision: true },
     { id: "second-vision-model", name: "Second", supportsVision: true },
   ]);
   for (let i = 0; i < 5; i += 1) {
-    vision.getSyncedAvailableModelVision("acme", "second-vision-model");
+    await vision.getSyncedAvailableModelVision("acme", "second-vision-model");
   }
   assert.equal(memoEntries(), 1);
 });

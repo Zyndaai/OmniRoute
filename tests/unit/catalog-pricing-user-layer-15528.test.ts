@@ -3,24 +3,24 @@ import { describe, it, before, after } from "node:test";
 import { enrichCatalogModelEntry } from "../../src/lib/modelMetadataRegistry.ts";
 import { saveModelsDevPricing, clearModelsDevPricing } from "../../src/lib/modelsDevSync.ts";
 import { updatePricing, getPricingWithSources } from "../../src/lib/db/settings/pricing.ts";
-import { resetDbInstance } from "../../src/lib/db/core.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 type CatalogPricing = { input?: number; output?: number; cached?: number };
 
 describe("catalog pricing honours the user layer (#15528)", () => {
-  before(() => {
-    saveModelsDevPricing({
+  before(async () => {
+    await saveModelsDevPricing({
       "opencode-go": {
         "deepseek-v4.1-flash": { input: 0.15, output: 0.6, cached: 0.003 },
         "partial-model": { input: 1, output: 2, cached: 0.5 },
       },
     });
   });
-  after(() => {
+  after(async () => {
     try {
-      clearModelsDevPricing();
+      await clearModelsDevPricing();
     } catch {}
-    resetDbInstance();
+    await resetTestDb();
   });
 
   it("user override (PATCH /api/pricing) wins over models.dev in enrichCatalogModelEntry", async () => {
@@ -30,7 +30,7 @@ describe("catalog pricing honours the user layer (#15528)", () => {
     const { sourceMap } = await getPricingWithSources();
     assert.equal(sourceMap["opencode-go"]["deepseek-v4.1-flash"], "user");
 
-    const entry = enrichCatalogModelEntry({
+    const entry = await enrichCatalogModelEntry({
       id: "opencode-go/deepseek-v4.1-flash",
       owned_by: "opencode-go",
       root: "deepseek-v4.1-flash",
@@ -44,7 +44,7 @@ describe("catalog pricing honours the user layer (#15528)", () => {
 
   it("partial user override keeps the remaining fields from lower layers", async () => {
     await updatePricing({ "opencode-go": { "partial-model": { input: 9 } } });
-    const entry = enrichCatalogModelEntry({
+    const entry = await enrichCatalogModelEntry({
       id: "opencode-go/partial-model",
       owned_by: "opencode-go",
       root: "partial-model",
@@ -55,8 +55,8 @@ describe("catalog pricing honours the user layer (#15528)", () => {
     assert.equal(p.cached, 0.5);
   });
 
-  it("uses the bulk-loaded snapshot userPricing when provided", () => {
-    const entry = enrichCatalogModelEntry(
+  it("uses the bulk-loaded snapshot userPricing when provided", async () => {
+    const entry = await enrichCatalogModelEntry(
       { id: "opencode-go/partial-model", owned_by: "opencode-go", root: "partial-model" },
       undefined,
       {

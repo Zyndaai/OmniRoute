@@ -51,16 +51,16 @@ const CC_TEXT_ONLY: [string, string][] = [
 ];
 
 for (const [name, modelId] of CC_VISION) {
-  test(`${name} resolves supportsVision: true`, () => {
-    const caps = getResolvedModelCapabilities(modelId);
+  test(`${name} resolves supportsVision: true`, async () => {
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.supportsVision, true, `${modelId} must have supportsVision: true`);
     assert.equal(caps.provider, "command-code");
   });
 }
 
 for (const [name, modelId] of CC_TEXT_ONLY) {
-  test(`${name} does not falsely claim vision`, () => {
-    const caps = getResolvedModelCapabilities(modelId);
+  test(`${name} does not falsely claim vision`, async () => {
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.notEqual(
       caps.supportsVision,
       true,
@@ -70,8 +70,8 @@ for (const [name, modelId] of CC_TEXT_ONLY) {
   });
 }
 
-test("MiniMax M3 via command-code keeps existing vision capability (no regression)", () => {
-  const caps = getResolvedModelCapabilities("command-code/MiniMaxAI/MiniMax-M3");
+test("MiniMax M3 via command-code keeps existing vision capability (no regression)", async () => {
+  const caps = await getResolvedModelCapabilities("command-code/MiniMaxAI/MiniMax-M3");
   assert.equal(caps.supportsVision, true);
 });
 
@@ -88,7 +88,7 @@ test("command-code effort-suffixed variants resolve capabilities from their base
   // reads for tool/vision/context) with the base models, then verify the
   // effort-suffixed variants inherit those capabilities via the base fallback.
   const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     "command-code": {
       "deepseek/deepseek-v4-flash": {
         tool_call: true,
@@ -97,6 +97,8 @@ test("command-code effort-suffixed variants resolve capabilities from their base
         limit_context: 1000000,
         limit_input: 1000000,
         limit_output: 131072,
+        modalities_input: "[]",
+        modalities_output: "[]",
       },
       "meta/muse-spark-1.2-contributor": {
         tool_call: true,
@@ -105,6 +107,8 @@ test("command-code effort-suffixed variants resolve capabilities from their base
         limit_context: 1048576,
         limit_input: 1048576,
         limit_output: 1048576,
+        modalities_input: '["text","image"]',
+        modalities_output: '["text"]',
       },
     },
   });
@@ -116,7 +120,7 @@ test("command-code effort-suffixed variants resolve capabilities from their base
     ["command-code/meta/muse-spark-1.2-contributor-high", true],
   ];
   for (const [modelId, vision] of cases) {
-    const caps = getResolvedModelCapabilities(modelId);
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.provider, "command-code", `${modelId} provider`);
     assert.equal(caps.supportsTools, true, `${modelId} must inherit tool support from base`);
     assert.equal(caps.supportsVision, vision, `${modelId} must inherit vision from base`);

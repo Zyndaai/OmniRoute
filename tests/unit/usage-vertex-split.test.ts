@@ -14,31 +14,32 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "omni-vertex-split-"));
 process.env.DATA_DIR = TMP;
 
 const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const V = await import("../../open-sse/services/usage/vertex.ts");
 
-function insertUsage(
+async function insertUsage(
   connectionId: string,
   provider: string,
   model: string,
   tokensIn: number,
   tokensOut: number,
-  success = 1
+  success = true
 ) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(provider, model, connectionId, tokensIn, tokensOut, success, new Date().toISOString());
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, model, connection_id, tokens_input, tokens_output, success, "timestamp")
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [provider, model, connectionId, tokensIn, tokensOut, success, new Date().toISOString()]
+  );
 }
 
 describe("vertex leaf self-tracked spend", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
-    insertUsage("conn-leaf", "vertex", "gemini-2.5-flash", 1_000_000, 500_000, 1);
+  before(async () => {
+    await core.ensureDbInitialized(); // trigger migrations
+    await insertUsage("conn-leaf", "vertex", "gemini-2.5-flash", 1_000_000, 500_000, true);
   });
 
-  after(() => {
-    core.resetDbInstance();
+  after(async () => {
+    await core.resetDbInstance();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {

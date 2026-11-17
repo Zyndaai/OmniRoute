@@ -17,6 +17,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const modelsDevSync = await import("../../src/lib/modelsDevSync.ts");
 const modelCapabilities = await import("../../src/lib/modelCapabilities.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 function buildCapability(overrides: Record<string, unknown> = {}) {
   return {
@@ -41,23 +42,24 @@ function buildCapability(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function resetStorage() {
-  core.resetDbInstance();
+async function resetStorage() {
+  await core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("#8032 cp/cline-pass/kimi-k3: attachment=false empty modalities → vision via leaf/registry", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("#8032 cp/cline-pass/kimi-k3: attachment=false empty modalities → vision via leaf/registry", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     clinepass: {
       "cline-pass/kimi-k3": buildCapability({
         attachment: false,
@@ -69,21 +71,21 @@ test("#8032 cp/cline-pass/kimi-k3: attachment=false empty modalities → vision 
     },
   });
 
-  const caps = modelCapabilities.getResolvedModelCapabilities("cp/cline-pass/kimi-k3");
+  const caps = await modelCapabilities.getResolvedModelCapabilities("cp/cline-pass/kimi-k3");
   assert.equal(caps.supportsVision, true);
 });
 
-test("#8032 leaf fallback: cline-pass/kimi-k3 resolves MODEL_SPECS kimi-k3 vision", () => {
+test("#8032 leaf fallback: cline-pass/kimi-k3 resolves MODEL_SPECS kimi-k3 vision", async () => {
   // No synced row — leaf static spec + registry must still confirm vision.
-  const caps = modelCapabilities.getResolvedModelCapabilities("cline-pass/kimi-k3");
+  const caps = await modelCapabilities.getResolvedModelCapabilities("cline-pass/kimi-k3");
   assert.equal(caps.supportsVision, true);
 });
 
-test("#8032 leaf fallback is vision-only: aihorde/deepseek/deepseek-v4-flash keeps tools=false", () => {
+test("#8032 leaf fallback is vision-only: aihorde/deepseek/deepseek-v4-flash keeps tools=false", async () => {
   // Regression guard from PR review (#8495 / #8212): shared getStaticSpec leaf
   // lookup previously promoted this live-discovered AI Horde id to the real
   // DeepSeek V4 Flash supportsTools:true spec. Leaf lookup must stay vision-only.
-  const caps = modelCapabilities.getResolvedModelCapabilities("aihorde/deepseek/deepseek-v4-flash");
+  const caps = await modelCapabilities.getResolvedModelCapabilities("aihorde/deepseek/deepseek-v4-flash");
   assert.equal(caps.toolCalling, false);
   assert.equal(caps.supportsTools, false);
   assert.equal(
@@ -93,8 +95,8 @@ test("#8032 leaf fallback is vision-only: aihorde/deepseek/deepseek-v4-flash kee
   );
 });
 
-test("#8032 #4071 text-only override still wins over path-shaped sync noise", () => {
-  modelsDevSync.saveModelsDevCapabilities({
+test("#8032 #4071 text-only override still wins over path-shaped sync noise", async () => {
+  await modelsDevSync.saveModelsDevCapabilities({
     xiaomi: {
       "mimo-v2.5-pro": buildCapability({
         attachment: true,
@@ -104,12 +106,12 @@ test("#8032 #4071 text-only override still wins over path-shaped sync noise", ()
     },
   });
 
-  const caps = modelCapabilities.getResolvedModelCapabilities("xiaomi/mimo-v2.5-pro");
+  const caps = await modelCapabilities.getResolvedModelCapabilities("xiaomi/mimo-v2.5-pro");
   assert.equal(caps.supportsVision, false);
 });
 
 test("#8032 Vision Bridge skips describe/reroute for cp/cline-pass/kimi-k3 with image", async () => {
-  modelsDevSync.saveModelsDevCapabilities({
+  await modelsDevSync.saveModelsDevCapabilities({
     clinepass: {
       "cline-pass/kimi-k3": buildCapability({
         attachment: false,
@@ -121,7 +123,7 @@ test("#8032 Vision Bridge skips describe/reroute for cp/cline-pass/kimi-k3 with 
   });
 
   const model = "cp/cline-pass/kimi-k3";
-  assert.equal(modelCapabilities.getResolvedModelCapabilities(model).supportsVision, true);
+  assert.equal((await modelCapabilities.getResolvedModelCapabilities(model)).supportsVision, true);
 
   const { VisionBridgeGuardrail } = await import("../../src/lib/guardrails/visionBridge.ts");
   let visionCallCount = 0;

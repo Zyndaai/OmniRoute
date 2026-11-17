@@ -23,8 +23,8 @@ const { saveModelsDevCapabilities, clearModelsDevCapabilities } =
 const { filterTargetsByRequestCompatibility } =
   await import("../../open-sse/services/combo.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   if (ORIGINAL_DATA_DIR === undefined) {
     delete process.env.DATA_DIR;
   } else {
@@ -33,8 +33,8 @@ test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test.beforeEach(() => {
-  clearModelsDevCapabilities();
+test.beforeEach(async () => {
+  await clearModelsDevCapabilities();
 });
 
 const LARGE_REQ = {
@@ -86,75 +86,75 @@ function bigContextBody(tokens: number) {
 
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 
-test("#12475 GLM-5.3-high inherits the GLM-5.3 override (catalog 200k would reject)", () => {
-  setModelContextOverride("unit-12475", "GLM-5.3", 385_351);
+test("#12475 GLM-5.3-high inherits the GLM-5.3 override (catalog 200k would reject)", async () => {
+  await setModelContextOverride("unit-12475", "GLM-5.3", 385_351);
   try {
-    const verdict = evaluateContextLimit(
+    const verdict = await evaluateContextLimit(
       { maxInputTokens: 200_000, contextWindow: 200_000 },
       LARGE_REQ,
       "unit-12475/GLM-5.3-high"
     );
     assert.equal(verdict, true, "base override 385351 must fit 348k after stripping -high");
   } finally {
-    removeModelContextOverride("unit-12475", "GLM-5.3");
+    await removeModelContextOverride("unit-12475", "GLM-5.3");
   }
 });
 
-test("#12475 GLM-5.2-high spec 1M must not shadow the GLM-5.2 override", () => {
-  setModelContextOverride("unit-12475", "GLM-5.2", 128_450);
+test("#12475 GLM-5.2-high spec 1M must not shadow the GLM-5.2 override", async () => {
+  await setModelContextOverride("unit-12475", "GLM-5.2", 128_450);
   try {
-    const verdict = evaluateContextLimit(
+    const verdict = await evaluateContextLimit(
       { maxInputTokens: 1_000_000, contextWindow: 1_000_000 },
       LARGE_REQ,
       "unit-12475/GLM-5.2-high"
     );
     assert.equal(verdict, false, "base override 128450 must reject 348k even when spec says 1M");
   } finally {
-    removeModelContextOverride("unit-12475", "GLM-5.2");
+    await removeModelContextOverride("unit-12475", "GLM-5.2");
   }
 });
 
-test("#12475 exact variant override still wins over the base row", () => {
-  setModelContextOverride("unit-12475", "GLM-5.3", 385_351);
-  setModelContextOverride("unit-12475", "GLM-5.3-high", 10_000);
+test("#12475 exact variant override still wins over the base row", async () => {
+  await setModelContextOverride("unit-12475", "GLM-5.3", 385_351);
+  await setModelContextOverride("unit-12475", "GLM-5.3-high", 10_000);
   try {
-    const verdict = evaluateContextLimit(
+    const verdict = await evaluateContextLimit(
       { maxInputTokens: 200_000, contextWindow: 200_000 },
       LARGE_REQ,
       "unit-12475/GLM-5.3-high"
     );
     assert.equal(verdict, false, "an explicit GLM-5.3-high row must not inherit the larger base");
   } finally {
-    removeModelContextOverride("unit-12475", "GLM-5.3-high");
-    removeModelContextOverride("unit-12475", "GLM-5.3");
+    await removeModelContextOverride("unit-12475", "GLM-5.3-high");
+    await removeModelContextOverride("unit-12475", "GLM-5.3");
   }
 });
 
-test("#12475 xhigh / mixed-case suffix also inherit", () => {
-  setModelContextOverride("unit-12475", "GLM-5.3-Flash", 899_153);
+test("#12475 xhigh / mixed-case suffix also inherit", async () => {
+  await setModelContextOverride("unit-12475", "GLM-5.3-Flash", 899_153);
   try {
-    const verdict = evaluateContextLimit(
+    const verdict = await evaluateContextLimit(
       { maxInputTokens: 200_000, contextWindow: 200_000 },
       LARGE_REQ,
       "unit-12475/GLM-5.3-Flash-xhigh"
     );
     assert.equal(verdict, true, "GLM-5.3-Flash-xhigh must inherit GLM-5.3-Flash");
   } finally {
-    removeModelContextOverride("unit-12475", "GLM-5.3-Flash");
+    await removeModelContextOverride("unit-12475", "GLM-5.3-Flash");
   }
 });
 
-test("#12475 filter prefers the larger-window effort variant, not the spec-inflated one", () => {
-  saveModelsDevCapabilities({
+test("#12475 filter prefers the larger-window effort variant, not the spec-inflated one", async () => {
+  await saveModelsDevCapabilities({
     "unit-12475": {
       "GLM-5.3-high": capabilityEntry(200_000),
       "GLM-5.2-high": capabilityEntry(1_000_000),
     },
   });
-  setModelContextOverride("unit-12475", "GLM-5.3", 1_000_000);
-  setModelContextOverride("unit-12475", "GLM-5.2", 128_000);
+  await setModelContextOverride("unit-12475", "GLM-5.3", 1_000_000);
+  await setModelContextOverride("unit-12475", "GLM-5.2", 128_000);
   try {
-    const out = filterTargetsByRequestCompatibility(
+    const out = await filterTargetsByRequestCompatibility(
       [target("unit-12475/GLM-5.2-high"), target("unit-12475/GLM-5.3-high")],
       bigContextBody(300_000),
       noopLog
@@ -162,7 +162,7 @@ test("#12475 filter prefers the larger-window effort variant, not the spec-infla
     assert.equal(out[0]?.modelStr, "unit-12475/GLM-5.3-high");
     assert.equal(out[1]?.modelStr, "unit-12475/GLM-5.2-high");
   } finally {
-    removeModelContextOverride("unit-12475", "GLM-5.3");
-    removeModelContextOverride("unit-12475", "GLM-5.2");
+    await removeModelContextOverride("unit-12475", "GLM-5.3");
+    await removeModelContextOverride("unit-12475", "GLM-5.2");
   }
 });

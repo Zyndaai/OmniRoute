@@ -15,6 +15,7 @@ const db = await import("../../src/lib/db/providers.ts");
 const { fetchAndPersistProviderLimits } = await import("../../src/lib/usage/providerLimits.ts");
 const { getMachineId } = await import("../../src/shared/utils/machine.ts");
 const { resetMachineIdCache } = await import("../../src/shared/utils/machineId.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const originalFetch = globalThis.fetch;
 
 // Prime a synthetic machine identity so the cloud-path spy never reads the host identity.
@@ -41,11 +42,11 @@ test.before(async () => {
     syncBuiltinESMExports();
   }
 });
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   delete process.env.OMNIROUTE_TOKEN_REFRESH_PASSIVE_PROVIDERS;
   resetMachineIdCache();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -72,10 +73,10 @@ for (const stored of [
     let credentialWrites = 0;
     let cloudPathCalls = 0;
     let synchronizing = false;
-    const database = core.getDbInstance();
-    const prepare = database.prepare;
+    const database = getTestBackend();
+    const execute = database.execute;
     const createHash = crypto.createHash;
-    database.prepare = function (sql: string) {
+    database.execute = function (sql: string, params?: unknown[]) {
       if (
         !synchronizing &&
         /UPDATE\s+provider_connections\s+SET/i.test(sql) &&
@@ -83,7 +84,7 @@ for (const stored of [
       ) {
         credentialWrites++;
       }
-      return prepare.call(this, sql);
+      return execute.call(this, sql, params);
     };
     crypto.createHash = (...args: Parameters<typeof createHash>) => {
       if (new Error().stack?.includes("getConsistentMachineId")) cloudPathCalls++;
@@ -159,7 +160,7 @@ for (const stored of [
       assert.equal(row.accessToken, stored === "unchanged" ? "synthetic-A" : "synthetic-B");
       assert.equal(row.refreshToken, "synthetic-refresh-B");
     } finally {
-      database.prepare = prepare;
+      database.execute = execute;
       crypto.createHash = createHash;
       syncBuiltinESMExports();
       globalThis.fetch = originalFetch;

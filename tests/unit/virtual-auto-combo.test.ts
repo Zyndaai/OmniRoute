@@ -9,7 +9,7 @@ const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const virtualFactory = await import("../../open-sse/services/autoCombo/virtualFactory.ts");
@@ -41,7 +41,7 @@ const EXCLUDED_NOAUTH_PROVIDERS = [
 ];
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -198,12 +198,6 @@ test("createVirtualAutoCombo groups same-provider web sessions behind one logica
 });
 
 test("createVirtualAutoCombo excludes trigger-bypassed retired Qwen rows", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    DROP TRIGGER provider_connections_retire_qwen_web_insert;
-    DROP TRIGGER provider_connections_retire_qwen_web_update;
-  `);
-
   await providersDb.createProviderConnection({
     provider: "qwen-web",
     authType: "apikey",
@@ -242,11 +236,7 @@ test("createVirtualAutoCombo excludes trigger-bypassed retired Qwen rows", async
 });
 
 test("createVirtualAutoCombo includes clean-room ChatGPT Web and excludes its legacy alias", async () => {
-  const db = core.getDbInstance();
-  db.exec(`
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_insert;
-    DROP TRIGGER IF EXISTS provider_connections_retire_chatgpt_web_update;
-  `);
+  const backend = getTestBackend();
   for (const provider of ["chatgpt-web", "cgpt-web"]) {
     const model = provider === "chatgpt-web" ? "gpt-5-5-thinking" : "gpt-5.5";
     const credential =
@@ -267,12 +257,13 @@ test("createVirtualAutoCombo includes clean-room ChatGPT Web and excludes its le
             origins: [],
           })
         : `sk-${provider}-restored-auto`;
-    db.prepare(
+    await backend.execute(
       "INSERT INTO provider_connections " +
         "(id, provider, auth_type, name, api_key, default_model, is_active, test_status, " +
-        "created_at, updated_at) VALUES (?, ?, 'apikey', ?, ?, ?, 1, 'active', " +
-        "datetime('now'), datetime('now'))"
-    ).run(`${provider}-restored-auto`, provider, `${provider} restored auto`, credential, model);
+        "created_at, updated_at) VALUES ($1, $2, 'apikey', $3, $4, $5, true, 'active', " +
+        "now(), now())",
+      [`${provider}-restored-auto`, provider, `${provider} restored auto`, credential, model]
+    );
   }
 
   const combo: VirtualComboResult = await virtualFactory.createVirtualAutoCombo("coding");
@@ -338,11 +329,6 @@ test("createVirtualAutoCombo keeps credential-required providers out when discon
 });
 
 test("createVirtualAutoCombo excludes trigger-bypassed Microsoft Designer connections exactly", async () => {
-  await core.ensureDbInitialized();
-  const db = core.getDbInstance();
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_insert");
-  db.exec("DROP TRIGGER IF EXISTS trg_retire_microsoft_designer_web_provider_update");
-
   for (const [provider, model] of [
     ["microsoft-designer-web", "dall-e-3"],
     ["msdesigner", "dall-e-3"],

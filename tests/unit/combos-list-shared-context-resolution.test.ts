@@ -22,8 +22,8 @@ const SIX_MODELS = [
   "gemini/gemini-2.5-pro",
 ];
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -47,11 +47,11 @@ test("listing many combos over few models builds the alias tables once with iden
     }
     const allCombos = await combosDb.getCombos();
 
-    const shared = allCombos.map((combo) =>
-      comboContext.computeComboContextLength(combo, allCombos, resolution)
+    const shared = await Promise.all(
+      allCombos.map((combo) => comboContext.computeComboContextLength(combo, allCombos, resolution))
     );
-    const isolated = allCombos.map((combo) =>
-      comboContext.computeComboContextLength(combo, allCombos)
+    const isolated = await Promise.all(
+      allCombos.map((combo) => comboContext.computeComboContextLength(combo, allCombos))
     );
 
     assert.equal(buildCount, 1);
@@ -83,8 +83,8 @@ test("a nested combo resolves to the same value with a shared resolution", async
 
     const resolution = comboContext.createComboContextResolution();
     assert.equal(
-      comboContext.computeComboContextLength(wrapper, allCombos, resolution),
-      comboContext.computeComboContextLength(wrapper, allCombos)
+      await comboContext.computeComboContextLength(wrapper, allCombos, resolution),
+      await comboContext.computeComboContextLength(wrapper, allCombos)
     );
   } finally {
     if (created) {
@@ -94,14 +94,14 @@ test("a nested combo resolves to the same value with a shared resolution", async
   }
 });
 
-test("a combo with a fixed context returns it without building alias tables", () => {
+test("a combo with a fixed context returns it without building alias tables", async () => {
   let buildCount = 0;
   const resolution = comboContext.createComboContextResolution(() => {
     buildCount += 1;
     return buildAliasMaps();
   });
 
-  const result = comboContext.computeComboContextLength(
+  const result = await comboContext.computeComboContextLength(
     { name: "shared-context-fixed", models: SIX_MODELS, context_length: 64000 },
     [],
     resolution
@@ -111,7 +111,7 @@ test("a combo with a fixed context returns it without building alias tables", ()
   assert.equal(buildCount, 0);
 });
 
-test("an isolated call without a resolution is unchanged", () => {
+test("an isolated call without a resolution is unchanged", async () => {
   const combo = { name: "shared-context-isolated", models: ["glm/glm-5.2"] };
-  assert.equal(comboContext.computeComboContextLength(combo, []), 1000000);
+  assert.equal(await comboContext.computeComboContextLength(combo, []), 1000000);
 });

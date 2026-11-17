@@ -1,8 +1,8 @@
-// Call-log artifacts carry full request/response bodies (prompts, tool output) and the
-// legacy log archive zips whole request-log trees. Both used to inherit the process
-// umask (typically 0755 dirs / 0644 files), so any other OS user on a shared host could
-// read them whenever the parent DATA_DIR was not itself locked down (bind mounts, a
-// DATA_DIR created outside the CLI bootstrap). They are now written 0700 / 0600.
+// Call-log artifacts carry full request/response bodies (prompts, tool output). They used
+// to inherit the process umask (typically 0755 dirs / 0644 files), so any other OS user on
+// a shared host could read them whenever the parent DATA_DIR was not itself locked down
+// (bind mounts, a DATA_DIR created outside the CLI bootstrap). They are now written
+// 0700 / 0600.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -31,8 +31,7 @@ fs.chmodSync(path.join(TEST_DATA_DIR, "log_archives"), 0o755);
 const { getCallLogsDir, writeCallArtifact } =
   await import("../../src/lib/usage/callLogArtifacts.ts");
 const CALL_LOGS_DIR = getCallLogsDir();
-const migrations = await import("../../src/lib/usage/migrations.ts");
-const { getDbInstance, resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
 const skipOnWindows = process.platform === "win32";
 
@@ -40,14 +39,8 @@ function modeOf(target: string): number {
   return fs.statSync(target).mode & 0o777;
 }
 
-test.after(() => {
-  try {
-    const db = getDbInstance();
-    if (db?.open) db.close();
-  } catch {
-    // Database may never have been opened.
-  }
-  resetDbInstance?.();
+test.after(async () => {
+  await resetDbInstance();
 
   if (ORIGINAL_HOME === undefined) delete process.env.HOME;
   else process.env.HOME = ORIGINAL_HOME;
@@ -93,26 +86,5 @@ test(
       .readdirSync(path.dirname(absPath))
       .filter((entry) => entry.endsWith(".tmp"));
     assert.deepEqual(leftovers, [], "atomic write must not leave temp files behind");
-  }
-);
-
-test(
-  "archiveLegacyRequestLogs writes the archive and marker 0600 in a 0700 dir",
-  { skip: skipOnWindows },
-  async () => {
-    fs.writeFileSync(path.join(TEST_DATA_DIR, "log.txt"), "legacy summary line\n");
-
-    const archiveFilename = await migrations.archiveLegacyRequestLogs();
-    assert.ok(archiveFilename, "legacy log.txt should produce an archive");
-
-    const archiveDir = migrations.LOG_ARCHIVES_DIR;
-    assert.ok(archiveDir, "LOG_ARCHIVES_DIR must be configured outside cloud mode");
-    assert.equal(modeOf(archiveDir), 0o700, "pre-existing log_archives dir must be tightened");
-    assert.equal(modeOf(path.join(archiveDir, archiveFilename)), 0o600, "zip must be 0600");
-    assert.equal(
-      modeOf(path.join(archiveDir, "legacy-request-logs.json")),
-      0o600,
-      "legacy layout marker must be 0600"
-    );
   }
 );

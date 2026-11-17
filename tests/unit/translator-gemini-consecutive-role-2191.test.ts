@@ -29,14 +29,14 @@ function assertNoConsecutiveSameRole(contents: GeminiContent[], label: string) {
   }
 }
 
-test("OpenAI -> Gemini merges two consecutive user messages into one content block", () => {
+test("OpenAI -> Gemini merges two consecutive user messages into one content block", async () => {
   const body = {
     messages: [
       { role: "user", content: "Hello" },
       { role: "user", content: "Additional context" },
     ],
   };
-  const result = openaiToGeminiRequest("gemini-2.5-pro", body, false) as GeminiReq;
+  const result = (await openaiToGeminiRequest("gemini-2.5-pro", body, false)) as GeminiReq;
 
   assertNoConsecutiveSameRole(result.contents, "two-user");
   // The two user turns collapse into a single user content carrying both parts.
@@ -46,7 +46,7 @@ test("OpenAI -> Gemini merges two consecutive user messages into one content blo
   assert.deepEqual(texts, ["Hello", "Additional context"]);
 });
 
-test("OpenAI -> Gemini does not emit a tool-result(user) turn adjacent to a user turn", () => {
+test("OpenAI -> Gemini does not emit a tool-result(user) turn adjacent to a user turn", async () => {
   // Agentic history: user -> assistant(tool_call) -> tool(result) -> user.
   // The assistant block pushes model + user(toolResponse); the trailing plain
   // user turn would otherwise produce two adjacent role:"user" contents.
@@ -68,7 +68,7 @@ test("OpenAI -> Gemini does not emit a tool-result(user) turn adjacent to a user
       { role: "user", content: "Now read a.ts" },
     ],
   };
-  const result = openaiToGeminiRequest("gemini-2.5-pro", body, false) as GeminiReq;
+  const result = (await openaiToGeminiRequest("gemini-2.5-pro", body, false)) as GeminiReq;
 
   assertNoConsecutiveSameRole(result.contents, "tool-result-then-user");
   // Roles must strictly alternate: user, model, user (toolResp + "Now read a.ts" merged).
@@ -78,7 +78,7 @@ test("OpenAI -> Gemini does not emit a tool-result(user) turn adjacent to a user
   );
 });
 
-test("OpenAI -> Gemini keeps a normally alternating conversation unchanged", () => {
+test("OpenAI -> Gemini keeps a normally alternating conversation unchanged", async () => {
   const body = {
     messages: [
       { role: "user", content: "Hi" },
@@ -86,7 +86,7 @@ test("OpenAI -> Gemini keeps a normally alternating conversation unchanged", () 
       { role: "user", content: "How are you?" },
     ],
   };
-  const result = openaiToGeminiRequest("gemini-2.5-pro", body, false) as GeminiReq;
+  const result = (await openaiToGeminiRequest("gemini-2.5-pro", body, false)) as GeminiReq;
 
   assertNoConsecutiveSameRole(result.contents, "alternating");
   assert.deepEqual(
@@ -169,7 +169,7 @@ test("ensureHistoryDoesNotOpenWithFunctionCall handles an empty contents array",
   assert.deepEqual(result, []);
 });
 
-test("OpenAI -> Gemini: a reconstructed history whose leading user turn was lost still produces a valid, Gemini-acceptable alternation", () => {
+test("OpenAI -> Gemini: a reconstructed history whose leading user turn was lost still produces a valid, Gemini-acceptable alternation", async () => {
   // Simulates the reported live failure shape directly through the full
   // translator: continuation/compression reconstruction can leave `messages`
   // starting with an assistant tool-call turn instead of the true first user
@@ -191,9 +191,9 @@ test("OpenAI -> Gemini: a reconstructed history whose leading user turn was lost
       { role: "user", content: "Now read a.ts" },
     ],
   };
-  const result = openaiToGeminiRequest("gemini-2.5-pro", body, false, null, {
+  const result = (await openaiToGeminiRequest("gemini-2.5-pro", body, false, null, {
     signaturelessToolCallMode: "context",
-  }) as GeminiReq;
+  })) as GeminiReq;
 
   assert.equal(result.contents[0].role, "user", "contents[] must never open with role:model");
   assertNoConsecutiveSameRole(result.contents, "reconstructed-history-missing-leading-user-turn");

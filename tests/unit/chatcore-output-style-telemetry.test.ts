@@ -13,27 +13,23 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-os-telemetry-tes
 process.env.DATA_DIR = testDataDir;
 
 const coreDb = await import("../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../helpers/postgres.ts");
 const { emitOutputStyleTelemetry } =
   await import("../../open-sse/handlers/chatCore/outputStyleTelemetry.ts");
 
-function rowFor(requestId: string): Record<string, unknown> | undefined {
-  try {
-    return coreDb
-      .getDbInstance()
-      .prepare(
-        "SELECT request_id, model, provider, source FROM compression_run_telemetry WHERE request_id = ?"
-      )
-      .get(requestId) as Record<string, unknown> | undefined;
-  } catch {
-    // table is created lazily by the first fire-and-forget insert; treat "no such table" as "no row"
-    return undefined;
-  }
+async function rowFor(requestId: string): Promise<Record<string, unknown> | undefined> {
+  return (
+    (await getTestBackend().queryOne<Record<string, unknown>>(
+      "SELECT request_id, model, provider, source FROM compression_run_telemetry WHERE request_id = $1",
+      [requestId]
+    )) ?? undefined
+  );
 }
 
 async function waitForRow(requestId: string, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (rowFor(requestId)) break;
+    if (await rowFor(requestId)) break;
     await new Promise((r) => setTimeout(r, 25));
   }
   return rowFor(requestId);
@@ -43,8 +39,8 @@ before(async () => {
   await coreDb.ensureDbInitialized();
 });
 
-after(() => {
-  coreDb.resetDbInstance();
+after(async () => {
+  await coreDb.resetDbInstance();
   try {
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
@@ -65,7 +61,7 @@ test("null outputStyleResult is a no-op (returns synchronously, no throw)", asyn
     })
   );
   await new Promise((r) => setTimeout(r, 80));
-  assert.equal(rowFor("os-noop"), undefined);
+  assert.equal(await rowFor("os-noop"), undefined);
 });
 
 test("applied output-style result records a run-telemetry row (source=active-profile when combo id set)", async () => {

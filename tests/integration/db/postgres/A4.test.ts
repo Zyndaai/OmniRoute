@@ -123,7 +123,7 @@ test("combos: create, read, case-insensitive name, update, count, delete", async
   const byId = await comboRepository.findById(created.id as string);
   assert.equal(byId?.name, "Alpha");
   assert.equal((await comboRepository.findByName("alpha"))?.id, created.id);
-  assert.equal((await comboRepository.findByNameInsensitive("ALPHA"))?.id, created.id);
+  assert.equal((await comboRepository.findByName("ALPHA"))?.id, created.id);
   assert.equal(await comboRepository.findByName("missing"), null);
 
   // unique on lower(name)

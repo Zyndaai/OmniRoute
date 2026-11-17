@@ -4,12 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { cleanupTempDataDir } from "../_setup/tempDataDir.ts";
+import { resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-reasoning-routing-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-reasoning-routing-secret";
 
-const core = await import("../../src/lib/db/core.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
@@ -19,9 +19,7 @@ const schemas = await import("../../src/shared/validation/schemas/reasoningRouti
 
 async function resetStorage() {
   apiKeysDb.resetApiKeyState();
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
   rulesDb.invalidateReasoningRoutingRuleCache();
 }
 
@@ -299,7 +297,7 @@ test("forced max/ultra is supported when the model declares that effort", async 
 
   // Operator declares the model's real effort vocabulary (what the Model
   // Overrides UI writes via PATCH /api/model-capability-overrides).
-  const set = setModelCapabilityOverride(model, "reasoning_efforts", ["low", "high", "max"]);
+  const set = await setModelCapabilityOverride(model, "reasoning_efforts", ["low", "high", "max"]);
   assert.equal(set, true, "override must accept a low/high/max vocabulary");
 
   const afterDecision = await policy.resolveReasoningRoutingRule({
@@ -314,7 +312,10 @@ test("forced max/ultra is supported when the model declares that effort", async 
   );
 
   // Declared vocabulary without max still rejects forced max.
-  assert.equal(setModelCapabilityOverride(model, "reasoning_efforts", ["low", "high"]), true);
+  assert.equal(
+    await setModelCapabilityOverride(model, "reasoning_efforts", ["low", "high"]),
+    true
+  );
   const noMaxDecision = await policy.resolveReasoningRoutingRule({
     sourceModel: model,
     sourceEffort: "missing",
@@ -356,7 +357,7 @@ test("static registry vocabulary outranks the operator override so the gate matc
     ),
     "precondition: registry must declare grok-4.6 without max"
   );
-  setModelCapabilityOverride(registeredModel, "reasoning_efforts", ["low", "high", "max"]);
+  await setModelCapabilityOverride(registeredModel, "reasoning_efforts", ["low", "high", "max"]);
   const widened = await policy.resolveReasoningRoutingRule({
     sourceModel: registeredModel,
     sourceEffort: "missing",
@@ -374,7 +375,7 @@ test("static registry vocabulary outranks the operator override so the gate matc
   // max. The override is terminal — the Codex alias-set fallback must not
   // resurrect the tier (grok ids are not in those sets, but the
   // precedence guarantee must not depend on the id shape).
-  setModelCapabilityOverride(registeredModel, "reasoning_efforts", ["low", "high"]);
+  await setModelCapabilityOverride(registeredModel, "reasoning_efforts", ["low", "high"]);
   const narrowed = await policy.resolveReasoningRoutingRule({
     sourceModel: registeredModel,
     sourceEffort: "missing",
@@ -394,7 +395,7 @@ test("static registry vocabulary outranks the operator override so the gate matc
     getProviderModels("codex").every((entry) => !Array.isArray(entry.supportedThinkingEfforts)),
     "precondition: codex entries declare no static effort vocabulary"
   );
-  setModelCapabilityOverride(undeclaredModel, "reasoning_efforts", ["low", "high", "max"]);
+  await setModelCapabilityOverride(undeclaredModel, "reasoning_efforts", ["low", "high", "max"]);
   const passthrough = await policy.resolveReasoningRoutingRule({
     sourceModel: undeclaredModel,
     sourceEffort: "missing",
@@ -426,7 +427,7 @@ test("static registry vocabulary outranks the operator override so the gate matc
   // alias-set fallback matches this exact id — without the terminal check it would
   // resurrect forced max the operator explicitly declared away.
   const gpt56Model = "codex/gpt-5.6-sol";
-  setModelCapabilityOverride(gpt56Model, "reasoning_efforts", ["low", "high"]);
+  await setModelCapabilityOverride(gpt56Model, "reasoning_efforts", ["low", "high"]);
   const denied56 = await policy.resolveReasoningRoutingRule({
     sourceModel: gpt56Model,
     sourceEffort: "missing",

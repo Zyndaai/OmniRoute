@@ -12,6 +12,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-estimated
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const { getDailyTotal } = await import("../../src/domain/costRules.ts");
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
@@ -23,14 +24,14 @@ const originalFetch = globalThis.fetch;
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
 const MODEL = "gpt-4o-mini";
 
-before(() => {
-  core.resetDbInstance();
+before(async () => {
+  await resetTestDb();
 });
 
 after(async () => {
   globalThis.fetch = originalFetch;
   await callLogs.closeCallLogSaves(5_000);
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -96,10 +97,10 @@ async function persistedLog(apiKeyId: string) {
 
 async function spend(apiKeyId: string): Promise<number> {
   const deadline = Date.now() + 5_000;
-  let total = getDailyTotal(apiKeyId);
+  let total = await getDailyTotal(apiKeyId);
   while (total === 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 50));
-    total = getDailyTotal(apiKeyId);
+    total = await getDailyTotal(apiKeyId);
   }
   return total;
 }

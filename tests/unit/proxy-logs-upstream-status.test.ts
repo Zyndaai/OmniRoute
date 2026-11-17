@@ -10,37 +10,27 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-upstream-status-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const core = await import("../../src/lib/db/core.ts");
 const proxyLogger = await import("../../src/lib/proxyLogger.ts");
 
-function resetStorage() {
-  proxyLogger.clearProxyLogs();
-  core.closeDbInstance();
+async function resetStorage() {
+  await proxyLogger.clearProxyLogs();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-test.beforeEach(() => {
-  resetStorage();
+test.beforeEach(async () => {
+  await resetStorage();
 });
 
-test.after(() => {
-  core.closeDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("a fresh install has upstream_status and the reconciler restores it", async () => {
-  const { ensureProxyLogsColumns, hasColumn } = await import("../../src/lib/db/schemaColumns.ts");
-  const db = core.getDbInstance();
-  assert.equal(hasColumn(db, "proxy_logs", "upstream_status"), true, "column after migration");
-  db.exec("ALTER TABLE proxy_logs DROP COLUMN upstream_status");
-  assert.equal(hasColumn(db, "proxy_logs", "upstream_status"), false);
-  ensureProxyLogsColumns(db);
-  assert.equal(hasColumn(db, "proxy_logs", "upstream_status"), true, "column restored");
-  assert.doesNotThrow(() => ensureProxyLogsColumns(db));
-});
-
-test("upstreamStatus is kept in memory, in SQLite and in the export", async () => {
+test("upstreamStatus is kept in memory, in the database and in the export", async () => {
   proxyLogger.logProxyEvent({
     status: "error",
     provider: "openai",
@@ -51,28 +41,28 @@ test("upstreamStatus is kept in memory, in SQLite and in the export", async () =
   const [entry] = proxyLogger.getProxyLogs();
   assert.equal(entry.upstreamStatus, 429);
 
-  proxyLogger.flushProxyLogsSync();
-  const row = core.getDbInstance().prepare("SELECT upstream_status FROM proxy_logs").get() as {
-    upstream_status: number | null;
-  };
-  assert.equal(row.upstream_status, 429);
+  await proxyLogger.flushProxyLogsSync();
+  const row = await getTestBackend().queryOne<{ upstream_status: number | null }>(
+    "SELECT upstream_status FROM proxy_logs"
+  );
+  assert.equal(row?.upstream_status, 429);
 
   const { exportProxyLogsSince } = await import("../../src/lib/db/proxyLogs.ts");
-  const [exported] = exportProxyLogsSince("1970-01-01T00:00:00.000Z");
+  const [exported] = await exportProxyLogsSince("1970-01-01T00:00:00.000Z");
   assert.equal(exported.upstream_status, 429);
 });
 
-test("an entry without upstreamStatus stores null, never 0", () => {
+test("an entry without upstreamStatus stores null, never 0", async () => {
   proxyLogger.logProxyEvent({ status: "error", provider: "openai", targetUrl: "openai/gpt-5" });
 
   const [entry] = proxyLogger.getProxyLogs();
   assert.equal(entry.upstreamStatus, null);
 
-  proxyLogger.flushProxyLogsSync();
-  const row = core.getDbInstance().prepare("SELECT upstream_status FROM proxy_logs").get() as {
-    upstream_status: number | null;
-  };
-  assert.equal(row.upstream_status, null);
+  await proxyLogger.flushProxyLogsSync();
+  const row = await getTestBackend().queryOne<{ upstream_status: number | null }>(
+    "SELECT upstream_status FROM proxy_logs"
+  );
+  assert.equal(row?.upstream_status, null);
 });
 
 test("the textual status filters return the same rows as before", () => {

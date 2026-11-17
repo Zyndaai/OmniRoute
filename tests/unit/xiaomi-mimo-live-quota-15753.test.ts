@@ -26,7 +26,7 @@ process.env.DATA_DIR = TMP;
 // Disable the shared quota-fetch throttle — tests must not wait on the gate.
 process.env.OMNIROUTE_QUOTA_FETCH_MIN_INTERVAL_MS = "0";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { resetQuotaFetchThrottle } = await import("../../open-sse/services/quotaFetchThrottle.ts");
 const { getUsageForProvider } = await import("../../open-sse/services/usage.ts");
 const X = await import("../../open-sse/services/usage/xiaomi-mimo.ts");
@@ -79,29 +79,33 @@ interface UsageResult {
   message?: string;
 }
 
-function insertUsage(connectionId: string, provider: string, tokens: number, timestamp: string) {
-  const db = core.getDbInstance();
-  db.prepare(
-    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, timestamp)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(provider, connectionId, tokens, 0, timestamp);
+async function insertUsage(
+  connectionId: string,
+  provider: string,
+  tokens: number,
+  timestamp: string
+) {
+  await getTestBackend().execute(
+    `INSERT INTO usage_history (provider, connection_id, tokens_input, tokens_output, "timestamp")
+     VALUES ($1, $2, $3, $4, $5)`,
+    [provider, connectionId, tokens, 0, timestamp]
+  );
 }
 
 const originalFetch = globalThis.fetch;
 
 describe("xiaomi-mimo live Token Plan quota (#15753)", () => {
-  before(() => {
-    core.getDbInstance(); // trigger migrations
+  before(async () => {
     resetQuotaFetchThrottle();
     const now = new Date().toISOString();
-    insertUsage("conn-live", "xiaomi-mimo", 1_000_000, now);
-    insertUsage("conn-live", "xiaomi-mimo", 600_000, now);
-    insertUsage("conn-fallback", "xiaomi-mimo", 1_600_000, now);
+    await insertUsage("conn-live", "xiaomi-mimo", 1_000_000, now);
+    await insertUsage("conn-live", "xiaomi-mimo", 600_000, now);
+    await insertUsage("conn-fallback", "xiaomi-mimo", 1_600_000, now);
   });
 
-  after(() => {
+  after(async () => {
     globalThis.fetch = originalFetch;
-    core.resetDbInstance();
+    await resetTestDb();
     try {
       fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {

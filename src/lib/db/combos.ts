@@ -31,10 +31,6 @@ export function getComboByName(name: string): Promise<ComboRecord | null> {
   return repository.findByName(name);
 }
 
-export function getComboByNameInsensitive(name: string): Promise<ComboRecord | null> {
-  return repository.findByNameInsensitive(name);
-}
-
 export async function createCombo(data: ComboRecord): Promise<ComboRecord> {
   const combo = await repository.create(data);
   invalidateDbCache("combos");

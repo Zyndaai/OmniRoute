@@ -25,15 +25,15 @@ describe("evalRunner", () => {
     resetSuites();
   });
 
-  it("should have golden-set suite pre-registered", () => {
-    const suite = getSuite("golden-set");
+  it("should have golden-set suite pre-registered", async () => {
+    const suite = await getSuite("golden-set");
     assert.ok(suite);
     assert.equal(suite.name, "OmniRoute Golden Set");
     assert.ok(suite.cases.length >= 10);
   });
 
-  it("should list registered suites", () => {
-    const suites = listSuites();
+  it("should list registered suites", async () => {
+    const suites = await listSuites();
     assert.ok(suites.length >= 1);
     assert.ok(suites.some((s) => s.id === "golden-set"));
   });
@@ -181,7 +181,7 @@ describe("evalRunner", () => {
     assert.equal(result.error, "custom failure");
   });
 
-  it("should run suite and produce summary", () => {
+  it("should run suite and produce summary", async () => {
     registerSuite({
       id: "test-suite",
       name: "Test Suite",
@@ -203,30 +203,30 @@ describe("evalRunner", () => {
       ],
     });
 
-    const result = runSuite("test-suite", { c1: "yes it works", c2: "yes it works" });
+    const result = await runSuite("test-suite", { c1: "yes it works", c2: "yes it works" });
     assert.equal(result.summary.total, 2);
     assert.equal(result.summary.passed, 1);
     assert.equal(result.summary.failed, 1);
     assert.equal(result.summary.passRate, 50);
   });
 
-  it("should create scorecard from runs", () => {
-    const run1 = runSuite("test-suite", { c1: "yes", c2: "no" });
+  it("should create scorecard from runs", async () => {
+    const run1 = await runSuite("test-suite", { c1: "yes", c2: "no" });
     const scorecard = createScorecard([run1]);
     assert.equal(scorecard.suites, 1);
     assert.equal(scorecard.totalCases, 2);
   });
 
-  it("should throw on unknown suite", () => {
-    assert.throws(() => runSuite("nonexistent", {}), { message: /not found/ });
+  it("should throw on unknown suite", async () => {
+    await assert.rejects(() => runSuite("nonexistent", {}), { message: /not found/ });
   });
 
-  it("should restore built-in suites when resetting test suites", () => {
+  it("should restore built-in suites when resetting test suites", async () => {
     registerSuite({ id: "temporary-suite", name: "Temporary", cases: [] });
     resetSuites();
 
-    assert.equal(getSuite("temporary-suite"), null);
-    assert.ok(getSuite("golden-set"));
+    assert.equal(await getSuite("temporary-suite"), null);
+    assert.ok(await getSuite("golden-set"));
   });
 });
 
@@ -336,18 +336,18 @@ describe("responsiveSpecs", () => {
 import { setNoLog, isNoLog, getRetentionDays } from "../../src/lib/compliance/index.ts";
 
 describe("compliance", () => {
-  it("should default to logging enabled", () => {
-    assert.equal(isNoLog("key-1"), false);
+  it("should default to logging enabled", async () => {
+    assert.equal(await isNoLog("key-1"), false);
   });
 
-  it("should set noLog opt-out", () => {
+  it("should set noLog opt-out", async () => {
     setNoLog("key-1", true);
-    assert.equal(isNoLog("key-1"), true);
+    assert.equal(await isNoLog("key-1"), true);
   });
 
-  it("should clear noLog opt-out", () => {
+  it("should clear noLog opt-out", async () => {
     setNoLog("key-1", false);
-    assert.equal(isNoLog("key-1"), false);
+    assert.equal(await isNoLog("key-1"), false);
   });
 
   it("should expose split default retention windows", () => {

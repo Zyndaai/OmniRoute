@@ -58,11 +58,11 @@ test("inputSanitizer: MAX_INJECTION_SCAN_BYTES is exported and equals 16 KB", ()
   assert.equal(MAX_INJECTION_SCAN_BYTES, 16 * 1024);
 });
 
-test("promptInjection guard: directive at the TOP of a >16 KB message is still flagged", () => {
+test("promptInjection guard: directive at the TOP of a >16 KB message is still flagged", async () => {
   const body = {
     messages: [{ role: "user", content: `${INJECTION_DIRECTIVE}\n${padTo(32 * 1024)}` }],
   };
-  const decision = evaluatePromptInjection(body, { mode: "block" });
+  const decision = await evaluatePromptInjection(body, { mode: "block" });
   assert.equal(decision.result.flagged, true, "injection at the top must still flag");
   assert.ok(
     decision.result.detections.some((d) => d.pattern === "system_override"),
@@ -70,7 +70,7 @@ test("promptInjection guard: directive at the TOP of a >16 KB message is still f
   );
 });
 
-test("promptInjection guard: a directive OUTSIDE the scan window is NOT scanned", () => {
+test("promptInjection guard: a directive OUTSIDE the scan window is NOT scanned", async () => {
   // Single message whose only injection marker sits between the head and tail
   // slices. The joined scan text stays bounded at 16 KB, so it is not flagged.
   const body = {
@@ -81,7 +81,7 @@ test("promptInjection guard: a directive OUTSIDE the scan window is NOT scanned"
       },
     ],
   };
-  const decision = evaluatePromptInjection(body, { mode: "block" });
+  const decision = await evaluatePromptInjection(body, { mode: "block" });
   assert.equal(
     decision.result.flagged,
     false,

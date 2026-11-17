@@ -9,16 +9,16 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const { getCombos, getComboById, getComboByName, deleteCombo } = await import(
-  "../../src/lib/db/repositories/sqliteComboRepository.ts"
+  "../../src/lib/db/repositories/comboRepository.ts"
 );
+const { getTestBackend } = await import("../helpers/postgres.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("getCombos and getComboById prioritize SQLite table primary key over inner data JSON id", async () => {
-  const db = core.getDbInstance();
+test("getCombos and getComboById prioritize the table primary key over inner data JSON id", async () => {
   const rowId = "2dafe555-77d1-4e42-b795-1e5b99e2b649";
   const staleInnerId = "da8b4aad-52bc-423c-b9f5-74e2654bbd00";
 
@@ -31,10 +31,11 @@ test("getCombos and getComboById prioritize SQLite table primary key over inner 
     strategy: "priority",
   });
 
-  db.prepare(
+  await getTestBackend().execute(
     `INSERT INTO combos (id, name, data, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, 1, datetime('now'), datetime('now'))`
-  ).run(rowId, "test-mismatched-combo", dataPayload);
+     VALUES ($1, $2, $3::jsonb, 1, now(), now())`,
+    [rowId, "test-mismatched-combo", dataPayload]
+  );
 
   // 1. getCombos must return the authoritative table primary key
   const list = await getCombos();

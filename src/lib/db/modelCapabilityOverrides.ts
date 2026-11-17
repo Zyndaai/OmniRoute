@@ -4,12 +4,10 @@ import {
   type ReasoningEffortOverrideValue,
 } from "@/shared/reasoning/reasoningEffortsOverride";
 import { db, jsonb } from "./pg";
-import { invalidateDbCache } from "./readCache";
+import { invalidateDbCache, loadModelMetadataSnapshot } from "./readCache";
 
 export type NumericModelCapabilityOverrideKey =
-  | "max_input_tokens"
-  | "max_output_tokens"
-  | "max_token";
+  "max_input_tokens" | "max_output_tokens" | "max_token";
 export type ModelCapabilityOverrideKey = NumericModelCapabilityOverrideKey | "reasoning_efforts";
 
 interface ModelCapabilityOverrideBase {
@@ -95,6 +93,28 @@ function toOverride(row: OverrideRow): ModelCapabilityOverride | null {
 /** Nested provider → model → numeric override map used by build-local snapshots. */
 export type NestedMaxTokenOverrideMap = ReadonlyMap<string, ReadonlyMap<string, number>>;
 
+const overrideKey = (provider: string, modelId: string, key: string) =>
+  `${provider}\u0000${modelId}\u0000${key}`;
+
+/**
+ * Every override, keyed by provider/model/key, shared until a model-metadata write or the
+ * snapshot TTL (see loadModelMetadataSnapshot). Invalid rows are dropped here once.
+ */
+function overrideSnapshot(): Promise<Map<string, ModelCapabilityOverride>> {
+  return loadModelMetadataSnapshot("model_capability_overrides", async () => {
+    const rows = await db().query<OverrideRow>(
+      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
+        "FROM model_capability_overrides"
+    );
+    const byKey = new Map<string, ModelCapabilityOverride>();
+    for (const row of rows) {
+      const override = toOverride(row);
+      if (override) byKey.set(overrideKey(row.provider, row.model_id, row.override_key), override);
+    }
+    return byKey;
+  });
+}
+
 export async function getModelCapabilityOverride(
   provider: string | null | undefined,
   modelId: string | null | undefined,
@@ -111,12 +131,9 @@ export async function getModelCapabilityOverride(
   }
 
   try {
-    const row = await db().queryOne<OverrideRow>(
-      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-        "FROM model_capability_overrides WHERE provider = $1 AND model_id = $2 AND override_key = $3",
-      [target.provider, target.modelId, key]
+    const override = (await overrideSnapshot()).get(
+      overrideKey(target.provider, target.modelId, key)
     );
-    const override = row ? toOverride(row) : null;
     return override && override.key !== "reasoning_efforts" ? override.value : null;
   } catch {
     return null;
@@ -133,13 +150,10 @@ export async function getReasoningEffortsOverride(
   if (bulk) return bulk.get(target.provider)?.get(target.modelId) ?? null;
 
   try {
-    const row = await db().queryOne<OverrideRow>(
-      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-        "FROM model_capability_overrides WHERE provider = $1 AND model_id = $2 AND override_key = 'reasoning_efforts'",
-      [target.provider, target.modelId]
+    const override = (await overrideSnapshot()).get(
+      overrideKey(target.provider, target.modelId, "reasoning_efforts")
     );
-    const override = row ? toOverride(row) : null;
-    return override?.key === "reasoning_efforts" ? override.value : null;
+    return override?.key === "reasoning_efforts" ? [...override.value] : null;
   } catch {
     return null;
   }

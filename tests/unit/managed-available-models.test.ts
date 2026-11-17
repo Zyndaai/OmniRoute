@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-managed-a
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const modelsDb = await import("../../src/lib/db/models.ts");
 const { getModelAliases, setModelAlias } = await import("@/lib/db/models");
 const localDb = { getModelAliases, setModelAlias };
@@ -21,8 +22,7 @@ const {
 const { getModelsByProviderId } = await import("../../src/shared/constants/models.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await resetTestDb();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
@@ -30,8 +30,8 @@ test.beforeEach(async () => {
   await resetStorage();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -52,7 +52,7 @@ test("OpenRouter keeps imported fallback models as its managed list source", () 
 });
 
 test("hidden managed models do not create aliases during sync", async () => {
-  modelsDb.mergeModelCompatOverride("openrouter", "hidden/model", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openrouter", "hidden/model", { isHidden: true });
 
   const result = await syncManagedAvailableModelAliases("openrouter", ["hidden/model"]);
   const aliases = await localDb.getModelAliases();
@@ -92,10 +92,10 @@ test("deleteManagedAvailableModelAliasesForProvider removes provider-scoped alia
 });
 
 test("unhidden managed models receive a fresh alias when sync reruns", async () => {
-  modelsDb.mergeModelCompatOverride("openrouter", "vendor/model", { isHidden: true });
+  await modelsDb.mergeModelCompatOverride("openrouter", "vendor/model", { isHidden: true });
   await syncManagedAvailableModelAliases("openrouter", ["vendor/model"]);
 
-  modelsDb.mergeModelCompatOverride("openrouter", "vendor/model", { isHidden: false });
+  await modelsDb.mergeModelCompatOverride("openrouter", "vendor/model", { isHidden: false });
   const result = await syncManagedAvailableModelAliases("openrouter", ["vendor/model"]);
   const aliases = await localDb.getModelAliases();
 

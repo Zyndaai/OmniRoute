@@ -8,7 +8,7 @@ import { applyThinkingBudget } from "../../open-sse/services/thinkingBudget.ts";
 import { translateRequest } from "../../open-sse/translator/index.ts";
 import { FORMATS } from "../../open-sse/translator/formats.ts";
 
-test("antigravity reasoning capabilities: Gemini and Claude models support reasoning", () => {
+test("antigravity reasoning capabilities: Gemini and Claude models support reasoning", async () => {
   const geminiModels = [
     "antigravity/gemini-3.8-flash-high",
     "antigravity/gemini-pro-agent",
@@ -18,10 +18,10 @@ test("antigravity reasoning capabilities: Gemini and Claude models support reaso
   ];
 
   for (const modelId of geminiModels) {
-    const isReasoning = supportsReasoning(modelId);
+    const isReasoning = await supportsReasoning(modelId);
     assert.equal(isReasoning, true, `supportsReasoning should be true for ${modelId}`);
 
-    const caps = getResolvedModelCapabilities(modelId);
+    const caps = await getResolvedModelCapabilities(modelId);
     assert.equal(caps.reasoning, true, `caps.reasoning should be true for ${modelId}`);
     assert.equal(
       caps.supportsThinking,
@@ -31,24 +31,24 @@ test("antigravity reasoning capabilities: Gemini and Claude models support reaso
   }
 
   // Passthrough / unlisted Gemini model should still heuristically resolve reasoning
-  assert.equal(supportsReasoning("antigravity/gemini-2.5-pro"), true);
-  const gemini25Caps = getResolvedModelCapabilities("antigravity/gemini-2.5-pro");
+  assert.equal(await supportsReasoning("antigravity/gemini-2.5-pro"), true);
+  const gemini25Caps = await getResolvedModelCapabilities("antigravity/gemini-2.5-pro");
   assert.equal(gemini25Caps.reasoning, true);
 
   // Non-reasoning models like tab completion should return false
-  assert.equal(supportsReasoning("antigravity/tab_flash_lite"), false);
-  const tabCaps = getResolvedModelCapabilities("antigravity/tab_flash_lite");
+  assert.equal(await supportsReasoning("antigravity/tab_flash_lite"), false);
+  const tabCaps = await getResolvedModelCapabilities("antigravity/tab_flash_lite");
   assert.equal(tabCaps.reasoning, false);
 });
 
-test("antigravity request pipeline: applyThinkingBudget preserves reasoning params", () => {
+test("antigravity request pipeline: applyThinkingBudget preserves reasoning params", async () => {
   const req: Record<string, unknown> = {
     model: "antigravity/gemini-pro-agent",
     messages: [{ role: "user", content: "Solve math problem" }],
     reasoning_effort: "max",
   };
 
-  const processed = applyThinkingBudget(req);
+  const processed = await applyThinkingBudget(req);
   assert.equal(
     (processed as Record<string, unknown>).reasoning_effort,
     "max",
@@ -56,14 +56,14 @@ test("antigravity request pipeline: applyThinkingBudget preserves reasoning para
   );
 });
 
-test("antigravity translator: translates reasoning_effort into Gemini thinkingConfig", () => {
+test("antigravity translator: translates reasoning_effort into Gemini thinkingConfig", async () => {
   const inputReq = {
     model: "antigravity/gemini-pro-agent",
     messages: [{ role: "user", content: "Solve math problem" }],
     reasoning_effort: "max",
   };
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.ANTIGRAVITY,
     "antigravity/gemini-pro-agent",
@@ -96,14 +96,14 @@ test("antigravity translator: translates reasoning_effort into Gemini thinkingCo
   );
 });
 
-test("antigravity translator: Claude models bump maxOutputTokens and strip raw thinkingConfig", () => {
+test("antigravity translator: Claude models bump maxOutputTokens and strip raw thinkingConfig", async () => {
   const inputReq = {
     model: "antigravity/claude-sonnet-4-6",
     messages: [{ role: "user", content: "Explain quantum mechanics" }],
     reasoning_effort: "high",
   };
 
-  const translated = translateRequest(
+  const translated = await translateRequest(
     FORMATS.OPENAI,
     FORMATS.ANTIGRAVITY,
     "antigravity/claude-sonnet-4-6",

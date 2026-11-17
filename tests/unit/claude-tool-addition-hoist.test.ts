@@ -62,7 +62,7 @@ function toolNames(tools: unknown): string[] {
   });
 }
 
-test("hoistToolAdditions moves definitions into tools without duplicates and keeps the source", () => {
+test("hoistToolAdditions moves definitions into tools without duplicates and keeps the source", async () => {
   const body = {
     tools: [{ name: "existing", input_schema: { type: "object" } }],
     messages: [
@@ -82,7 +82,7 @@ test("hoistToolAdditions moves definitions into tools without duplicates and kee
   assert.deepEqual(body, snapshot, "the input body must not be mutated");
 });
 
-test("hoistToolAdditions drops tool_reference additions and returns untouched bodies as-is", () => {
+test("hoistToolAdditions drops tool_reference additions and returns untouched bodies as-is", async () => {
   const plain = makeBody();
   plain.messages = [{ role: "user", content: [{ type: "text", text: "hi" }] }];
   assert.equal(hoistToolAdditions(plain), plain);
@@ -104,7 +104,7 @@ test("hoistToolAdditions drops tool_reference additions and returns untouched bo
   assert.deepEqual(result.messages, [{ role: "user", content: [{ type: "text", text: "hi" }] }]);
 });
 
-test("hoistToolAdditions merges same-role neighbours left adjacent by a removed turn", () => {
+test("hoistToolAdditions merges same-role neighbours left adjacent by a removed turn", async () => {
   const body = {
     messages: [
       { role: "user", content: "first" },
@@ -129,7 +129,7 @@ test("hoistToolAdditions merges same-role neighbours left adjacent by a removed 
   ]);
 });
 
-test("acceptsInlineToolAdditions only for Anthropic-native targets", () => {
+test("acceptsInlineToolAdditions only for Anthropic-native targets", async () => {
   for (const provider of ["claude", "anthropic", "anthropic-compatible-acme"]) {
     assert.equal(acceptsInlineToolAdditions(provider), true, provider);
   }
@@ -138,9 +138,9 @@ test("acceptsInlineToolAdditions only for Anthropic-native targets", () => {
   }
 });
 
-test("Claude -> OpenAI translation exposes the deferred MCP tool as a function", () => {
+test("Claude -> OpenAI translation exposes the deferred MCP tool as a function", async () => {
   const body = makeBody();
-  const result = translateRequest(
+  const result = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.OPENAI,
     "kimi-k2",
@@ -155,8 +155,8 @@ test("Claude -> OpenAI translation exposes the deferred MCP tool as a function",
   assert.ok(JSON.stringify(body.messages).includes("tool_addition"), "source body untouched");
 });
 
-test("Claude -> Claude translation hoists for third-party gateways only", () => {
-  const kimi = translateRequest(
+test("Claude -> Claude translation hoists for third-party gateways only", async () => {
+  const kimi = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.CLAUDE,
     "kimi-for-coding",
@@ -168,7 +168,7 @@ test("Claude -> Claude translation hoists for third-party gateways only", () => 
   assert.ok(toolNames(kimi.tools).includes("mcp_tool"));
   assert.ok(!JSON.stringify(kimi.messages).includes("tool_addition"));
 
-  const claude = translateRequest(
+  const claude = await translateRequest(
     FORMATS.CLAUDE,
     FORMATS.CLAUDE,
     "claude-sonnet-4-6",

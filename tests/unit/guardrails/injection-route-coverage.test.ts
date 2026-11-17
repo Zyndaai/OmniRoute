@@ -14,13 +14,13 @@ const SHAPES: Record<string, unknown> = {
   "query+documents": { query: INJ, documents: ["d1"] },
 };
 
-test("block mode: every prompt shape is blocked", () => {
+test("block mode: every prompt shape is blocked", async () => {
   const prev = process.env.INJECTION_GUARD_MODE;
   process.env.INJECTION_GUARD_MODE = "block";
   try {
     const guard = createInjectionGuard();
     for (const [name, body] of Object.entries(SHAPES)) {
-      assert.equal(guard(body).blocked, true, `expected block for shape: ${name}`);
+      assert.equal((await guard(body)).blocked, true, `expected block for shape: ${name}`);
     }
   } finally {
     if (prev === undefined) delete process.env.INJECTION_GUARD_MODE;
@@ -28,11 +28,11 @@ test("block mode: every prompt shape is blocked", () => {
   }
 });
 
-test("warn mode (default): does NOT block (no false-block on data routes)", () => {
+test("warn mode (default): does NOT block (no false-block on data routes)", async () => {
   const prev = process.env.INJECTION_GUARD_MODE;
   process.env.INJECTION_GUARD_MODE = "warn";
   try {
-    assert.equal(createInjectionGuard()({ input: INJ }).blocked, false);
+    assert.equal((await createInjectionGuard()({ input: INJ })).blocked, false);
   } finally {
     if (prev === undefined) delete process.env.INJECTION_GUARD_MODE;
     else process.env.INJECTION_GUARD_MODE = prev;
