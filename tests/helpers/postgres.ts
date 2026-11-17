@@ -7,6 +7,7 @@ import { createPostgresBackend } from "../../src/lib/db/backends/postgres/postgr
 import { runPostgresMigrations } from "../../src/lib/db/backends/postgres/migrationRunner.ts";
 import type { DbBackend } from "../../src/lib/db/backends/types.ts";
 import { PG_TYPE_PARSERS } from "../../src/lib/db/backends/postgres/typeParsers.ts";
+import { invalidateDbCache } from "../../src/lib/db/readCache.ts";
 
 /** The process backend; requires the run to use tests/_setup/isolatePostgres.ts. */
 export function getTestBackend(): DbBackend {
@@ -32,6 +33,38 @@ export async function truncateAll(
   const tables = rows.map((r) => r.tablename).filter((t) => !skip.has(t));
   if (tables.length === 0) return;
   await backend.execute(`TRUNCATE ${tables.map(quoteIdent).join(", ")} RESTART IDENTITY CASCADE`);
+}
+
+let seedStatements: string[] | null = null;
+
+/** Top-level `INSERT INTO ...;` statements of the migrations (the rows a fresh database has). */
+function migrationSeeds(): string[] {
+  if (seedStatements) return seedStatements;
+  const dir =
+    process.env.OMNIROUTE_PG_MIGRATIONS_DIR?.trim() ??
+    path.resolve("src/lib/db/backends/postgres/migrations");
+  seedStatements = fs
+    .readdirSync(dir)
+    .filter((f) => /^\d{4,}_.+\.sql$/.test(f))
+    .sort()
+    .flatMap((f) =>
+      [...fs.readFileSync(path.join(dir, f), "utf8").matchAll(/^INSERT INTO [^;]+;/gm)].map(
+        (m) => m[0]
+      )
+    );
+  return seedStatements;
+}
+
+/**
+ * Gives the current test a fresh database: empties every table, restores the migration seed
+ * rows and drops the process read caches. The Postgres replacement for the old
+ * "resetDbInstance() + delete the SQLite file" pattern between tests in one file.
+ */
+export async function resetTestDb(): Promise<void> {
+  const backend = getTestBackend();
+  await truncateAll(backend);
+  for (const sql of migrationSeeds()) await backend.execute(sql);
+  invalidateDbCache();
 }
 
 /** In-process Postgres (no Docker) with the migrations applied; closed after `fn`. */

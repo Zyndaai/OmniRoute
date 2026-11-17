@@ -9,7 +9,6 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "catalog-dashboard-retry-"
 Object.assign(process.env, {
   DATA_DIR: dataDir,
   API_KEY_SECRET: "catalog-dashboard-fixture-secret",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   APP_LOG_TO_FILE: "false",
   CATALOG_BUILD_TIMEOUT_MS: "50",
 });
@@ -20,8 +19,8 @@ const { GET } = await import("../../src/app/api/models/catalog/route.ts");
 const catalogCache = await import("../../src/app/api/v1/models/catalogCache.ts");
 const { aiHordeImageCatalog } = await import("../../open-sse/services/aihordeImageCatalog.ts");
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 

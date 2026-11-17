@@ -17,21 +17,15 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ab-bypass
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { seedDefaultBypassPatterns } = await import("../../src/lib/db/agentBridgeBypass.ts");
 const bypassRoute = await import("../../src/app/api/tools/agent-bridge/bypass/route.ts");
 
 const DEFAULT_PATTERNS = [".bank.", ".gov.", "okta.com", "auth0.com"];
 
-function resetDb() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-}
-
-test.beforeEach(() => {
-  resetDb();
-  seedDefaultBypassPatterns(DEFAULT_PATTERNS);
+test.beforeEach(async () => {
+  await resetTestDb();
+  await seedDefaultBypassPatterns(DEFAULT_PATTERNS);
 });
 
 test.after(async () => {

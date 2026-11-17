@@ -1,40 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createMcpServer } from "../server.ts";
 import { MCP_TOOL_MAP, dbHealthCheckInput } from "../schemas/tools.ts";
 
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-const mockRunManagedDbHealthCheck = vi.hoisted(() => vi.fn());
-
-vi.mock("../audit.ts", () => ({
-  logToolCall: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../../../src/lib/db/core.ts", async (importOriginal) => {
-  const actual = await importOriginal<any>();
-  return {
-    ...actual,
-    runManagedDbHealthCheck: mockRunManagedDbHealthCheck,
-  };
-});
-
 describe("omniroute_db_health_check MCP tool", () => {
   let client: Client;
 
   beforeEach(async () => {
-    mockFetch.mockReset();
-    mockRunManagedDbHealthCheck.mockReset();
-    mockRunManagedDbHealthCheck.mockResolvedValue({
-      isHealthy: false,
-      issues: [{ type: "broken_reference", table: "combos", description: "broken", count: 1 }],
-      repairedCount: 1,
-      backupCreated: true,
-      autoRepair: true,
-      checkedAt: new Date().toISOString(),
-    });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = await createMcpServer();
     await server.connect(serverTransport);
@@ -57,20 +30,20 @@ describe("omniroute_db_health_check MCP tool", () => {
     expect(dbHealthCheckInput.safeParse({ autoRepair: "yes" }).success).toBe(false);
   });
 
-  it("runs the database repair flow directly when autoRepair=true", async () => {
+  it("pings PostgreSQL and reports healthy with no repairs (autoRepair is a no-op)", async () => {
     const result = await client.callTool({
       name: "omniroute_db_health_check",
       arguments: { autoRepair: true },
     });
 
     expect(result.isError).toBeFalsy();
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(mockRunManagedDbHealthCheck).toHaveBeenCalledWith({ autoRepair: true });
 
     const content = result.content[0] as { type: string; text: string };
     const payload = JSON.parse(content.text);
-    expect(payload.autoRepair).toBe(true);
-    expect(payload.repairedCount).toBe(1);
-    expect(payload.backupCreated).toBe(true);
+    expect(payload.isHealthy).toBe(true);
+    expect(payload.issues).toEqual([]);
+    expect(payload.repairedCount).toBe(0);
+    expect(payload.backupCreated).toBe(false);
+    expect(payload.autoRepairRequested).toBe(true);
   });
 });

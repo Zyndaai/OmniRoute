@@ -53,7 +53,7 @@ describe("GET /v1/files limit validation", () => {
 
   it("returns only the requested number of files over HTTP", async () => {
     const created = [
-      createFile({
+      await createFile({
         bytes: 1,
         filename: "test-files-limit-http-a.txt",
         purpose: "assistants",
@@ -61,7 +61,7 @@ describe("GET /v1/files limit validation", () => {
         mimeType: "text/plain",
         apiKeyId,
       }),
-      createFile({
+      await createFile({
         bytes: 1,
         filename: "test-files-limit-http-b.txt",
         purpose: "assistants",
@@ -83,7 +83,7 @@ describe("GET /v1/files limit validation", () => {
       assert.equal(body.data.length, 1);
       assert.equal(body.has_more, true);
     } finally {
-      for (const file of created) deleteFile(file.id);
+      for (const file of created) await deleteFile(file.id);
     }
   });
 

@@ -27,7 +27,9 @@ function runFixture(): Promise<FixtureResult> {
     TMPDIR: process.env.TMPDIR,
     NODE_ENV: "test",
     API_KEY_SECRET: "zed-boundary-test-only-secret-with-32-plus-characters",
-    DISABLE_SQLITE_AUTO_BACKUP: "true",
+    ...(process.env.OMNIROUTE_POSTGRES_URL
+      ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+      : {}),
     NO_COLOR: "1",
   };
   // Inheriting this marker makes Node silently skip the nested --test run.

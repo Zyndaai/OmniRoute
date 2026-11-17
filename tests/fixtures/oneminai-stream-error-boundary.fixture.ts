@@ -232,7 +232,7 @@ test.after(async () => {
     globalThis.fetch = originalFetch;
     usageHistory.clearPendingRequests();
     accountSemaphore.resetAll();
-    dbCore.resetDbInstance();
+    await dbCore.resetDbInstance();
   }
   assert.equal(drained, true, "all call-log saves must drain before teardown");
 });

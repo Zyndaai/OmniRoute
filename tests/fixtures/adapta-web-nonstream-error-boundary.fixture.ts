@@ -65,7 +65,7 @@ afterEach(() => {
 
 after(async () => {
   const { resetDbInstance } = await import("../../src/lib/db/core.ts");
-  resetDbInstance();
+  await resetDbInstance();
   rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

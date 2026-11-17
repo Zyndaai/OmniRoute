@@ -33,7 +33,9 @@ test(
     const childEnv: NodeJS.ProcessEnv = {
       APP_LOG_TO_FILE: "false",
       DATA_DIR: testDataDir,
-      DISABLE_SQLITE_AUTO_BACKUP: "true",
+      ...(process.env.OMNIROUTE_POSTGRES_URL
+        ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+        : {}),
       NODE_ENV: "test",
       OMNIROUTE_PLUGINS_DIR: testPluginsDir,
     };

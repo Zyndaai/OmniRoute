@@ -54,6 +54,7 @@ const boundaryFetch = (async (input: string | URL | Request) => {
 globalThis.fetch = boundaryFetch;
 
 const core = await import("../../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../../helpers/postgres.ts");
 const providersDb = await import("../../../src/lib/db/providers.ts");
 const { saveCallLog, waitForCallLogSaves, closeCallLogSaves } =
   await import("../../../src/lib/usage/callLogs.ts");
@@ -147,27 +148,26 @@ test("connection validation projects hostile errors before public and persistent
   assert.equal(await waitForCallLogSaves(10_000), true, "call-log write must drain");
   flushProxyLogsSync();
 
-  const db = core.getDbInstance();
-  const providerRow = db
-    .prepare("SELECT last_error FROM provider_connections WHERE id = ?")
-    .get(connection.id) as { last_error: string | null };
-  const callLogRow = db
-    .prepare(
-      `SELECT error_summary, artifact_relpath
+  const backend = getTestBackend();
+  const providerRow = (await backend.queryOne<{ last_error: string | null }>(
+    "SELECT last_error FROM provider_connections WHERE id = $1",
+    [connection.id]
+  )) as { last_error: string | null };
+  const callLogRow = (await backend.queryOne<ArtifactRow>(
+    `SELECT error_summary, artifact_relpath
        FROM call_logs
-       WHERE connection_id = ? AND model = 'connection-test'
-       ORDER BY rowid DESC LIMIT 1`
-    )
-    .get(connection.id) as ArtifactRow;
-  const proxyLogRow = db
-    .prepare(
-      `SELECT error
+       WHERE connection_id = $1 AND model = 'connection-test'
+       ORDER BY seq DESC LIMIT 1`,
+    [connection.id]
+  )) as ArtifactRow;
+  const proxyLogRow = (await backend.queryOne<{ error: string | null }>(
+    `SELECT error
        FROM proxy_logs
-       WHERE connection_id = ? AND provider = 'jules'
+       WHERE connection_id = $1 AND provider = 'jules'
          AND target_url = 'jules/connection-test'
-       ORDER BY rowid DESC LIMIT 1`
-    )
-    .get(connection.id) as { error: string | null };
+       ORDER BY "timestamp" DESC LIMIT 1`,
+    [connection.id]
+  )) as { error: string | null };
   assert.ok(callLogRow, "connection test must write call_logs");
   assert.ok(proxyLogRow, "connection test must write proxy_logs");
   const artifact = readArtifact(callLogRow.artifact_relpath);
@@ -234,15 +234,12 @@ test("failed call logs sanitize response-body copies while successful bodies sta
   });
   assert.equal(await waitForCallLogSaves(2_000), true, "call-log writes must drain");
 
-  const db = core.getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT id, artifact_relpath FROM call_logs
+  const rows = await getTestBackend().query<{ id: string; artifact_relpath: string | null }>(
+    `SELECT id, artifact_relpath FROM call_logs
        WHERE id IN (
          'error-body-json', 'error-body-text', 'success-body-control', 'error-body-binary'
        )`
-    )
-    .all() as Array<{ id: string; artifact_relpath: string | null }>;
+  );
   const artifacts = Object.fromEntries(
     rows.map((row) => [row.id, readArtifact(row.artifact_relpath)])
   ) as Record<string, Record<string, unknown>>;

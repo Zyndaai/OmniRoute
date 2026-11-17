@@ -14,12 +14,12 @@ import { createManagementSessionHeaders } from "../helpers/managementSession.ts"
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-audit-level-filter-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const compliance = await import("../../src/lib/compliance/index.ts");
 const auditRoute = await import("../../src/app/api/compliance/audit-log/route.ts");
 
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -32,12 +32,12 @@ async function makeRequest(url: string): Promise<Request> {
   return new Request(url, { headers: Object.fromEntries(headers.entries()) });
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -46,37 +46,37 @@ test.after(() => {
  * - 2 with HIGH_LEVEL_ACTIONS (provider.credentials.created, quota.pool.created)
  * - 3 with arbitrary non-high actions
  */
-function seedEntries() {
+async function seedEntries() {
   compliance.initAuditLog();
 
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "provider.credentials.created",
     actor: "admin",
     target: "openai-conn-1",
     status: "success",
     createdAt: "2026-05-27T10:00:00.000Z",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "quota.pool.created",
     actor: "admin",
     target: "my-pool",
     status: "success",
     createdAt: "2026-05-27T10:01:00.000Z",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "debug.probe",
     actor: "system",
     target: "provider-node",
     status: "success",
     createdAt: "2026-05-27T10:02:00.000Z",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "system.startup",
     actor: "system",
     status: "success",
     createdAt: "2026-05-27T10:03:00.000Z",
   });
-  compliance.logAuditEvent({
+  await compliance.logAuditEvent({
     action: "debug.test_call",
     actor: "dev",
     status: "success",
@@ -85,7 +85,7 @@ function seedEntries() {
 }
 
 test("GET /api/compliance/audit-log (no level) returns all 5 entries", async () => {
-  seedEntries();
+  await seedEntries();
 
   const res = await auditRoute.GET(
     await makeRequest("http://localhost/api/compliance/audit-log?limit=100")
@@ -98,7 +98,7 @@ test("GET /api/compliance/audit-log (no level) returns all 5 entries", async () 
 });
 
 test("GET /api/compliance/audit-log?level=all returns all 5 entries", async () => {
-  seedEntries();
+  await seedEntries();
 
   const res = await auditRoute.GET(
     await makeRequest("http://localhost/api/compliance/audit-log?level=all&limit=100")
@@ -111,7 +111,7 @@ test("GET /api/compliance/audit-log?level=all returns all 5 entries", async () =
 });
 
 test("GET /api/compliance/audit-log?level=high returns only 2 HIGH_LEVEL entries", async () => {
-  seedEntries();
+  await seedEntries();
 
   const res = await auditRoute.GET(
     await makeRequest("http://localhost/api/compliance/audit-log?level=high&limit=100")
@@ -127,7 +127,7 @@ test("GET /api/compliance/audit-log?level=high returns only 2 HIGH_LEVEL entries
 });
 
 test("GET /api/compliance/audit-log?level=high x-total-count reflects filtered COUNT", async () => {
-  seedEntries();
+  await seedEntries();
 
   const res = await auditRoute.GET(
     await makeRequest("http://localhost/api/compliance/audit-log?level=high&limit=100")
@@ -140,7 +140,7 @@ test("GET /api/compliance/audit-log?level=high x-total-count reflects filtered C
 
 test("GET /api/compliance/audit-log error path does not leak stack trace (Hard Rule #12)", async () => {
   // Force an exception by making the DB inaccessible after init
-  seedEntries();
+  await seedEntries();
   // We test that if an error is thrown, the response body does not contain
   // stack-trace-like strings. We achieve this by testing the error path
   // of the route directly by using an invalid URL that triggers a parse error.
@@ -178,7 +178,7 @@ test("GET /api/compliance/audit-log error path does not leak stack trace (Hard R
 });
 
 test("GET /api/compliance/audit-log?level=high with limit=1 returns correct pagination", async () => {
-  seedEntries();
+  await seedEntries();
 
   const res = await auditRoute.GET(
     await makeRequest("http://localhost/api/compliance/audit-log?level=high&limit=1&offset=0")

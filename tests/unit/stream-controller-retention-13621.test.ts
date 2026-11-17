@@ -23,7 +23,6 @@ before(() => {
       ...process.env,
       DATA_DIR: dataDir,
       NODE_ENV: "test",
-      DISABLE_SQLITE_AUTO_BACKUP: "true",
     },
     encoding: "utf8",
     timeout: 180_000,

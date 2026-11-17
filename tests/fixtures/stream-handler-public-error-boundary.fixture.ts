@@ -37,7 +37,7 @@ const RAW_MESSAGE =
 test.after(async () => {
   assert.equal(await callLogs.waitForCallLogSaves(3_000), true);
   await artifactWriter.closeCallLogArtifactWriter();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await loggerResource.closeSharedLoggerResource();
 
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
@@ -50,7 +50,6 @@ test.after(async () => {
 
 test("fixture binds all persistent state to its process-owned directories", () => {
   assert.equal(core.DATA_DIR, TEST_DATA_DIR);
-  assert.equal(core.SQLITE_FILE, path.join(TEST_DATA_DIR, "storage.sqlite"));
   assert.equal(process.env.DATA_DIR, TEST_DATA_DIR);
   assert.equal(process.env.OMNIROUTE_PLUGINS_DIR, TEST_PLUGINS_DIR);
   assert.equal(fs.existsSync(TEST_DATA_DIR), true);

@@ -15,16 +15,20 @@ Object.assign(process.env, {
   API_KEY_SECRET: "15260-synthetic-api-secret",
   JWT_SECRET: "15260-synthetic-jwt-secret",
   APP_LOG_TO_FILE: "false",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   KIRO_VERIFY_FULL_CRC: "true",
 });
 const originalConnect = Socket.prototype.connect;
 const originalFetch = globalThis.fetch;
 let socketAttempts = 0;
-Socket.prototype.connect = function () {
+// The database is PostgreSQL: let connections to its port through, forbid every other socket.
+const postgresPort = Number(new URL(process.env.OMNIROUTE_POSTGRES_URL ?? "postgres://x").port || 5432);
+Socket.prototype.connect = function (this: Socket, ...args: unknown[]) {
+  const first = args[0] as { port?: number | string } | number | string | undefined;
+  const port = typeof first === "object" && first !== null ? first.port : first;
+  if (Number(port) === postgresPort) return Reflect.apply(originalConnect, this, args);
   socketAttempts++;
   throw new Error("#15260 fixture forbids network sockets");
-};
+} as typeof Socket.prototype.connect;
 globalThis.fetch = async () => {
   throw new Error("#15260 fixture has not installed its upstream response");
 };
@@ -396,9 +400,9 @@ test(
   }
 );
 
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
   Socket.prototype.connect = originalConnect;
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

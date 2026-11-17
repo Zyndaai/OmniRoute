@@ -7,7 +7,7 @@ const { dir: TEST_DATA_DIR, cleanup } = createTempDataDir("omniroute-compression
 process.env.REQUIRE_API_KEY = "false";
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "test-compression-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const readCacheDb = await import("../../src/lib/db/readCache.ts");
 const combosDb = await import("../../src/lib/db/combos.ts");
@@ -30,7 +30,7 @@ async function resetStorage() {
   await new Promise((resolve) => setTimeout(resolve, 20));
   // The previous test's call log is saved in the background; it must land before the reset.
   assert.ok(await waitForCallLogSaves(30_000), "the previous test's call-log saves should finish");
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -287,7 +287,7 @@ test("chatCore integration: disabled prompt compression leaves combo override re
       { role: "user", content: `${"Keep   spacing.\n\n\n".repeat(300)}Final question.` },
     ],
   };
-  const contextLimit = getTokenLimit(provider, model);
+  const contextLimit = await getTokenLimit(provider, model);
   const proactiveThreshold = Math.floor(contextLimit * 0.7);
   const estimatedBodyTokens = estimateTokens(JSON.stringify(body.messages));
   assert.ok(
@@ -333,7 +333,7 @@ test("chatCore integration: disabled prompt compression leaves combo override re
     assert.ok(capturedBody, "Fetch should have been called");
     assert.deepEqual(capturedBody.messages, body.messages);
 
-    const summary = compressionAnalyticsDb.getCompressionAnalyticsSummary();
+    const summary = await compressionAnalyticsDb.getCompressionAnalyticsSummary();
     assert.equal(summary.totalRequests, 0, "Disabled compression should not record analytics");
   } finally {
     globalThis.fetch = originalFetch;
@@ -354,7 +354,7 @@ test("chatCore integration: compressContext NOT called when context is below 85%
     defaultMode: "off",
     autoTriggerTokens: 0,
   });
-  const contextLimit = getTokenLimit(provider, model);
+  const contextLimit = await getTokenLimit(provider, model);
   const threshold = Math.floor(contextLimit * 0.85);
 
   const smallMessage = "Hello, how are you?";
@@ -742,7 +742,7 @@ test("chatCore integration: assigned compression combo applies language packs an
     ],
   });
 
-  const compressionCombo = compressionCombosDb.createCompressionCombo({
+  const compressionCombo = await compressionCombosDb.createCompressionCombo({
     name: "Assigned PT Output Mode",
     pipeline: [{ engine: "caveman", intensity: "lite" }],
     languagePacks: ["pt-BR"],
@@ -750,7 +750,7 @@ test("chatCore integration: assigned compression combo applies language packs an
     outputModeIntensity: "lite",
   });
   assert.equal(
-    compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
+    await compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
     true
   );
 
@@ -803,7 +803,8 @@ test("chatCore integration: assigned compression combo applies language packs an
 
     for (
       let attempt = 0;
-      attempt < 100 && compressionAnalyticsDb.getCompressionAnalyticsSummary().totalRequests === 0;
+      attempt < 100 &&
+      (await compressionAnalyticsDb.getCompressionAnalyticsSummary()).totalRequests === 0;
       attempt += 1
     ) {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -836,7 +837,7 @@ test("chatCore integration: default stacked compression combo applies for unassi
     },
   });
 
-  const compressionCombo = compressionCombosDb.createCompressionCombo({
+  const compressionCombo = await compressionCombosDb.createCompressionCombo({
     name: "Default PT Output Mode",
     pipeline: [
       { engine: "rtk", intensity: "standard" },
@@ -899,14 +900,14 @@ test("chatCore integration: default stacked compression combo applies for unassi
     assert.match(styleMessage?.content ?? "", /OmniRoute Output Styles/);
     assert.match(styleMessage?.content ?? "", /Responda conciso/);
 
-    let summary = compressionAnalyticsDb.getCompressionAnalyticsSummary();
+    let summary = await compressionAnalyticsDb.getCompressionAnalyticsSummary();
     for (
       let attempt = 0;
       attempt < 100 && !summary.byCompressionCombo[compressionCombo.id];
       attempt += 1
     ) {
       await new Promise((resolve) => setTimeout(resolve, 20));
-      summary = compressionAnalyticsDb.getCompressionAnalyticsSummary();
+      summary = await compressionAnalyticsDb.getCompressionAnalyticsSummary();
     }
 
     assert.equal(summary.byCompressionCombo[compressionCombo.id].count, 1);
@@ -972,7 +973,7 @@ test("chatCore integration: modular compression records analytics row best-effor
 
     assert.ok(result.success, "Request should succeed");
 
-    let summary = compressionAnalyticsDb.getCompressionAnalyticsSummary();
+    let summary = await compressionAnalyticsDb.getCompressionAnalyticsSummary();
     for (
       let attempt = 0;
       attempt < 100 &&
@@ -980,7 +981,7 @@ test("chatCore integration: modular compression records analytics row best-effor
       attempt += 1
     ) {
       await new Promise((resolve) => setTimeout(resolve, 20));
-      summary = compressionAnalyticsDb.getCompressionAnalyticsSummary();
+      summary = await compressionAnalyticsDb.getCompressionAnalyticsSummary();
     }
 
     assert.equal(summary.totalRequests, 1);
@@ -1075,7 +1076,7 @@ test("chatCore integration: active profile combo injects its own outputStyles", 
     outputStyles: [],
     cavemanOutputMode: { enabled: false, intensity: "full", autoClarity: true },
   });
-  const combo = compressionCombosDb.createCompressionCombo({
+  const combo = await compressionCombosDb.createCompressionCombo({
     name: "active-profile-styles",
     pipeline: [{ engine: "session-dedup", intensity: "standard" }],
     languagePacks: ["en"],

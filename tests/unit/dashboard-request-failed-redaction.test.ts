@@ -68,6 +68,9 @@ test("persistAttemptLogs redacts request.failed delivery/replay but keeps its in
       TZ: process.env.TZ,
       TMPDIR: process.env.TMPDIR,
       NODE_ENV: "test",
+      ...(process.env.OMNIROUTE_POSTGRES_URL
+        ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+        : {}),
       DATA_DIR: dataDir,
       OMNIROUTE_PLUGINS_DIR: pluginsDir,
       API_KEY_SECRET: "test-dashboard-failure-redaction-secret",

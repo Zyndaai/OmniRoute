@@ -36,7 +36,7 @@ function body(model: string) {
 /** A key whose daily allowance is configured, and optionally already spent. */
 async function keyWithBudget({ limitUsd, spentUsd }: { limitUsd: number; spentUsd: number }) {
   const key = await seedApiKey({ name: "budgeted" });
-  costRules.setBudget(key.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
+  await costRules.setBudget(key.id, { dailyLimitUsd: limitUsd, resetInterval: "daily" });
   if (spentUsd > 0) costRules.recordCost(key.id, spentUsd);
   return key;
 }
@@ -57,11 +57,11 @@ async function seedMixedCombo(name: string) {
 test.beforeEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = 0;
   await resetStorage();
-  costRules.resetCostData();
+  await costRules.resetCostData();
 });
 test.afterEach(async () => {
   BaseExecutor.RETRY_CONFIG.delayMs = h.originalRetryDelayMs;
-  costRules.resetCostData();
+  await costRules.resetCostData();
   await resetStorage();
 });
 test.after(async () => {
@@ -143,7 +143,7 @@ test("B6: once the allowance is raised, the metered target is routed to again", 
   assert.equal(blocked.status, 200);
   assert.deepEqual(h.providersSeen(), ["claude"]);
 
-  costRules.setBudget(key.id, { dailyLimitUsd: 1000, resetInterval: "daily" });
+  await costRules.setBudget(key.id, { dailyLimitUsd: 1000, resetInterval: "daily" });
   const restored = await handleChat(
     buildRequest({ body: body("b-budget-restored"), authKey: key.key })
   );
@@ -202,7 +202,7 @@ test("a budget refusal leaves the provider connection healthy — it is a local 
   assert.equal(after!.testStatus, "active");
 
   // And it is usable the moment the allowance returns.
-  costRules.setBudget(key.id, { dailyLimitUsd: 1000, resetInterval: "daily" });
+  await costRules.setBudget(key.id, { dailyLimitUsd: 1000, resetInterval: "daily" });
   const served = await handleChat(
     buildRequest({ body: body("openai/gpt-4o-mini"), authKey: key.key })
   );
@@ -213,10 +213,10 @@ test("a budget refusal leaves the provider connection healthy — it is a local 
 test("B7/B8: a served flat-rate request stays visible in telemetry and still does not move the allowance", async () => {
   await seedConnection("claude", { apiKey: "sk-claude-accounting" });
   const key = await seedApiKey({ name: "accounting" });
-  costRules.setBudget(key.id, { dailyLimitUsd: 10, resetInterval: "daily" });
+  await costRules.setBudget(key.id, { dailyLimitUsd: 10, resetInterval: "daily" });
   h.installRecordingFetch();
 
-  const before = costRules.getCostSummary(key.id).totalCostPeriod;
+  const before = (await costRules.getCostSummary(key.id)).totalCostPeriod;
   const r = await handleChat(
     buildRequest({ body: body("claude/claude-sonnet-4-6"), authKey: key.key })
   );
@@ -230,5 +230,5 @@ test("B7/B8: a served flat-rate request stays visible in telemetry and still doe
 
   // Budget consumption: unchanged. The subscription is not paid for out of the
   // metered allowance, so the allowance must not move.
-  assert.equal(costRules.getCostSummary(key.id).totalCostPeriod, before);
+  assert.equal((await costRules.getCostSummary(key.id)).totalCostPeriod, before);
 });

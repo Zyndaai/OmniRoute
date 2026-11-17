@@ -210,6 +210,7 @@ export async function antigravityModels(
         { forceRefresh: true }
       )
   );
+  assert.ok("quotas" in usage, "real model builder must return quotas");
   assert.ok(
     usage.quotas?.["gemini-3-flash"],
     "real model builder must consume the synthetic response"

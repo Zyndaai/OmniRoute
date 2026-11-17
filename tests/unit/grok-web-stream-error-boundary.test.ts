@@ -28,7 +28,9 @@ function runFixture(): Promise<FixtureResult> {
     TMPDIR: process.env.TMPDIR,
     NODE_ENV: "test",
     API_KEY_SECRET: "grok-boundary-test-only-secret-with-32-plus-characters",
-    DISABLE_SQLITE_AUTO_BACKUP: "true",
+    ...(process.env.OMNIROUTE_POSTGRES_URL
+      ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+      : {}),
     NO_COLOR: "1",
   };
   // An inherited marker makes Node treat this nested --test run as recursive

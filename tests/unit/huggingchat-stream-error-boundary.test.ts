@@ -33,7 +33,9 @@ function runFixture(testRoot: string): Promise<ChildResult> {
     API_KEY_SECRET: SYNTHETIC_API_KEY_SECRET,
     APP_LOG_TO_FILE: "false",
     DATA_DIR: dataDir,
-    DISABLE_SQLITE_AUTO_BACKUP: "true",
+    ...(process.env.OMNIROUTE_POSTGRES_URL
+      ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+      : {}),
     FORCE_COLOR: "0",
     LANG: "C.UTF-8",
     NODE_ENV: "test",

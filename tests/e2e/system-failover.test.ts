@@ -8,6 +8,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { MockUpstreamServer, buildCompletion, buildError } from "./helpers/mockUpstreamServer.ts";
+import { getTestBackend } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-system-failover-"));
 const DASHBOARD_PORT = await getFreePort();
@@ -24,10 +25,9 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
 
-function resetConnectionCooldowns() {
+async function resetConnectionCooldowns() {
   accountFallback.clearAllModelLockouts();
-  const db = core.getDbInstance() as any;
-  db.prepare(
+  await getTestBackend().execute(
     `UPDATE provider_connections
      SET rate_limited_until = NULL,
          test_status = 'active',
@@ -38,9 +38,8 @@ function resetConnectionCooldowns() {
          error_code = NULL,
          last_error_at = NULL
      WHERE rate_limited_until IS NOT NULL
-        OR test_status != 'active'`
-  ).run();
-  db.pragma("wal_checkpoint(TRUNCATE)");
+        OR test_status IS DISTINCT FROM 'active'`
+  );
 }
 
 function getFreePort() {
@@ -351,7 +350,7 @@ test.before(async () => {
     setupComplete: true,
   });
 
-  core.closeDbInstance();
+  await core.resetDbInstance();
 
   app = createServerProcess(TEST_DATA_DIR, DASHBOARD_PORT);
   await waitForServer(app.baseUrl, app);
@@ -365,7 +364,7 @@ test.after(async () => {
   if (app) await stopProcess(app.child);
   await serverA.stop();
   await serverB.stop();
-  core.closeDbInstance();
+  await core.resetDbInstance();
   await fsp.rm(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -400,7 +399,7 @@ test("500 Internal Server Error: combo falls back to Server B", async () => {
 test("503 Service Unavailable: combo falls back to Server B", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(503, "Service Unavailable")]);
   serverB.resetState(TOKEN_B);
 
@@ -416,7 +415,7 @@ test("503 Service Unavailable: combo falls back to Server B", async () => {
 test("both servers fail (500): request returns a 5xx error to the client", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(500, "A is down")]);
   serverB.resetState(TOKEN_B, [buildError(500, "B is down")]);
 
@@ -428,7 +427,7 @@ test("both servers fail (500): request returns a 5xx error to the client", async
 test("combo fallback to Server B survives sequential 503 failures from Server A", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(503, "transient blip"), buildError(503, "second blip")]);
   serverB.resetState(TOKEN_B);
 
@@ -453,7 +452,7 @@ test("combo fallback to Server B survives sequential 503 failures from Server A"
 test("429 with Retry-After and wait-for-cooldown: primary retries then falls back to B", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [
     buildError(429, "rate limited, retry after 1s", { "Retry-After": "1" }),
   ]);
@@ -475,7 +474,7 @@ test("429 with Retry-After and wait-for-cooldown: primary retries then falls bac
 test("failoverBeforeRetry enabled: upstream error triggers immediate failover to next target", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(429, "rate limited")]);
   serverB.resetState(TOKEN_B);
 
@@ -507,7 +506,7 @@ test("failoverBeforeRetry disabled: 429 triggers executor intra-URL retry, succe
   });
   assert.equal(patchRes.status, 200);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   // Wait for any residual cooldowns to expire
   await sleep(300);
   // One 429, then the default (200) on retry
@@ -544,7 +543,7 @@ test("maxSetRetries: both A and B fail first pass, A 429 again, B 200 on retry",
   });
   assert.equal(patchRes.status, 200);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   // Set try 0: A 429, B 500 — both fail
   // Set try 1: A 429, B 200 — B succeeds
   serverA.resetState(TOKEN_A, [buildError(429, "rate limited"), buildError(429, "rate limited")]);
@@ -597,7 +596,7 @@ test("same server failoverBeforeRetry disabled: first model 429 retried before t
   assert.equal(patchRes.status, 200);
   await sleep(300);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(429, "rate limited")]);
   serverA.resetState(TOKEN_A2);
 
@@ -618,7 +617,7 @@ test("same server failoverBeforeRetry enabled: first model 429 skipped to second
   assert.ok(app);
   await sleep(300);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(429, "rate limited")]);
   serverA.resetState(TOKEN_A2);
 
@@ -637,7 +636,7 @@ test("same server failoverBeforeRetry enabled: first model 429 skipped to second
 test("single provider, modelA 500: combo fails over to modelB", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(500, "model A error")]);
 
   const result = await postChat(app.baseUrl, "sys-single-provider", "test modelA 500");
@@ -650,7 +649,7 @@ test("single provider, modelA 500: combo fails over to modelB", async () => {
 test("single provider, modelA 503: combo fails over to modelB", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(503, "Service Unavailable")]);
 
   const result = await postChat(app.baseUrl, "sys-single-provider", "test modelA 503");
@@ -663,7 +662,7 @@ test("single provider, modelA 503: combo fails over to modelB", async () => {
 test("single provider, modelA 429 with fobr: immediate failover to modelB", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(429, "rate limited")]);
 
   const result = await postChat(app.baseUrl, "sys-single-provider-fobr", "test fobr");
@@ -676,7 +675,7 @@ test("single provider, modelA 429 with fobr: immediate failover to modelB", asyn
 test("single provider, modelA 500 with fobr: modelA retry", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(500, "Oops!")]);
 
   const result = await postChat(app.baseUrl, "sys-single-provider-fobr", "test fobr");
@@ -689,7 +688,7 @@ test("single provider, modelA 500 with fobr: modelA retry", async () => {
 test("single provider, both models fail: request returns 5xx to client", async () => {
   assert.ok(app);
   await resetBreakers(app.baseUrl);
-  resetConnectionCooldowns();
+  await resetConnectionCooldowns();
   serverA.resetState(TOKEN_A, [buildError(500, "modelA down"), buildError(500, "modelB down")]);
 
   const result = await postChat(app.baseUrl, "sys-single-provider", "both down");

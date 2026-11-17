@@ -32,7 +32,9 @@ function runTransportScenario(scenario: TransportScenario): TransportFailureResu
     env: {
       NODE_ENV: "test",
       NO_COLOR: "1",
-      DISABLE_SQLITE_AUTO_BACKUP: "true",
+      ...(process.env.OMNIROUTE_POSTGRES_URL
+        ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+        : {}),
     },
   });
 

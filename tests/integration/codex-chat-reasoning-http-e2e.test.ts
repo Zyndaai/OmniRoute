@@ -304,7 +304,7 @@ test("chat completions streams Codex Responses reasoning through real route HTTP
   } finally {
     globalThis.fetch = originalFetch;
     if (routeServer) await closeServer(routeServer);
-    core.closeDbInstance({ checkpointMode: null });
+    await core.resetDbInstance();
     await fsp.rm(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

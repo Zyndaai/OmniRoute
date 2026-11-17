@@ -72,7 +72,7 @@ after(async () => {
   await callLogArtifactWriter.closeCallLogArtifactWriter();
   usageHistory.clearPendingRequests();
   await loggerResource.closeSharedLoggerResource();
-  coreDb.resetDbInstance();
+  await coreDb.resetDbInstance();
 });
 
 function jsonlBody(lines: string[], trailingNewline = true): ReadableStream<Uint8Array> {
@@ -264,11 +264,12 @@ test("HuggingChat partial failures reach stream finalization, persistence, and f
     0,
     "the child must start without completed state"
   );
-  const previousPersistence = coreDb
-    .getDbInstance()
-    .prepare("SELECT COUNT(*) AS count FROM call_logs WHERE connection_id = ? AND model = ?")
-    .get(connectionId, model) as { count: number };
-  assert.equal(previousPersistence.count, 0, "the child must not reuse a prior persisted identity");
+  const { getTestBackend } = await import("../../helpers/postgres.ts");
+  const previousPersistence = (await getTestBackend().queryOne<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM call_logs WHERE connection_id = $1 AND model = $2",
+    [connectionId, model]
+  )) as { count: number };
+  assert.equal(Number(previousPersistence.count), 0, "the child must not reuse a prior persisted identity");
   const requestId = usageHistory.trackPendingRequest(model, provider, connectionId, true);
   assert.ok(requestId, "the full-pipeline test must own a real pending request");
 

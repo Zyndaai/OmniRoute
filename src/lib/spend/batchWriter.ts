@@ -48,6 +48,12 @@ export class SpendBatchWriter {
   private timer: NodeJS.Timeout | null = null;
   private started = false;
   private flushPromise: Promise<FlushResult> | null = null;
+  /**
+   * Incremented whenever a flush settles (entries leave `inFlightEntries`). A reader that
+   * adds a database total to {@link getPendingCostTotal} across an await compares this
+   * before and after: if it changed, flushed entries may be in neither number.
+   */
+  flushGeneration = 0;
   private persistEntries: (entries: BufferedCostEntry[]) => Promise<void> | void;
   private logger: Pick<Console, "log" | "error">;
   private flushIntervalMs: number;
@@ -157,6 +163,7 @@ export class SpendBatchWriter {
       } finally {
         this.inFlightEntries = [];
         this.flushPromise = null;
+        this.flushGeneration++;
       }
     })();
 

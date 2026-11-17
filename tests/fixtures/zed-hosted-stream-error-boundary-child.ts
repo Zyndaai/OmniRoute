@@ -150,7 +150,7 @@ function assertNoSensitiveFailureText(text: string): void {
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await loggerResource.closeSharedLoggerResource();
   globalThis.fetch = originalFetch;
   if (originalDataDir === undefined) delete process.env.DATA_DIR;

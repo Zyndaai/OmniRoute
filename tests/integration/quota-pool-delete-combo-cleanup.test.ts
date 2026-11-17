@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), "omniroute-quota-pool-delete-combo-cleanup-")
@@ -26,15 +27,8 @@ const { parseQuotaModelName, quotaGroupSlug } =
 
 type Combo = Awaited<ReturnType<typeof combosDb.getCombos>>[number];
 
-type Db = {
-  prepare: (sql: string) => {
-    all: (...params: unknown[]) => unknown[];
-    get: (...params: unknown[]) => unknown;
-  };
-};
-
-function resetDb() {
-  core.resetDbInstance();
+async function resetDb() {
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -70,54 +64,54 @@ async function deletePoolThroughRoute(poolId: string): Promise<Response> {
   return poolIdRoute.DELETE(request, { params: Promise.resolve({ id: poolId }) });
 }
 
-function getAllowedQuotas(apiKeyId: string): string[] {
-  const db = core.getDbInstance() as unknown as Db;
-  const row = db.prepare("SELECT allowed_quotas FROM api_keys WHERE id = ?").get(apiKeyId) as {
-    allowed_quotas: string;
-  };
-  return JSON.parse(row.allowed_quotas) as string[];
+async function getAllowedQuotas(apiKeyId: string): Promise<string[]> {
+  const row = await getTestBackend().queryOne<{ allowed_quotas: string[] | string }>(
+    "SELECT allowed_quotas FROM api_keys WHERE id = $1",
+    [apiKeyId]
+  );
+  const value = row?.allowed_quotas;
+  return (typeof value === "string" ? JSON.parse(value) : value) as string[];
 }
 
-function countRows(sql: string, id: string): number {
-  const db = core.getDbInstance() as unknown as Db;
-  const row = db.prepare(sql).get(id) as { count: number };
-  return row.count;
+async function countRows(sql: string, id: string): Promise<number> {
+  const row = await getTestBackend().queryOne<{ count: number }>(sql, [id]);
+  return Number(row?.count);
 }
 
 function nextImmediate(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-test.beforeEach(() => {
-  resetDb();
+test.beforeEach(async () => {
+  await resetDb();
   compliance.initAuditLog();
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("DELETE pool waits for scoped quota-combo cleanup before returning 204", async () => {
-  const targetGroup = groupsDb.createGroup("Delete Target Group");
-  const otherGroup = groupsDb.createGroup("Delete Other Group");
+  const targetGroup = await groupsDb.createGroup("Delete Target Group");
+  const otherGroup = await groupsDb.createGroup("Delete Other Group");
   const targetConnectionId = await createConnection("openrouter", "delete-target-openrouter");
   const sameGroupConnectionId = await createConnection("baidu", "delete-control-baidu");
   const otherGroupConnectionId = await createConnection("openrouter", "delete-control-openrouter");
   const apiKey = await apiKeysDb.createApiKey("Delete Pool Key", "delete-pool-machine");
 
-  const targetPool = poolsDb.createPool({
+  const targetPool = await poolsDb.createPool({
     connectionId: targetConnectionId,
     name: "Delete Target Pool",
     groupId: targetGroup.id,
     allocations: [{ apiKeyId: apiKey.id, weight: 100, policy: "hard" }],
   });
-  const sameGroupPool = poolsDb.createPool({
+  const sameGroupPool = await poolsDb.createPool({
     connectionId: sameGroupConnectionId,
     name: "Same Group Different Provider",
     groupId: targetGroup.id,
   });
-  const otherGroupPool = poolsDb.createPool({
+  const otherGroupPool = await poolsDb.createPool({
     connectionId: otherGroupConnectionId,
     name: "Different Group Same Provider",
     groupId: otherGroup.id,
@@ -148,19 +142,22 @@ test("DELETE pool waits for scoped quota-combo cleanup before returning 204", as
     await combosDb.getComboByName(ordinaryCombo.name as string),
     "ordinary combo must exist"
   );
-  assert.ok(poolsDb.getPool(targetPool.id), "target pool row must exist before DELETE");
+  assert.ok(await poolsDb.getPool(targetPool.id), "target pool row must exist before DELETE");
   assert.equal(
-    countRows(
-      "SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = ?",
+    await countRows(
+      "SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = $1",
       targetPool.id
     ),
     1
   );
   assert.equal(
-    countRows("SELECT count(*) AS count FROM quota_allocations WHERE pool_id = ?", targetPool.id),
+    await countRows(
+      "SELECT count(*) AS count FROM quota_allocations WHERE pool_id = $1",
+      targetPool.id
+    ),
     1
   );
-  assert.deepEqual(getAllowedQuotas(apiKey.id), [targetPool.id, otherGroupPool.id]);
+  assert.deepEqual(await getAllowedQuotas(apiKey.id), [targetPool.id, otherGroupPool.id]);
 
   const response = await deletePoolThroughRoute(targetPool.id);
 
@@ -186,20 +183,23 @@ test("DELETE pool waits for scoped quota-combo cleanup before returning 204", as
     ordinaryCombo,
     "ordinary user combo must remain unchanged"
   );
-  assert.equal(poolsDb.getPool(targetPool.id), null);
+  assert.equal(await poolsDb.getPool(targetPool.id), null);
   assert.equal(
-    countRows(
-      "SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = ?",
+    await countRows(
+      "SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = $1",
       targetPool.id
     ),
     0
   );
   assert.equal(
-    countRows("SELECT count(*) AS count FROM quota_allocations WHERE pool_id = ?", targetPool.id),
+    await countRows(
+      "SELECT count(*) AS count FROM quota_allocations WHERE pool_id = $1",
+      targetPool.id
+    ),
     0
   );
-  assert.deepEqual(getAllowedQuotas(apiKey.id), [otherGroupPool.id]);
-  const auditEvents = compliance.getAuditLog({ action: "quota.pool.deleted", limit: 10 });
+  assert.deepEqual(await getAllowedQuotas(apiKey.id), [otherGroupPool.id]);
+  const auditEvents = await compliance.getAuditLog({ action: "quota.pool.deleted", limit: 10 });
   assert.ok(
     auditEvents.some(
       (event) =>
@@ -212,9 +212,9 @@ test("DELETE pool waits for scoped quota-combo cleanup before returning 204", as
 });
 
 test("DELETE prevents an in-flight create sync from recreating quota combos", async () => {
-  const group = groupsDb.createGroup("Immediate Create Delete Group");
+  const group = await groupsDb.createGroup("Immediate Create Delete Group");
   const connectionId = await createConnection("openrouter", "immediate-create-delete");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Immediate Create Delete Pool",
     groupId: group.id,
@@ -225,7 +225,7 @@ test("DELETE prevents an in-flight create sync from recreating quota combos", as
   await nextImmediate();
 
   assert.equal(deleted, true);
-  assert.equal(poolsDb.getPool(pool.id), null);
+  assert.equal(await poolsDb.getPool(pool.id), null);
   assert.deepEqual(
     quotaNamesFor(await combosDb.getCombos(), group.name, "openrouter"),
     [],
@@ -234,9 +234,9 @@ test("DELETE prevents an in-flight create sync from recreating quota combos", as
 });
 
 test("DELETE prevents an in-flight update sync from recreating quota combos", async () => {
-  const group = groupsDb.createGroup("Immediate Update Delete Group");
+  const group = await groupsDb.createGroup("Immediate Update Delete Group");
   const connectionId = await createConnection("openrouter", "immediate-update-delete");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Immediate Update Delete Pool",
     groupId: group.id,
@@ -247,13 +247,13 @@ test("DELETE prevents an in-flight update sync from recreating quota combos", as
   await removeQuotaCombosForPool(pool.id);
   assert.deepEqual(quotaNamesFor(await combosDb.getCombos(), group.name, "openrouter"), []);
 
-  assert.ok(poolsDb.updatePool(pool.id, { name: "Updated Then Deleted Pool" }));
+  assert.ok(await poolsDb.updatePool(pool.id, { name: "Updated Then Deleted Pool" }));
   const deleted = await poolsDb.deletePool(pool.id);
   await nextImmediate();
   await nextImmediate();
 
   assert.equal(deleted, true);
-  assert.equal(poolsDb.getPool(pool.id), null);
+  assert.equal(await poolsDb.getPool(pool.id), null);
   assert.deepEqual(
     quotaNamesFor(await combosDb.getCombos(), group.name, "openrouter"),
     [],
@@ -261,11 +261,11 @@ test("DELETE prevents an in-flight update sync from recreating quota combos", as
   );
 });
 
-test("DELETE rejects a synchronous pool update once deletion has started", async () => {
-  const oldGroup = groupsDb.createGroup("Deleting Pool Old Group");
-  const newGroup = groupsDb.createGroup("Deleting Pool New Group");
+test("DELETE rejects a pool update issued once deletion has started", async () => {
+  const oldGroup = await groupsDb.createGroup("Deleting Pool Old Group");
+  const newGroup = await groupsDb.createGroup("Deleting Pool New Group");
   const connectionId = await createConnection("openrouter", "delete-update-race");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Delete Update Race Pool",
     groupId: oldGroup.id,
@@ -276,28 +276,29 @@ test("DELETE rejects a synchronous pool update once deletion has started", async
   assert.ok(quotaNamesFor(await combosDb.getCombos(), oldGroup.name, "openrouter").length > 0);
 
   const deleting = poolsDb.deletePool(pool.id);
-  const updated = poolsDb.updatePool(pool.id, { groupId: newGroup.id });
+  const updating = poolsDb.updatePool(pool.id, { groupId: newGroup.id });
   const deleted = await deleting;
+  const updated = await updating;
   await nextImmediate();
   await nextImmediate();
 
   assert.equal(updated, null, "a pool must become immutable as soon as deletion starts");
   assert.equal(deleted, true);
-  assert.equal(poolsDb.getPool(pool.id), null);
+  assert.equal(await poolsDb.getPool(pool.id), null);
   assert.deepEqual(quotaNamesFor(await combosDb.getCombos(), oldGroup.name, "openrouter"), []);
   assert.deepEqual(quotaNamesFor(await combosDb.getCombos(), newGroup.name, "openrouter"), []);
 });
 
-test("DELETE makes a synchronous allocation upsert a no-op once deletion has started", async () => {
-  const group = groupsDb.createGroup("Deleting Pool Allocation Group");
+test("DELETE makes an allocation upsert issued once deletion has started a no-op", async () => {
+  const group = await groupsDb.createGroup("Deleting Pool Allocation Group");
   const targetConnectionId = await createConnection("openrouter", "delete-allocation-target");
   const siblingConnectionId = await createConnection("baidu", "delete-allocation-sibling");
-  const targetPool = poolsDb.createPool({
+  const targetPool = await poolsDb.createPool({
     connectionId: targetConnectionId,
     name: "Delete Allocation Target",
     groupId: group.id,
   });
-  const siblingPool = poolsDb.createPool({
+  const siblingPool = await poolsDb.createPool({
     connectionId: siblingConnectionId,
     name: "Delete Allocation Sibling",
     groupId: group.id,
@@ -307,22 +308,25 @@ test("DELETE makes a synchronous allocation upsert a no-op once deletion has sta
   await nextImmediate();
 
   const deleting = poolsDb.deletePool(targetPool.id);
-  poolsDb.upsertAllocations(targetPool.id, [{ apiKeyId: apiKey.id, weight: 100, policy: "hard" }]);
+  const upserting = poolsDb.upsertAllocations(targetPool.id, [
+    { apiKeyId: apiKey.id, weight: 100, policy: "hard" },
+  ]);
   const deleted = await deleting;
+  await upserting;
 
   assert.equal(deleted, true);
-  assert.equal(poolsDb.getPool(targetPool.id), null);
+  assert.equal(await poolsDb.getPool(targetPool.id), null);
   assert.deepEqual(
-    poolsDb.getPool(siblingPool.id)?.allocations,
+    (await poolsDb.getPool(siblingPool.id))?.allocations,
     [],
     "an allocation upsert on a deleting pool must not mutate sibling pools"
   );
 });
 
 test("concurrent DELETE calls report one deletion and one missing pool", async () => {
-  const group = groupsDb.createGroup("Concurrent Delete Group");
+  const group = await groupsDb.createGroup("Concurrent Delete Group");
   const connectionId = await createConnection("openrouter", "concurrent-delete");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Concurrent Delete Pool",
     groupId: group.id,
@@ -331,15 +335,15 @@ test("concurrent DELETE calls report one deletion and one missing pool", async (
   const results = await Promise.all([poolsDb.deletePool(pool.id), poolsDb.deletePool(pool.id)]);
 
   assert.deepEqual(results, [true, false]);
-  assert.equal(poolsDb.getPool(pool.id), null);
+  assert.equal(await poolsDb.getPool(pool.id), null);
   assert.deepEqual(quotaNamesFor(await combosDb.getCombos(), group.name, "openrouter"), []);
 });
 
 test("DELETE nonexistent pool returns sanitized 404 without changing combos", async () => {
   const missingPoolId = "pool-that-never-existed";
-  const group = groupsDb.createGroup("Missing Pool Control Group");
+  const group = await groupsDb.createGroup("Missing Pool Control Group");
   const connectionId = await createConnection("baidu", "missing-pool-control-baidu");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Missing Pool Control",
     groupId: group.id,
@@ -367,18 +371,18 @@ test("DELETE nonexistent pool returns sanitized 404 without changing combos", as
   assert.doesNotMatch(JSON.stringify(body), /\s+at\s+\//, "404 must not expose a stack trace");
   assert.deepEqual(await combosDb.getCombos(), before);
   assert.deepEqual(
-    getAllowedQuotas(apiKey.id),
+    await getAllowedQuotas(apiKey.id),
     [missingPoolId, pool.id],
     "a missing-pool DELETE must not mutate API key permissions"
   );
-  assert.ok(poolsDb.getPool(pool.id), "unrelated pool must remain");
+  assert.ok(await poolsDb.getPool(pool.id), "unrelated pool must remain");
 });
 
 test("DELETE keeps relational cleanup non-fatal when quota-combo listing fails", async () => {
-  const group = groupsDb.createGroup("Cleanup Failure Group");
+  const group = await groupsDb.createGroup("Cleanup Failure Group");
   const connectionId = await createConnection("openrouter", "cleanup-failure-openrouter");
   const apiKey = await apiKeysDb.createApiKey("Cleanup Failure Key", "cleanup-failure-machine");
-  const pool = poolsDb.createPool({
+  const pool = await poolsDb.createPool({
     connectionId,
     name: "Cleanup Failure Pool",
     groupId: group.id,
@@ -390,17 +394,18 @@ test("DELETE keeps relational cleanup non-fatal when quota-combo listing fails",
   await nextImmediate();
   assert.ok(quotaNamesFor(await combosDb.getCombos(), group.name, "openrouter").length > 0);
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
+  const db = getTestBackend();
+  const originalQuery = db.query.bind(db);
   const unhandled: unknown[] = [];
   const onUnhandled = (reason: unknown) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandled);
-  db.prepare = ((sql: string) => {
-    if (sql.startsWith("SELECT data, sort_order, context_cache_protection FROM combos ORDER BY")) {
+  db.query = (async (sql: string, params?: unknown[]) => {
+    const normalized = String(sql).replace(/\s+/g, " ");
+    if (normalized.includes("FROM combos ORDER BY") && !normalized.includes("FOR UPDATE")) {
       throw new Error("forced quota combo listing failure");
     }
-    return originalPrepare(sql);
-  }) as typeof db.prepare;
+    return originalQuery(sql, params);
+  }) as typeof db.query;
 
   let response: Response;
   try {
@@ -408,20 +413,23 @@ test("DELETE keeps relational cleanup non-fatal when quota-combo listing fails",
     await nextImmediate();
     await nextImmediate();
   } finally {
-    db.prepare = originalPrepare as typeof db.prepare;
+    db.query = originalQuery;
     process.off("unhandledRejection", onUnhandled);
   }
 
   assert.equal(response!.status, 204);
   assert.deepEqual(unhandled, [], "guarded combo failure must not produce unhandledRejection");
-  assert.equal(poolsDb.getPool(pool.id), null);
+  assert.equal(await poolsDb.getPool(pool.id), null);
   assert.equal(
-    countRows("SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = ?", pool.id),
+    await countRows(
+      "SELECT count(*) AS count FROM quota_pool_connections WHERE pool_id = $1",
+      pool.id
+    ),
     0
   );
   assert.equal(
-    countRows("SELECT count(*) AS count FROM quota_allocations WHERE pool_id = ?", pool.id),
+    await countRows("SELECT count(*) AS count FROM quota_allocations WHERE pool_id = $1", pool.id),
     0
   );
-  assert.deepEqual(getAllowedQuotas(apiKey.id), []);
+  assert.deepEqual(await getAllowedQuotas(apiKey.id), []);
 });

@@ -9,9 +9,8 @@ export default defineConfig({
     // suites assume they start enabled, like tests/_setup/isolateDataDir.ts does for node:test.
     env: { OMNIROUTE_NOAUTH_PROVIDERS_DEFAULT: "enabled" },
     pool: "threads",
-    // MCP suites initialize isolated SQLite databases; Vitest 5 at 20 workers
-    // makes native migration/close operations contend and flakes audit tests.
-    // Keep all files/tests enabled while bounding the worker fan-out.
+    // Each test file gets its own PostgreSQL database (cloned from the migrated template).
+    setupFiles: ["./tests/_setup/vitestPostgres.ts"],
     maxWorkers: 4,
     fileParallelism: true,
     maxConcurrency: 20,
@@ -23,7 +22,6 @@ export default defineConfig({
       // #8890 shipped this suite into a directory no runner collects, so it had
       // never executed once (check:test-discovery flags it as a NEW orphan).
       "open-sse/services/__tests__/fail-fast-concurrency-gate.test.ts",
-      "src/lib/memory/__tests__/generic-backend.test.ts",
       "tests/unit/autoCombo/**/*.test.ts",
       "tests/unit/api/**/*.spec.ts",
       "tests/unit/encryption.spec.ts",

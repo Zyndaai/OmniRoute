@@ -34,7 +34,7 @@ const [
 
 test.after(async () => {
   await closeSharedLoggerResource();
-  dbCore.resetDbInstance();
+  await dbCore.resetDbInstance();
 });
 
 const encoder = new TextEncoder();

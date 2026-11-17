@@ -21,6 +21,7 @@ process.env.API_KEY_SECRET = "provider-last-error-test-secret";
 process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 
 const core = await import("../../../src/lib/db/core.ts");
+const { getTestBackend } = await import("../../helpers/postgres.ts");
 const providersDb = await import("../../../src/lib/db/providers.ts");
 const loggerResource = await import("../../../src/shared/utils/loggerResource.ts");
 const { runAsProbe } = await import("../../../src/shared/utils/probeOrigin.ts");
@@ -33,16 +34,16 @@ function restoreEnv(name: keyof typeof originalEnv): void {
   else process.env[name] = original;
 }
 
-function readLastError(connectionId: string): string | null {
-  const row = core
-    .getDbInstance()
-    .prepare("SELECT last_error FROM provider_connections WHERE id = ?")
-    .get(connectionId) as { last_error: string | null } | undefined;
+async function readLastError(connectionId: string): Promise<string | null> {
+  const row = await getTestBackend().queryOne<{ last_error: string | null }>(
+    "SELECT last_error FROM provider_connections WHERE id = $1",
+    [connectionId]
+  );
   return row?.last_error ?? null;
 }
 
 test.after(async () => {
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await loggerResource.closeSharedLoggerResource();
   restoreEnv("DATA_DIR");
   restoreEnv("OMNIROUTE_PLUGINS_DIR");
@@ -95,9 +96,9 @@ test("normal and probe failures sanitize provider_connections.lastError at the w
   );
 
   const persisted = {
-    normal: readLastError(normal.id),
-    probe: readLastError(probe.id),
-    terminal: readLastError(terminal.id),
+    normal: await readLastError(normal.id),
+    probe: await readLastError(probe.id),
+    terminal: await readLastError(terminal.id),
   };
   assert.match(String(persisted.normal), /provider failed/i);
   assert.match(String(persisted.probe), /provider failed/i);

@@ -1,12 +1,10 @@
 // Shared teardown for tests that own their own temporary DATA_DIR.
 //
-// Why this exists (#13290): a test that opens the SQLite DB and then removes its
-// temp DATA_DIR in `test.after()` fails on Windows with EPERM, because Windows
-// refuses to remove a directory while any handle on it is still open. The tell is
-// `storage.sqlite-shm` / `-wal` left behind next to the database file.
+// Why this exists (#13290): Windows refuses to remove a directory while any handle on it is
+// still open (call-log artifact files, for example), so the DB pool is closed first. The
+// database itself lives in PostgreSQL; DATA_DIR only holds files.
 //
-// `maxRetries` cannot help: nothing ever closes the connection, so every retry
-// hits the same open handle. The `process.on("exit")` fallback in isolateDataDir.ts
+// `maxRetries` cannot help while a handle stays open. The `process.on("exit")` fallback in isolateDataDir.ts
 // does not cover these tests either — it only runs when the test does NOT set
 // DATA_DIR itself, which is exactly the case that fails here.
 //
@@ -18,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Close the SQLite singleton if the DB module was ever loaded.
+ * Close the DB pool if the DB module was ever loaded.
  *
  * Imported lazily and defensively: most callers never touch the database, and a
  * static import would drag the whole DB layer into every test that only needs a
@@ -27,7 +25,7 @@ import path from "node:path";
 async function closeDbIfOpen(): Promise<void> {
   try {
     const core = await import("../../src/lib/db/core.ts");
-    core.resetDbInstance?.();
+    await core.resetDbInstance?.();
   } catch {
     // The DB module is absent, failed to load, or was never initialised.
     // Nothing to close — cleanup continues.

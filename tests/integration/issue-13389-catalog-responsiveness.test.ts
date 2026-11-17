@@ -4,10 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
-import { unexpectedCatalogNetworkRequests } from "../_helpers/catalogNetworkGuard13389.ts";
+
+const { unexpectedCatalogNetworkRequests } =
+  await import("../_helpers/catalogNetworkGuard13389.ts");
 
 // Exercise the real GET route and an unrelated health route against isolated
-// SQLite storage. Model discovery is seeded; sockets stay closed.
+// database storage. Model discovery is seeded; sockets stay closed.
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-13389-budget-"));
 Object.assign(process.env, {
   DATA_DIR: dataDir,
@@ -26,6 +28,7 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const keysDb = await import("../../src/lib/db/apiKeys.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const readCache = await import("../../src/lib/db/readCache.ts");
+const { saveModelsDevPricing } = await import("../../src/lib/modelsDevSync.ts");
 const catalog = await import("../../src/app/api/v1/models/catalog.ts");
 const modelsRoute = await import("../../src/app/api/v1/models/route.ts");
 const healthRoute = await import("../../src/app/api/health/ping/route.ts");
@@ -87,7 +90,7 @@ async function seedFixture() {
   await providersDb.createProviderNode({
     id: providerId,
     type: "openai-compatible",
-    apiType: "chat-completions",
+    apiType: "chat",
     name: "Catalog #13389 synthetic provider",
     prefix,
     baseUrl: "https://catalog-13389.invalid/v1",
@@ -140,10 +143,7 @@ async function seedFixture() {
   const prices = Object.fromEntries(
     Array.from({ length: aliasEnd }, (_, i) => [modelId(i), { input: 1.25, output: 5 }])
   );
-  core
-    .getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run("models_dev_pricing", providerId, JSON.stringify(prices));
+  await saveModelsDevPricing({ [providerId]: prices });
   apiKey = (await keysDb.createApiKey("catalog13389 probe", "catalog13389-probe-machine")).key;
   // Flush the sync writer's deferred reconcile before starting timed observations.
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -275,8 +275,8 @@ test("#13389 large-catalog cold, warm and concurrent budgets", { timeout: 120_00
   });
 });
 
-test.after(() => {
-  core.resetDbInstance();
+test.after(async () => {
+  await core.resetDbInstance();
   keysDb.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

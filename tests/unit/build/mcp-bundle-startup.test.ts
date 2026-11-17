@@ -49,7 +49,6 @@ test("MCP server bundle imports successfully on Node 24", () => {
         env: {
           ...process.env,
           DATA_DIR: join(outDir, "data"),
-          DISABLE_SQLITE_AUTO_BACKUP: "true",
           JWT_SECRET: "mcp-bundle-startup-test-jwt-secret-000",
           API_KEY_SECRET: "mcp-bundle-startup-test-api-key-secret",
         },

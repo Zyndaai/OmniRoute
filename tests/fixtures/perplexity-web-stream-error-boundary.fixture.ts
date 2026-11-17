@@ -186,7 +186,7 @@ test.after(async () => {
     "call-log writes must drain before the isolated DATA_DIR is removed"
   );
   await closeCallLogArtifactWriter();
-  core.resetDbInstance();
+  await core.resetDbInstance();
 });
 
 test("pre-content Perplexity failures remain unready and return a sanitized 502", async () => {

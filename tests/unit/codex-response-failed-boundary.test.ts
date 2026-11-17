@@ -26,7 +26,9 @@ function buildFixtureEnv(): NodeJS.ProcessEnv {
     NODE_ENV: "test",
     APP_LOG_TO_FILE: "false",
     API_KEY_SECRET: "codex-boundary-fixture-api-key-secret-20260902",
-    DISABLE_SQLITE_AUTO_BACKUP: "true",
+    ...(process.env.OMNIROUTE_POSTGRES_URL
+      ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+      : {}),
   };
 
   for (const key of CHILD_RUNTIME_ENV_KEYS) {

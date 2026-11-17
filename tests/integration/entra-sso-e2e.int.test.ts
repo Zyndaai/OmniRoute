@@ -48,7 +48,7 @@ const AUDIENCE = "api://omniroute-e2e";
 const KID = "e2e-key";
 const SCRIPT = path.resolve("scripts/cli/omniroute-sso.mjs");
 
-const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
 const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
 const { createKeyGroup } = await import("../../src/lib/db/apiKeyGroups.ts");
@@ -275,7 +275,7 @@ before(async () => {
   await startAuthority();
   await startGateway();
 
-  keyGroupId = createKeyGroup("E2E Engineering", "mapped from the stub tenant").id;
+  keyGroupId = (await createKeyGroup("E2E Engineering", "mapped from the stub tenant")).id;
   await updateSettings({
     entraSsoEnabled: true,
     entraAuthorityHost: authorityUrl,
@@ -289,11 +289,11 @@ before(async () => {
   resetEntraJwksCache();
 });
 
-after(() => {
+after(async () => {
   if (!ENABLED) return;
   authority?.close();
   gateway?.close();
-  resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
@@ -351,10 +351,10 @@ describe("Entra SSO end to end", () => {
 
     const { getSsoIdentity } = await import("../../src/lib/db/ssoIdentities.ts");
     const { getKeyGroupsForApiKey } = await import("../../src/lib/db/apiKeyGroups.ts");
-    const identity = getSsoIdentity("e2e-user-oid");
+    const identity = await getSsoIdentity("e2e-user-oid");
     assert.ok(identity, "the shadow identity was provisioned");
     assert.deepEqual(
-      getKeyGroupsForApiKey(identity.apiKeyId).map((g) => g.id),
+      (await getKeyGroupsForApiKey(identity.apiKeyId)).map((g) => g.id),
       [keyGroupId]
     );
   });

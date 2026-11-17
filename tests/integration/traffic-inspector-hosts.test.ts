@@ -14,22 +14,21 @@ import path from "node:path";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ti-hosts-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
 
-// Boot DB so migrations run
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const hostsRoute = await import("../../src/app/api/tools/traffic-inspector/hosts/route.ts");
 const hostDetailRoute =
   await import("../../src/app/api/tools/traffic-inspector/hosts/[host]/route.ts");
 
 test.beforeEach(async () => {
-  resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-  // Re-init DB with fresh migrations
-  await import("../../src/lib/db/core.ts").then((m) => m.getDbInstance());
 });
 
-test.after(() => {
+test.after(async () => {
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

@@ -289,11 +289,32 @@ async function getBudgetRefusalReason(
   return null;
 }
 
+/**
+ * Stored spend plus spend still buffered in the batch writer. The stored total is read
+ * across an await; a flush that settles during it moves entries from the buffer into
+ * the table after the read, so they would be in neither number and the budget would
+ * fail open. Retry when a flush settled meanwhile; after the last attempt the sum can
+ * only over-count (fail closed).
+ */
+export async function storedPlusPending(
+  readStored: () => Promise<number>,
+  readPending: () => number,
+  writer: { flushGeneration: number } = spendBatchWriter
+): Promise<number> {
+  for (let attempt = 0; ; attempt++) {
+    const generation = writer.flushGeneration;
+    const pendingBefore = readPending();
+    const stored = await readStored();
+    if (writer.flushGeneration === generation) return stored + readPending();
+    if (attempt >= 2) return stored + Math.max(pendingBefore, readPending());
+  }
+}
+
 async function getBudgetWindowTotal(apiKeyId: string, periodStartAt: number): Promise<number> {
   try {
-    return (
-      (await loadCostTotal(apiKeyId, periodStartAt)) +
-      spendBatchWriter.getPendingCostTotal(apiKeyId, periodStartAt)
+    return await storedPlusPending(
+      () => loadCostTotal(apiKeyId, periodStartAt),
+      () => spendBatchWriter.getPendingCostTotal(apiKeyId, periodStartAt)
     );
   } catch {
     return 0;
@@ -306,11 +327,12 @@ async function getBudgetWindowRangeTotal(
   periodEndAt: number
 ): Promise<number> {
   try {
-    return (
-      sumEntries(
-        toCostEntries(await loadCostEntriesInRange(apiKeyId, periodStartAt, periodEndAt))
-      ) +
-      spendBatchWriter.getPendingCostTotal(apiKeyId, periodStartAt, periodEndAt)
+    return await storedPlusPending(
+      async () =>
+        sumEntries(
+          toCostEntries(await loadCostEntriesInRange(apiKeyId, periodStartAt, periodEndAt))
+        ),
+      () => spendBatchWriter.getPendingCostTotal(apiKeyId, periodStartAt, periodEndAt)
     );
   } catch {
     return 0;

@@ -38,13 +38,13 @@ test("a compression combo's own output styles reach the upstream body and the ca
     strategy: "priority",
     models: ["openai/gpt-4o-mini"],
   });
-  const compressionCombo = compressionCombosDb.createCompressionCombo({
+  const compressionCombo = await compressionCombosDb.createCompressionCombo({
     name: "Style combo",
     pipeline: [{ engine: "lite" }],
     outputStyles: [{ id: "less-code", level: "full" }],
   });
   assert.equal(
-    compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
+    await compressionCombosDb.assignRoutingCombo(compressionCombo.id, routingCombo.id as string),
     true
   );
 

@@ -30,7 +30,9 @@ test("Codex app-server lifecycle survives retries and settles disconnects (#1602
           DATA_DIR: join(scratch, "data"),
           OMNIROUTE_PLUGINS_DIR: join(scratch, "plugins"),
           APP_LOG_TO_FILE: "false",
-          DISABLE_SQLITE_AUTO_BACKUP: "true",
+          ...(process.env.OMNIROUTE_POSTGRES_URL
+            ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+            : {}),
         },
       }
     );

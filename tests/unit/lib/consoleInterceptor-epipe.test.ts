@@ -152,7 +152,7 @@ test("a non-EPIPE stream error is still fatal: it must be re-raised (#8181)", as
   const result = spawnSync(process.execPath, ["--import", "tsx/esm", childFile], {
     encoding: "utf8",
     timeout: 30_000,
-    env: { ...process.env, DISABLE_SQLITE_AUTO_BACKUP: "true" },
+    env: { ...process.env },
   });
 
   rmSync(childDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -194,7 +194,7 @@ test("the stdio guard is installed even when file logging is disabled (#8181)", 
   const result = spawnSync(process.execPath, ["--import", "tsx/esm", childFile], {
     encoding: "utf8",
     timeout: 30_000,
-    env: { ...process.env, DISABLE_SQLITE_AUTO_BACKUP: "true", APP_LOG_TO_FILE: "false" },
+    env: { ...process.env, APP_LOG_TO_FILE: "false" },
   });
 
   rmSync(childDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -79,11 +79,11 @@ async function ensureGeminiProvider(): Promise<boolean> {
       // The health check marks API-key connections as expired because it expects
       // OAuth refresh tokens. Force test_status=active via direct DB update.
       try {
-        const { getDbInstance } = await import("../../src/lib/db/core.ts");
-        const db = getDbInstance();
-        db.prepare(
-          "UPDATE provider_connections SET test_status = 'active', error_code = NULL, last_error = NULL WHERE id = ?"
-        ).run(geminiExpired.id);
+        const { getTestBackend } = await import("../helpers/postgres.ts");
+        await getTestBackend().execute(
+          "UPDATE provider_connections SET test_status = 'active', error_code = NULL, last_error = NULL WHERE id = $1",
+          [geminiExpired.id]
+        );
         console.log(`  [setup] Reactivated gemini connection ${geminiExpired.id.slice(0, 8)}…`);
         return true;
       } catch (dbErr) {
@@ -120,11 +120,11 @@ async function ensureGeminiProvider(): Promise<boolean> {
       // Force test_status=active via direct DB — the health check will otherwise
       // mark it expired immediately because there's no OAuth refresh token.
       try {
-        const { getDbInstance } = await import("../../src/lib/db/core.ts");
-        const db = getDbInstance();
-        db.prepare(
-          "UPDATE provider_connections SET test_status = 'active', error_code = NULL, last_error = NULL WHERE id = ?"
-        ).run(connId);
+        const { getTestBackend } = await import("../helpers/postgres.ts");
+        await getTestBackend().execute(
+          "UPDATE provider_connections SET test_status = 'active', error_code = NULL, last_error = NULL WHERE id = $1",
+          [connId]
+        );
         console.log(`  [setup] gemini provider created and activated (id=${connId.slice(0, 8)}…)`);
       } catch (dbErr) {
         console.warn(`  [setup] DB activation failed: ${dbErr}`);

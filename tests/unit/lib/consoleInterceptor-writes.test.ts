@@ -45,7 +45,7 @@ function runChild(body: string[]): ChildResult {
   const result = spawnSync(process.execPath, ["--import", "tsx/esm", childFile], {
     encoding: "utf8",
     timeout: 60_000,
-    env: { ...process.env, DISABLE_SQLITE_AUTO_BACKUP: "true" },
+    env: { ...process.env },
   });
 
   const lines = existsSync(logFile)

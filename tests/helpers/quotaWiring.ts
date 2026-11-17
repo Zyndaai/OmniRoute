@@ -65,7 +65,7 @@ export async function exerciseQuotaWiring(quotaStatus = 200) {
   globalThis.fetch = fixtureFetch;
   let client: import("@modelcontextprotocol/sdk/client/index.js").Client | undefined;
   let server: import("@modelcontextprotocol/sdk/server/mcp.js").McpServer | undefined;
-  let resetDb: (() => void) | undefined;
+  let resetDb: (() => Promise<void>) | undefined;
   let closeAudit: (() => boolean) | undefined;
   try {
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
@@ -77,7 +77,7 @@ export async function exerciseQuotaWiring(quotaStatus = 200) {
     globalThis.fetch = fixtureFetch;
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    server = createMcpServer();
+    server = await createMcpServer();
     client = new Client({ name: "quota-wiring-test", version: "1.0.0" });
     await server.connect(serverTransport);
     await client.connect(clientTransport);
@@ -115,7 +115,7 @@ export async function exerciseQuotaWiring(quotaStatus = 200) {
           closeAudit?.();
         } finally {
           try {
-            resetDb?.();
+            await resetDb?.();
           } finally {
             globalThis.fetch = originalFetch;
             for (const [key, value] of previousEnv) {

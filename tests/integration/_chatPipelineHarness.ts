@@ -25,9 +25,7 @@ export async function createChatPipelineHarness(prefix) {
   const callLogsDb = await import("../../src/lib/usage/callLogs.ts");
   const modelComboMappingsDb = await import("../../src/lib/db/modelComboMappings.ts");
   const readCacheDb = await import("../../src/lib/db/readCache.ts");
-  const memoryStore = await import("../../src/lib/memory/store.ts");
-  const memoryToolsModule = await import("../../open-sse/mcp-server/tools/memoryTools.ts");
-  const { invalidateMemorySettingsCache } = await import("../../src/lib/memory/settings.ts");
+  const { resetTestDb } = await import("../helpers/postgres.ts");
   const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
   const { skillExecutor } = await import("../../src/lib/skills/executor.ts");
   const builtinsModule = await import("../../src/lib/skills/builtins.ts");
@@ -282,7 +280,6 @@ export async function createChatPipelineHarness(prefix) {
     apiKeysDb.resetApiKeyState();
     readCacheDb.invalidateDbCache();
     reasoningRulesDb.invalidateReasoningRoutingRuleCache();
-    invalidateMemorySettingsCache();
     clearSkillState();
     await new Promise((resolve) => setTimeout(resolve, 20));
     // Call-log persistence is fire-and-forget and the first cold artifact-worker
@@ -295,7 +292,7 @@ export async function createChatPipelineHarness(prefix) {
         `[chat-pipeline-harness:${prefix}] call-log saves did not drain within 10s; resetting anyway`
       );
     }
-    core.resetDbInstance();
+    await resetTestDb();
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(testDataDir, { recursive: true });
     initTranslators();
@@ -310,7 +307,7 @@ export async function createChatPipelineHarness(prefix) {
     clearSkillState();
     resetAllCircuitBreakers();
     await callLogsDb.waitForCallLogSaves(10_000);
-    core.resetDbInstance();
+    await core.resetDbInstance();
     fs.rmSync(testDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 
@@ -375,8 +372,6 @@ export async function createChatPipelineHarness(prefix) {
     combosDb,
     core,
     handleChat,
-    memoryStore,
-    memoryTools: memoryToolsModule.memoryTools,
     modelComboMappingsDb,
     originalRetryDelayMs,
     getLatestCallLog,

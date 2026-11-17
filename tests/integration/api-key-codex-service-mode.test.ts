@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import Database from "better-sqlite3";
 import { createChatPipelineHarness } from "./_chatPipelineHarness.ts";
 
 const h = await createChatPipelineHarness("key-service-mode");
@@ -10,28 +8,6 @@ const { flushProxyLogsSync } = await import("../../src/lib/proxyLogger.ts");
 type RecordedBody = Record<string, unknown>;
 let calls: RecordedBody[] = [];
 let firstConnectionId: string;
-
-test("service mode: migration preserves existing rows and rejects invalid values", () => {
-  const db = new Database(":memory:");
-  try {
-    db.exec(
-      "CREATE TABLE api_keys (id TEXT PRIMARY KEY); INSERT INTO api_keys VALUES ('existing');"
-    );
-    db.exec(
-      readFileSync(
-        new URL("../../src/lib/db/migrations/205_api_key_codex_service_mode.sql", import.meta.url),
-        "utf8"
-      )
-    );
-    assert.deepEqual(db.prepare("SELECT * FROM api_keys").get(), {
-      id: "existing",
-      codex_service_mode: "inherit",
-    });
-    assert.throws(() => db.exec("UPDATE api_keys SET codex_service_mode = 'invalid'"));
-  } finally {
-    db.close();
-  }
-});
 
 test("service mode: management PATCH and GET round-trip the setting", async () => {
   const { PATCH, GET } = await import("../../src/app/api/keys/[id]/route.ts");
@@ -281,7 +257,7 @@ test("service mode: retries retain force and unsupported tiers never downgrade s
   assert.equal(attempts, 2);
   attempts = 0;
   const { setGlobalAutoLearnEnabled } = await import("../../src/lib/db/paramFilters.ts");
-  setGlobalAutoLearnEnabled(true);
+  await setGlobalAutoLearnEnabled(true);
   globalThis.fetch = async (_url, init: RequestInit = {}) => {
     attempts++;
     assert.equal(JSON.parse(String(init.body)).service_tier, "default");
@@ -295,7 +271,7 @@ test("service mode: retries retain force and unsupported tiers never downgrade s
     assert.equal(rejected.response.status, 400);
     assert.equal(attempts, 1);
   } finally {
-    setGlobalAutoLearnEnabled(false);
+    await setGlobalAutoLearnEnabled(false);
   }
 });
 

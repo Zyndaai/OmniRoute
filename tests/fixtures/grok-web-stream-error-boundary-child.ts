@@ -179,7 +179,7 @@ test.after(async () => {
   accountSemaphore.resetAll();
   requestDedup.clearInflight();
   accountFallback.clearModelLock();
-  dbCore.resetDbInstance();
+  await dbCore.resetDbInstance();
   await loggerResource.closeSharedLoggerResource();
   globalThis.fetch = originalFetch;
 

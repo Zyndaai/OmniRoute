@@ -302,7 +302,7 @@ for (const fixture of table)
       {},
       f.now,
       {
-        availability: buildConnectionQuotaAvailability(
+        availability: await buildConnectionQuotaAvailability(
           connection,
           {
             ...raw,
@@ -392,7 +392,7 @@ test("Codex code_review: generic evaluator has no request-specific review select
       {},
       f.now,
       {
-        availability: buildConnectionQuotaAvailability(
+        availability: await buildConnectionQuotaAvailability(
           { id: "synthetic-review", provider: "codex", isActive: true },
           { ...raw, fetchedAt: new Date(f.now).toISOString() } as Partial<ProviderLimitsCacheEntry>,
           f.policy

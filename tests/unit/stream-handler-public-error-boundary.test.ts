@@ -26,7 +26,9 @@ function buildFixtureEnv(): NodeJS.ProcessEnv {
     NODE_ENV: "test",
     APP_LOG_TO_FILE: "false",
     API_KEY_SECRET: "stream-handler-boundary-fixture-secret-20260902",
-    DISABLE_SQLITE_AUTO_BACKUP: "true",
+    ...(process.env.OMNIROUTE_POSTGRES_URL
+      ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+      : {}),
     NO_COLOR: "1",
   };
 

@@ -181,7 +181,6 @@ function createServerProcess() {
       HOST: "127.0.0.1",
       REQUIRE_API_KEY: "false",
       API_KEY_SECRET: "batch-e2e-rl-secret",
-      DISABLE_SQLITE_AUTO_BACKUP: "true",
       INITIAL_PASSWORD: "",
       NEXT_TELEMETRY_DISABLED: "1",
       OMNIROUTE_E2E_BOOTSTRAP_MODE: "open",

@@ -8,7 +8,8 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-catalog-9
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = process.env.API_KEY_SECRET || "catalog-9199-test-secret";
 
-const core = await import("../../src/lib/db/core.ts");
+const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
+const { saveModelsDevPricing } = await import("../../src/lib/modelsDevSync.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -17,7 +18,7 @@ const modelsRoute = await import("../../src/app/api/v1/models/route.ts");
 const healthRoute = await import("../../src/app/api/health/ping/route.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -108,15 +109,10 @@ test(
       providerSpecificData: {},
     });
     const apiKey = await apiKeysDb.createApiKey("catalog pricing", "machine-pricing-9199");
-    const db = core.getDbInstance();
-    db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-      "models_dev_pricing",
-      "openai",
-      JSON.stringify({ "gpt-4o": { input: 1.25, output: 5 } })
-    );
+    await saveModelsDevPricing({ openai: { "gpt-4o": { input: 1.25, output: 5 } } });
 
-    const originalPrepare = db.prepare;
-    const callPrepare = originalPrepare.bind(db);
+    const db = getTestBackend();
+    const originalQuery = db.query.bind(db);
     let pricingReads = 0;
     let catalogSettled = false;
     let heartbeatScheduled = false;
@@ -127,10 +123,14 @@ test(
       rejectHeartbeat = reject;
     });
 
-    (db as unknown as { prepare: typeof db.prepare }).prepare = ((sql: string) => {
+    db.query = (async (sql: string, params?: unknown[]) => {
       const normalized = String(sql).replace(/\s+/g, " ").trim();
       if (
-        normalized === "SELECT key, value FROM key_value WHERE namespace = 'models_dev_pricing'"
+        normalized === "SELECT provider, models FROM model_pricing WHERE source = $1" &&
+        params?.[0] === "models_dev" &&
+        // The merged-pricing read cache also loads this namespace; only the catalog build's
+        // own snapshot (getModelsDevPricing) is the read this test pins to once per build.
+        String(new Error().stack).includes("getModelsDevPricing")
       ) {
         pricingReads++;
         if (!heartbeatScheduled) {
@@ -140,8 +140,8 @@ test(
           });
         }
       }
-      return callPrepare(sql);
-    }) as typeof db.prepare;
+      return originalQuery(sql, params);
+    }) as typeof db.query;
 
     let catalog!: Response;
     let heartbeat!: Response;
@@ -161,7 +161,7 @@ test(
       catalogSettledBeforeHeartbeat = catalogSettled;
       catalog = await catalogPromise;
     } finally {
-      (db as unknown as { prepare: typeof db.prepare }).prepare = originalPrepare;
+      db.query = originalQuery;
     }
 
     assert.equal(catalog.status, 200);

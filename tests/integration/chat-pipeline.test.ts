@@ -17,7 +17,7 @@ const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const readCacheDb = await import("../../src/lib/db/readCache.ts");
 const { getLatestCallLog, getResponsesCallLogs } = await import("./_chatPipelineCallLogs.ts");
 const { waitForCallLogSaves } = await import("../../src/lib/usage/callLogs.ts");
-const { invalidateMemorySettingsCache } = await import("../../src/lib/memory/settings.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const { skillRegistry } = await import("../../src/lib/skills/registry.ts");
 const { skillExecutor } = await import("../../src/lib/skills/executor.ts");
 const { encodeSkillToolName } = await import("../../src/lib/skills/injection.ts");
@@ -372,7 +372,6 @@ async function resetStorage() {
   resetAllCircuitBreakers();
   apiKeysDb.resetApiKeyState();
   readCacheDb.invalidateDbCache();
-  invalidateMemorySettingsCache();
   await new Promise((resolve) => setTimeout(resolve, 20));
   // Call-log persistence is fire-and-forget (persistAttemptLogs → saveCallLog with
   // a .catch(() => {})), and the first cold artifact-worker spawn can take ~2.4s, so
@@ -383,7 +382,7 @@ async function resetStorage() {
   if (!drained) {
     console.warn("[chat-pipeline] call-log saves did not drain within 10s; resetting anyway");
   }
-  core.resetDbInstance();
+  await resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   initTranslators();
@@ -428,74 +427,6 @@ async function seedApiKey({
   return key;
 }
 
-function ensureLegacyMemoryTable() {
-  const db = core.getDbInstance();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS memory (
-      id TEXT PRIMARY KEY,
-      apiKeyId TEXT NOT NULL,
-      sessionId TEXT,
-      type TEXT NOT NULL,
-      key TEXT,
-      content TEXT NOT NULL,
-      metadata TEXT,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      expiresAt TEXT
-    )
-  `);
-}
-
-function insertLegacyMemory(apiKeyId, content) {
-  const db = core.getDbInstance();
-  const now = new Date().toISOString();
-  const hasModernTable = Boolean(
-    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memories'").get()
-  );
-
-  if (hasModernTable) {
-    db.prepare(
-      `
-        INSERT INTO memories (
-          id, api_key_id, session_id, type, key, content, metadata, created_at, updated_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `
-    ).run(
-      `mem_${Math.random().toString(16).slice(2, 10)}`,
-      apiKeyId,
-      "",
-      "factual",
-      "pref",
-      content,
-      "{}",
-      now,
-      now,
-      null
-    );
-    return;
-  }
-
-  ensureLegacyMemoryTable();
-  db.prepare(
-    `
-      INSERT INTO memory (
-        id, apiKeyId, sessionId, type, key, content, metadata, createdAt, updatedAt, expiresAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  ).run(
-    `mem_${Math.random().toString(16).slice(2, 10)}`,
-    apiKeyId,
-    "",
-    "factual",
-    "pref",
-    content,
-    "{}",
-    now,
-    now,
-    null
-  );
-}
-
 async function waitFor(fn, timeoutMs = 1500) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -522,7 +453,7 @@ test.after(async () => {
   globalThis.fetch = originalFetch;
   clearInflight();
   resetAllCircuitBreakers();
-  core.resetDbInstance();
+  await core.resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
@@ -1508,55 +1439,12 @@ test("chat pipeline maps upstream timeouts to 504 responses", async () => {
   assert.match(json.error.message, /\[504\]: upstream timed out/);
 });
 
-test("chat pipeline injects memory context before sending the upstream request", async () => {
-  // Reset provider failure state to avoid circuit breaker interference
-  clearProviderFailure("openai");
-  await seedConnection("openai", { apiKey: "sk-openai-memory" });
-  const apiKey = await seedApiKey();
-  await settingsDb.updateSettings({
-    memoryEnabled: true,
-    memoryMaxTokens: 400,
-    memoryRetentionDays: 30,
-    memoryStrategy: "recent",
-  });
-  invalidateMemorySettingsCache();
-  insertLegacyMemory(apiKey.id, "User prefers concise answers.");
-
-  const fetchCalls = [];
-  globalThis.fetch = async (url, init: RequestInit = {}) => {
-    fetchCalls.push({
-      url: String(url),
-      body: init.body ? JSON.parse(String(init.body)) : null,
-    });
-    return buildOpenAIResponse("Memory-aware reply");
-  };
-
-  const response = await handleChat(
-    buildRequest({
-      authKey: apiKey.key,
-      body: {
-        model: "openai/gpt-4o-mini",
-        stream: false,
-        messages: [{ role: "user", content: "Summarize my preference" }],
-      },
-    })
-  );
-
-  const json = (await response.json()) as any;
-  assert.equal(response.status, 200);
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].body.messages[0].role, "system");
-  assert.match(fetchCalls[0].body.messages[0].content, /User prefers concise answers/);
-  assert.equal(json.choices[0].message.content, "Memory-aware reply");
-});
-
 test("chat pipeline injects skills into tools and intercepts tool calls with skill output", async () => {
   // Reset provider failure state to avoid circuit breaker interference
   clearProviderFailure("openai");
   await seedConnection("openai", { apiKey: "sk-openai-skills" });
   const apiKey = await seedApiKey();
   await settingsDb.updateSettings({ skillsEnabled: true });
-  invalidateMemorySettingsCache();
 
   const handlerName = `weather-handler-${Date.now()}`;
   skillExecutor.registerHandler(handlerName, async (input) => ({

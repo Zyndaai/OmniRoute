@@ -124,7 +124,7 @@ async function main(): Promise<void> {
       await callLogs.waitForCallLogSaves(10_000);
       await callLogs.closeCallLogSaves(10_000);
     } finally {
-      dbCore.resetDbInstance();
+      await dbCore.resetDbInstance();
     }
   }
 }

@@ -9,7 +9,6 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omni-policy-16329-"));
 const savedEnv = { ...process.env };
 Object.assign(process.env, {
   DATA_DIR: dataDir,
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   OMNIROUTE_CONTEXT_KEYCHAIN_DISABLED: "true",
   JWT_SECRET: "policy-test-jwt",
   INITIAL_PASSWORD: "bootstrap-password",
@@ -77,9 +76,9 @@ test.beforeEach(async () => {
     return request.method === "PATCH" ? route.PATCH(request, context) : route.GET(request, context);
   };
 });
-test.after(() => {
+test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.resetDbInstance();
+  await core.resetDbInstance();
   db.resetApiKeyState();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];

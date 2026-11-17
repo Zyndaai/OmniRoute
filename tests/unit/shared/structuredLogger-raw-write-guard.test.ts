@@ -62,7 +62,7 @@ test("error() with a destroyed stderr does not crash, and still writes to the lo
   const result = spawnSync(process.execPath, ["--import", "tsx/esm", childFile], {
     encoding: "utf8",
     timeout: 30_000,
-    env: { ...process.env, DISABLE_SQLITE_AUTO_BACKUP: "true" },
+    env: { ...process.env },
   });
 
   assert.equal(

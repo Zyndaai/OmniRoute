@@ -14,7 +14,6 @@ Object.assign(process.env, {
   OMNIROUTE_PLUGINS_DIR: path.join(dataDir, "plugins"),
   API_KEY_SECRET: "synthetic-tos-ui-only-15059",
   JWT_SECRET: "synthetic-tos-ui-jwt-only-15059",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
 });
 
 vi.mock("next/link", () => ({

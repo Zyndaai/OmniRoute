@@ -39,7 +39,9 @@ export function runIsolatedBoundaryFixture({
           APP_LOG_TO_FILE: "false",
           API_KEY_SECRET: "public-error-boundary-fixture-secret",
           DATA_DIR: dataDir,
-          DISABLE_SQLITE_AUTO_BACKUP: "true",
+          ...(process.env.OMNIROUTE_POSTGRES_URL
+            ? { OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL }
+            : {}),
           LANG: "C.UTF-8",
           LC_ALL: "C.UTF-8",
           NODE_ENV: "test",

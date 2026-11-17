@@ -146,9 +146,9 @@ async function executeAppServerFailure(stream: boolean): Promise<Response> {
   return result.response;
 }
 
-test.after(() => {
+test.after(async () => {
   __setCodexWebSocketTransportForTesting(undefined);
-  resetDbInstance();
+  await resetDbInstance();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   fs.rmSync(TEST_PLUGINS_DIR, { recursive: true, force: true });
 });

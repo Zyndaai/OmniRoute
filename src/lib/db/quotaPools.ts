@@ -498,11 +498,20 @@ export async function updatePool(id: string, input: PoolUpdate): Promise<QuotaPo
  */
 export async function deletePool(id: string): Promise<boolean> {
   if (deletingPools.has(id)) return false;
-  const exists = await db().queryOne<{ id: string }>("SELECT id FROM quota_pools WHERE id = $1", [
-    id,
-  ]);
-  if (!exists) return false;
+  // Mark before the first await: an update or allocation write issued right after
+  // deletePool() starts must already see the pool as deleting.
   deletingPools.add(id);
+  let exists: { id: string } | null;
+  try {
+    exists = await db().queryOne<{ id: string }>("SELECT id FROM quota_pools WHERE id = $1", [id]);
+  } catch (error) {
+    deletingPools.delete(id);
+    throw error;
+  }
+  if (!exists) {
+    deletingPools.delete(id);
+    return false;
+  }
 
   const deletion = serializeQuotaComboMaintenance(id, async () => {
     // Phase B2: remove quota combos BEFORE deleting the pool row so that

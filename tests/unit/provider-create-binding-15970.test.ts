@@ -11,7 +11,6 @@ Object.assign(process.env, {
   DATA_DIR: dataDir,
   OMNIROUTE_PLUGINS_DIR: path.join(dataDir, "plugins"),
   APP_LOG_TO_FILE: "false",
-  DISABLE_SQLITE_AUTO_BACKUP: "true",
   API_KEY_SECRET: "provider-binding-fixture-secret",
   JWT_SECRET: "provider-binding-fixture-session-secret",
 });
@@ -19,6 +18,7 @@ const network = new MockAgent();
 network.disableNetConnect();
 setGlobalDispatcher(network);
 const core = await import("../../src/lib/db/core.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 const nodes = await import("../../src/lib/db/providers/nodes.ts");
 const connections = await import("../../src/lib/db/providers.ts");
 const { POST } = await import("../../src/app/api/providers/route.ts");
@@ -29,15 +29,15 @@ globalThis.fetch = async (input) => {
   return Response.json({ data: [], models: [] });
 };
 
-test.beforeEach(() => {
-  core.resetDbInstance();
+test.beforeEach(async () => {
+  await resetTestDb();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(dataDir, { recursive: true });
   fetchCalls.length = 0;
 });
 test.after(async () => {
   await new Promise<void>((resolve) => setTimeout(resolve, 20));
-  core.resetDbInstance();
+  await core.resetDbInstance();
   await network.close();
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

@@ -270,16 +270,16 @@ test.before(async () => {
     setupComplete: true,
   });
 
-  core.closeDbInstance();
+  await core.resetDbInstance();
 
-  app = createServerProcess(TEST_DATA_DIR, DASHBOARD_PORT);
+  app =createServerProcess(TEST_DATA_DIR, DASHBOARD_PORT);
   await waitForServer(app.baseUrl, app);
 });
 
 test.after(async () => {
   if (app) await stopProcess(app.child);
   await upstream.stop();
-  core.closeDbInstance();
+  await core.resetDbInstance();
   await fsp.rm(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

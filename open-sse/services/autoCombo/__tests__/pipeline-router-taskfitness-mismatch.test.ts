@@ -11,20 +11,20 @@ import { describe, it, expect } from "vitest";
 import { resolveModelForTier } from "../pipelineRouter.ts";
 
 describe("pipeline stage model resolution vs. task-fitness table keys", () => {
-  it("resolves a coding-tier stage to a coding-strong model, not just the first candidate", () => {
+  it("resolves a coding-tier stage to a coding-strong model, not just the first candidate", async () => {
     // o3 (0.95) and deepseek-coder (0.9) both score high on FITNESS_TABLE.coding;
     // a model with no coding-table row (and no default-table row) sits at the 0.5 wildcard.
     const models = ["some-unknown-model", "o3", "deepseek-coder"];
-    const best = resolveModelForTier("moderate", models, "code");
+    const best = await resolveModelForTier("moderate", models, "code");
     expect(["o3", "deepseek-coder"]).toContain(best);
   });
 
-  it("does not resolve to the same result for an unrelated taskType", () => {
+  it("does not resolve to the same result for an unrelated taskType", async () => {
     // Sanity check that the mapping actually varies fitness-table selection by taskType,
     // rather than the fix accidentally collapsing everything onto 'default'.
     const models = ["some-unknown-model", "gpt-4o"];
-    const codeChoice = resolveModelForTier("cheapest", models, "code");
-    const defaultChoice = resolveModelForTier("cheapest", models, "simple");
+    const codeChoice = await resolveModelForTier("cheapest", models, "code");
+    const defaultChoice = await resolveModelForTier("cheapest", models, "simple");
     expect(codeChoice).toBeDefined();
     expect(defaultChoice).toBeDefined();
   });

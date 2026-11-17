@@ -19,7 +19,7 @@ const originalFetch = globalThis.fetch;
 
 test.after(async () => {
   globalThis.fetch = originalFetch;
-  core.closeDbInstance();
+  await core.resetDbInstance();
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {}
@@ -56,7 +56,7 @@ test("chatCore integration: over-window request is rejected before dispatch when
     ],
   };
   assert.ok(
-    estimateTokens(JSON.stringify(body.messages)) > getTokenLimit(provider, model),
+    estimateTokens(JSON.stringify(body.messages)) > (await getTokenLimit(provider, model)),
     "Test body should exceed the full context window"
   );
 

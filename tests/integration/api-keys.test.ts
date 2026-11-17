@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
+import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-api-keys-route-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -26,7 +27,7 @@ const MACHINE_ID = "1234567890abcdef";
 async function resetStorage() {
   delete process.env.ALLOW_API_KEY_REVEAL;
   delete process.env.INITIAL_PASSWORD;
-  core.resetDbInstance();
+  await resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
@@ -133,7 +134,7 @@ test("POST /api/keys creates a key, preserves special characters, and persists n
   assert.match(body.key, /^sk-[a-z0-9-]+/i);
   assert.equal(stored?.noLog, true);
   assert.equal(stored?.compressionEnabled, true);
-  assert.equal(compliance.isNoLog(body.id), true);
+  assert.equal(await compliance.isNoLog(body.id), true);
 });
 
 test("POST /api/keys preserves creation-time ACL and enforces it (#12275)", async () => {
@@ -372,17 +373,24 @@ test("POST /api/keys triggers cloud sync when cloud mode is enabled", async () =
 test("GET /api/keys returns 500 when the key store throws unexpectedly", async () => {
   await apiKeysDb.createApiKey("Alpha", MACHINE_ID);
 
-  const db = core.getDbInstance();
-  const originalPrepare = db.prepare.bind(db);
+  const db = getTestBackend();
+  const originalQuery = db.query.bind(db);
+  const originalQueryOne = db.queryOne.bind(db);
   const originalLog = console.log;
   const originalError = console.error;
 
-  db.prepare = (sql) => {
+  db.query = (async (sql: string, params?: unknown[]) => {
     if (String(sql).includes("FROM api_keys")) {
       throw new Error("api keys offline");
     }
-    return originalPrepare(sql);
-  };
+    return originalQuery(sql, params);
+  }) as typeof db.query;
+  db.queryOne = (async (sql: string, params?: unknown[]) => {
+    if (String(sql).includes("FROM api_keys")) {
+      throw new Error("api keys offline");
+    }
+    return originalQueryOne(sql, params);
+  }) as typeof db.queryOne;
   apiKeysDb.resetApiKeyState();
   // Suppress Pino structured log output during test
   console.log = () => {};
@@ -395,7 +403,8 @@ test("GET /api/keys returns 500 when the key store throws unexpectedly", async (
     assert.equal(response.status, 500);
     assert.equal(body.error, "Failed to fetch keys");
   } finally {
-    db.prepare = originalPrepare;
+    db.query = originalQuery;
+    db.queryOne = originalQueryOne;
     apiKeysDb.resetApiKeyState();
     console.log = originalLog;
     console.error = originalError;
