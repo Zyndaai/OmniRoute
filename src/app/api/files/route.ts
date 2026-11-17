@@ -21,8 +21,8 @@ export async function GET(request: Request) {
     const limit = parsedLimit.value;
     const files =
       listScope.mode === "api_key"
-        ? listFiles({ limit, apiKeyId: listScope.apiKeyId })
-        : listFiles({ limit });
+        ? await listFiles({ limit, apiKeyId: listScope.apiKeyId })
+        : await listFiles({ limit });
     return NextResponse.json({ files });
   } catch (error) {
     console.log("Error fetching files:", error);

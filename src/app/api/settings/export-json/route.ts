@@ -90,8 +90,8 @@ export async function GET(request: Request) {
       providerNodes,
       combos,
       apiKeys,
-      teams: listTeams({ includeArchived: true }),
-      apiKeyBillingTeamHistory: listAllApiKeyBillingHistory(),
+      teams: await listTeams({ includeArchived: true }),
+      apiKeyBillingTeamHistory: await listAllApiKeyBillingHistory(),
       // Metadata to identify export version
       _meta: {
         exportedAt: new Date().toISOString(),
@@ -104,10 +104,10 @@ export async function GET(request: Request) {
     // These tables (usage_history, domain_cost_history, domain_budgets) can contain
     // thousands of rows and make the config backup grow to many MBs.
     if (includeHistory) {
-      exportData.usageHistory = getAllUsageHistory();
-      exportData.dailyTeamUsageSummary = getAllDailyTeamUsageSummary();
-      exportData.domainCostHistory = getAllDomainCostHistory();
-      exportData.domainBudgets = getAllDomainBudgets();
+      exportData.usageHistory = await getAllUsageHistory();
+      exportData.dailyTeamUsageSummary = await getAllDailyTeamUsageSummary();
+      exportData.domainCostHistory = await getAllDomainCostHistory();
+      exportData.domainBudgets = await getAllDomainBudgets();
     }
 
     return new NextResponse(JSON.stringify(exportData, null, 2), {

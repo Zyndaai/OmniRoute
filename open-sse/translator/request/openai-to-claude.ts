@@ -164,7 +164,7 @@ export function normalizeContentToString(content: string | unknown[] | null | un
 }
 
 // Convert OpenAI request to Claude format
-export function openaiToClaudeRequest(
+export async function openaiToClaudeRequest(
   model,
   body,
   stream,
@@ -315,7 +315,7 @@ export function openaiToClaudeRequest(
   // could exceed model caps (e.g. Opus 4.7's 128000 ceiling) and trigger
   // HTTP 400 from Anthropic.
   if (!isKimiCoding) {
-    const fitted = fitThinkingToMaxTokens(
+    const fitted = await fitThinkingToMaxTokens(
       model,
       Number(result.max_tokens) || 0,
       result.thinking,
@@ -956,10 +956,10 @@ function stripCacheControl(value: unknown): unknown {
 }
 
 // OpenAI -> Claude format for Antigravity (without system prompt modifications)
-function openaiToClaudeRequestForAntigravity(model, body, stream) {
-  const result = stripCacheControl(openaiToClaudeRequest(model, body, stream)) as ReturnType<
-    typeof openaiToClaudeRequest
-  >;
+async function openaiToClaudeRequestForAntigravity(model, body, stream) {
+  const result = stripCacheControl(
+    await openaiToClaudeRequest(model, body, stream)
+  ) as Awaited<ReturnType<typeof openaiToClaudeRequest>>;
 
   // Strip prefix from tool names for Antigravity (doesn't use Claude OAuth)
   if (result.tools && Array.isArray(result.tools)) {

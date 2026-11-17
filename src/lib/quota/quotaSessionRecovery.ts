@@ -158,7 +158,7 @@ export async function maybeQueueQuotaSessionRecovery(input: {
   const now = Date.now();
   let ticket: QuotaRecoveryTicket;
   try {
-    ticket = enqueueQuotaRecoveryTicket({
+    ticket = await enqueueQuotaRecoveryTicket({
       apiKeyId: owner.apiKeyId,
       turnKey: `${sessionId}:${turnId}`,
       endpoint,
@@ -173,22 +173,22 @@ export async function maybeQueueQuotaSessionRecovery(input: {
 }
 
 async function dispatchTicket(ticket: QuotaRecoveryTicket): Promise<void> {
-  const claimed = claimQuotaRecoveryTicket(ticket.id);
+  const claimed = await claimQuotaRecoveryTicket(ticket.id);
   if (!claimed) return;
-  const raw = readQuotaRecoveryRequest(ticket.id);
+  const raw = await readQuotaRecoveryRequest(ticket.id);
   if (!raw) {
-    markQuotaRecoveryNeedsConfirmation(ticket.id);
+    await markQuotaRecoveryNeedsConfirmation(ticket.id);
     return;
   }
   let stored: StoredRequest;
   try {
     stored = JSON.parse(raw) as StoredRequest;
-    if (!isSafeQuotaRecoveryBody(stored.body) || !TURN_KEY_RE.test(stored.sessionId)) {
-      failQuotaRecoveryTicket(ticket.id);
-      return;
-    }
   } catch {
-    failQuotaRecoveryTicket(ticket.id);
+    await failQuotaRecoveryTicket(ticket.id);
+    return;
+  }
+  if (!isSafeQuotaRecoveryBody(stored.body) || !TURN_KEY_RE.test(stored.sessionId)) {
+    await failQuotaRecoveryTicket(ticket.id);
     return;
   }
 
@@ -210,21 +210,21 @@ async function dispatchTicket(ticket: QuotaRecoveryTicket): Promise<void> {
     if (response.ok) {
       const body = await response.text();
       if (Buffer.byteLength(body) > MAX_RESULT_BYTES) {
-        markQuotaRecoveryNeedsConfirmation(ticket.id);
+        await markQuotaRecoveryNeedsConfirmation(ticket.id);
         return;
       }
-      completeQuotaRecoveryTicket(ticket.id, body);
+      await completeQuotaRecoveryTicket(ticket.id, body);
     } else if (await isTerminalQuotaResponse(response)) {
-      rescheduleQuotaRecoveryTicket(
+      await rescheduleQuotaRecoveryTicket(
         ticket.id,
         new Date(Date.now() + quotaRecoveryDelayMs(response)).toISOString()
       );
     } else {
       // An unclassified server failure may have executed upstream. Do not replay it.
-      markQuotaRecoveryNeedsConfirmation(ticket.id);
+      await markQuotaRecoveryNeedsConfirmation(ticket.id);
     }
   } catch {
-    markQuotaRecoveryNeedsConfirmation(ticket.id);
+    await markQuotaRecoveryNeedsConfirmation(ticket.id).catch(() => undefined);
   }
 }
 
@@ -235,9 +235,9 @@ export async function runQuotaSessionRecoveryTick(now = new Date()): Promise<voi
   if (tickRunning) return;
   tickRunning = true;
   try {
-    expireQuotaRecoveryTickets(now);
-    reconcileStaleRunningQuotaRecoveries(now);
-    for (const ticket of listDueQuotaRecoveryTickets(now)) {
+    await expireQuotaRecoveryTickets(now);
+    await reconcileStaleRunningQuotaRecoveries(now);
+    for (const ticket of await listDueQuotaRecoveryTickets(now)) {
       await dispatchTicket(ticket);
     }
   } finally {
@@ -249,7 +249,7 @@ export function startQuotaSessionRecovery(): void {
   if (recoveryTimer) return;
   // A restart loses the in-process knowledge of whether the upstream accepted
   // a `running` dispatch. Preserve it for the owner to explicitly resolve.
-  reconcileInterruptedQuotaRecoveries();
+  const reconciled = reconcileInterruptedQuotaRecoveries().catch(() => 0);
   recoveryTimer = setInterval(() => {
     void runQuotaSessionRecoveryTick().catch((error) => {
       console.error(
@@ -259,5 +259,5 @@ export function startQuotaSessionRecovery(): void {
     });
   }, POLL_INTERVAL_MS);
   recoveryTimer.unref?.();
-  void runQuotaSessionRecoveryTick().catch(() => {});
+  void reconciled.then(() => runQuotaSessionRecoveryTick()).catch(() => {});
 }

@@ -503,7 +503,9 @@ export function translateNonStreamingResponse(
                         options?.signatureNamespace ?? null,
                         toolCallId
                       );
-                      storeGeminiThoughtSignature(sigKey, sig);
+                      // The in-memory entry is set synchronously; the store swallows its own
+                      // persistence errors.
+                      void storeGeminiThoughtSignature(sigKey, sig);
                     }
 
                     toolCalls.push({

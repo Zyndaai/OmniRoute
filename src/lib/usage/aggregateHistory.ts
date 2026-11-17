@@ -5,8 +5,8 @@
  * @module lib/usage/aggregateHistory
  */
 
-import { getDbInstance } from "../db/core";
-import { getUserDatabaseSettings } from "../db/databaseSettings";
+import { db, ts } from "@/lib/db/pg";
+import { getDatabaseSettingsSection } from "../db/databaseSettingsSections";
 import { calculateCost } from "./costCalculator";
 
 interface AggregationResult {
@@ -14,6 +14,12 @@ interface AggregationResult {
   inserted: number;
   errors: number;
 }
+
+/** Numeric field of a quota_snapshots `raw_data` document; non-numbers count as absent. */
+const rawDataNumber = (field: string, integer: boolean) =>
+  `CASE WHEN jsonb_typeof(raw_data->'${field}') = 'number'
+        THEN ${integer ? `trunc((raw_data->>'${field}')::numeric)` : `(raw_data->>'${field}')::numeric`}
+        END`;
 
 /**
  * Roll up quota_snapshots into daily_usage_summary table.
@@ -27,8 +33,6 @@ export async function rollupDailyUsage(
   fromDate: string,
   toDate: string
 ): Promise<AggregationResult> {
-  const db = getDbInstance();
-
   const result: AggregationResult = {
     processed: 0,
     inserted: 0,
@@ -39,26 +43,26 @@ export async function rollupDailyUsage(
     // Aggregate quota_snapshots by provider, model, and date
     const aggregateQuery = `
       INSERT INTO daily_usage_summary (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-      SELECT 
+      SELECT
         provider,
-        COALESCE(json_extract(raw_data, '$.model'), 'unknown') as model,
-        DATE(created_at) as date,
-        COUNT(*) as total_requests,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.input_tokens') AS INTEGER)), 0) as total_input_tokens,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.output_tokens') AS INTEGER)), 0) as total_output_tokens,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.cost') AS REAL)), 0.0) as total_cost
+        COALESCE(raw_data->>'model', 'unknown'),
+        (created_at AT TIME ZONE 'UTC')::date,
+        COUNT(*),
+        COALESCE(SUM(${rawDataNumber("input_tokens", true)}), 0)::bigint,
+        COALESCE(SUM(${rawDataNumber("output_tokens", true)}), 0)::bigint,
+        COALESCE(SUM(${rawDataNumber("cost", false)}), 0)
       FROM quota_snapshots
-      WHERE DATE(created_at) >= ? AND DATE(created_at) <= ?
-      GROUP BY provider, model, DATE(created_at)
-      ON CONFLICT(provider, model, date) DO UPDATE SET
-        total_requests = excluded.total_requests,
-        total_input_tokens = excluded.total_input_tokens,
-        total_output_tokens = excluded.total_output_tokens,
-        total_cost = excluded.total_cost
+      WHERE (created_at AT TIME ZONE 'UTC')::date >= $1::date
+        AND (created_at AT TIME ZONE 'UTC')::date <= $2::date
+      GROUP BY provider, COALESCE(raw_data->>'model', 'unknown'), (created_at AT TIME ZONE 'UTC')::date
+      ON CONFLICT (provider, model, date) DO UPDATE SET
+        total_requests = EXCLUDED.total_requests,
+        total_input_tokens = EXCLUDED.total_input_tokens,
+        total_output_tokens = EXCLUDED.total_output_tokens,
+        total_cost = EXCLUDED.total_cost
     `;
 
-    const stmt = db.prepare(aggregateQuery);
-    const runResult = stmt.run(fromDate, toDate);
+    const runResult = await db().execute(aggregateQuery, [fromDate, toDate]);
 
     result.processed = runResult.changes;
     result.inserted = runResult.changes;
@@ -72,63 +76,43 @@ export async function rollupDailyUsage(
   return result;
 }
 
-/**
- * Roll up quota_snapshots into hourly_usage_summary table.
- * Aggregates by provider, model, and hour.
- *
- * @param fromDate - Start datetime (YYYY-MM-DD HH:MM:SS format)
- * @param toDate - End datetime (YYYY-MM-DD HH:MM:SS format)
- * @returns Aggregation result with counts
- */
-export async function rollupHourlyQuota(
-  fromDate: string,
-  toDate: string
-): Promise<AggregationResult> {
-  const db = getDbInstance();
+type ArchivedUsageRow = {
+  provider: string;
+  model: string;
+  date: string;
+  serviceTier: string;
+  totalRequests: number;
+  requestInputTokens: number;
+  requestOutputTokens: number;
+  requestCacheReadTokens: number;
+  requestCacheCreationTokens: number;
+  requestReasoningTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  reasoningTokens: number;
+  hasStoredCost: boolean;
+  storedCost: number;
+};
 
-  const result: AggregationResult = {
-    processed: 0,
-    inserted: 0,
-    errors: 0,
-  };
+const TEAM_KEY_EXPRESSIONS = `
+  COALESCE(NULLIF(uh.api_key_id, ''), 'unknown'),
+  COALESCE(NULLIF(LOWER(uh.provider), ''), '__unknown_provider__'),
+  COALESCE(NULLIF(LOWER(uh.model), ''), '__unknown_model__'),
+  COALESCE(NULLIF(uh.service_tier, ''), 'standard'),
+  (uh."timestamp" AT TIME ZONE 'UTC')::date`;
 
-  try {
-    // Aggregate quota_snapshots by provider, model, and hour
-    const aggregateQuery = `
-      INSERT INTO hourly_usage_summary (provider, model, date_hour, total_requests, total_input_tokens, total_output_tokens, total_cost)
-      SELECT 
-        provider,
-        COALESCE(json_extract(raw_data, '$.model'), 'unknown') as model,
-        datetime(strftime('%Y-%m-%d %H:00:00', created_at)) as date_hour,
-        COUNT(*) as total_requests,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.input_tokens') AS INTEGER)), 0) as total_input_tokens,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.output_tokens') AS INTEGER)), 0) as total_output_tokens,
-        COALESCE(SUM(CAST(json_extract(raw_data, '$.cost') AS REAL)), 0.0) as total_cost
-      FROM quota_snapshots
-      WHERE created_at >= ? AND created_at <= ?
-      GROUP BY provider, model, datetime(strftime('%Y-%m-%d %H:00:00', created_at))
-      ON CONFLICT(provider, model, date_hour) DO UPDATE SET
-        total_requests = excluded.total_requests,
-        total_input_tokens = excluded.total_input_tokens,
-        total_output_tokens = excluded.total_output_tokens,
-        total_cost = excluded.total_cost
-    `;
-
-    const stmt = db.prepare(aggregateQuery);
-    const runResult = stmt.run(fromDate, toDate);
-
-    result.processed = runResult.changes;
-    result.inserted = runResult.changes;
-
-    console.log(
-      `[Aggregation] Hourly rollup: ${result.inserted} rows for ${fromDate} to ${toDate}`
-    );
-  } catch (err: any) {
-    console.error("[Aggregation] Hourly rollup error:", err);
-    result.errors++;
-  }
-
-  return result;
+/** Merges two per-day shape-count objects (`{"[in,out,cr,cc,r]": n}`) by summing counts per shape. */
+function mergeShapesSql(column: string) {
+  return `(
+          SELECT jsonb_object_agg(merged.shape, merged.total) FROM (
+            SELECT entry.key AS shape, SUM(entry.value::bigint) AS total FROM (
+              SELECT key, value FROM jsonb_each_text(COALESCE(daily_team_usage_summary.${column}, '{}'::jsonb))
+              UNION ALL SELECT key, value FROM jsonb_each_text(EXCLUDED.${column})
+            ) AS entry GROUP BY entry.key
+          ) AS merged
+        )`;
 }
 
 /**
@@ -144,8 +128,6 @@ export async function rollupHourlyQuota(
  * @returns Aggregation result with counts
  */
 export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<AggregationResult> {
-  const db = getDbInstance();
-
   const result: AggregationResult = {
     processed: 0,
     inserted: 0,
@@ -153,30 +135,31 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
   };
 
   try {
+    const before = ts(beforeDate);
+    if (!before) throw new Error(`Invalid rollup boundary: ${beforeDate}`);
     const rollupStartedAt = new Date().toISOString();
     const teamAggregateQuery = `
       WITH shape_counts AS (
-        SELECT billing_team_id AS team_id,
-          COALESCE(NULLIF(api_key_id, ''), 'unknown') AS api_key_id,
-          MAX(NULLIF(api_key_name, '')) AS api_key_name,
-          COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') AS provider,
-          COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') AS model,
-          COALESCE(NULLIF(service_tier, ''), 'standard') AS service_tier,
-          DATE(timestamp) AS date,
-          json_array(COALESCE(tokens_input,0), COALESCE(tokens_output,0), COALESCE(tokens_cache_read,0), COALESCE(tokens_cache_creation,0), COALESCE(tokens_reasoning,0)) AS shape,
+        SELECT uh.billing_team_id AS team_id,
+          COALESCE(NULLIF(uh.api_key_id, ''), 'unknown') AS api_key_id,
+          MAX(NULLIF(uh.api_key_name, '')) AS api_key_name,
+          COALESCE(NULLIF(LOWER(uh.provider), ''), '__unknown_provider__') AS provider,
+          COALESCE(NULLIF(LOWER(uh.model), ''), '__unknown_model__') AS model,
+          COALESCE(NULLIF(uh.service_tier, ''), 'standard') AS service_tier,
+          (uh."timestamp" AT TIME ZONE 'UTC')::date AS date,
+          '[' || COALESCE(uh.tokens_input, 0) || ',' || COALESCE(uh.tokens_output, 0) || ','
+            || COALESCE(uh.tokens_cache_read, 0) || ',' || COALESCE(uh.tokens_cache_creation, 0) || ','
+            || COALESCE(uh.tokens_reasoning, 0) || ']' AS shape,
           COUNT(*) AS count_all,
-          SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS count_success
-        FROM usage_history
-        WHERE timestamp < ? AND billing_team_id IS NOT NULL AND billing_team_id != ''
-          AND team_rollup_processed_at IS NULL
-        GROUP BY billing_team_id, COALESCE(NULLIF(api_key_id, ''), 'unknown'),
-          COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__'),
-          COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__'),
-          COALESCE(NULLIF(service_tier, ''), 'standard'), DATE(timestamp), shape
+          SUM(CASE WHEN uh.success THEN 1 ELSE 0 END) AS count_success
+        FROM usage_history AS uh
+        WHERE uh."timestamp" < $1 AND uh.billing_team_id IS NOT NULL AND uh.billing_team_id != ''
+          AND uh.team_rollup_processed_at IS NULL
+        GROUP BY uh.billing_team_id, ${TEAM_KEY_EXPRESSIONS}, shape
       ), grouped_shapes AS (
-        SELECT team_id, api_key_id, api_key_name, provider, model, service_tier, date,
-          json_group_object(shape, count_all) AS token_shapes_json,
-          json_group_object(shape, count_success) AS successful_token_shapes_json
+        SELECT team_id, api_key_id, MAX(api_key_name) AS api_key_name, provider, model, service_tier, date,
+          jsonb_object_agg(shape, count_all) AS token_shapes,
+          jsonb_object_agg(shape, count_success) AS successful_token_shapes
         FROM shape_counts
         GROUP BY team_id, api_key_id, provider, model, service_tier, date
       )
@@ -186,7 +169,7 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
         total_cache_read_tokens, total_cache_creation_tokens, total_reasoning_tokens,
         successful_input_tokens, successful_output_tokens, successful_cache_read_tokens,
         successful_cache_creation_tokens, successful_reasoning_tokens,
-        token_shapes_json, successful_token_shapes_json
+        token_shapes, successful_token_shapes
       )
       SELECT
         uh.billing_team_id,
@@ -195,114 +178,81 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
         COALESCE(NULLIF(LOWER(uh.provider), ''), '__unknown_provider__'),
         COALESCE(NULLIF(LOWER(uh.model), ''), '__unknown_model__'),
         COALESCE(NULLIF(uh.service_tier, ''), 'standard'),
-        DATE(uh.timestamp),
+        (uh."timestamp" AT TIME ZONE 'UTC')::date,
         COUNT(*),
-        COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN uh.success THEN 1 ELSE 0 END), 0),
         COALESCE(SUM(uh.tokens_input), 0),
         COALESCE(SUM(uh.tokens_output), 0),
         COALESCE(SUM(uh.tokens_cache_read), 0),
         COALESCE(SUM(uh.tokens_cache_creation), 0),
         COALESCE(SUM(uh.tokens_reasoning), 0),
-        COALESCE(SUM(CASE WHEN uh.success = 1 THEN uh.tokens_input ELSE 0 END), 0),
-        COALESCE(SUM(CASE WHEN uh.success = 1 THEN uh.tokens_output ELSE 0 END), 0),
-        COALESCE(SUM(CASE WHEN uh.success = 1 THEN uh.tokens_cache_read ELSE 0 END), 0),
-        COALESCE(SUM(CASE WHEN uh.success = 1 THEN uh.tokens_cache_creation ELSE 0 END), 0),
-        COALESCE(SUM(CASE WHEN uh.success = 1 THEN uh.tokens_reasoning ELSE 0 END), 0),
-        grouped_shapes.token_shapes_json, grouped_shapes.successful_token_shapes_json
+        COALESCE(SUM(CASE WHEN uh.success THEN uh.tokens_input ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN uh.success THEN uh.tokens_output ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN uh.success THEN uh.tokens_cache_read ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN uh.success THEN uh.tokens_cache_creation ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN uh.success THEN uh.tokens_reasoning ELSE 0 END), 0),
+        grouped_shapes.token_shapes, grouped_shapes.successful_token_shapes
       FROM usage_history AS uh
       JOIN grouped_shapes ON grouped_shapes.team_id = uh.billing_team_id
         AND grouped_shapes.api_key_id = COALESCE(NULLIF(uh.api_key_id, ''), 'unknown')
         AND grouped_shapes.provider = COALESCE(NULLIF(LOWER(uh.provider), ''), '__unknown_provider__')
         AND grouped_shapes.model = COALESCE(NULLIF(LOWER(uh.model), ''), '__unknown_model__')
         AND grouped_shapes.service_tier = COALESCE(NULLIF(uh.service_tier, ''), 'standard')
-        AND grouped_shapes.date = DATE(uh.timestamp)
-      WHERE uh.timestamp < ?
+        AND grouped_shapes.date = (uh."timestamp" AT TIME ZONE 'UTC')::date
+      WHERE uh."timestamp" < $1
         AND uh.billing_team_id IS NOT NULL AND uh.billing_team_id != ''
         AND uh.team_rollup_processed_at IS NULL
-      GROUP BY uh.billing_team_id, COALESCE(NULLIF(uh.api_key_id, ''), 'unknown'),
-        COALESCE(NULLIF(LOWER(uh.provider), ''), '__unknown_provider__'),
-        COALESCE(NULLIF(LOWER(uh.model), ''), '__unknown_model__'),
-        COALESCE(NULLIF(uh.service_tier, ''), 'standard'), DATE(uh.timestamp)
-      ON CONFLICT(team_id, api_key_id, provider, model, service_tier, date) DO UPDATE SET
-        api_key_name = COALESCE(excluded.api_key_name, daily_team_usage_summary.api_key_name),
-        total_requests = daily_team_usage_summary.total_requests + excluded.total_requests,
-        successful_requests = daily_team_usage_summary.successful_requests + excluded.successful_requests,
-        total_input_tokens = daily_team_usage_summary.total_input_tokens + excluded.total_input_tokens,
-        total_output_tokens = daily_team_usage_summary.total_output_tokens + excluded.total_output_tokens,
-        total_cache_read_tokens = daily_team_usage_summary.total_cache_read_tokens + excluded.total_cache_read_tokens,
-        total_cache_creation_tokens = daily_team_usage_summary.total_cache_creation_tokens + excluded.total_cache_creation_tokens,
-        total_reasoning_tokens = daily_team_usage_summary.total_reasoning_tokens + excluded.total_reasoning_tokens,
-        successful_input_tokens = daily_team_usage_summary.successful_input_tokens + excluded.successful_input_tokens,
-        successful_output_tokens = daily_team_usage_summary.successful_output_tokens + excluded.successful_output_tokens,
-        successful_cache_read_tokens = daily_team_usage_summary.successful_cache_read_tokens + excluded.successful_cache_read_tokens,
-        successful_cache_creation_tokens = daily_team_usage_summary.successful_cache_creation_tokens + excluded.successful_cache_creation_tokens,
-        successful_reasoning_tokens = daily_team_usage_summary.successful_reasoning_tokens + excluded.successful_reasoning_tokens,
-        token_shapes_json = CASE WHEN daily_team_usage_summary.total_requests > 0
-          AND daily_team_usage_summary.token_shapes_json IS NULL THEN NULL ELSE (
-          SELECT json_group_object(shape, total) FROM (
-            SELECT key AS shape, SUM(value) AS total FROM (
-              SELECT key, value FROM json_each(COALESCE(daily_team_usage_summary.token_shapes_json, '{}'))
-              UNION ALL SELECT key, value FROM json_each(excluded.token_shapes_json)
-            ) GROUP BY key
-          )
-        ) END,
-        successful_token_shapes_json = CASE WHEN daily_team_usage_summary.successful_requests > 0
-          AND daily_team_usage_summary.successful_token_shapes_json IS NULL THEN NULL ELSE (
-          SELECT json_group_object(shape, total) FROM (
-            SELECT key AS shape, SUM(value) AS total FROM (
-              SELECT key, value FROM json_each(COALESCE(daily_team_usage_summary.successful_token_shapes_json, '{}'))
-              UNION ALL SELECT key, value FROM json_each(excluded.successful_token_shapes_json)
-            ) GROUP BY key
-          )
-        ) END
+      GROUP BY uh.billing_team_id, ${TEAM_KEY_EXPRESSIONS},
+        grouped_shapes.token_shapes, grouped_shapes.successful_token_shapes
+      ON CONFLICT (team_id, api_key_id, provider, model, service_tier, date) DO UPDATE SET
+        api_key_name = COALESCE(EXCLUDED.api_key_name, daily_team_usage_summary.api_key_name),
+        total_requests = daily_team_usage_summary.total_requests + EXCLUDED.total_requests,
+        successful_requests = daily_team_usage_summary.successful_requests + EXCLUDED.successful_requests,
+        total_input_tokens = daily_team_usage_summary.total_input_tokens + EXCLUDED.total_input_tokens,
+        total_output_tokens = daily_team_usage_summary.total_output_tokens + EXCLUDED.total_output_tokens,
+        total_cache_read_tokens = daily_team_usage_summary.total_cache_read_tokens + EXCLUDED.total_cache_read_tokens,
+        total_cache_creation_tokens = daily_team_usage_summary.total_cache_creation_tokens + EXCLUDED.total_cache_creation_tokens,
+        total_reasoning_tokens = daily_team_usage_summary.total_reasoning_tokens + EXCLUDED.total_reasoning_tokens,
+        successful_input_tokens = daily_team_usage_summary.successful_input_tokens + EXCLUDED.successful_input_tokens,
+        successful_output_tokens = daily_team_usage_summary.successful_output_tokens + EXCLUDED.successful_output_tokens,
+        successful_cache_read_tokens = daily_team_usage_summary.successful_cache_read_tokens + EXCLUDED.successful_cache_read_tokens,
+        successful_cache_creation_tokens = daily_team_usage_summary.successful_cache_creation_tokens + EXCLUDED.successful_cache_creation_tokens,
+        successful_reasoning_tokens = daily_team_usage_summary.successful_reasoning_tokens + EXCLUDED.successful_reasoning_tokens,
+        token_shapes = CASE WHEN daily_team_usage_summary.total_requests > 0
+          AND daily_team_usage_summary.token_shapes IS NULL THEN NULL ELSE ${mergeShapesSql("token_shapes")} END,
+        successful_token_shapes = CASE WHEN daily_team_usage_summary.successful_requests > 0
+          AND daily_team_usage_summary.successful_token_shapes IS NULL THEN NULL ELSE ${mergeShapesSql("successful_token_shapes")} END
     `;
-    const rows = db
-      .prepare(
-        `SELECT
+    const rows = await db().query<ArchivedUsageRow>(
+      `SELECT
           LOWER(provider) as provider,
           LOWER(model) as model,
-          DATE(timestamp) as date,
-          COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
-          COUNT(*) as totalRequests,
-          COALESCE(tokens_input, 0) as requestInputTokens,
-          COALESCE(tokens_output, 0) as requestOutputTokens,
-          COALESCE(tokens_cache_read, 0) as requestCacheReadTokens,
-          COALESCE(tokens_cache_creation, 0) as requestCacheCreationTokens,
-          COALESCE(tokens_reasoning, 0) as requestReasoningTokens,
-          COALESCE(SUM(tokens_input), 0) as inputTokens,
-          COALESCE(SUM(tokens_output), 0) as outputTokens,
-          COALESCE(SUM(tokens_cache_read), 0) as cacheReadTokens,
-          COALESCE(SUM(tokens_cache_creation), 0) as cacheCreationTokens,
-          COALESCE(SUM(tokens_reasoning), 0) as reasoningTokens,
-          (provider_cost_usd IS NOT NULL) as hasStoredCost,
-          COALESCE(SUM(provider_cost_usd), 0) as storedCost
+          (("timestamp" AT TIME ZONE 'UTC')::date)::text as date,
+          COALESCE(NULLIF(service_tier, ''), 'standard') as "serviceTier",
+          COUNT(*) as "totalRequests",
+          COALESCE(tokens_input, 0) as "requestInputTokens",
+          COALESCE(tokens_output, 0) as "requestOutputTokens",
+          COALESCE(tokens_cache_read, 0) as "requestCacheReadTokens",
+          COALESCE(tokens_cache_creation, 0) as "requestCacheCreationTokens",
+          COALESCE(tokens_reasoning, 0) as "requestReasoningTokens",
+          COALESCE(SUM(tokens_input), 0) as "inputTokens",
+          COALESCE(SUM(tokens_output), 0) as "outputTokens",
+          COALESCE(SUM(tokens_cache_read), 0) as "cacheReadTokens",
+          COALESCE(SUM(tokens_cache_creation), 0) as "cacheCreationTokens",
+          COALESCE(SUM(tokens_reasoning), 0) as "reasoningTokens",
+          (provider_cost_usd IS NOT NULL) as "hasStoredCost",
+          COALESCE(SUM(provider_cost_usd), 0) as "storedCost"
         FROM usage_history
-        WHERE timestamp < ?
+        WHERE "timestamp" < $1
           AND provider IS NOT NULL AND provider != ''
           AND model IS NOT NULL AND model != ''
-        GROUP BY LOWER(provider), LOWER(model), DATE(timestamp), serviceTier,
-          requestInputTokens, requestOutputTokens, requestCacheReadTokens,
-          requestCacheCreationTokens, requestReasoningTokens, hasStoredCost`
-      )
-      .all(beforeDate) as Array<{
-      provider: string;
-      model: string;
-      date: string;
-      serviceTier: string;
-      totalRequests: number;
-      requestInputTokens: number;
-      requestOutputTokens: number;
-      requestCacheReadTokens: number;
-      requestCacheCreationTokens: number;
-      requestReasoningTokens: number;
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens: number;
-      cacheCreationTokens: number;
-      reasoningTokens: number;
-      hasStoredCost: number;
-      storedCost: number;
-    }>;
+        GROUP BY LOWER(provider), LOWER(model), ("timestamp" AT TIME ZONE 'UTC')::date,
+          COALESCE(NULLIF(service_tier, ''), 'standard'),
+          COALESCE(tokens_input, 0), COALESCE(tokens_output, 0), COALESCE(tokens_cache_read, 0),
+          COALESCE(tokens_cache_creation, 0), COALESCE(tokens_reasoning, 0),
+          (provider_cost_usd IS NOT NULL)`,
+      [before]
+    );
 
     const pricedRows = await Promise.all(
       rows.map(async (row) => ({
@@ -367,46 +317,46 @@ export async function rollupUsageHistoryBeforeDate(beforeDate: string): Promise<
         .values()
     );
 
-    const upsert = db.prepare(
-      `INSERT INTO daily_usage_summary
-        (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(provider, model, date) DO UPDATE SET
-        total_requests = excluded.total_requests,
-        total_input_tokens = excluded.total_input_tokens,
-        total_output_tokens = excluded.total_output_tokens,
-        total_cost = excluded.total_cost`
-    );
-    const insertRows = db.transaction((items: typeof archivedRows) => {
-      const changes = items.reduce(
-        (total, row) =>
-          total +
-          upsert.run(
+    // The summary upserts, the Team upsert and the raw-row processed marker are one
+    // transaction. If any fails, none becomes visible and a retry cannot double count.
+    const inserted = await db().transaction(async (tx) => {
+      let changes = 0;
+      for (const row of archivedRows) {
+        const upserted = await tx.execute(
+          `INSERT INTO daily_usage_summary
+            (provider, model, date, total_requests, total_input_tokens, total_output_tokens, total_cost)
+           VALUES ($1, $2, $3::date, $4, $5, $6, $7)
+           ON CONFLICT (provider, model, date) DO UPDATE SET
+            total_requests = EXCLUDED.total_requests,
+            total_input_tokens = EXCLUDED.total_input_tokens,
+            total_output_tokens = EXCLUDED.total_output_tokens,
+            total_cost = EXCLUDED.total_cost`,
+          [
             row.provider,
             row.model,
             row.date,
-            row.totalRequests,
-            row.inputTokens,
-            row.outputTokens,
-            row.totalCost
-          ).changes,
-        0
-      );
-      // The Team upsert and raw-row processed marker are one transaction. If
-      // either fails, neither becomes visible and a retry cannot double count.
-      db.prepare(teamAggregateQuery).run(beforeDate, beforeDate);
-      db.prepare(
+            Math.round(row.totalRequests),
+            Math.round(row.inputTokens),
+            Math.round(row.outputTokens),
+            row.totalCost,
+          ]
+        );
+        changes += upserted.changes;
+      }
+      await tx.execute(teamAggregateQuery, [before]);
+      await tx.execute(
         `UPDATE usage_history
-         SET team_rollup_processed_at = ?
-         WHERE timestamp < ?
+         SET team_rollup_processed_at = $1
+         WHERE "timestamp" < $2
            AND billing_team_id IS NOT NULL AND billing_team_id != ''
-           AND team_rollup_processed_at IS NULL`
-      ).run(rollupStartedAt, beforeDate);
+           AND team_rollup_processed_at IS NULL`,
+        [rollupStartedAt, before]
+      );
       return changes;
     });
 
     result.processed = rows.length;
-    result.inserted = insertRows(archivedRows);
+    result.inserted = inserted;
 
     console.log(
       `[Aggregation] usage_history rollup: ${result.inserted} rows for dates before ${beforeDate}`
@@ -432,7 +382,7 @@ export async function getRawDataCutoffDate(): Promise<string> {
   // Using rawDataRetentionDays (default 7 per migration 046) creates a gap:
   // analytics floors raw data at day-7 while cleanup doesn't roll up until
   // day-30, so the window [day-30, day-7) is excluded from BOTH UNION legs.
-  const rawDataRetentionDays = getUserDatabaseSettings().retention.usageHistory;
+  const rawDataRetentionDays = (await getDatabaseSettingsSection("retention")).usageHistory;
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - rawDataRetentionDays);
@@ -444,5 +394,5 @@ export async function getRawDataCutoffDate(): Promise<string> {
  * Check if aggregation is enabled in settings.
  */
 export async function isAggregationEnabled(): Promise<boolean> {
-  return getUserDatabaseSettings().aggregation.enabled;
+  return (await getDatabaseSettingsSection("aggregation")).enabled;
 }

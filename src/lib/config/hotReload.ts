@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-import { SQLITE_FILE } from "@/lib/db/core";
 import { getSettings } from "@/lib/db/settings";
 import { applyRuntimeSettings, type RuntimeReloadChange } from "./runtimeSettings";
 
@@ -10,7 +7,6 @@ const MIN_POLL_INTERVAL_MS = 1_000;
 let activeCheck: Promise<void> | null = null;
 let queuedSource: string | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-let sqliteWatcher: fs.FSWatcher | null = null;
 
 function getPollIntervalMs() {
   const parsed = Number.parseInt(process.env.OMNIROUTE_CONFIG_HOT_RELOAD_MS || "", 10);
@@ -18,12 +14,6 @@ function getPollIntervalMs() {
     return DEFAULT_POLL_INTERVAL_MS;
   }
   return parsed;
-}
-
-function isRelevantSqliteChange(filename: string | null): boolean {
-  if (!filename || !SQLITE_FILE) return false;
-  const baseName = path.basename(SQLITE_FILE);
-  return filename === baseName || filename.startsWith(`${baseName}-`);
 }
 
 function logChanges(source: string, changes: RuntimeReloadChange[]) {
@@ -64,7 +54,7 @@ function queueHotReloadCheck(source: string) {
 }
 
 export function startRuntimeConfigHotReload(options: { pollIntervalMs?: number } = {}) {
-  if (pollTimer || sqliteWatcher) return;
+  if (pollTimer) return;
 
   const pollIntervalMs = Math.max(
     options.pollIntervalMs || getPollIntervalMs(),
@@ -78,27 +68,7 @@ export function startRuntimeConfigHotReload(options: { pollIntervalMs?: number }
     (pollTimer as { unref?: () => void }).unref?.();
   }
 
-  if (SQLITE_FILE) {
-    try {
-      sqliteWatcher = fs.watch(path.dirname(SQLITE_FILE), (_eventType, filename: string | Buffer | null) => {
-        const normalizedFilename = typeof filename === "string" ? filename : filename?.toString();
-        if (isRelevantSqliteChange(normalizedFilename || null)) {
-          queueHotReloadCheck("hot-reload:fs-watch");
-        }
-      });
-    } catch (error) {
-      console.warn(
-        "[HOT_RELOAD] SQLite file watch unavailable, polling only:",
-        error instanceof Error ? error.message : error
-      );
-    }
-  }
-
-  console.log(
-    `[HOT_RELOAD] Runtime config hot-reload started (poll=${pollIntervalMs}ms, fsWatch=${
-      sqliteWatcher ? "on" : "off"
-    })`
-  );
+  console.log(`[HOT_RELOAD] Runtime config hot-reload started (poll=${pollIntervalMs}ms)`);
 
   queueHotReloadCheck("hot-reload:start");
 }
@@ -108,8 +78,6 @@ export function stopRuntimeConfigHotReloadForTests() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
-  sqliteWatcher?.close();
-  sqliteWatcher = null;
   queuedSource = null;
   activeCheck = null;
 }

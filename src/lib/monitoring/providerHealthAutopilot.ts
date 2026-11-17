@@ -262,7 +262,7 @@ export async function buildProviderHealthAutopilotReport(
     const provider = canonicalProviderId(connection.provider);
     return provider && (!providerFilter || provider === providerFilter);
   });
-  const breakers = (getAllCircuitBreakerStatuses() as unknown as JsonRecord[]).filter((breaker) => {
+  const breakers = ((await getAllCircuitBreakerStatuses()) as unknown as JsonRecord[]).filter((breaker) => {
     const name = toString(breaker.name);
     const provider = canonicalProviderId(name);
     if (!name || !provider || name.startsWith("test-") || name.startsWith("test_")) return false;

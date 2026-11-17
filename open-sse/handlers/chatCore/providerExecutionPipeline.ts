@@ -74,7 +74,7 @@ export interface PipelineConnectionContext {
   getCredentials: () => Record<string, unknown>;
   replaceCredentials: (next: Record<string, unknown>) => void;
   onCredentialsRefreshed: (next: Record<string, unknown>) => void | Promise<void>;
-  assertManagedLeaseFence: (connectionId: string) => void;
+  assertManagedLeaseFence: (connectionId: string) => Promise<void>;
   getProviderCredentials: typeof getProviderCredentials;
   /**
    * Connection allowlist the request was routed under (API key allowlist ∩ combo
@@ -365,7 +365,7 @@ export async function runProviderExecutionPipeline(
   ) => {
     const connectionId = currentConnectionId(connection);
     if (!input.getNextFamilyFallback) {
-      return getNextEligibleFamilyFallback(
+      return await getNextEligibleFamilyFallback(
         currentModel,
         triedModels,
         providerHint ?? target.provider,
@@ -377,7 +377,7 @@ export async function runProviderExecutionPipeline(
     while (true) {
       const candidate = await input.getNextFamilyFallback(currentModel, excluded, providerHint);
       if (!candidate || excluded.has(candidate)) return null;
-      if (isFamilyFallbackEligible(candidate, target.provider, connectionId)) return candidate;
+      if (await isFamilyFallbackEligible(candidate,target.provider, connectionId)) return candidate;
       excluded.add(candidate);
     }
   };

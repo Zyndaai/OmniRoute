@@ -1,4 +1,4 @@
-import { getDbInstance } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import type { ProviderLimitsCacheEntry } from "@/lib/db/providerLimits";
 import { getProviderQuotaWindowStartIso } from "@/lib/db/quotaResetEvents";
 import { sumSearchLedgerSpendSince } from "@/lib/db/costLedger";
@@ -72,8 +72,12 @@ export interface ApiKeyUsageLimitDeps {
   now?: () => number;
   getProviderConnectionById?: (connectionId: string) => Promise<unknown>;
   getProviderConnections?: (filter?: Record<string, unknown>) => Promise<unknown[]>;
-  getProviderLimitsCache?: (connectionId: string) => ProviderLimitsCacheEntry | null;
-  getAllProviderLimitsCache?: () => Record<string, ProviderLimitsCacheEntry>;
+  getProviderLimitsCache?: (
+    connectionId: string
+  ) => ProviderLimitsCacheEntry | null | Promise<ProviderLimitsCacheEntry | null>;
+  getAllProviderLimitsCache?: () =>
+    | Record<string, ProviderLimitsCacheEntry>
+    | Promise<Record<string, ProviderLimitsCacheEntry>>;
   getUnpricedUsagePolicy?: () => UnpricedUsageBudgetPolicy;
 }
 
@@ -264,30 +268,27 @@ function isWeeklyQuotaResetSnapshot(row: QuotaSnapshotRow, targetResetAtIso: str
   return resetDay(row.nextResetAt) === targetDay;
 }
 
-function getObservedWeeklyWindowStartIso(
+async function getObservedWeeklyWindowStartIso(
   connectionId: string,
   targetResetAtIso: string,
   nowMs: number
-): string | null {
+): Promise<string | null> {
   if (!connectionId || !targetResetAtIso) return null;
 
   try {
-    const rows = getDbInstance()
-      .prepare(
-        `
-        SELECT
-          remaining_percentage as remainingPercentage,
-          next_reset_at as nextResetAt,
-          created_at as createdAt
-        FROM quota_snapshots
-        WHERE connection_id = @connectionId
-          AND LOWER(window_key) LIKE '%weekly%'
-          AND LOWER(window_key) NOT LIKE '%sonnet%'
-          AND created_at <= @nowIso
-        ORDER BY created_at ASC, id ASC
-      `
-      )
-      .all({ connectionId, nowIso: new Date(nowMs).toISOString() }) as QuotaSnapshotRow[];
+    const rows = await db().query<QuotaSnapshotRow>(
+      `SELECT
+         remaining_percentage AS "remainingPercentage",
+         next_reset_at AS "nextResetAt",
+         created_at AS "createdAt"
+       FROM quota_snapshots
+       WHERE connection_id = $1
+         AND LOWER(window_key) LIKE '%weekly%'
+         AND LOWER(window_key) NOT LIKE '%sonnet%'
+         AND created_at <= $2
+       ORDER BY created_at ASC, id ASC`,
+      [connectionId, new Date(nowMs).toISOString()]
+    );
 
     let observedStartIso: string | null = null;
     let previousUsedPercent: number | null = null;
@@ -319,14 +320,14 @@ function getObservedWeeklyWindowStartIso(
 // Prefer the persisted, provider-observed window start (recorded by
 // quotaResetEvents on real reset transitions); fall back to inferring it from
 // historical snapshots when no observed event is available yet.
-function getWeeklyWindowStartIso(
+async function getWeeklyWindowStartIso(
   connectionId: string,
   targetResetAtIso: string,
   nowMs: number
-): string | null {
+): Promise<string | null> {
   return (
-    getProviderQuotaWindowStartIso(connectionId, targetResetAtIso, nowMs) ??
-    getObservedWeeklyWindowStartIso(connectionId, targetResetAtIso, nowMs)
+    (await getProviderQuotaWindowStartIso(connectionId, targetResetAtIso, nowMs)) ??
+    (await getObservedWeeklyWindowStartIso(connectionId, targetResetAtIso, nowMs))
   );
 }
 
@@ -367,7 +368,7 @@ async function getProviderWeeklyWindow(
       const connection = connectionFromValue(await deps.getProviderConnectionById(connectionId));
       if (!connection) continue;
       const resetAt = findWeeklyQuotaResetAt(
-        deps.getProviderLimitsCache(connection.id)?.quotas,
+        (await deps.getProviderLimitsCache(connection.id))?.quotas,
         nowMs
       );
       if (resetAt) {
@@ -375,12 +376,12 @@ async function getProviderWeeklyWindow(
           connectionId: connection.id,
           provider: connection.provider,
           resetAtIso: resetAt,
-          observedWindowStartIso: getWeeklyWindowStartIso(connection.id, resetAt, nowMs),
+          observedWindowStartIso: await getWeeklyWindowStartIso(connection.id, resetAt, nowMs),
         });
       }
     }
   } else {
-    const caches = deps.getAllProviderLimitsCache();
+    const caches = await deps.getAllProviderLimitsCache();
     const connections = await deps.getProviderConnections({ isActive: true });
     for (const rawConnection of connections) {
       const connection = connectionFromValue(rawConnection);
@@ -391,7 +392,7 @@ async function getProviderWeeklyWindow(
           connectionId: connection.id,
           provider: connection.provider,
           resetAtIso: resetAt,
-          observedWindowStartIso: getWeeklyWindowStartIso(connection.id, resetAt, nowMs),
+          observedWindowStartIso: await getWeeklyWindowStartIso(connection.id, resetAt, nowMs),
         });
       }
     }
@@ -488,29 +489,25 @@ interface ApiKeyUsdSpend {
 async function getApiKeyUsdSpendSince(apiKeyId: string, sinceIso: string): Promise<ApiKeyUsdSpend> {
   if (!apiKeyId)
     return { totalUsd: 0, hasUnpricedUsage: false, unpricedModels: [], hasPricingFailure: false };
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `
-      SELECT
-        LOWER(provider) as provider,
-        LOWER(model) as model,
-        COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
-        COALESCE(SUM(provider_cost_usd), 0) as storedCost,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN 1 ELSE 0 END), 0) as unmeteredRequests,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_input ELSE 0 END), 0) as promptTokens,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_output ELSE 0 END), 0) as completionTokens,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_read ELSE 0 END), 0) as cacheReadTokens,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_creation ELSE 0 END), 0) as cacheCreationTokens,
-        COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_reasoning ELSE 0 END), 0) as reasoningTokens
-      FROM usage_history
-      WHERE api_key_id = @apiKeyId
-        AND timestamp >= @sinceIso
-        AND (success = 1 OR provider_cost_usd IS NOT NULL)
-      GROUP BY LOWER(provider), LOWER(model), serviceTier
-    `
-    )
-    .all({ apiKeyId, sinceIso }) as UsageCostRow[];
+  const rows = await db().query<UsageCostRow>(
+    `SELECT
+       LOWER(provider) AS provider,
+       LOWER(model) AS model,
+       COALESCE(NULLIF(service_tier, ''), 'standard') AS "serviceTier",
+       COALESCE(SUM(provider_cost_usd), 0) AS "storedCost",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN 1 ELSE 0 END), 0) AS "unmeteredRequests",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_input ELSE 0 END), 0) AS "promptTokens",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_output ELSE 0 END), 0) AS "completionTokens",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_read ELSE 0 END), 0) AS "cacheReadTokens",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_creation ELSE 0 END), 0) AS "cacheCreationTokens",
+       COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_reasoning ELSE 0 END), 0) AS "reasoningTokens"
+     FROM usage_history
+     WHERE api_key_id = $1
+       AND "timestamp" >= $2
+       AND (success OR provider_cost_usd IS NOT NULL)
+     GROUP BY LOWER(provider), LOWER(model), COALESCE(NULLIF(service_tier, ''), 'standard')`,
+    [apiKeyId, sinceIso]
+  );
 
   let total = 0;
   const unpriced = new Set<string>();
@@ -559,7 +556,7 @@ async function getApiKeyUsdSpendSince(apiKeyId: string, sinceIso: string): Promi
 
   // Web search spend is not in usage_history; it lives in request_cost_ledger
   // under the search-only service_tier marker, so chat rows are never re-counted.
-  total += sumSearchLedgerSpendSince(apiKeyId, sinceIso);
+  total += await sumSearchLedgerSpendSince(apiKeyId, sinceIso);
   return {
     totalUsd: roundUsd(total),
     hasUnpricedUsage: unpriced.size > 0,

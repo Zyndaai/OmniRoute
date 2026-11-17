@@ -18,7 +18,7 @@ function getIntervalMs() {
  * caught here - safeRun records them as a failure run.
  */
 export async function run(): Promise<{ success: boolean; recordsAffected: number }> {
-  const result = syncAllBudgetSchedules(Date.now());
+  const result = await syncAllBudgetSchedules(Date.now());
   if (result.resetCount > 0) {
     console.log(`[BudgetReset] processed=${result.processed} reset=${result.resetCount}`);
   }
@@ -26,8 +26,8 @@ export async function run(): Promise<{ success: boolean; recordsAffected: number
 }
 
 /** Wire the budget_reset job into a JobRegistry (idempotent - call at boot). */
-export function registerBudgetResetJob(registry: JobRegistry): void {
-  registry.register({
+export async function registerBudgetResetJob(registry: JobRegistry): Promise<void> {
+  await registry.register({
     id: "budget_reset",
     type: "interval",
     cron: null,

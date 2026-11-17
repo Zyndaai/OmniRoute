@@ -1,16 +1,64 @@
-import { getFeatureFlagOverride } from "@/lib/db/featureFlags";
+import { getFeatureFlagOverrides } from "@/lib/db/featureFlags";
 import {
   FEATURE_FLAG_DEFINITIONS,
   type FeatureFlagDefinition,
 } from "@/shared/constants/featureFlagDefinitions";
 import { registerFeatureFlagResolver } from "@/shared/utils/featureFlagResolverBridge";
 
+// Flag reads are synchronous and sit on hot paths (once per string leaf of a request body),
+// while the database is asynchronous. Reads therefore go through an in-process snapshot of
+// the override table, refreshed in the background when it is older than the TTL (the same
+// staleness window the per-key database cache used to have). Until the first load finishes,
+// reads fall back to the environment variable and the definition default;
+// `ensureFeatureFlagSnapshot()` lets startup and request entry points wait for that load.
+const SNAPSHOT_TTL_MS = 1000;
+let overrideSnapshot: Record<string, string> | null = null;
+let snapshotLoadedAt = 0;
+let snapshotRefresh: Promise<void> | null = null;
+
+/** Reload the override snapshot from the database. Failures keep the previous snapshot. */
+export function refreshFeatureFlagSnapshot(): Promise<void> {
+  if (!snapshotRefresh) {
+    snapshotRefresh = getFeatureFlagOverrides()
+      .then((overrides) => {
+        overrideSnapshot = overrides;
+        snapshotLoadedAt = Date.now();
+      })
+      .catch((error) => {
+        console.error(
+          "[featureFlags] Failed to load feature flag overrides:",
+          error instanceof Error ? error.message : error
+        );
+      })
+      .finally(() => {
+        snapshotRefresh = null;
+      });
+  }
+  return snapshotRefresh;
+}
+
+/** Resolves once the override snapshot has been loaded at least once. */
+export async function ensureFeatureFlagSnapshot(): Promise<void> {
+  if (overrideSnapshot === null) await refreshFeatureFlagSnapshot();
+}
+
+/**
+ * Synchronous read of a stored override (undefined when none). Serves the snapshot and
+ * starts a background refresh when it is stale.
+ */
+export function peekFeatureFlagOverride(key: string): string | undefined {
+  if (overrideSnapshot === null || Date.now() - snapshotLoadedAt > SNAPSHOT_TTL_MS) {
+    void refreshFeatureFlagSnapshot();
+  }
+  return overrideSnapshot?.[key];
+}
+
 /**
  * Resolve the effective value of a feature flag.
  * Priority: DB override > process.env > definition.defaultValue
  */
 export function resolveFeatureFlag(key: string): string {
-  const dbOverride = getFeatureFlagOverride(key);
+  const dbOverride = peekFeatureFlagOverride(key);
   if (dbOverride !== undefined) return dbOverride;
 
   const envValue = process.env[key];
@@ -36,19 +84,25 @@ registerFeatureFlagResolver(isFeatureFlagEnabled);
 /**
  * Resolve all feature flags with their effective values and sources.
  */
-export function resolveAllFeatureFlags(): Array<{
-  key: string;
-  effectiveValue: string;
-  source: "db" | "env" | "default";
-  configuredSource?: "db" | "env" | "default";
-  sourceKey?: string;
-  definition: FeatureFlagDefinition;
-}> {
+export async function resolveAllFeatureFlags(): Promise<
+  Array<{
+    key: string;
+    effectiveValue: string;
+    source: "db" | "env" | "default";
+    configuredSource?: "db" | "env" | "default";
+    sourceKey?: string;
+    definition: FeatureFlagDefinition;
+  }>
+> {
+  // Read fresh (the dashboard shows this right after a toggle) and refresh the snapshot with it.
+  const overrides = await getFeatureFlagOverrides();
+  overrideSnapshot = overrides;
+  snapshotLoadedAt = Date.now();
   return FEATURE_FLAG_DEFINITIONS.map((definition) => {
     if (definition.key === "UNPRICED_USAGE_BUDGET_POLICY") {
       return { key: definition.key, ...resolveUnpricedUsageBudgetPolicy(), definition };
     }
-    const dbOverride = getFeatureFlagOverride(definition.key);
+    const dbOverride = overrides[definition.key];
     if (dbOverride !== undefined) {
       return { key: definition.key, effectiveValue: dbOverride, source: "db", definition };
     }
@@ -153,7 +207,7 @@ export function resolveUnpricedUsageBudgetPolicy(): {
   sourceKey: string;
 } {
   const key = "UNPRICED_USAGE_BUDGET_POLICY";
-  const dbPolicy = getFeatureFlagOverride(key);
+  const dbPolicy = peekFeatureFlagOverride(key);
   const explicitPolicy = dbPolicy ?? (process.env[key] || undefined);
   if (explicitPolicy !== undefined) {
     const source = dbPolicy !== undefined ? "db" : "env";
@@ -167,7 +221,7 @@ export function resolveUnpricedUsageBudgetPolicy(): {
   const sourceKey = "USAGE_LIMIT_IGNORE_UNPRICED";
   const effectiveValue = isFeatureFlagEnabled(sourceKey) ? "count_as_zero" : "fail_closed";
   const source =
-    getFeatureFlagOverride(sourceKey) !== undefined
+    peekFeatureFlagOverride(sourceKey) !== undefined
       ? "db"
       : process.env[sourceKey]
         ? "env"

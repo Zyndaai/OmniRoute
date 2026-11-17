@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 import { invalidateDbCache } from "./readCache";
 
 /**
@@ -58,22 +58,21 @@ function toOverride(row: OverrideRow): ModelContextOverride {
 }
 
 /** Full override record for (provider, modelId), or null. Never throws. */
-export function getModelContextOverrideRecord(
+export async function getModelContextOverrideRecord(
   provider: string | null | undefined,
   modelId: string | null | undefined
-): ModelContextOverride | null {
+): Promise<ModelContextOverride | null> {
   const key = normalizeKey(provider, modelId);
   if (!key) return null;
   try {
-    const row = getDbInstance()
-      .prepare(
-        "SELECT provider, model_id, real_context, source, refreshed_at " +
-          "FROM model_context_overrides WHERE provider = ? AND model_id = ?"
-      )
-      .get(key.provider, key.modelId) as OverrideRow | undefined;
+    const row = await db().queryOne<OverrideRow>(
+      "SELECT provider, model_id, real_context, source, refreshed_at " +
+        "FROM model_context_overrides WHERE provider = $1 AND model_id = $2",
+      [key.provider, key.modelId]
+    );
     return row ? toOverride(row) : null;
   } catch {
-    // Table may not exist yet (pre-migration) — fall through to the catalog.
+    // Database unavailable — fall through to the catalog.
     return null;
   }
 }
@@ -82,17 +81,17 @@ export function getModelContextOverrideRecord(
 export type NestedContextOverrideMap = ReadonlyMap<string, ReadonlyMap<string, number>>;
 
 /** The overridden context window (tokens) for (provider, modelId), or null. Never throws. */
-export function getModelContextOverride(
+export async function getModelContextOverride(
   provider: string | null | undefined,
   modelId: string | null | undefined,
   bulkContextOverrides?: NestedContextOverrideMap | null
-): number | null {
+): Promise<number | null> {
   if (bulkContextOverrides) {
     const key = normalizeKey(provider, modelId);
     if (!key) return null;
     return bulkContextOverrides.get(key.provider)?.get(key.modelId) ?? null;
   }
-  const record = getModelContextOverrideRecord(provider, modelId);
+  const record = await getModelContextOverrideRecord(provider, modelId);
   return record ? record.realContext : null;
 }
 
@@ -109,52 +108,53 @@ export interface ModelContextOverrideWriteOptions {
  * Upsert an override. `realContext` must be a positive integer (a token count);
  * anything else is rejected (no write). Returns true when a row was written.
  */
-export function setModelContextOverride(
+export async function setModelContextOverride(
   provider: string,
   modelId: string,
   realContext: number,
   source: ModelContextOverrideSource = "manual",
   options: ModelContextOverrideWriteOptions = {}
-): boolean {
+): Promise<boolean> {
   const key = normalizeKey(provider, modelId);
-  if (!key || !isPositiveInteger(realContext)) return false;
+  // real_context is a 32-bit integer column.
+  if (!key || !isPositiveInteger(realContext) || realContext > 2_147_483_647) return false;
   const normalizedSource: ModelContextOverrideSource =
     source === "auto:discovery" ? "auto:discovery" : "manual";
-  getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO model_context_overrides " +
-        "(provider, model_id, real_context, source, refreshed_at) " +
-        "VALUES (?, ?, ?, ?, datetime('now'))"
-    )
-    .run(key.provider, key.modelId, realContext, normalizedSource);
+  await db().execute(
+    `INSERT INTO model_context_overrides (provider, model_id, real_context, source, refreshed_at)
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (provider, model_id)
+     DO UPDATE SET real_context = EXCLUDED.real_context, source = EXCLUDED.source,
+                   refreshed_at = EXCLUDED.refreshed_at`,
+    [key.provider, key.modelId, realContext, normalizedSource]
+  );
   if (options.invalidate !== false) invalidateDbCache("model-capabilities");
   return true;
 }
 
 /** Remove an override. Returns true when a row was deleted. */
-export function removeModelContextOverride(
+export async function removeModelContextOverride(
   provider: string,
   modelId: string,
   options: ModelContextOverrideWriteOptions = {}
-): boolean {
+): Promise<boolean> {
   const key = normalizeKey(provider, modelId);
   if (!key) return false;
-  const info = getDbInstance()
-    .prepare("DELETE FROM model_context_overrides WHERE provider = ? AND model_id = ?")
-    .run(key.provider, key.modelId);
+  const info = await db().execute(
+    "DELETE FROM model_context_overrides WHERE provider = $1 AND model_id = $2",
+    [key.provider, key.modelId]
+  );
   if (info.changes > 0 && options.invalidate !== false) invalidateDbCache("model-capabilities");
   return info.changes > 0;
 }
 
 /** All overrides, newest refresh first. Never throws. */
-export function listModelContextOverrides(): ModelContextOverride[] {
+export async function listModelContextOverrides(): Promise<ModelContextOverride[]> {
   try {
-    const rows = getDbInstance()
-      .prepare(
-        "SELECT provider, model_id, real_context, source, refreshed_at " +
-          "FROM model_context_overrides ORDER BY refreshed_at DESC"
-      )
-      .all() as OverrideRow[];
+    const rows = await db().query<OverrideRow>(
+      "SELECT provider, model_id, real_context, source, refreshed_at " +
+        "FROM model_context_overrides ORDER BY refreshed_at DESC"
+    );
     return rows.map(toOverride);
   } catch {
     return [];

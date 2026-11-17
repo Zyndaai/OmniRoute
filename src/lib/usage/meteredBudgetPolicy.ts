@@ -106,13 +106,13 @@ const ALLOWED: MeteredBudgetDecision = { allowed: true };
  * every provider. A key whose allowance is spent is allowed only for providers
  * that do not consume it.
  */
-export function checkMeteredBudgetForProvider(
+export async function checkMeteredBudgetForProvider(
   apiKeyId: string | null | undefined,
   providerId: string | null | undefined
-): MeteredBudgetDecision {
+): Promise<MeteredBudgetDecision> {
   if (!apiKeyId) return ALLOWED;
   if (!consumesMeteredBudget(providerId)) return ALLOWED;
-  const budget = checkBudget(apiKeyId);
+  const budget = await checkBudget(apiKeyId);
   if (budget.allowed) return ALLOWED;
   return { allowed: false, reason: budget.reason || "Budget limit exceeded" };
 }
@@ -124,12 +124,12 @@ export function checkMeteredBudgetForProvider(
  * rate limit and cool a healthy connection). Returns the 429 to send, or null to
  * proceed. Kept out of the handler to stay under its frozen file-size ratchet.
  */
-export function rejectIfMeteredBudgetExceeded(
+export async function rejectIfMeteredBudgetExceeded(
   apiKeyId: string | null | undefined,
   providerId: string | null | undefined,
   modelStr: string
-): Response | null {
-  const decision = checkMeteredBudgetForProvider(apiKeyId, providerId);
+): Promise<Response | null> {
+  const decision = await checkMeteredBudgetForProvider(apiKeyId, providerId);
   if (decision.allowed) return null;
   log.info(
     "BUDGET",

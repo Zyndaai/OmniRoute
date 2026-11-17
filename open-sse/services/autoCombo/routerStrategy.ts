@@ -14,7 +14,8 @@
 
 import type { ProviderCandidate, ScoredProvider, ScoringWeights } from "./scoring.ts";
 import { scorePool } from "./scoring.ts";
-import { getTaskFitness } from "./taskFitness.ts";
+import { getStaticFitnessTableScore } from "./taskFitness.ts";
+import { loadTaskFitnessLookup, type SyncTaskFitness } from "./fitnessLookup.ts";
 import { clamp01 } from "../../utils/number.ts";
 import { rankBySpeed } from "./speedRanking.ts";
 import type { SpeedCandidate } from "./speedRanking.ts";
@@ -99,17 +100,43 @@ function toSpeedCandidate(c: ProviderCandidate): SpeedCandidate {
   };
 }
 
+/** Sync fallback for `select`: the static fitness table only (no DB overrides). */
+function staticTaskFitness(model: string, taskType: string): number {
+  return getStaticFitnessTableScore(model, taskType) ?? 0.5;
+}
+
+function eligiblePool(pool: ProviderCandidate[]): ProviderCandidate[] {
+  const eligible = pool.filter((c) => c.circuitBreakerState !== "OPEN");
+  return eligible.length > 0 ? eligible : pool;
+}
+
 class RulesStrategyImpl implements RouterStrategy {
   readonly name = "rules";
   readonly description = "16-factor weighted scoring (see DEFAULT_WEIGHTS)";
 
   select(pool: ProviderCandidate[], context: RoutingContext): RoutingDecision {
-    const eligible = pool.filter((c) => c.circuitBreakerState !== "OPEN");
+    return this.decide(pool, context, staticTaskFitness);
+  }
+
+  async selectAsync(pool: ProviderCandidate[], context: RoutingContext): Promise<RoutingDecision> {
+    const eligible = eligiblePool(pool);
+    const fitness = await loadTaskFitnessLookup(
+      eligible.map((c) => c.model),
+      context.taskType
+    );
+    return this.decide(pool, context, fitness);
+  }
+
+  private decide(
+    pool: ProviderCandidate[],
+    context: RoutingContext,
+    fitness: SyncTaskFitness
+  ): RoutingDecision {
     const ranked: ScoredProvider[] = scorePool(
-      eligible.length > 0 ? eligible : pool,
+      eligiblePool(pool),
       context.taskType,
       context.weights,
-      getTaskFitness,
+      fitness,
       context.manifestHint
     );
     const best = ranked[0];
@@ -133,12 +160,28 @@ class ScoreStrategyImpl implements RouterStrategy {
   readonly description = "Selects the highest configured weighted score, with explicit exploration";
 
   select(pool: ProviderCandidate[], context: RoutingContext): RoutingDecision {
-    const eligible = pool.filter((candidate) => candidate.circuitBreakerState !== "OPEN");
+    return this.decide(pool, context, staticTaskFitness);
+  }
+
+  async selectAsync(pool: ProviderCandidate[], context: RoutingContext): Promise<RoutingDecision> {
+    const eligible = eligiblePool(pool);
+    const fitness = await loadTaskFitnessLookup(
+      eligible.map((c) => c.model),
+      context.taskType
+    );
+    return this.decide(pool, context, fitness);
+  }
+
+  private decide(
+    pool: ProviderCandidate[],
+    context: RoutingContext,
+    fitness: SyncTaskFitness
+  ): RoutingDecision {
     const ranked = scorePool(
-      eligible.length > 0 ? eligible : pool,
+      eligiblePool(pool),
       context.taskType,
       context.weights,
-      getTaskFitness,
+      fitness,
       context.manifestHint
     );
     if (ranked.length === 0) throw new Error("[ScoreStrategy] No candidates to score");
@@ -380,6 +423,21 @@ class LKGPStrategyImpl implements RouterStrategy {
 
     // Fallback to rules strategy
     return getStrategy("rules").select(pool, context);
+  }
+
+  async selectAsync(pool: ProviderCandidate[], context: RoutingContext): Promise<RoutingDecision> {
+    if (context.lkgpEnabled === false) {
+      return selectWithStrategyAsync(pool, context, "rules");
+    }
+
+    if (context.lastKnownGoodProvider) {
+      const hasCandidate = pool.some(
+        (c) => c.provider === context.lastKnownGoodProvider && c.circuitBreakerState !== "OPEN"
+      );
+      if (hasCandidate) return this.select(pool, context);
+    }
+
+    return selectWithStrategyAsync(pool, context, "rules");
   }
 }
 

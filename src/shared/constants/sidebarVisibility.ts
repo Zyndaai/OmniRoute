@@ -181,7 +181,6 @@ export const ESSENTIALS_ADVANCED_TOOL_IDS: ReadonlySet<HideableSidebarItemId> = 
   "resilience-connections",
   "mcp",
   "a2a",
-  "memory",
   "skills",
 ]);
 
@@ -225,7 +224,6 @@ const DEVELOPER_SHOWN: ReadonlySet<HideableSidebarItemId> = new Set([
   "resilience-connections",
   "translator",
   "playground",
-  "memory",
   "skills",
   "mcp",
   "a2a",

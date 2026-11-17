@@ -60,9 +60,10 @@ export async function POST(
     ? expandVscodeServiceTierModels(catalogBody.data.filter(isUsableChatModel))
     : [];
 
-  const model = Array.isArray(expandedModels)
-    ? expandedModels.find((entry) => matchesRequestedModel(entry, requestedName))
-    : undefined;
+  const matches = await Promise.all(
+    expandedModels.map((entry) => matchesRequestedModel(entry, requestedName))
+  );
+  const model = expandedModels.find((_entry, index) => matches[index]);
 
   if (!model) {
     return Response.json(
@@ -78,9 +79,12 @@ export async function POST(
     );
   }
 
-  return Response.json(buildShowPayload(model, getVscodeModelDisplayName(model), requestedName), {
-    headers: {
-      ...CORS_HEADERS,
-    },
-  });
+  return Response.json(
+    await buildShowPayload(model, await getVscodeModelDisplayName(model), requestedName),
+    {
+      headers: {
+        ...CORS_HEADERS,
+      },
+    }
+  );
 }

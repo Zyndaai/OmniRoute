@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = getNotionConfig();
+    const config = await getNotionConfig();
     return NextResponse.json({
       connected: config.connected,
       hasToken: config.token !== null,
@@ -50,12 +50,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    setNotionToken(parsed.data.token);
+    await setNotionToken(parsed.data.token);
 
     const client = createNotionClient(parsed.data.token);
     const result = await client.searchPagesAndDatabases("test", undefined, 1);
     if (result && typeof result === "object" && "object" in result && (result as Record<string, unknown>).object === "error") {
-      clearNotionToken();
+      await clearNotionToken();
       return NextResponse.json(
         { error: "Token validation failed: invalid token", connected: false },
         { status: 400 }
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       message: "Notion integration token saved and validated",
     });
   } catch (error) {
-    clearNotionToken();
+    await clearNotionToken();
     const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: sanitizeErrorMessage(msg), connected: false }, { status: 400 });
   }
@@ -79,7 +79,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    clearNotionToken();
+    await clearNotionToken();
     return NextResponse.json({
       connected: false,
       message: "Notion integration disconnected",

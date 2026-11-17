@@ -57,11 +57,13 @@ function isKnownWebFetchProvider(value: unknown): value is WebFetchProviderId {
   return typeof value === "string" && (WEB_FETCH_PROVIDERS as readonly string[]).includes(value);
 }
 
-function resolvePinnedBackend(input: ExecuteWebFetchInput): WebFetchProviderId | undefined {
+async function resolvePinnedBackend(
+  input: ExecuteWebFetchInput
+): Promise<WebFetchProviderId | undefined> {
   if (isKnownWebFetchProvider(input.provider)) return input.provider;
   if (!input.ruleProvider) return undefined;
 
-  const rules = getInterceptionRules(input.ruleProvider);
+  const rules = await getInterceptionRules(input.ruleProvider);
   if (!rules) return undefined;
 
   const modelRule = input.ruleModel ? rules.models?.[input.ruleModel] : undefined;
@@ -113,7 +115,7 @@ async function autoSelectProvider(): Promise<{
 async function resolveProviderAndCredentials(
   input: ExecuteWebFetchInput
 ): Promise<{ provider: WebFetchProviderId; credentials: WebFetchCredentials }> {
-  const pinnedProvider = resolvePinnedBackend(input);
+  const pinnedProvider = await resolvePinnedBackend(input);
   const pinnedCredentials = pinnedProvider ? await resolveCredentials(pinnedProvider) : null;
   if (pinnedProvider && pinnedCredentials) {
     return { provider: pinnedProvider, credentials: pinnedCredentials };

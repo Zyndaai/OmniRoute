@@ -115,7 +115,9 @@ type VideoBridgeBody = {
 
 export interface VideoBridgeDependencies extends VideoSttAdapterDependencies {
   getSettings?: () => Promise<Record<string, unknown>>;
-  getCapabilities?: (model: string) => { supportsVideo: boolean | null };
+  getCapabilities?: (
+    model: string
+  ) => { supportsVideo: boolean | null } | Promise<{ supportsVideo: boolean | null }>;
   describePart?: (part: VideoPart, analysis: VideoAnalysisContext) => Promise<DescribedVideo>;
   extractFrames?: DescribeVideoDependencies["extractFrames"];
   fetchRemote?: DescribeVideoDependencies["fetchRemote"];
@@ -199,7 +201,7 @@ export class VideoBridgeGuardrail extends BaseGuardrail {
     const parts = extractVideoParts(body);
     if (parts.length === 0) return { block: false };
 
-    const capabilities = (this.deps.getCapabilities ?? getResolvedModelCapabilities)(model);
+    const capabilities = await (this.deps.getCapabilities ?? getResolvedModelCapabilities)(model);
     if (capabilities.supportsVideo === true) return { block: false };
 
     // Raw cue fields stay sensitive even when describing the video fails or

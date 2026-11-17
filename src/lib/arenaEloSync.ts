@@ -16,8 +16,7 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
 
 import { isArenaEloSyncEnabled } from "@/shared/utils/featureFlags";
 
-import { getDbInstance } from "./db/core";
-import { backupDbFile } from "./db/backup";
+import { db } from "./db/pg";
 import { fetchHuggingFaceLeaderboards } from "./arenaEloHfSource";
 import {
   applyArenaEloRefresh,
@@ -174,73 +173,72 @@ let syncTimer: ReturnType<typeof setInterval> | null = null;
 let lastSyncTime: string | null = null;
 let lastSyncModelCount = 0;
 let activeSyncIntervalMs = SYNC_INTERVAL_MS;
-let firstSyncDone = false;
 let syncInProgress = false;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// ─── Failure backoff (persisted in key_value) ────────────
-// After a failed sync we stamp arena_elo/lastFailedAt so restarts and the
+// ─── Failure backoff (persisted in config_entries) ────────────
+// After a failed sync we stamp job_state `arena_elo.lastFailedAt` so restarts and the
 // periodic timer skip retrying a rate-limited/dead upstream within the
 // window (remediation 2026-09-12: prevents boot-loop retry storms).
+// The values are raw text stored as JSON strings (read back with `value #>> '{}'`).
 const BACKOFF_MS = SYNC_INTERVAL_MS / 4; // 6h for the default 24h interval
 
-const KV_READ_SQL = `SELECT value FROM key_value WHERE namespace = ? AND key = ? LIMIT 1`;
-const KV_WRITE_SQL = `INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)`;
+const kvKey = (key: string) => `arena_elo.${key}`;
 
-function readLastFailedAt(): number | null {
+async function readLastFailedAt(): Promise<number | null> {
   try {
-    const db = getDbInstance();
-    const row = db.prepare(KV_READ_SQL).get("arena_elo", "lastFailedAt") as
-      { value: string } | undefined;
-    if (!row?.value) return null;
-    const ts = Date.parse(row.value);
+    const value = await readKv("lastFailedAt");
+    if (!value) return null;
+    const ts = Date.parse(value);
     return Number.isFinite(ts) ? ts : null;
   } catch {
     return null; // kv problems must never break the sync itself
   }
 }
 
-function writeLastFailedAt(ts: number): void {
+async function writeLastFailedAt(ts: number): Promise<void> {
   try {
-    const db = getDbInstance();
-    db.prepare(KV_WRITE_SQL).run("arena_elo", "lastFailedAt", new Date(ts).toISOString());
+    await db().execute(
+      `INSERT INTO config_entries (namespace, key, value) VALUES ('job_state', $1, to_jsonb($2::text))
+       ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [kvKey("lastFailedAt"), new Date(ts).toISOString()]
+    );
   } catch (err) {
     console.warn(`[ARENA_ELO_SYNC] Failed to persist lastFailedAt: ${getErrorMessage(err)}`);
   }
 }
 
-function clearLastFailedAt(): void {
-  try {
-    const db = getDbInstance();
-    db.prepare(`DELETE FROM key_value WHERE namespace = ? AND key = ?`).run(
-      "arena_elo",
-      "lastFailedAt"
-    );
-  } catch {
-    // Swallow: a stuck kv row only costs one redundant fetch later.
-  }
+async function clearLastFailedAt(): Promise<void> {
+  await writeKv("lastFailedAt", null);
 }
 
-function readKv(key: string): string | null {
+async function readKv(key: string): Promise<string | null> {
   try {
-    const row = getDbInstance().prepare(KV_READ_SQL).get("arena_elo", key) as
-      { value: string } | undefined;
+    const row = await db().queryOne<{ value: string | null }>(
+      "SELECT value #>> '{}' AS value FROM config_entries WHERE namespace = 'job_state' AND key = $1",
+      [kvKey(key)]
+    );
     return row?.value || null;
   } catch {
     return null;
   }
 }
 
-function writeKv(key: string, value: string | null): void {
+async function writeKv(key: string, value: string | null): Promise<void> {
   try {
-    const db = getDbInstance();
     if (value === null) {
-      db.prepare(`DELETE FROM key_value WHERE namespace = ? AND key = ?`).run("arena_elo", key);
+      await db().execute("DELETE FROM config_entries WHERE namespace = 'job_state' AND key = $1", [
+        kvKey(key),
+      ]);
     } else {
-      db.prepare(KV_WRITE_SQL).run("arena_elo", key, value);
+      await db().execute(
+        `INSERT INTO config_entries (namespace, key, value) VALUES ('job_state', $1, to_jsonb($2::text))
+         ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+        [kvKey(key), value]
+      );
     }
   } catch {
     // kv problems must never break the sync itself
@@ -250,19 +248,19 @@ function writeKv(key: string, value: string | null): void {
 /** Which upstream served the most recent fetch (set by fetchArenaLeaderboards). */
 let lastFetchSource: "wulong" | "huggingface" = "wulong";
 
-function recordSyncSuccess(leaderboards: ArenaLeaderboardMap): void {
+async function recordSyncSuccess(leaderboards: ArenaLeaderboardMap): Promise<void> {
   const datasetDate =
     lastFetchSource === "huggingface"
       ? (Object.values(leaderboards).find((b) => b.meta?.dataset_date)?.meta.dataset_date ?? null)
       : null;
-  writeKv("lastError", null);
-  writeKv("activeSource", lastFetchSource);
-  writeKv("datasetDate", datasetDate);
+  await writeKv("lastError", null);
+  await writeKv("activeSource", lastFetchSource);
+  await writeKv("datasetDate", datasetDate);
 }
 
-function getEffectiveArenaEloSyncEnabled(): boolean {
+async function getEffectiveArenaEloSyncEnabled(): Promise<boolean> {
   try {
-    return isArenaEloSyncEnabled();
+    return await isArenaEloSyncEnabled();
   } catch (error) {
     console.warn(
       `[ARENA_ELO_SYNC] Failed to resolve ARENA_ELO_SYNC_ENABLED feature flag: ${getErrorMessage(
@@ -571,16 +569,10 @@ export async function syncArenaElo(dryRun = false): Promise<SyncResult> {
   }
   syncInProgress = true;
   try {
-    // Backup DB before first sync (same pattern as pricingSync)
-    if (!firstSyncDone && !dryRun) {
-      backupDbFile("pre-arena-elo-sync");
-      firstSyncDone = true;
-    }
-
     if (!dryRun) {
       // Freshness guard: a non-empty dataset synced within the interval is
       // still good — skip the fetch entirely (cheap fast path on boot).
-      const latest = getLatestSyncedAt("arena_elo");
+      const latest = await getLatestSyncedAt("arena_elo");
       if (latest) {
         const age = Date.now() - Date.parse(latest);
         if (Number.isFinite(age) && age >= 0 && age < SYNC_INTERVAL_MS) {
@@ -594,7 +586,7 @@ export async function syncArenaElo(dryRun = false): Promise<SyncResult> {
 
       // Failure backoff: a recent failed sync means the upstream is probably
       // still rate-limited or down — skip instead of hammering it.
-      const failedAt = readLastFailedAt();
+      const failedAt = await readLastFailedAt();
       if (failedAt !== null && Date.now() - failedAt < BACKOFF_MS) {
         return {
           success: false,
@@ -614,9 +606,9 @@ export async function syncArenaElo(dryRun = false): Promise<SyncResult> {
     if (!dryRun && entries.length > 0) {
       try {
         // Atomic replace: upsert all + prune not-in-refreshed-set in one tx.
-        applyArenaEloRefresh(entries);
-        clearLastFailedAt();
-        recordSyncSuccess(leaderboards);
+        await applyArenaEloRefresh(entries);
+        await clearLastFailedAt();
+        await recordSyncSuccess(leaderboards);
       } catch (err) {
         const message = getErrorMessage(err);
         console.warn(`[ARENA_ELO_SYNC] Failed to apply intelligence refresh: ${message}`);
@@ -650,8 +642,8 @@ export async function syncArenaElo(dryRun = false): Promise<SyncResult> {
     if (!dryRun) {
       // Persist the failure so restarts/periodic ticks back off instead of
       // retrying a dead upstream in a loop.
-      writeLastFailedAt(Date.now());
-      writeKv("lastError", sanitizeErrorMessage(message).slice(0, 500));
+      await writeLastFailedAt(Date.now());
+      await writeKv("lastError", sanitizeErrorMessage(message).slice(0, 500));
     }
     return {
       success: false,
@@ -673,8 +665,8 @@ export async function syncArenaElo(dryRun = false): Promise<SyncResult> {
  * since the DB module provides per-key deletion. This is used by the
  * DELETE /api/intelligence/sync endpoint.
  */
-export function clearSyncedIntelligence(): void {
-  const deleted = deleteModelIntelligenceBySource("arena_elo");
+export async function clearSyncedIntelligence(): Promise<void> {
+  const deleted = await deleteModelIntelligenceBySource("arena_elo");
   console.log(`[ARENA_ELO_SYNC] Cleared ${deleted} arena_elo intelligence entries`);
 }
 
@@ -750,21 +742,23 @@ export function stopArenaEloSync(): void {
  * @returns Sync status including enabled flag, last sync time, model count,
  *   next scheduled sync time, interval, and active sources.
  */
-export function getArenaEloSyncStatus(): SyncStatus {
-  const enabled = getEffectiveArenaEloSyncEnabled();
-  // Stored synced_at comes from SQLite datetime('now'): UTC "YYYY-MM-DD HH:MM:SS"
-  // without a timezone suffix. Date.parse reads that as local time, which
-  // shifts the served date under non-UTC TZ, so normalize to ISO UTC here.
+export async function getArenaEloSyncStatus(): Promise<SyncStatus> {
+  const enabled = await getEffectiveArenaEloSyncEnabled();
+  // synced_at is a timestamptz and arrives as an ISO string already.
   let persisted: string | null = null;
   try {
-    const persistedRaw = getLatestSyncedAt("arena_elo");
-    const persistedMs = persistedRaw
-      ? Date.parse(persistedRaw.includes("T") ? persistedRaw : `${persistedRaw.replace(" ", "T")}Z`)
-      : NaN;
+    const persistedRaw = await getLatestSyncedAt("arena_elo");
+    const persistedMs = persistedRaw ? Date.parse(persistedRaw) : NaN;
     persisted = Number.isFinite(persistedMs) ? new Date(persistedMs).toISOString() : null;
   } catch (error) {
     console.warn(`[ARENA_ELO_SYNC] Failed to read persisted sync time: ${getErrorMessage(error)}`);
   }
+  const [lastError, lastFailedAt, activeSourceRaw, datasetDate] = await Promise.all([
+    readKv("lastError"),
+    readKv("lastFailedAt"),
+    readKv("activeSource"),
+    readKv("datasetDate"),
+  ]);
   return {
     enabled,
     lastSync: persisted ?? lastSyncTime,
@@ -775,15 +769,15 @@ export function getArenaEloSyncStatus(): SyncStatus {
         : null,
     intervalMs: activeSyncIntervalMs,
     sources: ["arena_elo"],
-    lastError: readKv("lastError"),
-    lastFailedAt: readKv("lastFailedAt"),
+    lastError,
+    lastFailedAt,
     activeSource:
-      readKv("activeSource") === "huggingface"
+      activeSourceRaw === "huggingface"
         ? "huggingface"
-        : readKv("activeSource") === "wulong"
+        : activeSourceRaw === "wulong"
           ? "wulong"
           : null,
-    datasetDate: readKv("datasetDate"),
+    datasetDate,
   };
 }
 
@@ -801,7 +795,7 @@ export function getArenaEloSyncStatus(): SyncStatus {
  * — initialization is never fatal.
  */
 export async function initArenaEloSync(): Promise<boolean> {
-  if (!getEffectiveArenaEloSyncEnabled()) {
+  if (!(await getEffectiveArenaEloSyncEnabled())) {
     console.log(
       "[ARENA_ELO_SYNC] Disabled by the effective ARENA_ELO_SYNC_ENABLED feature flag. Enable it from Dashboard Feature Flags, unset the env var, or set it to true to enable."
     );

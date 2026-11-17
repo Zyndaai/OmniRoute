@@ -7,12 +7,13 @@
 
 import type { RequestPipelinePayloads } from "@omniroute/open-sse/utils/requestLogger.ts";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/errorSanitization.ts";
-import { getDbInstance } from "../db/core";
+import { db, ts } from "../db/pg";
+import { jsonTextParam, stripNul } from "../db/pgJsonText";
+import { isNextBuildPhase } from "../buildPhase";
 import { failPendingCallLogDetail, publishPendingCallLogDetail } from "../db/callLogDetails";
 import { applyNodePrefix, resolveProviderDisplay } from "./callLogDisplay";
 export { applyNodePrefix, resolveProviderDisplay } from "./callLogDisplay";
 import { dashboardDetailIo, resolveCallLogDetail } from "./callLogDetailResolver";
-import { shouldPersistToDisk } from "./migrations";
 import { updateRequestTokensById } from "./usageHistory";
 import { getCallLogApiKeyContext } from "./callLogApiKeyContext";
 import { serializeResilienceActions, resetResilienceActions } from "./resilienceActionsContext";
@@ -42,9 +43,13 @@ import {
   protectPayloadForLog,
 } from "../logPayloads";
 import { pickDisplayValue } from "@/shared/utils/maskEmail";
-import { getCallLogsDir, type CallLogArtifact, type CallLogDetailState } from "./callLogArtifacts";
+import {
+  buildArtifactRelativePath,
+  getCallLogsDir,
+  type CallLogArtifact,
+  type CallLogDetailState,
+} from "./callLogArtifacts";
 import { closeCallLogArtifactWriter, writeCallArtifactAsync } from "./callLogArtifactWriter";
-import { isWriteLockError, scheduleWriteRetry } from "./usageWriteRetry";
 import {
   toNumber,
   toStringOrNull,
@@ -79,6 +84,9 @@ export {
 };
 
 type JsonRecord = Record<string, unknown>;
+
+// Persistence is always on; only the Next.js build phase has no database to write to.
+const persistCallLogs = !isNextBuildPhase();
 
 const pendingCallLogSaves = new Set<Promise<void>>();
 let callLogSavesClosing = false;
@@ -118,19 +126,21 @@ type CallLogSummaryRow = {
   artifact_relpath: string | null;
   artifact_size_bytes: number | null;
   artifact_sha256: string | null;
-  has_request_body: number | null;
-  has_response_body: number | null;
-  has_pipeline_details: number | null;
-  request_summary: string | null;
+  has_request_body: boolean | null;
+  has_response_body: boolean | null;
+  has_pipeline_details: boolean | null;
+  /** jsonb: arrives parsed. */
+  request_summary: unknown;
   provider_node_name?: string | null;
   provider_node_prefix?: string | null;
   resolved_account?: string | null;
   correlation_id?: string | null;
-  model_pinned?: number | null;
+  model_pinned?: boolean | null;
   session_tag?: string | null;
   client_session_id?: string | null;
-  resilience_actions?: string | null;
-  has_content?: number | null;
+  /** jsonb: arrives parsed. */
+  resilience_actions?: unknown;
+  has_content?: boolean | null;
   usage_provenance?: string | null;
 };
 
@@ -148,13 +158,18 @@ function generateLogId() {
   return globalThis.crypto.randomUUID();
 }
 
+// The PK is (id, "timestamp"): only a reused id with the same timestamp conflicts, and
+// SQLSTATE 23505 on insert is the collision signal (no pre-check query).
 function isCallLogIdCollision(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-  const code = String((error as { code?: unknown }).code ?? "");
-  const msg = String((error as { message?: unknown }).message ?? "");
-  if (/SQLITE_CONSTRAINT_PRIMARYKEY/i.test(code)) return true;
-  if (/SQLITE_CONSTRAINT_UNIQUE/i.test(code) && /call_logs\.id/i.test(msg)) return true;
-  return /UNIQUE constraint failed: call_logs\.id/i.test(msg);
+  const { code, kind } = error as { code?: unknown; kind?: unknown };
+  return code === "23505" || kind === "unique_violation";
+}
+
+/** jsonb columns arrive parsed; the row mappers below still read JSON text. */
+function jsonColumnToText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 // TTFT is only meaningful when measured and non-negative; normalize anything
@@ -351,32 +366,14 @@ function resolveReasoningObservation(
   return { source: null, chars: null };
 }
 
-function hasCallLogsColumn(columnName: string): boolean {
-  // One PRAGMA per INSERT is wasteful; the cached answer is invalidated only
-  // when a write fails with "no such column" (concurrent migration race).
-  const cached = (hasCallLogsColumn as { cache?: Map<string, boolean> }).cache;
-  if (cached?.has(columnName)) return cached.get(columnName) as boolean;
-  try {
-    const db = getDbInstance();
-    const rows = db.prepare("PRAGMA table_info(call_logs)").all() as Array<{ name?: string }>;
-    const found = rows.some((row) => row.name === columnName);
-    const map = cached ?? new Map<string, boolean>();
-    map.set(columnName, found);
-    (hasCallLogsColumn as { cache?: Map<string, boolean> }).cache = map;
-    return found;
-  } catch {
-    return false;
-  }
-}
-
-export function invalidateCallLogsColumnCache(): void {
-  (hasCallLogsColumn as { cache?: Map<string, boolean> }).cache = undefined;
-}
-
 export { parseResilienceActions };
 
 function mapSummaryRow(row: CallLogSummaryRow) {
   const detailState = normalizeDetailState(row.detail_state);
+  // The path is stored at insert, before the artifact exists: it only means "has an
+  // artifact" once the detail is published (detail_state = 'ready').
+  const artifactRelPath = detailState === "ready" ? row.artifact_relpath : null;
+  const requestSummaryText = jsonColumnToText(row.request_summary);
   const provider = row.provider;
   const nodeName = row.provider_node_name ?? null;
   const nodePrefix = row.provider_node_prefix ?? null;
@@ -407,7 +404,8 @@ function mapSummaryRow(row: CallLogSummaryRow) {
     // detail view can tell "reasoned but not metered" apart from "did not reason".
     reasoningSource: row.reasoning_source ?? null,
     reasoningChars: row.reasoning_chars != null ? toNumber(row.reasoning_chars) : null,
-    hasContent: row.has_content ?? null,
+    // Tri-state; consumers (CallContentProvenanceBadges) compare it to 0/1.
+    hasContent: row.has_content === null || row.has_content === undefined ? null : row.has_content ? 1 : 0,
     usageProvenance: row.usage_provenance ?? null,
     requestType: row.request_type,
     sourceFormat: row.source_format,
@@ -419,18 +417,18 @@ function mapSummaryRow(row: CallLogSummaryRow) {
     comboExecutionKey: row.combo_execution_key,
     error: row.error_summary,
     detailState,
-    artifactRelPath: row.artifact_relpath,
+    artifactRelPath,
     artifactSizeBytes: row.artifact_size_bytes,
     artifactSha256: row.artifact_sha256,
-    requestSummary: row.request_summary ? parseStoredPayload(row.request_summary) : null,
-    hasRequestBody: toNumber(row.has_request_body) === 1,
-    hasResponseBody: toNumber(row.has_response_body) === 1,
-    hasPipelineDetails: toNumber(row.has_pipeline_details) === 1,
+    requestSummary: requestSummaryText ? parseStoredPayload(requestSummaryText) : null,
+    hasRequestBody: row.has_request_body === true,
+    hasResponseBody: row.has_response_body === true,
+    hasPipelineDetails: row.has_pipeline_details === true,
     correlationId: row.correlation_id || null,
-    modelPinned: toNumber(row.model_pinned) === 1,
+    modelPinned: row.model_pinned === true,
     sessionTag: row.session_tag || null,
     clientSessionId: row.client_session_id || null,
-    resilienceActions: parseResilienceActions(row.resilience_actions ?? null),
+    resilienceActions: parseResilienceActions(jsonColumnToText(row.resilience_actions)),
   };
 }
 
@@ -442,27 +440,12 @@ async function saveCallLogOperation(entry: any): Promise<void> {
     logCallLogSaveFailure(error);
     return;
   }
-  let inserted = false;
   try {
-    insertCallLogRow(prepared);
-    inserted = true;
+    await insertCallLogRow(prepared);
   } catch (error) {
-    if (!isWriteLockError(error)) {
-      logCallLogSaveFailure(error);
-      return;
-    }
-    const retry = scheduleWriteRetry(() => {
-      insertCallLogRow(prepared);
-      inserted = true;
-    }, logCallLogSaveFailure);
-    pendingCallLogSaves.add(retry);
-    try {
-      await retry;
-    } finally {
-      pendingCallLogSaves.delete(retry);
-    }
+    logCallLogSaveFailure(error);
+    return;
   }
-  if (!inserted) return;
   try {
     await publishCallLogDetail(prepared);
   } catch (error) {
@@ -471,10 +454,8 @@ async function saveCallLogOperation(entry: any): Promise<void> {
 }
 
 type PreparedCallLogRow = {
-  db: ReturnType<typeof getDbInstance>;
   logEntry: Record<string, unknown>;
   insertParams: Record<string, unknown>;
-  hasResilienceColumn: boolean;
   detailState: CallLogDetailState;
   responseId: string | null;
   /** Builds the artifact from the row's FINAL id; null when no detail is expected. */
@@ -482,9 +463,6 @@ type PreparedCallLogRow = {
 };
 
 function logCallLogSaveFailure(error: unknown): void {
-  if (String((error as Error)?.message ?? error).includes("no such column")) {
-    invalidateCallLogsColumnCache();
-  }
   console.error(
     "[callLogs] Failed to save call log:",
     sanitizeErrorMessage(error) || "Call log persistence failed"
@@ -492,9 +470,6 @@ function logCallLogSaveFailure(error: unknown): void {
 }
 
 async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
-  // Bind before any await: a reset must never redirect this request or its retry
-  // into a replacement database (#12780). Closed handles fail normally.
-  const db = getDbInstance();
   const apiKeyContext = getCallLogApiKeyContext();
   // `||` (not `??`): an empty-string apiKeyId/apiKeyName is "unattributed",
   // same as before this fallback existed — it must not be persisted verbatim
@@ -502,7 +477,13 @@ async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
   const apiKeyId = entry.apiKeyId || apiKeyContext?.apiKeyId || null;
   const apiKeyName = entry.apiKeyName || apiKeyContext?.apiKeyName || null;
   const connectionId = entry.connectionId || apiKeyContext?.connectionId || null;
-  const noLogEnabled = Boolean(entry.noLog) || (apiKeyId ? isNoLog(apiKeyId) : false);
+  // resilience resilience summary for this attempt (implicit ALS store opened
+  // around the attempt; null outside a store or when nothing was noted).
+  // Read BEFORE any await: the ALS context is synchronous and later awaits
+  // (isNoLog, resolveAccountName, artifact write) may cross async boundaries.
+  const resilienceActions = serializeResilienceActions();
+  // isNoLog answers from an in-process set/30s cache; only a cache miss reaches the database.
+  const noLogEnabled = Boolean(entry.noLog) || (apiKeyId ? await isNoLog(apiKeyId) : false);
 
   const protectedRequestBody = noLogEnabled ? null : protectPayloadForLog(entry.requestBody);
   const responseStatus = Number(entry.status);
@@ -539,13 +520,6 @@ async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
       Boolean(entry.videoContentRemoved)
     );
   }
-
-  // resilience resilience summary for this attempt (implicit ALS store opened
-  // around the attempt; null outside a store or when nothing was noted).
-  // Read BEFORE any await: the ALS context is synchronous and later awaits
-  // (resolveAccountName, artifact write) may cross async boundaries.
-  const resilienceActions = serializeResilienceActions();
-  const hasResilienceColumn = hasCallLogsColumn("resilience_actions");
 
   const account = await resolveAccountName(connectionId);
   const rawProvider: string = entry.provider || "-";
@@ -625,7 +599,10 @@ async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
   });
   const logEntry = {
     id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : generateLogId(),
-    timestamp: typeof entry.timestamp === "string" ? entry.timestamp : new Date().toISOString(),
+    // Normalised so the row key and the artifact path (derived from it) always agree.
+    timestamp:
+      (typeof entry.timestamp === "string" ? ts(entry.timestamp) : null) ??
+      new Date().toISOString(),
     method: entry.method || "POST",
     path: entry.path || "/v1/chat/completions",
     status: entry.status || 0,
@@ -722,10 +699,8 @@ async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
     requestSummary,
   };
   return {
-    db,
     logEntry,
     insertParams,
-    hasResilienceColumn,
     detailState,
     responseId: typeof logEntry.responseId === "string" ? logEntry.responseId : null,
     buildDetailArtifact: detailExpected
@@ -741,15 +716,14 @@ async function buildCallLogRow(entry: any): Promise<PreparedCallLogRow> {
   };
 }
 
-function insertCallLogRow(prepared: PreparedCallLogRow): void {
-  const { db, logEntry, insertParams, hasResilienceColumn } = prepared;
-  // Optional column (migration 191) — only fixed identifiers are spliced in.
-  const resilienceCol = hasResilienceColumn ? ", resilience_actions" : "";
-  const resilienceParam = hasResilienceColumn ? ", @resilienceActions" : "";
-  const insertStmt = db.prepare(
-    `
+const intOrNull = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null;
+const flag = (value: unknown): boolean | null =>
+  value === null || value === undefined ? null : value === 1 || value === true;
+
+const CALL_LOG_INSERT_SQL = `
       INSERT INTO call_logs (
-        id, timestamp, method, path, status, model, requested_model, provider,
+        id, "timestamp", method, path, status, model, requested_model, provider,
         account, connection_id, duration, ttft_ms, tokens_in, tokens_out,
         tokens_cache_read, tokens_cache_creation, tokens_reasoning, tokens_compressed,
         reasoning_source, reasoning_chars,
@@ -761,30 +735,97 @@ function insertCallLogRow(prepared: PreparedCallLogRow): void {
         has_request_body, has_response_body, has_pipeline_details, request_summary,
         correlation_id, model_pinned, session_tag, client_session_id, response_id, error_type,
         video_content_removed, has_content, usage_provenance,
-        added_wait_ms, added_wait_cause${resilienceCol}
+        added_wait_ms, added_wait_cause, resilience_actions
       )
       VALUES (
-        @id, @timestamp, @method, @path, @status, @model, @requestedModel, @provider,
-        @account, @connectionId, @duration, @ttftMs, @tokensIn, @tokensOut,
-        @tokensCacheRead, @tokensCacheCreation, @tokensReasoning, @tokensCompressed,
-        @reasoningSource, @reasoningChars,
-        @reasoningDurationMs, @reasoningEffortRequested, @reasoningEffortUpstream,
-        @reasoningEncrypted,
-        @cacheSource, @requestType, @sourceFormat, @targetFormat, @apiKeyId, @apiKeyName,
-        @comboName, @comboStepId, @comboExecutionKey, @errorSummary, @detailState,
-        @detailPendingUntil, @artifactRelPath, @artifactSizeBytes, @artifactSha256,
-        @hasRequestBody, @hasResponseBody, @hasPipelineDetails, @requestSummary,
-        @correlationId, @modelPinned, @sessionTag, @clientSessionId, @responseId, @errorType,
-        @videoContentRemoved, @hasContent, @usageProvenance,
-        @addedWaitMs, @addedWaitCause${resilienceParam}
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18,
+        $19, $20,
+        $21, $22, $23,
+        $24,
+        $25, $26, $27, $28, $29, $30,
+        $31, $32, $33, $34, $35,
+        $36, $37, $38, $39,
+        $40, $41, $42, $43,
+        $44, $45, $46, $47, $48, $49,
+        $50, $51, $52,
+        $53, $54, $55
       )
-    `
-  );
+    `;
+
+function callLogInsertValues(p: Record<string, unknown>): unknown[] {
+  return [
+    p.id,
+    ts(p.timestamp as string),
+    p.method,
+    p.path,
+    intOrNull(Number(p.status)) ?? 0,
+    p.model,
+    p.requestedModel,
+    p.provider,
+    p.account,
+    p.connectionId,
+    intOrNull(Number(p.duration)) ?? 0,
+    intOrNull(p.ttftMs),
+    intOrNull(p.tokensIn) ?? 0,
+    intOrNull(p.tokensOut) ?? 0,
+    intOrNull(p.tokensCacheRead),
+    intOrNull(p.tokensCacheCreation),
+    intOrNull(p.tokensReasoning),
+    intOrNull(p.tokensCompressed),
+    p.reasoningSource,
+    intOrNull(p.reasoningChars),
+    intOrNull(p.reasoningDurationMs),
+    p.reasoningEffortRequested,
+    p.reasoningEffortUpstream,
+    flag(p.reasoningEncrypted),
+    p.cacheSource,
+    p.requestType,
+    p.sourceFormat,
+    p.targetFormat,
+    p.apiKeyId,
+    p.apiKeyName,
+    p.comboName,
+    p.comboStepId,
+    p.comboExecutionKey,
+    typeof p.errorSummary === "string" ? stripNul(p.errorSummary) : null,
+    p.detailState,
+    ts(p.detailPendingUntil as number | null),
+    p.artifactRelPath,
+    intOrNull(p.artifactSizeBytes),
+    p.artifactSha256,
+    flag(p.hasRequestBody) === true,
+    flag(p.hasResponseBody) === true,
+    flag(p.hasPipelineDetails) === true,
+    jsonTextParam(p.requestSummary as string | null),
+    p.correlationId,
+    flag(p.modelPinned) === true,
+    p.sessionTag,
+    p.clientSessionId,
+    p.responseId,
+    p.errorType,
+    flag(p.videoContentRemoved) === true,
+    flag(p.hasContent),
+    p.usageProvenance,
+    intOrNull(p.addedWaitMs),
+    p.addedWaitCause,
+    jsonTextParam(p.resilienceActions as string | null),
+  ];
+}
+
+async function insertCallLogRow(prepared: PreparedCallLogRow): Promise<void> {
+  const { logEntry, insertParams } = prepared;
   // #14451: a 6-char dashboard traceId (or any reused explicit id) can collide.
   // Regenerate logEntry.id too, so the artifact summary and path use the final id.
   for (let attempt = 0; ; attempt++) {
+    // The path is a pure function of (timestamp, id), so it is stored at insert and the
+    // detail publish never has to touch it.
+    insertParams.artifactRelPath = prepared.buildDetailArtifact
+      ? buildArtifactRelativePath(String(insertParams.timestamp), String(insertParams.id))
+      : null;
     try {
-      insertStmt.run(insertParams);
+      await db().execute(CALL_LOG_INSERT_SQL, callLogInsertValues(insertParams));
       break;
     } catch (error) {
       if (!isCallLogIdCollision(error) || attempt >= CALL_LOG_ID_RETRY_LIMIT) throw error;
@@ -800,18 +841,22 @@ function insertCallLogRow(prepared: PreparedCallLogRow): void {
 
 /** Write the inserted row's artifact and publish it, or make the row terminal missing. */
 async function publishCallLogDetail(prepared: PreparedCallLogRow): Promise<void> {
-  const { db, logEntry, buildDetailArtifact, responseId } = prepared;
+  const { logEntry, buildDetailArtifact, responseId } = prepared;
   let detailState = prepared.detailState;
   if (buildDetailArtifact) {
     const id = String(logEntry.id);
+    const rowTimestamp = String(logEntry.timestamp);
     try {
       const artifactResult = await writeCallArtifactAsync(buildDetailArtifact());
-      if (artifactResult && publishPendingCallLogDetail(db, id, artifactResult)) {
+      if (
+        artifactResult &&
+        (await publishPendingCallLogDetail(db(), id, artifactResult, rowTimestamp))
+      ) {
         detailState = "ready";
       }
     } finally {
       // A null result or a thrown write must not strand the export cursor.
-      failPendingCallLogDetail(db, id);
+      await failPendingCallLogDetail(db(), id, rowTimestamp);
     }
   }
 
@@ -837,7 +882,7 @@ export function saveCallLog(entry: any): Promise<void> {
       compressed: typeof entry.tokensCompressed === "number" ? entry.tokensCompressed : null,
     });
   }
-  if (!shouldPersistToDisk || callLogSavesClosing) return Promise.resolve();
+  if (!persistCallLogs || callLogSavesClosing) return Promise.resolve();
 
   const operation = saveCallLogOperation(entry);
   pendingCallLogSaves.add(operation);
@@ -882,7 +927,7 @@ export async function closeCallLogSaves(timeoutMs = 2_000): Promise<void> {
   await closeCallLogArtifactWriter(0);
 }
 
-if (shouldPersistToDisk && process.env.NODE_ENV !== "test") {
+if (persistCallLogs && process.env.NODE_ENV !== "test") {
   scheduleCallLogRotation();
 }
 
@@ -892,18 +937,16 @@ if (shouldPersistToDisk && process.env.NODE_ENV !== "test") {
  */
 function pushLikeFilter(
   conditions: string[],
-  params: Record<string, unknown>,
+  params: unknown[],
   column: string,
-  paramKey: string,
   value: unknown
 ) {
   if (!value) return;
-  conditions.push(`cl.${column} LIKE @${paramKey}`);
-  params[paramKey] = `%${value}%`;
+  params.push(`%${value}%`);
+  conditions.push(`cl.${column} ILIKE $${params.length}`);
 }
 
 export async function getCallLogs(filter: any = {}) {
-  const db = getDbInstance();
   let sql = `
     SELECT cl.*,
       pn.name AS provider_node_name, pn.prefix AS provider_node_prefix,
@@ -913,7 +956,12 @@ export async function getCallLogs(filter: any = {}) {
     LEFT JOIN provider_connections pc ON pc.id = cl.connection_id
   `;
   const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
+  const params: unknown[] = [];
+  // Appends a value and returns its `$n` placeholder.
+  const bind = (value: unknown): string => {
+    params.push(value);
+    return `$${params.length}`;
+  };
 
   if (filter.status) {
     if (filter.status === "error") {
@@ -923,30 +971,29 @@ export async function getCallLogs(filter: any = {}) {
     } else {
       const statusCode = Number.parseInt(filter.status, 10);
       if (!Number.isNaN(statusCode)) {
-        conditions.push("cl.status = @statusCode");
-        params.statusCode = statusCode;
+        conditions.push(`cl.status = ${bind(statusCode)}`);
       }
     }
   }
 
+  // SQLite's LIKE ignored ASCII case; ILIKE keeps the filters behaving the same.
   if (filter.model) {
-    conditions.push("(cl.model LIKE @modelQ OR cl.requested_model LIKE @modelQ)");
-    params.modelQ = `%${filter.model}%`;
+    const q = bind(`%${filter.model}%`);
+    conditions.push(`(cl.model ILIKE ${q} OR cl.requested_model ILIKE ${q})`);
   }
   if (filter.provider) {
-    conditions.push("cl.provider LIKE @providerQ");
-    params.providerQ = `%${filter.provider}%`;
+    conditions.push(`cl.provider ILIKE ${bind(`%${filter.provider}%`)}`);
   }
   if (filter.account) {
-    conditions.push(`(cl.account LIKE @accountQ OR ${RESOLVED_ACCOUNT_SQL} LIKE @accountQ)`);
-    params.accountQ = `%${filter.account}%`;
+    const q = bind(`%${filter.account}%`);
+    conditions.push(`(cl.account ILIKE ${q} OR ${RESOLVED_ACCOUNT_SQL} ILIKE ${q})`);
   }
   if (filter.apiKey) {
-    conditions.push("(cl.api_key_name LIKE @apiKeyQ OR cl.api_key_id LIKE @apiKeyQ)");
-    params.apiKeyQ = `%${filter.apiKey}%`;
+    const q = bind(`%${filter.apiKey}%`);
+    conditions.push(`(cl.api_key_name ILIKE ${q} OR cl.api_key_id ILIKE ${q})`);
   }
-  pushLikeFilter(conditions, params, "correlation_id", "correlationId", filter.correlationId);
-  pushLikeFilter(conditions, params, "session_tag", "sessionTag", filter.sessionTag);
+  pushLikeFilter(conditions, params, "correlation_id", filter.correlationId);
+  pushLikeFilter(conditions, params, "session_tag", filter.sessionTag);
   if (filter.combo) {
     conditions.push("cl.combo_name IS NOT NULL");
   }
@@ -959,25 +1006,25 @@ export async function getCallLogs(filter: any = {}) {
     conditions.push(`(cl.path LIKE '/v1/%' OR cl.path LIKE '/api/v1/%')`);
   }
   if (filter.since) {
-    conditions.push("cl.timestamp >= @since");
-    params.since = filter.since instanceof Date ? filter.since.toISOString() : String(filter.since);
+    const since = ts(filter.since instanceof Date ? filter.since : String(filter.since));
+    if (since) conditions.push(`cl."timestamp" >= ${bind(since)}`);
   }
   if (filter.until) {
-    conditions.push("cl.timestamp <= @until");
-    params.until = filter.until instanceof Date ? filter.until.toISOString() : String(filter.until);
+    const until = ts(filter.until instanceof Date ? filter.until : String(filter.until));
+    if (until) conditions.push(`cl."timestamp" <= ${bind(until)}`);
   }
   if (filter.search) {
+    const q = bind(`%${filter.search}%`);
     conditions.push(`(
-      cl.model LIKE @searchQ OR cl.path LIKE @searchQ OR cl.account LIKE @searchQ OR
-      ${RESOLVED_ACCOUNT_SQL} LIKE @searchQ OR
-      cl.requested_model LIKE @searchQ OR cl.provider LIKE @searchQ OR
-      cl.api_key_name LIKE @searchQ OR cl.api_key_id LIKE @searchQ OR
-      cl.combo_name LIKE @searchQ OR CAST(cl.status AS TEXT) LIKE @searchQ
-      OR cl.combo_step_id LIKE @searchQ OR cl.combo_execution_key LIKE @searchQ
-      OR cl.error_summary LIKE @searchQ
-      OR cl.correlation_id LIKE @searchQ
+      cl.model ILIKE ${q} OR cl.path ILIKE ${q} OR cl.account ILIKE ${q} OR
+      ${RESOLVED_ACCOUNT_SQL} ILIKE ${q} OR
+      cl.requested_model ILIKE ${q} OR cl.provider ILIKE ${q} OR
+      cl.api_key_name ILIKE ${q} OR cl.api_key_id ILIKE ${q} OR
+      cl.combo_name ILIKE ${q} OR cl.status::text ILIKE ${q}
+      OR cl.combo_step_id ILIKE ${q} OR cl.combo_execution_key ILIKE ${q}
+      OR cl.error_summary ILIKE ${q}
+      OR cl.correlation_id ILIKE ${q}
     )`);
-    params.searchQ = `%${filter.search}%`;
   }
 
   if (conditions.length > 0) {
@@ -986,50 +1033,59 @@ export async function getCallLogs(filter: any = {}) {
 
   const limit = Number.isInteger(filter.limit) && filter.limit > 0 ? filter.limit : 200;
   const offset = Number.isInteger(filter.offset) && filter.offset > 0 ? filter.offset : 0;
-  sql += ` ORDER BY cl.timestamp DESC LIMIT @__limit OFFSET @__offset`;
-  params.__limit = limit;
-  params.__offset = offset;
+  sql += ` ORDER BY cl."timestamp" DESC, cl.seq DESC LIMIT ${bind(limit)} OFFSET ${bind(offset)}`;
 
-  const rows = db.prepare(sql).all(params) as CallLogSummaryRow[];
+  const rows = await db().query<CallLogSummaryRow>(sql, params);
   return rows.map(mapSummaryRow);
 }
 
-export async function getCallLogById(id: string) {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT cl.*,
+/**
+ * Detail view by id. The detail route only has the id, so without `timestamp` this probes
+ * every partition's PK index (fine for one interactive read). Callers that already hold
+ * the row's timestamp (export, conversation views) pass it so the lookup prunes to one day.
+ */
+export async function getCallLogById(id: string, timestamp?: string | null) {
+  const rowTs = ts(timestamp);
+  const row = await db().queryOne<CallLogSummaryRow>(
+    `SELECT cl.*,
         pn.name AS provider_node_name,
         pn.prefix AS provider_node_prefix,
         ${RESOLVED_ACCOUNT_SQL} AS resolved_account
        FROM call_logs cl
        LEFT JOIN provider_nodes pn ON pn.id = cl.provider
        LEFT JOIN provider_connections pc ON pc.id = cl.connection_id
-       WHERE cl.id = ?`
-    )
-    .get(id) as CallLogSummaryRow | undefined;
+       WHERE cl.id = $1${rowTs ? ` AND cl."timestamp" = $2` : ""}
+       ORDER BY cl."timestamp" DESC
+       LIMIT 1`,
+    rowTs ? [id, rowTs] : [id]
+  );
   if (!row) return null;
 
   const entry = mapSummaryRow(row);
-  return resolveCallLogDetail(db, entry, getCallLogsDir(), {
+  return resolveCallLogDetail(entry, getCallLogsDir(), {
     io: dashboardDetailIo,
-    onArtifactState(relativePath, state) {
-      if (state === "missing") clearArtifactReference(relativePath, "missing");
-      else db.prepare("UPDATE call_logs SET detail_state = ? WHERE id = ?").run("corrupt", id);
+    async onArtifactState(relativePath, state) {
+      if (state === "missing") await clearArtifactReference(relativePath, "missing");
+      else {
+        // Runs right after reading the row, so it prunes by the row's own partition key.
+        await db().execute(
+          `UPDATE call_logs SET detail_state = 'corrupt' WHERE id = $1 AND "timestamp" = $2`,
+          [id, row.timestamp]
+        );
+      }
     },
   });
 }
 
 export async function exportCallLogsSince(since: string) {
-  const db = getDbInstance();
-  const ids = db
-    .prepare("SELECT id FROM call_logs WHERE timestamp >= ? ORDER BY timestamp DESC")
-    .all(since)
-    .map((row) => String((row as { id: string }).id));
+  const rows = await db().query<{ id: string; timestamp: string }>(
+    `SELECT id, "timestamp" FROM call_logs WHERE "timestamp" >= $1 ORDER BY "timestamp" DESC`,
+    [ts(since)]
+  );
 
   const logs: unknown[] = [];
-  for (const id of ids) {
-    const log = await getCallLogById(id);
+  for (const row of rows) {
+    const log = await getCallLogById(String(row.id), row.timestamp);
     if (log) logs.push(log);
   }
   return logs;
@@ -1040,12 +1096,12 @@ export async function exportCallLogsSince(since: string) {
  * aggregate query, no row hydration. Used by /api/logs/export to report
  * `totalAvailable` without paying the cost of hydrating every row (#13123).
  */
-export function countCallLogsSince(since: string): number {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT COUNT(*) AS count FROM call_logs WHERE timestamp >= ?")
-    .get(since) as { count: number };
-  return row.count;
+export async function countCallLogsSince(since: string): Promise<number> {
+  const row = await db().queryOne<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM call_logs WHERE "timestamp" >= $1`,
+    [ts(since)]
+  );
+  return Number(row?.count ?? 0);
 }
 
 /**
@@ -1062,14 +1118,13 @@ export async function* iterateCallLogsSince(
   since: string,
   limit: number
 ): AsyncGenerator<unknown, void, void> {
-  const db = getDbInstance();
-  const ids = db
-    .prepare("SELECT id FROM call_logs WHERE timestamp >= ? ORDER BY timestamp DESC LIMIT ?")
-    .all(since, limit)
-    .map((row) => String((row as { id: string }).id));
+  const rows = await db().query<{ id: string; timestamp: string }>(
+    `SELECT id, "timestamp" FROM call_logs WHERE "timestamp" >= $1 ORDER BY "timestamp" DESC LIMIT $2`,
+    [ts(since), limit]
+  );
 
-  for (const id of ids) {
-    const log = await getCallLogById(id);
+  for (const row of rows) {
+    const log = await getCallLogById(String(row.id), row.timestamp);
     if (log) yield log;
   }
 }

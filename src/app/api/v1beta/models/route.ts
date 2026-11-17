@@ -104,7 +104,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    getSyncedCapabilities();
+    await getSyncedCapabilities();
     const models = [];
     const existingNames = new Set<string>();
 
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
       for (const model of providerModels) {
         const name = `models/${provider}/${model.id}`;
         if (existingNames.has(name)) continue;
-        const resolved = getResolvedModelCapabilities({ provider, model: model.id });
+        const resolved = await getResolvedModelCapabilities({ provider, model: model.id });
         models.push({
           name,
           displayName: model.name || model.id,
@@ -185,7 +185,7 @@ export async function GET(request: Request) {
           if (!m || typeof m.id !== "string") continue;
           const name = `models/${resolvePublicProviderId(providerId)}/${m.id}`;
           if (existingNames.has(name)) continue;
-          const resolved = getResolvedModelCapabilities({
+          const resolved = await getResolvedModelCapabilities({
             provider: providerId,
             model: m.id,
           });
@@ -229,7 +229,7 @@ export async function GET(request: Request) {
             continue;
           const m = model as Record<string, unknown>;
           if (m.isHidden === true) continue;
-          const resolved = getResolvedModelCapabilities({
+          const resolved = await getResolvedModelCapabilities({
             provider: providerId,
             model: String(m.id),
           });

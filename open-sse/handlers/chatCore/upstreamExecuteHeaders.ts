@@ -17,7 +17,7 @@ import { mergeUpstreamExtraHeaders } from "../../executors/base/headers.ts";
 import { resolveConnectionUpstreamOverrides } from "./connectionUpstreamOverrides.ts";
 import { FORMATS } from "../../translator/formats.ts";
 
-export function buildUpstreamHeadersForExecute(opts: {
+export async function buildUpstreamHeadersForExecute(opts: {
   modelToCall: string;
   effectiveModel: string;
   provider: string | null | undefined;
@@ -27,7 +27,7 @@ export function buildUpstreamHeadersForExecute(opts: {
   connectionCustomUserAgent: string;
   connectionCustomHeaders?: Record<string, string>;
   settings: unknown;
-}): Record<string, string> {
+}): Promise<Record<string, string>> {
   const {
     modelToCall,
     effectiveModel,
@@ -43,14 +43,14 @@ export function buildUpstreamHeadersForExecute(opts: {
   const upstreamHeaders: Record<string, string> =
     modelToCall === effectiveModel
       ? {
-          ...getModelUpstreamExtraHeaders(provider || "", model || "", sourceFormat),
-          ...getModelUpstreamExtraHeaders(provider || "", resolvedModel || "", sourceFormat),
+          ...(await getModelUpstreamExtraHeaders(provider || "", model || "", sourceFormat)),
+          ...(await getModelUpstreamExtraHeaders(provider || "", resolvedModel || "", sourceFormat)),
         }
-      : (() => {
+      : await (async () => {
           const r = resolveModelAlias(modelToCall);
           return {
-            ...getModelUpstreamExtraHeaders(provider || "", modelToCall || "", sourceFormat),
-            ...getModelUpstreamExtraHeaders(provider || "", r || "", sourceFormat),
+            ...(await getModelUpstreamExtraHeaders(provider || "", modelToCall || "", sourceFormat)),
+            ...(await getModelUpstreamExtraHeaders(provider || "", r || "", sourceFormat)),
           };
         })();
 
@@ -100,20 +100,20 @@ export function buildUpstreamHeadersForExecute(opts: {
  * per-model override (e.g. a Codex `Version` that unlocks a model) is not lost on the WS upgrade.
  * Mutates and returns `executorHeaders`.
  */
-export function applyResponsesWsUpstreamHeaders(
+export async function applyResponsesWsUpstreamHeaders(
   executorHeaders: Record<string, string>,
   opts: {
     provider: string;
     model: string;
     providerSpecificData?: { customUserAgent?: unknown; customHeaders?: unknown } | null;
   }
-): Record<string, string> {
+): Promise<Record<string, string>> {
   const { connectionCustomUserAgent, connectionCustomHeaders } = resolveConnectionUpstreamOverrides(
     opts.providerSpecificData
   );
   mergeUpstreamExtraHeaders(
     executorHeaders,
-    buildUpstreamHeadersForExecute({
+    await buildUpstreamHeadersForExecute({
       modelToCall: opts.model,
       effectiveModel: opts.model,
       provider: opts.provider,

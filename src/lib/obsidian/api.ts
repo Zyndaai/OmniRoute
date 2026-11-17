@@ -1,4 +1,5 @@
-import { getDbInstance } from "@/lib/db/core";
+import { deleteConfigValue, getConfigValue, setConfigValue } from "@/lib/db/configEntries";
+import { decrypt, encrypt } from "@/lib/db/encryption";
 import { safeOutboundFetch } from "@/shared/network/safeOutboundFetch";
 
 const DEFAULT_OBSIDIAN_BASE_URL = "http://127.0.0.1:27123";
@@ -317,43 +318,23 @@ export type ObsidianClient = ReturnType<typeof createObsidianClient>;
 const DEFAULT_SYNC_SERVER_URL = "http://127.0.0.1:27781";
 const SYNC_TOKEN_KEY = "omniroute_sync_token";
 
-export function getSyncToken(): string | null {
+/** The sync token is stored encrypted (`enc:v1`); plaintext rows from older versions still read. */
+export async function getSyncToken(): Promise<string | null> {
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get("sync", SYNC_TOKEN_KEY) as { value?: string } | undefined;
-    return typeof row?.value === "string" ? JSON.parse(row.value) : null;
+    const stored = await getConfigValue("sync", SYNC_TOKEN_KEY);
+    if (typeof stored !== "string") return null;
+    return decrypt(stored) ?? stored;
   } catch {
     return null;
   }
 }
 
-export function setSyncToken(token: string | null): void {
+export async function setSyncToken(token: string | null): Promise<void> {
   try {
-    const db = getDbInstance();
     if (token === null) {
-      db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(
-        "sync",
-        SYNC_TOKEN_KEY
-      );
+      await deleteConfigValue("sync", SYNC_TOKEN_KEY);
     } else {
-      const existing = db
-        .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-        .get("sync", SYNC_TOKEN_KEY);
-      if (existing) {
-        db.prepare("UPDATE key_value SET value = ? WHERE namespace = ? AND key = ?").run(
-          JSON.stringify(token),
-          "sync",
-          SYNC_TOKEN_KEY
-        );
-      } else {
-        db.prepare("INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-          "sync",
-          SYNC_TOKEN_KEY,
-          JSON.stringify(token)
-        );
-      }
+      await setConfigValue("sync", SYNC_TOKEN_KEY, encrypt(token) ?? token);
     }
   } catch {
     /* ignore */

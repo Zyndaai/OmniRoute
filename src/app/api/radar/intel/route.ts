@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     });
   }
   try {
-    return NextResponse.json(getRadarIntel(), {
+    return NextResponse.json(await getRadarIntel(), {
       headers: { ...CORS_HEADERS, "Cache-Control": "no-store" },
     });
   } catch (error: unknown) {

@@ -582,7 +582,7 @@ async function executeImageEditCombo(comboName: string, ctx: ImageEditContext): 
     return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo not found: ${comboName}`);
   }
   const allCombos = await getCombos();
-  const targets = resolveComboTargets(combo as never, allCombos as never);
+  const targets = await resolveComboTargets(combo as never, allCombos as never);
   if (!targets || targets.length === 0) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo "${comboName}" has no usable targets`);
   }
@@ -687,7 +687,7 @@ async function postHandler(request: Request, _context?: unknown) {
   if (!prompt) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
   }
-  const injectionDecision = createInjectionGuard()({ prompt });
+  const injectionDecision = await createInjectionGuard()({ prompt });
   if (injectionDecision.blocked) {
     return jsonResponse(
       {

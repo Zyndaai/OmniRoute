@@ -72,9 +72,9 @@ export interface SyncDeps {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   getFlag?: (key: string) => boolean;
-  getSettings?: () => RadarSettingsSnapshot;
-  getCache?: () => RadarCacheEntry | null;
-  setCache?: (entry: RadarCacheEntry) => void;
+  getSettings?: () => RadarSettingsSnapshot | Promise<RadarSettingsSnapshot>;
+  getCache?: () => RadarCacheEntry | null | Promise<RadarCacheEntry | null>;
+  setCache?: (entry: RadarCacheEntry) => void | Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,10 +185,10 @@ export async function syncRadar(deps: SyncDeps = {}): Promise<SyncStatus> {
     // Step 2: Opt-in gate
     let settings: RadarSettingsSnapshot;
     if (getSettingsFn) {
-      settings = getSettingsFn();
+      settings = await getSettingsFn();
     } else {
       const mod = await import("@/lib/db/radar");
-      settings = mod.getRadarSettings();
+      settings = await mod.getRadarSettings();
     }
     if (!settings.optIn) {
       return { status: "opt_out" };
@@ -287,10 +287,10 @@ export async function syncRadar(deps: SyncDeps = {}): Promise<SyncStatus> {
     // cache even when the community snapshot is older.
     let existingCache: RadarCacheEntry | null = null;
     if (getCacheFn) {
-      existingCache = getCacheFn();
+      existingCache = await getCacheFn();
     } else {
       const mod = await import("@/lib/db/radar");
-      existingCache = mod.getRadarCache();
+      existingCache = await mod.getRadarCache();
     }
 
     const isEntitlementDowngrade = existingCache?.tier === "live" && servedTier === "community";
@@ -323,10 +323,10 @@ export async function syncRadar(deps: SyncDeps = {}): Promise<SyncStatus> {
     };
 
     if (setCacheFn) {
-      setCacheFn(cacheEntry);
+      await setCacheFn(cacheEntry);
     } else {
       const mod = await import("@/lib/db/radar");
-      mod.setRadarCache(cacheEntry);
+      await mod.setRadarCache(cacheEntry);
     }
 
     return { status: "updated", version: feed.version, tier: servedTier };

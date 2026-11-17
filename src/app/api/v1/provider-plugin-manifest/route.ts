@@ -78,8 +78,13 @@ function toProviderPluginModel(tool: string, model: ServiceModel): ProviderPlugi
   };
 }
 
-function pickServiceModels(tool: string, reader: (toolName: string) => ServiceModel[]): ProviderPluginModel[] {
-  const models = reader(tool).filter(isValidServiceModelEntry);
+type ServiceModelReader = (toolName: string) => Promise<ServiceModel[]> | ServiceModel[];
+
+async function pickServiceModels(
+  tool: string,
+  reader: ServiceModelReader
+): Promise<ProviderPluginModel[]> {
+  const models = (await reader(tool)).filter(isValidServiceModelEntry);
 
   const unique = new Map<string, ProviderPluginModel>();
   for (const model of models) {
@@ -107,7 +112,7 @@ function shouldInjectBackendPluginModels(provider: ProviderPluginManifestEntry) 
 
 export async function injectServiceModelsIntoManifest(
   manifest: ProviderPluginManifest,
-  reader: (toolName: string) => ServiceModel[] = getServiceModels,
+  reader: ServiceModelReader = getServiceModels,
   exposeReader?: (toolName: string) => Promise<boolean> | boolean
 ): Promise<ProviderPluginManifest> {
   const providers: ProviderPluginManifestEntry[] = [...manifest.providers];
@@ -129,7 +134,7 @@ export async function injectServiceModelsIntoManifest(
           : await shouldExposeServiceModels(provider.id);
         if (!shouldExpose) return provider;
 
-        const models = pickServiceModels(provider.id, reader);
+        const models = await pickServiceModels(provider.id, reader);
         if (models.length === 0) return provider;
 
         const mergedModels = [...provider.models];

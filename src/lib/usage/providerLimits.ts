@@ -552,10 +552,10 @@ export function hasBlockingClaudeModelQuota(usage: JsonRecord, model: string): b
   });
 }
 
-function canRecoverClaudeFromObservedReset(
+async function canRecoverClaudeFromObservedReset(
   connection: ProviderConnectionLike,
   usage: JsonRecord
-): boolean {
+): Promise<boolean> {
   return (
     connection.provider === "claude" &&
     (connection.lastErrorType === "quota_exhausted" ||
@@ -566,9 +566,9 @@ function canRecoverClaudeFromObservedReset(
     isClaudeWeeklyQuota429Signal(connection.lastError) &&
     connection.lastErrorSource !== "extra_usage" &&
     Number(connection.errorCode) === 429 &&
-    hasObservedClaudeQuotaResetAfter(connection.id, connection.lastErrorAt) &&
     everyQuotaWindowReplenished(usage) &&
-    hasRecoveredClaudeWeeklyWindow(usage)
+    hasRecoveredClaudeWeeklyWindow(usage) &&
+    (await hasObservedClaudeQuotaResetAfter(connection.id, connection.lastErrorAt))
   );
 }
 
@@ -611,7 +611,7 @@ export async function maybeClearRecoveredQuotaState(
     // #17043: unlike an ordinary quota poll, a persisted weekly reset event
     // observed after the last 429 is independent positive evidence. It can
     // release only a Claude quota-exhaustion lock with every live window open.
-    const observedResetOverride = canRecoverClaudeFromObservedReset(connection, usage);
+    const observedResetOverride = await canRecoverClaudeFromObservedReset(connection, usage);
     if (!syntheticRecoveryOverride && !observedResetOverride) return connection;
     verifiedResetRecovery = observedResetOverride;
   }
@@ -934,14 +934,16 @@ async function setLastProviderLimitsAutoSyncTime(timestamp: string): Promise<voi
   await updateSettings({ [PROVIDER_LIMITS_AUTO_SYNC_SETTING_KEY]: timestamp });
 }
 
-export function getCachedProviderLimitsMap(): Record<string, ProviderLimitsCacheEntry> {
+export async function getCachedProviderLimitsMap(): Promise<
+  Record<string, ProviderLimitsCacheEntry>
+> {
   return getAllProviderLimitsCache();
 }
 
 export async function getSanitizedCachedProviderLimitsMap(): Promise<
   Record<string, ProviderLimitsCacheEntry>
 > {
-  const caches = getAllProviderLimitsCache();
+  const caches = await getAllProviderLimitsCache();
   // Sanitization only rewrites Antigravity/agy quota keys; every other provider's cache
   // entry is returned untouched (see sanitizeProviderLimitsCacheForConnection). The
   // dashboard polls this on an auto-refresh interval, so avoid the unconditional
@@ -1198,7 +1200,7 @@ export async function fetchAndPersistProviderLimits(
     includeResetCredits: opts.includeResetCredits,
   });
   const newCache = toProviderLimitsCacheEntry(usage, source);
-  const previous = getProviderLimitsCache(connectionId);
+  const previous = await getProviderLimitsCache(connectionId);
   const cache = mergeProviderLimitsCacheEntry(connection.provider, newCache, previous);
 
   // Don't persist error-only entries (429 etc.) — would wipe prior good cache.
@@ -1211,7 +1213,7 @@ export async function fetchAndPersistProviderLimits(
     let served = previous;
     if (isClaude && previous.bankedResetCredits !== bankedResetCredits) {
       const { bankedResetCredits: _cached, ...rest } = previous;
-      served = setProviderLimitsCache(
+      served = await setProviderLimitsCache(
         connectionId,
         bankedResetCredits === undefined ? rest : { ...rest, bankedResetCredits }
       );
@@ -1237,7 +1239,7 @@ export async function fetchAndPersistProviderLimits(
     ...usage,
     ...(cache.billing ? { billing: cache.billing } : {}),
   };
-  setProviderLimitsCache(connectionId, cache);
+  await setProviderLimitsCache(connectionId, cache);
   return { connection, usage: mergedUsage, cache };
 }
 
@@ -1262,13 +1264,17 @@ export async function syncAllProviderLimits(
   const caches: Record<string, ProviderLimitsCacheEntry> = {};
   const errors: Record<string, string> = {};
 
-  const recordResult = (
-    connectionId: string,
-    result: PromiseSettledResult<{ connectionId: string; cache: ProviderLimitsCacheEntry }>
-  ) => {
+  type FetchOneResult = {
+    connectionId: string;
+    cache: ProviderLimitsCacheEntry;
+    previous: ProviderLimitsCacheEntry | null;
+  };
+
+  const recordResult = (connectionId: string, result: PromiseSettledResult<FetchOneResult>) => {
     if (result.status === "fulfilled") {
-      const { cache } = result.value;
-      const previous = getProviderLimitsCache(connectionId);
+      // `previous` is the entry fetchOne merged against: an unchanged merge hands it back
+      // by identity, so comparing against a fresh DB read would never match.
+      const { cache, previous } = result.value;
       if (cache === previous) {
         caches[connectionId] = cache;
         return;
@@ -1281,8 +1287,8 @@ export async function syncAllProviderLimits(
     errors[connectionId] = reason?.message || "Failed to refresh provider limits";
   };
 
-  const fetchOne = async (connection: ProviderConnectionLike) => {
-    const existingCache = getProviderLimitsCache(connection.id);
+  const fetchOne = async (connection: ProviderConnectionLike): Promise<FetchOneResult> => {
+    const existingCache = await getProviderLimitsCache(connection.id);
     await refreshLiveModelIds(connection.provider);
     const forceRefresh =
       source === "manual" ||
@@ -1292,7 +1298,7 @@ export async function syncAllProviderLimits(
     });
     const nextCache = toProviderLimitsCacheEntry(usage, source);
     const cache = mergeProviderLimitsCacheEntry(connection.provider, nextCache, existingCache);
-    return { connectionId: connection.id, cache };
+    return { connectionId: connection.id, cache, previous: existingCache };
   };
 
   // OAuth connections are processed STRICTLY SEQUENTIALLY (chunk size 1) with a
@@ -1306,7 +1312,7 @@ export async function syncAllProviderLimits(
 
   const recordChunk = (
     chunk: ProviderConnectionLike[],
-    results: PromiseSettledResult<{ connectionId: string; cache: ProviderLimitsCacheEntry }>[]
+    results: PromiseSettledResult<FetchOneResult>[]
   ) => {
     results.forEach((result, index) => {
       const connectionId = chunk[index]?.id;
@@ -1318,7 +1324,7 @@ export async function syncAllProviderLimits(
   await syncInChunksWithSpacing(oauthConnections, 1, spacingMs, fetchOne, recordChunk);
 
   if (cacheEntries.length > 0) {
-    setProviderLimitsCacheBatch(cacheEntries);
+    await setProviderLimitsCacheBatch(cacheEntries);
   }
 
   if (source === "scheduled") {

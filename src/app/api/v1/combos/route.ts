@@ -45,7 +45,7 @@ export async function GET(request: Request) {
     const combos = await getCombos();
     // #3979/#14232: project the full collection through one canonical capability
     // snapshot so nested combos agree with /v1/models without per-member reads.
-    const data = projectComboCollectionWithCapabilities(Array.isArray(combos) ? combos : []);
+    const data = await projectComboCollectionWithCapabilities(Array.isArray(combos) ? combos : []);
 
     return NextResponse.json(
       { object: "list", data },

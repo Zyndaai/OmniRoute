@@ -1,10 +1,10 @@
 // Proxy-subscription-specific pool operations, split out of `proxies.ts` to keep
 // that module under its frozen size cap. Re-exported from `proxies.ts` so callers
 // (subscriptionService.ts et al.) can keep importing from the original module.
-import { getDbInstance } from "./core";
-import { backupDbFile } from "./backup";
+import { db } from "@/lib/db/pg";
 import { normalizeScope, normalizeAssignmentScopeId, isScopeIdMissing } from "./proxies/mappers";
 import { bumpProxyRegistryGeneration } from "./proxies/registryGeneration";
+import { appendProxiesToScopePool } from "./proxies/scopePool";
 
 /**
  * Add MULTIPLE proxies to a scope's rotation POOL in a single batched write
@@ -22,38 +22,13 @@ export async function addProxiesToScopePool(
   const normalizedScope = normalizeScope(scope);
   const normalizedScopeId = normalizeAssignmentScopeId(normalizedScope, scopeId);
   // Contract: normalizedScope is already normalized — the raw-scope guard applies to it directly.
-  if (isScopeIdMissing(normalizedScope, normalizedScopeId)) {
+  if (isScopeIdMissing(normalizedScope, normalizedScopeId) || normalizedScopeId === null) {
     throw new Error("scopeId is required for non-global proxy assignments");
   }
   const unique = [...new Set((proxyIds || []).filter(Boolean))];
   if (unique.length === 0) return 0;
 
-  const db = getDbInstance();
-  const maxRow = db
-    .prepare("SELECT MAX(position) AS maxPos FROM proxy_assignments WHERE scope = ? AND scope_id IS ?")
-    .get(normalizedScope, normalizedScopeId) as { maxPos?: number | null } | undefined;
-  const base = maxRow && typeof maxRow.maxPos === "number" ? maxRow.maxPos + 1 : 0;
-  const now = new Date().toISOString();
-
-  const exists = db.prepare(
-    "SELECT 1 FROM proxy_assignments WHERE scope = ? AND scope_id IS ? AND proxy_id = ? LIMIT 1"
-  );
-  const insert = db.prepare(
-    `INSERT INTO proxy_assignments (proxy_id, scope, scope_id, position, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  );
-
-  let added = 0;
-  unique.forEach((pid, i) => {
-    if (!exists.get(normalizedScope, normalizedScopeId, pid)) {
-      insert.run(pid, normalizedScope, normalizedScopeId, base + i, now, now);
-      added++;
-    }
-  });
-
-  if (added > 0) {
-    backupDbFile("pre-write");
-    bumpProxyRegistryGeneration();
-  }
+  const added = await appendProxiesToScopePool(db(), normalizedScope, normalizedScopeId, unique);
+  if (added > 0) bumpProxyRegistryGeneration();
   return added;
 }

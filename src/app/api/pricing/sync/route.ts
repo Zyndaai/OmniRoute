@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const { getSyncStatus } = await import("@/lib/pricingSync");
-    return NextResponse.json(getSyncStatus());
+    return NextResponse.json(await getSyncStatus());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
@@ -66,7 +66,7 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const { clearSyncedPricing } = await import("@/lib/pricingSync");
-    clearSyncedPricing();
+    await clearSyncedPricing();
     return NextResponse.json({ success: true, message: "Synced pricing data cleared" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

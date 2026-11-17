@@ -1,14 +1,13 @@
 /**
  * db/interceptionRules.ts — Per-model web-search / web-fetch interception rules (#3384).
  *
- * CRUD against the key_value table under namespace "interception_rules". Follows the
- * established key_value pattern from paramFilters.ts / databaseSettings.ts.
+ * CRUD against `config_entries` under namespace "interception_rules" (one row per provider).
  *
  * Resolution precedence (see resolveInterceptSearch): per-model rule > provider-level
  * rule > undefined (caller falls back to the existing native-bypass defaults).
  */
 
-import { getDbInstance } from "./core";
+import { deleteConfigValue, getConfigEntries, setConfigValue } from "./configEntries";
 
 const NAMESPACE = "interception_rules";
 
@@ -37,9 +36,15 @@ export interface ProviderInterceptionRules {
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 
+// The TTL bounds staleness when another instance sharing the database writes.
+const CACHE_TTL_MS = 5_000;
+
 let rulesCache: Map<string, ProviderInterceptionRules> | null = null;
+let rulesCacheLoadedAt = 0;
+let cacheGeneration = 0;
 
 function invalidateCache(): void {
+  cacheGeneration++;
   rulesCache = null;
 }
 
@@ -59,15 +64,6 @@ function toOptionalBool(value: unknown): boolean | undefined {
 
 function toFetchBackend(value: unknown): FetchInterceptionBackend | undefined {
   return value === "firecrawl" || value === "jina" || value === "tavily" ? value : undefined;
-}
-
-function parseStoredValue(raw: unknown): unknown {
-  if (typeof raw !== "string") return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }
 
 function toModelInterceptionRule(raw: unknown): ModelInterceptionRule | null {
@@ -106,32 +102,24 @@ function toProviderInterceptionRules(raw: unknown): ProviderInterceptionRules | 
 
 // ── Read ────────────────────────────────────────────────────────────────────
 
-function readNamespace(namespace: string): Record<string, unknown> {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-    .all(namespace) as Array<{ key: string; value: string }>;
-
-  const values: Record<string, unknown> = {};
-  for (const row of rows) {
-    values[row.key] = parseStoredValue(row.value);
-  }
-  return values;
-}
-
-function loadAllRules(): Map<string, ProviderInterceptionRules> {
-  const raw = readNamespace(NAMESPACE);
+async function loadAllRules(): Promise<Map<string, ProviderInterceptionRules>> {
   const map = new Map<string, ProviderInterceptionRules>();
-  for (const [key, value] of Object.entries(raw)) {
-    const parsed = toProviderInterceptionRules(value);
-    if (parsed) map.set(key, parsed);
+  for (const row of await getConfigEntries(NAMESPACE)) {
+    const parsed = toProviderInterceptionRules(row.value);
+    if (parsed) map.set(row.key, parsed);
   }
   return map;
 }
 
-function loadRulesCached(): Map<string, ProviderInterceptionRules> {
+async function loadRulesCached(): Promise<Map<string, ProviderInterceptionRules>> {
+  if (rulesCache !== null && Date.now() - rulesCacheLoadedAt > CACHE_TTL_MS) rulesCache = null;
   if (rulesCache === null) {
-    rulesCache = loadAllRules();
+    const generation = cacheGeneration;
+    const loaded = await loadAllRules();
+    // A write that landed while loading invalidated the cache: the loaded map may predate it.
+    if (generation !== cacheGeneration) return loadRulesCached();
+    rulesCache = loaded;
+    rulesCacheLoadedAt = Date.now();
   }
   return rulesCache;
 }
@@ -139,19 +127,19 @@ function loadRulesCached(): Map<string, ProviderInterceptionRules> {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /** Get the interception rules for a single provider, or null if not configured. */
-export function getInterceptionRules(provider: string): ProviderInterceptionRules | null {
-  return toNormalizedString(provider) ? (loadRulesCached().get(provider) ?? null) : null;
+export async function getInterceptionRules(
+  provider: string
+): Promise<ProviderInterceptionRules | null> {
+  return toNormalizedString(provider) ? ((await loadRulesCached()).get(provider) ?? null) : null;
 }
 
 /** Upsert the entire interception rule set for a provider. Invalidates the cache. */
-export function setInterceptionRules(provider: string, rules: ProviderInterceptionRules): void {
+export async function setInterceptionRules(
+  provider: string,
+  rules: ProviderInterceptionRules
+): Promise<void> {
   const normalizedProvider = toNormalizedString(provider);
   if (!normalizedProvider) return;
-
-  const db = getDbInstance();
-  const stmt = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)"
-  );
 
   const normalized: ProviderInterceptionRules = {
     interceptSearch: rules.interceptSearch,
@@ -161,20 +149,16 @@ export function setInterceptionRules(provider: string, rules: ProviderIntercepti
     models: rules.models && Object.keys(rules.models).length > 0 ? rules.models : undefined,
   };
 
-  stmt.run(NAMESPACE, normalizedProvider, JSON.stringify(normalized));
+  await setConfigValue(NAMESPACE, normalizedProvider, normalized);
   invalidateCache();
 }
 
 /** Delete the interception rules for a provider. Resets that provider to default behavior. */
-export function deleteInterceptionRules(provider: string): void {
+export async function deleteInterceptionRules(provider: string): Promise<void> {
   const normalizedProvider = toNormalizedString(provider);
   if (!normalizedProvider) return;
 
-  const db = getDbInstance();
-  db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(
-    NAMESPACE,
-    normalizedProvider
-  );
+  await deleteConfigValue(NAMESPACE, normalizedProvider);
   invalidateCache();
 }
 
@@ -184,14 +168,14 @@ export function deleteInterceptionRules(provider: string): void {
  * Precedence: per-model rule > provider-level rule > undefined (no override — the
  * caller should fall back to the existing native-bypass defaults).
  */
-export function resolveInterceptSearch(
+export async function resolveInterceptSearch(
   provider: string | null | undefined,
   model: string | null | undefined
-): boolean | undefined {
+): Promise<boolean | undefined> {
   const normalizedProvider = toNormalizedString(provider);
   if (!normalizedProvider) return undefined;
 
-  const rules = getInterceptionRules(normalizedProvider);
+  const rules = await getInterceptionRules(normalizedProvider);
   if (!rules) return undefined;
 
   const normalizedModel = toNormalizedString(model);
@@ -209,14 +193,14 @@ export function resolveInterceptSearch(
  * caller should fall back to the existing native-bypass defaults). Structural twin of
  * resolveInterceptSearch above (#7339 / Phase 3 of #3384).
  */
-export function resolveInterceptFetch(
+export async function resolveInterceptFetch(
   provider: string | null | undefined,
   model: string | null | undefined
-): boolean | undefined {
+): Promise<boolean | undefined> {
   const normalizedProvider = toNormalizedString(provider);
   if (!normalizedProvider) return undefined;
 
-  const rules = getInterceptionRules(normalizedProvider);
+  const rules = await getInterceptionRules(normalizedProvider);
   if (!rules) return undefined;
 
   const normalizedModel = toNormalizedString(model);

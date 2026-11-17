@@ -20,8 +20,46 @@
 // introduces new keys and never throws on null/undefined bodies — call sites
 // can chain it without extra guards.
 
-import { getParamFilterConfig, ModelParamFilter, ProviderParamFilter } from "@/lib/db/paramFilters";
+import {
+  loadParamFilterConfigs,
+  ModelParamFilter,
+  ProviderParamFilter,
+} from "@/lib/db/paramFilters";
 import { getProviderModel } from "../config/providerModels.ts";
+
+// The param-filter store is asynchronous, but `stripUnsupportedParams` runs on synchronous request
+// paths. The config rules therefore read this snapshot, refreshed in the background once it is
+// older than the TTL (stale-while-revalidate); the very first strip after boot sees an empty
+// snapshot until its background load lands. Callers that need the freshest rules can await
+// `refreshParamFilterSnapshot()` first.
+const PARAM_FILTER_SNAPSHOT_TTL_MS = 5_000;
+let paramFilterSnapshot: ReadonlyMap<string, ProviderParamFilter> = new Map();
+let paramFilterSnapshotAt = 0;
+let paramFilterRefresh: Promise<void> | null = null;
+
+export function refreshParamFilterSnapshot(): Promise<void> {
+  if (!paramFilterRefresh) {
+    paramFilterRefresh = loadParamFilterConfigs()
+      .then((configs) => {
+        paramFilterSnapshot = configs;
+        paramFilterSnapshotAt = Date.now();
+      })
+      .catch(() => {
+        // Keep the previous snapshot; retry on the next stale read.
+      })
+      .finally(() => {
+        paramFilterRefresh = null;
+      });
+  }
+  return paramFilterRefresh;
+}
+
+function currentParamFilterSnapshot(): ReadonlyMap<string, ProviderParamFilter> {
+  if (Date.now() - paramFilterSnapshotAt > PARAM_FILTER_SNAPSHOT_TTL_MS) {
+    void refreshParamFilterSnapshot();
+  }
+  return paramFilterSnapshot;
+}
 
 type StripRule = {
   provider?: string;
@@ -366,7 +404,7 @@ export function applyConfigFilters(
   snapshot: Record<string, unknown>
 ): void {
   if (!provider || !body) return;
-  const config = getParamFilterConfig(provider);
+  const config = currentParamFilterSnapshot().get(provider);
   if (!config) return;
 
   applyProviderLevelFilters(body, snapshot, config);

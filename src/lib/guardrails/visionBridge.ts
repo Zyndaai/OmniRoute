@@ -48,7 +48,9 @@ type LeafVisionTally = { hasVision: boolean; hasNonVision: boolean };
 
 /// Evaluate a single `kind: "model"` step's proven vision capability.
 /// Returns null when the step lacks a valid model string (malformed step).
-function evaluateModelStepCapability(s: Record<string, unknown>): "vision" | "non-vision" | null {
+async function evaluateModelStepCapability(
+  s: Record<string, unknown>
+): Promise<"vision" | "non-vision" | null> {
   const targetModel = s.model;
   if (typeof targetModel !== "string") return null;
   const provider =
@@ -65,7 +67,7 @@ function evaluateModelStepCapability(s: Record<string, unknown>): "vision" | "no
   if (internalProvider) {
     const slash = targetModel.indexOf("/");
     const prefix = slash > 0 ? targetModel.slice(0, slash) : null;
-    const ownPrefix = getProviderNodePrefixSync(internalProvider);
+    const ownPrefix = await getProviderNodePrefixSync(internalProvider);
     const hasOwnPrefix = Boolean(
       prefix &&
       (prefix === internalProvider ||
@@ -77,22 +79,22 @@ function evaluateModelStepCapability(s: Record<string, unknown>): "vision" | "no
     // before positive discoveries and must not be overridden by a foreign
     // public-model verdict. Slash-shaped upstream IDs stay unmodified.
     for (const id of candidates) {
-      const custom = getExactCustomModelVisionOverride(internalProvider, id);
+      const custom = await getExactCustomModelVisionOverride(internalProvider, id);
       if (custom !== null) return custom ? "vision" : "non-vision";
     }
     for (const id of candidates) {
-      const compat = getModelCompatVisionOverride(internalProvider, [id]);
+      const compat = await getModelCompatVisionOverride(internalProvider, [id]);
       if (compat !== null) return compat ? "vision" : "non-vision";
     }
     for (const id of candidates) {
-      if (getSyncedAvailableModelVision(internalProvider, id) === true) return "vision";
+      if ((await getSyncedAvailableModelVision(internalProvider, id)) === true) return "vision";
     }
     // No exact source owned by this node confirmed vision support. Do not
     // treat an unrelated provider's row or a name heuristic as a pass.
     return "non-vision";
   }
 
-  const caps = getResolvedModelCapabilities({ provider, model: targetModel });
+  const caps = await getResolvedModelCapabilities({ provider, model: targetModel });
   return caps.supportsVision === true ? "vision" : "non-vision";
 }
 
@@ -137,7 +139,7 @@ async function resolveComboRefVisionCapability(
     }
     if (s.kind === "model") {
       hasLeaf = true;
-      const capability = evaluateModelStepCapability(s);
+      const capability = await evaluateModelStepCapability(s);
       if (capability === "vision") tally.hasVision = true;
       else tally.hasNonVision = true;
     }
@@ -245,7 +247,7 @@ export async function getComboVisionBridgeDecision(
       }
       if (s.kind === "model") {
         hasModelStep = true;
-        const capability = evaluateModelStepCapability(s);
+        const capability = await evaluateModelStepCapability(s);
         if (capability === null) return "process";
         if (capability === "vision") {
           hasVisionCapableStep = true;
@@ -365,7 +367,7 @@ export class VisionBridgeGuardrail extends BaseGuardrail {
       forceVisionBridge = isVisionBridgeForcedModel(model);
 
       // 4. Check if model supports vision
-      const capabilities = getResolvedModelCapabilities(model);
+      const capabilities = await getResolvedModelCapabilities(model);
       requestedModelVision = capabilities?.supportsVision ?? null;
       comboVisionBridgeDecision = forceVisionBridge
         ? "process"

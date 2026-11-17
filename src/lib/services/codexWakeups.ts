@@ -75,16 +75,16 @@ export interface CodexWakeupPingResult {
 type WakeupConnection = QuotaAutoPingConnection & { isActive?: boolean | null };
 
 export interface CodexWakeupStore {
-  listTasks: () => CodexWakeupTask[];
+  listTasks: () => Promise<CodexWakeupTask[]>;
   claimRun: (
     taskId: string,
     trigger: CodexWakeupTrigger,
     nowMs: number,
     computeNextRunAt: (schedule: CodexWakeupSchedule, after: number) => string | null
-  ) => CodexWakeupClaim | null;
-  recordResult: (runId: string, result: CodexWakeupRunResult) => void;
-  finishRun: (runId: string, nowMs: number, interrupted?: boolean) => unknown;
-  recoverRuns: (nowMs: number) => number;
+  ) => Promise<CodexWakeupClaim | null>;
+  recordResult: (runId: string, result: CodexWakeupRunResult) => Promise<void>;
+  finishRun: (runId: string, nowMs: number, interrupted?: boolean) => Promise<unknown>;
+  recoverRuns: (nowMs: number) => Promise<number>;
 }
 
 export interface CodexWakeupDeps extends QuotaAutoPingDeps {
@@ -293,16 +293,16 @@ export async function executeCodexWakeupRun(
     for (const connectionId of claim.task.connectionIds) {
       const startedAt = Date.now();
       const result = await pingCodexAccountForWakeup(connectionId, deps, state);
-      deps.store.recordResult(claim.run.id, {
+      await deps.store.recordResult(claim.run.id, {
         connectionId,
         ...result,
         durationMs: Date.now() - startedAt,
       });
     }
-    deps.store.finishRun(claim.run.id, now());
+    await deps.store.finishRun(claim.run.id, now());
   } catch (err) {
     warn(`run ${claim.run.id}: interrupted`, err);
-    deps.store.finishRun(claim.run.id, now(), true);
+    await deps.store.finishRun(claim.run.id, now(), true);
   }
 }
 
@@ -332,10 +332,10 @@ export async function runCodexWakeupTick(
   let started = 0;
   try {
     const nowMs = now();
-    deps.store.recoverRuns(nowMs);
-    for (const task of deps.store.listTasks()) {
+    await deps.store.recoverRuns(nowMs);
+    for (const task of await deps.store.listTasks()) {
       if (!task.enabled || !task.nextRunAt || Date.parse(task.nextRunAt) > nowMs) continue;
-      const claim = deps.store.claimRun(task.id, "scheduled", nowMs, nextWakeupAt);
+      const claim = await deps.store.claimRun(task.id, "scheduled", nowMs, nextWakeupAt);
       if (!claim) continue;
       trackRun(claim, deps, state, now);
       started += 1;
@@ -352,15 +352,15 @@ export async function runCodexWakeupTick(
  * Start a manual run of `taskId` now, without touching its schedule. Returns null when
  * another run of the task is still live. Throws `CodexWakeupStoreError("not_found")`.
  */
-export function runCodexWakeupTaskNow(
+export async function runCodexWakeupTaskNow(
   taskId: string,
   deps: CodexWakeupDeps = createDefaultCodexWakeupDeps(),
   state: CodexWakeupState = sharedState,
   now: () => number = Date.now
-): CodexWakeupRun | null {
+): Promise<CodexWakeupRun | null> {
   const nowMs = now();
-  deps.store.recoverRuns(nowMs);
-  const claim = deps.store.claimRun(taskId, "manual", nowMs, nextWakeupAt);
+  await deps.store.recoverRuns(nowMs);
+  const claim = await deps.store.claimRun(taskId, "manual", nowMs, nextWakeupAt);
   if (!claim) return null;
   trackRun(claim, deps, state, now);
   return claim.run;

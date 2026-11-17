@@ -120,7 +120,7 @@ describe("omniroute_radar_catalog MCP dispatch", () => {
     mockFetch.mockReset();
     vi.stubGlobal("fetch", mockFetch);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     client = new Client({ name: "radar-catalog-test", version: "1.0.0" });
     await client.connect(clientTransport);

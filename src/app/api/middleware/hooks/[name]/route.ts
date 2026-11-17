@@ -4,9 +4,8 @@ import {
   getMiddlewareHook,
   updateMiddlewareHook,
   deleteMiddlewareHook,
-  getHookLogs,
 } from "@/lib/db/middleware";
-import { registerHook, unregisterHook, updateHook } from "@/lib/middleware/registry";
+import { registerHook, unregisterHook, updateHook, getHookLogs } from "@/lib/middleware/registry";
 import type { HookConfig } from "@/lib/middleware/types";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -42,7 +41,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     const includeLogs = url.searchParams.get("logs") === "true";
     const logLimit = parseInt(url.searchParams.get("logLimit") || "20", 10);
 
-    const hook = getMiddlewareHook(name);
+    const hook = await getMiddlewareHook(name);
     if (!hook) {
       return NextResponse.json({ error: "Hook not found" }, { status: 404 });
     }
@@ -77,7 +76,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     }
     const body = validation.data;
 
-    const existing = getMiddlewareHook(name);
+    const existing = await getMiddlewareHook(name);
     if (!existing) {
       return NextResponse.json({ error: "Hook not found" }, { status: 404 });
     }
@@ -91,7 +90,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     if (body.code !== undefined) updates.code = body.code;
 
     // Persist to DB
-    const saved = updateMiddlewareHook(name, updates);
+    const saved = await updateMiddlewareHook(name, updates);
     if (!saved) {
       return NextResponse.json({ error: "Failed to update hook" }, { status: 500 });
     }
@@ -123,13 +122,13 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   try {
     const { name } = await params;
 
-    const existing = getMiddlewareHook(name);
+    const existing = await getMiddlewareHook(name);
     if (!existing) {
       return NextResponse.json({ error: "Hook not found" }, { status: 404 });
     }
 
     // Remove from DB
-    const deleted = deleteMiddlewareHook(name);
+    const deleted = await deleteMiddlewareHook(name);
     if (!deleted) {
       return NextResponse.json({ error: "Failed to delete hook" }, { status: 500 });
     }

@@ -20,40 +20,8 @@ function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
 }
 
 const STATE_EVENT_PREFIX = "state:";
-/** Event type written by `collectMemoryHits` (src/lib/a2a/taskExecution.ts). */
+/** Legacy event type written by the dropped memory engine; old rows may still carry it. */
 const MEMORY_HITS_EVENT_TYPE = "memory_hits";
-const MEMORY_HIT_FIELDS = ["id", "key", "type", "snippet"] as const;
-
-interface MemoryHit {
-  id: string;
-  key: string;
-  type: string;
-  snippet: string;
-}
-
-/**
- * Parse a persisted `memory_hits` event's `data_json` into the hits the drawer renders.
- * Mirrors `DrawerMemory`'s validation in
- * `src/app/(dashboard)/dashboard/orchestration/drawer/OrchestrationDrawer.tsx`: `metadata` is
- * caller-supplied and unvalidated end to end, so what got persisted can be anything —
- * a bare string (`"boom"`, whose `.length` is truthy), an object, or an array carrying entries
- * with a non-string `key`/`type`/`snippet` (rendered as React children, so an object there
- * would throw "Objects are not valid as a React child" and take the whole drawer down).
- * Never throws: a malformed payload degrades to an empty list, so the route answers 200
- * with `metadata: {}` instead of 500.
- */
-function parseMemoryHits(dataJson: string | null | undefined): MemoryHit[] {
-  const raw = safeJsonParse<unknown>(dataJson, null);
-  if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (hit): hit is MemoryHit =>
-      !!hit &&
-      typeof hit === "object" &&
-      MEMORY_HIT_FIELDS.every(
-        (field) => typeof (hit as Record<string, unknown>)[field] === "string"
-      )
-  );
-}
 
 /**
  * Reconstitute the in-memory `A2ATask` shape (src/lib/a2a/taskManager.ts) from a persisted
@@ -62,20 +30,15 @@ function parseMemoryHits(dataJson: string | null | undefined): MemoryHit[] {
  * `A2ATaskManager.persist()` writes one `state:<TaskState>` event per transition — the runtime
  * state each event represents is recovered by stripping that prefix.
  */
-function reconstituteHistoricalTask(row: A2ATaskHistoryRow) {
+async function reconstituteHistoricalTask(row: A2ATaskHistoryRow) {
   const input = safeJsonParse<{
     skill: string;
     messages: Array<{ role: string; content: string }>;
   }>(row.input_json, { skill: row.skill_id ?? "", messages: [] });
   const artifacts = safeJsonParse<unknown[]>(row.output_json, []);
-  const eventRows = listA2ATaskEvents(row.id);
+  const eventRows = await listA2ATaskEvents(row.id);
 
-  // `memory_hits` is observability, not a state transition — it is hydrated into `metadata`
-  // (Fase 3, Task C1) and kept out of the timeline the drawer renders.
-  const memoryHits = eventRows
-    .filter((event) => event.event_type === MEMORY_HITS_EVENT_TYPE)
-    .flatMap((event) => parseMemoryHits(event.data_json));
-
+  // Legacy `memory_hits` events are not state transitions; keep them out of the timeline.
   const events = eventRows
     .filter((event) => event.event_type !== MEMORY_HITS_EVENT_TYPE)
     .map((event) => {
@@ -97,7 +60,7 @@ function reconstituteHistoricalTask(row: A2ATaskHistoryRow) {
     input,
     artifacts,
     events,
-    metadata: memoryHits.length > 0 ? { memoryHits } : {},
+    metadata: {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     expiresAt: row.updated_at,
@@ -126,9 +89,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // matches `listA2ATaskHistory`'s existing owner rule (management/keyless callers see
     // everything, same posture as `listTasks`) — intentional, not a bug. Do not "fix" it by
     // passing a stricter owner clause into the history fallback.
-    const historyRow = getA2ATaskHistoryById(id, auth.owner);
+    const historyRow = await getA2ATaskHistoryById(id, auth.owner);
     if (historyRow) {
-      return NextResponse.json({ task: reconstituteHistoricalTask(historyRow) });
+      return NextResponse.json({ task: await reconstituteHistoricalTask(historyRow) });
     }
 
     return NextResponse.json({ error: `Task not found: ${id}` }, { status: 404 });

@@ -56,7 +56,7 @@ export async function GET(request: Request = new Request("http://localhost/")): 
 
       // Gravar no audit log (best-effort — falha silenciosa para não bloquear reveal)
       try {
-        logAuditEvent({
+        await logAuditEvent({
           action: "service.reveal_api_key",
           target: TOOL,
           resourceType: "service",

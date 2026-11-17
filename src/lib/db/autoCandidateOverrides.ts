@@ -14,7 +14,7 @@
  * JSON array column.
  */
 import { randomUUID } from "node:crypto";
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "@/lib/db/pg";
 
 export interface AutoCandidateOverride {
   id: string;
@@ -30,7 +30,7 @@ type OverrideRow = {
   api_key_id: string;
   auto_channel: string;
   connection_id: string;
-  excluded: number;
+  excluded: boolean;
   created_at: string;
 };
 
@@ -40,9 +40,32 @@ function rowToOverride(row: OverrideRow): AutoCandidateOverride {
     apiKeyId: row.api_key_id,
     autoChannel: row.auto_channel,
     connectionId: row.connection_id,
-    excluded: row.excluded === 1,
+    excluded: row.excluded === true,
     createdAt: row.created_at,
   };
+}
+
+/** No FK on this table (keys may be `env-key`/`self-loop`), so deletes must clean it up. */
+export async function deleteOverridesForApiKey(
+  apiKeyId: string,
+  executor: DbExecutor = db()
+): Promise<number> {
+  const res = await executor.execute("DELETE FROM auto_candidate_overrides WHERE api_key_id = $1", [
+    apiKeyId,
+  ]);
+  return res.changes;
+}
+
+/** Counterpart for connection deletion (called by the providers domain). */
+export async function deleteOverridesForConnection(
+  connectionId: string,
+  executor: DbExecutor = db()
+): Promise<number> {
+  const res = await executor.execute(
+    "DELETE FROM auto_candidate_overrides WHERE connection_id = $1",
+    [connectionId]
+  );
+  return res.changes;
 }
 
 /**
@@ -56,13 +79,11 @@ export async function getExcludedConnectionIds(
   autoChannel: string
 ): Promise<Set<string>> {
   if (!apiKeyId || !autoChannel) return new Set();
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT connection_id FROM auto_candidate_overrides
-       WHERE api_key_id = ? AND auto_channel = ? AND excluded = 1`
-    )
-    .all(apiKeyId, autoChannel) as Array<{ connection_id: string }>;
+  const rows = await db().query<{ connection_id: string }>(
+    `SELECT connection_id FROM auto_candidate_overrides
+       WHERE api_key_id = $1 AND auto_channel = $2 AND excluded = true`,
+    [apiKeyId, autoChannel]
+  );
   return new Set(rows.map((row) => row.connection_id));
 }
 
@@ -77,25 +98,16 @@ export async function setExcluded(
   connectionId: string,
   excluded: boolean
 ): Promise<AutoCandidateOverride> {
-  const db = getDbInstance();
-  const id = randomUUID();
-  const createdAt = new Date().toISOString();
-  db.prepare(
+  const row = await db().queryOne<OverrideRow>(
     `INSERT INTO auto_candidate_overrides
        (id, api_key_id, auto_channel, connection_id, excluded, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(api_key_id, auto_channel, connection_id)
-     DO UPDATE SET excluded = excluded.excluded`
-  ).run(id, apiKeyId, autoChannel, connectionId, excluded ? 1 : 0, createdAt);
-
-  const row = db
-    .prepare(
-      `SELECT id, api_key_id, auto_channel, connection_id, excluded, created_at
-       FROM auto_candidate_overrides
-       WHERE api_key_id = ? AND auto_channel = ? AND connection_id = ?`
-    )
-    .get(apiKeyId, autoChannel, connectionId) as OverrideRow;
-  return rowToOverride(row);
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (api_key_id, auto_channel, connection_id)
+     DO UPDATE SET excluded = EXCLUDED.excluded
+     RETURNING id, api_key_id, auto_channel, connection_id, excluded, created_at`,
+    [randomUUID(), apiKeyId, autoChannel, connectionId, excluded]
+  );
+  return rowToOverride(row as OverrideRow);
 }
 
 /** Lists all override rows for one API key + auto channel (excluded and not). */
@@ -104,14 +116,12 @@ export async function listOverrides(
   autoChannel: string
 ): Promise<AutoCandidateOverride[]> {
   if (!apiKeyId || !autoChannel) return [];
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT id, api_key_id, auto_channel, connection_id, excluded, created_at
+  const rows = await db().query<OverrideRow>(
+    `SELECT id, api_key_id, auto_channel, connection_id, excluded, created_at
        FROM auto_candidate_overrides
-       WHERE api_key_id = ? AND auto_channel = ?
-       ORDER BY created_at ASC`
-    )
-    .all(apiKeyId, autoChannel) as OverrideRow[];
+       WHERE api_key_id = $1 AND auto_channel = $2
+       ORDER BY created_at ASC`,
+    [apiKeyId, autoChannel]
+  );
   return rows.map(rowToOverride);
 }

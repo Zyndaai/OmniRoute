@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { id } = await params;
-    const config = getInterceptionRules(id);
+    const config = await getInterceptionRules(id);
     return NextResponse.json(config ?? { interceptSearch: undefined, interceptFetch: undefined });
   } catch (error) {
     return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(error)), { status: 500 });
@@ -50,7 +50,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    setInterceptionRules(id, validation.data);
+    await setInterceptionRules(id, validation.data);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(error)), { status: 500 });
@@ -67,7 +67,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   try {
     const { id } = await params;
-    deleteInterceptionRules(id);
+    await deleteInterceptionRules(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(error)), { status: 500 });

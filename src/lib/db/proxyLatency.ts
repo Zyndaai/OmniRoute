@@ -2,7 +2,7 @@
 // average latency observed in `proxy_logs` over a trailing window. Extracted
 // from proxies.ts to keep that frozen god-file under its line-count cap
 // (imported directly by src/lib/db/proxies.ts, anti-barrel, #6798).
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "./pg";
 
 const PROXY_LATENCY_WINDOW_HOURS = parseInt(process.env.PROXY_LATENCY_WINDOW_HOURS ?? "3", 10);
 
@@ -17,23 +17,22 @@ type LatencyLogRow = {
 // measures the latency of sends served: a fast refusal does not make an
 // outlet fast, so abandoned sends are excluded (legacy rows predate the
 // journal and stay included via the NULL guard).
-function buildLatencyMap(db: ReturnType<typeof getDbInstance>): Map<string, number> {
+async function buildLatencyMap(executor: DbExecutor): Promise<Map<string, number>> {
   const sinceIso = new Date(Date.now() - PROXY_LATENCY_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
 
-  const latencyRows = db
-    .prepare(
-      `SELECT proxy_host, proxy_port, AVG(latency_ms) as avg_latency
+  const latencyRows = await executor.query<LatencyLogRow>(
+    `SELECT proxy_host, proxy_port, AVG(latency_ms)::float8 as avg_latency
        FROM proxy_logs
-       WHERE timestamp >= ?
+       WHERE "timestamp" >= $1
          AND (attempt_issue IS NULL OR attempt_issue <> 'abandoned')
-       GROUP BY proxy_host, proxy_port`
-    )
-    .all(sinceIso) as LatencyLogRow[];
+       GROUP BY proxy_host, proxy_port`,
+    [sinceIso]
+  );
 
   const latencyMap = new Map<string, number>();
   for (const r of latencyRows) {
     if (r.avg_latency !== null && r.avg_latency !== undefined) {
-      latencyMap.set(`${r.proxy_host}:${r.proxy_port}`, r.avg_latency);
+      latencyMap.set(`${r.proxy_host}:${r.proxy_port}`, Number(r.avg_latency));
     }
   }
   return latencyMap;
@@ -42,8 +41,11 @@ function buildLatencyMap(db: ReturnType<typeof getDbInstance>): Map<string, numb
 // Picks the candidate with the lowest recorded average latency; candidates
 // with no logged latency are treated as -1 (best/first) so untested proxies
 // still get a chance to be selected and gather data.
-export function pickByLatency<T>(db: ReturnType<typeof getDbInstance>, candidates: T[]): T {
-  const latencyMap = buildLatencyMap(db);
+export async function pickByLatency<T>(
+  executor: DbExecutor = db(),
+  candidates: T[]
+): Promise<T> {
+  const latencyMap = await buildLatencyMap(executor);
 
   const sorted = [...candidates].sort((a, b) => {
     const pA = a as { host: string; port: number };

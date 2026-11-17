@@ -156,7 +156,7 @@ export async function POST(request: Request): Promise<Response> {
     await writeAtomic(configPaths.env, nextEnv, 0o600);
 
     try {
-      saveCliToolLastConfigured("qwen");
+      await saveCliToolLastConfigured("qwen");
     } catch (error) {
       logger.warn({ err: error }, "Failed to save Qwen Code configuration timestamp");
     }
@@ -203,7 +203,7 @@ export async function DELETE(request: Request): Promise<Response> {
     }
 
     try {
-      deleteCliToolLastConfigured("qwen");
+      await deleteCliToolLastConfigured("qwen");
     } catch (error) {
       logger.warn({ err: error }, "Failed to clear Qwen Code configuration timestamp");
     }

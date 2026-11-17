@@ -4,8 +4,7 @@ import {
   finalizeServerToolExecution,
   readRow,
 } from "../db/skillExecutionFence";
-import type { SqliteAdapter } from "../db/adapters/types";
-import { getDbInstance } from "../db/core";
+import { db as getDb, type DbExecutor } from "../db/pg";
 
 export type RunWithServerToolFenceResult<T> =
   | { kind: "executed"; value: T }
@@ -48,19 +47,19 @@ export interface RunWithServerToolFenceOptions<T> {
   execute: (executionId: string) => Promise<T>;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  db?: SqliteAdapter;
+  db?: DbExecutor;
 }
 
 export async function runWithServerToolFence<T>(
   input: RunWithServerToolFenceOptions<T>
 ): Promise<RunWithServerToolFenceResult<T>> {
-  const db = input.db ?? getDbInstance();
+  const db = input.db ?? getDb();
   const now = input.now ?? (() => Date.now());
   const sleep = input.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const inputDigest = canonicalJsonSha256(input.arguments);
   const leaseExpiresAt = new Date(now() + input.leaseDurationMs).toISOString();
 
-  const claim = claimServerToolExecution(
+  const claim = await claimServerToolExecution(
     {
       apiKeyId: input.apiKeyId,
       requestIdentity: input.requestIdentity,
@@ -81,7 +80,7 @@ export async function runWithServerToolFence<T>(
         try {
           const value = await input.execute(claim.executionId);
           const durationMs = now() - claimStartTime;
-          finalizeServerToolExecution(
+          await finalizeServerToolExecution(
             {
               executionId: claim.executionId,
               status: "success",
@@ -96,7 +95,7 @@ export async function runWithServerToolFence<T>(
           const message = err instanceof Error ? err.message : String(err);
           const safeMessage = message.replace(/\bat\s+\/[^\s"']+/g, "[stack-redacted]");
           const durationMs = now() - claimStartTime;
-          finalizeServerToolExecution(
+          await finalizeServerToolExecution(
             {
               executionId: claim.executionId,
               status: "error",
@@ -196,7 +195,7 @@ export async function runWithServerToolFence<T>(
           }
         }
         // Also check DB — another process may have finalized
-        const row = readRow(db, claim.executionId);
+        const row = await readRow(db, claim.executionId);
         if (row && row.status !== "running") {
           if (row.status === "success" || row.status === "error" || row.status === "timeout") {
             let parsedOutput: unknown = null;

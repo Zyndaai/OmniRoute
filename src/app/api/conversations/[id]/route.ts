@@ -22,11 +22,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const { id } = await params;
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const row = getMultiTurnConversationById(id);
+    const row = await getMultiTurnConversationById(id);
     if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const activeCallLogIdByConversation = buildActiveCallLogIdByConversation();
-    const conversation = annotateConversationRow(row, activeCallLogIdByConversation);
+    const conversation = await annotateConversationRow(row, activeCallLogIdByConversation);
 
     return NextResponse.json({ conversation });
   } catch (err) {

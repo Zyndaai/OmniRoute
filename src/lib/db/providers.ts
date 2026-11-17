@@ -5,8 +5,9 @@
 import { v4 as uuidv4 } from "uuid";
 
 import { isCommonChatGptWebRetiredProviderId } from "@/shared/constants/chatgptWebRetirement";
-import { getDbInstance, rowToCamel, cleanNulls } from "./core";
-import { backupDbFile } from "./backup";
+import { db, ts, type DbExecutor } from "./pg";
+import { jsonValueParam, stripNul } from "./pgJsonText";
+import { rowToCamel, cleanNulls } from "./caseMapping";
 import { encryptConnectionFields, decryptConnectionFields } from "./encryption";
 import { createLazyRowProxy } from "./providers/lazyConnectionView";
 import { invalidateDbCache, getCachedRawProviderConnections } from "./readCache";
@@ -43,11 +44,9 @@ import {
   withNullableRateLimitOverrides,
   normalizeBooleanColumn,
   sanitizeRateLimitOverrides,
-  serializeJsonField,
   toRecord,
   sanitizeQuotaWindowThresholds,
   toStringOrNull,
-  toNumberOrZero,
 } from "./providers/columns";
 
 type JsonRecord = Record<string, unknown>;
@@ -117,19 +116,33 @@ async function assertApiKeyIsNotManagementPassword(apiKey: unknown): Promise<voi
   throw new ManagementPasswordAsCredentialError();
 }
 
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
+/** `rowToCamel` plus the `group_name` column surfaced under its historical `group` key. */
+function connectionRowToCamel(row: unknown): JsonRecord {
+  const camel = (rowToCamel(row) ?? {}) as JsonRecord;
+  if (Object.hasOwn(camel, "groupName")) {
+    camel.group = camel.groupName;
+    delete camel.groupName;
+  }
+  return camel;
 }
 
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  transaction: <T>(fn: () => T) => () => T;
+/** Whole numbers only: integer columns reject 12.5 where SQLite stored it. */
+function toIntOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.round(n) : null;
 }
+
+// Legacy column names that callers still pass in the `columns` projection,
+// mapped to the PostgreSQL column that replaced them.
+const LEGACY_COLUMN_ALIASES: Record<string, string> = {
+  group: "group_name",
+  quota_window_thresholds_json: "quota_window_thresholds",
+  rate_limit_overrides_json: "rate_limit_overrides",
+};
 
 // Real column set for provider_connections (must match the CREATE TABLE in
-// core.ts's SCHEMA_SQL). getProviderConnections()'s optional `columns`
+// 0001_init.sql). getProviderConnections()'s optional `columns`
 // projection is interpolated directly into the SELECT clause, so every
 // requested name must be validated against this allowlist before use —
 // there is no current caller that passes untrusted input, but the
@@ -171,9 +184,13 @@ export const PROVIDER_CONNECTIONS_COLUMNS = new Set([
   "rate_limit_protection",
   "last_used_at",
   "group",
+  "group_name",
   "max_concurrent",
   "proxy_enabled",
   "per_key_proxy_enabled",
+  "quota_visible",
+  "quota_window_thresholds",
+  "rate_limit_overrides",
   "quota_window_thresholds_json",
   "rate_limit_overrides_json",
   "created_at",
@@ -226,8 +243,7 @@ export async function getRawProviderConnections(
   offset?: number,
   columns?: string[]
 ) {
-  const db = getDbInstance() as unknown as DbLike;
-  ensureProviderSpecificDataSecretsEncrypted(db);
+  await ensureProviderSpecificDataSecretsEncrypted();
   let selectCols = "*";
   if (columns?.length) {
     const invalidColumns = columns.filter((col) => !PROVIDER_CONNECTIONS_COLUMNS.has(col));
@@ -236,40 +252,18 @@ export async function getRawProviderConnections(
         `getProviderConnections: invalid column(s) requested: ${invalidColumns.join(", ")}`
       );
     }
-    // "group" is a reserved SQL keyword — the schema declares it quoted, so
-    // it must be re-quoted here too or the generated SELECT is a syntax error.
-    selectCols = columns.map((col) => (col === "group" ? `"group"` : col)).join(", ");
+    selectCols = columns.map((col) => LEGACY_COLUMN_ALIASES[col] ?? col).join(", ");
   }
-  let sql = `SELECT ${selectCols} FROM provider_connections`;
-  const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
-
-  if (filter.provider) {
-    conditions.push("provider = @provider");
-    params.provider = filter.provider;
-  }
-  if (filter.isActive !== undefined) {
-    conditions.push("is_active = @isActive");
-    params.isActive = filter.isActive ? 1 : 0;
-  }
-  if (filter.authType) {
-    conditions.push("auth_type = @authType");
-    params.authType = filter.authType;
-  }
-
-  if (conditions.length > 0) {
-    sql += " WHERE " + conditions.join(" AND ");
-  }
-  sql += " ORDER BY priority ASC, updated_at DESC";
+  const { where, params } = buildConnectionFilter(filter);
+  let sql = `SELECT ${selectCols} FROM provider_connections${where} ORDER BY priority ASC, updated_at DESC`;
   if (limit !== undefined) {
-    sql += " LIMIT @limit OFFSET @offset";
-    params.limit = limit;
-    params.offset = offset ?? 0;
+    params.push(limit, offset ?? 0);
+    sql += ` LIMIT $${params.length - 1} OFFSET $${params.length}`;
   }
 
-  const rows = db.prepare(sql).all(params);
+  const rows = await db().query(sql, params);
   return rows.map((r) => {
-    const camelRow = rowToCamel(r);
+    const camelRow = connectionRowToCamel(r);
     return withNullableRateLimitOverrides(
       withNullableQuotaWindowThresholds(
         withNullableMaxConcurrent(cleanNulls(camelRow), camelRow),
@@ -280,40 +274,39 @@ export async function getRawProviderConnections(
   });
 }
 
-export function getProviderConnectionsCount(filter: JsonRecord = {}): number {
-  const db = getDbInstance() as unknown as DbLike;
-  let sql = "SELECT count(*) as cnt FROM provider_connections";
+function buildConnectionFilter(filter: JsonRecord): { where: string; params: unknown[] } {
   const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
-
+  const params: unknown[] = [];
   if (filter.provider) {
-    conditions.push("provider = @provider");
-    params.provider = filter.provider;
+    params.push(filter.provider);
+    conditions.push(`provider = $${params.length}`);
   }
   if (filter.isActive !== undefined) {
-    conditions.push("is_active = @isActive");
-    params.isActive = filter.isActive ? 1 : 0;
+    params.push(Boolean(filter.isActive));
+    conditions.push(`is_active = $${params.length}`);
   }
   if (filter.authType) {
-    conditions.push("auth_type = @authType");
-    params.authType = filter.authType;
+    params.push(filter.authType);
+    conditions.push(`auth_type = $${params.length}`);
   }
+  return { where: conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "", params };
+}
 
-  if (conditions.length > 0) {
-    sql += " WHERE " + conditions.join(" AND ");
-  }
-
-  const row = db.prepare(sql).get(params) as { cnt: number };
-  return row.cnt;
+export async function getProviderConnectionsCount(filter: JsonRecord = {}): Promise<number> {
+  const { where, params } = buildConnectionFilter(filter);
+  const row = await db().queryOne<{ cnt: number }>(
+    `SELECT count(*) AS cnt FROM provider_connections${where}`,
+    params
+  );
+  return Number(row?.cnt ?? 0);
 }
 
 export async function getProviderConnectionById(id: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  ensureProviderSpecificDataSecretsEncrypted(db);
-  const row = db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(id);
+  await ensureProviderSpecificDataSecretsEncrypted();
+  const row = await db().queryOne("SELECT * FROM provider_connections WHERE id = $1", [id]);
   if (!row) return null;
 
-  const camelRow = rowToCamel(row);
+  const camelRow = connectionRowToCamel(row);
   return decryptConnectionFields(
     withNullableRateLimitOverrides(
       withNullableQuotaWindowThresholds(
@@ -337,19 +330,16 @@ export interface ProviderConnectionDisplayMetadata {
  *
  * This avoids decrypting provider credentials when a dashboard only needs labels.
  */
-export function getProviderConnectionDisplayMetadata(
+export async function getProviderConnectionDisplayMetadata(
   connectionIds: readonly string[]
-): ProviderConnectionDisplayMetadata[] {
+): Promise<ProviderConnectionDisplayMetadata[]> {
   const ids = [...new Set(connectionIds.filter((id) => id.length > 0))];
   if (ids.length === 0) return [];
 
-  const db = getDbInstance() as unknown as DbLike;
-  const rows = db
-    .prepare(
-      `SELECT id, name, display_name, email FROM provider_connections
-       WHERE id IN (${ids.map(() => "?").join(", ")})`
-    )
-    .all(...ids);
+  const rows = await db().query(
+    "SELECT id, name, display_name, email FROM provider_connections WHERE id = ANY($1::text[])",
+    [ids]
+  );
 
   return rows.map((row) => {
     const view = rowToCamel(row) as JsonRecord;
@@ -432,18 +422,19 @@ function storedCookieCredentialKey(raw: unknown): string | null {
   );
 }
 
-function findExistingCookieConnection(
-  db: DbLike,
+async function findExistingCookieConnection(
+  q: DbExecutor,
   provider: unknown,
   name: unknown,
   normalizedProviderSpecificData: unknown
-): JsonRecord | null {
+): Promise<JsonRecord | null> {
   // 1) Credential-value dedup — the authoritative identity for a web session.
   const newCredKey = webSessionCredentialKey(normalizedProviderSpecificData);
   if (newCredKey) {
-    const cookieRows = db
-      .prepare("SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'cookie'")
-      .all(provider) as JsonRecord[];
+    const cookieRows = await q.query<JsonRecord>(
+      "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'cookie'",
+      [provider]
+    );
     for (const row of cookieRows) {
       if (storedCookieCredentialKey(row.provider_specific_data) === newCredKey) return row;
     }
@@ -455,11 +446,10 @@ function findExistingCookieConnection(
   //    nothing — the same data loss, reached from the other direction.
   if (name && !newCredKey) {
     const byName =
-      (db
-        .prepare(
-          "SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'cookie' AND name = ?"
-        )
-        .get(provider, name) as JsonRecord | undefined) || null;
+      (await q.queryOne<JsonRecord>(
+        "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'cookie' AND name = $2 LIMIT 1",
+        [provider, name]
+      )) || null;
     if (byName && !storedCookieCredentialKey(byName.provider_specific_data)) {
       return byName;
     }
@@ -470,7 +460,28 @@ function findExistingCookieConnection(
 
 export async function createProviderConnection(data: JsonRecord) {
   await assertApiKeyIsNotManagementPassword(data.apiKey);
-  const db = getDbInstance() as unknown as DbLike;
+  await ensureProviderSpecificDataSecretsEncrypted();
+
+  // Creates for one provider run one at a time, from the duplicate lookup to the
+  // renumbering: two overlapping creates of the same key or account would otherwise both
+  // miss each other's row and insert twice. A matched row is then locked until the write.
+  const outcome = await db().transaction(async (tx) => {
+    await tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `provider_connections:${toStringOrNull(data.provider) ?? ""}`,
+    ]);
+    return createOrMergeConnection(tx, data);
+  });
+  invalidateDbCache("connections"); // Bust connections read cache
+  if (outcome.reloadId) {
+    return (await getProviderConnectionById(outcome.reloadId)) ?? outcome.connection;
+  }
+  return outcome.connection;
+}
+
+async function createOrMergeConnection(
+  tx: DbExecutor,
+  data: JsonRecord
+): Promise<{ connection: JsonRecord | null; reloadId: string | null }> {
   const now = new Date().toISOString();
   const normalizedProviderSpecificData = normalizeConnectionProviderSpecificData(
     toStringOrNull(data.provider),
@@ -487,23 +498,22 @@ export async function createProviderConnection(data: JsonRecord) {
 
   if (data.authType === "oauth" && data.provider === "codex" && chatgptUserId) {
     const strongSql = workspaceId
-      ? "SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'oauth' AND json_extract(provider_specific_data, '$.workspaceId') = ? AND json_extract(provider_specific_data, '$.chatgptUserId') = ?"
-      : "SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'oauth' AND (json_extract(provider_specific_data, '$.workspaceId') IS NULL OR json_extract(provider_specific_data, '$.workspaceId') = '') AND json_extract(provider_specific_data, '$.chatgptUserId') = ?";
+      ? "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'oauth' AND provider_specific_data->>'workspaceId' = $2 AND provider_specific_data->>'chatgptUserId' = $3 LIMIT 1"
+      : "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'oauth' AND (provider_specific_data->>'workspaceId' IS NULL OR provider_specific_data->>'workspaceId' = '') AND provider_specific_data->>'chatgptUserId' = $2 LIMIT 1";
     existing =
-      ((workspaceId
-        ? db.prepare(strongSql).get(data.provider, workspaceId, chatgptUserId)
-        : db.prepare(strongSql).get(data.provider, chatgptUserId)) as JsonRecord | undefined) ||
-      null;
+      (await tx.queryOne<JsonRecord>(
+        strongSql,
+        workspaceId ? [data.provider, workspaceId, chatgptUserId] : [data.provider, chatgptUserId]
+      )) || null;
 
     if (!existing && workspaceId) {
-      const workspaceMatches = db
-        .prepare(
-          `SELECT * FROM provider_connections
-           WHERE provider = ? AND auth_type = 'oauth'
-             AND json_extract(provider_specific_data, '$.workspaceId') = ?
-           ORDER BY created_at`
-        )
-        .all(data.provider, workspaceId) as JsonRecord[];
+      const workspaceMatches = await tx.query<JsonRecord>(
+        `SELECT * FROM provider_connections
+         WHERE provider = $1 AND auth_type = 'oauth'
+           AND provider_specific_data->>'workspaceId' = $2
+         ORDER BY created_at`,
+        [data.provider, workspaceId]
+      );
       existing = pickCodexConnectionForUser(
         workspaceMatches,
         chatgptUserId,
@@ -515,15 +525,14 @@ export async function createProviderConnection(data: JsonRecord) {
     if (data.provider === "codex") {
       if (workspaceId) {
         existing =
-          (db
-            .prepare(
-              `SELECT * FROM provider_connections
-               WHERE provider = ? AND auth_type = 'oauth'
-                 AND json_extract(provider_specific_data, '$.workspaceId') = ?
-                 AND email = ?
-               LIMIT 1`
-            )
-            .get(data.provider, workspaceId, data.email) as JsonRecord | undefined) || null;
+          (await tx.queryOne<JsonRecord>(
+            `SELECT * FROM provider_connections
+             WHERE provider = $1 AND auth_type = 'oauth'
+               AND provider_specific_data->>'workspaceId' = $2
+               AND email = $3
+             LIMIT 1`,
+            [data.provider, workspaceId, data.email]
+          )) || null;
       }
     } else {
       // For other providers (or Codex without workspaceId), match on email —
@@ -541,11 +550,10 @@ export async function createProviderConnection(data: JsonRecord) {
       // organization with the same email and the same accountUUID, so
       // organizationUUID is what separates the accounts.
       const incomingOrganizationUuid = toStringOrNull(providerSpecificData.organizationUUID);
-      const emailMatches = db
-        .prepare(
-          "SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'oauth' AND email = ?"
-        )
-        .all(data.provider, data.email) as JsonRecord[];
+      const emailMatches = await tx.query<JsonRecord>(
+        "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'oauth' AND email = $2",
+        [data.provider, data.email]
+      );
       existing =
         emailMatches.find((row) =>
           isMatchingOauthIdentity(
@@ -559,11 +567,10 @@ export async function createProviderConnection(data: JsonRecord) {
   } else if (data.authType === "apikey") {
     if (data.name && !isWebCookieProviderId(data.provider)) {
       existing =
-        (db
-          .prepare(
-            "SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'apikey' AND name = ?"
-          )
-          .get(data.provider, data.name) as JsonRecord | undefined) || null;
+        (await tx.queryOne<JsonRecord>(
+          "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'apikey' AND name = $2 LIMIT 1",
+          [data.provider, data.name]
+        )) || null;
     }
     // #3023 — dedup by API key value: re-adding the same key (under a different
     // or blank name) must update the existing connection, not insert a duplicate
@@ -574,9 +581,10 @@ export async function createProviderConnection(data: JsonRecord) {
     if (!existing && newApiKey) {
       const isLocal = isLocalProviderId(data.provider);
       const newBaseUrl = normalizeBaseUrlForDedup(providerSpecificData.baseUrl);
-      const apiKeyRows = db
-        .prepare("SELECT * FROM provider_connections WHERE provider = ? AND auth_type = 'apikey'")
-        .all(data.provider) as JsonRecord[];
+      const apiKeyRows = await tx.query<JsonRecord>(
+        "SELECT * FROM provider_connections WHERE provider = $1 AND auth_type = 'apikey'",
+        [data.provider]
+      );
       for (const row of apiKeyRows) {
         const decrypted = decryptConnectionFields(toRecord(rowToCamel(row)));
         if (toStringOrNull(decrypted.apiKey)?.trim() !== newApiKey) continue;
@@ -594,8 +602,8 @@ export async function createProviderConnection(data: JsonRecord) {
       }
     }
   } else if (data.authType === "cookie") {
-    existing = findExistingCookieConnection(
-      db,
+    existing = await findExistingCookieConnection(
+      tx,
       data.provider,
       data.name,
       normalizedProviderSpecificData
@@ -611,9 +619,18 @@ export async function createProviderConnection(data: JsonRecord) {
   }
 
   if (existing) {
-    const existingId = toStringOrNull(existing.id);
-    if (!existingId) return null;
-    const rawExisting = toRecord(rowToCamel(existing));
+    const matchedId = toStringOrNull(existing.id);
+    if (!matchedId) return { connection: null, reloadId: null };
+    // Lock the matched row and merge into its current state, so a concurrent
+    // updateProviderConnection is not overwritten by a copy read before it committed.
+    const locked = await tx.queryOne<JsonRecord>(
+      "SELECT * FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [matchedId]
+    );
+    if (!locked) return { connection: null, reloadId: null };
+    existing = locked;
+    const existingId = matchedId;
+    const rawExisting = connectionRowToCamel(existing);
     const decryptedExisting = decryptConnectionFields({ ...rawExisting });
     const merged: JsonRecord = { ...decryptedExisting, ...data, updatedAt: now };
     merged.providerSpecificData = normalizeConnectionProviderSpecificData(
@@ -628,19 +645,15 @@ export async function createProviderConnection(data: JsonRecord) {
         persistence[field] = rawExisting[field];
       }
     }
-    db.transaction(() => {
-      if (promotedCodexIdentity) {
-        reconcileCodexUsageHistory(db, {
-          connectionId: existingId,
-          existing,
-          merged,
-          matchedExistingCodexByWorkspace: true,
-        });
-      }
-      _updateConnectionRow(db, existingId, encryptConnectionFields(persistence));
-    })();
-    backupDbFile("pre-write");
-    invalidateDbCache("connections");
+    if (promotedCodexIdentity) {
+      await reconcileCodexUsageHistory(tx, {
+        connectionId: existingId,
+        existing,
+        merged,
+        matchedExistingCodexByWorkspace: true,
+      });
+    }
+    await _updateConnectionRow(tx, existingId, encryptConnectionFields(persistence));
     const returnedConnection = withNullableRateLimitOverrides(
       withNullableQuotaWindowThresholds(
         withNullableMaxConcurrent(cleanNulls(merged), merged),
@@ -654,11 +667,10 @@ export async function createProviderConnection(data: JsonRecord) {
       isRuntimeRetiredProviderId(merged.provider) ||
       isCommonChatGptWebRetiredProviderId(merged.provider)
     ) {
-      invalidateDbCache("connections");
-      return (await getProviderConnectionById(existingId)) ?? returnedConnection;
+      return { connection: returnedConnection, reloadId: existingId };
     }
 
-    return returnedConnection;
+    return { connection: returnedConnection, reloadId: null };
   }
 
   // Generate name: prefer explicit name, then email, then a stable short-ID label.
@@ -673,22 +685,12 @@ export async function createProviderConnection(data: JsonRecord) {
     // Otherwise leave null — UI will fall back to getAccountDisplayName() → "Account #<id>"
   }
 
-  // Auto-increment priority
-  let connectionPriority = data.priority;
-  if (!connectionPriority) {
-    const max = db
-      .prepare("SELECT MAX(priority) as maxP FROM provider_connections WHERE provider = ?")
-      .get(data.provider) as JsonRecord | undefined;
-    const maxPriority = toNumberOrZero(toRecord(max).maxP);
-    connectionPriority = maxPriority + 1;
-  }
-
   const connection: Record<string, unknown> = {
     id: uuidv4(),
     provider: data.provider,
     authType: data.authType || "oauth",
     name: connectionName,
-    priority: connectionPriority,
+    priority: data.priority,
     isActive: data.isActive !== undefined ? data.isActive : true,
     createdAt: now,
     updatedAt: now,
@@ -771,13 +773,9 @@ export async function createProviderConnection(data: JsonRecord) {
     connection.rateLimitOverrides = result.sanitized;
   }
 
-  _insertConnectionRow(db, encryptConnectionFields({ ...connection }));
   const providerId = toStringOrNull(data.provider);
-  if (providerId) {
-    reorderConnections(db, providerId);
-  }
-  backupDbFile("pre-write");
-  invalidateDbCache("connections"); // Bust connections read cache
+  connection.priority = await _insertConnectionRow(tx, encryptConnectionFields({ ...connection }));
+  if (providerId) await reorderConnections(tx, providerId);
 
   const returnedConnection = withNullableRateLimitOverrides(
     withNullableQuotaWindowThresholds(
@@ -792,178 +790,114 @@ export async function createProviderConnection(data: JsonRecord) {
     isRuntimeRetiredProviderId(providerId) ||
     isCommonChatGptWebRetiredProviderId(providerId)
   ) {
-    return (await getProviderConnectionById(String(connection.id))) ?? returnedConnection;
+    return { connection: returnedConnection, reloadId: String(connection.id) };
   }
 
-  return returnedConnection;
+  return { connection: returnedConnection, reloadId: null };
 }
 
-function _insertConnectionRow(db: DbLike, conn: JsonRecord) {
-  db.prepare(
-    `
-    INSERT INTO provider_connections (
-      id, provider, auth_type, name, email, priority, is_active,
-      access_token, refresh_token, expires_at, token_expires_at,
-      scope, project_id, test_status, error_code, last_error,
-      last_error_at, last_error_type, last_error_source, backoff_level,
-      rate_limited_until, health_check_interval, last_health_check_at,
-      last_tested, api_key, id_token, provider_specific_data,
-      expires_in, display_name, global_priority, default_model,
-      token_type, consecutive_use_count, rate_limit_protection, last_used_at, "group", max_concurrent,
-      proxy_enabled, per_key_proxy_enabled, quota_visible, quota_window_thresholds_json, rate_limit_overrides_json,
-      created_at, updated_at
-    ) VALUES (
-      @id, @provider, @authType, @name, @email, @priority, @isActive,
-      @accessToken, @refreshToken, @expiresAt, @tokenExpiresAt,
-      @scope, @projectId, @testStatus, @errorCode, @lastError,
-      @lastErrorAt, @lastErrorType, @lastErrorSource, @backoffLevel,
-      @rateLimitedUntil, @healthCheckInterval, @lastHealthCheckAt,
-      @lastTested, @apiKey, @idToken, @providerSpecificData,
-      @expiresIn, @displayName, @globalPriority, @defaultModel,
-      @tokenType, @consecutiveUseCount, @rateLimitProtection, @lastUsedAt, @group, @maxConcurrent,
-      @proxyEnabled, @perKeyProxyEnabled, @quotaVisible, @quotaWindowThresholdsJson, @rateLimitOverridesJson,
-      @createdAt, @updatedAt
-    )
-  `
-  ).run({
-    id: conn.id,
-    provider: conn.provider,
-    authType: conn.authType || null,
-    name: conn.name || null,
-    email: conn.email || null,
-    priority: conn.priority || 0,
-    isActive: conn.isActive === false ? 0 : 1,
-    accessToken: conn.accessToken || null,
-    refreshToken: conn.refreshToken || null,
-    expiresAt: conn.expiresAt || null,
-    tokenExpiresAt: conn.tokenExpiresAt || null,
-    scope: conn.scope || null,
-    projectId: conn.projectId || null,
-    testStatus: conn.testStatus || null,
-    errorCode: conn.errorCode || null,
-    lastError: conn.lastError || null,
-    lastErrorAt: conn.lastErrorAt || null,
-    lastErrorType: conn.lastErrorType || null,
-    lastErrorSource: conn.lastErrorSource || null,
-    backoffLevel: conn.backoffLevel || 0,
-    rateLimitedUntil: conn.rateLimitedUntil || null,
-    healthCheckInterval: conn.healthCheckInterval ?? null,
-    lastHealthCheckAt: conn.lastHealthCheckAt || null,
-    lastTested: conn.lastTested || null,
-    apiKey: conn.apiKey || null,
-    idToken: conn.idToken || null,
-    providerSpecificData: conn.providerSpecificData
-      ? JSON.stringify(conn.providerSpecificData)
-      : null,
-    expiresIn: conn.expiresIn || null,
-    displayName: conn.displayName || null,
-    globalPriority: conn.globalPriority || null,
-    defaultModel: conn.defaultModel || null,
-    tokenType: conn.tokenType || null,
-    consecutiveUseCount: conn.consecutiveUseCount || 0,
-    rateLimitProtection:
-      conn.rateLimitProtection === true || conn.rateLimitProtection === 1 ? 1 : 0,
-    lastUsedAt: conn.lastUsedAt || null,
-    group: conn.group || null,
-    maxConcurrent: conn.maxConcurrent ?? null,
-    proxyEnabled: normalizeBooleanColumn(conn.proxyEnabled, true) ? 1 : 0,
-    perKeyProxyEnabled: normalizeBooleanColumn(conn.perKeyProxyEnabled, false) ? 1 : 0,
-    quotaVisible: normalizeBooleanColumn(conn.quotaVisible, true) ? 1 : 0,
-    quotaWindowThresholdsJson: serializeJsonField(conn.quotaWindowThresholds),
-    rateLimitOverridesJson: serializeJsonField(conn.rateLimitOverrides),
-    createdAt: conn.createdAt,
-    updatedAt: conn.updatedAt,
-  });
+/**
+ * The writable provider_connections columns with the value each takes from a
+ * camelCase connection record. Insert and update share it, so the two can no
+ * longer drift apart. `id`, `created_at` and `priority` are handled by the callers.
+ */
+function connectionColumnValues(conn: JsonRecord): Array<[column: string, value: unknown]> {
+  // Postgres text and jsonb reject U+0000, and error messages arrive from upstream.
+  const str = (value: unknown) =>
+    value ? (typeof value === "string" ? stripNul(value) : value) : null;
+  return [
+    ["provider", conn.provider],
+    ["auth_type", str(conn.authType)],
+    ["name", str(conn.name)],
+    ["email", str(conn.email)],
+    ["is_active", conn.isActive !== false],
+    ["access_token", str(conn.accessToken)],
+    ["refresh_token", str(conn.refreshToken)],
+    ["expires_at", ts(conn.expiresAt as string | number | Date | null | undefined)],
+    ["token_expires_at", ts(conn.tokenExpiresAt as string | number | Date | null | undefined)],
+    ["scope", str(conn.scope)],
+    ["project_id", str(conn.projectId)],
+    ["test_status", str(conn.testStatus)],
+    ["error_code", str(conn.errorCode)],
+    ["last_error", str(conn.lastError)],
+    ["last_error_at", ts(conn.lastErrorAt as string | number | Date | null | undefined)],
+    ["last_error_type", str(conn.lastErrorType)],
+    ["last_error_source", str(conn.lastErrorSource)],
+    ["backoff_level", toIntOrNull(conn.backoffLevel) ?? 0],
+    ["rate_limited_until", ts(conn.rateLimitedUntil as string | number | Date | null | undefined)],
+    ["health_check_interval", toIntOrNull(conn.healthCheckInterval)],
+    [
+      "last_health_check_at",
+      ts(conn.lastHealthCheckAt as string | number | Date | null | undefined),
+    ],
+    ["last_tested", ts(conn.lastTested as string | number | Date | null | undefined)],
+    ["api_key", str(conn.apiKey)],
+    ["id_token", str(conn.idToken)],
+    [
+      "provider_specific_data",
+      jsonValueParam(conn.providerSpecificData ? conn.providerSpecificData : null),
+    ],
+    ["expires_in", toIntOrNull(conn.expiresIn) || null],
+    ["display_name", str(conn.displayName)],
+    ["global_priority", toIntOrNull(conn.globalPriority) || null],
+    ["default_model", str(conn.defaultModel)],
+    ["token_type", str(conn.tokenType)],
+    ["consecutive_use_count", toIntOrNull(conn.consecutiveUseCount) ?? 0],
+    ["rate_limit_protection", conn.rateLimitProtection === true || conn.rateLimitProtection === 1],
+    ["last_used_at", ts(conn.lastUsedAt as string | number | Date | null | undefined)],
+    ["group_name", str(conn.group)],
+    ["max_concurrent", toIntOrNull(conn.maxConcurrent)],
+    ["proxy_enabled", normalizeBooleanColumn(conn.proxyEnabled, true)],
+    ["per_key_proxy_enabled", normalizeBooleanColumn(conn.perKeyProxyEnabled, false)],
+    ["quota_visible", normalizeBooleanColumn(conn.quotaVisible, true)],
+    ["quota_window_thresholds", jsonValueParam(objectOrNull(conn.quotaWindowThresholds))],
+    ["rate_limit_overrides", jsonValueParam(objectOrNull(conn.rateLimitOverrides))],
+    ["last_ping_at", ts(conn.lastPingAt as string | number | Date | null | undefined)],
+    ["last_pinged_reset_key", str(conn.lastPingedResetKey)],
+  ];
 }
 
-// Assembles the `.run()` params for _updateConnectionRow's UPDATE statement.
-// Split out purely to keep _updateConnectionRow under the max-lines-per-function
-// gate — same field mapping/normalization as before, just relocated.
-function _buildUpdateConnectionRowParams(id: string, data: JsonRecord, now: unknown) {
-  return {
+function objectOrNull(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
+}
+
+/** Inserts the row and returns the stored priority (an unset one becomes the provider's max + 1). */
+async function _insertConnectionRow(tx: DbExecutor, conn: JsonRecord): Promise<number> {
+  const columns = connectionColumnValues(conn);
+  const names = ["id", "created_at", "updated_at", "priority", ...columns.map(([name]) => name)];
+  const now = ts(conn.updatedAt as string) ?? new Date().toISOString();
+  const values: unknown[] = [
+    conn.id,
+    ts(conn.createdAt as string) ?? now,
+    now,
+    toIntOrNull(conn.priority) || 0,
+    ...columns.map(([, value]) => value),
+  ];
+  const placeholders = names.map((_, index) => `$${index + 1}`);
+  // priority is $4: an unset one takes the provider's next slot inside this statement,
+  // so two concurrent creates cannot both read the same max.
+  placeholders[3] =
+    "COALESCE(NULLIF($4::integer, 0), (SELECT COALESCE(MAX(priority), 0) + 1 FROM provider_connections WHERE provider = $5::text))";
+  const row = await tx.queryOne<{ priority: number }>(
+    `INSERT INTO provider_connections (${names.join(", ")}) VALUES (${placeholders.join(", ")})
+     RETURNING priority`,
+    values
+  );
+  return row?.priority ?? 0;
+}
+
+async function _updateConnectionRow(tx: DbExecutor, id: string, data: JsonRecord) {
+  const columns = connectionColumnValues(data);
+  const now = ts(data.updatedAt as string) ?? new Date().toISOString();
+  const assignments = ["priority", "updated_at", ...columns.map(([name]) => name)].map(
+    (name, index) => `${name} = $${index + 2}`
+  );
+  await tx.execute(`UPDATE provider_connections SET ${assignments.join(", ")} WHERE id = $1`, [
     id,
-    provider: data.provider,
-    authType: data.authType || null,
-    name: data.name || null,
-    email: data.email || null,
-    priority: data.priority || 0,
-    isActive: data.isActive === false ? 0 : 1,
-    accessToken: data.accessToken || null,
-    refreshToken: data.refreshToken || null,
-    expiresAt: data.expiresAt || null,
-    tokenExpiresAt: data.tokenExpiresAt || null,
-    scope: data.scope || null,
-    projectId: data.projectId || null,
-    testStatus: data.testStatus || null,
-    errorCode: data.errorCode || null,
-    lastError: data.lastError || null,
-    lastErrorAt: data.lastErrorAt || null,
-    lastErrorType: data.lastErrorType || null,
-    lastErrorSource: data.lastErrorSource || null,
-    backoffLevel: data.backoffLevel || 0,
-    rateLimitedUntil: data.rateLimitedUntil || null,
-    healthCheckInterval: data.healthCheckInterval ?? null,
-    lastHealthCheckAt: data.lastHealthCheckAt || null,
-    lastTested: data.lastTested || null,
-    apiKey: data.apiKey || null,
-    idToken: data.idToken || null,
-    providerSpecificData: data.providerSpecificData
-      ? JSON.stringify(data.providerSpecificData)
-      : null,
-    expiresIn: data.expiresIn || null,
-    displayName: data.displayName || null,
-    globalPriority: data.globalPriority || null,
-    defaultModel: data.defaultModel || null,
-    tokenType: data.tokenType || null,
-    consecutiveUseCount: data.consecutiveUseCount || 0,
-    rateLimitProtection:
-      data.rateLimitProtection === true || data.rateLimitProtection === 1 ? 1 : 0,
-    lastUsedAt: data.lastUsedAt || null,
-    group: data.group || null,
-    maxConcurrent: data.maxConcurrent ?? null,
-    quotaWindowThresholdsJson: serializeJsonField(data.quotaWindowThresholds),
-    proxyEnabled: normalizeBooleanColumn(data.proxyEnabled, true) ? 1 : 0,
-    perKeyProxyEnabled: normalizeBooleanColumn(data.perKeyProxyEnabled, false) ? 1 : 0,
-    quotaVisible: normalizeBooleanColumn(data.quotaVisible, true) ? 1 : 0,
-    rateLimitOverridesJson: serializeJsonField(data.rateLimitOverrides),
-    lastPingAt: data.lastPingAt || null,
-    lastPingedResetKey: data.lastPingedResetKey || null,
-    updatedAt: now,
-  };
-}
-
-function _updateConnectionRow(db: DbLike, id: string, data: JsonRecord) {
-  const now = data.updatedAt || new Date().toISOString();
-  db.prepare(
-    `
-    UPDATE provider_connections SET
-      provider = @provider, auth_type = @authType, name = @name, email = @email,
-      priority = @priority, is_active = @isActive, access_token = @accessToken,
-      refresh_token = @refreshToken, expires_at = @expiresAt, token_expires_at = @tokenExpiresAt,
-      scope = @scope, project_id = @projectId, test_status = @testStatus, error_code = @errorCode,
-      last_error = @lastError, last_error_at = @lastErrorAt, last_error_type = @lastErrorType,
-      last_error_source = @lastErrorSource, backoff_level = @backoffLevel,
-      rate_limited_until = @rateLimitedUntil, health_check_interval = @healthCheckInterval,
-      last_health_check_at = @lastHealthCheckAt, last_tested = @lastTested, api_key = @apiKey,
-      id_token = @idToken, provider_specific_data = @providerSpecificData,
-      expires_in = @expiresIn, display_name = @displayName, global_priority = @globalPriority,
-      default_model = @defaultModel, token_type = @tokenType,
-      consecutive_use_count = @consecutiveUseCount,
-      rate_limit_protection = @rateLimitProtection,
-      last_used_at = @lastUsedAt,
-      "group" = @group,
-      max_concurrent = @maxConcurrent,
-      quota_window_thresholds_json = @quotaWindowThresholdsJson,
-      proxy_enabled = @proxyEnabled,
-      per_key_proxy_enabled = @perKeyProxyEnabled,
-      quota_visible = @quotaVisible,
-      rate_limit_overrides_json = @rateLimitOverridesJson,
-      last_ping_at = @lastPingAt,
-      last_pinged_reset_key = @lastPingedResetKey,
-      updated_at = @updatedAt
-    WHERE id = @id
-  `
-  ).run(_buildUpdateConnectionRowParams(id, data, now));
+    toIntOrNull(data.priority) || 0,
+    now,
+    ...columns.map(([, value]) => value),
+  ]);
 }
 
 export type ProviderConnectionUpdateOpts = UpdateOpts & {
@@ -971,22 +905,12 @@ export type ProviderConnectionUpdateOpts = UpdateOpts & {
   permanentBan?: boolean;
 };
 
-export async function updateProviderConnection(
-  id: string,
+function buildUpdatedConnection(
+  existing: JsonRecord,
   data: JsonRecord,
   opts?: ProviderConnectionUpdateOpts
-) {
-  const db = getDbInstance() as unknown as DbLike;
-  const existing = db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(id);
-  if (!existing) return null;
-
-  // The incoming value only. A connection that already holds the password has
-  // to stay editable, or an operator cannot repair the one this guard exists
-  // to prevent -- and re-checking the merged value would spend a bcrypt round
-  // on every unrelated field edit.
-  await assertApiKeyIsNotManagementPassword(data.apiKey);
-
-  const existingCamel = toRecord(rowToCamel(existing));
+): JsonRecord {
+  const existingCamel = connectionRowToCamel(existing);
   const merged: JsonRecord = {
     ...existingCamel,
     ...data,
@@ -1038,29 +962,52 @@ export async function updateProviderConnection(
     }
     merged.rateLimitOverrides = result.sanitized;
   }
-  const existingRecord = toRecord(existing);
+  return merged;
+}
 
-  db.transaction(() => {
-    reconcileCodexUsageHistory(db, {
-      connectionId: id,
-      existing: existingRecord,
-      merged,
-    });
-    _updateConnectionRow(db, id, encryptConnectionFields({ ...merged }));
-  })();
-  backupDbFile("pre-write");
+export async function updateProviderConnection(
+  id: string,
+  data: JsonRecord,
+  opts?: ProviderConnectionUpdateOpts
+) {
+  // The incoming value only. A connection that already holds the password has
+  // to stay editable, or an operator cannot repair the one this guard exists
+  // to prevent -- and re-checking the merged value would spend a bcrypt round
+  // on every unrelated field edit.
+  if (typeof data.apiKey === "string" && data.apiKey.trim()) {
+    const present = await db().queryOne(
+      "SELECT 1 AS present FROM provider_connections WHERE id = $1",
+      [id]
+    );
+    if (!present) return null;
+    await assertApiKeyIsNotManagementPassword(data.apiKey);
+  }
+  await ensureProviderSpecificDataSecretsEncrypted();
+
+  // The row is locked from the read to the write: two concurrent updates of
+  // different fields both start from the other's result instead of losing one.
+  const outcome = await db().transaction(async (tx) => {
+    const existing = await tx.queryOne<JsonRecord>(
+      "SELECT * FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
+    );
+    if (!existing) return null;
+    const built = buildUpdatedConnection(existing, data, opts);
+    await reconcileCodexUsageHistory(tx, { connectionId: id, existing, merged: built });
+    await _updateConnectionRow(tx, id, encryptConnectionFields({ ...built }));
+    return { merged: built, existing };
+  });
+  if (!outcome) return null;
+  const { merged, existing } = outcome;
   invalidateConnectionUpdate(id, data, opts);
-  bumpProxyConfigGeneration();
+  await bumpProxyConfigGeneration();
 
   // Zero is the internal move-to-top sentinel. Explicit positive priorities
   // are operator-selected values, not ranks to compact after every edit.
   if (data.priority === 0) {
-    const existingRecord = toRecord(existing);
     const providerId =
-      typeof existingRecord.provider === "string"
-        ? existingRecord.provider
-        : String(existingRecord.provider || "");
-    reorderConnections(db, providerId);
+      typeof existing.provider === "string" ? existing.provider : String(existing.provider || "");
+    await reorderConnections(db(), providerId);
     return getProviderConnectionById(id);
   }
 
@@ -1120,20 +1067,15 @@ export async function touchConnectionLastUsed(
   consecutiveUseCount: number
 ): Promise<void> {
   if (!id) return;
-  const db = getDbInstance() as unknown as DbLike;
   const now = new Date().toISOString();
-  db.prepare(
+  await db().execute(
     `UPDATE provider_connections SET
-      last_used_at = @lastUsedAt,
-      consecutive_use_count = @consecutiveUseCount,
-      updated_at = @updatedAt
-    WHERE id = @id`
-  ).run({
-    lastUsedAt: now,
-    consecutiveUseCount,
-    updatedAt: now,
-    id,
-  });
+      last_used_at = $1,
+      consecutive_use_count = $2,
+      updated_at = $1
+    WHERE id = $3`,
+    [now, toIntOrNull(consecutiveUseCount) ?? 0, id]
+  );
 }
 
 /**
@@ -1145,18 +1087,14 @@ export async function touchConnectionLastUsed(
  */
 export async function touchConnectionSyncedModelsAt(id: string): Promise<void> {
   if (!id) return;
-  const db = getDbInstance() as unknown as DbLike;
   const now = new Date().toISOString();
-  db.prepare(
+  await db().execute(
     `UPDATE provider_connections SET
-      synced_models_at = @syncedModelsAt,
-      updated_at = @updatedAt
-    WHERE id = @id`
-  ).run({
-    syncedModelsAt: now,
-    updatedAt: now,
-    id,
-  });
+      synced_models_at = $1,
+      updated_at = $1
+    WHERE id = $2`,
+    [now, id]
+  );
   // New successful-sync timestamp must be visible without waiting for the
   // connection row cache to expire.
   invalidateDbCache("connections", id, { skipModelCatalog: true });
@@ -1173,9 +1111,7 @@ export async function touchConnectionSyncedModelsAt(id: string): Promise<void> {
  */
 export async function resetConnectionBackoff(id: string): Promise<void> {
   if (!id) return;
-  const db = getDbInstance() as unknown as DbLike;
-  const now = new Date().toISOString();
-  db.prepare(
+  await db().execute(
     `UPDATE provider_connections SET
       backoff_level = 0,
       test_status = 'active',
@@ -1184,14 +1120,12 @@ export async function resetConnectionBackoff(id: string): Promise<void> {
       last_error_type = NULL,
       last_error_source = NULL,
       error_code = NULL,
-      updated_at = @updatedAt
-    WHERE id = @id`
-  ).run({
-    updatedAt: now,
-    id,
-  });
+      updated_at = $1
+    WHERE id = $2`,
+    [new Date().toISOString(), id]
+  );
   invalidateDbCache("connections", id, { skipModelCatalog: true });
-  bumpProxyConfigGeneration();
+  await bumpProxyConfigGeneration();
 }
 
 export async function cleanupProviderConnections() {
@@ -1199,13 +1133,10 @@ export async function cleanupProviderConnections() {
 }
 
 export async function getDistinctGroups(): Promise<string[]> {
-  const db = getDbInstance() as unknown as DbLike;
-  const rows = db
-    .prepare(
-      'SELECT DISTINCT "group" FROM provider_connections WHERE "group" IS NOT NULL ORDER BY "group"'
-    )
-    .all() as Array<{ group?: string }>;
-  return rows.map((r) => String(r.group ?? "")).filter(Boolean);
+  const rows = await db().query<{ group_name: string | null }>(
+    "SELECT DISTINCT group_name FROM provider_connections WHERE group_name IS NOT NULL ORDER BY group_name"
+  );
+  return rows.map((r) => String(r.group_name ?? "")).filter(Boolean);
 }
 
 export { autoMigrateLegacyEncryptedConnections, getGheCopilotHosts } from "./providers/migrations";

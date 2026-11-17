@@ -7,9 +7,9 @@
  */
 
 import { ALL_COMBOS_ACCESS_RULE } from "@/shared/constants/comboAccess";
-import type { getDbInstance } from "../core";
+import { jsonb, type DbExecutor } from "@/lib/db/pg";
 
-type Db = ReturnType<typeof getDbInstance>;
+type Db = DbExecutor;
 
 // Same normalization as `normalizeComboAccessName` in `@/shared/utils/apiKeyPolicy`
 // (kept local: that module imports the combo repository, which calls this helper).
@@ -28,28 +28,31 @@ function grantedComboName(rule: string): string {
  * - An emptied list is written as `[]` (deny all), never NULL (legacy allow-all).
  * - NULL and malformed lists are left untouched.
  */
-export function revokeComboGrantsByName(db: Db, comboName: string): string[] {
+export async function revokeComboGrantsByName(db: Db, comboName: string): Promise<string[]> {
   const target = comboName.trim().toLowerCase();
   if (!target) return [];
 
-  const stillExists = db
-    .prepare("SELECT 1 FROM combos WHERE name = ? COLLATE NOCASE LIMIT 1")
-    .get(comboName.trim());
+  const stillExists = await db.queryOne(
+    "SELECT 1 FROM combos WHERE lower(name) = lower($1) LIMIT 1",
+    [comboName.trim()]
+  );
   if (stillExists) return [];
 
-  const rows = db
-    .prepare("SELECT id, allowed_combos FROM api_keys WHERE allowed_combos IS NOT NULL")
-    .all() as Array<{ id: string; allowed_combos: unknown }>;
-  const update = db.prepare("UPDATE api_keys SET allowed_combos = ? WHERE id = ?");
+  // FOR UPDATE: the caller runs inside the combo-delete transaction; lock the rows we rewrite.
+  const rows = await db.query<{ id: string; allowed_combos: unknown }>(
+    "SELECT id, allowed_combos FROM api_keys WHERE allowed_combos IS NOT NULL FOR UPDATE"
+  );
   const changed: string[] = [];
 
   for (const row of rows) {
-    if (typeof row.allowed_combos !== "string") continue;
-    let rules: unknown;
-    try {
-      rules = JSON.parse(row.allowed_combos);
-    } catch {
-      continue;
+    // jsonb arrives parsed; a legacy JSON string (double-encoded) is still tolerated.
+    let rules: unknown = row.allowed_combos;
+    if (typeof rules === "string") {
+      try {
+        rules = JSON.parse(rules);
+      } catch {
+        continue;
+      }
     }
     if (!Array.isArray(rules)) continue;
 
@@ -61,7 +64,10 @@ export function revokeComboGrantsByName(db: Db, comboName: string): string[] {
     );
     if (remaining.length === rules.length) continue;
 
-    update.run(JSON.stringify(remaining), row.id);
+    await db.execute("UPDATE api_keys SET allowed_combos = $1::jsonb WHERE id = $2", [
+      jsonb(remaining),
+      row.id,
+    ]);
     changed.push(row.id);
   }
 

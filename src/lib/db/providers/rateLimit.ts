@@ -2,25 +2,14 @@
  * db/providers/rateLimit.ts — Rate-limit/quota runtime helpers for provider_connections.
  */
 
-import { getDbInstance } from "../core";
+import { db, ts, toMs } from "../pg";
 import { invalidateDbCache } from "../readCache";
-import { backupDbFile } from "../backup";
 import { bumpProxyConfigGeneration } from "../settings";
 import { stripCodexChildCooldownsFromConnection } from "./codexAccountState";
 
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-}
-
 // ──────────────── T05: Rate-Limit DB Persistence ──────────────────────────
 // Allows rate-limit state to survive token refresh without being accidentally
-// cleared. DB column rate_limited_until already exists in schema.
+// cleared. The rate_limited_until column is a timestamptz.
 // Ref: sub2api PR #1218 (fix(openai): prevent rescheduling rate-limited accounts)
 
 /**
@@ -30,20 +19,22 @@ interface DbLike {
  * @param connectionId - The provider_connections.id
  * @param until - Epoch ms when the rate limit expires (null to clear)
  */
-export function setConnectionRateLimitUntil(connectionId: string, until: number | null): void {
-  // Guard: never persist a non-finite or already-expired timestamp. The TEXT
-  // column would store "NaN"/"Infinity" and pollute every future read. null
+export async function setConnectionRateLimitUntil(
+  connectionId: string,
+  until: number | null
+): Promise<void> {
+  // Guard: never persist a non-finite or already-expired timestamp. null
   // is the only clear path (via clearConnectionRateLimit); past/zero
   // timestamps are noops so an expired write cannot overwrite a live row.
   if (until !== null && (!Number.isFinite(until) || until <= Date.now())) return;
   if (until == null) {
-    stripCodexChildCooldownsFromConnection(connectionId, { alsoClearTopLevel: true });
+    await stripCodexChildCooldownsFromConnection(connectionId, { alsoClearTopLevel: true });
     return;
   }
-  const db = getDbInstance() as unknown as DbLike;
-  db.prepare(
-    "UPDATE provider_connections SET rate_limited_until = ?, updated_at = ? WHERE id = ?"
-  ).run(until, new Date().toISOString(), connectionId);
+  await db().execute(
+    "UPDATE provider_connections SET rate_limited_until = $1, updated_at = $2 WHERE id = $3",
+    [ts(until), new Date().toISOString(), connectionId]
+  );
   // Routing-only write (rate_limited_until) — the /v1/models builder never reads
   // it, so bust the connections read cache without dropping the catalog cache.
   invalidateDbCache("connections", connectionId, { skipModelCatalog: true });
@@ -57,11 +48,14 @@ export function setConnectionRateLimitUntil(connectionId: string, until: number 
  * the timestamp is always strictly in the future at the moment of write. See Issue #1
  * (per-account 429 cascade not persisting).
  */
-export function markConnectionRateLimitedUntil(connectionId: string, retryAfterMs: number): void {
+export async function markConnectionRateLimitedUntil(
+  connectionId: string,
+  retryAfterMs: number
+): Promise<void> {
   if (typeof connectionId !== "string" || connectionId.length === 0) return;
   if (!Number.isFinite(retryAfterMs) || retryAfterMs <= 0) return;
   try {
-    setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs);
+    await setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs);
   } catch {
     // best-effort
   }
@@ -73,10 +67,10 @@ export function markConnectionRateLimitedUntil(connectionId: string, retryAfterM
  * Best-effort: never throws. Mirrors `resetAccountState`'s in-memory clear so the
  * in-memory AccountState and the DB row agree.
  */
-export function clearConnectionRateLimit(connectionId: string): void {
+export async function clearConnectionRateLimit(connectionId: string): Promise<void> {
   if (typeof connectionId !== "string" || connectionId.length === 0) return;
   try {
-    setConnectionRateLimitUntil(connectionId, null);
+    await setConnectionRateLimitUntil(connectionId, null);
   } catch {
     // best-effort
   }
@@ -88,30 +82,28 @@ export function clearConnectionRateLimit(connectionId: string): void {
  *
  * @returns true if rate_limited_until is set and in the future
  */
-export function isConnectionRateLimited(connectionId: string): boolean {
-  const db = getDbInstance() as unknown as DbLike;
-  const row = db
-    .prepare("SELECT rate_limited_until FROM provider_connections WHERE id = ?")
-    .get(connectionId) as { rate_limited_until?: number | null } | undefined;
-  if (!row?.rate_limited_until) return false;
-  return Date.now() < row.rate_limited_until;
+export async function isConnectionRateLimited(connectionId: string): Promise<boolean> {
+  const row = await db().queryOne<{ rate_limited_until: string | null }>(
+    "SELECT rate_limited_until FROM provider_connections WHERE id = $1",
+    [connectionId]
+  );
+  const untilMs = toMs(row?.rate_limited_until);
+  if (untilMs === null) return false;
+  return Date.now() < untilMs;
 }
 
 /**
  * T05: Get all connections for a provider that are currently rate-limited.
  * Returns an array of { id, rateLimitedUntil } for dashboard display.
  */
-export function getRateLimitedConnections(
+export async function getRateLimitedConnections(
   provider: string
-): Array<{ id: string; rateLimitedUntil: number }> {
-  const db = getDbInstance() as unknown as DbLike;
-  const now = Date.now();
-  const rows = db
-    .prepare(
-      "SELECT id, rate_limited_until FROM provider_connections WHERE provider = ? AND rate_limited_until > ?"
-    )
-    .all(provider, now) as Array<{ id: string; rate_limited_until: number }>;
-  return rows.map((r) => ({ id: r.id, rateLimitedUntil: r.rate_limited_until }));
+): Promise<Array<{ id: string; rateLimitedUntil: number }>> {
+  const rows = await db().query<{ id: string; rate_limited_until: string }>(
+    "SELECT id, rate_limited_until FROM provider_connections WHERE provider = $1 AND rate_limited_until > $2",
+    [provider, new Date().toISOString()]
+  );
+  return rows.map((r) => ({ id: r.id, rateLimitedUntil: toMs(r.rate_limited_until) ?? 0 }));
 }
 
 // ──────────────── T13: Stale Quota Display Fix ─────────────────────────────
@@ -139,27 +131,6 @@ export function getEffectiveQuotaUsage(
 }
 
 /**
- * Normalize a persisted `rate_limited_until` to epoch ms.
- *
- * The column is written in two shapes: epoch ms by `setConnectionRateLimitUntil`
- * (the chat path) and an ISO-8601 string by `updateProviderConnection` (the
- * dashboard/AUTH path). Returns null when the value is absent or unparseable —
- * callers treat that as "no usable deadline".
- */
-function parseCooldownUntilMs(value: string | number | null | undefined): number | null {
-  if (value == null || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const raw = String(value).trim();
-  if (raw === "") return null;
-  if (/^\d+$/.test(raw)) {
-    const numeric = Number(raw);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
-  const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/**
  * T05: Startup crash-recovery — clear stale transient connection cooldowns.
  *
  * After an unclean crash (SIGKILL, OOM-kill, large-body burst) the normal
@@ -175,9 +146,7 @@ function parseCooldownUntilMs(value: string | number | null | undefined): number
  *    those require a deliberate credential change or operator reset.
  *  - Past timestamps are cleared: they are already expired in the lazy
  *    expiry sense, but clearing them resets `backoffLevel` / transient error
- *    fields so the connection gets a clean slate on this fresh process. An
- *    unparseable timestamp is treated the same way — it can never expire
- *    lazily, so leaving it would strand the connection forever.
+ *    fields so the connection gets a clean slate on this fresh process.
  *  - FUTURE timestamps are NEVER cleared. Clearing them was the original
  *    behaviour and it wiped legitimate multi-day quota cooldowns on every
  *    container recreate: a GLM weekly cap persisted until 2026-08-29 came
@@ -190,37 +159,12 @@ function parseCooldownUntilMs(value: string | number | null | undefined): number
  * Must be called once, early in the startup sequence, before any request
  * is handled.  Returns the number of connections that were cleared.
  */
-export function clearStaleCrashCooldowns(): { cleared: number } {
-  const db = getDbInstance() as unknown as DbLike;
+export async function clearStaleCrashCooldowns(): Promise<{ cleared: number }> {
   const now = new Date().toISOString();
-  const nowMs = Date.now();
 
-  // Fetch all connections that have a rate_limited_until set and are NOT in
-  // a terminal state.  We do the terminal-status filter in JS to reuse the
-  // canonical `TERMINAL_STATUSES` set rather than duplicating the list in SQL.
-  const TERMINAL_STATUSES = new Set(["banned", "expired", "credits_exhausted"]);
-
-  const rows = db
-    .prepare(
-      `SELECT id, test_status, rate_limited_until FROM provider_connections WHERE rate_limited_until IS NOT NULL`
-    )
-    .all() as Array<{
-    id: string;
-    test_status: string | null;
-    rate_limited_until: string | number | null;
-  }>;
-
-  const toReset = rows.filter((r) => {
-    const status = (r.test_status || "").trim().toLowerCase();
-    if (TERMINAL_STATUSES.has(status)) return false;
-    const untilMs = parseCooldownUntilMs(r.rate_limited_until);
-    // Unparseable → clear (cannot expire lazily). Future → keep.
-    return untilMs === null || untilMs <= nowMs;
-  });
-
-  if (toReset.length === 0) return { cleared: 0 };
-
-  const stmt = db.prepare(
+  // One statement: the cutoff and the terminal-status filter are applied
+  // atomically, so a cooldown written between a read and the clear is never wiped.
+  const { changes } = await db().execute(
     `UPDATE provider_connections SET
        rate_limited_until = NULL,
        test_status        = 'active',
@@ -230,19 +174,20 @@ export function clearStaleCrashCooldowns(): { cleared: number } {
        last_error_type    = NULL,
        last_error_source  = NULL,
        error_code         = NULL,
-       updated_at         = ?
-     WHERE id = ?`
+       updated_at         = $1
+     WHERE rate_limited_until IS NOT NULL
+       AND rate_limited_until <= $1
+       AND lower(btrim(COALESCE(test_status, ''))) NOT IN ('banned', 'expired', 'credits_exhausted')`,
+    [now]
   );
 
-  for (const row of toReset) {
-    stmt.run(now, row.id);
-  }
+  if (changes === 0) return { cleared: 0 };
 
   // Routing/health-only fields (rate_limited_until, test_status, backoff_level,
   // last_error*, error_code) — the /v1/models builder never reads them.
   invalidateDbCache("connections", undefined, { skipModelCatalog: true });
 
-  return { cleared: toReset.length };
+  return { cleared: changes };
 }
 
 /**
@@ -266,49 +211,40 @@ export async function clearConnectionErrorIfUnchanged(
     rateLimitedUntil: string | null | undefined;
   }
 ): Promise<boolean> {
-  const db = getDbInstance() as unknown as DbLike;
-  backupDbFile("pre-write");
-  const result = db
-    .prepare(
-      `
-    UPDATE provider_connections SET
-      test_status = 'active',
-      last_error = NULL,
-      last_error_at = NULL,
-      last_error_type = NULL,
-      last_error_source = NULL,
-      error_code = NULL,
-      rate_limited_until = NULL,
-      backoff_level = 0,
-      provider_specific_data = CASE
-        WHEN provider = 'codex' AND json_valid(provider_specific_data)
-          THEN json_remove(
-            provider_specific_data,
-            '$.codexScopeRateLimitedUntil',
-            '$.codexScopeRateLimitSource'
-          )
-        ELSE provider_specific_data
-      END,
-      updated_at = ?
-    WHERE id = ?
-      AND IFNULL(test_status, '') = ?
-      AND IFNULL(last_error_at, '') = ?
-      AND IFNULL(rate_limited_until, '') = ?
-    `
-    )
-    .run(
+  const result = await db().execute(
+    `UPDATE provider_connections SET
+       test_status = 'active',
+       last_error = NULL,
+       last_error_at = NULL,
+       last_error_type = NULL,
+       last_error_source = NULL,
+       error_code = NULL,
+       rate_limited_until = NULL,
+       backoff_level = 0,
+       provider_specific_data = CASE
+         WHEN provider = 'codex' AND jsonb_typeof(provider_specific_data) = 'object'
+           THEN provider_specific_data - 'codexScopeRateLimitedUntil' - 'codexScopeRateLimitSource'
+         ELSE provider_specific_data
+       END,
+       updated_at = $1
+     WHERE id = $2
+       AND COALESCE(test_status, '') = $3
+       AND last_error_at IS NOT DISTINCT FROM $4::timestamptz
+       AND rate_limited_until IS NOT DISTINCT FROM $5::timestamptz`,
+    [
       new Date().toISOString(),
       id,
       expected.testStatus ?? "",
-      expected.lastErrorAt ?? "",
-      expected.rateLimitedUntil ?? ""
-    );
-  const applied = (result.changes ?? 0) > 0;
+      ts(expected.lastErrorAt),
+      ts(expected.rateLimitedUntil),
+    ]
+  );
+  const applied = result.changes > 0;
   if (applied) {
     // Routing/health-only fields + codex-scope cooldown keys — none are read by
     // the /v1/models builder (it only reads providerSpecificData.excludedModels).
     invalidateDbCache("connections", id, { skipModelCatalog: true });
-    bumpProxyConfigGeneration();
+    await bumpProxyConfigGeneration();
   }
   return applied;
 }
@@ -316,6 +252,6 @@ export async function clearConnectionErrorIfUnchanged(
 // T13: Format a reset countdown as a human-readable string ("2h 35m" / "4m 30s").
 // The implementation lives in the client-safe formatting utils so client
 // components (e.g. CoolingConnectionsPanel) can import it without pulling this
-// server-only DB module (better-sqlite3/ioredis) into the browser bundle.
+// server-only DB module into the browser bundle.
 // Re-exported here for existing server-side callers and the db/providers barrel.
 export { formatResetCountdown } from "@/shared/utils/formatting";

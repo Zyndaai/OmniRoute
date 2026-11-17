@@ -54,18 +54,20 @@ export interface RadarCatalogResult {
 /** Injectable deps for testing. */
 export interface GetRadarCatalogDeps {
   getFlag?: (key: string) => boolean;
-  getCache?: () => {
+  getCache?: () => MaybePromise<{
     version: string;
     generatedAt?: string | null;
     tier: string;
     payload: string;
     fetchedAt: string;
-  } | null;
+  } | null>;
   baseline?: MergedEntry[];
   localOverrides?: Map<string, Partial<MergedEntry>>;
   tombstones?: Set<string>;
-  getLocalState?: () => RadarLocalMergeState;
+  getLocalState?: () => MaybePromise<RadarLocalMergeState>;
 }
+
+type MaybePromise<T> = T | Promise<T>;
 
 // ---------------------------------------------------------------------------
 // Baseline converter
@@ -106,7 +108,7 @@ export function baselineToMergedEntries(budgets: typeof FREE_MODEL_BUDGETS): Mer
  *
  * @param deps - Injectable dependencies for testing.
  */
-export function getRadarCatalog(deps: GetRadarCatalogDeps = {}): RadarCatalogResult {
+export async function getRadarCatalog(deps: GetRadarCatalogDeps = {}): Promise<RadarCatalogResult> {
   const {
     getFlag = isFeatureFlagEnabled,
     getCache: getCacheFn = getRadarCache,
@@ -126,7 +128,7 @@ export function getRadarCatalog(deps: GetRadarCatalogDeps = {}): RadarCatalogRes
   }
 
   // Cache gate
-  const cache = getCacheFn();
+  const cache = await getCacheFn();
   if (!cache) {
     return { entries: baseline, meta: null };
   }
@@ -141,7 +143,7 @@ export function getRadarCatalog(deps: GetRadarCatalogDeps = {}): RadarCatalogRes
   }
 
   const persistedState =
-    localOverrides === undefined || tombstones === undefined ? getLocalStateFn() : null;
+    localOverrides === undefined || tombstones === undefined ? await getLocalStateFn() : null;
 
   // Apply overlay
   const entries = applyFeed({
@@ -165,7 +167,7 @@ export function getRadarCatalog(deps: GetRadarCatalogDeps = {}): RadarCatalogRes
 /** Injectable deps for `getCatalogWithoutOverlay`, same shape as the catalog resolver's. */
 export interface GetCatalogWithoutOverlayDeps {
   baseline?: MergedEntry[];
-  getLocalState?: () => RadarLocalMergeState;
+  getLocalState?: () => MaybePromise<RadarLocalMergeState>;
 }
 
 /**
@@ -178,11 +180,13 @@ export interface GetCatalogWithoutOverlayDeps {
  * absent, and `applyFeed` skips tombstoned entries — so models the operator
  * removed would silently reappear in the published numbers.
  */
-export function getCatalogWithoutOverlay(deps: GetCatalogWithoutOverlayDeps = {}): MergedEntry[] {
+export async function getCatalogWithoutOverlay(
+  deps: GetCatalogWithoutOverlayDeps = {}
+): Promise<MergedEntry[]> {
   const { baseline: baselineInput, getLocalState: getLocalStateFn = getRadarLocalMergeState } =
     deps;
   const baseline = baselineInput ?? baselineToMergedEntries(FREE_MODEL_BUDGETS);
-  const { localOverrides, tombstones } = getLocalStateFn();
+  const { localOverrides, tombstones } = await getLocalStateFn();
   return applyFeed({ baseline, feed: [], localOverrides, tombstones });
 }
 
@@ -208,7 +212,12 @@ const EMPTY_REFERRALS: RadarReferralsResult = { fixed: [], campaigns: [] };
  */
 export interface GetRadarReferralsDeps {
   getFlag?: (key: string) => boolean;
-  getCache?: () => { generatedAt: string; tier: string; payload: string; fetchedAt: string } | null;
+  getCache?: () => MaybePromise<{
+    generatedAt: string;
+    tier: string;
+    payload: string;
+    fetchedAt: string;
+  } | null>;
 }
 
 /**
@@ -219,14 +228,16 @@ export interface GetRadarReferralsDeps {
  * there is no cache yet, or the cached payload fails defensive
  * re-validation (corrupt/garbage payload).
  */
-export function getRadarReferrals(deps: GetRadarReferralsDeps = {}): RadarReferralsResult {
+export async function getRadarReferrals(
+  deps: GetRadarReferralsDeps = {}
+): Promise<RadarReferralsResult> {
   const { getFlag = isFeatureFlagEnabled, getCache: getCacheFn = getRadarReferralsCache } = deps;
 
   if (!getFlag("RADAR_ENABLED")) {
     return EMPTY_REFERRALS;
   }
 
-  const cache = getCacheFn();
+  const cache = await getCacheFn();
   if (!cache) {
     return EMPTY_REFERRALS;
   }
@@ -247,11 +258,11 @@ export function getRadarReferrals(deps: GetRadarReferralsDeps = {}): RadarReferr
  * when there isn't one (flag off, no cache, or no matching default). Only
  * looks at `fixed` referrals — see `findDefaultReferral` in `./referrals.ts`.
  */
-export function getDefaultReferralFor(
+export async function getDefaultReferralFor(
   provider: string,
   deps: GetRadarReferralsDeps = {}
-): RadarReferral | null {
-  const { fixed } = getRadarReferrals(deps);
+): Promise<RadarReferral | null> {
+  const { fixed } = await getRadarReferrals(deps);
   return findDefaultReferral(fixed, provider);
 }
 
@@ -266,19 +277,19 @@ export interface RadarOffersResult {
 
 export interface GetRadarOffersDeps {
   getFlag?: (key: string) => boolean;
-  getCache?: () => {
+  getCache?: () => MaybePromise<{
     version: string;
     tier: string;
     payload: string;
     fetchedAt: string;
-  } | null;
+  } | null>;
   now?: () => Date;
 }
 
 const EMPTY_OFFERS: RadarOffersResult = { offers: [], meta: null };
 
 /** Return only revalidated, unexpired offers from the local live cache. */
-export function getRadarOffers(deps: GetRadarOffersDeps = {}): RadarOffersResult {
+export async function getRadarOffers(deps: GetRadarOffersDeps = {}): Promise<RadarOffersResult> {
   const {
     getFlag = isFeatureFlagEnabled,
     getCache: getCacheFn = getRadarOffersCache,
@@ -286,7 +297,7 @@ export function getRadarOffers(deps: GetRadarOffersDeps = {}): RadarOffersResult
   } = deps;
   if (!getFlag("RADAR_ENABLED")) return EMPTY_OFFERS;
 
-  const cache = getCacheFn();
+  const cache = await getCacheFn();
   if (!cache || cache.tier !== "live") return EMPTY_OFFERS;
 
   try {
@@ -319,10 +330,10 @@ export interface GetRadarIntelDeps {
 const EMPTY_INTEL: RadarIntelResult = { intel: null, meta: null };
 
 /** Return only a defensively revalidated live Intel cache. */
-export function getRadarIntel(deps: GetRadarIntelDeps = {}): RadarIntelResult {
+export async function getRadarIntel(deps: GetRadarIntelDeps = {}): Promise<RadarIntelResult> {
   const { getFlag = isFeatureFlagEnabled, getCache: getCacheFn = getRadarIntelCache } = deps;
   if (!getFlag("RADAR_ENABLED")) return EMPTY_INTEL;
-  const cache = getCacheFn();
+  const cache = await getCacheFn();
   if (!cache || cache.tier !== "live" || !/^radar:[a-f0-9]{64}$/.test(cache.supporterIdentity)) {
     return EMPTY_INTEL;
   }

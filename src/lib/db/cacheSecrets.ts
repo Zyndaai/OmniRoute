@@ -1,5 +1,4 @@
 import { decrypt, encrypt } from "./encryption";
-import type { getDbInstance } from "./core";
 
 export const CACHE_SECRET_MASK = "********";
 export const CACHE_SECRET_KEYS = ["semanticCacheEmbeddingApiKey", "semanticCacheRedisUrl"] as const;
@@ -40,44 +39,6 @@ export function encryptCacheValue(key: string, value: unknown): unknown {
 export function decryptCacheSecrets(cache: Record<string, unknown>): void {
   for (const key of CACHE_SECRET_KEYS) {
     if (typeof cache[key] === "string") cache[key] = decrypt(cache[key]) ?? "";
-  }
-}
-
-/** Protect older flat/nested copies as well as the canonical cache.* rows. */
-export function encryptLegacyCacheSecretCopies(db: ReturnType<typeof getDbInstance>): void {
-  const keys = [
-    "cache",
-    "databaseSettings",
-    ...CACHE_SECRET_KEYS,
-    ...CACHE_SECRET_KEYS.map((key) => `cache.${key}`),
-  ];
-  const rows = db
-    .prepare(
-      `SELECT namespace, key, value FROM key_value WHERE namespace IN ('settings', 'databaseSettings') AND key IN (${keys.map(() => "?").join(",")})`
-    )
-    .all(...keys) as Array<{ namespace: string; key: string; value: string }>;
-  const update = db.prepare("UPDATE key_value SET value = ? WHERE namespace = ? AND key = ?");
-  for (const row of rows) {
-    let value: unknown;
-    try {
-      value = JSON.parse(row.value);
-    } catch {
-      value = row.value;
-    }
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const record = value as Record<string, unknown>;
-      const cache = row.key === "databaseSettings" ? record.cache : record;
-      if (cache && typeof cache === "object" && !Array.isArray(cache)) {
-        for (const key of CACHE_SECRET_KEYS) {
-          const fields = cache as Record<string, unknown>;
-          if (fields[key] !== undefined) fields[key] = encryptCacheValue(key, fields[key]);
-        }
-      }
-    } else {
-      value = encryptCacheValue(row.key.replace(/^cache\./, ""), value);
-    }
-    const encoded = JSON.stringify(value);
-    if (encoded !== row.value) update.run(encoded, row.namespace, row.key);
   }
 }
 

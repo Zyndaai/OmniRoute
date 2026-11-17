@@ -163,13 +163,13 @@ export async function resolveKeyGroups(
   // shadow key in zero groups, which checkKeyModelAccess reads as
   // "no restrictions" — a misconfiguration would WIDEN access instead of
   // denying it. Resolve to nothing rather than to everything.
-  const mapped = filterExistingActiveKeyGroupIds(mapToKeyGroups(groupIds, config));
+  const mapped = await filterExistingActiveKeyGroupIds(mapToKeyGroups(groupIds, config));
   if (mapped.length > 0) {
     return { ok: true, keyGroupIds: mapped, usedDefault: false };
   }
 
   const fallback = config.defaultKeyGroupId
-    ? filterExistingActiveKeyGroupIds([config.defaultKeyGroupId])
+    ? await filterExistingActiveKeyGroupIds([config.defaultKeyGroupId])
     : [];
   if (fallback.length > 0) {
     return { ok: true, keyGroupIds: fallback, usedDefault: true };

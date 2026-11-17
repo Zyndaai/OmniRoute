@@ -84,7 +84,10 @@ let lastPruneAt = 0;
 function maybePruneIdleSessions(now: number): void {
   if (now - lastPruneAt < PRUNE_INTERVAL_MS) return;
   lastPruneAt = now;
-  pruneIdleMuseOwnershipScopes(now);
+  // Housekeeping: a failed prune is retried on the next interval and never blocks a claim.
+  void pruneIdleMuseOwnershipScopes(now).catch((error) => {
+    console.warn("[muse] Idle session prune failed:", error);
+  });
 }
 
 /** Never derive cryptographic ownership from prompt text or a caller-selected connection. */
@@ -184,21 +187,21 @@ function continuationIds(value: unknown, ids = new Set<string>()): Set<string> {
 }
 
 /** Atomic session assignment; once output was served, pins never expire or move to another account. */
-export function claimMuseSession(
+export async function claimMuseSession(
   scope: string,
   body: Record<string, unknown>,
   candidates: Connection[],
   forcedId?: string | null
-): Owner {
+): Promise<Owner> {
   let owner!: Owner;
   const now = Date.now();
   maybePruneIdleSessions(now);
-  runMuseOwnershipTransaction(() => {
-    touchMuseOwnershipScope(scope, now);
-    const stored = load(`session:${scope}`);
+  await runMuseOwnershipTransaction(async (tx) => {
+    await touchMuseOwnershipScope(scope, now, tx);
+    const stored = await load(`session:${scope}`, tx);
     const prior = stored ? (JSON.parse(stored) as Owner) : null;
     const current = prior && candidates.find((candidate) => candidate.id === prior.connectionId);
-    const pinned = load(`served:${scope}`) === "1";
+    const pinned = (await load(`served:${scope}`, tx)) === "1";
     if (
       prior &&
       (pinned || (current && !current.unavailable && (!forcedId || forcedId === current.id)))
@@ -236,7 +239,7 @@ export function claimMuseSession(
       const ordered = [...candidates].sort((a, b) => a.id.localeCompare(b.id));
       if (!ordered.length)
         throw new MuseOwnershipError("No native OAuth Muse account is available.", 503);
-      const cursor = Number(load("cursor") || "0");
+      const cursor = Number((await load("cursor", tx)) || "0");
       const rotation = ordered.map((_, index) => ordered[(cursor + index) % ordered.length]);
       const connection = forcedId
         ? ordered.find((candidate) => candidate.id === forcedId)
@@ -244,18 +247,21 @@ export function claimMuseSession(
       if (!connection)
         throw new MuseOwnershipError("Requested Muse OAuth account is unavailable.", 503);
       owner = { connectionId: connection.id };
-      save(`session:${scope}`, JSON.stringify(owner));
-      if (!forcedId) save("cursor", String(cursor + 1));
+      await save(`session:${scope}`, JSON.stringify(owner), tx);
+      if (!forcedId) await save("cursor", String(cursor + 1), tx);
     }
     for (const hash of opaqueHashes(body)) {
-      if (!owner.generation || load(`opaque:${scope}:${hash}`) !== owner.generation) {
+      if (!owner.generation || (await load(`opaque:${scope}:${hash}`, tx)) !== owner.generation) {
         throw new MuseOwnershipError(
           "Muse encrypted reasoning was not issued to this session and caller generation."
         );
       }
     }
     for (const id of continuationIds(body)) {
-      if (!owner.generation || load(`reference:${scope}:${digest(id)}`) !== owner.generation) {
+      if (
+        !owner.generation ||
+        (await load(`reference:${scope}:${digest(id)}`, tx)) !== owner.generation
+      ) {
         throw new MuseOwnershipError(
           "Muse tool continuation was not issued to this session and caller generation."
         );
@@ -266,18 +272,18 @@ export function claimMuseSession(
 }
 
 /** Hash the actual inference credential, not timestamps or mutable account labels. Never persist secrets. */
-export function bindMuseGeneration(
+export async function bindMuseGeneration(
   scope: string,
   connectionId: string,
   credential: string,
   accountIdentity: string
-): string {
+): Promise<string> {
   if (!credential)
     throw new MuseOwnershipError("Muse session owner has no inference credential.", 503);
   const generation = digest(credential);
   const account = digest(accountIdentity);
-  runMuseOwnershipTransaction(() => {
-    const owner = JSON.parse(load(`session:${scope}`) || "null") as Owner | null;
+  await runMuseOwnershipTransaction(async (tx) => {
+    const owner = JSON.parse((await load(`session:${scope}`, tx)) || "null") as Owner | null;
     if (
       !owner ||
       owner.connectionId !== connectionId ||
@@ -287,12 +293,16 @@ export function bindMuseGeneration(
         "Muse session owner changed; existing session reasoning cannot be replayed under the new caller."
       );
     }
-    if (owner.generation && owner.generation !== generation && museScopeHasRecordedItems(scope)) {
+    if (
+      owner.generation &&
+      owner.generation !== generation &&
+      (await museScopeHasRecordedItems(scope, tx))
+    ) {
       throw new MuseOwnershipError(
         "Muse caller generation changed; existing session reasoning cannot be replayed under the new credential."
       );
     }
-    save(`session:${scope}`, JSON.stringify({ connectionId, generation, account }));
+    await save(`session:${scope}`, JSON.stringify({ connectionId, generation, account }), tx);
   });
   return generation;
 }
@@ -300,11 +310,23 @@ export function bindMuseGeneration(
 /** Observe the exact downstream output without altering events, tools, opaque reasoning, or terminal errors. */
 export function recordMuseOutput(response: Response, scope: string, generation: string): Response {
   if (!response.body || !response.ok) return response;
-  save(`served:${scope}`, "1");
-  touchMuseOwnershipScope(scope);
+  // Writes run in order off the stream's hot path; flush() waits for them before the stream
+  // ends, so the pin is stored before the caller can send its next request.
+  let writes: Promise<void> = Promise.resolve();
+  const persist = (write: () => Promise<void>) => {
+    writes = writes.then(write).catch((error) => {
+      console.error("[muse] Failed to record session ownership:", error);
+    });
+  };
+  persist(() => save(`served:${scope}`, "1"));
+  persist(() => touchMuseOwnershipScope(scope));
   const record = (value: unknown) => {
-    for (const hash of opaqueHashes(value)) save(`opaque:${scope}:${hash}`, generation);
-    for (const id of continuationIds(value)) save(`reference:${scope}:${digest(id)}`, generation);
+    for (const hash of opaqueHashes(value)) {
+      persist(() => save(`opaque:${scope}:${hash}`, generation));
+    }
+    for (const id of continuationIds(value)) {
+      persist(() => save(`reference:${scope}:${digest(id)}`, generation));
+    }
     const output = value as {
       item?: { id?: unknown };
       output?: unknown[];
@@ -313,7 +335,8 @@ export function recordMuseOutput(response: Response, scope: string, generation: 
     const items = output?.item ? [output.item] : output?.output || output?.response?.output || [];
     for (const item of items) {
       if (item && typeof item === "object" && "id" in item && typeof item.id === "string") {
-        save(`reference:${scope}:${digest(`item:${item.id}`)}`, generation);
+        const itemId = item.id;
+        persist(() => save(`reference:${scope}:${digest(`item:${itemId}`)}`, generation));
       }
     }
   };
@@ -347,7 +370,7 @@ export function recordMuseOutput(response: Response, scope: string, generation: 
         }
         controller.enqueue(chunk);
       },
-      flush() {
+      async flush() {
         buffer += decoder.decode();
         if (!sse && buffer) {
           try {
@@ -356,6 +379,7 @@ export function recordMuseOutput(response: Response, scope: string, generation: 
             if (!(error instanceof SyntaxError)) throw error;
           }
         }
+        await writes;
       },
     })
   );

@@ -30,21 +30,29 @@ const fallbackChains = new Map();
 
 /** @type {boolean} Whether we've loaded from DB yet */
 let _loaded = false;
+/** @type {Promise<void> | null} In-flight hydration shared by concurrent callers */
+let _loading = null;
 
 /**
- * Ensure in-memory cache is hydrated from SQLite.
+ * Ensure in-memory cache is hydrated from the database.
  */
-function ensureLoaded() {
+async function ensureLoaded() {
   if (_loaded) return;
-  try {
-    const all = loadAllFallbackChains();
-    for (const [model, chain] of Object.entries(all)) {
-      fallbackChains.set(model, chain);
-    }
-  } catch {
-    // DB may not be ready yet (build phase), that's ok
+  if (!_loading) {
+    _loading = (async () => {
+      try {
+        const all = await loadAllFallbackChains();
+        for (const [model, chain] of Object.entries(all)) {
+          if (!fallbackChains.has(model)) fallbackChains.set(model, chain);
+        }
+      } catch {
+        // DB may not be ready yet (build phase), that's ok
+      }
+      _loaded = true;
+      _loading = null;
+    })();
   }
-  _loaded = true;
+  await _loading;
 }
 
 /**
@@ -53,8 +61,8 @@ function ensureLoaded() {
  * @param {string} model - Model identifier (e.g. "gpt-4o")
  * @param {FallbackEntry[]} chain - Ordered list of fallback providers
  */
-export function registerFallback(model, chain) {
-  ensureLoaded();
+export async function registerFallback(model, chain) {
+  await ensureLoaded();
   const sorted = [...chain]
     .map((e) => ({
       provider: e.provider,
@@ -65,7 +73,7 @@ export function registerFallback(model, chain) {
 
   fallbackChains.set(model, sorted);
   try {
-    saveFallbackChain(model, sorted);
+    await saveFallbackChain(model, sorted);
   } catch {
     // Non-critical: in-memory still works
   }
@@ -77,10 +85,10 @@ export function registerFallback(model, chain) {
  *
  * @param {string} model
  * @param {string[]} [excludeProviders=[]] - Providers to skip (e.g. already tried)
- * @returns {FallbackEntry[]} Ordered list of fallback providers
+ * @returns {Promise<FallbackEntry[]>} Ordered list of fallback providers
  */
-export function resolveFallbackChain(model, excludeProviders = []) {
-  ensureLoaded();
+export async function resolveFallbackChain(model, excludeProviders = []) {
+  await ensureLoaded();
   const chain = fallbackChains.get(model);
   if (!chain) return [];
 
@@ -93,10 +101,10 @@ export function resolveFallbackChain(model, excludeProviders = []) {
  *
  * @param {string} model
  * @param {string[]} [excludeProviders=[]]
- * @returns {string | null} Next provider ID or null if chain exhausted
+ * @returns {Promise<string | null>} Next provider ID or null if chain exhausted
  */
-export function getNextFallback(model, excludeProviders = []) {
-  const chain = resolveFallbackChain(model, excludeProviders);
+export async function getNextFallback(model, excludeProviders = []) {
+  const chain = await resolveFallbackChain(model, excludeProviders);
   return chain.length > 0 ? chain[0].provider : null;
 }
 
@@ -104,10 +112,10 @@ export function getNextFallback(model, excludeProviders = []) {
  * Check if a model has any fallback providers configured.
  *
  * @param {string} model
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function hasFallback(model) {
-  ensureLoaded();
+export async function hasFallback(model) {
+  await ensureLoaded();
   const chain = fallbackChains.get(model);
   return !!chain && chain.some((e) => e.enabled);
 }
@@ -116,14 +124,14 @@ export function hasFallback(model) {
  * Remove a fallback chain for a model.
  *
  * @param {string} model
- * @returns {boolean} true if removed
+ * @returns {Promise<boolean>} true if removed
  */
-export function removeFallback(model) {
-  ensureLoaded();
+export async function removeFallback(model) {
+  await ensureLoaded();
   const removed = fallbackChains.delete(model);
   if (removed) {
     try {
-      deleteFallbackChain(model);
+      await deleteFallbackChain(model);
     } catch {
       // Non-critical
     }
@@ -134,10 +142,10 @@ export function removeFallback(model) {
 /**
  * Get all registered fallback chains (for dashboard).
  *
- * @returns {Record<string, FallbackEntry[]>}
+ * @returns {Promise<Record<string, FallbackEntry[]>>}
  */
-export function getAllFallbackChains() {
-  ensureLoaded();
+export async function getAllFallbackChains() {
+  await ensureLoaded();
   /** @type {Record<string, FallbackEntry[]>} */
   const result = {};
   for (const [model, chain] of fallbackChains.entries()) {
@@ -149,11 +157,11 @@ export function getAllFallbackChains() {
 /**
  * Reset all fallback chains (for testing).
  */
-export function resetAllFallbacks() {
+export async function resetAllFallbacks() {
   fallbackChains.clear();
   _loaded = false;
   try {
-    deleteAllFallbackChains();
+    await deleteAllFallbackChains();
   } catch {
     // Non-critical
   }

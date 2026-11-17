@@ -165,7 +165,7 @@ export async function handleRoundRobinCombo({
   signal,
   apiKeyAllowedConnections = null,
   nesting: _nesting = null,
-  hiddenModelsByProvider = getHiddenModelsByProvider(),
+  hiddenModelsByProvider: hiddenModelsByProviderArg,
   clientManagedResponsesContext: _clientManagedResponsesContext,
   deferContextOverflowWhenCompressible: _deferContextOverflowWhenCompressible = false,
   compressionExclusions: _compressionExclusions,
@@ -220,7 +220,8 @@ export async function handleRoundRobinCombo({
         }
     : allCombos;
 
-  let orderedTargets = resolveComboTargets(
+  const hiddenModelsByProvider = hiddenModelsByProviderArg ?? (await getHiddenModelsByProvider());
+  let orderedTargets = await resolveComboTargets(
     rrExpandedCombo,
     rrExpandedAllCombos,
     clampComboDepth(config.maxComboDepth),
@@ -248,13 +249,13 @@ export async function handleRoundRobinCombo({
     if (coolingDown) return coolingDown;
   }
   const tagFilteredTargets = await applyRequestTagRouting(orderedTargets, body, log);
-  const evalRankedTargets = orderTargetsByEvalScores(tagFilteredTargets, config.evalRouting, log);
+  const evalRankedTargets = await orderTargetsByEvalScores(tagFilteredTargets, config.evalRouting, log);
   // Align with the main/auto paths: combo config OR top-level settings (#8488 / #8494).
   const rrCompatFailOpen =
     (config as { compatFilterFailOpen?: unknown }).compatFilterFailOpen === true ||
     (settings as { compatFilterFailOpen?: unknown } | null | undefined)?.compatFilterFailOpen ===
       true;
-  let filteredTargets = filterTargetsByRequestCompatibility(
+  let filteredTargets = await filterTargetsByRequestCompatibility(
     evalRankedTargets,
     body,
     log,
@@ -272,14 +273,14 @@ export async function handleRoundRobinCombo({
   // BEFORE availability is known; if every compat-kept target then turns out to be
   // runtime-unavailable, we must reconsider these before returning 503, instead of
   // permanently dropping a compat-rejected-but-healthy provider.
-  const compatRejectedTargets = computeCompatRejectedTargets(
+  const compatRejectedTargets = await computeCompatRejectedTargets(
     evalRankedTargets,
     filteredTargets,
     body
   );
   let modelCount = filteredTargets.length;
   if (modelCount === 0) {
-    const exhaustion = describeCapabilityFilterExhaustion(
+    const exhaustion = await describeCapabilityFilterExhaustion(
       evalRankedTargets,
       body,
       rrExpandedCombo?.name || combo?.name
@@ -455,7 +456,7 @@ export async function handleRoundRobinCombo({
   // WITHIN the confirmed tier and only fall through to the unknown tier after it.
   // The partition is stable (a no-op unless prompt-cache affinity reordered the
   // list), and the start index follows the target it pointed at.
-  const rrVisionTiers = partitionConfirmedVisionTargets(
+  const rrVisionTiers = await partitionConfirmedVisionTargets(
     filteredTargets,
     deriveRequestCompatibilityRequirements(body)
   );
@@ -603,7 +604,7 @@ export async function handleRoundRobinCombo({
         );
         if (persistedSkip) {
           log.info("COMBO-RR", persistedSkip);
-          clearStaleLKGP(
+          void clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,
@@ -629,7 +630,7 @@ export async function handleRoundRobinCombo({
             "COMBO-RR",
             `Skipping ${modelStr} — no credentials available or model excluded`
           );
-          clearStaleLKGP(
+          void clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,
@@ -653,7 +654,7 @@ export async function handleRoundRobinCombo({
         )
       ) {
         log.info("COMBO-RR", `Skipping ${modelStr} — provider ${provider} in global cooldown`);
-        clearStaleLKGP(
+        void clearStaleLKGP(
           combo.name,
           target.executionKey,
           combo.id,
@@ -674,7 +675,7 @@ export async function handleRoundRobinCombo({
       );
       if (exhaustedSkip) {
         log.info("COMBO-RR", exhaustedSkip);
-        clearStaleLKGP(
+        void clearStaleLKGP(
           combo.name,
           target.executionKey,
           combo.id,
@@ -783,7 +784,7 @@ export async function handleRoundRobinCombo({
           {
             const bodyRecord = attemptBody as Record<string, unknown>;
             const currentMaxTokens = toPositiveInteger(bodyRecord.max_tokens);
-            const bufferedMaxTokens = resolveReasoningBufferedMaxTokens(
+            const bufferedMaxTokens = await resolveReasoningBufferedMaxTokens(
               modelStr,
               bodyRecord.max_tokens,
               { enabled: reasoningTokenBufferEnabled }
@@ -837,9 +838,14 @@ export async function handleRoundRobinCombo({
           ) {
             try {
               const { reserveQuota } = await import("../../../src/lib/quota/quotaScheduler.ts");
-              reserveQuota(target.connectionId, modelStr, attemptBody as Record<string, unknown>, {
-                tokenLimit: await resolveTargetTokenLimit(target),
-              });
+              await reserveQuota(
+                target.connectionId,
+                modelStr,
+                attemptBody as Record<string, unknown>,
+                {
+                  tokenLimit: await resolveTargetTokenLimit(target),
+                }
+              );
             } catch {
               // best-effort only
             }
@@ -992,7 +998,7 @@ export async function handleRoundRobinCombo({
 
             if (provider) {
               const connId = effectiveConnectionId || undefined;
-              recordLkgpPin({
+              void recordLkgpPin({
                 comboName: combo.name,
                 executionKey: target.executionKey,
                 comboId: combo.id,
@@ -1192,7 +1198,7 @@ export async function handleRoundRobinCombo({
             exhaustedConnections.has(`${provider}:${targetWithConnection.connectionId}`) ||
             (provider && exhaustedProviders.has(provider))
           ) {
-            clearStaleLKGP(
+            void clearStaleLKGP(
               combo.name,
               target.executionKey,
               combo.id,
@@ -1253,7 +1259,7 @@ export async function handleRoundRobinCombo({
           // LKGP (#919) mirror of handleComboChat's failure-path clear above — see
           // that comment for why this must happen (nothing else clears a pin left
           // by a request-scoped failure class like a stream-readiness timeout).
-          clearStaleLKGP(
+          void clearStaleLKGP(
             combo.name,
             target.executionKey,
             combo.id,

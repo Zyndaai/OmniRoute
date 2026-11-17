@@ -420,9 +420,9 @@ async function lookupModelMeta(
       // across the provider AND its no-auth sibling ids (requested id first)
       // instead of canonicalizing the low-level compat key, which would break
       // paths that legitimately key on the raw id (e.g. getHiddenModelsByProvider).
-      Promise.resolve(
-        getNoAuthHydrationProviderIds(providerId).flatMap((id) => getModelCompatOverrides(id))
-      ),
+      Promise.all(
+        getNoAuthHydrationProviderIds(providerId).map((id) => getModelCompatOverrides(id))
+      ).then((perProvider) => perProvider.flat()),
     ]);
     const syncedModels = liveCatalog.models;
 

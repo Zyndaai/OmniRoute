@@ -1,4 +1,6 @@
-import { getDbInstance, rowToCamel } from "./core";
+import { db, ts } from "./pg";
+import { jsonTextParam } from "./pgJsonText";
+import { rowToCamel } from "./caseMapping";
 import type { QuotaSnapshotRow, ProviderUtilizationPoint } from "@/shared/types/utilization";
 import {
   hasCodexScopeCooldown,
@@ -6,54 +8,60 @@ import {
 } from "./providers/codexAccountState";
 import { isCodexSparkQuotaKey } from "@omniroute/open-sse/config/codexQuotaScopes";
 
-type JsonRecord = Record<string, unknown>;
-
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-}
-
 let lastCleanupAt = 0;
 
-export function saveQuotaSnapshot(snapshot: Omit<QuotaSnapshotRow, "id" | "created_at">): void {
-  const db = getDbInstance() as unknown as DbLike;
+function isForeignKeyViolation(err: unknown): boolean {
+  const e = err as { kind?: string; code?: string } | null;
+  return e?.kind === "foreign_key_violation" || e?.code === "23503";
+}
+
+/**
+ * Readers keep the pre-Postgres row shape: `is_exhausted` as 0/1 and `raw_data`
+ * as JSON text, so callers that compare `=== 1` or `JSON.parse` keep working.
+ */
+function toSnapshotRow(row: Record<string, unknown>): QuotaSnapshotRow {
+  const camel = rowToCamel(row) as Record<string, unknown>;
+  camel.isExhausted = camel.isExhausted === true || camel.isExhausted === 1 ? 1 : 0;
+  const raw = camel.rawData;
+  camel.rawData = raw === null || raw === undefined ? null : JSON.stringify(raw);
+  return camel as unknown as QuotaSnapshotRow;
+}
+
+export async function saveQuotaSnapshot(
+  snapshot: Omit<QuotaSnapshotRow, "id" | "created_at">
+): Promise<void> {
   const now = new Date().toISOString();
 
   try {
-    db.prepare(
+    await db().execute(
       `INSERT INTO quota_snapshots
        (provider, connection_id, window_key, remaining_percentage, is_exhausted,
         next_reset_at, window_duration_ms, raw_data, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      snapshot.provider,
-      snapshot.connection_id,
-      snapshot.window_key,
-      snapshot.remaining_percentage,
-      snapshot.is_exhausted,
-      snapshot.next_reset_at,
-      snapshot.window_duration_ms,
-      snapshot.raw_data,
-      now
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        snapshot.provider,
+        snapshot.connection_id,
+        snapshot.window_key,
+        snapshot.remaining_percentage,
+        (snapshot.is_exhausted as unknown) === 1 || (snapshot.is_exhausted as unknown) === true,
+        ts(snapshot.next_reset_at),
+        snapshot.window_duration_ms === null || snapshot.window_duration_ms === undefined
+          ? null
+          : Math.round(snapshot.window_duration_ms),
+        jsonTextParam(snapshot.raw_data),
+        now,
+      ]
     );
-  } catch (err: any) {
-    if (err?.message?.includes("no such table")) {
-      console.warn(
-        "[QuotaSnapshots] Skipping save: quota_snapshots table not found. Awaiting migration."
-      );
-      return;
-    }
+  } catch (err: unknown) {
+    // The connection was deleted between the usage fetch and this write: its
+    // snapshots are cascade-deleted with it, so there is nothing to keep.
+    if (isForeignKeyViolation(err)) return;
     throw err;
   }
 
   // #12860: When a new snapshot demonstrates headroom on a Codex connection,
   // lift any fallback-sourced scope cooldown parked by quota preflight.
-  maybeLiftCodexCooldownOnHeadroom(snapshot);
+  await maybeLiftCodexCooldownOnHeadroom(snapshot);
 }
 
 /**
@@ -72,15 +80,16 @@ function snapshotHasHeadroom(s: SnapshotShape): boolean {
   return pct > 0 && exhausted !== 1;
 }
 
-function maybeLiftCodexCooldownOnHeadroom(
+async function maybeLiftCodexCooldownOnHeadroom(
   snapshot: Omit<QuotaSnapshotRow, "id" | "created_at">
-): void {
+): Promise<void> {
   if (
     snapshot.provider?.toLowerCase() !== "codex" ||
     typeof snapshot.connection_id !== "string" ||
     snapshot.connection_id.length === 0 ||
     (snapshot.remaining_percentage ?? 0) <= 0 ||
-    snapshot.is_exhausted === 1
+    (snapshot.is_exhausted as unknown) === 1 ||
+    (snapshot.is_exhausted as unknown) === true
   ) {
     return;
   }
@@ -89,9 +98,9 @@ function maybeLiftCodexCooldownOnHeadroom(
     const scope = isCodexSparkQuotaKey(snapshot.window_key) ? "spark" : "codex";
     // The scope-wide read is only worth paying for when a cooldown is
     // actually parked on this connection+scope; the common case is clean.
-    if (!hasCodexScopeCooldown(snapshot.connection_id, scope)) return;
+    if (!(await hasCodexScopeCooldown(snapshot.connection_id, scope))) return;
 
-    const scopeWindows = getLatestQuotaSnapshotsForConnection(snapshot.connection_id).filter(
+    const scopeWindows = (await getLatestQuotaSnapshotsForConnection(snapshot.connection_id)).filter(
       (s: SnapshotShape) => {
         const key = s.windowKey ?? s.window_key;
         return scope === "spark" ? isCodexSparkQuotaKey(key) : !isCodexSparkQuotaKey(key);
@@ -100,7 +109,7 @@ function maybeLiftCodexCooldownOnHeadroom(
     // Every window in the scope must be healthy: one exhausted window still
     // justifies the cooldown even when a sibling reports full headroom.
     if (scopeWindows.length > 0 && scopeWindows.every(snapshotHasHeadroom)) {
-      liftCodexScopeCooldownOnHeadroom(snapshot.connection_id, scope);
+      await liftCodexScopeCooldownOnHeadroom(snapshot.connection_id, scope);
     }
   } catch (err) {
     console.debug("[QuotaSnapshots] Headroom evaluation skipped:", err);
@@ -125,41 +134,35 @@ export function isUnreportedQuotaSnapshot(snapshot: QuotaSnapshotRow): boolean {
   }
 }
 
-export function getQuotaSnapshots(opts: {
+export async function getQuotaSnapshots(opts: {
   provider?: string;
   connectionId?: string;
   since: string;
   until?: string;
-}): QuotaSnapshotRow[] {
-  const db = getDbInstance() as unknown as DbLike;
-  const conditions: string[] = ["created_at >= ?"];
-  const params: unknown[] = [opts.since];
+}): Promise<QuotaSnapshotRow[]> {
+  const params: unknown[] = [ts(opts.since)];
+  const conditions: string[] = ["created_at >= $1"];
 
   if (opts.provider) {
-    conditions.push("provider = ?");
     params.push(opts.provider);
+    conditions.push(`provider = $${params.length}`);
   }
 
   if (opts.connectionId) {
-    conditions.push("connection_id = ?");
     params.push(opts.connectionId);
+    conditions.push(`connection_id = $${params.length}`);
   }
 
   if (opts.until) {
-    conditions.push("created_at <= ?");
-    params.push(opts.until);
+    params.push(ts(opts.until));
+    conditions.push(`created_at <= $${params.length}`);
   }
 
-  try {
-    const sql = `SELECT * FROM quota_snapshots WHERE ${conditions.join(" AND ")} ORDER BY created_at ASC`;
-    const rows = db.prepare(sql).all(...params);
-    return rows.map((r) => rowToCamel(r) as unknown as QuotaSnapshotRow);
-  } catch (err: any) {
-    if (err?.message?.includes("no such table")) {
-      return [];
-    }
-    throw err;
-  }
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT * FROM quota_snapshots WHERE ${conditions.join(" AND ")} ORDER BY created_at ASC, id ASC`,
+    params
+  );
+  return rows.map(toSnapshotRow);
 }
 
 /**
@@ -172,33 +175,20 @@ export function getQuotaSnapshots(opts: {
  * old row each, thanks to the #4438 no-op-write dedup) would otherwise have
  * its recent-rows slice flooded entirely by the hot windows, silently
  * evicting the idle windows from rehydration (#8431). Scoping "latest" PER
- * window_key via a window function keeps every window visible regardless of
+ * window_key via DISTINCT ON keeps every window visible regardless of
  * how skewed the write frequency is across windows.
  */
-export function getLatestQuotaSnapshotsForConnection(connectionId: string): QuotaSnapshotRow[] {
-  const db = getDbInstance() as unknown as DbLike;
-
-  try {
-    const rows = db
-      .prepare(
-        `SELECT * FROM (
-           SELECT *, ROW_NUMBER() OVER (
-             PARTITION BY window_key ORDER BY created_at DESC, id DESC
-           ) AS rn
-           FROM quota_snapshots
-           WHERE connection_id = ?
-         )
-         WHERE rn = 1`
-      )
-      .all(connectionId);
-
-    return rows.map((row) => rowToCamel(row) as unknown as QuotaSnapshotRow);
-  } catch (err: any) {
-    if (err?.message?.includes("no such table")) {
-      return [];
-    }
-    throw err;
-  }
+export async function getLatestQuotaSnapshotsForConnection(
+  connectionId: string
+): Promise<QuotaSnapshotRow[]> {
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT DISTINCT ON (window_key) *
+       FROM quota_snapshots
+      WHERE connection_id = $1
+      ORDER BY window_key, created_at DESC, id DESC`,
+    [connectionId]
+  );
+  return rows.map(toSnapshotRow);
 }
 
 /**
@@ -211,94 +201,91 @@ export function getLatestQuotaSnapshotsForConnection(connectionId: string): Quot
  * provider whose weekly window was exhausted could be drawn from its half-empty session
  * window instead. Samples of the same window inside a bucket are still averaged first.
  */
-export function getAggregatedSnapshots(opts: {
+export async function getAggregatedSnapshots(opts: {
   provider?: string;
   since: string;
   until?: string;
   bucketMinutes: number;
   aggregateBy?: "provider" | "connection";
-}): ProviderUtilizationPoint[] {
-  const db = getDbInstance() as unknown as DbLike;
-  const conditions: string[] = ["created_at >= ?"];
-  const params: unknown[] = [opts.since];
+}): Promise<ProviderUtilizationPoint[]> {
+  const params: unknown[] = [ts(opts.since)];
+  const conditions: string[] = ["created_at >= $1"];
 
   if (opts.provider) {
-    conditions.push("provider = ?");
     params.push(opts.provider);
+    conditions.push(`provider = $${params.length}`);
   }
 
   if (opts.until) {
-    conditions.push("created_at <= ?");
-    params.push(opts.until);
+    params.push(ts(opts.until));
+    conditions.push(`created_at <= $${params.length}`);
   }
 
   const bucketSeconds = Number(opts.bucketMinutes) * 60;
   if (!Number.isFinite(bucketSeconds) || bucketSeconds <= 0) {
     throw new Error("Invalid bucket size");
   }
+  params.push(bucketSeconds);
+  const bucketParam = `$${params.length}::float8`;
 
   const groupFields =
     opts.aggregateBy === "connection"
       ? "bucket, provider, connection_id, window_key"
       : "bucket, provider, window_key";
   const selectKey =
-    opts.aggregateBy === "connection" ? "provider || ':' || connection_id as provider" : "provider";
+    opts.aggregateBy === "connection" ? "provider || ':' || connection_id AS provider" : "provider";
 
-  try {
-    const sql = `
+  const sql = `
       WITH per_window AS (
         SELECT
-          strftime('%Y-%m-%dT%H:%M:%SZ', (strftime('%s', created_at) / ${bucketSeconds}) * ${bucketSeconds}, 'unixepoch') as bucket,
+          to_char(
+            to_timestamp(floor(extract(epoch FROM created_at) / ${bucketParam}) * ${bucketParam}) AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+          ) AS bucket,
           ${selectKey},
-          AVG(remaining_percentage) as remainingPct,
-          MAX(is_exhausted) as isExhausted,
+          AVG(remaining_percentage) AS "remainingPct",
+          MAX(is_exhausted::int) AS "isExhausted",
           window_key
         FROM quota_snapshots
         WHERE ${conditions.join(" AND ")}
         GROUP BY ${groupFields}
       )
-      SELECT bucket, provider, remainingPct, isExhausted, window_key AS windowKey
+      SELECT bucket, provider, "remainingPct", "isExhausted", window_key AS "windowKey"
       FROM (
         SELECT
           bucket,
           provider,
-          remainingPct,
-          MAX(isExhausted) OVER (PARTITION BY bucket, provider) AS isExhausted,
+          "remainingPct",
+          MAX("isExhausted") OVER (PARTITION BY bucket, provider) AS "isExhausted",
           window_key,
           ROW_NUMBER() OVER (
             PARTITION BY bucket, provider
-            ORDER BY remainingPct IS NULL, remainingPct ASC, window_key ASC
+            ORDER BY "remainingPct" IS NULL, "remainingPct" ASC, window_key ASC
           ) AS rn
         FROM per_window
-      )
+      ) ranked
       WHERE rn = 1
       ORDER BY bucket ASC
     `;
 
-    const rows = db.prepare(sql).all(...params) as Array<{
-      bucket: string;
-      provider: string;
-      remainingPct: number | null;
-      isExhausted: number;
-      windowKey: string;
-    }>;
+  const rows = await db().query<{
+    bucket: string;
+    provider: string;
+    remainingPct: number | null;
+    isExhausted: number;
+    windowKey: string;
+  }>(sql, params);
 
-    return rows.map((r) => ({
-      timestamp: r.bucket,
-      provider: r.provider,
-      remainingPct: r.remainingPct ?? 0,
-      isExhausted: r.isExhausted === 1,
-      windowKey: r.windowKey,
-    }));
-  } catch (err: any) {
-    if (err?.message?.includes("no such table")) {
-      return [];
-    }
-    throw err;
-  }
+  return rows.map((r) => ({
+    timestamp: r.bucket,
+    provider: r.provider,
+    remainingPct: r.remainingPct ?? 0,
+    isExhausted: Number(r.isExhausted) === 1,
+    windowKey: r.windowKey,
+  }));
 }
 
-export function cleanupOldSnapshots(retentionDays = 90): number {
+export async function cleanupOldSnapshots(retentionDays = 90): Promise<number> {
   const now = Date.now();
   const cleanupThresholdMs = 6 * 60 * 60 * 1000;
 
@@ -306,17 +293,10 @@ export function cleanupOldSnapshots(retentionDays = 90): number {
     return 0;
   }
 
-  const db = getDbInstance() as unknown as DbLike;
   const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-
-  try {
-    const result = db.prepare("DELETE FROM quota_snapshots WHERE created_at < ?").run(cutoffDate);
-    lastCleanupAt = now;
-    return result.changes;
-  } catch (err: any) {
-    if (err?.message?.includes("no such table")) {
-      return 0;
-    }
-    throw err;
-  }
+  const result = await db().execute("DELETE FROM quota_snapshots WHERE created_at < $1", [
+    cutoffDate,
+  ]);
+  lastCleanupAt = now;
+  return result.changes;
 }

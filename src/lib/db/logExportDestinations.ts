@@ -1,14 +1,17 @@
 /**
- * Log-export destination persistence (migration 170).
+ * Log-export destination persistence.
  *
- * snake_case in SQLite, camelCase in the returned objects. `config` is a JSON string
- * whose secret keys are already ciphertext when they reach this module — encryption
- * lives in src/lib/logExport/secrets.ts, next to the destination registry that knows
- * which keys are secret.
+ * snake_case columns, camelCase in the returned objects. `config` is jsonb whose secret
+ * keys are already ciphertext when they reach this module — encryption lives in
+ * src/lib/logExport/secrets.ts, next to the destination registry that knows which keys
+ * are secret.
+ *
+ * The export cursor is `call_logs.seq` (column `cursor_seq`); the field keeps its old
+ * name `cursorRowId` for the callers, and `cursorSeq` is the same value.
  */
 
 import { randomUUID } from "node:crypto";
-import { getDbInstance } from "./core";
+import { db, jsonb } from "./pg";
 
 export interface LogExportDestinationRow {
   id: string;
@@ -20,7 +23,9 @@ export interface LogExportDestinationRow {
   includeBodies: boolean;
   maxBodyBytes: number;
   maxRowsPerRun: number;
+  /** Last exported `call_logs.seq`. */
   cursorRowId: number;
+  cursorSeq: number;
   exportedTotal: number;
   lastRunAt: string | null;
   lastStatus: "success" | "failure" | null;
@@ -52,25 +57,28 @@ export interface UpdateLogExportDestinationInput {
 
 function mapRow(row: any): LogExportDestinationRow {
   let config: Record<string, unknown> = {};
-  if (row.config) {
+  let raw = row.config;
+  if (typeof raw === "string") {
     try {
-      const parsed = JSON.parse(row.config);
-      if (parsed && typeof parsed === "object") config = parsed as Record<string, unknown>;
+      raw = JSON.parse(raw);
     } catch {
-      config = {};
+      raw = null;
     }
   }
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) config = raw;
+  const cursor = row.cursor_seq ?? 0;
   return {
     id: row.id,
     name: row.name,
     type: row.type,
-    enabled: row.enabled === 1,
+    enabled: row.enabled === true,
     config,
     batchSize: row.batch_size,
-    includeBodies: row.include_bodies === 1,
+    includeBodies: row.include_bodies === true,
     maxBodyBytes: row.max_body_bytes ?? 262_144,
     maxRowsPerRun: row.max_rows_per_run,
-    cursorRowId: row.cursor_row_id ?? 0,
+    cursorRowId: cursor,
+    cursorSeq: cursor,
     exportedTotal: row.exported_total ?? 0,
     lastRunAt: row.last_run_at ?? null,
     lastStatus: row.last_status ?? null,
@@ -80,127 +88,125 @@ function mapRow(row: any): LogExportDestinationRow {
   };
 }
 
-export function getLogExportDestinations(): LogExportDestinationRow[] {
-  const db = getDbInstance();
-  const rows = db.prepare("SELECT * FROM log_export_destinations ORDER BY created_at ASC").all();
+export async function getLogExportDestinations(): Promise<LogExportDestinationRow[]> {
+  const rows = await db().query("SELECT * FROM log_export_destinations ORDER BY created_at ASC");
   return rows.map(mapRow);
 }
 
-export function getEnabledLogExportDestinations(): LogExportDestinationRow[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT * FROM log_export_destinations WHERE enabled = 1 ORDER BY created_at ASC")
-    .all();
+export async function getEnabledLogExportDestinations(): Promise<LogExportDestinationRow[]> {
+  const rows = await db().query(
+    "SELECT * FROM log_export_destinations WHERE enabled ORDER BY created_at ASC"
+  );
   return rows.map(mapRow);
 }
 
-export function getLogExportDestination(id: string): LogExportDestinationRow | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM log_export_destinations WHERE id = ?").get(id);
+export async function getLogExportDestination(id: string): Promise<LogExportDestinationRow | null> {
+  const row = await db().queryOne("SELECT * FROM log_export_destinations WHERE id = $1", [id]);
   return row ? mapRow(row) : null;
 }
 
-export function createLogExportDestination(
+export async function createLogExportDestination(
   input: CreateLogExportDestinationInput
-): LogExportDestinationRow {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
+): Promise<LogExportDestinationRow> {
   const id = randomUUID();
-  db.prepare(
+  const row = await db().queryOne(
     `INSERT INTO log_export_destinations
        (id, name, type, enabled, config, batch_size, include_bodies, max_body_bytes,
-        max_rows_per_run, cursor_row_id, exported_total, created_at, updated_at)
-     VALUES (@id, @name, @type, @enabled, @config, @batchSize, @includeBodies, @maxBodyBytes,
-             @maxRowsPerRun, 0, 0, @now, @now)`
-  ).run({
-    id,
-    name: input.name,
-    type: input.type,
-    enabled: input.enabled ? 1 : 0,
-    config: JSON.stringify(input.config ?? {}),
-    batchSize: input.batchSize ?? 500,
-    includeBodies: input.includeBodies ? 1 : 0,
-    maxBodyBytes: input.maxBodyBytes ?? 262_144,
-    maxRowsPerRun: input.maxRowsPerRun ?? 10_000,
-    now,
-  });
-  return getLogExportDestination(id) as LogExportDestinationRow;
+        max_rows_per_run, cursor_seq, exported_total)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, 0, 0)
+     RETURNING *`,
+    [
+      id,
+      input.name,
+      input.type,
+      Boolean(input.enabled),
+      jsonb(input.config ?? {}),
+      input.batchSize ?? 500,
+      Boolean(input.includeBodies),
+      input.maxBodyBytes ?? 262_144,
+      input.maxRowsPerRun ?? 10_000,
+    ]
+  );
+  return mapRow(row);
 }
 
-export function updateLogExportDestination(
+export async function updateLogExportDestination(
   id: string,
   input: UpdateLogExportDestinationInput
-): LogExportDestinationRow | null {
-  const existing = getLogExportDestination(id);
+): Promise<LogExportDestinationRow | null> {
+  const existing = await getLogExportDestination(id);
   if (!existing) return null;
 
-  const db = getDbInstance();
-  db.prepare(
+  const row = await db().queryOne(
     `UPDATE log_export_destinations
-        SET name = @name,
-            enabled = @enabled,
-            config = @config,
-            batch_size = @batchSize,
-            include_bodies = @includeBodies,
-            max_body_bytes = @maxBodyBytes,
-            max_rows_per_run = @maxRowsPerRun,
-            updated_at = @now
-      WHERE id = @id`
-  ).run({
-    id,
-    name: input.name ?? existing.name,
-    enabled: (input.enabled ?? existing.enabled) ? 1 : 0,
-    config: JSON.stringify(input.config ?? existing.config),
-    batchSize: input.batchSize ?? existing.batchSize,
-    includeBodies: (input.includeBodies ?? existing.includeBodies) ? 1 : 0,
-    maxBodyBytes: input.maxBodyBytes ?? existing.maxBodyBytes,
-    maxRowsPerRun: input.maxRowsPerRun ?? existing.maxRowsPerRun,
-    now: new Date().toISOString(),
-  });
-  return getLogExportDestination(id);
+        SET name = $2,
+            enabled = $3,
+            config = $4::jsonb,
+            batch_size = $5,
+            include_bodies = $6,
+            max_body_bytes = $7,
+            max_rows_per_run = $8,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [
+      id,
+      input.name ?? existing.name,
+      input.enabled ?? existing.enabled,
+      jsonb(input.config ?? existing.config),
+      input.batchSize ?? existing.batchSize,
+      input.includeBodies ?? existing.includeBodies,
+      input.maxBodyBytes ?? existing.maxBodyBytes,
+      input.maxRowsPerRun ?? existing.maxRowsPerRun,
+    ]
+  );
+  return row ? mapRow(row) : null;
 }
 
-export function deleteLogExportDestination(id: string): boolean {
-  const db = getDbInstance();
-  const result = db.prepare("DELETE FROM log_export_destinations WHERE id = ?").run(id);
+export async function deleteLogExportDestination(id: string): Promise<boolean> {
+  const result = await db().execute("DELETE FROM log_export_destinations WHERE id = $1", [id]);
   return result.changes > 0;
 }
 
 /** Advance the cursor after a batch is durably accepted by the destination. */
-export function advanceLogExportCursor(id: string, cursorRowId: number, exported: number): void {
-  const db = getDbInstance();
-  db.prepare(
+export async function advanceLogExportCursor(
+  id: string,
+  cursorRowId: number,
+  exported: number
+): Promise<void> {
+  await db().execute(
     `UPDATE log_export_destinations
-        SET cursor_row_id = @cursorRowId,
-            exported_total = exported_total + @exported,
-            updated_at = @now
-      WHERE id = @id`
-  ).run({ id, cursorRowId, exported, now: new Date().toISOString() });
+        SET cursor_seq = $2,
+            exported_total = exported_total + $3,
+            updated_at = now()
+      WHERE id = $1`,
+    [id, cursorRowId, Math.round(exported)]
+  );
 }
 
 /**
  * Rewind the cursor. Used by the truncation guard: when `call_logs` has been purged
- * the surviving max(rowid) can be lower than the stored cursor, which would otherwise
+ * the surviving max(seq) can be lower than the stored cursor, which would otherwise
  * make every future row invisible to the exporter.
  */
-export function resetLogExportCursor(id: string, cursorRowId = 0): void {
-  const db = getDbInstance();
-  db.prepare(
+export async function resetLogExportCursor(id: string, cursorRowId = 0): Promise<void> {
+  await db().execute(
     `UPDATE log_export_destinations
-        SET cursor_row_id = @cursorRowId, updated_at = @now
-      WHERE id = @id`
-  ).run({ id, cursorRowId, now: new Date().toISOString() });
+        SET cursor_seq = $2, updated_at = now()
+      WHERE id = $1`,
+    [id, cursorRowId]
+  );
 }
 
-export function recordLogExportRun(
+export async function recordLogExportRun(
   id: string,
   status: "success" | "failure",
   error: string | null
-): void {
-  const db = getDbInstance();
-  db.prepare(
+): Promise<void> {
+  await db().execute(
     `UPDATE log_export_destinations
-        SET last_run_at = @now, last_status = @status, last_error = @error, updated_at = @now
-      WHERE id = @id`
-  ).run({ id, status, error, now: new Date().toISOString() });
+        SET last_run_at = now(), last_status = $2, last_error = $3, updated_at = now()
+      WHERE id = $1`,
+    [id, status, error]
+  );
 }

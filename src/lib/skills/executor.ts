@@ -6,7 +6,8 @@ import {
 import { skillRegistry } from "./registry";
 import { SkillExecution, SkillStatus, SkillHandler } from "./types";
 import { builtinSkills } from "./builtins";
-import { getDbInstance } from "../db/core";
+import { db } from "../db/pg";
+import { jsonValueParam } from "../db/pgJsonText";
 import { getSettings } from "../db/settings";
 import { randomUUID } from "crypto";
 import { logger } from "../../../open-sse/utils/logger.ts";
@@ -231,24 +232,24 @@ class SkillExecutor {
       throw new Error(`Skill is disabled: ${skillName}`);
     }
 
-    const db = getDbInstance();
     const executionId = randomUUID();
     const startTime = Date.now();
 
     log.info("skills.executor.start", { skillId: skill.id, skillName, apiKeyId: context.apiKeyId });
 
     try {
-      db.prepare(
+      await db().execute(
         `INSERT INTO skill_executions (id, skill_id, api_key_id, session_id, input, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        executionId,
-        skill.id,
-        context.apiKeyId,
-        context.sessionId || null,
-        JSON.stringify(input),
-        SkillStatus.RUNNING,
-        new Date().toISOString()
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+        [
+          executionId,
+          skill.id,
+          context.apiKeyId,
+          context.sessionId || null,
+          jsonValueParam(input) ?? "{}",
+          SkillStatus.RUNNING,
+          new Date().toISOString(),
+        ]
       );
 
       const { output, errorMessage, status } = await this.runHandler(skillName, input, {
@@ -258,9 +259,10 @@ class SkillExecutor {
 
       const durationMs = Date.now() - startTime;
 
-      db.prepare(
-        `UPDATE skill_executions SET output = ?, status = ?, error_message = ?, duration_ms = ? WHERE id = ?`
-      ).run(output ? JSON.stringify(output) : null, status, errorMessage, durationMs, executionId);
+      await db().execute(
+        `UPDATE skill_executions SET output = $1::jsonb, status = $2, error_message = $3, duration_ms = $4 WHERE id = $5`,
+        [output ? jsonValueParam(output) : null, status, errorMessage, durationMs, executionId]
+      );
 
       log.info("skills.executor.complete", {
         skillId: skill.id,
@@ -284,9 +286,10 @@ class SkillExecutor {
       const durationMs = Date.now() - startTime;
       const errorMessage = toSafeSkillErrorMessage(err);
 
-      db.prepare(
-        `UPDATE skill_executions SET status = ?, error_message = ?, duration_ms = ? WHERE id = ?`
-      ).run(SkillStatus.ERROR, errorMessage, durationMs, executionId);
+      await db().execute(
+        `UPDATE skill_executions SET status = $1, error_message = $2, duration_ms = $3 WHERE id = $4`,
+        [SkillStatus.ERROR, errorMessage, durationMs, executionId]
+      );
 
       throw err;
     }
@@ -417,18 +420,14 @@ class SkillExecutor {
     };
   }
 
-  getExecution(executionId: string): SkillExecution | undefined {
-    const db = getDbInstance();
-    const row = db.prepare("SELECT * FROM skill_executions WHERE id = ?").get(executionId) as any;
-    if (!row) return undefined;
-
+  private rowToExecution(row: any): SkillExecution {
     return {
       id: row.id,
       skillId: row.skill_id,
       apiKeyId: row.api_key_id,
       sessionId: row.session_id || "",
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
+      input: typeof row.input === "string" ? JSON.parse(row.input) : row.input,
+      output: row.output ?? null,
       status: row.status as SkillStatus,
       errorMessage: row.error_message,
       durationMs: row.duration_ms,
@@ -436,40 +435,36 @@ class SkillExecutor {
     };
   }
 
-  listExecutions(apiKeyId?: string, limit: number = 50, offset: number = 0): SkillExecution[] {
-    const db = getDbInstance();
-    const rows = apiKeyId
-      ? db
-          .prepare(
-            "SELECT * FROM skill_executions WHERE api_key_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
-          )
-          .all(apiKeyId, limit, offset)
-      : db
-          .prepare("SELECT * FROM skill_executions ORDER BY created_at DESC LIMIT ? OFFSET ?")
-          .all(limit, offset);
-
-    return (rows as any[]).map((row) => ({
-      id: row.id,
-      skillId: row.skill_id,
-      apiKeyId: row.api_key_id,
-      sessionId: row.session_id || "",
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
-      status: row.status as SkillStatus,
-      errorMessage: row.error_message,
-      durationMs: row.duration_ms,
-      createdAt: new Date(row.created_at),
-    }));
+  async getExecution(executionId: string): Promise<SkillExecution | undefined> {
+    const row = await db().queryOne(`SELECT * FROM skill_executions WHERE id = $1`, [executionId]);
+    return row ? this.rowToExecution(row) : undefined;
   }
 
-  countExecutions(apiKeyId?: string): number {
-    const db = getDbInstance();
+  async listExecutions(
+    apiKeyId?: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<SkillExecution[]> {
+    const rows = apiKeyId
+      ? await db().query(
+          `SELECT * FROM skill_executions WHERE api_key_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+          [apiKeyId, limit, offset]
+        )
+      : await db().query(
+          `SELECT * FROM skill_executions ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`,
+          [limit, offset]
+        );
+    return rows.map((row) => this.rowToExecution(row));
+  }
+
+  async countExecutions(apiKeyId?: string): Promise<number> {
     const row = apiKeyId
-      ? (db
-          .prepare("SELECT COUNT(*) as count FROM skill_executions WHERE api_key_id = ?")
-          .get(apiKeyId) as any)
-      : (db.prepare("SELECT COUNT(*) as count FROM skill_executions").get() as any);
-    return row?.count ?? 0;
+      ? await db().queryOne<{ count: number }>(
+          `SELECT COUNT(*) AS count FROM skill_executions WHERE api_key_id = $1`,
+          [apiKeyId]
+        )
+      : await db().queryOne<{ count: number }>(`SELECT COUNT(*) AS count FROM skill_executions`);
+    return Number(row?.count ?? 0);
   }
 }
 

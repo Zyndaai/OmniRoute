@@ -1,5 +1,5 @@
 import { getComboById, getCombos } from "@/lib/db/combos";
-import { getDbInstance } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import {
   getSyncedAvailableModelsByConnection,
   SYNCED_AVAILABLE_MODELS_MALFORMED,
@@ -39,7 +39,7 @@ type PerformanceRow = {
 type QuotaSnapshotView = {
   connectionId?: string;
   remainingPercentage?: number | null;
-  isExhausted?: number;
+  isExhausted?: number | boolean;
   createdAt?: string;
 };
 
@@ -204,7 +204,7 @@ export function buildProviderHealth(
     }
 
     const latestEntry = ordered[ordered.length - 1] as unknown as QuotaSnapshotView | undefined;
-    isExhausted = isExhausted || latestEntry?.isExhausted === 1;
+    isExhausted = isExhausted || latestEntry?.isExhausted === 1 || latestEntry?.isExhausted === true;
   }
 
   const firstAverage =
@@ -269,31 +269,31 @@ function buildConnectionHealth(
   return {
     provider: `${provider}:${connectionId}`,
     remainingPct: lastRemaining === null ? null : roundNumber(lastRemaining),
-    isExhausted:
-      (ordered[ordered.length - 1] as unknown as QuotaSnapshotView | undefined)?.isExhausted === 1,
+    isExhausted: [1, true].includes(
+      (ordered[ordered.length - 1] as unknown as QuotaSnapshotView | undefined)
+        ?.isExhausted as number | boolean
+    ),
     trend,
     dropReason: null,
   };
 }
 
-function buildUsageSkew(
+async function buildUsageSkew(
   comboName: string,
   comboModels: string[],
   since: string
-): ComboHealthMetrics["usageSkew"] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT
+): Promise<ComboHealthMetrics["usageSkew"]> {
+  const rows = await db().query<ModelUsageRow>(
+    `SELECT
          model,
          COUNT(*) as requests,
-         SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) as totalTokens
+         SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)) as "totalTokens"
        FROM call_logs
-       WHERE combo_name = ?
-         AND timestamp >= ?
-       GROUP BY model`
-    )
-    .all(comboName, since) as ModelUsageRow[];
+       WHERE combo_name = $1
+         AND "timestamp" >= $2
+       GROUP BY model`,
+    [comboName, since]
+  );
 
   const usageByModel = new Map<string, { requests: number; tokens: number }>();
   for (const model of comboModels) {
@@ -332,19 +332,20 @@ function buildUsageSkew(
   };
 }
 
-function buildPerformance(comboName: string, since: string): ComboHealthMetrics["performance"] {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT
-         COUNT(*) as totalRequests,
-         SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) as successCount,
-         AVG(duration) as avgLatencyMs
+async function buildPerformance(
+  comboName: string,
+  since: string
+): Promise<ComboHealthMetrics["performance"]> {
+  const row = await db().queryOne<PerformanceRow>(
+    `SELECT
+         COUNT(*) as "totalRequests",
+         SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) as "successCount",
+         AVG(duration) as "avgLatencyMs"
        FROM call_logs
-       WHERE combo_name = ?
-         AND timestamp >= ?`
-    )
-    .get(comboName, since) as PerformanceRow | undefined;
+       WHERE combo_name = $1
+         AND "timestamp" >= $2`,
+    [comboName, since]
+  );
 
   const totalRequests = toSafeNumber(row?.totalRequests);
   const successCount = toSafeNumber(row?.successCount);
@@ -357,12 +358,14 @@ function buildPerformance(comboName: string, since: string): ComboHealthMetrics[
   };
 }
 
-export function buildQuotaHealth(
+export async function buildQuotaHealth(
   providers: string[],
   since: string
-): ComboHealthMetrics["quotaHealth"] {
-  const providerHealth = providers.map((provider) =>
-    buildProviderHealth(provider, getQuotaSnapshots({ provider, since }))
+): Promise<ComboHealthMetrics["quotaHealth"]> {
+  const providerHealth = await Promise.all(
+    providers.map(async (provider) =>
+      buildProviderHealth(provider, await getQuotaSnapshots({ provider, since }))
+    )
   );
 
   const nonNull = providerHealth
@@ -376,21 +379,22 @@ export function buildQuotaHealth(
   };
 }
 
-function getHistoricalTargetMetrics(comboName: string, since: string): HistoricalTargetMetrics {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `WITH target_logs AS (
+async function getHistoricalTargetMetrics(
+  comboName: string,
+  since: string
+): Promise<HistoricalTargetMetrics> {
+  const rows = await db().query<HistoricalTargetAggregateRow>(
+    `WITH target_logs AS (
          SELECT
            id,
-           NULLIF(combo_execution_key, '') AS executionKey,
-           NULLIF(combo_step_id, '') AS stepId,
+           NULLIF(combo_execution_key, '') AS execution_key,
+           NULLIF(combo_step_id, '') AS step_id,
            status,
            duration,
-           timestamp
+           "timestamp"
          FROM call_logs
-         WHERE combo_name = ?
-           AND timestamp >= ?
+         WHERE combo_name = $1
+           AND "timestamp" >= $2
            AND (
              NULLIF(combo_execution_key, '') IS NOT NULL
              OR NULLIF(combo_step_id, '') IS NOT NULL
@@ -398,66 +402,66 @@ function getHistoricalTargetMetrics(comboName: string, since: string): Historica
        ),
        scoped_logs AS (
          SELECT
-           'execution' AS metricScope,
-           executionKey AS metricKey,
+           'execution'::text AS metric_scope,
+           execution_key AS metric_key,
            id,
            status,
            duration,
-           timestamp
+           "timestamp"
          FROM target_logs
-         WHERE executionKey IS NOT NULL
+         WHERE execution_key IS NOT NULL
          UNION ALL
          SELECT
-           'step' AS metricScope,
-           stepId AS metricKey,
+           'step'::text AS metric_scope,
+           step_id AS metric_key,
            id,
            status,
            duration,
-           timestamp
+           "timestamp"
          FROM target_logs
-         WHERE stepId IS NOT NULL
+         WHERE step_id IS NOT NULL
        ),
        aggregate_metrics AS (
          SELECT
-           metricScope,
-           metricKey,
+           metric_scope,
+           metric_key,
            COUNT(*) AS requests,
-           SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS successCount,
-           AVG(duration) AS avgLatencyMs,
-           MAX(timestamp) AS lastUsedAt
+           SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS success_count,
+           AVG(duration) AS avg_latency_ms,
+           MAX("timestamp") AS last_used_at
          FROM scoped_logs
-         GROUP BY metricScope, metricKey
+         GROUP BY metric_scope, metric_key
        ),
        latest_metrics AS (
-         SELECT metricScope, metricKey, status AS lastStatusCode
+         SELECT metric_scope, metric_key, status AS last_status_code
          FROM (
            SELECT
-             metricScope,
-             metricKey,
+             metric_scope,
+             metric_key,
              status,
              ROW_NUMBER() OVER (
-               PARTITION BY metricScope, metricKey
-               ORDER BY timestamp DESC, id DESC
-             ) AS rowRank
+               PARTITION BY metric_scope, metric_key
+               ORDER BY "timestamp" DESC, id DESC
+             ) AS row_rank
            FROM scoped_logs
-         )
-         WHERE rowRank = 1
+         ) AS ranked
+         WHERE row_rank = 1
        )
        SELECT
-         aggregate_metrics.metricScope,
-         aggregate_metrics.metricKey,
+         aggregate_metrics.metric_scope AS "metricScope",
+         aggregate_metrics.metric_key AS "metricKey",
          aggregate_metrics.requests,
-         aggregate_metrics.successCount,
-         aggregate_metrics.avgLatencyMs,
-         latest_metrics.lastStatusCode,
-         aggregate_metrics.lastUsedAt
+         aggregate_metrics.success_count AS "successCount",
+         aggregate_metrics.avg_latency_ms AS "avgLatencyMs",
+         latest_metrics.last_status_code AS "lastStatusCode",
+         aggregate_metrics.last_used_at AS "lastUsedAt"
        FROM aggregate_metrics
        LEFT JOIN latest_metrics
-         ON latest_metrics.metricScope = aggregate_metrics.metricScope
-        AND latest_metrics.metricKey = aggregate_metrics.metricKey
-       ORDER BY aggregate_metrics.metricScope ASC, aggregate_metrics.metricKey ASC`
-    )
-    .all(comboName, since) as HistoricalTargetAggregateRow[];
+         ON latest_metrics.metric_scope = aggregate_metrics.metric_scope
+        AND latest_metrics.metric_key = aggregate_metrics.metric_key
+       ORDER BY aggregate_metrics.metric_scope ASC, aggregate_metrics.metric_key ASC`,
+    [comboName, since]
+  );
 
   const metrics: HistoricalTargetMetrics = {
     byExecutionKey: new Map(),
@@ -530,12 +534,15 @@ type TargetQuotaView = {
 };
 
 /** Quota for the pinned connection when it has snapshots, else the provider-wide rollup. */
-function resolveTargetQuota(target: ResolvedComboTargetView, since: string): TargetQuotaView {
+async function resolveTargetQuota(
+  target: ResolvedComboTargetView,
+  since: string
+): Promise<TargetQuotaView> {
   if (target.connectionId) {
     const connectionHealth = buildConnectionHealth(
       target.provider,
       target.connectionId,
-      getQuotaSnapshots({
+      await getQuotaSnapshots({
         provider: target.provider,
         connectionId: target.connectionId,
         since,
@@ -551,7 +558,7 @@ function resolveTargetQuota(target: ResolvedComboTargetView, since: string): Tar
     }
   }
 
-  const providerSnapshots = getQuotaSnapshots({ provider: target.provider, since });
+  const providerSnapshots = await getQuotaSnapshots({ provider: target.provider, since });
   if (providerSnapshots.length > 0) {
     const providerHealth = buildProviderHealth(target.provider, providerSnapshots);
     return {
@@ -592,7 +599,7 @@ async function buildTargetHealth(
   now: number
 ): Promise<TargetHealthWithEligibility[]> {
   const comboMetrics = getComboMetrics(comboName);
-  const historicalMetrics = getHistoricalTargetMetrics(comboName, since);
+  const historicalMetrics = await getHistoricalTargetMetrics(comboName, since);
 
   return Promise.all(
     targets.map(async (target) => {
@@ -616,7 +623,7 @@ async function buildTargetHealth(
         avgLatencyMs: toSafeNumber(historicalMetric?.avgLatencyMs ?? runtimeMetric?.avgLatencyMs),
         lastStatus: historicalMetric?.lastStatus ?? runtimeMetric?.lastStatus ?? null,
         lastUsedAt: historicalMetric?.lastUsedAt ?? runtimeMetric?.lastUsedAt ?? null,
-        ...resolveTargetQuota(target, since),
+        ...(await resolveTargetQuota(target, since)),
         eligibleConnectionIds: await resolveEligibleConnectionIds(
           target,
           activeConnectionsByProvider?.get(target.provider) ??
@@ -672,9 +679,9 @@ async function buildComboHealth(
       syncedModelsByProvider,
       now
     ),
-    quotaHealth: buildQuotaHealth(providers, since),
-    usageSkew: buildUsageSkew(comboName, models, since),
-    performance: buildPerformance(comboName, since),
+    quotaHealth: await buildQuotaHealth(providers, since),
+    usageSkew: await buildUsageSkew(comboName, models, since),
+    performance: await buildPerformance(comboName, since),
   };
 }
 

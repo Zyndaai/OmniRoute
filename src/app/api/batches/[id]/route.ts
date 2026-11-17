@@ -8,7 +8,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   if (scope.rejection) return scope.rejection;
 
   try {
-    const batch = getBatch(params.id);
+    const batch = await getBatch(params.id);
     // Session = operator, key = own rows only, null owner = denied. Mirrors
     // /api/v1/batches/[id] (GHSA-2jm2-mpx8-6523) so this management sibling
     // cannot leak a foreign tenant's batch metadata to an unauthenticated

@@ -83,14 +83,14 @@ export async function findPublishedModel(
 }
 
 /** Hidden under the canonical id, or under the alias the client used. */
-export function isPublishedModelHidden(
+export async function isPublishedModelHidden(
   providerId: string,
   providerOrAlias: string,
   publishedModelId: string
-): boolean {
+): Promise<boolean> {
   return (
-    getModelIsHidden(providerId, publishedModelId) ||
-    (providerId !== providerOrAlias && getModelIsHidden(providerOrAlias, publishedModelId))
+    (await getModelIsHidden(providerId, publishedModelId)) ||
+    (providerId !== providerOrAlias && (await getModelIsHidden(providerOrAlias, publishedModelId)))
   );
 }
 
@@ -107,7 +107,8 @@ export async function isDeniedUnderCanonicalProvider(
   const canonicalProvider = provider ? await canonicalProviderForAlias(provider) : null;
   if (!canonicalProvider) return false;
   return Boolean(
-    checkKeyModelAccess(apiKeyId, modelTarget, canonicalProvider).deniedBy ||
-    checkKeyModelAccess(apiKeyId, `${canonicalProvider}/${modelTarget}`, canonicalProvider).deniedBy
+    (await checkKeyModelAccess(apiKeyId, modelTarget, canonicalProvider)).deniedBy ||
+    (await checkKeyModelAccess(apiKeyId, `${canonicalProvider}/${modelTarget}`, canonicalProvider))
+      .deniedBy
   );
 }

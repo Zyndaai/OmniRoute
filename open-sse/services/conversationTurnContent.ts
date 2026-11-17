@@ -13,7 +13,7 @@
  * text where the old stored text_preview was capped at 8000 chars.
  */
 
-import { getDbInstance } from "../../src/lib/db/core.ts";
+import { db } from "../../src/lib/db/pg.ts";
 import { readCallArtifact } from "../../src/lib/usage/callLogArtifacts.ts";
 import { extractCanonicalTurns, hashTurnContent } from "./conversationTracker.ts";
 
@@ -116,24 +116,23 @@ function indexTurns(result: Map<string, TurnDisplayContent>, turns: CanonicalTur
  * not lossy, and avoids redundant artifact reads for a request that touched
  * many nodes at once.
  */
-export function resolveTurnDisplayContent(
+export async function resolveTurnDisplayContent(
   nodes: ReadonlyArray<{ lastCorrelationId: string | null }>
-): Map<string, TurnDisplayContent> {
+): Promise<Map<string, TurnDisplayContent>> {
   const result = new Map<string, TurnDisplayContent>();
   const correlationIds = [
     ...new Set(nodes.map((n) => n.lastCorrelationId).filter((v): v is string => !!v)),
   ];
   if (correlationIds.length === 0) return result;
 
-  const db = getDbInstance();
-  const placeholders = correlationIds.map(() => "?").join(",");
-  const rows = db
-    .prepare(
-      `SELECT correlation_id, artifact_relpath FROM call_logs
-       WHERE correlation_id IN (${placeholders}) AND artifact_relpath IS NOT NULL
-       ORDER BY timestamp ASC`
-    )
-    .all(...correlationIds) as Array<{ correlation_id: string; artifact_relpath: string }>;
+  // An artifact exists once the detail is published ('ready'); the path itself is
+  // stored at insert, before the file is written.
+  const rows = await db().query<{ correlation_id: string; artifact_relpath: string }>(
+    `SELECT correlation_id, artifact_relpath FROM call_logs
+       WHERE correlation_id = ANY($1::text[]) AND detail_state = 'ready' AND artifact_relpath IS NOT NULL
+       ORDER BY "timestamp" ASC`,
+    [correlationIds]
+  );
 
   // A retry/combo-fallback attempt can share one correlation_id across a few
   // call_logs rows; they all carry the same client-facing request body, so

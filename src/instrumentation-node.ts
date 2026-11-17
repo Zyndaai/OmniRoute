@@ -54,10 +54,9 @@ export { normalizeBootError };
 const TRANSIENT_DB_CLOSED_RE = /database\s*(connection\s*)?(is\s*)?closed/i;
 
 /**
- * Initialize the SQLite singleton for boot, tolerating one transient
- * "database closed" failure (#6560) by retrying once — the driverFactory
- * cache-eviction fix (`preInitSqlJs`) makes the retry create a fresh adapter
- * instead of reusing the dead one. Any other failure (or a second consecutive
+ * Initialize the PostgreSQL backend for boot (connect, migrations, partitions),
+ * tolerating one transient "database closed" failure (#6560) by retrying once.
+ * Any other failure (or a second consecutive
  * "database closed") is re-thrown as a real `Error` via `normalizeBootError`
  * so it can never crash instrumentation with a masking TypeError — the caller
  * (`registerNodejs`) still surfaces it as a real boot failure.
@@ -110,8 +109,8 @@ export function isBackgroundServicesDisabled(): boolean {
 }
 
 async function ensureSecrets(): Promise<void> {
-  let getPersistedSecret = (_key: string): string | null => null;
-  let persistSecret = (_key: string, _value: string): void => {};
+  let getPersistedSecret = async (_key: string): Promise<string | null> => null;
+  let persistSecret = async (_key: string, _value: string): Promise<void> => {};
 
   try {
     ({ getPersistedSecret, persistSecret } = await import("@/lib/db/secrets"));
@@ -124,26 +123,26 @@ async function ensureSecrets(): Promise<void> {
   }
 
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim() === "") {
-    const persisted = getPersistedSecret("jwtSecret");
+    const persisted = await getPersistedSecret("jwtSecret");
     if (persisted) {
       process.env.JWT_SECRET = persisted;
       console.log("[STARTUP] JWT_SECRET restored from persistent store");
     } else {
       const generated = toBase64(getRandomBytes(48));
       process.env.JWT_SECRET = generated;
-      persistSecret("jwtSecret", generated);
+      await persistSecret("jwtSecret", generated);
       console.log("[STARTUP] JWT_SECRET auto-generated and persisted (random 64-char secret)");
     }
   }
 
   if (!process.env.API_KEY_SECRET || process.env.API_KEY_SECRET.trim() === "") {
-    const persisted = getPersistedSecret("apiKeySecret");
+    const persisted = await getPersistedSecret("apiKeySecret");
     if (persisted) {
       process.env.API_KEY_SECRET = persisted;
     } else {
       const generated = toHex(getRandomBytes(32));
       process.env.API_KEY_SECRET = generated;
-      persistSecret("apiKeySecret", generated);
+      await persistSecret("apiKeySecret", generated);
       console.log(
         "[STARTUP] API_KEY_SECRET auto-generated and persisted (random 64-char hex secret)"
       );
@@ -347,8 +346,7 @@ export interface OptionalBootSubsystem {
  * inside the background-services block. Headless mode (`OMNIROUTE_HEADLESS=1`,
  * see src/lib/system/headless.ts) skips the whole table. Proxy-engine
  * background work — token auto-refresh, connection-cooldown recovery,
- * context-window reconcile, the memory subsystems (cross-cutting: `/v1`
- * injects and queries memory) and the backup schedule — stays inline in
+ * context-window reconcile — stays inline in
  * `registerNodejs()` and runs in both modes.
  */
 export const OPTIONAL_BOOT_SUBSYSTEMS: ReadonlyArray<OptionalBootSubsystem> = [
@@ -381,8 +379,8 @@ export const OPTIONAL_BOOT_SUBSYSTEMS: ReadonlyArray<OptionalBootSubsystem> = [
     name: "conductor-bridge",
     start: () =>
       import("@/lib/conductor/boot")
-        .then((m) => {
-          if (m.initConductorBridge()) console.log("[STARTUP] Conductor bridge started");
+        .then(async (m) => {
+          if (await m.initConductorBridge()) console.log("[STARTUP] Conductor bridge started");
         })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
@@ -411,8 +409,8 @@ export const OPTIONAL_BOOT_SUBSYSTEMS: ReadonlyArray<OptionalBootSubsystem> = [
     name: "radar-sync",
     start: () =>
       import("@/lib/radar/scheduler")
-        .then((m) => {
-          const started = m.initRadarSyncScheduler();
+        .then(async (m) => {
+          const started = await m.initRadarSyncScheduler();
           if (started) console.log("[STARTUP] Radar sync scheduler initialized");
         })
         .catch((err: unknown) => {
@@ -565,17 +563,11 @@ export async function registerNodejs(): Promise<void> {
     await import("@/lib/providers/noAuthAutoRoutingReadiness");
   registerNoAuthAutoRoutingReadiness();
 
-  // Guarantee the SQLite singleton — including a sql.js WASM pre-init when
-  // both synchronous drivers (better-sqlite3, node:sqlite) are unavailable —
-  // is ready before ANY other startup step reaches getDbInstance(). This
-  // MUST run before ensureSecrets, clearStaleCrashCooldowns,
-  // getSettings, initAuditLog below: those all reach getDbInstance()
-  // transitively, and used to run ahead of this call (previously at the end
-  // of this function), throwing the misleading "sql.js WASM ainda não foi
-  // pré-inicializado" error for an existing DB file when both sync drivers
-  // failed (#7288 / #7494). ensureDbInitialized() itself is idempotent and
-  // caches the singleton, so every later getDbInstance() call below is a
-  // free no-op re-read of the same connection — no double-init cost.
+  // Connect to PostgreSQL, run pending migrations and ensure partitions
+  // (ensureDbInitialized) before ANY other startup step touches the database.
+  // This MUST run before ensureSecrets, clearStaleCrashCooldowns, getSettings
+  // and initAuditLog below. ensureDbInitialized() is idempotent, so later
+  // callers just reuse the connected pool.
   await ensureDbReadyForBoot();
 
   await ensureSecrets();
@@ -586,7 +578,6 @@ export async function registerNodejs(): Promise<void> {
     import("@/lib/db/encryption").then(({ assertEncryptionKeyConfiguredForProduction }) =>
       assertEncryptionKeyConfiguredForProduction()
     ),
-    import("@/lib/usage/migrations"),
     import("@/lib/consoleInterceptor").then(({ initConsoleInterceptor }) =>
       initConsoleInterceptor()
     ),
@@ -600,7 +591,7 @@ export async function registerNodejs(): Promise<void> {
   // See: https://github.com/cheaper-inference/OmniRoute/issues/3625 (Part A)
   try {
     const { clearStaleCrashCooldowns } = await import("@/lib/db/providers");
-    const { cleared } = clearStaleCrashCooldowns();
+    const { cleared } = await clearStaleCrashCooldowns();
     if (cleared > 0) {
       console.log(
         `[STARTUP] Cleared ${cleared} stale transient connection cooldown(s) from prior crash (#3625)`
@@ -831,17 +822,6 @@ export async function registerNodejs(): Promise<void> {
     console.warn("[COMPLIANCE] Could not initialize audit log:", msg);
   }
 
-  // Storage-configured scheduled VACUUM (#4437): registers the timer from
-  // Settings > System & Storage and persists lastVacuumAt for the UI.
-  try {
-    const { initVacuumScheduler } = await import("@/lib/db/vacuumScheduler");
-    initVacuumScheduler();
-    console.log("[STARTUP] Scheduled VACUUM initialized (#4437)");
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[STARTUP] Could not initialize vacuum scheduler (non-fatal):", msg);
-  }
-
   // Retention cleanup scheduler (#4691/#6988, #9624): runs the general retention
   // cleanup once after startup and then every 6 hours. Previously this was only
   // wired into the unused src/server-init.ts, so telemetry tables grew unboundedly
@@ -885,39 +865,6 @@ export async function registerNodejs(): Promise<void> {
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn("[STARTUP] context-window reconcile failed to start (non-fatal):", msg);
-        }),
-
-      // TV6 typed memory decay: optional periodic sweep of decayed episodic memories.
-      // Doubly opt-in (no-op unless MEMORY_TYPED_DECAY_ENABLED=true AND
-      // MEMORY_TYPED_DECAY_SWEEP_INTERVAL>0). Never deletes by default. Never fatal.
-      import("@/lib/memory/typedDecay")
-        .then((m) => m.startMemoryDecaySweep())
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn("[STARTUP] memory decay sweep failed to start (non-fatal):", msg);
-        }),
-
-      // MemoryBackend provider pattern (PR #8752): initialize configured memory
-      // backends from settings (sqlite, obsidian, notion, custom HTTP, etc.).
-      // Reads the DB settings synchronously (non-blocking, never fatal). Must
-      // run after the DB is ready AND after getSettings/applyRuntimeSettings so
-      // memory backend config is hydrated.
-      import("@/lib/memory/index")
-        .then((m) => m.initMemoryBackends())
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn("[STARTUP] memory backend initialization failed (non-fatal):", msg);
-        }),
-
-      // Backup schedule (#8513): execute `backup-schedule.json` cron server-side.
-      // Reads the schedule written by `omniroute backup auto enable` and fires
-      // `runBackupCommand` when the cron expression matches. Self-gated: no-op
-      // when no schedule file exists or the schedule is disabled. Never fatal.
-      import("@/lib/jobs/backupScheduleJob")
-        .then((m) => m.startBackupScheduleJob())
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn("[STARTUP] backup schedule job failed to start (non-fatal):", msg);
         }),
 
       // Optional subsystems (dashboard, catalog enrichment, embedded

@@ -62,26 +62,28 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const resolved = resolveAllFeatureFlags();
+    const resolved = await resolveAllFeatureFlags();
 
-    const flags = resolved.map(({ key, effectiveValue, source, definition, ...provenance }) => {
+    const flags = await Promise.all(
+      resolved.map(async ({ key, effectiveValue, source, definition, ...provenance }) => {
       // Flags whose gate resolves with env-wins-over-db precedence (the
       // opposite of resolveAllFeatureFlags' generic db-wins-over-env order)
       // report the gate's own resolution so the dashboard never shows a source
       // that doesn't match actual gate behavior.
       if (key === CC_DISCOVERY_ALIASES_FLAG_KEY) {
-        const gateState = getCcAliasGlobalState();
+        const gateState = await getCcAliasGlobalState();
         return flagPayload(definition, gateState.enabled ? "true" : "false", gateState.source);
       }
       // #9654 U7: the adaptive virtual-lanes gate reads env at runtime
       // construction — env wins over any DB override, and a DB override gates
       // at next boot (see lib/admissionVirtualLanes.ts).
       if (key === ADAPTIVE_VIRTUAL_LANES_FLAG_KEY) {
-        const state = resolveAdaptiveVirtualLanesFlag();
+        const state = await resolveAdaptiveVirtualLanesFlag();
         return flagPayload(definition, state.enabled ? "true" : "false", state.source);
       }
       return { ...flagPayload(definition, effectiveValue, source), ...provenance };
-    });
+      })
+    );
 
     const total = flags.length;
     const active = flags.filter((f) => isActive(f.effectiveValue)).length;
@@ -153,19 +155,19 @@ export async function PUT(request: NextRequest) {
 
   try {
     // Capture previous state before modifying
-    const allFlagsBefore = resolveAllFeatureFlags();
+    const allFlagsBefore = await resolveAllFeatureFlags();
     const prevFlag = allFlagsBefore.find((f) => f.key === key);
     const previousValue = prevFlag?.effectiveValue ?? definition.defaultValue;
     const previousSource = prevFlag?.source ?? "default";
 
     if (value === undefined) {
-      removeFeatureFlagOverride(key);
+      await removeFeatureFlagOverride(key);
     } else {
-      setFeatureFlagOverride(key, value);
+      await setFeatureFlagOverride(key, value);
     }
 
     // After write — get new effective value
-    const allFlagsAfter = resolveAllFeatureFlags();
+    const allFlagsAfter = await resolveAllFeatureFlags();
     const updatedFlag = allFlagsAfter.find((f) => f.key === key);
     const newEffectiveValue = updatedFlag?.effectiveValue ?? definition.defaultValue;
     const newSource = updatedFlag?.source ?? "default";
@@ -177,7 +179,7 @@ export async function PUT(request: NextRequest) {
     let reportedEffectiveValue = newEffectiveValue;
     let reportedSource = newSource;
     if (key === ADAPTIVE_VIRTUAL_LANES_FLAG_KEY) {
-      const state = resolveAdaptiveVirtualLanesFlag();
+      const state = await resolveAdaptiveVirtualLanesFlag();
       reportedEffectiveValue = state.enabled ? "true" : "false";
       reportedSource = state.source;
     }
@@ -213,10 +215,10 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const overrides = getFeatureFlagOverrides();
+    const overrides = await getFeatureFlagOverrides();
     const count = Object.keys(overrides).length;
 
-    clearAllFeatureFlagOverrides();
+    await clearAllFeatureFlagOverrides();
 
     return NextResponse.json({
       cleared: count,

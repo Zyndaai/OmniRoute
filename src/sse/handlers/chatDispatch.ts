@@ -59,8 +59,7 @@ export async function dispatchChatWithAffinityEviction(
       ),
     });
   } catch (dispatchErr) {
-    const evicted = evict();
-    if (evicted instanceof Promise) await evicted;
+    await evict();
     throw dispatchErr;
   }
 
@@ -69,8 +68,7 @@ export async function dispatchChatWithAffinityEviction(
   if ("localResourcePressureResult" in dispatched) return dispatched;
 
   if (!dispatched.result?.success) {
-    const evicted = evict();
-    if (evicted instanceof Promise) await evicted;
+    await evict();
   }
   return dispatched;
 }

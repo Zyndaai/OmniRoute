@@ -15,7 +15,7 @@ export async function GET(
   const { provider } = await params;
 
   try {
-    const report = getWebSessionPoolHealth(provider);
+    const report = await getWebSessionPoolHealth(provider);
     const poolData = report.providers[0];
 
     if (!poolData) {

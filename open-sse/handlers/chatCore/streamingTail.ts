@@ -37,7 +37,6 @@ import { buildCacheUsageLogMeta } from "./cacheUsageMeta.ts";
 import { recordContextEditingTelemetryHook } from "./contextEditingTelemetry.ts";
 import { readCpaAuthIndex } from "./failureUsage.ts";
 import { maybeConvertJsonBodyToSse } from "./jsonBodyToSse.ts";
-import { runMemoryExtractionGate } from "./memoryExtraction.ts";
 import { mergeResponseToolNameMap } from "./passthroughToolNames.ts";
 import { runPluginOnResponseHook, runPluginOnStreamCompleteHook } from "./pluginOnResponse.ts";
 import { wrapReadableStreamWithFinalize } from "./streamFinalize.ts";
@@ -56,7 +55,6 @@ import {
   resolveTargetStreamActiveTimeoutMs,
 } from "./upstreamTimeouts.ts";
 import { recordCost, recordUnpricedBudgetUsage } from "@/domain/costRules";
-import { extractFacts } from "@/lib/memory/extraction";
 import { calculateCost, calculateCostDetailed } from "@/lib/usage/costCalculator";
 import { appendRequestLog, trackPendingRequest } from "@/lib/usageDb";
 import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags.ts";
@@ -118,8 +116,6 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
     isResponsesEndpoint,
     log,
     managedLease,
-    memoryOwnerId,
-    memorySettings,
     model,
     modelInfo,
     onRequestSuccess,
@@ -129,7 +125,6 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
     pendingRequestOwner,
     persistAttemptLogs,
     persistFailureUsage,
-    pipelineSessionId,
     provider,
     providerHeaders,
     providerRequestCapture,
@@ -505,7 +500,7 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       calibrationEstimatedInputTokens,
       streamUsage
     );
-    recordStreamingUsageStats(streamUsage, {
+    void recordStreamingUsageStats(streamUsage, {
       provider,
       model,
       streamStatus: normalizedStreamStatus,
@@ -519,6 +514,8 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       comboStrategy,
       endpoint: endpointPath,
       cpaAuthIndex: readCpaAuthIndex(providerResponse),
+    }).catch((err) => {
+      console.error("Failed to record streaming usage stats:", err?.message ?? err);
     });
 
     // Routing event (feedback foundation) — fire-and-forget, cheap, never blocks
@@ -579,7 +576,9 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
       // A metered model with no price must not pass the dollar budget as $0.
       recordUnpricedCost: (apiKeyId, cost) => {
         if (isUnpricedMeteredCost(provider, cost)) {
-          recordUnpricedBudgetUsage(apiKeyId, { provider, model });
+          void recordUnpricedBudgetUsage(apiKeyId, { provider, model }).catch((err) => {
+            console.error("Failed to record unpriced budget usage:", err?.message ?? err);
+          });
         }
       },
       ledger: buildStreamLedgerDetails(effectiveServiceTier, normalizedStreamStatus < 400, traceId),
@@ -602,22 +601,6 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
     });
     // === /Quota Share POST-hook streaming ===
 
-    if (streamStatus === 200) {
-      // #12150 P1b surface 3 (fix round 1): see the matching non-streaming
-      // gate above — an observed request populates NO durable memory from
-      // either the request-derived text or this streamed response.
-      runMemoryExtractionGate({
-        memoryOwnerId,
-        memorySettings,
-        videoBridgeObserved,
-        pipelineSessionId,
-        requestBody: body as Record<string, unknown>,
-        responseBody: (streamResponseBody ?? null) as Record<string, unknown> | null,
-        extractFacts,
-        log,
-      });
-    }
-
     // Semantic cache: store assembled streaming response for future cache hits
     storeStreamingSemanticCacheResponse({
       enabled: semanticCacheEnabled,
@@ -636,7 +619,7 @@ export async function runStreamingTail(deps: StreamingTailDeps) {
     // Plugin onStreamComplete hook — fire-and-forget, fail-open (#9571)
     // Pass traceId as requestId so plugins can correlate the stream-completion event
     // with the originating request (the same id used for onRequest/onResponse). (#11825)
-    runPluginOnStreamCompleteHook({
+    void runPluginOnStreamCompleteHook({
       status: normalizedStreamStatus,
       usage: streamUsage as Record<string, unknown> | undefined,
       ttft,

@@ -76,11 +76,7 @@ import { getComboByName, updateCombo } from "@/lib/db/combos";
 import { isModelAllowedForKey } from "@/lib/db/apiKeys";
 import { isProviderBlockedByIdOrAlias } from "@/shared/utils/noAuthProviders";
 import { promoteSuccessfulComboModel } from "@/lib/combos/autoPromote";
-import {
-  deleteSessionAccountAffinity,
-  getSessionAccountAffinity,
-  evictSessionAccountAffinityForConnectionAsync as evictSessionAccountAffinityForConnection,
-} from "@/lib/db/sessionAccountAffinity";
+import { evictSessionAccountAffinityForConnectionAsync as evictSessionAccountAffinityForConnection } from "@/lib/db/sessionAccountAffinity";
 import { dispatchChatWithAffinityEviction } from "./chatDispatch";
 import { getCachedSettings, getCombosCacheVersion } from "@/lib/db/readCache";
 import { isManagedComboUnsupported } from "./chat/managedComboSupport.ts";
@@ -168,7 +164,6 @@ import { markQuotaHealthy } from "../../domain/quotaCache";
 import { resolveForcedConnectionForCredentialPool } from "../services/sessionAffinityPin.ts";
 import { RequestTelemetry, recordTelemetry } from "../../shared/utils/requestTelemetry";
 import { generateRequestId } from "../../shared/utils/requestId";
-import { logAuditEvent } from "../../lib/compliance/index";
 import { enforceApiKeyPolicy } from "../../shared/utils/apiKeyPolicy";
 import { rejectIfMeteredBudgetExceeded } from "@/lib/usage/meteredBudgetPolicy";
 import { hasProviderQuotaBypassScope } from "../../shared/constants/apiKeyPolicyScopes";
@@ -786,7 +781,7 @@ async function handleChatImplementation(
     const previousResponseId = (body as { previous_response_id: string }).previous_response_id;
     const detailedLoggingEnabled = await isDetailedLoggingEnabled();
     const stored = detailedLoggingEnabled
-      ? resolvePreviousResponseState(previousResponseId, apiKeyInfo?.id ?? null)
+      ? await resolvePreviousResponseState(previousResponseId, apiKeyInfo?.id ?? null)
       : null;
     // resume flag for the attempt store in handleChatCore (best-effort).
     if (!stored) {
@@ -1062,7 +1057,7 @@ async function handleChatImplementation(
   combo = virtualCombo;
   if (combo) {
     if (reasoningDecision) {
-      const filtered = filterReasoningCombo(combo, reasoningDecision);
+      const filtered = await filterReasoningCombo(combo, reasoningDecision);
       if (filtered instanceof Response) return filtered;
       combo = filtered;
     }
@@ -1070,7 +1065,7 @@ async function handleChatImplementation(
       getCachedSettings().catch(() => ({})),
       getCombosCachedForChat(),
     ]);
-    if (managedLease && isManagedComboUnsupported(combo, settings, allCombos))
+    if (managedLease && (await isManagedComboUnsupported(combo, settings, allCombos)))
       return managedComboRejection();
     log.info(
       "CHAT",
@@ -1639,7 +1634,7 @@ async function handleSingleModelChat(
   const modelPolicyRejection = await resolvedModelGate([`${provider}/${model}`]);
   if (modelPolicyRejection) return modelPolicyRejection;
   const forceLiveComboTest = runtimeOptions.forceLiveComboTest === true;
-  const budgetRejection = rejectIfMeteredBudgetExceeded(apiKeyInfo?.id, provider, modelStr);
+  const budgetRejection = await rejectIfMeteredBudgetExceeded(apiKeyInfo?.id, provider, modelStr);
   if (budgetRejection) return budgetRejection;
   const bypassProviderQuotaPolicy = hasProviderQuotaBypassScope(apiKeyInfo?.scopes);
   const forcedConnectionId =
@@ -2057,7 +2052,7 @@ async function handleSingleModelChat(
         runtimeOptions.sessionId &&
         body?._omnirouteSkipContextRelay !== true
       ) {
-        const handoff = getHandoff(runtimeOptions.sessionId, comboName);
+        const handoff = await getHandoff(runtimeOptions.sessionId, comboName);
         if (handoff && handoff.fromAccount !== credentials.connectionId) {
           // Inject only after a real account switch. The combo loop itself cannot
           // reliably detect this because account selection happens inside auth.
@@ -2083,10 +2078,10 @@ async function handleSingleModelChat(
       }
       const museBindFailure =
         museOwner &&
-        muse.bindMuseOwner(museOwner, credentials, refreshedCredentials, () => {
+        (await muse.bindMuseOwner(museOwner, credentials, refreshedCredentials, () => {
           releaseOAuthSession();
           agyLease.release(leaseId);
-        });
+        }));
       if (museBindFailure) return museBindFailure;
       const storeEnabled = isOpenAIResponsesStoreEnabled(
         refreshedCredentials?.providerSpecificData ?? credentials?.providerSpecificData
@@ -2251,7 +2246,7 @@ async function handleSingleModelChat(
           breaker._onSuccess();
         }
         if (injectedHandoff && runtimeOptions.sessionId && comboName) {
-          deleteHandoff(runtimeOptions.sessionId, comboName);
+          await deleteHandoff(runtimeOptions.sessionId, comboName);
         }
         if (telemetry) telemetry.startPhase("finalize");
         if (telemetry) telemetry.endPhase();
@@ -2459,13 +2454,11 @@ async function handleSingleModelChat(
           }
           if (runtimeOptions.sessionAffinityKey) {
             try {
-              const affinity = getSessionAccountAffinity(
+              await evictSessionAccountAffinityForConnection(
                 runtimeOptions.sessionAffinityKey,
-                provider
+                provider,
+                credentials.connectionId
               );
-              if (affinity?.connectionId === credentials.connectionId) {
-                deleteSessionAccountAffinity(runtimeOptions.sessionAffinityKey, provider);
-              }
             } catch {
               // best-effort: selection also excludes this connection for the current retry.
             }
@@ -2508,13 +2501,11 @@ async function handleSingleModelChat(
           }
           if (runtimeOptions.sessionAffinityKey) {
             try {
-              const affinity = getSessionAccountAffinity(
+              await evictSessionAccountAffinityForConnection(
                 runtimeOptions.sessionAffinityKey,
-                provider
+                provider,
+                credentials.connectionId
               );
-              if (affinity?.connectionId === credentials.connectionId) {
-                deleteSessionAccountAffinity(runtimeOptions.sessionAffinityKey, provider);
-              }
             } catch {
               // best-effort: selection also excludes this connection for the current retry.
             }

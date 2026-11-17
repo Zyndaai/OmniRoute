@@ -22,8 +22,12 @@ export interface ModelAccessLookups {
     providerOrAlias: string,
     modelId: string
   ): Promise<{ providerId: string; publishedModelId: string } | null>;
-  isPublishedModelHidden(providerId: string, alias: string, modelId: string): boolean;
-  checkGroupAccess(keyId: string, modelId: string, provider?: string): { allowed: boolean };
+  isPublishedModelHidden(providerId: string, alias: string, modelId: string): Promise<boolean>;
+  checkGroupAccess(
+    keyId: string,
+    modelId: string,
+    provider?: string
+  ): Promise<{ allowed: boolean }>;
   isDeniedUnderCanonicalProvider(
     keyId: string,
     provider: string | undefined,
@@ -81,7 +85,7 @@ export async function evaluateModelAccess(
         }
       }
 
-      if (lookups.isPublishedModelHidden(providerId, providerOrAlias, publishedModelId)) {
+      if (await lookups.isPublishedModelHidden(providerId, providerOrAlias, publishedModelId)) {
         return { allowed: false, reason: "hidden" };
       }
     }
@@ -98,8 +102,8 @@ export async function evaluateModelAccess(
       const hasProvider = groupModelId.includes("/");
       const provider = hasProvider ? groupModelId.split("/")[0] : undefined;
       const target = hasProvider ? groupModelId.split("/").slice(1).join("/") : groupModelId;
-      const targetOk = lookups.checkGroupAccess(policy.id, target, provider).allowed;
-      const fullOk = lookups.checkGroupAccess(policy.id, groupModelId, provider).allowed;
+      const targetOk = (await lookups.checkGroupAccess(policy.id, target, provider)).allowed;
+      const fullOk = (await lookups.checkGroupAccess(policy.id, groupModelId, provider)).allowed;
       if (!targetOk || !fullOk) allowed = false;
 
       if (allowed && (await lookups.isDeniedUnderCanonicalProvider(policy.id, provider, target))) {

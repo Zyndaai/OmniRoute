@@ -1,12 +1,11 @@
 /**
- * Deferred retry for usage writes blocked by a locked database.
+ * Deferred retry for usage writes that meet a transient database conflict.
  *
- * The hot-path writers here are best-effort: the database caps a contended
- * write at 2 s (`busy_timeout = 2000` in `src/lib/db/core.ts`) so a busy disk
- * cannot freeze the event loop. When a write still meets a lock, the first
- * failure is swallowed silently and the entry is attempted once more after a
- * short delay, off the request path (`setTimeout`, never awaited). If the
- * second attempt fails the existing log line is written and the row is
+ * The hot-path writers here are best-effort. When a write meets a retryable
+ * conflict (deadlock, serialization failure, lock timeout, statement timeout),
+ * the first failure is swallowed silently and the entry is attempted once more
+ * after a short delay, off the request path (`setTimeout`, never awaited). If
+ * the second attempt fails the existing log line is written and the row is
  * dropped. Any other error keeps the current behaviour: logged at once,
  * never retried. If the server stops during the wait the row is lost as
  * before, on a best-effort basis (the timer never keeps the loop alive).
@@ -14,7 +13,7 @@
  * @module lib/usage/usageWriteRetry
  */
 
-import { getDbInstance } from "../db/core";
+import { db, ts, type DbExecutor } from "@/lib/db/pg";
 import { resolveBillingTeamIdForApiKeyAt } from "../db/teams";
 import { resolveProviderId } from "@/shared/constants/providers";
 import {
@@ -37,34 +36,19 @@ import type { UsageEntry } from "./usageHistory";
 /** Delay before the single deferred attempt. Internal, not user-facing. */
 const RETRY_DELAY_MS = 1000;
 
+/** SQLSTATEs that are expected to clear within the retry delay. */
+const RETRYABLE_SQLSTATES = new Set(["40001", "40P01", "55P03", "57014"]);
+
 /**
- * True when the error is a database lock, in any shape the supported drivers
- * report it. Restricted to locks: only a lock is expected to clear within the
- * retry delay. Lock classification mirrors the lock subset of the probe
- * classifier and the busy checker (drivers report plain "database is locked"
- * while better-sqlite3 carries the name in `code` and node:sqlite the numeric
- * primary code in `errcode`, extended codes in the high bits).
+ * True when the error is a transient database conflict worth one deferred retry:
+ * a `DbBackendError` of kind "retryable", or the raw SQLSTATE of a serialization
+ * failure (40001), deadlock (40P01), lock timeout (55P03) or statement timeout (57014).
+ * The name is kept from the SQLite era so existing callers need no change.
  */
 export function isWriteLockError(error: unknown): boolean {
-  const details = error as { code?: unknown; errcode?: unknown; message?: unknown } | null;
-  const code = details?.code ?? details?.errcode;
-  if (typeof code === "string" && isLockCodeName(code)) return true;
-  if (typeof code === "number" && isLockCodeNumber(code)) return true;
-  const message = error instanceof Error ? error.message : String(details?.message ?? error);
-  return isLockMessage(message);
-}
-
-function isLockCodeName(code: string): boolean {
-  return /^SQLITE_(BUSY|LOCKED)/.test(code);
-}
-
-function isLockCodeNumber(code: number): boolean {
-  const primary = code & 0xff;
-  return primary === 5 || primary === 6;
-}
-
-function isLockMessage(message: string): boolean {
-  return /database(?: table| schema)? is (?:locked|busy)|SQLITE_BUSY|SQLITE_LOCKED/i.test(message);
+  const details = error as { code?: unknown; kind?: unknown } | null;
+  if (details?.kind === "retryable") return true;
+  return typeof details?.code === "string" && RETRYABLE_SQLSTATES.has(details.code);
 }
 
 /** Legacy natural-key dedup stays on unless the caller owns a physical attempt. */
@@ -79,20 +63,22 @@ type UsageWriteOptions = {
  * `deduplicate: false` is the image-attempt opt-out: two real upstream calls
  * can share every natural-key field, including the millisecond timestamp.
  */
-export function attemptWrite(entry: UsageEntry, options: UsageWriteOptions = {}): void {
-  const db = getDbInstance();
-  const prepared = prepareEntry(db, entry);
+export async function attemptWrite(
+  entry: UsageEntry,
+  options: UsageWriteOptions = {}
+): Promise<void> {
+  const prepared = await prepareEntry(entry);
   let inserted = false;
   const deduplicate = options.deduplicate !== false;
 
-  db.transaction(() => {
+  await db().transaction(async (tx) => {
     if (!deduplicate) {
-      insertEntry(db, prepared);
+      await insertEntry(tx, prepared);
       inserted = true;
       return;
     }
-    inserted = insertUnlessDuplicate(db, prepared);
-  })();
+    inserted = await insertUnlessDuplicate(tx, prepared);
+  });
 
   // Decoupled via the event bus so usageHistory never imports providerLimits
   // (which would pull the executors/translator graph into the type-check surface).
@@ -116,11 +102,15 @@ type PreparedEntry = {
   };
 };
 
-function prepareEntry(db: ReturnType<typeof getDbInstance>, entry: UsageEntry): PreparedEntry {
-  const timestamp = entry.timestamp || new Date().toISOString();
+async function prepareEntry(entry: UsageEntry): Promise<PreparedEntry> {
+  // Normalised once: it is the partition key and the dedup key, and an unparseable
+  // value would otherwise reach the insert as NULL.
+  const timestamp = ts(entry.timestamp) ?? new Date().toISOString();
   const connection = entry.connectionId
-    ? (db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(entry.connectionId) as
-        Record<string, unknown> | undefined)
+    ? await db().queryOne<Record<string, unknown>>(
+        "SELECT * FROM provider_connections WHERE id = $1",
+        [entry.connectionId]
+      )
     : undefined;
   return {
     entry,
@@ -128,9 +118,10 @@ function prepareEntry(db: ReturnType<typeof getDbInstance>, entry: UsageEntry): 
     serviceTier: normalizeServiceTier(entry.serviceTier ?? entry.service_tier),
     // Ordinary terminal writes always resolve ownership from effective history.
     // Historical snapshot restoration belongs to the authenticated JSON importer.
-    billingTeamId: resolveBillingTeamIdForApiKeyAt(entry.apiKeyId, timestamp),
-    tokensInput: getLoggedInputTokens(entry.tokens),
-    tokensOutput: getLoggedOutputTokens(entry.tokens),
+    billingTeamId: await resolveBillingTeamIdForApiKeyAt(entry.apiKeyId, timestamp),
+    // Integer columns: round once here so the dedup lookup compares what is stored.
+    tokensInput: Math.round(Number(getLoggedInputTokens(entry.tokens)) || 0),
+    tokensOutput: Math.round(Number(getLoggedOutputTokens(entry.tokens)) || 0),
     accountIdentity: connection
       ? resolveUsageAccountIdentity(connection)
       : resolveOrphanedUsageAccountIdentity(entry.provider, entry.connectionId),
@@ -144,20 +135,29 @@ function prepareEntry(db: ReturnType<typeof getDbInstance>, entry: UsageEntry): 
 // Keyed on the natural identity of a request: timestamp + provider + model
 // + connectionId + apiKeyId + token counts. If only the endpoint is missing
 // on the existing row, fill it in rather than inserting a duplicate.
-function insertUnlessDuplicate(
-  db: ReturnType<typeof getDbInstance>,
-  prepared: PreparedEntry
-): boolean {
+async function insertUnlessDuplicate(tx: DbExecutor, prepared: PreparedEntry): Promise<boolean> {
   const { entry, timestamp, tokensInput, tokensOutput } = prepared;
-  if (backfillDuplicateUsageEntry(db, entry, timestamp, tokensInput, tokensOutput)) {
+  // SQLite's single writer made look-then-insert atomic; two concurrent callbacks for
+  // one request would now both miss the lookup. Serialize them per natural key.
+  const lockKey = [
+    timestamp,
+    entry.provider ?? "",
+    entry.model ?? "",
+    entry.connectionId ?? "",
+    entry.apiKeyId ?? "",
+    tokensInput,
+    tokensOutput,
+  ].join("|");
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [lockKey]);
+  if (await backfillDuplicateUsageEntry(tx, entry, timestamp, tokensInput, tokensOutput)) {
     return false;
   }
 
-  insertEntry(db, prepared);
+  await insertEntry(tx, prepared);
   return true;
 }
 
-function insertEntry(db: ReturnType<typeof getDbInstance>, prepared: PreparedEntry): void {
+async function insertEntry(tx: DbExecutor, prepared: PreparedEntry): Promise<void> {
   const {
     entry,
     timestamp,
@@ -168,42 +168,46 @@ function insertEntry(db: ReturnType<typeof getDbInstance>, prepared: PreparedEnt
     accountIdentity,
   } = prepared;
   const { providerCredits, providerCostUsd } = readReportedCost(entry.provider, entry.tokens);
-  db.prepare(
+  // Integer columns reject fractional values (token counts after a ratio, latencies).
+  const int = (value: unknown): number => Math.round(toFinite(value));
+  await tx.execute(
     `
     INSERT INTO usage_history (provider, model, connection_id, account_key, account_label,
       account_label_priority, api_key_id, api_key_name, billing_team_id,
       tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
       service_tier, status, success, latency_ms, ttft_ms, error_code, combo_strategy, endpoint,
-      cpa_auth_index, timestamp, provider_credits, provider_cost_usd)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    entry.provider ? resolveProviderId(entry.provider) : null,
-    entry.model || null,
-    entry.connectionId || null,
-    accountIdentity.accountKey,
-    accountIdentity.accountLabel,
-    accountIdentity.accountLabelPriority,
-    entry.apiKeyId || null,
-    entry.apiKeyName || null,
-    billingTeamId,
-    tokensInput,
-    tokensOutput,
-    getPromptCacheReadTokens(entry.tokens),
-    getPromptCacheCreationTokens(entry.tokens),
-    getReasoningTokens(entry.tokens),
-    serviceTier,
-    entry.status || null,
-    entry.success === false ? 0 : 1,
-    toFinite(entry.latencyMs),
-    toFirstToken(entry),
-    entry.errorCode || null,
-    entry.comboStrategy || entry.combo_strategy || null,
-    entry.endpoint || null,
-    entry.cpaAuthIndex || null,
-    timestamp,
-    providerCredits,
-    providerCostUsd
+      cpa_auth_index, "timestamp", provider_credits, provider_cost_usd)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+      $20, $21, $22, $23, $24, $25, $26)
+  `,
+    [
+      entry.provider ? resolveProviderId(entry.provider) : null,
+      entry.model || null,
+      entry.connectionId || null,
+      accountIdentity.accountKey,
+      accountIdentity.accountLabel,
+      int(accountIdentity.accountLabelPriority),
+      entry.apiKeyId || null,
+      entry.apiKeyName || null,
+      billingTeamId,
+      int(tokensInput),
+      int(tokensOutput),
+      int(getPromptCacheReadTokens(entry.tokens)),
+      int(getPromptCacheCreationTokens(entry.tokens)),
+      int(getReasoningTokens(entry.tokens)),
+      serviceTier,
+      entry.status || null,
+      entry.success !== false,
+      int(entry.latencyMs),
+      Math.round(toFirstToken(entry)),
+      entry.errorCode || null,
+      entry.comboStrategy || entry.combo_strategy || null,
+      entry.endpoint || null,
+      entry.cpaAuthIndex || null,
+      timestamp,
+      providerCredits ?? null,
+      providerCostUsd ?? null,
+    ]
   );
 }
 
@@ -222,12 +226,12 @@ function toFirstToken(entry: UsageEntry): number {
  * line and stops.
  */
 export function scheduleWriteRetry(
-  task: () => void,
+  task: () => void | Promise<void>,
   onFinalFailure: (error: unknown) => void
 ): Promise<void>;
 export function scheduleWriteRetry(entry: UsageEntry, options?: UsageWriteOptions): void;
 export function scheduleWriteRetry(
-  taskOrEntry: (() => void) | UsageEntry,
+  taskOrEntry: (() => void | Promise<void>) | UsageEntry,
   optionsOrFailure?: UsageWriteOptions | ((error: unknown) => void)
 ): Promise<void> | void {
   if (typeof taskOrEntry !== "function") {
@@ -242,13 +246,15 @@ export function scheduleWriteRetry(
   const fail = typeof optionsOrFailure === "function" ? optionsOrFailure : () => {};
   return new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
-      try {
-        task();
-      } catch (retryError) {
-        fail(retryError);
-      } finally {
-        resolve();
-      }
+      void (async () => {
+        try {
+          await task();
+        } catch (retryError) {
+          fail(retryError);
+        } finally {
+          resolve();
+        }
+      })();
     }, RETRY_DELAY_MS);
     // Allow Node.js to exit naturally even if the timer is still pending
     // (avoids keeping the event loop alive for a stray retry).

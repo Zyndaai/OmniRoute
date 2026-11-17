@@ -64,7 +64,7 @@ async function resolvePoolForSync(poolId: string): Promise<{
     groupName: string;
   };
 } | null> {
-  const pool = getPool(poolId);
+  const pool = await getPool(poolId);
   if (!pool) return null;
 
   // Defensive: ensure connectionIds is always a non-empty array.
@@ -75,7 +75,7 @@ async function resolvePoolForSync(poolId: string): Promise<{
 
   // B4: resolve the group name for combo naming.
   // Fall back to pool.name when the group is missing (legacy / test isolation).
-  const groupName = getGroupName(pool.groupId) ?? pool.name;
+  const groupName = (await getGroupName(pool.groupId)) ?? pool.name;
 
   return {
     pool: {
@@ -248,9 +248,9 @@ export async function syncQuotaCombos(poolId: string): Promise<void> {
     try {
       const existing = await getComboByName(comboName);
       // A pool may be deleted while this fire-and-forget sync is awaiting combo
-      // lookups. Re-check immediately before the synchronous DB upsert so stale
+      // lookups. Re-check immediately before the DB upsert so stale
       // create/update work cannot recreate managed combos after delete cleanup.
-      if (!getPool(poolId)) return;
+      if (!(await getPool(poolId))) return;
       const payload = {
         name: comboName,
         models: steps,

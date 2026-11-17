@@ -132,7 +132,7 @@ export async function evaluateAutoCandidates(options: EvaluateAutoCandidatesOpti
     sourceCandidates: builtCandidates,
     candidates,
     routableCandidates,
-    scoredTargets: scoreAutoTargets(
+    scoredTargets: await scoreAutoTargets(
       options.targets,
       routableCandidates,
       options.taskType,
@@ -210,10 +210,14 @@ export async function resolveAutoStrategyOrder(
     if (emptyPoolResponse) return { earlyResponse: emptyPoolResponse };
     // Keep #5240 prompt-emulation providers (toolCalling:"emulated") even when
     // registry/capability rows honestly report toolCalling:false.
-    const filtered = eligibleTargets.filter(
-      (target) =>
-        supportsToolCalling(target.modelStr) || providerSupportsEmulatedToolCalling(target.provider)
+    const toolVerdicts = await Promise.all(
+      eligibleTargets.map(
+        async (target) =>
+          providerSupportsEmulatedToolCalling(target.provider) ||
+          (await supportsToolCalling(target.modelStr))
+      )
     );
+    const filtered = eligibleTargets.filter((_, index) => toolVerdicts[index]);
     if (filtered.length > 0) {
       eligibleTargets = filtered;
     } else if (compatFilterFailOpen) {
@@ -258,8 +262,11 @@ export async function resolveAutoStrategyOrder(
       : []
   );
   if (estimatedInputTokens > 0) {
-    const filteredByContext = eligibleTargets.filter((target) => {
-      const limit = getModelContextLimitForModelString(target.modelStr);
+    const contextLimits = await Promise.all(
+      eligibleTargets.map((target) => getModelContextLimitForModelString(target.modelStr))
+    );
+    const filteredByContext = eligibleTargets.filter((_, index) => {
+      const limit = contextLimits[index];
       if (limit === null || limit === undefined) return true; // unknown — include to be safe
       return limit >= estimatedInputTokens;
     });
@@ -456,7 +463,7 @@ export async function resolveAutoStrategyOrder(
     if (!selectedProvider || !selectedModel) {
       let selection;
       try {
-        selection = selectAutoProvider(
+        selection = await selectAutoProvider(
           {
             id: combo.id || combo.name,
             name: combo.name,

@@ -126,11 +126,11 @@ interface PoolCandidate {
 export function buildAutoCandidateFilter(
   category?: AutoCategory,
   tier?: AutoTier
-): ((candidate: PoolCandidate) => boolean) | null {
-  const checks: Array<(c: PoolCandidate) => boolean> = [];
+): ((candidate: PoolCandidate) => Promise<boolean>) | null {
+  const checks: Array<(c: PoolCandidate) => boolean | Promise<boolean>> = [];
 
   if (category === "vision" || category === "multimodal") {
-    checks.push((c) => {
+    checks.push(async (c) => {
       if (c.resolvedSupportsVision !== undefined) {
         // #vision-pool: same bridge exclusion as the on-demand path below —
         // registry entries whose catalog overstates vision support are forced
@@ -140,7 +140,7 @@ export function buildAutoCandidateFilter(
         return !isVisionBridgeForcedModel(`${c.provider}/${c.model}`);
       }
       try {
-        const caps = getResolvedModelCapabilities({ provider: c.provider, model: c.model });
+        const caps = await getResolvedModelCapabilities({ provider: c.provider, model: c.model });
         const capable = caps.supportsVision === true || isVisionModelId(c.model);
         if (!capable) return false;
         // #vision-pool: registry entries whose catalog OVERSTATES vision support
@@ -154,12 +154,12 @@ export function buildAutoCandidateFilter(
     });
   }
   if (category === "reasoning") {
-    checks.push((c) => {
+    checks.push(async (c) => {
       if (c.resolvedReasoning !== undefined && c.resolvedSupportsThinking !== undefined) {
         return c.resolvedReasoning || c.resolvedSupportsThinking;
       }
       try {
-        const caps = getResolvedModelCapabilities({ provider: c.provider, model: c.model });
+        const caps = await getResolvedModelCapabilities({ provider: c.provider, model: c.model });
         return caps.reasoning === true || caps.supportsThinking === true;
       } catch {
         return false;
@@ -174,7 +174,12 @@ export function buildAutoCandidateFilter(
   }
 
   if (checks.length === 0) return null;
-  return (candidate: PoolCandidate) => checks.every((fn) => fn(candidate));
+  return async (candidate: PoolCandidate) => {
+    for (const fn of checks) {
+      if (!(await fn(candidate))) return false;
+    }
+    return true;
+  };
 }
 
 function safeClassifyTier(c: PoolCandidate): string {

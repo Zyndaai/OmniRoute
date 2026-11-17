@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   // when the dashboard runs with login disabled (mirrors the ALWAYS_PROTECTED tier).
   const authError = await requireManagementAuth(request, { alwaysRequireAuth: true });
   if (authError) return authError;
-  const tokens = getRelayTokens();
+  const tokens = await getRelayTokens();
   // Strip hash from response
   const safe = tokens.map((t) => ({
     id: t.id,
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: validation.error }, { status: 400 });
   }
   try {
-    const token = createRelayToken(validation.data);
+    const token = await createRelayToken(validation.data);
 
     return NextResponse.json({
       id: token.id,

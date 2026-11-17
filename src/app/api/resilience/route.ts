@@ -295,7 +295,7 @@ export async function PATCH(request) {
       sparseBase.connectionCooldown.apikey.useUpstream429BreakerHints !==
         nextResilience.connectionCooldown.apikey.useUpstream429BreakerHints;
     if (breakerHintsChanged) {
-      resetAllCircuitBreakers();
+      await resetAllCircuitBreakers();
     }
 
     return NextResponse.json({

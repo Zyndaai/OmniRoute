@@ -16,10 +16,10 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    const totalRequests = getAutoRoutingTotalCount();
+    const totalRequests = await getAutoRoutingTotalCount();
 
     // Variant breakdown
-    const variantRows = getAutoRoutingVariantBreakdown();
+    const variantRows = await getAutoRoutingVariantBreakdown();
 
     const variantBreakdown: Record<string, number> = {};
     variantRows.forEach((row) => {
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     });
 
     // Top providers (from LKGP cache or usage logs)
-    const topProviders = getAutoRoutingTopProviders();
+    const topProviders = await getAutoRoutingTopProviders();
 
     return NextResponse.json({
       totalRequests: totalRequests.count,

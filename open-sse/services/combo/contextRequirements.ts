@@ -18,8 +18,8 @@ export interface ContextRequirements {
  * Get context window size for a target model.
  * Returns null if unknown.
  */
-function getTargetContextWindow(target: ResolvedComboTarget): number | null {
-  const limit = getModelContextLimit(target.provider, target.modelStr);
+async function getTargetContextWindow(target: ResolvedComboTarget): Promise<number | null> {
+  const limit = await getModelContextLimit(target.provider, target.modelStr);
   return typeof limit === "number" && limit > 0 ? limit : null;
 }
 
@@ -45,11 +45,11 @@ function getTargetContextWindow(target: ResolvedComboTarget): number | null {
  * @param log - Combo logger for debug output
  * @returns Filtered and sorted targets array
  */
-export function applyContextRequirements(
+export async function applyContextRequirements(
   targets: ResolvedComboTarget[],
   requirements: ContextRequirements | undefined,
   log: ComboLogger
-): ResolvedComboTarget[] {
+): Promise<ResolvedComboTarget[]> {
   if (!requirements || targets.length === 0) return targets;
 
   const {
@@ -64,13 +64,22 @@ export function applyContextRequirements(
 
   let filtered = targets;
 
+  // Load every target's window once; the filters and the sort below read this map.
+  const windows = new Map<ResolvedComboTarget, number | null>();
+  await Promise.all(
+    targets.map(async (target) => {
+      windows.set(target, await getTargetContextWindow(target));
+    })
+  );
+  const windowOf = (target: ResolvedComboTarget): number | null => windows.get(target) ?? null;
+
   // Apply minContextWindow filtering
   if (minContextWindow && minContextWindow > 0) {
     const beforeFilterCount = filtered.length;
 
     const classified = filtered.map((target) => ({
       target,
-      contextWindow: getTargetContextWindow(target),
+      contextWindow: windowOf(target),
     }));
 
     filtered = classified
@@ -119,7 +128,7 @@ export function applyContextRequirements(
     const beforeFilterCount = filtered.length;
 
     filtered = filtered.filter((target) => {
-      const contextWindow = getTargetContextWindow(target);
+      const contextWindow = windowOf(target);
 
       // Unknown context limit handling
       if (contextWindow === null) {
@@ -145,8 +154,8 @@ export function applyContextRequirements(
   // Apply preferLargeContext sorting
   if (preferLargeContext && filtered.length > 1) {
     filtered = [...filtered].sort((a, b) => {
-      const aContext = getTargetContextWindow(a) ?? 0;
-      const bContext = getTargetContextWindow(b) ?? 0;
+      const aContext = windowOf(a) ?? 0;
+      const bContext = windowOf(b) ?? 0;
       return bContext - aContext; // Descending order
     });
 
@@ -154,7 +163,7 @@ export function applyContextRequirements(
       "COMBO",
       `Context requirements: sorted by context size (descending): ${filtered
         .map((t) => {
-          const ctx = getTargetContextWindow(t);
+          const ctx = windowOf(t);
           return `${t.modelStr}(${ctx === null ? "unknown" : ctx})`;
         })
         .join(", ")}`

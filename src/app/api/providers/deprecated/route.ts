@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
   const deleted = Number(await deleteProviderConnectionsByProvider(provider) || 0);
 
-  logAuditEvent({
+  await logAuditEvent({
     action: "provider.credentials.revoked",
     actor: "admin",
     target: provider,

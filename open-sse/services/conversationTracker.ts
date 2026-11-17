@@ -525,7 +525,7 @@ function probeTurnHashes(turnHashes: string[]): string[] {
 }
 
 /** Bucket candidates holding some of this request's turns; recency only when there are none. */
-function findCandidates(fingerprintHash: string, probes: string[]) {
+async function findCandidates(fingerprintHash: string, probes: string[]) {
   return probes.length > 0
     ? findAgenticConversationsByContent(fingerprintHash, probes)
     : findAgenticConversationsByFingerprint(fingerprintHash);
@@ -539,12 +539,12 @@ interface ReconnectContext {
 }
 
 /** Continue the first candidate whose chain this request extends; null when none does. */
-function reconnectToCandidates(
-  candidates: ReturnType<typeof findAgenticConversationsByFingerprint>,
+async function reconnectToCandidates(
+  candidates: Awaited<ReturnType<typeof findAgenticConversationsByFingerprint>>,
   { chainTurns, turnHashes, walkBudget, correlationId }: ReconnectContext
-): ResolveConversationIdResult | null {
+): Promise<ResolveConversationIdResult | null> {
   for (const candidate of candidates) {
-    const index = getConversationTurnIndex(candidate.id);
+    const index = await getConversationTurnIndex(candidate.id);
     if (index.nodeIds.size === 0) continue;
 
     const { match } = findReconnectMatch(chainTurns, index, {
@@ -563,7 +563,7 @@ function reconnectToCandidates(
       // Every turn from the reconnect point onward already exists on this
       // chain (e.g. an exact retry, or the whole request is already fully
       // recorded) — a real continuation, nothing new to insert.
-      updateAgenticConversation(candidate.id, { turnCount: candidate.turnCount + 1 });
+      await updateAgenticConversation(candidate.id, { turnCount: candidate.turnCount + 1 });
       return { conversationId: candidate.id, isNewConversation: false };
     }
 
@@ -581,8 +581,8 @@ function reconnectToCandidates(
         candidate.id,
         turnHashes
       );
-      insertConversationTurnNodes(candidate.id, correlationId, newNodes);
-      updateAgenticConversation(candidate.id, { turnCount: candidate.turnCount + 1 });
+      await insertConversationTurnNodes(candidate.id, correlationId, newNodes);
+      await updateAgenticConversation(candidate.id, { turnCount: candidate.turnCount + 1 });
       return { conversationId: candidate.id, isNewConversation: false };
     }
 
@@ -619,7 +619,7 @@ export async function resolveConversationId(
   // new prefix so the existing header's contract/format stays unchanged.
   if (input.clientSessionIdHeader && input.clientSessionIdHeader.trim()) {
     const id = input.clientSessionIdHeader.trim().slice(0, MAX_STORED_ID_LENGTH);
-    touchOrCreateExternalConversation(id, { apiKeyId: input.apiKeyId });
+    await touchOrCreateExternalConversation(id, { apiKeyId: input.apiKeyId });
     return { conversationId: id, isNewConversation: false };
   }
 
@@ -665,15 +665,15 @@ export async function resolveConversationId(
   // bucketing, or before this client started sending a session id, reachable.
   const probes = probeTurnHashes(turnHashes);
   const reconnected =
-    reconnectToCandidates(findCandidates(fingerprintHash, probes), context) ??
+    (await reconnectToCandidates(await findCandidates(fingerprintHash, probes), context)) ??
     (fingerprintHash !== legacyFingerprintHash
-      ? reconnectToCandidates(findCandidates(legacyFingerprintHash, probes), context)
+      ? await reconnectToCandidates(await findCandidates(legacyFingerprintHash, probes), context)
       : null);
   if (reconnected) return reconnected;
 
   const id = `conv_${randomUUID()}`;
-  createAgenticConversation({ id, apiKeyId: input.apiKeyId, fingerprintHash });
-  insertConversationTurnNodes(
+  await createAgenticConversation({ id, apiKeyId: input.apiKeyId, fingerprintHash });
+  await insertConversationTurnNodes(
     id,
     input.correlationId,
     buildNewNodes(chainTurns, 0, id, id, turnHashes)

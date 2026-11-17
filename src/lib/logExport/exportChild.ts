@@ -1,7 +1,11 @@
-/** One short-lived OS process per destination run. Never import the server DB singleton. */
+/**
+ * One short-lived OS process per destination run. It opens its own PostgreSQL pool (the
+ * pool is per process) and closes it before exiting, so a stuck destination never holds
+ * a connection of the server.
+ */
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { openLogExportReadOnlyDb } from "../db/logExportReadOnly";
+import { db as getDb } from "../db/pg";
 import { resolveDataDir } from "../dataPaths";
 import {
   attachExportBodies,
@@ -40,7 +44,7 @@ process.on("message", (message: ExportChildStart | { kind: "ack"; cursorRowId: n
 });
 
 async function run(start: ExportChildStart) {
-  let db: ReturnType<typeof openLogExportReadOnlyDb> | undefined;
+  let db: ReturnType<typeof getDb> | undefined;
   let secretValues: string[] = [];
   try {
     // Only parent-injected test code can register fixture destinations or stub fetch.
@@ -54,17 +58,17 @@ async function run(start: ExportChildStart) {
     if (!type) throw new Error("Unknown log export destination type");
     secretValues = exportSecretValues(start.config, type.secretFields);
     const client = type.createClient(start.config);
-    db = openLogExportReadOnlyDb();
+    db = getDb();
     const readDb = db;
-    // Snapshot the insertion boundary, not a long-lived SQLite read transaction:
-    // live WAL writers/checkpoints remain free while destination I/O awaits.
-    const throughRowId = getMaxCallLogRowId(readDb);
+    // Snapshot the insertion boundary (`seq`), not a long-lived read transaction:
+    // writers stay free while destination I/O awaits.
+    const throughRowId = await getMaxCallLogRowId(readDb);
     const baseDir = path.join(resolveDataDir(), "call_logs");
     let cursor = start.cursorRowId;
     let exported = 0;
     let prepared = false;
     while (exported < start.maxRowsPerRun) {
-      const summaries = getCallLogsForExport(
+      const summaries = await getCallLogsForExport(
         readDb,
         cursor,
         Math.min(start.batchSize, start.maxRowsPerRun - exported),
@@ -73,24 +77,27 @@ async function run(start: ExportChildStart) {
       );
       if (!summaries.length) break;
       const batch = start.includeBodies
-        ? await attachExportBodies(summaries, start.maxBodyBytes, async (id) => {
-            const row = readDb
-              .prepare(
-                "SELECT id, timestamp, model, status, detail_state, artifact_relpath, error_summary, has_pipeline_details FROM call_logs WHERE id = ?"
-              )
-              .get(id) as Record<string, unknown> | undefined;
+        ? await attachExportBodies(summaries, start.maxBodyBytes, async (id, timestamp) => {
+            const row = await readDb.queryOne<Record<string, unknown>>(
+              `SELECT id, "timestamp", model, status, detail_state, artifact_relpath, error_summary, has_pipeline_details
+                 FROM call_logs WHERE id = $1 AND ($2::timestamptz IS NULL OR "timestamp" = $2::timestamptz)
+                 ORDER BY "timestamp" DESC LIMIT 1`,
+              [id, timestamp]
+            );
             if (!row) return null;
+            const detailState = String(row.detail_state ?? "none");
             const entry: CallLogDetailEntry = {
               id: String(row.id),
               timestamp: row.timestamp as string | null,
               model: row.model as string | null,
               status: Number(row.status),
-              detailState: String(row.detail_state ?? "none"),
-              artifactRelPath: row.artifact_relpath as string | null,
+              detailState,
+              // The path is stored at insert; it names an artifact only once published.
+              artifactRelPath: detailState === "ready" ? (row.artifact_relpath as string | null) : null,
               error: row.error_summary,
-              hasPipelineDetails: Number(row.has_pipeline_details) === 1,
+              hasPipelineDetails: row.has_pipeline_details === true,
             };
-            return resolveCallLogDetail(readDb, entry, baseDir);
+            return resolveCallLogDetail(entry, baseDir);
           })
         : summaries;
       if (!prepared) {
@@ -108,12 +115,12 @@ async function run(start: ExportChildStart) {
       exported += batch.length;
       if (batch.length < start.batchSize) break;
     }
-    db.close();
+    await db.close();
     db = undefined;
     await post({ kind: "done" });
     process.exit(0);
   } catch (error) {
-    db?.close();
+    await db?.close().catch(() => {});
     try {
       await post({ kind: "error", message: safeExportError(error, secretValues) });
     } catch {

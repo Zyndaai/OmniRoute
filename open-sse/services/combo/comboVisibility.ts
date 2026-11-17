@@ -9,7 +9,7 @@ const lookups = new WeakMap<HiddenModelsByProvider, ReturnType<typeof createHidd
 export function isComboModelVisible(
   modelStr: string,
   providerId: string | null = null,
-  hiddenModelsByProvider: HiddenModelsByProvider = getHiddenModelsByProvider()
+  hiddenModelsByProvider: HiddenModelsByProvider
 ): boolean {
   const parsed = parseModel(modelStr);
   const hasExplicitProvider =
@@ -27,8 +27,9 @@ export function isComboModelVisible(
 }
 
 /** Share one hidden-model snapshot across all candidates of a recovery decision. */
-export function createComboModelVisibility(
-  hiddenModelsByProvider: HiddenModelsByProvider = getHiddenModelsByProvider()
-): (model: string, provider: string) => boolean {
-  return (model, provider) => isComboModelVisible(model, provider, hiddenModelsByProvider);
+export async function createComboModelVisibility(
+  hiddenModelsByProvider?: HiddenModelsByProvider
+): Promise<(model: string, provider: string) => boolean> {
+  const hidden = hiddenModelsByProvider ?? (await getHiddenModelsByProvider());
+  return (model, provider) => isComboModelVisible(model, provider, hidden);
 }

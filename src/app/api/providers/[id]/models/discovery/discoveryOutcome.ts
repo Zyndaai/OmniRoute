@@ -69,7 +69,7 @@ export function readDiscoveryOutcome(payload: unknown): DiscoveryOutcome | null 
  * is logged and swallowed: the stored outcome is a comfort, never the result of
  * the request that produced it.
  */
-export function recordDiscoveryOutcome(payload: unknown): void {
+export async function recordDiscoveryOutcome(payload: unknown): Promise<void> {
   const outcome = readDiscoveryOutcome(payload);
   if (!outcome) return;
 
@@ -80,7 +80,7 @@ export function recordDiscoveryOutcome(payload: unknown): void {
   if (!provider || !connectionId) return;
 
   try {
-    saveDiscoveryState(provider, connectionId, outcome);
+    await saveDiscoveryState(provider, connectionId, outcome);
   } catch (error) {
     console.error("Failed to store the discovery outcome:", error);
   }

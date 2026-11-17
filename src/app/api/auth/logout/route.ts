@@ -80,7 +80,7 @@ export async function POST(request) {
         "[auth] Failed to revoke the signed-out session:",
         error instanceof Error ? error.name : typeof error
       );
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.logout.failed",
         actor: "admin",
         target: "dashboard-auth",
@@ -104,7 +104,7 @@ export async function POST(request) {
   }
 
   cookieStore.delete("auth_token");
-  logAuditEvent({
+  await logAuditEvent({
     action: "auth.logout.success",
     actor: "admin",
     target: "dashboard-auth",

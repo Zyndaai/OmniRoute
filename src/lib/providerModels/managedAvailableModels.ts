@@ -205,7 +205,7 @@ export async function syncManagedAvailableModelAliases(
   for (const modelId of targetModelIds) {
     const fullModel = `${storagePrefix}/${modelId}`;
 
-    if (getModelIsHidden(providerId, modelId)) {
+    if (await getModelIsHidden(providerId, modelId)) {
       await pruneHiddenModelAliases(state, fullModel);
       continue;
     }

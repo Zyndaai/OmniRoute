@@ -17,7 +17,7 @@ export async function resolveGuardedProxyConfig(
 ): Promise<{ proxyConfig: unknown; blocked: boolean }> {
   const resolved = (await resolveProxyForConnection(connectionId)) as { proxy?: unknown } | null;
   const proxyConfig = resolved?.proxy ?? null;
-  if (!proxyConfig && hasBlockingProxyAssignment(connectionId, provider)) {
+  if (!proxyConfig && (await hasBlockingProxyAssignment(connectionId, provider))) {
     return { proxyConfig: null, blocked: true };
   }
   return { proxyConfig, blocked: false };

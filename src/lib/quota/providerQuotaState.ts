@@ -8,8 +8,9 @@
  * of waiting for a 429.
  *
  * Design notes:
- *  - Window semantics: fixed windows keyed by `window_start` (epoch ms).
- *    When `window_reset` passes, usage resets to 0 for the new window.
+ *  - Window semantics: fixed windows keyed by `window_start`. When
+ *    `window_reset` passes, usage resets to 0 for the new window. The roll
+ *    happens inside one upsert, so concurrent processes cannot lose updates.
  *  - Fail-open: reads return `{ known: false }` when the store is missing
  *    or empty — the scheduler treats unknown budget as available (existing
  *    routing behavior is preserved when quota tracking is not configured).
@@ -18,7 +19,7 @@
  *
  * Part of: Quota-aware provider scheduling (feat/quota-aware-scheduling).
  */
-import { getDbInstance } from "@/lib/db/core";
+import { db, toMs, ts } from "@/lib/db/pg";
 import { createLogger } from "@/shared/utils/logger";
 
 const log = createLogger("quota:provider-state");
@@ -50,8 +51,8 @@ interface RowLike {
   model?: string;
   tokens_used?: number;
   token_limit?: number;
-  window_start?: number;
-  window_reset?: number;
+  window_start?: string;
+  window_reset?: string;
   updated_at?: string;
 }
 
@@ -61,8 +62,8 @@ function normalizeRow(row: RowLike): ProviderQuotaRow {
     model: String(row.model ?? ""),
     tokensUsed: Number(row.tokens_used ?? 0),
     tokenLimit: Number(row.token_limit ?? 0),
-    windowStart: Number(row.window_start ?? 0),
-    windowReset: Number(row.window_reset ?? 0),
+    windowStart: toMs(row.window_start) ?? 0,
+    windowReset: toMs(row.window_reset) ?? 0,
     updatedAt: String(row.updated_at ?? ""),
   };
 }
@@ -72,16 +73,16 @@ function normalizeRow(row: RowLike): ProviderQuotaRow {
  * When the record is stale (its window expired) the caller sees
  * `known: false` — usage for the new window is implicitly zero.
  */
-export function getProviderQuota(
+export async function getProviderQuota(
   connectionId: string,
   model: string
-): ProviderQuotaSnapshot | null {
+): Promise<ProviderQuotaSnapshot | null> {
   if (!connectionId || !model) return null;
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT * FROM provider_quota_state WHERE connection_id = ? AND model = ?")
-      .get(connectionId, model) as RowLike | undefined;
+    const row = await db().queryOne<RowLike>(
+      "SELECT * FROM provider_quota_state WHERE connection_id = $1 AND model = $2",
+      [connectionId, model]
+    );
     if (!row) return null;
 
     const normalized = normalizeRow(row);
@@ -123,62 +124,38 @@ export function getProviderQuota(
 /**
  * Record token usage for (connectionId, model) in the current window.
  *
- * If no row exists, seeds one with the configured tokenLimit. If the window
- * has rolled over, resets usage to the new usage. Best-effort: never throws.
+ * One upsert: a missing row is seeded with the configured tokenLimit, and a row
+ * whose window has rolled over restarts at the new usage. Best-effort: never throws.
  */
-export function recordProviderQuotaUsage(
+export async function recordProviderQuotaUsage(
   connectionId: string,
   model: string,
   tokensUsedDelta: number,
   opts: { tokenLimit?: number; windowMs?: number } = {}
-): void {
+): Promise<void> {
   if (!connectionId || !model || !(tokensUsedDelta > 0)) return;
   try {
-    const db = getDbInstance();
-    const existing = db
-      .prepare("SELECT * FROM provider_quota_state WHERE connection_id = ? AND model = ?")
-      .get(connectionId, model) as RowLike | undefined;
-
     const now = Date.now();
     const windowMs = opts.windowMs ?? 60_000; // default: per-minute window
     const windowStart = Math.floor(now / windowMs) * windowMs;
     const windowReset = windowStart + windowMs;
+    const delta = Math.round(tokensUsedDelta);
+    const limit = Math.round(opts.tokenLimit && opts.tokenLimit > 0 ? opts.tokenLimit : 0);
 
-    if (!existing) {
-      db.prepare(
-        `INSERT OR REPLACE INTO provider_quota_state
+    await db().execute(
+      `INSERT INTO provider_quota_state
          (connection_id, model, tokens_used, token_limit, window_start, window_reset, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        connectionId,
-        model,
-        tokensUsedDelta,
-        opts.tokenLimit ?? 0,
-        windowStart,
-        windowReset,
-        new Date().toISOString()
-      );
-      return;
-    }
-
-    const normalized = normalizeRow(existing);
-    const windowRolledOver = normalized.windowReset > 0 && now > normalized.windowReset;
-    const nextUsed = windowRolledOver ? tokensUsedDelta : normalized.tokensUsed + tokensUsedDelta;
-    const nextLimit =
-      opts.tokenLimit && opts.tokenLimit > 0 ? opts.tokenLimit : normalized.tokenLimit;
-
-    db.prepare(
-      `UPDATE provider_quota_state
-       SET tokens_used = ?, token_limit = ?, window_start = ?, window_reset = ?, updated_at = ?
-       WHERE connection_id = ? AND model = ?`
-    ).run(
-      nextUsed,
-      nextLimit,
-      windowStart,
-      windowReset,
-      new Date().toISOString(),
-      connectionId,
-      model
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (connection_id, model) DO UPDATE SET
+         tokens_used = CASE WHEN provider_quota_state.window_reset < $7
+                            THEN EXCLUDED.tokens_used
+                            ELSE provider_quota_state.tokens_used + EXCLUDED.tokens_used END,
+         token_limit = CASE WHEN EXCLUDED.token_limit > 0 THEN EXCLUDED.token_limit
+                            ELSE provider_quota_state.token_limit END,
+         window_start = EXCLUDED.window_start,
+         window_reset = EXCLUDED.window_reset,
+         updated_at = now()`,
+      [connectionId, model, delta, limit, ts(windowStart), ts(windowReset), ts(now)]
     );
   } catch (err) {
     log.warn(
@@ -189,12 +166,12 @@ export function recordProviderQuotaUsage(
 }
 
 /** Delete all quota state for a connection (used on connection removal). */
-export function clearProviderQuota(connectionId: string): void {
+export async function clearProviderQuota(connectionId: string): Promise<void> {
   if (!connectionId) return;
   try {
-    getDbInstance()
-      .prepare("DELETE FROM provider_quota_state WHERE connection_id = ?")
-      .run(connectionId);
+    await db().execute("DELETE FROM provider_quota_state WHERE connection_id = $1", [
+      connectionId,
+    ]);
   } catch {
     // best-effort
   }

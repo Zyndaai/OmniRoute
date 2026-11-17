@@ -56,7 +56,7 @@ export async function GET(request, { params }) {
     // step label or the full connection id).
     let connectionLabels: Record<string, string> = {};
     try {
-      connectionLabels = buildComboConnectionLabels(combo);
+      connectionLabels = await buildComboConnectionLabels(combo);
     } catch (error) {
       console.warn("Failed to resolve combo connection labels:", error);
     }

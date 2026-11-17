@@ -136,9 +136,9 @@ export async function POST(request: Request) {
     }
 
     const tokenHash = hashToken(rawToken);
-    const token = getRelayTokenByHash(tokenHash);
+    const token = await getRelayTokenByHash(tokenHash);
     if (!token) {
-      recordRelayUsage("unknown", {
+      await recordRelayUsage("unknown", {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "auth_failed",
         statusCode: 401,
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     // sidecar path does not weaken leaked-token abuse protection.
     const ipCheck = checkIpRateLimit(token.id, throttleKey);
     if (!ipCheck.allowed) {
-      recordRelayUsage(token.id, {
+      await recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "rate_limited",
         statusCode: 429,
@@ -181,9 +181,9 @@ export async function POST(request: Request) {
       });
     }
 
-    const rateCheck = checkRateLimit(token.id, token);
+    const rateCheck = await checkRateLimit(token.id, token);
     if (!rateCheck.allowed) {
-      recordRelayUsage(token.id, {
+      await recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "rate_limited",
         statusCode: 429,
@@ -222,9 +222,9 @@ export async function POST(request: Request) {
     }
     const body = parsed.data;
 
-    const guard = injectionGuard(body);
+    const guard = await injectionGuard(body);
     if (guard.blocked) {
-      recordRelayUsage(token.id, {
+      await recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "error",
         statusCode: 400,
@@ -294,14 +294,14 @@ export async function POST(request: Request) {
     // 5. Forward response. Non-streaming responses can be accounted for as soon
     //    as headers arrive; streaming responses finalize on body close/cancel/error.
     const recordUsage: RelayUsageRecorder = (status, statusCode) => {
-      recordRelayUsage(token.id, {
+      void recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status,
         statusCode,
         latencyMs: Date.now() - startTime,
         clientIp,
         userAgent,
-      });
+      }).catch(() => {});
     };
 
     // Never copy the upstream headers wholesale: the sidecar receives our

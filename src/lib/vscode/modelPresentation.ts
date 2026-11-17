@@ -90,7 +90,9 @@ function prefixDisplayName(displayName: string, providerPrefix: string | null) {
   return `${normalizedProviderPrefix} ${stripLeadingProviderPrefix(normalizedDisplayName, normalizedProviderPrefix)}`.trim();
 }
 
-export function resolveVscodeModelMetadata(model: VscodeCatalogModel) {
+export async function resolveVscodeModelMetadata(
+  model: VscodeCatalogModel
+): Promise<CanonicalModelMetadata | null> {
   const rawModelId = model.id || model.root || model.name || "";
   const normalizedModelId = resolveFamilyFirstPublishedModelId(rawModelId);
   const parsedTierModel = parseVscodeServiceTierVariantModelId(normalizedModelId);
@@ -114,10 +116,10 @@ export function resolveVscodeModelMetadata(model: VscodeCatalogModel) {
       : null;
 }
 
-export function getVscodeModelDisplayName(model: VscodeCatalogModel) {
+export async function getVscodeModelDisplayName(model: VscodeCatalogModel): Promise<string> {
   const rawModelId = model.id || model.root || model.name || "";
   const { serviceTier } = parseVscodeServiceTierVariantModelId(rawModelId);
-  const metadata = resolveVscodeModelMetadata(model);
+  const metadata = await resolveVscodeModelMetadata(model);
   const displayName = metadata?.displayName || model.name || model.id || model.root || "unknown";
   const prefixedDisplayName = prefixDisplayName(displayName, getProviderPrefix(metadata));
   const shouldShowTierSuffix = Boolean(serviceTier) || supportsVscodeServiceTierVariants(model);
@@ -126,7 +128,7 @@ export function getVscodeModelDisplayName(model: VscodeCatalogModel) {
     : prefixedDisplayName;
 }
 
-export function getVscodeModelGroupingKey(model: VscodeCatalogModel) {
-  const metadata = resolveVscodeModelMetadata(model);
+export async function getVscodeModelGroupingKey(model: VscodeCatalogModel): Promise<string> {
+  const metadata = await resolveVscodeModelMetadata(model);
   return metadata?.qualifiedId || metadata?.model || model.id || model.name || model.root || "";
 }

@@ -343,7 +343,7 @@ export async function buildAutoCandidates(
   resilienceSettings: ResilienceSettings | null = null,
   apiKeyAllowedConnections: string[] | null = null
 ): Promise<AutoProviderCandidate[]> {
-  const hiddenModelsMap = getHiddenModelsByProvider();
+  const hiddenModelsMap = await getHiddenModelsByProvider();
   const metrics = getComboMetrics(comboName);
   // Opt-in hard quota cutoff (default OFF). When disabled, candidates are never
   // dropped for low quota here — the soft quota penalty + connection cooldown still
@@ -824,7 +824,7 @@ async function handleComboChatInner({
     config,
     comboTargetTimeoutMs,
     reasoningTokenBufferEnabled,
-  } = phaseComboSetup(comboCtx);
+  } = await phaseComboSetup(comboCtx);
   body = comboCtx.body;
 
   // #10681: opaque per-invocation decision trace (safe routing metadata only).
@@ -904,11 +904,13 @@ async function handleComboChatInner({
       : null;
   const chaosDispatch = dispatchChaosFromCombo({
     cfg,
-    comboModels: resolveComboTargets(
-      combo,
-      allCombos,
-      clampComboDepth(config.maxComboDepth),
-      hiddenModelsByProvider
+    comboModels: (
+      await resolveComboTargets(
+        combo,
+        allCombos,
+        clampComboDepth(config.maxComboDepth),
+        hiddenModelsByProvider
+      )
     ).map((target) => target.modelStr),
     comboName: combo.name,
     body,

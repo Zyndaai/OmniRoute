@@ -324,8 +324,8 @@ const STRATEGY_ORDERERS: Record<
     log.info("COMBO", `Reset-window ordering: ${describeFirstTarget(nextTargets)} first`);
     return orderedOnly(nextTargets);
   },
-  "context-optimized": (orderedTargets, { log }) => {
-    const nextTargets = sortTargetsByContextSize(orderedTargets);
+  "context-optimized": async (orderedTargets, { log }) => {
+    const nextTargets = await sortTargetsByContextSize(orderedTargets);
     log.info("COMBO", `Context-optimized ordering: largest first (${nextTargets[0]?.modelStr})`);
     return orderedOnly(nextTargets);
   },

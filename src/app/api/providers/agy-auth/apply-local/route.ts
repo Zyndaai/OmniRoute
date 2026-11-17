@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       overwriteExisting,
     });
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.imported",
       actor: "admin",
       target: getProviderAuditTarget(connection),

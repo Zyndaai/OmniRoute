@@ -60,9 +60,10 @@ export async function POST(
     ? expandVscodeRawModels(catalogBody.data.filter(isUsableChatModel))
     : [];
 
-  const model = Array.isArray(expandedModels)
-    ? expandedModels.find((entry) => matchesRequestedModel(entry, requestedName))
-    : undefined;
+  const matches = await Promise.all(
+    expandedModels.map((entry) => matchesRequestedModel(entry, requestedName))
+  );
+  const model = expandedModels.find((_entry, index) => matches[index]);
 
   if (!model) {
     return Response.json(
@@ -79,9 +80,9 @@ export async function POST(
   }
 
   return Response.json(
-    buildShowPayload(
+    await buildShowPayload(
       model,
-      getVscodeRawModelDisplayName(model),
+      await getVscodeRawModelDisplayName(model),
       model.id || model.name || model.root || "unknown"
     ),
     {

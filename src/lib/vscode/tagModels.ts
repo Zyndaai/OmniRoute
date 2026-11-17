@@ -108,9 +108,9 @@ function buildReasoningFields(model: OpenAiCatalogModel) {
   };
 }
 
-export function toOllamaTagModel(model: OpenAiCatalogModel, mode: "grouped" | "raw") {
+export async function toOllamaTagModel(model: OpenAiCatalogModel, mode: "grouped" | "raw") {
   const actualModelId = model.id || model.root || "unknown";
-  const canonicalMetadata = getCanonicalModelMetadata({
+  const canonicalMetadata = await getCanonicalModelMetadata({
     provider: model.owned_by || null,
     model: model.root || model.id || model.name || null,
   });

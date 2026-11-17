@@ -93,7 +93,7 @@ export async function POST(request) {
       const tgt =
         reqTargetFormat || (provider ? getTargetFormat(provider, providerSpecificData) : "openai");
       const model = getModelId(asJsonRecord(body));
-      const translated = translateRequest(src, tgt, model, body, true, null, provider);
+      const translated = await translateRequest(src, tgt, model, body, true, null, provider);
       return NextResponse.json({
         success: true,
         sourceFormat: src,
@@ -126,7 +126,7 @@ export async function POST(request) {
         const sourceFormat = detectFormat(actualBody);
         const targetFormat = FORMATS.OPENAI;
         const model = getModelId(actualBody);
-        const translated = translateRequest(
+        const translated = await translateRequest(
           sourceFormat,
           targetFormat,
           model,
@@ -152,7 +152,7 @@ export async function POST(request) {
         const providerSpecificData = await getActiveProviderSpecificData(provider);
         const targetFormat = getTargetFormat(provider, providerSpecificData);
         const model = getModelId(actualBody);
-        const translated = translateRequest(
+        const translated = await translateRequest(
           sourceFormat,
           targetFormat,
           model,

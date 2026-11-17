@@ -18,22 +18,22 @@ import {
 
 const MODEL_ID = "claude-sonnet-5-5";
 
-test("Claude Sonnet 5.5 keeps disabled thinking and rejects forced tool choice", () => {
+test("Claude Sonnet 5.5 turns disabled thinking into between_tools and rejects forced tool choice", () => {
   const spec = getModelSpec(MODEL_ID);
   assert.equal(spec?.contextWindow, 1_000_000);
   assert.equal(spec?.maxOutputTokens, 128_000);
   assert.equal(spec?.adaptiveThinkingOnly, true);
-  assert.notEqual(spec?.rejectsThinkingDisabled, true);
+  assert.equal(spec?.rejectsThinkingDisabled, true);
   assert.equal(spec?.rejectsForcedToolChoice, true);
 
-  // Dropping a client's "disabled" lets Sonnet 5.5 fall back to adaptive
-  // thinking, so a no-thinking call bills reasoning tokens it never asked for.
-  const withDisabled = normalizeThinkingForModel(
+  // Anthropic rejects "disabled" for Sonnet 5.5 and names "between_tools" as
+  // its no-thinking value; dropping the field instead made every call think.
+  const noThinking = normalizeThinkingForModel(
     { model: MODEL_ID, thinking: { type: "disabled" }, marker: true },
     MODEL_ID
   );
-  assert.deepEqual(withDisabled.thinking, { type: "disabled" });
-  assert.equal(withDisabled.marker, true);
+  assert.deepEqual(noThinking.thinking, { type: "between_tools" });
+  assert.equal(noThinking.marker, true);
 
   for (const toolChoice of [
     "required",

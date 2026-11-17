@@ -15,15 +15,27 @@ import { createConductorBridge, type ConductorBridge, type ConductorBridgeOption
 let bridge: ConductorBridge | null = null;
 
 /** Starts the bridge once (idempotent). Returns null when CONDUCTOR_HUB_URL is unset. */
-export function initConductorBridge(overrides: Partial<ConductorBridgeOptions> = {}): ConductorBridge | null {
+export async function initConductorBridge(
+  overrides: Partial<ConductorBridgeOptions> = {}
+): Promise<ConductorBridge | null> {
   const hubUrl = process.env.CONDUCTOR_HUB_URL?.trim();
   if (!hubUrl) return null;
+  if (bridge) return bridge;
+  // The bridge reads its cursor synchronously: load it once, keep it in memory and
+  // persist every update in the background.
+  let currentCursor = await getConductorCursor();
   if (bridge) return bridge;
   bridge = createConductorBridge({
     hubUrl,
     token: process.env.CONDUCTOR_HUB_TOKEN?.trim() ?? "",
     tm: getTaskManager(),
-    cursor: { get: getConductorCursor, set: setConductorCursor },
+    cursor: {
+      get: () => currentCursor,
+      set: (value: string) => {
+        currentCursor = value;
+        void setConductorCursor(value).catch(() => {});
+      },
+    },
     ...overrides,
   });
   bridge.start();

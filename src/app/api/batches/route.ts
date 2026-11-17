@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     if (parsedLimit.ok === false) return parsedLimit.response;
     const limit = parsedLimit.value;
     const ownerFilter = listScope.mode === "api_key" ? listScope.apiKeyId : undefined;
-    const batches = listBatches(ownerFilter, limit);
+    const batches = await listBatches(ownerFilter, limit);
     return NextResponse.json({ batches });
   } catch (error) {
     console.log("Error fetching batches:", error);

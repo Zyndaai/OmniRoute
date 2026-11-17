@@ -91,7 +91,7 @@ export async function claimMuseOwner(args: ClaimArgs): Promise<MuseOwner | Respo
       args.allowedConnections,
       args.allowUnavailable
     );
-    const owner = claimMuseSession(scope, args.body, candidates, args.forcedConnectionId);
+    const owner = await claimMuseSession(scope, args.body, candidates, args.forcedConnectionId);
     return { scope, ...owner, emptyRetries: 0, emptyOriginal: null };
   } catch (error) {
     if (error instanceof MuseOwnershipError) return errorResponse(error.status, error.message);
@@ -125,14 +125,14 @@ const accountOf = (credentials: Cred) =>
  * Fence the owner's credential generation after the token refresh. `onFailure` runs for ANY
  * error (caller releases its leases); a MuseOwnershipError becomes the response, others rethrow.
  */
-export function bindMuseOwner(
+export async function bindMuseOwner(
   owner: MuseOwner,
   credentials: Cred,
   refreshed: Partial<Cred> | null | undefined,
   onFailure: () => void
-): Response | null {
+): Promise<Response | null> {
   try {
-    owner.generation = bindMuseGeneration(
+    owner.generation = await bindMuseGeneration(
       owner.scope,
       credentials.connectionId,
       refreshed?.accessToken ||
@@ -152,8 +152,8 @@ export function bindMuseOwner(
 
 /** chatCore hook: re-fence the generation with the credentials of every upstream attempt. */
 export function museBeforeUpstreamAttempt(owner: MuseOwner, credentials: Cred) {
-  return (attempt: Partial<Cred>) => {
-    owner.generation = bindMuseGeneration(
+  return async (attempt: Partial<Cred>): Promise<void> => {
+    owner.generation = await bindMuseGeneration(
       owner.scope,
       attempt.connectionId || credentials.connectionId,
       attempt.accessToken || attempt.apiKey || "",

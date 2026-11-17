@@ -9,7 +9,7 @@ export type SessionAccountAffinityRecord = {
 
 type Result<T> = T | Promise<T>;
 
-/** SQLite stays synchronous; request callers await only Promise results (Redis). */
+/** The SQL store is async (PostgreSQL), like Redis; callers await every operation. */
 export interface SessionAffinityStore {
   readonly driver: "sqlite" | "redis";
   get(

@@ -49,7 +49,7 @@ export async function recordLedgerFromCost(input: CostLedgerRecorderInput): Prom
       }
     }
 
-    recordLedgerEntrySafe({
+    await recordLedgerEntrySafe({
       apiKeyId: input.apiKeyId,
       provider: input.provider || "unknown",
       model: input.model || "unknown",

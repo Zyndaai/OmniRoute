@@ -57,7 +57,7 @@ export async function getUnpricedUsageReport(
   // One row per distinct provider/model; each lookup below is served from the
   // in-memory pricing cache (getCachedPricing), so the loop does no per-row I/O.
   const models: UnpricedUsageModel[] = [];
-  for (const group of getSuccessfulUsageModelGroupsSince(sinceIso)) {
+  for (const group of await getSuccessfulUsageModelGroupsSince(sinceIso)) {
     // Token counts do not affect whether a price row exists; a minimal probe
     // reuses the exact provider-alias / model-normalization lookup enforcement uses.
     const { priced, failed } = await calculateCostDetailed(
@@ -77,7 +77,7 @@ export async function getUnpricedUsageReport(
       `${a.provider}/${a.model}`.localeCompare(`${b.provider}/${b.model}`)
   );
 
-  const limitedApiKeysAffected = countLimitedApiKeysUsingModelsSince(
+  const limitedApiKeysAffected = await countLimitedApiKeysUsingModelsSince(
     sinceIso,
     models.map((m) => `${m.provider}/${m.model}`)
   );

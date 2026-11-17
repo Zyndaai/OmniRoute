@@ -65,19 +65,19 @@ function persistUsageRow(usage: object, ctx: RecordNonStreamingUsageStatsContext
   });
 }
 
-function recordBillableTokens(
+async function recordBillableTokens(
   usage: object,
   apiKeyInfo: RecordNonStreamingUsageStatsContext["apiKeyInfo"],
   provider: string | null | undefined,
   model: string | null | undefined
-): void {
+): Promise<void> {
   if (!apiKeyInfo?.id) return;
   try {
     const billable = computeBillableTokens(usage);
     // Key-quota tpm/rpm counters advance for every successful call regardless
     // of token count (rpm always +1), so the gate in apiKeyPolicy sees current
     // usage. Mirrors recordTokenUsage's swallow-and-continue.
-    recordKeyQuotaUsage(apiKeyInfo.id, billable);
+    await recordKeyQuotaUsage(apiKeyInfo.id, billable);
     if (billable > 0)
       recordTokenUsage(apiKeyInfo.id, provider || "unknown", model || "unknown", billable);
   } catch {
@@ -85,13 +85,13 @@ function recordBillableTokens(
   }
 }
 
-export function recordNonStreamingUsageStats(
+export async function recordNonStreamingUsageStats(
   usage: unknown,
   ctx: RecordNonStreamingUsageStatsContext
-): void {
+): Promise<void> {
   if (!usage || typeof usage !== "object") return;
 
   if (ctx.traceEnabled) logUsageTrace(usage, ctx.provider, ctx.connectionId);
   persistUsageRow(usage, ctx);
-  recordBillableTokens(usage, ctx.apiKeyInfo, ctx.provider, ctx.model);
+  await recordBillableTokens(usage, ctx.apiKeyInfo, ctx.provider, ctx.model);
 }

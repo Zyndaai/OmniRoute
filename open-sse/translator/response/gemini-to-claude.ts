@@ -221,7 +221,7 @@ export function geminiToClaudeResponse(chunk, state) {
             ? state.pendingThoughtSignature
             : null);
         if (signatureForToolCall) {
-          storeGeminiThoughtSignature(
+          void storeGeminiThoughtSignature(
             buildGeminiThoughtSignatureKey(state.signatureNamespace, toolId),
             signatureForToolCall
           );
@@ -286,7 +286,7 @@ export function geminiToClaudeResponse(chunk, state) {
                 ? state.pendingThoughtSignature
                 : null);
             if (signatureForToolCall) {
-              storeGeminiThoughtSignature(
+              void storeGeminiThoughtSignature(
                 buildGeminiThoughtSignatureKey(state.signatureNamespace, tc.id),
                 signatureForToolCall
               );

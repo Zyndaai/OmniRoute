@@ -1,6 +1,7 @@
 import type { Skill, SkillSchema } from "./types";
 import { SkillCreateInputSchema } from "./schemas";
-import { getDbInstance } from "../db/core";
+import { db } from "../db/pg";
+import { jsonValueParam } from "../db/pgJsonText";
 import { randomUUID } from "crypto";
 import { logger } from "../../../open-sse/utils/logger.ts";
 
@@ -111,28 +112,30 @@ class SkillRegistry {
       ...parseableData
     } = skillData;
     const parsed = SkillCreateInputSchema.parse(parseableData);
-    const db = getDbInstance();
     const id = randomUUID();
     const now = new Date();
 
-    db.prepare(
+    await db().execute(
       `INSERT INTO skills (id, api_key_id, name, version, description, schema, handler, enabled, mode, source_provider, tags, install_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      skillData.apiKeyId,
-      parsed.name,
-      parsed.version,
-      parsed.description || null,
-      JSON.stringify(parsed.schema),
-      parsed.handler,
-      parsed.enabled ? 1 : 0,
-      skillData.mode || (parsed.enabled ? "on" : "off"),
-      skillData.sourceProvider || null,
-      JSON.stringify(skillData.tags || []),
-      typeof skillData.installCount === "number" ? Math.max(0, skillData.installCount) : 0,
-      now.toISOString(),
-      now.toISOString()
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)`,
+      [
+        id,
+        skillData.apiKeyId,
+        parsed.name,
+        parsed.version,
+        parsed.description || null,
+        jsonValueParam(parsed.schema),
+        parsed.handler,
+        Boolean(parsed.enabled),
+        skillData.mode || (parsed.enabled ? "on" : "off"),
+        skillData.sourceProvider || null,
+        jsonValueParam(skillData.tags || []),
+        typeof skillData.installCount === "number"
+          ? Math.max(0, Math.round(skillData.installCount))
+          : 0,
+        now.toISOString(),
+        now.toISOString(),
+      ]
     );
 
     const skill: Skill = {
@@ -160,8 +163,6 @@ class SkillRegistry {
   }
 
   async unregister(name: string, version?: string, apiKeyId?: string): Promise<boolean> {
-    const db = getDbInstance();
-
     if (version) {
       const skill = Array.from(this.registeredSkills.values()).find(
         (candidate) =>
@@ -170,16 +171,17 @@ class SkillRegistry {
           (!apiKeyId || candidate.apiKeyId === apiKeyId)
       );
       if (skill && (!apiKeyId || skill.apiKeyId === apiKeyId)) {
-        db.prepare("DELETE FROM skills WHERE id = ?").run(skill.id);
+        await db().execute(`DELETE FROM skills WHERE id = $1`, [skill.id]);
         this.registeredSkills.delete(this.cacheKey(skill));
         this.rebuildVersionCache(name);
         this.invalidateCache();
         return true;
       }
     } else {
-      const deleted = db
-        .prepare("DELETE FROM skills WHERE name = ? AND (? IS NULL OR api_key_id = ?)")
-        .run(name, apiKeyId || null, apiKeyId || null);
+      const deleted = await db().execute(
+        `DELETE FROM skills WHERE name = $1 AND ($2::text IS NULL OR api_key_id = $2::text)`,
+        [name, apiKeyId || null]
+      );
 
       if (deleted.changes > 0) {
         this.removeCachedSkills(
@@ -194,8 +196,7 @@ class SkillRegistry {
   }
 
   async unregisterById(id: string): Promise<boolean> {
-    const db = getDbInstance();
-    const deleted = db.prepare("DELETE FROM skills WHERE id = ?").run(id);
+    const deleted = await db().execute(`DELETE FROM skills WHERE id = $1`, [id]);
     if (deleted.changes > 0) {
       const affectedNames = new Set<string>();
       const keysToDelete = Array.from(this.registeredSkills.entries())
@@ -333,18 +334,17 @@ class SkillRegistry {
     this.pendingLoad = (async () => {
       try {
         log.debug("skills.registry.loadFromDatabase", { cached: false });
-        const db = getDbInstance();
         let rows: unknown[];
         if (!apiKeyId) {
-          rows = db.prepare("SELECT * FROM skills").all();
+          rows = await db().query(`SELECT * FROM skills`);
         } else if (this.isGlobalOwner(apiKeyId)) {
-          rows = db
-            .prepare("SELECT * FROM skills WHERE api_key_id IN (?, ?, ?)")
-            .all(...GLOBAL_SKILL_OWNER_IDS);
+          rows = await db().query(`SELECT * FROM skills WHERE api_key_id = ANY($1::text[])`, [
+            [...GLOBAL_SKILL_OWNER_IDS],
+          ]);
         } else {
-          rows = db
-            .prepare("SELECT * FROM skills WHERE api_key_id IN (?, ?, ?, ?)")
-            .all(apiKeyId, ...GLOBAL_SKILL_OWNER_IDS);
+          rows = await db().query(`SELECT * FROM skills WHERE api_key_id = ANY($1::text[])`, [
+            [apiKeyId, ...GLOBAL_SKILL_OWNER_IDS],
+          ]);
         }
 
         if (apiKeyId) {
@@ -359,8 +359,7 @@ class SkillRegistry {
         for (const row of rows as any[]) {
           const tags = (() => {
             try {
-              if (typeof row.tags !== "string") return [];
-              const parsed = JSON.parse(row.tags);
+              const parsed = typeof row.tags === "string" ? JSON.parse(row.tags) : row.tags;
               return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
             } catch {
               return [];
@@ -373,9 +372,9 @@ class SkillRegistry {
             name: row.name,
             version: row.version,
             description: row.description || "",
-            schema: JSON.parse(row.schema),
+            schema: typeof row.schema === "string" ? JSON.parse(row.schema) : row.schema,
             handler: row.handler,
-            enabled: row.enabled === 1,
+            enabled: row.enabled === true,
             mode: row.mode === "off" || row.mode === "auto" ? row.mode : "on",
             sourceProvider:
               row.source_provider === "skillsmp" || row.source_provider === "skillssh"
@@ -412,13 +411,11 @@ class SkillRegistry {
   }
 
   async setEnabledById(id: string, apiKeyId: string, enabled: boolean): Promise<Skill | undefined> {
-    const db = getDbInstance();
     const now = new Date();
-    const updated = db
-      .prepare(
-        "UPDATE skills SET enabled = ?, mode = ?, updated_at = ? WHERE id = ? AND api_key_id = ?"
-      )
-      .run(enabled ? 1 : 0, enabled ? "on" : "off", now.toISOString(), id, apiKeyId);
+    const updated = await db().execute(
+      `UPDATE skills SET enabled = $1, mode = $2, updated_at = $3 WHERE id = $4 AND api_key_id = $5`,
+      [Boolean(enabled), enabled ? "on" : "off", now.toISOString(), id, apiKeyId]
+    );
 
     if (updated.changes === 0) return undefined;
 

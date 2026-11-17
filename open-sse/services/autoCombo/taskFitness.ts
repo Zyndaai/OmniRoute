@@ -38,18 +38,15 @@
 
 // ─── Static fitness table (versioned rows only, fallback layer 4) ────────
 
-import { getDbInstance } from "../../../src/lib/db/core.ts";
+import { db } from "../../../src/lib/db/pg.ts";
 import {
   getModelIntelligenceBySource,
   setUserFitnessOverrideEntry,
   deleteUserFitnessOverrideEntry,
 } from "../../../src/lib/db/modelIntelligence.ts";
+import { getModelIntelligenceWriteGeneration } from "../../../src/lib/db/modelIntelligenceGeneration.ts";
 import { readFileSync } from "node:fs";
 import { resolveScoresAs } from "./scoresAs.ts";
-import {
-  clearIntelligenceLookupCache,
-  lookupIntelligenceCached,
-} from "./intelligenceLookupCache.ts";
 import { isVendorRetiredId } from "../modelLifecycle.ts";
 
 // #11508 — vendor lifecycle snapshot (#11507). An id the vendor has retired
@@ -202,19 +199,41 @@ const TIER_TASK_FITNESS: Record<string, Record<string, number>> = {
 };
 // ─── DB access helpers ──────────────────────────────────────────────────
 
-function queryModelIntelligence(model: string, category: string, source: string): number | null {
-  return lookupIntelligenceCached(`${model}:${category}:${source}`, () => {
-    try {
-      return getModelIntelligenceBySource(model, source, category)?.score ?? null;
-    } catch {
-      return null;
-    }
-  });
+// Memo for model_intelligence lookups on the auto/* scoring path (#16814). It caches misses
+// as well as hits and is dropped whenever any model_intelligence write happens (see
+// getModelIntelligenceWriteGeneration), so a cached miss can never hide a freshly synced
+// arena_elo row or a user override. Promises are cached, so concurrent candidates share
+// one query per key.
+const intelligenceCache = new Map<string, Promise<number | null>>();
+let seenIntelligenceGeneration = -1;
+
+function queryModelIntelligence(
+  model: string,
+  category: string,
+  source: string
+): Promise<number | null> {
+  const generation = getModelIntelligenceWriteGeneration();
+  if (generation !== seenIntelligenceGeneration) {
+    intelligenceCache.clear();
+    seenIntelligenceGeneration = generation;
+  }
+  const key = `${model}:${category}:${source}`;
+  let hit = intelligenceCache.get(key);
+  if (!hit) {
+    hit = getModelIntelligenceBySource(model, source, category).then(
+      (entry) => entry?.score ?? null,
+      () => null
+    );
+    intelligenceCache.set(key, hit);
+  }
+  return hit;
 }
 
 // ─── Models.dev capability → tier → fitness resolution ──────────────────
 
 let _capabilitiesCache: Record<string, ModelCapRow> | null = null;
+let _capabilitiesLoad: Promise<Record<string, ModelCapRow> | null> | null = null;
+let _capabilitiesGeneration = 0;
 
 interface ModelCapRow {
   tool_call: boolean | null;
@@ -241,17 +260,28 @@ function deriveTierFromCapabilities(cap: ModelCapRow): string {
  * non-null row asserting `true` wins; `limit_context` is the max across rows
  * that carry one. Both are deterministic and independent of row order.
  */
-function loadModelCapabilities(): Record<string, ModelCapRow> | null {
-  if (_capabilitiesCache) return _capabilitiesCache;
+function loadModelCapabilities(): Promise<Record<string, ModelCapRow> | null> {
+  if (_capabilitiesCache) return Promise.resolve(_capabilitiesCache);
+  if (!_capabilitiesLoad) {
+    const generation = _capabilitiesGeneration;
+    const load: Promise<Record<string, ModelCapRow> | null> = readModelCapabilities(
+      generation
+    ).finally(() => {
+      // A newer load may already own the slot after an invalidation.
+      if (_capabilitiesLoad === load) _capabilitiesLoad = null;
+    });
+    _capabilitiesLoad = load;
+  }
+  return _capabilitiesLoad;
+}
 
+async function readModelCapabilities(
+  generation: number
+): Promise<Record<string, ModelCapRow> | null> {
   try {
-    const db = getDbInstance();
-    const tableExists = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='model_capabilities'")
-      .get();
-    if (!tableExists) return null;
-
-    const rows = db.prepare("SELECT * FROM model_capabilities").all() as Record<string, unknown>[];
+    const rows = await db().query<Record<string, unknown>>(
+      "SELECT model_id, tool_call, reasoning, limit_context FROM model_capabilities"
+    );
 
     interface CapAccumulator {
       toolTrue: boolean;
@@ -282,17 +312,17 @@ function loadModelCapabilities(): Record<string, ModelCapRow> | null {
         acc.set(modelId.toLowerCase(), entry);
       }
 
-      if (row.tool_call === true || row.tool_call === 1) {
+      if (row.tool_call === true) {
         entry.toolTrue = true;
         entry.toolSeen = true;
-      } else if (row.tool_call === false || row.tool_call === 0) {
+      } else if (row.tool_call === false) {
         entry.toolFalse = true;
         entry.toolSeen = true;
       }
-      if (row.reasoning === true || row.reasoning === 1) {
+      if (row.reasoning === true) {
         entry.reasonTrue = true;
         entry.reasonSeen = true;
-      } else if (row.reasoning === false || row.reasoning === 0) {
+      } else if (row.reasoning === false) {
         entry.reasonFalse = true;
         entry.reasonSeen = true;
       }
@@ -313,7 +343,8 @@ function loadModelCapabilities(): Record<string, ModelCapRow> | null {
       };
     }
 
-    _capabilitiesCache = cache;
+    // An invalidation that ran while the query was in flight makes this snapshot stale.
+    if (generation === _capabilitiesGeneration) _capabilitiesCache = cache;
     return cache;
   } catch {
     return null;
@@ -322,7 +353,9 @@ function loadModelCapabilities(): Record<string, ModelCapRow> | null {
 
 /** Test/ops hook: forces the next tier lookup to re-read `model_capabilities`. */
 export function invalidateCapabilitiesCache(): void {
+  _capabilitiesGeneration++;
   _capabilitiesCache = null;
+  _capabilitiesLoad = null;
 }
 
 /**
@@ -334,10 +367,10 @@ export function invalidateCapabilitiesCache(): void {
  * layers 1–2 only; models.dev publishes base ids, so e.g. `gpt-5.6-sol-xhigh`
  * used to fall to the wildcard while `gpt-5.6-sol` scored premium).
  */
-export function getModelsDevTierFitnessWithSource(
+export async function getModelsDevTierFitnessWithSource(
   model: string,
   taskType: string
-): { score: number; source: string } | null {
+): Promise<{ score: number; source: string } | null> {
   const normalizedModel = model.toLowerCase();
   const normalizedTask = taskType.toLowerCase();
 
@@ -346,10 +379,10 @@ export function getModelsDevTierFitnessWithSource(
   // premium score from capabilities data that outlived the vendor's support.
   if (loadRetiredModels().has(normalizedModel)) return null;
 
-  const dbScore = queryModelIntelligence(normalizedModel, normalizedTask, "models_dev_tier");
+  const dbScore = await queryModelIntelligence(normalizedModel, normalizedTask, "models_dev_tier");
   if (dbScore !== null) return { score: dbScore, source: "models_dev_tier" };
 
-  const caps = loadModelCapabilities();
+  const caps = await loadModelCapabilities();
   if (!caps) return null;
 
   let capRow = caps[normalizedModel];
@@ -372,8 +405,11 @@ export function getModelsDevTierFitnessWithSource(
   return { score, source: inheritedViaBase ? "models_dev_tier:inherited" : "models_dev_tier" };
 }
 
-export function getModelsDevTierFitness(model: string, taskType: string): number | null {
-  const hit = getModelsDevTierFitnessWithSource(model, taskType);
+export async function getModelsDevTierFitness(
+  model: string,
+  taskType: string
+): Promise<number | null> {
+  const hit = await getModelsDevTierFitnessWithSource(model, taskType);
   return hit ? hit.score : null;
 }
 
@@ -454,8 +490,8 @@ function lookupWildcardBoosts(normalizedModel: string, normalizedTask: string): 
   return Math.min(1.0, baseScore);
 }
 
-export function getTaskFitness(model: string, taskType: string): number {
-  return getTaskFitnessWithSource(model, taskType).score;
+export async function getTaskFitness(model: string, taskType: string): Promise<number> {
+  return (await getTaskFitnessWithSource(model, taskType)).score;
 }
 
 function isFitnessRetired(modelId: string): boolean {
@@ -464,21 +500,25 @@ function isFitnessRetired(modelId: string): boolean {
   return via !== null && isVendorRetiredId(base);
 }
 
-export function getTaskFitnessWithSource(
+export async function getTaskFitnessWithSource(
   model: string,
   taskType: string
-): { score: number; source: string } {
+): Promise<{ score: number; source: string }> {
   const normalizedModel = model.toLowerCase();
   const normalizedTask = taskType.toLowerCase();
   const fitnessRetired = isFitnessRetired(normalizedModel);
 
   if (!fitnessRetired) {
-    const userOverride = queryModelIntelligence(normalizedModel, normalizedTask, "user_override");
+    const userOverride = await queryModelIntelligence(
+      normalizedModel,
+      normalizedTask,
+      "user_override"
+    );
     if (userOverride !== null) {
       return { score: userOverride, source: "user_override" };
     }
 
-    const arenaElo = queryModelIntelligence(normalizedModel, normalizedTask, "arena_elo");
+    const arenaElo = await queryModelIntelligence(normalizedModel, normalizedTask, "arena_elo");
     if (arenaElo !== null) {
       return { score: arenaElo, source: "arena_elo" };
     }
@@ -492,12 +532,12 @@ export function getTaskFitnessWithSource(
     // The score is inherited VERBATIM: the 12-factor scoring already prices cost
     // and latency per variant, so there is no basis for inventing an effort
     // delta. `:inherited` keeps the indirection visible to callers.
-    const inherited = lookupInheritedFitness(normalizedModel, normalizedTask);
+    const inherited = await lookupInheritedFitness(normalizedModel, normalizedTask);
     if (inherited !== null) {
       return inherited;
     }
 
-    const tierScore = getModelsDevTierFitness(normalizedModel, normalizedTask);
+    const tierScore = await getModelsDevTierFitness(normalizedModel, normalizedTask);
     if (tierScore !== null) {
       return { score: tierScore, source: "models_dev_tier" };
     }
@@ -527,25 +567,29 @@ export function getTaskFitnessWithSource(
  * indirection now covers effort suffixes and vendor aliases. `resolveScoresAs`
  * is catalog-anchored, so a base that is not a routable id is never queried.
  */
-function lookupInheritedFitness(
+async function lookupInheritedFitness(
   normalizedModel: string,
   normalizedTask: string
-): { score: number; source: string } | null {
+): Promise<{ score: number; source: string } | null> {
   const { base, via } = resolveScoresAs(normalizedModel);
   if (via === null || base === normalizedModel) return null;
   const normalizedBase = base.toLowerCase();
   if (isVendorRetiredId(normalizedBase)) return null;
 
   for (const source of ["user_override", "arena_elo"] as const) {
-    const score = queryModelIntelligence(normalizedBase, normalizedTask, source);
+    const score = await queryModelIntelligence(normalizedBase, normalizedTask, source);
     if (score !== null) return { score, source: `${source}:inherited` };
   }
   return null;
 }
 
-export function setUserFitnessOverride(model: string, category: string, score: number): void {
+export async function setUserFitnessOverride(
+  model: string,
+  category: string,
+  score: number
+): Promise<void> {
   try {
-    setUserFitnessOverrideEntry(model.toLowerCase(), category.toLowerCase(), score);
+    await setUserFitnessOverrideEntry(model.toLowerCase(), category.toLowerCase(), score);
     invalidateFitnessCache();
   } catch (err) {
     throw new Error(
@@ -554,9 +598,9 @@ export function setUserFitnessOverride(model: string, category: string, score: n
   }
 }
 
-export function clearUserFitnessOverride(model: string, category: string): void {
+export async function clearUserFitnessOverride(model: string, category: string): Promise<void> {
   try {
-    deleteUserFitnessOverrideEntry(model.toLowerCase(), category.toLowerCase());
+    await deleteUserFitnessOverrideEntry(model.toLowerCase(), category.toLowerCase());
     invalidateFitnessCache();
   } catch (err) {
     throw new Error(
@@ -570,6 +614,8 @@ export function getTaskTypes(): string[] {
 }
 
 export function invalidateFitnessCache(): void {
+  _capabilitiesGeneration++;
   _capabilitiesCache = null;
-  clearIntelligenceLookupCache();
+  _capabilitiesLoad = null;
+  intelligenceCache.clear();
 }

@@ -52,7 +52,7 @@ const injectionGuard = createInjectionGuard({ logger: null });
 
 type RelayUsageStatus = "success" | "error";
 
-function recordUsage(
+async function recordUsage(
   tokenId: string,
   request: Request,
   startTime: number,
@@ -61,7 +61,7 @@ function recordUsage(
   status: RelayUsageStatus,
   statusCode: number
 ) {
-  recordRelayUsage(tokenId, {
+  await recordRelayUsage(tokenId, {
     requestId: request.headers.get("x-request-id") || undefined,
     status,
     statusCode,
@@ -139,7 +139,7 @@ async function forwardToBifrost(
         errorHeaders.set("Retry-After", String(Math.ceil(parsed.retryAfterMs / 1000)));
       }
       clearTimeout(tid);
-      recordUsage(token.id, request, startTime, clientIp, userAgent, "error", parsed.statusCode);
+      await recordUsage(token.id, request, startTime, clientIp, userAgent, "error", parsed.statusCode);
       return new Response(JSON.stringify(errorBody), {
         status: parsed.statusCode,
         headers: errorHeaders,
@@ -158,7 +158,7 @@ async function forwardToBifrost(
               : "bifrost-stream-error"
           );
         }
-        recordUsage(
+        void recordUsage(
           token.id,
           request,
           startTime,
@@ -166,7 +166,7 @@ async function forwardToBifrost(
           userAgent,
           error || statusCode >= 500 ? "error" : "success",
           statusCode
-        );
+        ).catch(() => {});
       });
 
       return new Response(stream, {
@@ -176,7 +176,7 @@ async function forwardToBifrost(
     }
 
     clearTimeout(tid);
-    recordUsage(
+    await recordUsage(
       token.id,
       request,
       startTime,
@@ -222,9 +222,9 @@ async function postHandler(request: Request) {
     }
 
     const tokenHash = hashToken(rawToken);
-    const token = getRelayTokenByHash(tokenHash);
+    const token = await getRelayTokenByHash(tokenHash);
     if (!token) {
-      recordRelayUsage("unknown", {
+      await recordRelayUsage("unknown", {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "auth_failed",
         statusCode: 401,
@@ -249,7 +249,7 @@ async function postHandler(request: Request) {
     // 2a. Per-(token,IP) gate — bounds the blast radius of a leaked token.
     const ipCheck = checkIpRateLimit(token.id, throttleKey);
     if (!ipCheck.allowed) {
-      recordRelayUsage(token.id, {
+      await recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "rate_limited",
         statusCode: 429,
@@ -268,9 +268,9 @@ async function postHandler(request: Request) {
     }
 
     // 2b. Per-token rate limit check
-    const rateCheck = checkRateLimit(token.id, token);
+    const rateCheck = await checkRateLimit(token.id, token);
     if (!rateCheck.allowed) {
-      recordRelayUsage(token.id, {
+      await recordRelayUsage(token.id, {
         requestId: request.headers.get("x-request-id") || undefined,
         status: "rate_limited",
         statusCode: 429,
@@ -297,9 +297,9 @@ async function postHandler(request: Request) {
     try {
       parsedBody = await cloned.json().catch(() => null);
       if (parsedBody) {
-        const { blocked, result } = injectionGuard(parsedBody);
+        const { blocked, result } = await injectionGuard(parsedBody);
         if (blocked) {
-          recordRelayUsage(token.id, {
+          await recordRelayUsage(token.id, {
             requestId: request.headers.get("x-request-id") || undefined,
             status: "error",
             statusCode: 400,
@@ -376,7 +376,7 @@ async function postHandler(request: Request) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           if (backend === "bifrost") {
-            recordUsage(token.id, request, startTime, clientIp, userAgent, "error", 502);
+            await recordUsage(token.id, request, startTime, clientIp, userAgent, "error", 502);
             return new Response(JSON.stringify(buildErrorBody(502, message)), {
               status: 502,
               headers: {
@@ -400,14 +400,14 @@ async function postHandler(request: Request) {
 
     // 5. Record usage (async, don't block response)
     const latencyMs = Date.now() - startTime;
-    recordRelayUsage(token.id, {
+    void recordRelayUsage(token.id, {
       requestId: request.headers.get("x-request-id") || undefined,
       status: response.status < 500 ? "success" : "error",
       statusCode: response.status,
       latencyMs,
       clientIp,
       userAgent,
-    });
+    }).catch(() => {});
 
     // Add relay headers
     const newHeaders = new Headers(response.headers);

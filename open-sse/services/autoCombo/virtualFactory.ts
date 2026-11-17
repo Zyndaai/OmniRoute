@@ -492,12 +492,12 @@ export async function attachPreparedCapabilityValues(
     }
     let values = byModel.get(candidate.model);
     if (!values) {
-      const contextLength = getTokenLimit(
+      const contextLength = await getTokenLimit(
         candidate.provider,
         candidate.model,
         state.resolutionSnapshot
       );
-      const capabilities = getResolvedModelCapabilities(
+      const capabilities = await getResolvedModelCapabilities(
         {
           provider: candidate.provider,
           model: candidate.model,
@@ -584,7 +584,7 @@ export async function prepareVirtualAutoComboInputs(
       !isMicrosoftDesignerWebRetiredProviderId(connection.provider) &&
       !isRuntimeRetiredProviderId(connection.provider)
   );
-  const hiddenModelsMap = getHiddenModelsByProvider();
+  const hiddenModelsMap = await getHiddenModelsByProvider();
   // #7622: a no-auth provider's own provider_connections row (#6557) can carry
   // `providerSpecificData.excludedModels` regardless of its isActive state (the
   // dispatch-time enforcement in auth.ts does not gate on isActive either), so
@@ -847,7 +847,8 @@ export async function prepareVirtualAutoComboInputs(
   const capabilityState: PreparedCapabilityState = {
     byTarget: new Map(),
     resolvedSinceYield: 0,
-    resolutionSnapshot: options.resolutionSnapshot ?? createModelCapabilityResolutionSnapshot(),
+    resolutionSnapshot:
+      options.resolutionSnapshot ?? (await createModelCapabilityResolutionSnapshot()),
   };
   return {
     regularCandidates: await attachPreparedCapabilityValues(regularCandidates, capabilityState),
@@ -985,11 +986,11 @@ function isFullPoolFallbackEnabled(spec: AutoComboSpec | undefined): boolean {
  * two overlays are mutually exclusive on the spec (family takes precedence when
  * both are somehow present, which callers never do in practice).
  */
-function narrowPoolByCategoryTier(
+async function narrowPoolByCategoryTier(
   candidatePool: VirtualAutoComboCandidate[],
   spec: AutoComboSpec | undefined,
   traceInvocationId?: string
-): VirtualAutoComboCandidate[] {
+): Promise<VirtualAutoComboCandidate[]> {
   const candidateFilter = spec?.family
     ? buildFamilyCandidateFilter(spec.family)
     : spec
@@ -997,7 +998,11 @@ function narrowPoolByCategoryTier(
       : null;
   if (!candidateFilter) return candidatePool;
 
-  const narrowed = candidatePool.filter((candidate) => candidateFilter(candidate));
+  // Run the (possibly async) capability checks first, then filter synchronously.
+  const keepVerdicts = await Promise.all(
+    candidatePool.map((candidate) => candidateFilter(candidate))
+  );
+  const narrowed = candidatePool.filter((_, index) => keepVerdicts[index]);
   recordAutoDroppedCandidates(
     traceInvocationId,
     candidatePool,
@@ -1085,7 +1090,7 @@ export async function selectVirtualAutoCandidatePool(
   await applyCandidateOverrides(candidatePool, apiKeyId, autoChannel, traceInvocationId);
   if (candidatePool.length === 0) return { candidatePool, effectivePool: candidatePool };
 
-  let effectivePool = narrowPoolByCategoryTier(candidatePool, spec, traceInvocationId);
+  let effectivePool = await narrowPoolByCategoryTier(candidatePool, spec, traceInvocationId);
   if (spec?.tier === "subscription" || spec?.tier === "thrifty") {
     effectivePool = applySubscriptionLadder(prepared, spec.tier, effectivePool, traceInvocationId);
   }
@@ -1245,7 +1250,7 @@ export async function createVirtualAutoComboFromPrepared(
 
   recordAutoSurvivors(traceInvocationId, effectivePool, "category_tier");
 
-  const advertisedLimits = computeAdvertisedLimits(effectivePool);
+  const advertisedLimits = await computeAdvertisedLimits(effectivePool);
 
   return {
     id: `virtual-auto-${variant || "default"}`,

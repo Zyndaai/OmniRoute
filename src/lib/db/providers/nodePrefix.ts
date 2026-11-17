@@ -1,27 +1,30 @@
 /**
- * db/providers/nodePrefix.ts — sync lookup of a provider node's own routing prefix (#15563).
+ * db/providers/nodePrefix.ts — lookup of a provider node's own routing prefix (#15563).
  */
 
-import { getDbInstance } from "../core";
+import { db } from "../pg";
 
 // #16814 — capability resolution calls this several times per provider on the auto/* request
-// path. Memoized per DB instance (a reset/reopened DB drops it) and cleared by the
-// provider_nodes writers in nodes.ts.
-let prefixMemo: Map<string, string | null> | null = null;
-let prefixIndex: Map<string, string> | null = null;
-let memoDb: unknown = null;
-export function resetProviderNodePrefixCache(): void {
-  prefixMemo = null;
-  prefixIndex = null;
+// path. Memoized per backend (a reset/reopened backend drops it) and cleared by the
+// provider_nodes writers in nodes.ts. The memo holds the load promise, so concurrent
+// first calls share one query.
+interface PrefixIndex {
+  byId: Map<string, string | null>;
+  byPrefix: Map<string, string>;
 }
 
-type NodeDb = {
-  prepare: (sql: string) => { all: () => Array<{ id?: unknown; prefix?: unknown }> };
-};
+let memo: Promise<PrefixIndex> | null = null;
+let memoBackend: unknown = null;
+export function resetProviderNodePrefixCache(): void {
+  memo = null;
+}
 
-function loadPrefixes(db: NodeDb): Map<string, string | null> {
+async function loadPrefixes(): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
-  for (const row of db.prepare("SELECT id, prefix FROM provider_nodes").all()) {
+  const rows = await db().query<{ id: unknown; prefix: unknown }>(
+    "SELECT id, prefix FROM provider_nodes"
+  );
+  for (const row of rows) {
     if (typeof row.id !== "string") continue;
     const prefix = typeof row.prefix === "string" ? row.prefix.trim() : "";
     map.set(row.id, prefix || null);
@@ -31,7 +34,7 @@ function loadPrefixes(db: NodeDb): Map<string, string | null> {
 
 /**
  * Reverse index (prefix → node id) built from the same memoized prefix map.
- * Kept in the same module/DB-instance memo so the two directions can never
+ * Kept in the same module/backend memo so the two directions can never
  * disagree about which nodes exist.
  */
 function buildPrefixToId(prefixes: Map<string, string | null>): Map<string, string> {
@@ -40,19 +43,33 @@ function buildPrefixToId(prefixes: Map<string, string | null>): Map<string, stri
     if (!prefix) continue;
     const key = prefix.toLowerCase();
     const current = byPrefix.get(key);
-    // Prefixes are operator-unique (reserved-prefix validation), but a duplicate
-    // row must still resolve deterministically: keep the lowest id.
+    // Prefixes are unique (lower(btrim(prefix)) index), but resolve a
+    // duplicate deterministically anyway: keep the lowest id.
     if (current === undefined || id < current) byPrefix.set(key, id);
   }
   return byPrefix;
 }
 
-function loadPrefixIndex(db: NodeDb): {
-  byId: Map<string, string | null>;
-  byPrefix: Map<string, string>;
-} {
-  const byId = loadPrefixes(db);
+async function loadPrefixIndex(): Promise<PrefixIndex> {
+  const byId = await loadPrefixes();
   return { byId, byPrefix: buildPrefixToId(byId) };
+}
+
+function ensurePrefixCache(): Promise<PrefixIndex> {
+  const backend = db();
+  if (backend !== memoBackend) {
+    memo = null;
+    memoBackend = backend;
+  }
+  if (memo === null) {
+    const loading = loadPrefixIndex();
+    memo = loading;
+    // A failed load must not stay memoized.
+    loading.catch(() => {
+      if (memo === loading) memo = null;
+    });
+  }
+  return memo;
 }
 
 /**
@@ -60,11 +77,10 @@ function loadPrefixIndex(db: NodeDb): {
  * when the id is not a node or has no prefix. Never throws (capability
  * resolution must stay best-effort).
  */
-export function getProviderNodePrefixSync(providerId: string): string | null {
+export async function getProviderNodePrefixSync(providerId: string): Promise<string | null> {
   if (!providerId) return null;
   try {
-    ensurePrefixCache(getDbInstance() as unknown as NodeDb);
-    return prefixMemo?.get(providerId) ?? null;
+    return (await ensurePrefixCache()).byId.get(providerId) ?? null;
   } catch {
     return null;
   }
@@ -80,26 +96,12 @@ export function getProviderNodePrefixSync(providerId: string): string | null {
  * (what the catalog and prefix-addressed requests use), so every consumer that
  * keys persisted per-node state on one of the two forms needs to map to the other.
  */
-export function getProviderNodeIdByPrefixSync(prefix: string): string | null {
+export async function getProviderNodeIdByPrefixSync(prefix: string): Promise<string | null> {
   const key = typeof prefix === "string" ? prefix.trim().toLowerCase() : "";
   if (!key) return null;
   try {
-    ensurePrefixCache(getDbInstance() as unknown as NodeDb);
-    return prefixIndex?.get(key) ?? null;
+    return (await ensurePrefixCache()).byPrefix.get(key) ?? null;
   } catch {
     return null;
-  }
-}
-
-function ensurePrefixCache(db: NodeDb): void {
-  if (db !== memoDb) {
-    prefixMemo = null;
-    prefixIndex = null;
-    memoDb = db;
-  }
-  if (prefixMemo === null || prefixIndex === null) {
-    const index = loadPrefixIndex(db);
-    prefixMemo = index.byId;
-    prefixIndex = index.byPrefix;
   }
 }

@@ -40,7 +40,7 @@ export interface ComboSetup {
 
 /**
  * Server-side context cache pinning (replaces the <omniModel> tag roundtrip): re-pins the
- * combo to the model used last for this session via session_model_history — no client-side
+ * combo to the model used last for this session via session_model_pins — no client-side
  * tag injection, no visible output pollution. Rewrites ctx.body when a model is pinned.
  *
  * #3825: when the client sends no session id (most OpenAI-compatible clients), fall back to a
@@ -51,10 +51,10 @@ export interface ComboSetup {
  * Extracted from phaseComboSetup to keep that function under the complexity ceiling and to
  * further the combo god-file decomposition.
  */
-function resolveContextCachePin(ctx: ComboContext): {
+async function resolveContextCachePin(ctx: ComboContext): Promise<{
   effectiveSessionId: string | null;
   pinnedModel: string | null;
-} {
+}> {
   const { combo, relayOptions, log } = ctx;
   const effectiveSessionId: string | null = combo.context_cache_protection
     ? (relayOptions?.sessionId ?? deriveComboSessionKey(ctx.body))
@@ -65,7 +65,7 @@ function resolveContextCachePin(ctx: ComboContext): {
     effectiveSessionId &&
     !(ctx.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
   ) {
-    const pinned = getLastSessionModel(effectiveSessionId, combo.name);
+    const pinned = await getLastSessionModel(effectiveSessionId, combo.name);
     if (pinned) {
       ctx.body = { ...ctx.body, model: pinned };
       pinnedModel = pinned;
@@ -75,7 +75,7 @@ function resolveContextCachePin(ctx: ComboContext): {
   return { effectiveSessionId, pinnedModel };
 }
 
-export function phaseComboSetup(ctx: ComboContext): ComboSetup {
+export async function phaseComboSetup(ctx: ComboContext): Promise<ComboSetup> {
   const { combo, settings, relayOptions } = ctx;
 
   const strategy = normalizeRoutingStrategy(combo.strategy || "priority");
@@ -94,7 +94,7 @@ export function phaseComboSetup(ctx: ComboContext): ComboSetup {
   );
 
   // Server-side context cache pinning (rewrites ctx.body when a model is pinned).
-  const { effectiveSessionId, pinnedModel } = resolveContextCachePin(ctx);
+  const { effectiveSessionId, pinnedModel } = await resolveContextCachePin(ctx);
 
   // ── Combo Agent Middleware (#399 + #401) ────────────────────────────────
   // Apply system_message override, tool_filter_regex.

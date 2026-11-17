@@ -125,19 +125,19 @@ function adaptResponsesRequestForZed(request: unknown): unknown {
   return request;
 }
 
-function buildProviderRequest(
+async function buildProviderRequest(
   provider: ZedProviderName,
   model: string,
   body: unknown,
   stream: boolean,
   credentials: ProviderCredentials
-): unknown {
+): Promise<unknown> {
   if (provider === ZED_PROVIDER.anthropic) {
-    return openaiToClaudeRequest(model, body, true);
+    return await openaiToClaudeRequest(model, body, true);
   }
   if (provider === ZED_PROVIDER.google) {
     return adaptGeminiRequestForZed(
-      openaiToGeminiRequest(model, body as Record<string, unknown>, true, credentials)
+      await openaiToGeminiRequest(model, body as Record<string, unknown>, true, credentials)
     );
   }
   if (provider === ZED_PROVIDER.openai) {
@@ -509,7 +509,7 @@ export class ZedHostedExecutor extends BaseExecutor {
   }> {
     const zedCredentials = credentials as ZedCredentials;
     const { provider } = await this.resolveModel(model, zedCredentials, signal, log);
-    const providerRequest = buildProviderRequest(provider, model, body, stream, credentials);
+    const providerRequest = await buildProviderRequest(provider, model, body, stream, credentials);
     const bodyRecord = (body ?? {}) as Record<string, unknown>;
     const payload = {
       thread_id: bodyRecord.thread_id || (credentials as Record<string, unknown>)?._clientSessionId,

@@ -88,7 +88,7 @@ export async function createProofRunner(
     const stage = deadline(signal, 20_000);
     const stageSignal = stage.signal;
     try {
-      assertValidationSnapshot(snapshot);
+      await abortable(assertValidationSnapshot(snapshot), stageSignal);
       const credentials = await abortable(
         selectStrictCredentials(input, selectCredentials),
         stageSignal
@@ -98,9 +98,10 @@ export async function createProofRunner(
         signal: stageSignal,
         expectedExecutor,
         expectedCredentials: credentials,
+        // Synchronous by contract: the stored configuration is re-verified with
+        // `assertValidationSnapshot` at the stage boundaries around the dispatch.
         assertFresh: () => {
           assertRequestPluginsIdle();
-          assertValidationSnapshot(snapshot);
         },
       });
       const body = {
@@ -137,8 +138,10 @@ export async function createProofRunner(
         stageSignal
       );
       fence.assertDispatched();
+      await abortable(assertValidationSnapshot(snapshot), stageSignal);
       const proof = await readProof(requireProofResponse(result), stageSignal, stream);
       fence.assertDispatched();
+      await abortable(assertValidationSnapshot(snapshot), stageSignal);
       return proof;
     } finally {
       stage.clear();

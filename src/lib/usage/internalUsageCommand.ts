@@ -55,8 +55,12 @@ export interface InternalUsageCommandDeps {
   getApiKeyMetadata?: (apiKey: string) => Promise<UsageCommandApiKeyMetadata | null>;
   getProviderConnectionById?: (connectionId: string) => Promise<unknown>;
   getProviderConnections?: (filter?: JsonRecord) => Promise<unknown[]>;
-  getProviderLimitsCache?: (connectionId: string) => ProviderLimitsCacheEntry | null;
-  getAllProviderLimitsCache?: () => Record<string, ProviderLimitsCacheEntry>;
+  getProviderLimitsCache?: (
+    connectionId: string
+  ) => ProviderLimitsCacheEntry | null | Promise<ProviderLimitsCacheEntry | null>;
+  getAllProviderLimitsCache?: () =>
+    | Record<string, ProviderLimitsCacheEntry>
+    | Promise<Record<string, ProviderLimitsCacheEntry>>;
   getApiKeyUsageLimitStatus?: (
     metadata: UsageCommandApiKeyMetadata,
     deps?: { now?: () => number }
@@ -273,14 +277,14 @@ export async function collectUsageSnapshots(
       if (!connection) continue;
       const snapshot = snapshotFromConnection(
         connection,
-        deps.getProviderLimitsCache(connection.id)
+        await deps.getProviderLimitsCache(connection.id)
       );
       if (snapshot) snapshots.push(snapshot);
     }
     return snapshots;
   }
 
-  const caches = deps.getAllProviderLimitsCache();
+  const caches = await deps.getAllProviderLimitsCache();
   const connections = await deps.getProviderConnections({ isActive: true });
   const snapshots: UsageSnapshot[] = [];
   for (const rawConnection of connections) {

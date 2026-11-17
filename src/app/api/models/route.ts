@@ -38,7 +38,7 @@ const getModelsQuerySchema = z.object({
     .transform((value) => value === "1" || value === "true"),
 });
 
-function resolveModelCapabilityFields(
+async function resolveModelCapabilityFields(
   fullModel: string,
   snapshot: ModelCapabilityResolutionSnapshot,
   withLimits: boolean
@@ -46,10 +46,11 @@ function resolveModelCapabilityFields(
   if (!withLimits) {
     return {
       supportsVision:
-        getResolvedModelCapabilities(fullModel, undefined, snapshot).supportsVision === true,
+        (await getResolvedModelCapabilities(fullModel, undefined, snapshot)).supportsVision ===
+        true,
     };
   }
-  const { capabilities, limitSources } = getResolvedModelCapabilitiesWithLimitSources(
+  const { capabilities, limitSources } = await getResolvedModelCapabilitiesWithLimitSources(
     fullModel,
     snapshot
   );
@@ -160,7 +161,7 @@ export async function handleGetModels(request: Request, dependencies: GetModelsD
         (providerHasFreeModels(model.provider) && isFreeModel(model.provider, { id: model.model }))
       );
     });
-    const capabilitySnapshot = (
+    const capabilitySnapshot = await (
       dependencies.createCapabilitySnapshot ?? createModelCapabilityResolutionSnapshot
     )();
 
@@ -202,7 +203,7 @@ export async function handleGetModels(request: Request, dependencies: GetModelsD
         )
     );
 
-    const models = candidates.map((m: any) => {
+    const models = await Promise.all(candidates.map(async (m: any) => {
       const fullModel = `${m.provider}/${m.model}`;
       const canonicalProviderId = resolveCanonicalProviderIdForStatic(m.provider);
       const syncedForProvider = syncedModelIdsByCanonicalProvider.get(canonicalProviderId);
@@ -222,9 +223,9 @@ export async function handleGetModels(request: Request, dependencies: GetModelsD
         fullModel,
         alias: modelAliases[fullModel] || m.model,
         available,
-        ...resolveModelCapabilityFields(fullModel, capabilitySnapshot, withLimits),
+        ...(await resolveModelCapabilityFields(fullModel, capabilitySnapshot, withLimits)),
       };
-    });
+    }));
 
     return NextResponse.json({ models });
   } catch (error) {

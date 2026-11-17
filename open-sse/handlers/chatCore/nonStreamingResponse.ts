@@ -60,7 +60,6 @@ import { finalizeToolLoopError } from "../chatCore/nonStreamingFinalization.ts";
 import { markCodexScopeRateLimited } from "../chatCore/codexFailover.ts";
 import { deleteSessionAccountAffinityBestEffort } from "@/lib/db/sessionAccountAffinity";
 import { writeTerminalStatus } from "@/shared/utils/terminalStatus";
-import { MEMORY_BUILTIN_TOOL_NAMES } from "@/lib/skills/memoryBuiltins";
 
 import { storeSemanticCacheResponse } from "../chatCore/semanticCacheStore.ts";
 import {
@@ -70,7 +69,8 @@ import {
 import { routingFinishReason } from "../chatCore/routingFinishReason.ts";
 import { hasTrustedEmptyTurn, inheritEmptyTurnPolicy } from "../../utils/emptyTurnPolicy.ts";
 import { getProviderCredentials } from "@/sse/services/auth";
-import { extractFacts } from "@/lib/memory/extraction";
+import { getModelPreserveVideoUrl } from "@/lib/db/models/modelPreserveVideoUrl";
+import { prefetchThoughtSignatures } from "../../translator/index.ts";
 // The leaf body is unchanged from the barrel, so its closed-over values keep
 // the barrel's types. This alias only exists so the deps bag type-checks.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -136,8 +136,6 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
     managedLease,
     managedLeaseFenceErrorResult,
     markAccountSemaphoreBlocked,
-    memoryOwnerId,
-    memorySettings,
     model,
     normalizeHeaders,
     normalizeUsage,
@@ -161,7 +159,6 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
     reportMalformed200,
     reqLogger,
     resolveReportedServiceTier,
-    runMemoryExtractionGate,
     runPluginOnResponseHook,
     sanitizeErrorMessage,
     sanitizeUpstreamDetails,
@@ -171,6 +168,8 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
     sessionAffinityKey,
     shouldIsolateProbeFailures,
     skillRequestId,
+    skillsEnabled,
+    skillsOwnerId,
     sourceFormat,
     startTime,
     targetFormat,
@@ -257,9 +256,8 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
           },
           onCredentialsRefreshed: handleCredentialsRefreshed,
           refreshCredentials: executeRefreshCredentials,
-          assertManagedLeaseFence: (id) => {
-            assertManagedLeaseFence(id);
-          },
+          // Async fence: the pipeline context type is `=> void`; hand it the promise.
+          assertManagedLeaseFence: (id) => assertManagedLeaseFence(id),
           getProviderCredentials,
           allowedConnections: deps.allowedConnections ?? null,
         },
@@ -284,7 +282,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
           persistConnectionPatch: updateProviderConnection,
           setConnectionRateLimitedUntil: async (id, untilMs) => {
             const { setConnectionRateLimitUntil } = await import("@/lib/db/providers");
-            setConnectionRateLimitUntil(id, untilMs);
+            await setConnectionRateLimitUntil(id, untilMs);
           },
           lockModel,
           recordAntigravityQuotaState: recordCoreOwnedAntigravityQuotaState,
@@ -311,8 +309,8 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
             if (!key) return;
             deleteSessionAccountAffinityBestEffort(key, "codex");
           },
-          onAuditAccountRotation: (params) => {
-            logAuditEvent({
+          onAuditAccountRotation: async (params) => {
+            await logAuditEvent({
               action: params.action,
               actor: apiKeyInfo?.name || "system",
               target: params.newConnectionId,
@@ -478,7 +476,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
     if (toolLoopEnabled) {
       try {
         postInjectionRequestIdentity = derivePostInjectionRequestIdentity({
-          apiKeyId: memoryOwnerId || "local",
+          apiKeyId: skillsOwnerId || "local",
           headers: clientRawRequest?.headers ?? null,
           skillRequestId,
           postInjectionBody: (body || {}) as Record<string, unknown>,
@@ -502,14 +500,13 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
       sourceBody: (body || {}) as Record<string, unknown>,
       skillsModelId: getSkillsModelIdForFormat(sourceFormat),
       executionContext: {
-        apiKeyId: memoryOwnerId || "local",
+        apiKeyId: skillsOwnerId || "local",
         sessionId: pipelineSessionId,
         requestId: skillRequestId,
         requestIdentity: postInjectionRequestIdentity,
         builtinToolNames: injectionResult.builtinToolNames,
         injectedCustomSkillNames: injectionResult.injectedCustomSkillNames,
-        customSkillExecutionEnabled:
-          Boolean(memoryOwnerId) && memorySettings?.skillsEnabled === true,
+        customSkillExecutionEnabled: Boolean(skillsOwnerId) && skillsEnabled === true,
         executionFenceEnabled: true,
         provider,
         model: effectiveModel,
@@ -517,7 +514,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
       abortSignal: clientRawRequest?.signal,
       expectedConnectionId: expectedConn,
       followUpLeg: async (nextSourceBody) => {
-        translatedBody = translateRequest(
+        translatedBody = await translateRequest(
           sourceFormat,
           targetFormat,
           model,
@@ -527,15 +524,25 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
           provider,
           reqLogger,
           {
-            normalizeToolCallId: getModelNormalizeToolCallId(
+            normalizeToolCallId: await getModelNormalizeToolCallId(
               provider || "",
               model || "",
               sourceFormat
             ),
-            preserveDeveloperRole: getModelPreserveOpenAIDeveloperRole(
+            preserveDeveloperRole: await getModelPreserveOpenAIDeveloperRole(
               provider || "",
               model || "",
               sourceFormat
+            ),
+            preserveVideoUrl: await getModelPreserveVideoUrl(
+              String(provider ?? ""),
+              String(model ?? "")
+            ),
+            thoughtSignatures: await prefetchThoughtSignatures(
+              targetFormat,
+              model,
+              nextSourceBody,
+              connectionId
             ),
             preserveCacheControl,
             signatureNamespace: connectionId,
@@ -657,7 +664,6 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
     const responsePayloadFormat = okLeg.responsePayloadFormat;
     const looksLikeSSE = okLeg.looksLikeSSE;
     let translatedResponse = okLeg.response;
-    const memoryExtractionResponse = okLeg.responseForMemoryExtraction;
     reqLogger.logProviderResponse(
       200,
       "OK",
@@ -717,7 +723,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
       tokens: usage,
       status: "200 OK",
     }).catch(() => {});
-    recordNonStreamingUsageStats(usage, {
+    await recordNonStreamingUsageStats(usage, {
       traceEnabled,
       provider,
       connectionId: successConnectionId,
@@ -731,29 +737,10 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
       cpaAuthIndex: readCpaAuthIndex(providerResponse),
     });
 
-    // #12150 P1b surface 3 (fix round 1): a video-bridge-observed request's
-    // request- AND response-derived text both carry the full transcript (the
-    // flattened description on the request side, the model's own reply on
-    // the response side) — neither may populate durable Memory. See
-    // runMemoryExtractionGate for the shared gate + extraction wiring, unit
-    // tested directly in tests/unit/video-bridge-memory-suppression.test.ts.
-    runMemoryExtractionGate({
-      memoryOwnerId,
-      memorySettings,
-      videoBridgeObserved,
-      pipelineSessionId,
-      requestBody: body as Record<string, unknown>,
-      responseBody: memoryExtractionResponse as Record<string, unknown> | null,
-      extractFacts,
-      log,
-    });
-
-    const customSkillExecutionEnabled =
-      Boolean(memoryOwnerId) && memorySettings?.skillsEnabled === true;
+    const customSkillExecutionEnabled = Boolean(skillsOwnerId) && skillsEnabled === true;
     const builtinToolNames = [
       webSearchFallbackPlan.toolName,
       webFetchFallbackPlan.toolName,
-      ...(memoryOwnerId && memorySettings?.enabled ? MEMORY_BUILTIN_TOOL_NAMES : []),
     ].filter((name): name is string => Boolean(name));
     if (!toolLoopRan && (customSkillExecutionEnabled || builtinToolNames.length > 0)) {
       const skillSessionId = pipelineSessionId;
@@ -762,7 +749,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
         translatedResponse,
         getSkillsModelIdForFormat(sourceFormat),
         {
-          apiKeyId: memoryOwnerId || "local",
+          apiKeyId: skillsOwnerId || "local",
           sessionId: skillSessionId,
           requestId: skillRequestId,
           builtinToolNames,

@@ -74,14 +74,28 @@ function setNestedOverride(
 }
 
 /**
- * Load all capability/custom-model tables in one uninterrupted JS turn.
- * Callers must not yield between the bulk reads if they need a coherent view;
- * existing catalog generation guards remain authoritative across later yields.
+ * Load all capability/custom-model tables concurrently into a build-local view.
+ * The reads are independent queries, so the view is not a single-transaction
+ * snapshot; existing catalog generation guards remain authoritative.
  */
-export function createModelCapabilityResolutionSnapshot(
-  options: ModelCapabilityResolutionSnapshotOptions = {}
-): ModelCapabilityResolutionSnapshot {
-  const synced = loadAllSyncedCapabilitiesUncached();
+export async function createModelCapabilityResolutionSnapshot(
+  _options: ModelCapabilityResolutionSnapshotOptions = {}
+): Promise<ModelCapabilityResolutionSnapshot> {
+  const [
+    synced,
+    capabilityOverrides,
+    contextOverrideRows,
+    customModelsByProvider,
+    compatVisionOverrides,
+    syncedAvailableModelVision,
+  ] = await Promise.all([
+    loadAllSyncedCapabilitiesUncached(),
+    listModelCapabilityOverrides(),
+    listModelContextOverrides(),
+    readCustomModelsByProvider(),
+    listModelCompatVisionOverrides(),
+    listSyncedAvailableModelVision(),
+  ]);
 
   const maxTokenOverrides = new Map<string, Map<string, number>>();
   const maxInputTokenOverrides = new Map<string, Map<string, number>>();
@@ -89,7 +103,7 @@ export function createModelCapabilityResolutionSnapshot(
     string,
     Map<string, readonly ReasoningEffortOverrideValue[]>
   >();
-  for (const entry of listModelCapabilityOverrides()) {
+  for (const entry of capabilityOverrides) {
     if (entry.key === "max_output_tokens") {
       setNestedOverride(maxTokenOverrides, entry.provider, entry.modelId, entry.value);
     } else if (entry.key === "max_input_tokens") {
@@ -105,11 +119,9 @@ export function createModelCapabilityResolutionSnapshot(
   }
 
   const contextOverrides = new Map<string, Map<string, number>>();
-  for (const entry of listModelContextOverrides()) {
+  for (const entry of contextOverrideRows) {
     setNestedOverride(contextOverrides, entry.provider, entry.modelId, entry.realContext);
   }
-
-  const customModelsByProvider = readCustomModelsByProvider(options.customModelVision);
 
   return {
     synced,
@@ -119,7 +131,7 @@ export function createModelCapabilityResolutionSnapshot(
     contextOverrides,
     customVisionOverrides: buildCustomModelVisionOverrides(customModelsByProvider),
     customModelsByProvider,
-    compatVisionOverrides: listModelCompatVisionOverrides(),
-    syncedAvailableModelVision: listSyncedAvailableModelVision(),
+    compatVisionOverrides,
+    syncedAvailableModelVision,
   };
 }

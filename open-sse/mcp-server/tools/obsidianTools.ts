@@ -15,8 +15,8 @@ function extractApiKeyId(extra?: McpExtra): string | undefined {
     : undefined;
 }
 
-function requireToken(apiKeyId?: string): string {
-  const config = getObsidianConfigForApiKey(apiKeyId);
+async function requireToken(apiKeyId?: string): Promise<string> {
+  const config = await getObsidianConfigForApiKey(apiKeyId);
   if (!config.token) {
     throw new Error(
       "Obsidian API token not configured. Set it in Settings > Context Sources" +
@@ -346,7 +346,7 @@ export const obsidianTools = [
     scopes: ["read:obsidian"],
     inputSchema: z.object({}),
     handler: async (_args: unknown, extra?: McpExtra) => {
-      const token = getSyncToken() || requireToken(extractApiKeyId(extra));
+      const token = (await getSyncToken()) || (await requireToken(extractApiKeyId(extra)));
       const syncClient = createSyncServerClient(token);
       return syncClient.getStatus();
     },
@@ -358,7 +358,7 @@ export const obsidianTools = [
     scopes: ["write:obsidian"],
     inputSchema: z.object({}),
     handler: async (_args: unknown, extra?: McpExtra) => {
-      const token = getSyncToken() || requireToken(extractApiKeyId(extra));
+      const token = (await getSyncToken()) || (await requireToken(extractApiKeyId(extra)));
       const syncClient = createSyncServerClient(token);
       const result = await syncClient.triggerSync();
       return { success: true, ...result };
@@ -371,7 +371,7 @@ export const obsidianTools = [
     scopes: ["read:obsidian"],
     inputSchema: z.object({}),
     handler: async (_args: unknown, extra?: McpExtra) => {
-      const token = getSyncToken() || requireToken(extractApiKeyId(extra));
+      const token = (await getSyncToken()) || (await requireToken(extractApiKeyId(extra)));
       const syncClient = createSyncServerClient(token);
       return syncClient.getConflicts();
     },
@@ -394,7 +394,7 @@ export const obsidianTools = [
       args: { path: string; resolution: "local" | "remote" | "keep-both" },
       extra?: McpExtra
     ) => {
-      const token = getSyncToken() || requireToken(extractApiKeyId(extra));
+      const token = (await getSyncToken()) || (await requireToken(extractApiKeyId(extra)));
       const syncClient = createSyncServerClient(token);
       const result = await syncClient.resolveConflict(args.path, args.resolution);
       return { success: true, result };

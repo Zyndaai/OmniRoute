@@ -6,9 +6,8 @@
  * module only owns the gate (global flag + per-provider/per-model overrides
  * + precedence resolver) — the catalog wiring itself lives elsewhere.
  *
- * Storage: `key_value` table, namespace `ccDiscoveryAliases`, following the
- * established key_value pattern (see `db/models.ts::setModelAlias` /
- * `db/paramFilters.ts`). Keys:
+ * Storage: `config_entries`, namespace `ccDiscoveryAliases` (raw "on"/"off" kept as
+ * JSON strings). Keys:
  *   - `provider:<providerId>`              -> "on" | "off"
  *   - `model:<providerId>/<modelId>`       -> "on" | "off"
  * A missing key means "inherit" (null).
@@ -21,8 +20,12 @@
  */
 
 import { getFeatureFlagOverride } from "./featureFlags";
-import { getDbInstance } from "./core";
-import { loadCatalogOverrides } from "./catalogOverrides";
+import {
+  deleteConfigValue,
+  getConfigText,
+  loadCatalogOverrideMaps,
+  setConfigText,
+} from "./configEntries";
 import { finishModelCatalogWriteWithoutBackup } from "./models/modelCatalogWriteSignals";
 
 const NAMESPACE = "ccDiscoveryAliases";
@@ -60,64 +63,44 @@ export function resolveCcAliasEnabled(opts: {
   return opts.global;
 }
 
-export function getCcAliasProviderSetting(providerId: string): CcAliasSetting {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, providerKey(providerId)) as { value: string } | undefined;
-  return parseSetting(row?.value);
-}
-
-export function setCcAliasProviderSetting(providerId: string, v: CcAliasSetting): void {
-  const db = getDbInstance();
-  const key = providerKey(providerId);
-  if (v === null) {
-    db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(NAMESPACE, key);
-    finishModelCatalogWriteWithoutBackup();
-    return;
-  }
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    NAMESPACE,
-    key,
-    v
-  );
+async function writeSetting(key: string, v: CcAliasSetting): Promise<void> {
+  if (v === null) await deleteConfigValue(NAMESPACE, key);
+  else await setConfigText(NAMESPACE, key, v);
   finishModelCatalogWriteWithoutBackup();
 }
 
-export function getCcAliasModelSetting(providerId: string, modelId: string): CcAliasSetting {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, modelKey(providerId, modelId)) as { value: string } | undefined;
-  return parseSetting(row?.value);
+export async function getCcAliasProviderSetting(providerId: string): Promise<CcAliasSetting> {
+  return parseSetting(await getConfigText(NAMESPACE, providerKey(providerId)));
 }
 
-export function setCcAliasModelSetting(
+export async function setCcAliasProviderSetting(
+  providerId: string,
+  v: CcAliasSetting
+): Promise<void> {
+  await writeSetting(providerKey(providerId), v);
+}
+
+export async function getCcAliasModelSetting(
+  providerId: string,
+  modelId: string
+): Promise<CcAliasSetting> {
+  return parseSetting(await getConfigText(NAMESPACE, modelKey(providerId, modelId)));
+}
+
+export async function setCcAliasModelSetting(
   providerId: string,
   modelId: string,
   v: CcAliasSetting
-): void {
-  const db = getDbInstance();
-  const key = modelKey(providerId, modelId);
-  if (v === null) {
-    db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(NAMESPACE, key);
-    finishModelCatalogWriteWithoutBackup();
-    return;
-  }
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    NAMESPACE,
-    key,
-    v
-  );
-  finishModelCatalogWriteWithoutBackup();
+): Promise<void> {
+  await writeSetting(modelKey(providerId, modelId), v);
 }
 
 /**
  * Loads every provider/model override in a single query — intended for the
  * catalog builder, which needs the full set rather than per-row lookups.
  */
-export function getCcAliasSettingsBulk() {
-  return loadCatalogOverrides(NAMESPACE);
+export async function getCcAliasSettingsBulk() {
+  return loadCatalogOverrideMaps(NAMESPACE);
 }
 
 function envForcesGlobalOn(): boolean {
@@ -129,12 +112,15 @@ function envForcesGlobalOn(): boolean {
  * Resolves the effective global state, and where it came from.
  * Precedence: env forces on > DB override > definition default.
  */
-export function getCcAliasGlobalState(): { enabled: boolean; source: "env" | "db" | "default" } {
+export async function getCcAliasGlobalState(): Promise<{
+  enabled: boolean;
+  source: "env" | "db" | "default";
+}> {
   if (envForcesGlobalOn()) {
     return { enabled: true, source: "env" };
   }
 
-  const dbOverride = getFeatureFlagOverride(FLAG_KEY);
+  const dbOverride = await getFeatureFlagOverride(FLAG_KEY);
   if (dbOverride !== undefined) {
     return { enabled: dbOverride === "true" || dbOverride === "1", source: "db" };
   }
@@ -142,6 +128,6 @@ export function getCcAliasGlobalState(): { enabled: boolean; source: "env" | "db
   return { enabled: false, source: "default" };
 }
 
-export function isCcAliasGlobalEnabled(): boolean {
-  return getCcAliasGlobalState().enabled;
+export async function isCcAliasGlobalEnabled(): Promise<boolean> {
+  return (await getCcAliasGlobalState()).enabled;
 }

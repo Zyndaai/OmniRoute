@@ -8,11 +8,12 @@
  * cap_value of ≤ Number.EPSILON is treated as a placeholder by the enforce
  * layer (not enforced), consistent with the planRegistry EPSILON convention.
  *
- * All SQL goes through prepared statements — never raw string interpolation
- * (Hard Rule #5).
+ * All SQL goes through parameterised statements — never raw string interpolation.
+ * Caps belong to an allocation: the (pool_id, api_key_id) allocation row must
+ * exist (foreign key), and deleting the allocation removes its caps.
  */
 
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,20 +37,6 @@ interface ModelCapRow {
   cap_unit: string;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-}
-
 function rowToModelCap(row: ModelCapRow): ModelCap {
   return {
     poolId: row.pool_id,
@@ -60,10 +47,6 @@ function rowToModelCap(row: ModelCapRow): ModelCap {
   };
 }
 
-function getDb(): DbLike {
-  return getDbInstance() as unknown as DbLike;
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -72,25 +55,28 @@ function getDb(): DbLike {
  * Retrieve the cap for a specific (pool, key, model) triple.
  * Returns null if no cap is configured.
  */
-export function getModelCap(poolId: string, apiKeyId: string, model: string): ModelCap | null {
-  const row = getDb()
-    .prepare<ModelCapRow>(
-      `SELECT pool_id, api_key_id, model, cap_value, cap_unit
-       FROM quota_allocation_model_caps
-       WHERE pool_id = ? AND api_key_id = ? AND model = ?`
-    )
-    .get(poolId, apiKeyId, model);
+export async function getModelCap(
+  poolId: string,
+  apiKeyId: string,
+  model: string
+): Promise<ModelCap | null> {
+  const row = await db().queryOne<ModelCapRow>(
+    `SELECT pool_id, api_key_id, model, cap_value, cap_unit
+     FROM quota_allocation_model_caps
+     WHERE pool_id = $1 AND api_key_id = $2 AND model = $3`,
+    [poolId, apiKeyId, model]
+  );
   return row ? rowToModelCap(row) : null;
 }
-export function setModelCap(cap: ModelCap): void {
-  getDb()
-    .prepare(
-      `INSERT INTO quota_allocation_model_caps
-         (pool_id, api_key_id, model, cap_value, cap_unit)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(pool_id, api_key_id, model) DO UPDATE SET
-         cap_value = excluded.cap_value,
-         cap_unit  = excluded.cap_unit`
-    )
-    .run(cap.poolId, cap.apiKeyId, cap.model, cap.capValue, cap.capUnit);
+
+export async function setModelCap(cap: ModelCap): Promise<void> {
+  await db().execute(
+    `INSERT INTO quota_allocation_model_caps
+       (pool_id, api_key_id, model, cap_value, cap_unit)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (pool_id, api_key_id, model) DO UPDATE SET
+       cap_value = EXCLUDED.cap_value,
+       cap_unit  = EXCLUDED.cap_unit`,
+    [cap.poolId, cap.apiKeyId, cap.model, cap.capValue, cap.capUnit]
+  );
 }

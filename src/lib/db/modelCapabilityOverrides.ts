@@ -3,7 +3,7 @@ import {
   REASONING_EFFORT_OVERRIDE_VALUES,
   type ReasoningEffortOverrideValue,
 } from "@/shared/reasoning/reasoningEffortsOverride";
-import { getDbInstance } from "./core";
+import { db, jsonb } from "./pg";
 import { invalidateDbCache } from "./readCache";
 
 export type NumericModelCapabilityOverrideKey =
@@ -33,7 +33,7 @@ interface OverrideRow {
   provider: string;
   model_id: string;
   override_key: string;
-  override_value: string;
+  override_value: unknown;
   refreshed_at: string;
 }
 
@@ -74,12 +74,7 @@ export function parseModelOverrideTarget(
 function toOverride(row: OverrideRow): ModelCapabilityOverride | null {
   if (!isSupportedKey(row.override_key)) return null;
 
-  let parsedValue: unknown;
-  try {
-    parsedValue = JSON.parse(row.override_value);
-  } catch {
-    return null;
-  }
+  const parsedValue = row.override_value;
 
   const base: ModelCapabilityOverrideBase = {
     provider: row.provider,
@@ -100,12 +95,12 @@ function toOverride(row: OverrideRow): ModelCapabilityOverride | null {
 /** Nested provider → model → numeric override map used by build-local snapshots. */
 export type NestedMaxTokenOverrideMap = ReadonlyMap<string, ReadonlyMap<string, number>>;
 
-export function getModelCapabilityOverride(
+export async function getModelCapabilityOverride(
   provider: string | null | undefined,
   modelId: string | null | undefined,
   key: NumericModelCapabilityOverrideKey,
   bulkMaxTokenOverrides?: NestedMaxTokenOverrideMap | null
-): number | null {
+): Promise<number | null> {
   const target = parseModelOverrideTarget(`${provider || ""}/${modelId || ""}`);
   if (!target || !isNumericKey(key)) return null;
 
@@ -116,12 +111,11 @@ export function getModelCapabilityOverride(
   }
 
   try {
-    const row = getDbInstance()
-      .prepare(
-        "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-          "FROM model_capability_overrides WHERE provider = ? AND model_id = ? AND override_key = ?"
-      )
-      .get(target.provider, target.modelId, key) as OverrideRow | undefined;
+    const row = await db().queryOne<OverrideRow>(
+      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
+        "FROM model_capability_overrides WHERE provider = $1 AND model_id = $2 AND override_key = $3",
+      [target.provider, target.modelId, key]
+    );
     const override = row ? toOverride(row) : null;
     return override && override.key !== "reasoning_efforts" ? override.value : null;
   } catch {
@@ -129,22 +123,21 @@ export function getModelCapabilityOverride(
   }
 }
 
-export function getReasoningEffortsOverride(
+export async function getReasoningEffortsOverride(
   provider: string | null | undefined,
   modelId: string | null | undefined,
   bulk?: ReadonlyMap<string, ReadonlyMap<string, readonly ReasoningEffortOverrideValue[]>> | null
-): readonly ReasoningEffortOverrideValue[] | null {
+): Promise<readonly ReasoningEffortOverrideValue[] | null> {
   const target = parseModelOverrideTarget(`${provider || ""}/${modelId || ""}`);
   if (!target) return null;
   if (bulk) return bulk.get(target.provider)?.get(target.modelId) ?? null;
 
   try {
-    const row = getDbInstance()
-      .prepare(
-        "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-          "FROM model_capability_overrides WHERE provider = ? AND model_id = ? AND override_key = 'reasoning_efforts'"
-      )
-      .get(target.provider, target.modelId) as OverrideRow | undefined;
+    const row = await db().queryOne<OverrideRow>(
+      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
+        "FROM model_capability_overrides WHERE provider = $1 AND model_id = $2 AND override_key = 'reasoning_efforts'",
+      [target.provider, target.modelId]
+    );
     const override = row ? toOverride(row) : null;
     return override?.key === "reasoning_efforts" ? override.value : null;
   } catch {
@@ -152,11 +145,11 @@ export function getReasoningEffortsOverride(
   }
 }
 
-export function setModelCapabilityOverride(
+export async function setModelCapabilityOverride(
   target: string,
   key: ModelCapabilityOverrideKey,
   value: number | string | readonly string[]
-): boolean {
+): Promise<boolean> {
   const parsedTarget = parseModelOverrideTarget(target);
   if (!parsedTarget || !isSupportedKey(key)) return false;
 
@@ -172,42 +165,39 @@ export function setModelCapabilityOverride(
     normalizedValue = value;
   }
 
-  getDbInstance()
-    .prepare(
-      "INSERT OR REPLACE INTO model_capability_overrides " +
-        "(provider, model_id, override_key, override_value, refreshed_at) " +
-        "VALUES (?, ?, ?, ?, datetime('now'))"
-    )
-    .run(parsedTarget.provider, parsedTarget.modelId, key, JSON.stringify(normalizedValue));
+  await db().execute(
+    `INSERT INTO model_capability_overrides (provider, model_id, override_key, override_value, refreshed_at)
+     VALUES ($1, $2, $3, $4::jsonb, now())
+     ON CONFLICT (provider, model_id, override_key)
+     DO UPDATE SET override_value = EXCLUDED.override_value, refreshed_at = EXCLUDED.refreshed_at`,
+    [parsedTarget.provider, parsedTarget.modelId, key, jsonb(normalizedValue)]
+  );
   invalidateDbCache("model-capabilities");
   return true;
 }
 
-export function removeModelCapabilityOverride(
+export async function removeModelCapabilityOverride(
   target: string,
   key: ModelCapabilityOverrideKey
-): boolean {
+): Promise<boolean> {
   const parsedTarget = parseModelOverrideTarget(target);
   if (!parsedTarget || !isSupportedKey(key)) return false;
 
-  const info = getDbInstance()
-    .prepare(
-      "DELETE FROM model_capability_overrides " +
-        "WHERE provider = ? AND model_id = ? AND override_key = ?"
-    )
-    .run(parsedTarget.provider, parsedTarget.modelId, key);
+  const info = await db().execute(
+    "DELETE FROM model_capability_overrides " +
+      "WHERE provider = $1 AND model_id = $2 AND override_key = $3",
+    [parsedTarget.provider, parsedTarget.modelId, key]
+  );
   if (info.changes > 0) invalidateDbCache("model-capabilities");
   return info.changes > 0;
 }
 
-export function listModelCapabilityOverrides(): ModelCapabilityOverride[] {
+export async function listModelCapabilityOverrides(): Promise<ModelCapabilityOverride[]> {
   try {
-    const rows = getDbInstance()
-      .prepare(
-        "SELECT provider, model_id, override_key, override_value, refreshed_at " +
-          "FROM model_capability_overrides ORDER BY refreshed_at DESC"
-      )
-      .all() as OverrideRow[];
+    const rows = await db().query<OverrideRow>(
+      "SELECT provider, model_id, override_key, override_value, refreshed_at " +
+        "FROM model_capability_overrides ORDER BY refreshed_at DESC"
+    );
     return rows.map(toOverride).filter((entry): entry is ModelCapabilityOverride => entry !== null);
   } catch {
     return [];

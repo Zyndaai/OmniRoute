@@ -1,40 +1,44 @@
-import { getDbInstance, pingDb } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import { listPools } from "@/lib/db/quotaPools";
 
 interface ProviderStatusRow {
   id: string;
   provider: string;
-  is_active: number | boolean | null;
+  is_active: boolean;
   test_status: string | null;
   last_error: string | null;
 }
 
-function readProviderStatusRows(): ProviderStatusRow[] {
-  const db = getDbInstance();
-  return db
-    .prepare("SELECT id, provider, is_active, test_status, last_error FROM provider_connections")
-    .all() as ProviderStatusRow[];
+async function readProviderStatusRows(): Promise<ProviderStatusRow[]> {
+  return db().query<ProviderStatusRow>(
+    "SELECT id, provider, is_active, test_status, last_error FROM provider_connections"
+  );
+}
+
+async function isDatabaseReachable(): Promise<boolean> {
+  try {
+    return (await db().health()).ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function buildOmniRouteStatus() {
-  const [connections, circuitModule, quotaMonitorModule] = await Promise.all([
-    Promise.resolve(readProviderStatusRows()),
+  const [connections, circuitModule, quotaMonitorModule, reachable] = await Promise.all([
+    readProviderStatusRows(),
     import("@/shared/utils/circuitBreaker").catch(() => null),
     import("../../open-sse/services/quotaMonitor").catch(() => null),
+    isDatabaseReachable(),
   ]);
-  const pools = listPools().items;
-  const circuitStatuses = circuitModule?.getAllCircuitBreakerStatuses() ?? null;
+  const pools = (await listPools()).items;
+  const circuitStatuses = circuitModule ? await circuitModule.getAllCircuitBreakerStatuses() : null;
   const quotaSummary = quotaMonitorModule?.getQuotaMonitorSummary() ?? null;
-  const active = connections.filter(
-    (connection) => connection.is_active !== 0 && connection.is_active !== false
-  );
-  const disabled = connections.filter(
-    (connection) => connection.is_active === 0 || connection.is_active === false
-  );
+  const active = connections.filter((connection) => connection.is_active);
+  const disabled = connections.filter((connection) => !connection.is_active);
   const healthy = active.filter((connection) => connection.test_status === "active");
 
   return {
-    gateway: pingDb() ? "healthy" : "degraded",
+    gateway: reachable ? "healthy" : "degraded",
     catalog: { available: true },
     providers: {
       configured: connections.length,
@@ -44,13 +48,12 @@ export async function buildOmniRouteStatus() {
       connections: connections.map((connection) => ({
         id: connection.id,
         provider: connection.provider,
-        active: connection.is_active !== 0 && connection.is_active !== false,
-        health:
-          connection.is_active === 0 || connection.is_active === false
-            ? "disabled"
-            : connection.test_status === "active"
-              ? "healthy"
-              : "unknown",
+        active: connection.is_active,
+        health: !connection.is_active
+          ? "disabled"
+          : connection.test_status === "active"
+            ? "healthy"
+            : "unknown",
         failureState: connection.last_error ? "recent_error" : "none",
       })),
     },

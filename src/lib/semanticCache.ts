@@ -16,7 +16,7 @@
 import crypto from "crypto";
 import { canonicalJson } from "./skills/stableJson";
 import { LRUCache } from "./cacheLayer";
-import { getDbInstance } from "./db/core";
+import { db } from "@/lib/db/pg";
 import { toNumber } from "@/shared/utils/numeric";
 import { conversationSignatureFields } from "../../open-sse/utils/conversationSignatureFields";
 import { startSemanticCachePruneJob } from "./jobs/semanticCachePruneJob";
@@ -30,53 +30,28 @@ function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
 
-/**
- * Current time in the same format `expires_at` and `created_at` are written in.
- *
- * `expires_at` is a TEXT column holding an ISO-8601 string ("2026-08-26T14:00:00.000Z"),
- * so it has to be compared against another ISO-8601 string. Comparing it to SQLite's
- * `datetime('now')` ("2026-08-26 14:00:00") is a lexicographic comparison that diverges
- * at index 10, where the stored value has 'T' (0x54) and `datetime('now')` has ' ' (0x20).
- * 'T' sorts after ' ', so every row whose UTC calendar date was today compared as
- * unexpired regardless of its real time-of-day TTL.
- */
-function isoNow(): string {
-  return new Date().toISOString();
+/** Postgres rejects U+0000 in text; upstream content can carry it. */
+function stripNul(value: string): string {
+  return value.includes("\u0000") ? value.replace(/\u0000/g, "") : value;
 }
 
-function ensureCacheMetricsTable() {
+// The three counter rows are seeded by the schema migration; the upsert keeps this correct if one is missing.
+async function incrementMetric(metric: "hits" | "misses" | "tokens_saved", amount = 1) {
   try {
-    const db = getDbInstance();
-    db.prepare(
-      `CREATE TABLE IF NOT EXISTS cache_metrics (
-        key TEXT PRIMARY KEY,
-        value INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`
-    ).run();
-    db.prepare(
-      `INSERT OR IGNORE INTO cache_metrics (key, value) VALUES ('hits', 0), ('misses', 0), ('tokens_saved', 0)`
-    ).run();
+    await db().execute(
+      `INSERT INTO cache_metrics (key, value, updated_at) VALUES ($2, $1, now())
+       ON CONFLICT (key) DO UPDATE SET
+         value = cache_metrics.value + EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      [Math.round(amount), metric]
+    );
   } catch {
-    // DB not available
+    // DB not available — metrics are best effort
   }
 }
 
-function incrementMetric(metric: "hits" | "misses" | "tokens_saved", amount = 1) {
+async function getMetricValue(metric: string): Promise<number> {
   try {
-    const db = getDbInstance();
-    db.prepare(
-      `UPDATE cache_metrics SET value = value + ?, updated_at = datetime('now') WHERE key = ?`
-    ).run(amount, metric);
-  } catch {
-    // DB not available — fall back to in-memory
-  }
-}
-
-function getMetricValue(metric: string): number {
-  try {
-    const db = getDbInstance();
-    const row = db.prepare(`SELECT value FROM cache_metrics WHERE key = ?`).get(metric);
+    const row = await db().queryOne(`SELECT value FROM cache_metrics WHERE key = $1`, [metric]);
     return row ? toNumber(asRecord(row).value, 0) : 0;
   } catch {
     return 0;
@@ -113,7 +88,6 @@ function getMemoryCache() {
       maxBytes: parseInt(process.env.SEMANTIC_CACHE_MAX_BYTES || String(2 * 1024 * 1024), 10),
       defaultTTL: parseInt(process.env.SEMANTIC_CACHE_TTL_MS || "1800000", 10),
     });
-    ensureCacheMetricsTable();
   }
   return memoryCache;
 }
@@ -346,29 +320,28 @@ function normalizeConversation(conversation: unknown) {
  * @param {string} signature
  * @returns {object|null} Cached response or null
  */
-export function getCachedResponse(signature) {
+export async function getCachedResponse(signature) {
   // 1. Check memory cache
   const memResult = getMemoryCache().get(signature);
   if (memResult) {
-    incrementMetric("hits");
-    incrementMetric("tokens_saved", memResult.tokensSaved || 0);
+    // Best-effort counters stay off the latency-sensitive hit path.
+    void incrementMetric("hits");
+    void incrementMetric("tokens_saved", memResult.tokensSaved || 0);
     return memResult.response;
   }
 
-  // 2. Check SQLite
+  // 2. Check Postgres
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare(
-        "SELECT response, tokens_saved FROM semantic_cache WHERE signature = ? AND expires_at > ?"
-      )
-      .get(signature, isoNow());
+    const row = await db().queryOne(
+      "SELECT response, tokens_saved FROM semantic_cache WHERE signature = $1 AND expires_at > now()",
+      [signature]
+    );
 
     if (row) {
       const record = asRecord(row);
       const responsePayload = typeof record.response === "string" ? record.response : null;
       if (!responsePayload) {
-        incrementMetric("misses");
+        await incrementMetric("misses");
         return null;
       }
       const parsed = JSON.parse(responsePayload);
@@ -379,19 +352,20 @@ export function getCachedResponse(signature) {
         tokensSaved,
       });
       // Update hit count in DB
-      db.prepare("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE signature = ?").run(
-        signature
+      await db().execute(
+        "UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE signature = $1",
+        [signature]
       );
 
-      incrementMetric("hits");
-      incrementMetric("tokens_saved", tokensSaved);
+      await incrementMetric("hits");
+      await incrementMetric("tokens_saved", tokensSaved);
       return parsed;
     }
   } catch {
     // DB not available — fail open
   }
 
-  incrementMetric("misses");
+  await incrementMetric("misses");
   return null;
 }
 
@@ -399,17 +373,17 @@ export function getCachedResponse(signature) {
  * Record a semantic cache hit: increments hit count for the entry in SQLite
  * and increments global hit metrics (hits and tokens_saved).
  */
-export function recordSemanticCacheHit(signature: string, tokensSaved = 0): void {
+export async function recordSemanticCacheHit(signature: string, tokensSaved = 0): Promise<void> {
   try {
-    const db = getDbInstance();
     if (signature) {
-      db.prepare("UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE signature = ?").run(
-        signature
+      await db().execute(
+        "UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE signature = $1",
+        [signature]
       );
     }
-    incrementMetric("hits");
+    await incrementMetric("hits");
     if (tokensSaved > 0) {
-      incrementMetric("tokens_saved", tokensSaved);
+      await incrementMetric("tokens_saved", tokensSaved);
     }
   } catch {
     // DB not available — fail open
@@ -424,24 +398,45 @@ export function recordSemanticCacheHit(signature: string, tokensSaved = 0): void
  * @param {number} tokensSaved - Estimated tokens saved
  * @param {number} [ttlMs] - TTL in ms (default: 1 hour)
  */
-export function setCachedResponse(signature, model, response, tokensSaved = 0, ttlMs = 3600000) {
+export async function setCachedResponse(
+  signature,
+  model,
+  response,
+  tokensSaved = 0,
+  ttlMs = 3600000
+) {
   const ttl = parseInt(process.env.SEMANTIC_CACHE_TTL_MS || String(ttlMs), 10);
 
   // 1. Memory cache
   getMemoryCache().set(signature, { response, tokensSaved }, ttl);
 
-  // 2. SQLite
+  // 2. Postgres
   try {
-    const db = getDbInstance();
-    const id = crypto.randomUUID();
     const promptHash = signature.slice(0, 16);
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + ttl).toISOString();
 
-    db.prepare(
-      `INSERT OR REPLACE INTO semantic_cache (id, signature, model, prompt_hash, response, tokens_saved, hit_count, created_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
-    ).run(id, signature, model, promptHash, JSON.stringify(response), tokensSaved, now, expiresAt);
+    await db().execute(
+      `INSERT INTO semantic_cache (signature, model, prompt_hash, response, tokens_saved, hit_count, created_at, expires_at)
+       VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
+       ON CONFLICT (signature) DO UPDATE SET
+         model = EXCLUDED.model,
+         prompt_hash = EXCLUDED.prompt_hash,
+         response = EXCLUDED.response,
+         tokens_saved = EXCLUDED.tokens_saved,
+         hit_count = 0,
+         created_at = EXCLUDED.created_at,
+         expires_at = EXCLUDED.expires_at`,
+      [
+        signature,
+        model,
+        promptHash,
+        stripNul(JSON.stringify(response)),
+        Math.round(Number(tokensSaved) || 0),
+        now,
+        expiresAt,
+      ]
+    );
   } catch {
     // DB write failed — cache still in memory
   }
@@ -453,11 +448,10 @@ export function setCachedResponse(signature, model, response, tokensSaved = 0, t
  * @param {string} model - Model name to invalidate (exact match)
  * @returns {number} Number of entries removed
  */
-export function invalidateByModel(model: string): number {
+export async function invalidateByModel(model: string): Promise<number> {
   getMemoryCache().clear(); // Memory cache doesn't track model; full clear
   try {
-    const db = getDbInstance();
-    const result = db.prepare("DELETE FROM semantic_cache WHERE model = ?").run(model);
+    const result = await db().execute("DELETE FROM semantic_cache WHERE model = $1", [model]);
     return result.changes || 0;
   } catch {
     return 0;
@@ -469,11 +463,12 @@ export function invalidateByModel(model: string): number {
  * @param {string} signature - Cache signature to invalidate
  * @returns {boolean} Whether the entry was found and removed
  */
-export function invalidateBySignature(signature: string): boolean {
+export async function invalidateBySignature(signature: string): Promise<boolean> {
   getMemoryCache().delete(signature);
   try {
-    const db = getDbInstance();
-    const result = db.prepare("DELETE FROM semantic_cache WHERE signature = ?").run(signature);
+    const result = await db().execute("DELETE FROM semantic_cache WHERE signature = $1", [
+      signature,
+    ]);
     return (result.changes || 0) > 0;
   } catch {
     return false;
@@ -485,12 +480,13 @@ export function invalidateBySignature(signature: string): boolean {
  * @param {number} maxAgeMs - Maximum age in milliseconds
  * @returns {number} Number of entries removed
  */
-export function invalidateStale(maxAgeMs: number): number {
+export async function invalidateStale(maxAgeMs: number): Promise<number> {
   getMemoryCache().clear();
   try {
-    const db = getDbInstance();
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-    const result = db.prepare("DELETE FROM semantic_cache WHERE created_at < ?").run(cutoff);
+    const result = await db().execute("DELETE FROM semantic_cache WHERE created_at < $1", [
+      cutoff,
+    ]);
     return result.changes || 0;
   } catch {
     return 0;
@@ -500,36 +496,34 @@ export function invalidateStale(maxAgeMs: number): number {
 /**
  * Clear all cache entries.
  */
-export function clearCache(): number {
+export async function clearCache(): Promise<number> {
   getMemoryCache().clear();
   let removed = 0;
   try {
-    const db = getDbInstance();
-    const result = db.prepare("DELETE FROM semantic_cache").run();
+    const result = await db().execute("DELETE FROM semantic_cache");
     removed = result.changes || 0;
-    db.prepare("UPDATE cache_metrics SET value = 0").run();
+    await db().execute("UPDATE cache_metrics SET value = 0, updated_at = now()");
   } catch {
     // DB not available
   }
   return removed;
 }
 
-export function getCacheStats() {
+export async function getCacheStats() {
   const memStats = getMemoryCache().getStats();
   let dbSize = 0;
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT COUNT(*) as count FROM semantic_cache WHERE expires_at > ?")
-      .get(isoNow());
+    const row = await db().queryOne(
+      "SELECT COUNT(*) as count FROM semantic_cache WHERE expires_at > now()"
+    );
     dbSize = toNumber(asRecord(row).count, 0);
   } catch {
     // DB not available
   }
 
-  const hits = getMetricValue("hits");
-  const misses = getMetricValue("misses");
-  const tokensSaved = getMetricValue("tokens_saved");
+  const hits = await getMetricValue("hits");
+  const misses = await getMetricValue("misses");
+  const tokensSaved = await getMetricValue("tokens_saved");
   const total = hits + misses;
 
   return {

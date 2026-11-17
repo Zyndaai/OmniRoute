@@ -31,7 +31,7 @@
  * `control_url`, so it is excluded.
  */
 
-import { getDbInstance } from "../db/core";
+import { db } from "@/lib/db/pg";
 import { decrypt } from "../db/encryption";
 import { isProxySkipRecentlyFailedEnabled } from "@/shared/utils/featureFlags";
 import {
@@ -153,12 +153,11 @@ export function __setAnyControlUrlConfiguredForTesting(v: boolean | null): void 
   anyControlUrlConfigured = v;
 }
 
-function refreshControlUrlCache(): boolean {
+async function refreshControlUrlCache(): Promise<boolean> {
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT 1 AS hit FROM proxy_subscriptions WHERE control_url IS NOT NULL LIMIT 1")
-      .get() as { hit?: unknown } | undefined;
+    const row = await db().queryOne<{ hit?: unknown }>(
+      "SELECT 1 AS hit FROM proxy_subscriptions WHERE control_url IS NOT NULL LIMIT 1"
+    );
     anyControlUrlConfigured = !!row;
     return anyControlUrlConfigured;
   } catch {
@@ -174,10 +173,8 @@ interface ResolveHit {
   gapSeconds: number;
 }
 
-function resolvePairs(setAsideKey: string): ResolveHit[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
+async function resolvePairs(setAsideKey: string): Promise<ResolveHit[]> {
+  const rows = await db().query<Record<string, unknown>>(
       `SELECT p.id AS rid, p.type AS type, p.host AS host, p.port AS port, p.username AS username,
               p.subscription_id AS subscription_id, p.updated_at AS updated_at,
               s.control_url AS control_url, s.control_secret_enc AS control_secret_enc,
@@ -186,9 +183,8 @@ function resolvePairs(setAsideKey: string): ResolveHit[] {
          FROM proxy_registry p
          JOIN proxy_subscriptions s ON s.id = p.subscription_id
         WHERE p.subscription_id IS NOT NULL AND s.control_url IS NOT NULL
-        ORDER BY datetime(p.updated_at) DESC, p.id ASC`
-    )
-    .all() as Array<Record<string, unknown>>;
+        ORDER BY p.updated_at DESC, p.id ASC`
+  );
   const hits: ResolveHit[] = [];
   for (const r of rows) {
     const key = selectorRegistryKey({
@@ -479,7 +475,13 @@ function setAsideKind(entryKey: string, now: number): ProxyRefusalKind | null {
  * Unknown, missing or unreadable entries fall through to the caller. */
 function selectorEntryKind(raw: unknown, selector: string): ProxyRefusalKind | null {
   try {
-    const stored = typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : null;
+    // jsonb arrives parsed; a legacy JSON string is still accepted.
+    const stored =
+      typeof raw === "string"
+        ? (JSON.parse(raw) as Record<string, unknown>)
+        : raw && typeof raw === "object"
+          ? (raw as Record<string, unknown>)
+          : null;
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
     const entry = stored[selector];
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
@@ -509,19 +511,18 @@ function asRefusalKind(value: unknown): ProxyRefusalKind | null {
   return typeof value === "string" && value.length > 0 ? (value as ProxyRefusalKind) : null;
 }
 
-function lastPersistedSwitchKind(
+async function lastPersistedSwitchKind(
   subscriptionId: string,
   selector?: string
-): ProxyRefusalKind | null {
+): Promise<ProxyRefusalKind | null> {
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare(
-        "SELECT selector_last_switch_kind, selector_last_switch_by_selector FROM proxy_subscriptions WHERE id = ?"
-      )
-      .get(subscriptionId) as
-      | { selector_last_switch_kind?: unknown; selector_last_switch_by_selector?: unknown }
-      | undefined;
+    const row = await db().queryOne<{
+      selector_last_switch_kind?: unknown;
+      selector_last_switch_by_selector?: unknown;
+    }>(
+      "SELECT selector_last_switch_kind, selector_last_switch_by_selector FROM proxy_subscriptions WHERE id = $1",
+      [subscriptionId]
+    );
     return kindFromExtendedRow(row, selector);
   } catch {
     return null;
@@ -539,16 +540,16 @@ function restoreSlot(throttleKey: string, prev: number | undefined): void {
  * earlier outcome); live snapshot as fallback for the synchronous quota
  * caller; hard default last so the column never stays unexplained.
  */
-function switchOutcomeKind(
+async function switchOutcomeKind(
   setAsideKey: string,
   now: number,
   propagated?: ProxyRefusalKind,
   subscriptionId?: string,
   selector?: string
-): ProxyRefusalKind {
+): Promise<ProxyRefusalKind> {
   if (propagated !== undefined) return propagated;
   if (subscriptionId !== undefined) {
-    const kept = lastPersistedSwitchKind(subscriptionId, selector);
+    const kept = await lastPersistedSwitchKind(subscriptionId, selector);
     if (kept !== null) return kept;
   }
   return setAsideKind(setAsideKey, now) ?? "ip_quota_429";
@@ -569,11 +570,11 @@ export async function maybeSwitchOnSetAside(
       noteSelectorEarlyReason("no-control");
       return { switched: false, reason: "no-control" };
     }
-    if (anyControlUrlConfigured === null && !refreshControlUrlCache()) {
+    if (anyControlUrlConfigured === null && !(await refreshControlUrlCache())) {
       noteSelectorEarlyReason("no-control");
       return { switched: false, reason: "no-control" };
     }
-    const pairs = resolvePairs(setAsideKey);
+    const pairs = await resolvePairs(setAsideKey);
     if (pairs.length === 0) {
       noteSelectorEarlyReason("unmapped");
       return { switched: false, reason: "unmapped" };
@@ -588,7 +589,13 @@ export async function maybeSwitchOnSetAside(
         subscriptionId: hit.subscriptionId,
         selector: hit.selector,
         result: "throttled",
-        kind: switchOutcomeKind(setAsideKey, now, opts?.kind, hit.subscriptionId, hit.selector),
+        kind: await switchOutcomeKind(
+          setAsideKey,
+          now,
+          opts?.kind,
+          hit.subscriptionId,
+          hit.selector
+        ),
       });
       return { switched: false, reason: "throttled" };
     }
@@ -596,7 +603,7 @@ export async function maybeSwitchOnSetAside(
       hit,
       setAsideKey,
       now,
-      switchOutcomeKind(setAsideKey, now, opts?.kind),
+      await switchOutcomeKind(setAsideKey, now, opts?.kind),
       pairs
         .filter((p) => p.controlUrl === hit.controlUrl && p.selector !== hit.selector)
         .map((p) => ({ selector: p.selector, secretEnc: p.secretEnc }))

@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     const auditContext = getAuditRequestContext(request);
     for (const write of writes) {
       const connection = write.connection;
-      logAuditEvent({
+      await logAuditEvent({
         action:
           write.outcome === "created"
             ? "provider.credentials.created"

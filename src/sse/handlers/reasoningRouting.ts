@@ -177,8 +177,8 @@ export async function applyReasoningRouting({
   };
 }
 
-export function filterReasoningCombo(combo: any, decision: ReasoningRuleDecision) {
-  const filtered = filterComboForReasoningDecision(combo, decision);
+export async function filterReasoningCombo(combo: any, decision: ReasoningRuleDecision) {
+  const filtered = await filterComboForReasoningDecision(combo, decision);
   if (!filtered.combo) {
     return errorResponse(
       HTTP_STATUS.BAD_REQUEST,

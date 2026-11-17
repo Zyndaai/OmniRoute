@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
-import { getDbInstance } from "./core";
+import { db, ts } from "@/lib/db/pg";
 import { type AccessScope, normalizeScope } from "../accessTokens/scopes";
 
 /**
@@ -95,15 +95,14 @@ function isExpired(expiresAt: string | null): boolean {
  * secret — the ONLY time the secret is available. Caller must show it once and
  * never store it server-side.
  */
-export function createAccessToken(input: {
+export async function createAccessToken(input: {
   name: string;
   scope?: AccessScope | string;
   expiresAt?: string | null;
-}): { record: AccessTokenRecord; secret: string } {
+}): Promise<{ record: AccessTokenRecord; secret: string }> {
   const name = (input.name ?? "").trim();
   if (!name) throw new Error("Access token name is required");
 
-  const db = getDbInstance();
   const scope = normalizeScope(input.scope, "read");
   const secret = `${TOKEN_SECRET_PREFIX}${randomBytes(TOKEN_RANDOM_BYTES).toString("base64url")}`;
   const id = `tok_${randomUUID()}`;
@@ -112,11 +111,12 @@ export function createAccessToken(input: {
   const createdAt = new Date().toISOString();
   const expiresAt = input.expiresAt ?? null;
 
-  db.prepare(
+  await db().execute(
     `INSERT INTO cli_access_tokens
        (id, token_hash, token_prefix, name, scope, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, tokenHash, tokenPrefix, name, scope, createdAt, expiresAt);
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, tokenHash, tokenPrefix, name, scope, createdAt, ts(expiresAt)]
+  );
 
   return {
     secret,
@@ -137,12 +137,14 @@ export function createAccessToken(input: {
  * Validate a presented secret. Returns the token's identity + scope, or null when
  * the secret is unknown, revoked, or expired. Touches `last_used_at` on success.
  */
-export function verifyAccessToken(secret: string | null | undefined): VerifiedAccessToken | null {
+export async function verifyAccessToken(
+  secret: string | null | undefined
+): Promise<VerifiedAccessToken | null> {
   if (!secret || typeof secret !== "string") return null;
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT * FROM cli_access_tokens WHERE token_hash = ?")
-    .get(hashAccessToken(secret)) as AccessTokenRow | undefined;
+  const row = await db().queryOne<AccessTokenRow>(
+    "SELECT * FROM cli_access_tokens WHERE token_hash = $1",
+    [hashAccessToken(secret)]
+  );
   if (!row) return null;
   if (row.revoked_at) return null;
   if (isExpired(row.expires_at)) return null;
@@ -154,10 +156,10 @@ export function verifyAccessToken(secret: string | null | undefined): VerifiedAc
     Number.isFinite(lastUsedMs) && Date.now() - lastUsedMs < LAST_USED_WRITE_INTERVAL_MS;
   if (!stampIsFresh) {
     try {
-      db.prepare("UPDATE cli_access_tokens SET last_used_at = ? WHERE id = ?").run(
+      await db().execute("UPDATE cli_access_tokens SET last_used_at = $1 WHERE id = $2", [
         new Date().toISOString(),
-        row.id
-      );
+        row.id,
+      ]);
     } catch {
       /* non-fatal */
     }
@@ -167,19 +169,18 @@ export function verifyAccessToken(secret: string | null | undefined): VerifiedAc
 }
 
 /** List all tokens (masked — never includes the secret or its hash). */
-export function listAccessTokens(): AccessTokenRecord[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT * FROM cli_access_tokens ORDER BY created_at DESC")
-    .all() as AccessTokenRow[];
+export async function listAccessTokens(): Promise<AccessTokenRecord[]> {
+  const rows = await db().query<AccessTokenRow>(
+    "SELECT * FROM cli_access_tokens ORDER BY created_at DESC"
+  );
   return rows.map(rowToRecord);
 }
 
 /** Fetch one token's masked record by id, or null. */
-export function getAccessToken(id: string): AccessTokenRecord | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM cli_access_tokens WHERE id = ?").get(id) as
-    AccessTokenRow | undefined;
+export async function getAccessToken(id: string): Promise<AccessTokenRecord | null> {
+  const row = await db().queryOne<AccessTokenRow>("SELECT * FROM cli_access_tokens WHERE id = $1", [
+    id,
+  ]);
   return row ? rowToRecord(row) : null;
 }
 
@@ -188,17 +189,15 @@ export function getAccessToken(id: string): AccessTokenRecord | null {
  * token. A prefix shared by two or more live tokens revokes nothing.
  * Revoking an already-revoked token succeeds and reports alreadyRevoked.
  */
-export function revokeAccessToken(idOrPrefix: string): RevokeAccessTokenResult {
+export async function revokeAccessToken(idOrPrefix: string): Promise<RevokeAccessTokenResult> {
   const none = { revoked: false, alreadyRevoked: false, ambiguous: false };
   if (!idOrPrefix) return none;
-  const db = getDbInstance();
 
-  const matches = db
-    .prepare(
-      `SELECT id, revoked_at FROM cli_access_tokens
-         WHERE id = ? OR token_prefix = ?`
-    )
-    .all(idOrPrefix, idOrPrefix) as Array<{ id: string; revoked_at: string | null }>;
+  const matches = await db().query<{ id: string; revoked_at: string | null }>(
+    `SELECT id, revoked_at FROM cli_access_tokens
+         WHERE id = $1 OR token_prefix = $1`,
+    [idOrPrefix]
+  );
   if (matches.length === 0) return none;
 
   const exact = matches.find((row) => row.id === idOrPrefix);
@@ -217,12 +216,11 @@ export function revokeAccessToken(idOrPrefix: string): RevokeAccessTokenResult {
     return { revoked: true, alreadyRevoked: true, ambiguous: false };
   }
 
-  const res = db
-    .prepare(
-      `UPDATE cli_access_tokens SET revoked_at = ?
-         WHERE id = ? AND revoked_at IS NULL`
-    )
-    .run(new Date().toISOString(), target.id);
+  const res = await db().execute(
+    `UPDATE cli_access_tokens SET revoked_at = $1
+         WHERE id = $2 AND revoked_at IS NULL`,
+    [new Date().toISOString(), target.id]
+  );
   if (res.changes > 0) {
     return { revoked: true, alreadyRevoked: false, ambiguous: false };
   }

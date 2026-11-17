@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db } from "@/lib/db/pg";
 import { calculateCostDetailed } from "@/lib/usage/costCalculator";
 import { toNumber } from "@/shared/utils/numeric";
 import { parseShapeCounts } from "@/lib/usage/teamCostShapes";
@@ -89,11 +89,12 @@ type ReportOptions = { startIso?: string | null; endIso?: string | null };
 function buildReportBind(teamId: string, options: ReportOptions) {
   return {
     teamId,
-    startIso: options.startIso || "0000-01-01T00:00:00.000Z",
+    // Postgres has no year 0, so the open lower bound is year 1.
+    startIso: options.startIso || "0001-01-01T00:00:00.000Z",
     endIso: options.endIso || "9999-12-31T23:59:59.999Z",
     completeSummaryStartDate: (() => {
       const start = options.startIso;
-      if (!start) return "0000-01-01";
+      if (!start) return "0001-01-01";
       const date = start.slice(0, 10);
       return start === `${date}T00:00:00.000Z`
         ? date
@@ -110,58 +111,55 @@ function buildReportBind(teamId: string, options: ReportOptions) {
   };
 }
 
-function loadReportRows(
-  db: ReturnType<typeof getDbInstance>,
+async function loadReportRows(
   bind: ReturnType<typeof buildReportBind>
-): TeamUsageCostRow[] {
-  const rawRows = db
-    .prepare(
-      `SELECT
-         COALESCE(NULLIF(api_key_id, ''), 'unknown') as apiKeyId,
-         MAX(NULLIF(api_key_name, '')) as apiKeyName,
+): Promise<TeamUsageCostRow[]> {
+  const rawRows = await db().query<TeamUsageCostRow>(
+    `SELECT
+         COALESCE(NULLIF(api_key_id, ''), 'unknown') as "apiKeyId",
+         MAX(NULLIF(api_key_name, '')) as "apiKeyName",
          COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') as provider,
          COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') as model,
-         COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
+         COALESCE(NULLIF(service_tier, ''), 'standard') as "serviceTier",
          COUNT(*) as requests,
-         COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0) as successfulRequests,
-         COALESCE(SUM(tokens_input), 0) as inputTokens,
-         COALESCE(SUM(tokens_output), 0) as outputTokens,
-         COALESCE(SUM(tokens_cache_read), 0) as cacheReadTokens,
-         COALESCE(SUM(tokens_cache_creation), 0) as cacheCreationTokens,
-         COALESCE(SUM(tokens_reasoning), 0) as reasoningTokens
+         COALESCE(SUM(CASE WHEN success THEN 1 ELSE 0 END), 0) as "successfulRequests",
+         COALESCE(SUM(tokens_input), 0) as "inputTokens",
+         COALESCE(SUM(tokens_output), 0) as "outputTokens",
+         COALESCE(SUM(tokens_cache_read), 0) as "cacheReadTokens",
+         COALESCE(SUM(tokens_cache_creation), 0) as "cacheCreationTokens",
+         COALESCE(SUM(tokens_reasoning), 0) as "reasoningTokens"
        FROM usage_history
-       WHERE billing_team_id = @teamId
+       WHERE billing_team_id = $1
          AND team_rollup_processed_at IS NULL
-         AND timestamp >= @startIso AND timestamp <= @endIso
-       GROUP BY apiKeyId, LOWER(provider), LOWER(model), serviceTier,
-         tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning`
-    )
-    .all(bind) as TeamUsageCostRow[];
+         AND "timestamp" >= $2 AND "timestamp" <= $3
+       GROUP BY "apiKeyId", LOWER(provider), LOWER(model), "serviceTier",
+         tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning`,
+    [bind.teamId, bind.startIso, bind.endIso]
+  );
 
-  const summaryRows = db
-    .prepare(
-      `SELECT
-         api_key_id as apiKeyId,
-         MAX(NULLIF(api_key_name, '')) as apiKeyName,
+  const summaryRows = await db().query<TeamUsageCostRow>(
+    `SELECT
+         api_key_id as "apiKeyId",
+         MAX(NULLIF(api_key_name, '')) as "apiKeyName",
          COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') as provider,
          COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') as model,
-         COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
+         COALESCE(NULLIF(service_tier, ''), 'standard') as "serviceTier",
          COALESCE(SUM(total_requests), 0) as requests,
-         COALESCE(SUM(successful_requests), 0) as successfulRequests,
-         COALESCE(SUM(total_input_tokens), 0) as inputTokens,
-         COALESCE(SUM(total_output_tokens), 0) as outputTokens,
-         COALESCE(SUM(total_cache_read_tokens), 0) as cacheReadTokens,
-         COALESCE(SUM(total_cache_creation_tokens), 0) as cacheCreationTokens,
-         COALESCE(SUM(total_reasoning_tokens), 0) as reasoningTokens,
-         MAX(token_shapes_json) as tokenShapesJson,
+         COALESCE(SUM(successful_requests), 0) as "successfulRequests",
+         COALESCE(SUM(total_input_tokens), 0) as "inputTokens",
+         COALESCE(SUM(total_output_tokens), 0) as "outputTokens",
+         COALESCE(SUM(total_cache_read_tokens), 0) as "cacheReadTokens",
+         COALESCE(SUM(total_cache_creation_tokens), 0) as "cacheCreationTokens",
+         COALESCE(SUM(total_reasoning_tokens), 0) as "reasoningTokens",
+         MAX(token_shapes::text) as "tokenShapesJson",
          1 as retained
        FROM daily_team_usage_summary
-       WHERE team_id = @teamId
-         AND date >= @completeSummaryStartDate
-         AND date < @completeSummaryEndDateExclusive
-       GROUP BY api_key_id, LOWER(provider), LOWER(model), serviceTier, date`
-    )
-    .all(bind) as TeamUsageCostRow[];
+       WHERE team_id = $1
+         AND date >= $2::date
+         AND date < $3::date
+       GROUP BY api_key_id, LOWER(provider), LOWER(model), "serviceTier", date`,
+    [bind.teamId, bind.completeSummaryStartDate, bind.completeSummaryEndDateExclusive]
+  );
 
   return [...rawRows, ...summaryRows];
 }
@@ -227,7 +225,7 @@ export async function getTeamUsageReport(
   options: ReportOptions = {}
 ): Promise<TeamUsageReport> {
   const bind = buildReportBind(teamId, options);
-  const rows = loadReportRows(getDbInstance(), bind);
+  const rows = await loadReportRows(bind);
   const {
     requests,
     successfulRequests,

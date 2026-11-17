@@ -1,19 +1,13 @@
 /**
- * Row writers for `proxy_subscriptions` (mirror column tolerant).
- *
- * The `mirror_urls` column lands via a later migration; databases that
- * predate it (and unit tests seeding legacy rows) lack the column. Both
- * writers probe `PRAGMA table_info` and include the column only when
- * present — so writes stay green with and without the migration applied.
+ * Row writers for `proxy_subscriptions`.
  */
+import { jsonb, type DbExecutor } from "@/lib/db/pg";
+import { stripNul } from "@/lib/db/proxies/sanitize";
 import { encodeMirrorUrls } from "./mirrorUrls";
-import { hasSubscriptionColumn } from "./subscriptionColumns";
 
-export interface RowDb {
-  prepare: (sql: string) => {
-    run: (...args: unknown[]) => unknown;
-    all: (...args: unknown[]) => unknown;
-  };
+/** The column is an integer with CHECK > 0; the schema layer lets any number through. */
+function clampIntervalMinutes(value: number): number {
+  return Number.isFinite(value) ? Math.max(1, Math.round(value)) : 60;
 }
 
 export interface SubscriptionRowValues {
@@ -21,7 +15,7 @@ export interface SubscriptionRowValues {
   name: string;
   url: string;
   mirrorUrls: string[] | null;
-  enabled: number;
+  enabled: boolean;
   mode: string;
   ruleProviders: string[] | null;
   localCoreEndpoint: string | null;
@@ -32,74 +26,71 @@ export interface SubscriptionRowValues {
   now: string;
 }
 
-/** INSERT a subscription row, with `mirror_urls` only when the column exists. */
-export function insertSubscriptionRow(
-  db: RowDb,
+/** INSERT a subscription row. `executor` is `db()` or a transaction's `tx`. */
+export async function insertSubscriptionRow(
+  executor: DbExecutor,
   row: SubscriptionRowValues & { controlSecretEnc: string | null }
-): void {
-  const head = [row.id, row.name, row.url];
-  const tail = [
-    row.enabled,
-    row.mode,
-    row.ruleProviders ? JSON.stringify(row.ruleProviders) : null,
-    row.localCoreEndpoint || null,
-    row.updateIntervalMinutes,
-    row.controlUrl,
-    row.coreConfigPath,
-    row.controlSecretEnc,
-    row.gapSeconds,
-    row.now,
-    row.now,
-  ];
-  if (hasSubscriptionColumn(db, "mirror_urls")) {
-    db.prepare(
-      `INSERT INTO proxy_subscriptions
-      (id, name, url, mirror_urls, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, control_url, core_config_path, control_secret_enc, selector_min_gap_seconds, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'empty', ?, ?)`
-    ).run(...head, encodeMirrorUrls(row.mirrorUrls), ...tail);
-    return;
-  }
-  db.prepare(
+): Promise<void> {
+  await executor.execute(
     `INSERT INTO proxy_subscriptions
-      (id, name, url, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, control_url, core_config_path, control_secret_enc, selector_min_gap_seconds, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'empty', ?, ?)`
-  ).run(...head, ...tail);
+      (id, name, url, mirror_urls, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, control_url, core_config_path, control_secret_enc, selector_min_gap_seconds, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, 'empty', $14, $14)`,
+    [
+      row.id,
+      stripNul(row.name),
+      stripNul(row.url),
+      encodeMirrorUrls(row.mirrorUrls),
+      row.enabled,
+      row.mode,
+      jsonb(row.ruleProviders),
+      row.localCoreEndpoint || null,
+      clampIntervalMinutes(row.updateIntervalMinutes),
+      row.controlUrl,
+      row.coreConfigPath,
+      row.controlSecretEnc,
+      row.gapSeconds,
+      row.now,
+    ]
+  );
 }
 
 export interface SubscriptionUpdateValues extends SubscriptionRowValues {
   controlSecretEnc: string | null | undefined;
 }
 
-function updateSql(withMirror: boolean, withSecret: boolean): string {
-  const mirrorSet = withMirror ? "mirror_urls = ?, " : "";
-  const secretSet = withSecret ? "control_secret_enc = ?, " : "";
-  return `UPDATE proxy_subscriptions
-         SET name = ?, url = ?, ${mirrorSet}enabled = ?, mode = ?, rule_providers = ?, local_core_endpoint = ?, update_interval_minutes = ?, control_url = ?, core_config_path = ?, ${secretSet}selector_min_gap_seconds = ?, updated_at = ?
-       WHERE id = ?`;
-}
-
-/** UPDATE a subscription row, with `mirror_urls` only when the column exists. */
-export function updateSubscriptionRow(db: RowDb, row: SubscriptionUpdateValues): void {
-  const withMirror = hasSubscriptionColumn(db, "mirror_urls");
-  const withSecret = row.controlSecretEnc !== undefined;
-  const head = [row.name, row.url];
-  const mirrorArgs = withMirror ? [encodeMirrorUrls(row.mirrorUrls)] : [];
-  const tail = [
+/**
+ * UPDATE a subscription row. `control_secret_enc` is written only when
+ * `controlSecretEnc` is not undefined (write-only secret: absent leaves it).
+ */
+export async function updateSubscriptionRow(
+  executor: DbExecutor,
+  row: SubscriptionUpdateValues
+): Promise<void> {
+  const params: unknown[] = [
+    stripNul(row.name),
+    stripNul(row.url),
+    encodeMirrorUrls(row.mirrorUrls),
     row.enabled,
     row.mode,
-    row.ruleProviders ? JSON.stringify(row.ruleProviders) : null,
+    jsonb(row.ruleProviders),
     row.localCoreEndpoint || null,
-    row.updateIntervalMinutes,
+    clampIntervalMinutes(row.updateIntervalMinutes),
     row.controlUrl,
     row.coreConfigPath,
   ];
-  const secretArgs = withSecret ? [row.controlSecretEnc] : [];
-  const end = [row.gapSeconds, row.now, row.id];
-  db.prepare(updateSql(withMirror, withSecret)).run(
-    ...head,
-    ...mirrorArgs,
-    ...tail,
-    ...secretArgs,
-    ...end
+  let secretSet = "";
+  if (row.controlSecretEnc !== undefined) {
+    params.push(row.controlSecretEnc);
+    secretSet = `control_secret_enc = $${params.length}, `;
+  }
+  params.push(row.gapSeconds, row.now, row.id);
+  const n = params.length;
+  await executor.execute(
+    `UPDATE proxy_subscriptions
+        SET name = $1, url = $2, mirror_urls = $3, enabled = $4, mode = $5, rule_providers = $6::jsonb,
+            local_core_endpoint = $7, update_interval_minutes = $8, control_url = $9, core_config_path = $10,
+            ${secretSet}selector_min_gap_seconds = $${n - 2}, updated_at = $${n - 1}
+      WHERE id = $${n}`,
+    params
   );
 }

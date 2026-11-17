@@ -1,7 +1,7 @@
 import { registerDbStateResetter } from "@/lib/db/stateReset";
 import { getSyncedAvailableModelsByConnection } from "@/lib/db/models";
 import { getProviderConnections } from "@/lib/db/providers";
-import { getDbInstance } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import { getAllCircuitBreakerStatuses } from "@/shared/utils/circuitBreaker";
 import { getAllModelLockouts } from "@omniroute/open-sse/services/accountFallback";
 import { resolveProviderAlias } from "@omniroute/open-sse/services/model";
@@ -125,7 +125,9 @@ interface CallLogTargetStats {
   lastErrorStatus: number | null;
 }
 
-const statsCache = createHealthSnapshotCache<{ rows: CallLogTargetStats[]; cutoff: string }>();
+const statsCache = createHealthSnapshotCache<
+  Promise<{ rows: CallLogTargetStats[]; cutoff: string }>
+>();
 registerDbStateResetter(() => statsCache.clear());
 
 /** Exported so other surfaces reporting over a window use the same scale. */
@@ -220,81 +222,79 @@ function maxIso(left: string | null, right: string | null): string | null {
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
-function queryCallLogTargetStats(
+async function queryCallLogTargetStats(
   cutoff: string,
   providerFilter: string | null
-): CallLogTargetStats[] {
-  const db = getDbInstance();
-  const providerClause = providerFilter ? "AND c.provider = @provider" : "";
-  const params = providerFilter ? { cutoff, provider: providerFilter } : { cutoff };
-  const rows = db
-    .prepare(
-      `WITH log_targets AS (
+): Promise<CallLogTargetStats[]> {
+  const providerClause = providerFilter ? "AND c.provider = $2" : "";
+  const params = providerFilter ? [cutoff, providerFilter] : [cutoff];
+  const rows = await db().query<JsonRecord>(
+    `WITH log_targets AS (
         SELECT
           c.provider,
-          COALESCE(c.connection_id, '') as connectionId,
-          COALESCE(c.model, c.requested_model, 'unknown') as model,
+          COALESCE(c.connection_id, '') AS connection_key,
+          COALESCE(c.model, c.requested_model, 'unknown') AS model,
           c.status,
           c.duration,
-          c.timestamp,
+          c."timestamp",
           c.id,
           c.error_summary
         FROM call_logs c
         WHERE c.provider IS NOT NULL
           AND c.provider != '-'
-          AND c.timestamp >= @cutoff
+          AND c."timestamp" >= $1
           ${providerClause}
       ), ranked AS (
         SELECT
           provider,
-          connectionId,
+          connection_key,
           model,
           status,
           duration,
-          timestamp,
+          "timestamp",
           CASE
             WHEN (status IS NOT NULL AND (status < 200 OR status >= 400))
               OR error_summary IS NOT NULL
             THEN 1
             ELSE 0
-          END as isError,
+          END AS is_error,
           ROW_NUMBER() OVER (
-            PARTITION BY provider, connectionId, model
-            ORDER BY timestamp DESC, id DESC
-          ) as latestRank,
+            PARTITION BY provider, connection_key, model
+            ORDER BY "timestamp" DESC, id DESC
+          ) AS latest_rank,
           ROW_NUMBER() OVER (
-            PARTITION BY provider, connectionId, model,
+            PARTITION BY provider, connection_key, model,
               CASE
                 WHEN (status IS NOT NULL AND (status < 200 OR status >= 400))
                   OR error_summary IS NOT NULL
                 THEN 1
                 ELSE 0
               END
-            ORDER BY timestamp DESC, id DESC
-          ) as errorRank
+            ORDER BY "timestamp" DESC, id DESC
+          ) AS error_rank
         FROM log_targets
       )
       SELECT
         provider,
-        connectionId,
+        connection_key AS "connectionId",
         model,
-        COUNT(*) as requests,
-        SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) as successes,
-        ROUND(AVG(duration)) as avgLatencyMs,
-        MAX(timestamp) as lastRequestAt,
+        COUNT(*) AS requests,
+        SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS successes,
+        ROUND(AVG(duration)) AS "avgLatencyMs",
+        MAX("timestamp") AS "lastRequestAt",
         MAX(
           CASE
-            WHEN isError = 1
-            THEN timestamp
+            WHEN is_error = 1
+            THEN "timestamp"
             ELSE NULL
           END
-        ) as lastErrorAt,
-        MAX(CASE WHEN latestRank = 1 THEN status ELSE NULL END) as lastStatus,
-        MAX(CASE WHEN isError = 1 AND errorRank = 1 THEN status ELSE NULL END) as lastErrorStatus
+        ) AS "lastErrorAt",
+        MAX(CASE WHEN latest_rank = 1 THEN status ELSE NULL END) AS "lastStatus",
+        MAX(CASE WHEN is_error = 1 AND error_rank = 1 THEN status ELSE NULL END) AS "lastErrorStatus"
       FROM ranked
-      GROUP BY provider, connectionId, model`
-    )
-    .all(params) as JsonRecord[];
+      GROUP BY provider, connection_key, model`,
+    params
+  );
 
   return rows.map((row) => {
     const connectionId = toString(row.connectionId);
@@ -369,7 +369,17 @@ export async function buildProviderHealthMatrix(
     getProviderConnections({}),
     getAllCircuitBreakerStatuses(),
     getAllModelLockouts(),
-    statsCache.get(range, () => ({ rows: queryCallLogTargetStats(cutoff, null), cutoff })),
+    // The snapshot cache takes a sync loader, so it caches the in-flight promise; a failed
+    // query clears the cache so the rejection is not served until the entry expires.
+    statsCache.get(range, () =>
+      queryCallLogTargetStats(cutoff, null).then(
+        (rows) => ({ rows, cutoff }),
+        (error: unknown) => {
+          statsCache.clear();
+          throw error;
+        }
+      )
+    ),
   ]);
 
   const connectionRows = (connections as unknown as JsonRecord[]).filter((connection) => {
@@ -613,7 +623,7 @@ export async function buildProviderHealthMatrix(
     }
   }
 
-  const poolReport = getWebSessionPoolHealth(providerFilter ?? undefined);
+  const poolReport = await getWebSessionPoolHealth(providerFilter ?? undefined);
 
   return {
     checkedAt,

@@ -1,5 +1,6 @@
 /** Upstream proxy config persistence for upstream_proxy_config table. */
-import { getDbInstance } from "./core";
+import { db, jsonb } from "@/lib/db/pg";
+import { toIntOrNull } from "@/lib/db/proxies/sanitize";
 import {
   isCloudMetadataHost,
   isPrivateHost as isPrivateNetworkHost,
@@ -11,7 +12,6 @@ import { normalizeHost } from "@/shared/network/privateHost";
 export type FallbackBackend = "cliproxyapi" | "dario";
 
 interface UpstreamProxyConfig {
-  id: number;
   providerId: string;
   mode: string;
   cliproxyapiModelMapping: Record<string, unknown> | null;
@@ -26,7 +26,6 @@ interface UpstreamProxyConfig {
 }
 
 interface UpstreamProxyRow {
-  id: unknown;
   provider_id: unknown;
   mode: unknown;
   cliproxyapi_model_mapping: unknown;
@@ -99,16 +98,19 @@ function normalizeFallbackBackend(value: unknown): FallbackBackend {
 }
 
 function rowToConfig(record: Record<string, unknown>): UpstreamProxyConfig {
+  // jsonb arrives parsed; a legacy JSON string is still accepted.
   let mapping: Record<string, unknown> | null = null;
-  if (record.cliproxyapi_model_mapping && typeof record.cliproxyapi_model_mapping === "string") {
+  const rawMapping = record.cliproxyapi_model_mapping;
+  if (rawMapping && typeof rawMapping === "object") {
+    mapping = rawMapping as Record<string, unknown>;
+  } else if (rawMapping && typeof rawMapping === "string") {
     try {
-      mapping = JSON.parse(record.cliproxyapi_model_mapping);
+      mapping = JSON.parse(rawMapping);
     } catch {
       mapping = null;
     }
   }
   return {
-    id: record.id as number,
     providerId: record.provider_id as string,
     mode: record.mode as string,
     cliproxyapiModelMapping: mapping,
@@ -122,10 +124,10 @@ function rowToConfig(record: Record<string, unknown>): UpstreamProxyConfig {
   };
 }
 export async function getUpstreamProxyConfig(providerId: string) {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT * FROM upstream_proxy_config WHERE provider_id = ?")
-    .get(providerId) as UpstreamProxyRow | undefined;
+  const row = await db().queryOne<UpstreamProxyRow>(
+    "SELECT * FROM upstream_proxy_config WHERE provider_id = $1",
+    [providerId]
+  );
   if (!row) return null;
   return rowToConfig(toRecord(row));
 }
@@ -140,40 +142,38 @@ export async function upsertUpstreamProxyConfig(data: {
   family?: string;
   fallbackBackend?: FallbackBackend;
 }) {
-  const db = getDbInstance();
   const mode = data.mode ?? "native";
   const cliproxyapiModelMapping =
-    data.cliproxyapiModelMapping !== undefined
-      ? JSON.stringify(data.cliproxyapiModelMapping)
-      : null;
-  const nativePriority = data.nativePriority ?? 1;
-  const cliproxyapiPriority = data.cliproxyapiPriority ?? 2;
-  const enabled = data.enabled !== false ? 1 : 0;
+    data.cliproxyapiModelMapping !== undefined ? jsonb(data.cliproxyapiModelMapping) : null;
+  const nativePriority = toIntOrNull(data.nativePriority) ?? 1;
+  const cliproxyapiPriority = toIntOrNull(data.cliproxyapiPriority) ?? 2;
+  const enabled = data.enabled !== false;
   const family = data.family ?? "auto";
   const fallbackBackend = normalizeFallbackBackend(data.fallbackBackend);
 
-  db.prepare(
+  await db().execute(
     `INSERT INTO upstream_proxy_config
      (provider_id, mode, cliproxyapi_model_mapping, native_priority, cliproxyapi_priority, enabled, family, fallback_backend, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-     ON CONFLICT(provider_id) DO UPDATE SET
-       mode = excluded.mode,
-       cliproxyapi_model_mapping = excluded.cliproxyapi_model_mapping,
-       native_priority = excluded.native_priority,
-       cliproxyapi_priority = excluded.cliproxyapi_priority,
-       enabled = excluded.enabled,
-       family = excluded.family,
-       fallback_backend = excluded.fallback_backend,
-       updated_at = datetime('now')`
-  ).run(
-    data.providerId,
-    mode,
-    cliproxyapiModelMapping,
-    nativePriority,
-    cliproxyapiPriority,
-    enabled,
-    family,
-    fallbackBackend
+     VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, now(), now())
+     ON CONFLICT (provider_id) DO UPDATE SET
+       mode = EXCLUDED.mode,
+       cliproxyapi_model_mapping = EXCLUDED.cliproxyapi_model_mapping,
+       native_priority = EXCLUDED.native_priority,
+       cliproxyapi_priority = EXCLUDED.cliproxyapi_priority,
+       enabled = EXCLUDED.enabled,
+       family = EXCLUDED.family,
+       fallback_backend = EXCLUDED.fallback_backend,
+       updated_at = now()`,
+    [
+      data.providerId,
+      mode,
+      cliproxyapiModelMapping,
+      nativePriority,
+      cliproxyapiPriority,
+      enabled,
+      family,
+      fallbackBackend,
+    ]
   );
 
   return getUpstreamProxyConfig(data.providerId);
@@ -183,71 +183,53 @@ export async function updateUpstreamProxyConfig(
   providerId: string,
   updates: Record<string, unknown>
 ) {
-  const db = getDbInstance();
   const current = await getUpstreamProxyConfig(providerId);
   if (!current) {
     throw new Error(`Provider ${providerId} not found`);
   }
 
-  const sets: string[] = ["updated_at = datetime('now')"];
+  const sets: string[] = ["updated_at = now()"];
   const params: unknown[] = [];
+  const set = (column: string, value: unknown, cast = "") => {
+    params.push(value);
+    sets.push(`${column} = $${params.length}${cast}`);
+  };
 
-  if (updates.mode !== undefined) {
-    sets.push("mode = ?");
-    params.push(updates.mode);
-  }
+  if (updates.mode !== undefined) set("mode", updates.mode);
   if (updates.cliproxyapiModelMapping !== undefined) {
-    sets.push("cliproxyapi_model_mapping = ?");
-    params.push(
-      updates.cliproxyapiModelMapping === null
-        ? null
-        : JSON.stringify(updates.cliproxyapiModelMapping)
-    );
+    set("cliproxyapi_model_mapping", jsonb(updates.cliproxyapiModelMapping), "::jsonb");
   }
-  if (updates.nativePriority !== undefined) {
-    sets.push("native_priority = ?");
-    params.push(updates.nativePriority);
-  }
-  if (updates.cliproxyapiPriority !== undefined) {
-    sets.push("cliproxyapi_priority = ?");
-    params.push(updates.cliproxyapiPriority);
-  }
-  if (updates.enabled !== undefined) {
-    sets.push("enabled = ?");
-    params.push(updates.enabled === true ? 1 : 0);
-  }
-  if (updates.family !== undefined) {
-    sets.push("family = ?");
-    params.push(updates.family);
-  }
+  const nativePriority = toIntOrNull(updates.nativePriority);
+  if (nativePriority !== null) set("native_priority", nativePriority);
+  const cliproxyapiPriority = toIntOrNull(updates.cliproxyapiPriority);
+  if (cliproxyapiPriority !== null) set("cliproxyapi_priority", cliproxyapiPriority);
+  if (updates.enabled !== undefined) set("enabled", updates.enabled === true);
+  if (updates.family !== undefined) set("family", updates.family);
   if (updates.fallbackBackend !== undefined) {
-    sets.push("fallback_backend = ?");
-    params.push(normalizeFallbackBackend(updates.fallbackBackend));
+    set("fallback_backend", normalizeFallbackBackend(updates.fallbackBackend));
   }
 
   params.push(providerId);
-  db.prepare(`UPDATE upstream_proxy_config SET ${sets.join(", ")} WHERE provider_id = ?`).run(
-    ...params
+  await db().execute(
+    `UPDATE upstream_proxy_config SET ${sets.join(", ")} WHERE provider_id = $${params.length}`,
+    params
   );
 
   return getUpstreamProxyConfig(providerId);
 }
 
 export async function deleteUpstreamProxyConfig(providerId: string) {
-  const db = getDbInstance();
-  const result = db
-    .prepare("DELETE FROM upstream_proxy_config WHERE provider_id = ?")
-    .run(providerId);
+  const result = await db().execute("DELETE FROM upstream_proxy_config WHERE provider_id = $1", [
+    providerId,
+  ]);
   return result.changes > 0;
 }
 
 export async function getProvidersByMode(mode: string) {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      "SELECT * FROM upstream_proxy_config WHERE mode = ? AND enabled = 1 ORDER BY provider_id"
-    )
-    .all(mode) as UpstreamProxyRow[];
+  const rows = await db().query<UpstreamProxyRow>(
+    "SELECT * FROM upstream_proxy_config WHERE mode = $1 AND enabled = true ORDER BY provider_id",
+    [mode]
+  );
   return rows.map((row) => rowToConfig(toRecord(row)));
 }
 

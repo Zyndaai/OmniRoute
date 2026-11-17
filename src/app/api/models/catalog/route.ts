@@ -5,7 +5,7 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getHiddenModelsByProvider } from "@/lib/db/models";
 import { getCachedProviderNodes } from "@/lib/db/readCache";
-import { createCatalogVisibilityAnnotator } from "@/lib/modelCatalogVisibility";
+import { catalogRowModality, createCatalogVisibilityAnnotator } from "@/lib/modelCatalogVisibility";
 
 type CatalogRow = Record<string, unknown>;
 type VisibilityAnnotator = ReturnType<typeof createCatalogVisibilityAnnotator>;
@@ -34,11 +34,17 @@ async function loadHiddenInclusiveRows(
   } catch {
     // No compatible nodes known: prefix rows keep their public owner id.
   }
+  const revealedRows: CatalogRow[] = revealedBody.data || [];
+  // The annotator reads hidden maps synchronously: load one per modality up front.
+  const hiddenByModality = new Map<string, ReadonlyMap<string, ReadonlySet<string>>>();
+  for (const modality of new Set(revealedRows.map(catalogRowModality))) {
+    hiddenByModality.set(modality, await getHiddenModelsByProvider(modality));
+  }
   const annotate = createCatalogVisibilityAnnotator(visibleRows, {
     nodes,
-    getHiddenModels: getHiddenModelsByProvider,
+    getHiddenModels: (modality) => hiddenByModality.get(modality) ?? new Map(),
   });
-  return { rows: revealedBody.data || [], annotate };
+  return { rows: revealedRows, annotate };
 }
 
 /**

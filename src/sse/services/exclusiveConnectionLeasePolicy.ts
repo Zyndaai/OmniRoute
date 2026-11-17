@@ -34,7 +34,7 @@ export async function applyExclusiveConnectionLeasePolicy(
   connections: ProviderConnectionView[],
   options: LeaseSelectionOptions
 ): Promise<LeaseCandidatePolicy> {
-  const occupancy = getExclusiveLeaseOccupancy(connections.map((connection) => connection.id));
+  const occupancy = await getExclusiveLeaseOccupancy(connections.map((connection) => connection.id));
   if (!options.lease) {
     return {
       connections: connections.filter((connection) => !occupancy.has(connection.id)),
@@ -44,7 +44,7 @@ export async function applyExclusiveConnectionLeasePolicy(
   }
 
   const { lease } = options;
-  const activeLease = getActiveExclusiveConnectionLease(lease.context.leaseOwnerId);
+  const activeLease = await getActiveExclusiveConnectionLease(lease.context.leaseOwnerId);
   if (lease.mode === "request" && !activeLease) {
     return { connections: [], activeLease: null, retryAfter: null, error: "leaseRequired" };
   }
@@ -77,14 +77,14 @@ export async function applyExclusiveConnectionLeasePolicy(
   };
 }
 
-export function mutateExclusiveConnectionLease(
+export async function mutateExclusiveConnectionLease(
   connection: ProviderConnectionView,
   activeLease: ExclusiveConnectionLease | null,
   lease: CredentialLeaseSelectionContext,
   reason: ExclusiveLeaseEndReason = "CONNECTION_INELIGIBLE"
 ) {
   const result = activeLease
-    ? transitionExclusiveConnectionLease({
+    ? await transitionExclusiveConnectionLease({
         leaseOwnerId: lease.context.leaseOwnerId,
         generation: lease.mode === "acquire" ? activeLease.generation : lease.context.generation,
         apiKeyId: lease.apiKeyId,
@@ -92,7 +92,7 @@ export function mutateExclusiveConnectionLease(
         connectionId: connection.id,
         reason,
       })
-    : acquireExclusiveConnectionLease({
+    : await acquireExclusiveConnectionLease({
         leaseOwnerId: lease.context.leaseOwnerId,
         apiKeyId: lease.apiKeyId,
         provider: connection.provider,
@@ -107,12 +107,12 @@ export function mutateExclusiveConnectionLease(
   return { kind: "CLAIMED" as const, lease: result.lease };
 }
 
-export function invalidateManagedConnectionLease(
+export async function invalidateManagedConnectionLease(
   lease: CredentialLeaseSelectionContext | undefined,
   reason: ExclusiveLeaseEndReason
-): void {
+): Promise<void> {
   if (lease?.mode !== "request") return;
-  invalidateExclusiveConnectionLease({
+  await invalidateExclusiveConnectionLease({
     leaseOwnerId: lease.context.leaseOwnerId,
     generation: lease.context.generation,
     apiKeyId: lease.apiKeyId,

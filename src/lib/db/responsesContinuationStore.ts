@@ -31,7 +31,7 @@
  * of truth once it exists.
  */
 
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 import { readCallArtifact } from "../usage/callLogArtifacts";
 
 export type ResponsesContinuationState = {
@@ -219,22 +219,22 @@ function resolvePendingContinuationState(
  * resend full history, exactly like a real `previous_response_not_found`
  * from OpenAI itself.
  */
-export function resolvePreviousResponseState(
+export async function resolvePreviousResponseState(
   responseId: string,
   apiKeyId: string | null | undefined
-): ResponsesContinuationState | null {
+): Promise<ResponsesContinuationState | null> {
   if (!responseId) return null;
 
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT artifact_relpath, api_key_id, video_content_removed FROM call_logs
-       WHERE response_id = ? AND detail_state = 'ready'
-       ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(responseId) as
-    | { artifact_relpath: string | null; api_key_id: string | null; video_content_removed: number }
-    | undefined;
+  const row = await db().queryOne<{
+    artifact_relpath: string | null;
+    api_key_id: string | null;
+    video_content_removed: boolean;
+  }>(
+    `SELECT artifact_relpath, api_key_id, video_content_removed FROM call_logs
+       WHERE response_id = $1 AND detail_state = 'ready'
+       ORDER BY "timestamp" DESC LIMIT 1`,
+    [responseId]
+  );
 
   if (!row) {
     // No durable row at all yet -- this is exactly the write-in-flight
@@ -252,7 +252,7 @@ export function resolvePreviousResponseState(
 
   return extractContinuationState(
     artifact.pipeline as ContinuationPipeline,
-    row.video_content_removed === 1
+    row.video_content_removed === true
   );
 }
 
@@ -264,20 +264,18 @@ export function resolvePreviousResponseState(
  * Returns null on any lookup miss so the caller renders no link rather than
  * a broken one.
  */
-export function resolveCallLogIdByResponseId(
+export async function resolveCallLogIdByResponseId(
   responseId: string,
   apiKeyId: string | null | undefined
-): string | null {
+): Promise<string | null> {
   if (!responseId || !apiKeyId) return null;
 
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT id FROM call_logs
-       WHERE response_id = ? AND api_key_id = ?
-       ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(responseId, apiKeyId) as { id: string } | undefined;
+  const row = await db().queryOne<{ id: string }>(
+    `SELECT id FROM call_logs
+       WHERE response_id = $1 AND api_key_id = $2
+       ORDER BY "timestamp" DESC LIMIT 1`,
+    [responseId, apiKeyId]
+  );
 
   return row?.id ?? null;
 }
@@ -337,10 +335,10 @@ function cacheGenuineContinuation(key: string, value: boolean): boolean {
  * `previous_response_id` wire optimization; this checks the transport fact,
  * not the content-hash one.
  */
-export function isGenuineContinuationTurn(
+export async function isGenuineContinuationTurn(
   artifactRelPath: string | null | undefined,
   apiKeyId: string | null | undefined
-): boolean {
+): Promise<boolean> {
   if (!artifactRelPath) return false;
   const cached = genuineContinuationCache.get(artifactRelPath);
   if (cached !== undefined) return cached;
@@ -356,7 +354,7 @@ export function isGenuineContinuationTurn(
 
   return cacheGenuineContinuation(
     artifactRelPath,
-    resolveCallLogIdByResponseId(previousResponseId, apiKeyId) !== null
+    (await resolveCallLogIdByResponseId(previousResponseId, apiKeyId)) !== null
   );
 }
 

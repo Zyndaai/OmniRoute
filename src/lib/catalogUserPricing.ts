@@ -1,14 +1,14 @@
 /**
  * Catalog user-pricing layer (#15528): PATCH /api/pricing overrides live in the
- * `pricing` key_value namespace and must win over models.dev / LiteLLM / defaults
+ * `model_pricing` rows of source `user` and must win over models.dev / LiteLLM / defaults
  * in GET /v1/models, same as the dashboard's merged pricing view.
  */
-import { getDbInstance } from "@/lib/db/core";
+import { readPricingSource } from "@/lib/db/modelPricing";
 
 export type UserPricingByProvider = Record<string, Record<string, Record<string, unknown>>>;
 
 const MEMO_TTL_MS = 5_000;
-let memo: { at: number; value: UserPricingByProvider } | null = null;
+let memo: { at: number; value: Promise<UserPricingByProvider> } | null = null;
 
 /** Drop the memo after a pricing write (called from db/settings/pricing.ts). */
 export function invalidateUserPricingMemo(): void {
@@ -19,7 +19,7 @@ export function invalidateUserPricingMemo(): void {
  * Short-lived memo for callers without a build-local snapshot: keeps the object
  * identity stable so findInsensitive's WeakMap index is reused across lookups.
  */
-export function readUserPricingMemoized(): UserPricingByProvider {
+export function readUserPricingMemoized(): Promise<UserPricingByProvider> {
   const now = Date.now();
   if (memo && now - memo.at < MEMO_TTL_MS) return memo.value;
   const value = readUserPricingSync();
@@ -31,26 +31,14 @@ type PricingFields = Record<string, number>;
 
 const PRICING_FIELDS = ["input", "output", "cached", "cache_creation"] as const;
 
-/** Bulk-load the user `pricing` namespace once (sync, no per-entry SQLite). */
-export function readUserPricingSync(): UserPricingByProvider {
-  const out: UserPricingByProvider = {};
+/** Bulk-load the user price tables once (one query, no per-entry reads). */
+export async function readUserPricingSync(): Promise<UserPricingByProvider> {
   try {
-    const rows = getDbInstance()
-      .prepare("SELECT key, value FROM key_value WHERE namespace = 'pricing'")
-      .all() as Array<{ key?: unknown; value?: unknown }>;
-    for (const row of rows) {
-      if (typeof row.key !== "string" || typeof row.value !== "string") continue;
-      try {
-        const parsed = JSON.parse(row.value);
-        if (parsed && typeof parsed === "object") out[row.key] = parsed;
-      } catch {
-        // corrupted row: fall back to lower layers
-      }
-    }
+    return await readPricingSource("user");
   } catch {
     // user pricing is optional for catalog assembly
+    return {};
   }
-  return out;
 }
 
 type Finder = <T>(obj: Record<string, T> | null | undefined, key: string) => T | undefined;

@@ -1,89 +1,15 @@
 /**
  * MCP Audit Logger — Records all MCP tool invocations for security and observability.
  *
- * Logs are written to the `mcp_tool_audit` SQLite table.
+ * Logs are written to the `mcp_tool_audit` PostgreSQL table through the shared
+ * backend (`src/lib/db/pg.ts`); the MCP server process opens its own pool.
  * Input data is hashed (SHA-256) to avoid storing sensitive prompts.
  * Output is truncated to 200 chars for summary.
  */
 
 import { hashInput, summarizeOutput } from "./schemas/audit.ts";
-import { runtimeRequire } from "../../src/lib/db/adapters/runtimeRequire.ts";
-import { isNativeSqliteLoadError } from "../../src/lib/db/core.ts";
+import { db } from "../../src/lib/db/pg.ts";
 import { resolveMcpCallerApiKeyId } from "./mcpCallerIdentity.ts";
-
-// ============ Database Connection ============
-
-interface StatementLike<TRow = unknown> {
-  get: (...params: unknown[]) => TRow | undefined;
-  all: (...params: unknown[]) => TRow[];
-  run: (...params: unknown[]) => unknown;
-}
-
-interface AuditDatabase {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  pragma: (sql: string) => unknown;
-  close: () => void;
-  open?: boolean;
-  driver?: "better-sqlite3" | "node:sqlite";
-}
-
-interface NodeSqliteDatabase {
-  prepare: (sql: string) => {
-    run: (...params: unknown[]) => { changes: number | bigint; lastInsertRowid: number | bigint };
-    get: (...params: unknown[]) => unknown;
-    all: (...params: unknown[]) => unknown[];
-  };
-  exec: (sql: string) => void;
-  close: () => void;
-}
-
-/**
- * node:sqlite's `DatabaseSync` does NOT expose a boolean `open` property —
- * `open` and `close` are methods on the prototype, and the only state
- * surface is the `isOpen` getter. Track open state locally in a closure
- * so the adapter's `AuditDatabase` contract (`open?: boolean`) is honored
- * and `getCachedAuditDb()`'s truthy check doesn't return a closed handle
- * after `closeAuditDb()`.
- */
-function createNodeSqliteAuditAdapter(db: NodeSqliteDatabase): AuditDatabase {
-  let _isOpen = true;
-  return {
-    driver: "node:sqlite",
-    get open() {
-      return _isOpen;
-    },
-    prepare<TRow = unknown>(sql: string) {
-      const stmt = db.prepare(sql);
-      return {
-        get: (...params: unknown[]) => stmt.get(...params) as TRow | undefined,
-        all: (...params: unknown[]) => stmt.all(...params) as TRow[],
-        run: (...params: unknown[]) => stmt.run(...params),
-      };
-    },
-    pragma(pragmaSql: string) {
-      // node:sqlite has no .pragma() helper — route through .exec() for
-      // statement-shaped PRAGMAs (e.g. "wal_checkpoint(TRUNCATE)").
-      try {
-        db.exec(`PRAGMA ${pragmaSql}`);
-        return null;
-      } catch (err) {
-        return err instanceof Error ? err.message : String(err);
-      }
-    },
-    close: () => {
-      if (!_isOpen) return;
-      try {
-        db.close();
-      } finally {
-        _isOpen = false;
-      }
-    },
-  };
-}
-
-declare global {
-  var __omnirouteMcpAuditDb: AuditDatabase | null | undefined;
-}
 
 interface AuditStatsRow {
   total: unknown;
@@ -168,30 +94,22 @@ function buildAuditFilterSql(filters: McpAuditQuery): { whereSql: string; params
   const params: unknown[] = [];
 
   if (typeof filters.tool === "string" && filters.tool.trim().length > 0) {
-    clauses.push("tool_name = ?");
     params.push(filters.tool.trim());
+    clauses.push(`tool_name = $${params.length}`);
   }
   if (typeof filters.success === "boolean") {
-    clauses.push("success = ?");
-    params.push(filters.success ? 1 : 0);
+    params.push(filters.success);
+    clauses.push(`success = $${params.length}`);
   }
   if (typeof filters.apiKeyId === "string" && filters.apiKeyId.trim().length > 0) {
-    clauses.push("api_key_id = ?");
     params.push(filters.apiKeyId.trim());
+    clauses.push(`api_key_id = $${params.length}`);
   }
 
   return {
     whereSql: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
     params,
   };
-}
-
-function getCachedAuditDb(): AuditDatabase | null | undefined {
-  return globalThis.__omnirouteMcpAuditDb;
-}
-
-function setCachedAuditDb(database: AuditDatabase | null | undefined): void {
-  globalThis.__omnirouteMcpAuditDb = database;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -208,15 +126,6 @@ function toString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-/**
- * Test-only seam: tests inject a throwing/mocked loader here to exercise the
- * node:sqlite fallback without depending on a native binding.
- */
-let betterSqliteLoaderForTests: (() => unknown) | null = null;
-export function __setBetterSqliteLoaderForTests(loader: (() => unknown) | null): void {
-  betterSqliteLoaderForTests = loader;
-}
-
 let auditCallerIdResolverForTests: (() => Promise<string | undefined>) | null = null;
 export function __setAuditCallerIdResolverForTests(
   resolver: (() => Promise<string | undefined>) | null
@@ -230,146 +139,13 @@ async function resolveAuditCallerId(): Promise<string | null> {
   return raw ? raw : null;
 }
 
-async function openBetterSqliteAuditDb(dbPath: string): Promise<AuditDatabase> {
-  let mod: unknown;
-  if (betterSqliteLoaderForTests) {
-    mod = betterSqliteLoaderForTests();
-  } else {
-    mod = runtimeRequire("better-sqlite3");
-  }
-  const Database = ((mod as { default?: unknown })?.default || mod) as unknown;
-  if (typeof Database !== "function") {
-    throw new TypeError("better-sqlite3 export is not a function");
-  }
-  return new (Database as new (dbPath: string) => AuditDatabase)(dbPath);
-}
-
-function nodeSqliteFallbackAvailable(): boolean {
-  const [maj, min] = (process.versions.node ?? "0.0").split(".").map(Number);
-  return maj > 22 || (maj === 22 && (min ?? 0) >= 5);
-}
-
-async function openNodeSqliteAuditDb(dbPath: string): Promise<AuditDatabase> {
-  const { DatabaseSync } = (await import("node:sqlite")) as {
-    DatabaseSync: new (p: string) => NodeSqliteDatabase;
-  };
-  return createNodeSqliteAuditAdapter(new DatabaseSync(dbPath));
-}
-
-async function openFallbackAuditDb(
-  dbPath: string,
-  nativeMessage: string
-): Promise<AuditDatabase | null> {
-  if (!nodeSqliteFallbackAvailable()) {
-    console.error(
-      `[MCP Audit] better-sqlite3 native binding unavailable and Node ${process.version} ` +
-        "has no built-in sqlite. Audit logging disabled. Fix: run " +
-        "`npm rebuild better-sqlite3` in the omniroute install root."
-    );
-    return null;
-  }
-
-  try {
-    const adapter = await openNodeSqliteAuditDb(dbPath);
-    console.warn(
-      `[MCP Audit] better-sqlite3 binding unavailable — fell back to node:sqlite ` +
-        `(${nativeMessage.split("\n")[0]})`
-    );
-    return adapter;
-  } catch (nodeErr) {
-    const nodeMessage = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-    console.error("[MCP Audit] Failed to connect to database:", nodeMessage);
-    return null;
-  }
-}
-
 /**
- * Lazy-load the database connection.
- * Uses the same SQLite database as the main OmniRoute app.
- *
- * Driver priority:
- *   1. better-sqlite3 — fast native binding (when its compiled `.node`
- *      binary is present, see scripts/build/postinstall.mjs).
- *   2. node:sqlite    — built-in to Node 22.5+. Used as a transparent
- *      fallback so the MCP audit logger still works on installs where
- *      the better-sqlite3 binary failed to resolve (e.g. missing
- *      `dist/node_modules/better-sqlite3/build/Release/better_sqlite3.node`
- *      in some global-install / Docker scenarios).
+ * The audit logger uses the shared PostgreSQL backend, so there is no dedicated handle
+ * to close any more. Kept for the shutdown hooks that call it; always reports that
+ * nothing was open.
  */
-async function getDb(): Promise<AuditDatabase | null> {
-  const cachedDb = getCachedAuditDb();
-  // undefined = never tried / retryable; null = the driver itself failed to load.
-  // Only that second case is cached, so dashboard 30s polls do not reopen and
-  // reprint the same binding error.
-  if (cachedDb !== undefined) return cachedDb;
-
-  try {
-    const { homedir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { existsSync } = await import("node:fs");
-
-    const dbPath = process.env.DATA_DIR
-      ? join(process.env.DATA_DIR, "storage.sqlite")
-      : join(homedir(), ".omniroute", "storage.sqlite");
-
-    if (!existsSync(dbPath)) {
-      // Do NOT cache this miss: an MCP server can start before the app creates
-      // storage.sqlite, and the file appearing is exactly how it recovers. A
-      // cached null would disable audit logging for the whole process lifetime.
-      console.error(`[MCP Audit] Database not found at ${dbPath} — audit logging disabled`);
-      return null;
-    }
-
-    try {
-      const database = await openBetterSqliteAuditDb(dbPath);
-      setCachedAuditDb(database);
-      return database;
-    } catch (nativeErr) {
-      const nativeMessage = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
-      if (!isNativeSqliteLoadError(nativeErr)) {
-        console.error("[MCP Audit] Failed to connect to database:", nativeMessage);
-        setCachedAuditDb(null);
-        return null;
-      }
-      const fallbackDb = await openFallbackAuditDb(dbPath, nativeMessage);
-      setCachedAuditDb(fallbackDb);
-      return fallbackDb;
-    }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[MCP Audit] Failed to connect to database:", message);
-    setCachedAuditDb(null);
-    return null;
-  }
-}
-
 export function closeAuditDb(): boolean {
-  const database = getCachedAuditDb();
-  if (!database) return false;
-
-  // Drop the cache to undefined (never tried), not null (tried and failed),
-  // so a later getDb() can open again after an intentional close.
-  setCachedAuditDb(undefined);
-
-  try {
-    try {
-      if (database.open !== false) {
-        database.pragma("wal_checkpoint(TRUNCATE)");
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("[MCP Audit] WAL checkpoint failed during close:", message);
-    }
-  } finally {
-    try {
-      database.close();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.warn("[MCP Audit] Failed to close database:", message);
-    }
-  }
-
-  return true;
+  return false;
 }
 
 // ============ Audit Logger ============
@@ -389,27 +165,26 @@ export async function logToolCall(
   errorCode?: string
 ): Promise<void> {
   try {
-    const database = await getDb();
-    if (!database) return; // Audit disabled if no DB
-
     const inputHash = await hashInput(input);
     const outputSummary = summarizeOutput(output);
     const apiKeyId = await resolveAuditCallerId();
 
-    database
-      .prepare(
-        `INSERT INTO mcp_tool_audit (tool_name, input_hash, output_summary, duration_ms, api_key_id, success, error_code)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
+    await db().execute(
+      `INSERT INTO mcp_tool_audit (tool_name, input_hash, output_summary, duration_ms, api_key_id, success, error_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
         toolName,
         inputHash,
-        outputSummary,
-        durationMs,
+        // U+0000 is rejected by Postgres text; output summaries can carry upstream text.
+        outputSummary === null || outputSummary === undefined
+          ? null
+          : String(outputSummary).replace(/\u0000/g, ""),
+        Number.isFinite(durationMs) ? Math.round(durationMs) : null,
         apiKeyId,
-        success ? 1 : 0,
-        errorCode || null
-      );
+        success,
+        errorCode || null,
+      ]
+    );
   } catch (err: unknown) {
     // Never let audit failure break tool execution
     const message = err instanceof Error ? err.message : String(err);
@@ -424,18 +199,16 @@ export async function queryAuditEntries(
   filters: McpAuditQuery = {}
 ): Promise<{ entries: McpAuditEntry[]; total: number; limit: number; offset: number }> {
   try {
-    const database = await getDb();
     const limit = Math.max(1, Math.min(500, toPositiveInt(filters.limit, 50)));
     const offset = Math.max(0, toPositiveInt(filters.offset, 0));
-    if (!database) return { entries: [], total: 0, limit, offset };
 
     const { whereSql, params } = buildAuditFilterSql(filters);
-    const totalRow = database
-      .prepare<AuditCountRow>(`SELECT COUNT(*) as total FROM mcp_tool_audit ${whereSql}`)
-      .get(...params);
-    const rows = database
-      .prepare<AuditEntryRow>(
-        `SELECT
+    const totalRow = await db().queryOne<AuditCountRow>(
+      `SELECT COUNT(*) as total FROM mcp_tool_audit ${whereSql}`,
+      params
+    );
+    const rows = await db().query<AuditEntryRow>(
+      `SELECT
            id,
            tool_name,
            input_hash,
@@ -447,10 +220,10 @@ export async function queryAuditEntries(
            created_at
          FROM mcp_tool_audit
          ${whereSql}
-         ORDER BY created_at DESC
-         LIMIT ? OFFSET ?`
-      )
-      .all(...params, limit, offset);
+         ORDER BY created_at DESC, id DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
 
     return {
       entries: rows.map(mapAuditEntry),
@@ -481,30 +254,26 @@ export async function getAuditStats(): Promise<{
   topTools: Array<{ tool: string; count: number }>;
 }> {
   try {
-    const database = await getDb();
-    if (!database) return { totalCalls: 0, successRate: 0, avgDurationMs: 0, topTools: [] };
-
-    const stats = database
-      .prepare(
-        `SELECT 
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const stats = await db().queryOne<AuditStatsRow>(
+      `SELECT
            COUNT(*) as total,
-           AVG(CASE WHEN success = 1 THEN 1.0 ELSE 0.0 END) as successRate,
-           AVG(duration_ms) as avgDuration
+           AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END) as "successRate",
+           AVG(duration_ms) as "avgDuration"
          FROM mcp_tool_audit
-         WHERE created_at > datetime('now', '-24 hours')`
-      )
-      .get() as AuditStatsRow | undefined;
+         WHERE created_at > $1`,
+      [since]
+    );
 
-    const topTools = database
-      .prepare(
-        `SELECT tool_name as tool, COUNT(*) as count
+    const topTools = await db().query<AuditTopToolRow>(
+      `SELECT tool_name as tool, COUNT(*) as count
          FROM mcp_tool_audit
-         WHERE created_at > datetime('now', '-24 hours')
+         WHERE created_at > $1
          GROUP BY tool_name
          ORDER BY count DESC
-         LIMIT 10`
-      )
-      .all() as AuditTopToolRow[];
+         LIMIT 10`,
+      [since]
+    );
 
     return {
       totalCalls: toNumber(stats?.total, 0),

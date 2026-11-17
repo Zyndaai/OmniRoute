@@ -13,7 +13,7 @@
  * @module db/costLedger
  */
 
-import { getDbInstance } from "./core";
+import { db, ts } from "./pg";
 import { toNumber } from "@/shared/utils/numeric";
 
 // ---------------------------------------------------------------------------
@@ -75,44 +75,47 @@ function toNonNegative(value: unknown): number {
  * Insert a single cost-ledger row. Fire-and-forget callers should use
  * {@link recordLedgerEntrySafe} so a ledger failure never crashes the request.
  */
-export function recordLedgerEntry(entry: CostLedgerEntry): void {
-  if (!entry?.apiKeyId) return;
-  const db = getDbInstance();
-  db.prepare(
-    `
+const INSERT_LEDGER_SQL = `
     INSERT INTO request_cost_ledger (
       api_key_id, provider, model,
       tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
       unit_price_input, unit_price_output, amount_usd,
-      service_tier, success, timestamp, request_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  ).run(
+      service_tier, success, "timestamp", request_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    `;
+
+function ledgerParams(entry: CostLedgerEntry): unknown[] {
+  return [
     entry.apiKeyId,
     entry.provider || "unknown",
     entry.model || "unknown",
-    toNonNegative(entry.tokensInput),
-    toNonNegative(entry.tokensOutput),
-    toNonNegative(entry.tokensCacheRead),
-    toNonNegative(entry.tokensCacheCreation),
-    toNonNegative(entry.tokensReasoning),
+    Math.round(toNonNegative(entry.tokensInput)),
+    Math.round(toNonNegative(entry.tokensOutput)),
+    Math.round(toNonNegative(entry.tokensCacheRead)),
+    Math.round(toNonNegative(entry.tokensCacheCreation)),
+    Math.round(toNonNegative(entry.tokensReasoning)),
     toNonNegative(entry.unitPriceInput),
     toNonNegative(entry.unitPriceOutput),
     toNonNegative(entry.amountUsd),
     entry.serviceTier || "standard",
-    entry.success === false ? 0 : 1,
-    entry.timestamp || new Date().toISOString(),
-    entry.requestId ?? null
-  );
+    entry.success !== false,
+    ts(entry.timestamp) || new Date().toISOString(),
+    entry.requestId ?? null,
+  ];
+}
+
+export async function recordLedgerEntry(entry: CostLedgerEntry): Promise<void> {
+  if (!entry?.apiKeyId) return;
+  await db().execute(INSERT_LEDGER_SQL, ledgerParams(entry));
 }
 
 /**
  * Best-effort variant for hot-path callers: never throws, so a ledger hiccup
  * can never block an LLM response. Mirrors recordCost's swallow-and-log.
  */
-export function recordLedgerEntrySafe(entry: CostLedgerEntry): void {
+export async function recordLedgerEntrySafe(entry: CostLedgerEntry): Promise<void> {
   try {
-    recordLedgerEntry(entry);
+    await recordLedgerEntry(entry);
   } catch (error) {
     console.error("[CostLedger] Failed to record ledger entry:", error);
   }
@@ -121,42 +124,14 @@ export function recordLedgerEntrySafe(entry: CostLedgerEntry): void {
 /**
  * Batch-insert ledger rows inside one transaction (used by flush paths).
  */
-export function recordLedgerEntries(entries: CostLedgerEntry[]): void {
+export async function recordLedgerEntries(entries: CostLedgerEntry[]): Promise<void> {
   if (!Array.isArray(entries) || entries.length === 0) return;
-  const db = getDbInstance();
-  const stmt = db.prepare(
-    `
-    INSERT INTO request_cost_ledger (
-      api_key_id, provider, model,
-      tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning,
-      unit_price_input, unit_price_output, amount_usd,
-      service_tier, success, timestamp, request_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  );
-  const tx = db.transaction((rows: CostLedgerEntry[]) => {
-    for (const entry of rows) {
+  await db().transaction(async (tx) => {
+    for (const entry of entries) {
       if (!entry?.apiKeyId) continue;
-      stmt.run(
-        entry.apiKeyId,
-        entry.provider || "unknown",
-        entry.model || "unknown",
-        toNonNegative(entry.tokensInput),
-        toNonNegative(entry.tokensOutput),
-        toNonNegative(entry.tokensCacheRead),
-        toNonNegative(entry.tokensCacheCreation),
-        toNonNegative(entry.tokensReasoning),
-        toNonNegative(entry.unitPriceInput),
-        toNonNegative(entry.unitPriceOutput),
-        toNonNegative(entry.amountUsd),
-        entry.serviceTier || "standard",
-        entry.success === false ? 0 : 1,
-        entry.timestamp || new Date().toISOString(),
-        entry.requestId ?? null
-      );
+      await tx.execute(INSERT_LEDGER_SQL, ledgerParams(entry));
     }
   });
-  tx(entries);
 }
 
 // ---------------------------------------------------------------------------
@@ -176,23 +151,21 @@ function getAggRow(row: unknown): LedgerAggregate {
  * timestamp. `whereClause` is trusted internal SQL appended after `WHERE
  * api_key_id = ?` — callers must only pass fixed fragments, never user input.
  */
-export function aggregateLedger(
+export async function aggregateLedger(
   apiKeyId: string,
   sinceIso: string,
   opts: { successOnly?: boolean } = {}
-): LedgerAggregate {
+): Promise<LedgerAggregate> {
   if (!apiKeyId) return { amountUsd: 0, requestCount: 0 };
-  const successClause = opts.successOnly === true ? " AND success = 1" : "";
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT
+  const successClause = opts.successOnly === true ? " AND success" : "";
+  const row = await db().queryOne(
+    `SELECT
          COALESCE(SUM(amount_usd), 0) AS amount_usd,
          COUNT(*) AS request_count
        FROM request_cost_ledger
-       WHERE api_key_id = ? AND timestamp >= ?${successClause}`
-    )
-    .get(apiKeyId, sinceIso);
+       WHERE api_key_id = $1 AND "timestamp" >= $2${successClause}`,
+    [apiKeyId, ts(sinceIso)]
+  );
   return getAggRow(row);
 }
 
@@ -207,15 +180,17 @@ export const SEARCH_LEDGER_SERVICE_TIER = "search";
  * Total web-search spend for an api key since an ISO timestamp, failed calls
  * included (a provider that reports a cost on an error status still charged).
  */
-export function sumSearchLedgerSpendSince(apiKeyId: string, sinceIso: string): number {
+export async function sumSearchLedgerSpendSince(
+  apiKeyId: string,
+  sinceIso: string
+): Promise<number> {
   if (!apiKeyId) return 0;
-  const row = getDbInstance()
-    .prepare(
-      `SELECT COALESCE(SUM(amount_usd), 0) AS amount_usd
+  const row = await db().queryOne(
+    `SELECT COALESCE(SUM(amount_usd), 0) AS amount_usd
        FROM request_cost_ledger
-       WHERE api_key_id = ? AND timestamp >= ? AND service_tier = ?`
-    )
-    .get(apiKeyId, sinceIso, SEARCH_LEDGER_SERVICE_TIER);
+       WHERE api_key_id = $1 AND "timestamp" >= $2 AND service_tier = $3`,
+    [apiKeyId, ts(sinceIso), SEARCH_LEDGER_SERVICE_TIER]
+  );
   return getAggRow(row).amountUsd;
 }
 
@@ -223,25 +198,22 @@ export function sumSearchLedgerSpendSince(apiKeyId: string, sinceIso: string): n
  * Return ledger rows for an api key within a window (descending timestamp).
  * Used by tests and future dashboard surfaces. `limit` is clamped to 500.
  */
-export function listLedgerEntries(
+export async function listLedgerEntries(
   apiKeyId: string,
   opts: { sinceIso?: string; limit?: number } = {}
-): CostLedgerEntry[] {
+): Promise<CostLedgerEntry[]> {
   if (!apiKeyId) return [];
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT *
+  const since = opts.sinceIso ? ts(opts.sinceIso) : null;
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT *
        FROM request_cost_ledger
-       WHERE api_key_id = ?
-         ${opts.sinceIso ? "AND timestamp >= ?" : ""}
-       ORDER BY timestamp DESC
-       LIMIT ?`
-    )
-    .all(apiKeyId, ...(opts.sinceIso ? [opts.sinceIso] : []), limit) as unknown as Array<
-    Record<string, unknown>
-  >;
+       WHERE api_key_id = $1
+         ${since ? `AND "timestamp" >= $2` : ""}
+       ORDER BY "timestamp" DESC, id DESC
+       LIMIT $${since ? 3 : 2}`,
+    since ? [apiKeyId, since, limit] : [apiKeyId, limit]
+  );
 
   return rows.map((r) => {
     const row = asRecord(r);
@@ -258,7 +230,7 @@ export function listLedgerEntries(
       unitPriceOutput: toNumber(row.unit_price_output),
       amountUsd: toNumber(row.amount_usd),
       serviceTier: typeof row.service_tier === "string" ? row.service_tier : "standard",
-      success: toNumber(row.success) !== 0,
+      success: row.success !== false && row.success !== 0,
       timestamp: typeof row.timestamp === "string" ? row.timestamp : "",
       requestId: typeof row.request_id === "string" ? row.request_id : null,
     } satisfies CostLedgerEntry;
@@ -270,7 +242,10 @@ export function listLedgerEntries(
  * month window). Used by the monthly-amount quota check so the counter does not
  * need its own window bookkeeping — the ledger IS the counter.
  */
-export function aggregateLedgerThisMonth(apiKeyId: string, nowIso?: string): LedgerAggregate {
+export async function aggregateLedgerThisMonth(
+  apiKeyId: string,
+  nowIso?: string
+): Promise<LedgerAggregate> {
   const now = nowIso ? new Date(nowIso) : new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
   return aggregateLedger(apiKeyId, monthStart, { successOnly: true });
@@ -290,20 +265,18 @@ export function aggregateLedgerThisMonth(apiKeyId: string, nowIso?: string): Led
  * traceId, so those calls do not join. The common case (no explicit
  * correlationId) does.
  */
-export function getCostBySessionTag(sessionTag: string): RunCostRow[] {
+export async function getCostBySessionTag(sessionTag: string): Promise<RunCostRow[]> {
   if (!sessionTag) return [];
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT r.provider, r.model, r.tokens_input, r.tokens_output,
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT r.provider, r.model, r.tokens_input, r.tokens_output,
               r.tokens_cache_read, r.tokens_cache_creation, r.tokens_reasoning,
-              r.amount_usd, r.request_id, r.timestamp
+              r.amount_usd, r.request_id, r."timestamp"
        FROM call_logs c
        JOIN request_cost_ledger r ON r.request_id = c.correlation_id
-       WHERE c.session_tag = ?
-       ORDER BY r.timestamp DESC`
-    )
-    .all(sessionTag) as unknown as Array<Record<string, unknown>>;
+       WHERE c.session_tag = $1
+       ORDER BY r."timestamp" DESC`,
+    [sessionTag]
+  );
 
   return rows.map((r) => {
     const row = asRecord(r);

@@ -29,17 +29,17 @@ export type ComboContextLimitSource = "combo-explicit" | "target" | "combo-min" 
  * A non-finite or non-positive `comboContextLength` is ignored, so steps 2-3
  * keep their pre-existing behavior exactly.
  */
-export function resolveComboContextLimit(options: {
+export async function resolveComboContextLimit(options: {
   provider: string;
   model: string | null;
   comboTargetLimits: number[];
   comboContextLength?: number | null;
-}): { limit: number; source: ComboContextLimitSource } {
+}): Promise<{ limit: number; source: ComboContextLimitSource }> {
   const explicit = options.comboContextLength;
   if (typeof explicit === "number" && Number.isFinite(explicit) && explicit > 0) {
     return { limit: explicit, source: "combo-explicit" };
   }
-  const own = resolveTokenLimit(options.provider, options.model ?? null);
+  const own = await resolveTokenLimit(options.provider, options.model ?? null);
   if (own.specific) {
     return { limit: own.limit, source: "target" };
   }

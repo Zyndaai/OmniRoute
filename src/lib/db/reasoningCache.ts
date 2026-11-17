@@ -9,7 +9,7 @@
  * @see Issue #1628
  */
 
-import { getDbInstance } from "./core";
+import { db } from "@/lib/db/pg";
 
 // ──────────────── Types ────────────────
 
@@ -36,88 +36,63 @@ export interface ReasoningCacheStats {
 
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-function toUnixEpochSeconds(dateMs: number): number {
-  return Math.floor(dateMs / 1000);
-}
-
-const EXPIRES_AT_EPOCH_SQL = `COALESCE(
-  CASE
-    WHEN typeof(expires_at) IN ('integer', 'real') THEN CAST(expires_at AS INTEGER)
-    WHEN typeof(expires_at) = 'text' AND expires_at <> '' AND expires_at NOT GLOB '*[^0-9]*'
-      THEN CAST(expires_at AS INTEGER)
-    ELSE unixepoch(expires_at)
-  END,
-  0
-)`;
-
-function epochSecondsToIso(value: number | string): string {
-  const text = String(value);
-  const seconds =
-    typeof value === "number" || (text !== "" && !/[^0-9]/.test(text))
-      ? Number.parseInt(text, 10)
-      : NaN;
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return new Date(seconds * 1000).toISOString();
-  }
-  const parsedMs = Date.parse(text);
-  if (Number.isFinite(parsedMs)) {
-    return new Date(parsedMs).toISOString();
-  }
-  return String(value);
-}
-
 const MAX_ENTRY_BYTES = 10000;
 
 // ──────────────── CRUD ────────────────
 
 /**
  * Store a reasoning_content entry for a given tool_call_id.
- * Uses INSERT OR REPLACE to handle duplicate tool_call_ids gracefully.
+ * Upserts so duplicate tool_call_ids replace the earlier entry.
  */
-export function setReasoningCache(
+export async function setReasoningCache(
   toolCallId: string,
   provider: string,
   model: string,
   reasoning: string,
   ttlMs: number = DEFAULT_TTL_MS
-): void {
+): Promise<void> {
   const PLACEHOLDER = "(prior reasoning summary unavailable)";
   if (!reasoning || reasoning.trim() === PLACEHOLDER) return; // ponytail: never store the internal placeholder
   if (reasoning.length > MAX_ENTRY_BYTES) {
     reasoning = reasoning.slice(0, MAX_ENTRY_BYTES);
   }
-  const db = getDbInstance();
-  const expiresAt = toUnixEpochSeconds(Date.now() + ttlMs);
+  // Postgres rejects U+0000 in text.
+  reasoning = reasoning.replace(/\u0000/g, "");
+  const expiresAt = new Date(Date.now() + ttlMs).toISOString();
   const charCount = reasoning.length;
 
-  db.prepare(
-    `INSERT OR REPLACE INTO reasoning_cache
+  await db().execute(
+    `INSERT INTO reasoning_cache
        (tool_call_id, provider, model, reasoning, char_count, created_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`
-  ).run(toolCallId, provider, model, reasoning, charCount, expiresAt);
+     VALUES ($1, $2, $3, $4, $5, now(), $6)
+     ON CONFLICT (tool_call_id) DO UPDATE SET
+       provider = EXCLUDED.provider,
+       model = EXCLUDED.model,
+       reasoning = EXCLUDED.reasoning,
+       char_count = EXCLUDED.char_count,
+       created_at = EXCLUDED.created_at,
+       expires_at = EXCLUDED.expires_at`,
+    [toolCallId, provider, model, reasoning, charCount, expiresAt]
+  );
 }
 
 /**
  * Retrieve a cached reasoning_content by tool_call_id.
  * Returns null if not found or expired.
  */
-export function getReasoningCache(
+export async function getReasoningCache(
   toolCallId: string
-): { reasoning: string; provider: string; model: string; expiresAt: string } | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT reasoning, provider, model, expires_at FROM reasoning_cache
-       WHERE tool_call_id = ? AND ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now')`
-    )
-    .get(toolCallId) as
-    | {
-        reasoning: string;
-        provider: string;
-        model: string;
-        expires_at: number | string;
-      }
-    | undefined;
+): Promise<{ reasoning: string; provider: string; model: string; expiresAt: string } | null> {
+  const row = await db().queryOne<{
+    reasoning: string;
+    provider: string;
+    model: string;
+    expires_at: string;
+  }>(
+    `SELECT reasoning, provider, model, expires_at FROM reasoning_cache
+     WHERE tool_call_id = $1 AND expires_at > now()`,
+    [toolCallId]
+  );
 
   const PLACEHOLDER = "(prior reasoning summary unavailable)";
   if (row && row.reasoning && row.reasoning.trim() === PLACEHOLDER) return null;
@@ -126,7 +101,7 @@ export function getReasoningCache(
         reasoning: row.reasoning,
         provider: row.provider,
         model: row.model,
-        expiresAt: epochSecondsToIso(row.expires_at),
+        expiresAt: row.expires_at,
       }
     : null;
 }
@@ -134,20 +109,18 @@ export function getReasoningCache(
 /**
  * Delete a specific reasoning cache entry.
  */
-export function deleteReasoningCache(toolCallId: string): number {
-  const db = getDbInstance();
-  const result = db.prepare(`DELETE FROM reasoning_cache WHERE tool_call_id = ?`).run(toolCallId);
+export async function deleteReasoningCache(toolCallId: string): Promise<number> {
+  const result = await db().execute(`DELETE FROM reasoning_cache WHERE tool_call_id = $1`, [
+    toolCallId,
+  ]);
   return result.changes;
 }
 
 /**
  * Delete all expired entries. Returns count of rows removed.
  */
-export function cleanupExpiredReasoning(): number {
-  const db = getDbInstance();
-  const result = db
-    .prepare(`DELETE FROM reasoning_cache WHERE ${EXPIRES_AT_EPOCH_SQL} <= unixepoch('now')`)
-    .run();
+export async function cleanupExpiredReasoning(): Promise<number> {
+  const result = await db().execute(`DELETE FROM reasoning_cache WHERE expires_at <= now()`);
   return result.changes;
 }
 
@@ -155,13 +128,14 @@ export function cleanupExpiredReasoning(): number {
  * Delete all entries, optionally filtered by provider.
  * Returns count of rows removed.
  */
-export function clearAllReasoningCache(provider?: string): number {
-  const db = getDbInstance();
+export async function clearAllReasoningCache(provider?: string): Promise<number> {
   if (provider) {
-    const result = db.prepare(`DELETE FROM reasoning_cache WHERE provider = ?`).run(provider);
+    const result = await db().execute(`DELETE FROM reasoning_cache WHERE provider = $1`, [
+      provider,
+    ]);
     return result.changes;
   }
-  const result = db.prepare(`DELETE FROM reasoning_cache`).run();
+  const result = await db().execute(`DELETE FROM reasoning_cache`);
   return result.changes;
 }
 
@@ -170,67 +144,46 @@ export function clearAllReasoningCache(provider?: string): number {
 /**
  * Get aggregate statistics for the reasoning cache.
  */
-export function getReasoningCacheStats(): ReasoningCacheStats {
-  const db = getDbInstance();
+export async function getReasoningCacheStats(): Promise<ReasoningCacheStats> {
+  const totals = await db().queryOne<{ total_entries: number; total_chars: number }>(
+    `SELECT COUNT(*) as total_entries, COALESCE(SUM(char_count), 0) as total_chars
+     FROM reasoning_cache WHERE expires_at > now()`
+  );
 
-  // Total counts
-  const totals = db
-    .prepare(
-      `SELECT COUNT(*) as total_entries, COALESCE(SUM(char_count), 0) as total_chars
-       FROM reasoning_cache WHERE ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now')`
-    )
-    .get() as { total_entries: number; total_chars: number };
-
-  // By provider
-  const providerRows = db
-    .prepare(
-      `SELECT provider, COUNT(*) as entries, COALESCE(SUM(char_count), 0) as chars
-       FROM reasoning_cache WHERE ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now')
-       GROUP BY provider ORDER BY entries DESC`
-    )
-    .all() as { provider: string; entries: number; chars: number }[];
+  const providerRows = await db().query<{ provider: string; entries: number; chars: number }>(
+    `SELECT provider, COUNT(*) as entries, COALESCE(SUM(char_count), 0) as chars
+     FROM reasoning_cache WHERE expires_at > now()
+     GROUP BY provider ORDER BY entries DESC`
+  );
 
   const byProvider: Record<string, { entries: number; chars: number }> = {};
   for (const row of providerRows) {
-    byProvider[row.provider] = { entries: row.entries, chars: row.chars };
+    byProvider[row.provider] = { entries: Number(row.entries), chars: Number(row.chars) };
   }
 
-  // By model
-  const modelRows = db
-    .prepare(
-      `SELECT model, COUNT(*) as entries, COALESCE(SUM(char_count), 0) as chars
-       FROM reasoning_cache WHERE ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now')
-       GROUP BY model ORDER BY entries DESC`
-    )
-    .all() as { model: string; entries: number; chars: number }[];
+  const modelRows = await db().query<{ model: string; entries: number; chars: number }>(
+    `SELECT model, COUNT(*) as entries, COALESCE(SUM(char_count), 0) as chars
+     FROM reasoning_cache WHERE expires_at > now()
+     GROUP BY model ORDER BY entries DESC`
+  );
 
   const byModel: Record<string, { entries: number; chars: number }> = {};
   for (const row of modelRows) {
-    byModel[row.model] = { entries: row.entries, chars: row.chars };
+    byModel[row.model] = { entries: Number(row.entries), chars: Number(row.chars) };
   }
 
-  // Oldest/newest
-  const oldest = db
-    .prepare(
-      `SELECT created_at FROM reasoning_cache
-       WHERE ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now') ORDER BY created_at ASC LIMIT 1`
-    )
-    .get() as { created_at: string } | undefined;
-
-  const newest = db
-    .prepare(
-      `SELECT created_at FROM reasoning_cache
-       WHERE ${EXPIRES_AT_EPOCH_SQL} > unixepoch('now') ORDER BY created_at DESC LIMIT 1`
-    )
-    .get() as { created_at: string } | undefined;
+  const bounds = await db().queryOne<{ oldest: string | null; newest: string | null }>(
+    `SELECT MIN(created_at) AS oldest, MAX(created_at) AS newest
+     FROM reasoning_cache WHERE expires_at > now()`
+  );
 
   return {
-    totalEntries: totals.total_entries,
-    totalChars: totals.total_chars,
+    totalEntries: Number(totals?.total_entries ?? 0),
+    totalChars: Number(totals?.total_chars ?? 0),
     byProvider,
     byModel,
-    oldestEntry: oldest?.created_at ?? null,
-    newestEntry: newest?.created_at ?? null,
+    oldestEntry: bounds?.oldest ?? null,
+    newestEntry: bounds?.newest ?? null,
   };
 }
 
@@ -239,48 +192,46 @@ export function getReasoningCacheStats(): ReasoningCacheStats {
 /**
  * List reasoning cache entries with optional filters and pagination.
  */
-export function getReasoningCacheEntries(
+export async function getReasoningCacheEntries(
   opts: {
     limit?: number;
     offset?: number;
     provider?: string;
     model?: string;
   } = {}
-): ReasoningCacheEntry[] {
-  const db = getDbInstance();
+): Promise<ReasoningCacheEntry[]> {
   const limit = Math.min(opts.limit ?? 50, 200);
   const offset = opts.offset ?? 0;
 
-  const conditions: string[] = [`${EXPIRES_AT_EPOCH_SQL} > unixepoch('now')`];
+  const conditions: string[] = ["expires_at > now()"];
   const params: unknown[] = [];
 
   if (opts.provider) {
-    conditions.push("provider = ?");
     params.push(opts.provider);
+    conditions.push(`provider = $${params.length}`);
   }
   if (opts.model) {
-    conditions.push("model = ?");
     params.push(opts.model);
+    conditions.push(`model = $${params.length}`);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
-  const rows = db
-    .prepare(
-      `SELECT tool_call_id, provider, model, reasoning, char_count, created_at, expires_at
-       FROM reasoning_cache ${where}
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(...params, limit, offset) as {
+  const rows = await db().query<{
     tool_call_id: string;
     provider: string;
     model: string;
     reasoning: string;
     char_count: number;
     created_at: string;
-    expires_at: number | string;
-  }[];
+    expires_at: string;
+  }>(
+    `SELECT tool_call_id, provider, model, reasoning, char_count, created_at, expires_at
+     FROM reasoning_cache ${where}
+     ORDER BY created_at DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset]
+  );
 
   return rows.map((row) => ({
     toolCallId: row.tool_call_id,
@@ -289,6 +240,6 @@ export function getReasoningCacheEntries(
     reasoning: row.reasoning,
     charCount: row.char_count,
     createdAt: row.created_at,
-    expiresAt: epochSecondsToIso(row.expires_at),
+    expiresAt: row.expires_at,
   }));
 }

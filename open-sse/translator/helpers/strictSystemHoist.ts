@@ -1,4 +1,26 @@
-import { systemMessageMustBeFirst } from "../../../src/lib/memory/injection.ts";
+/**
+ * Providers that accept a system-role message ONLY at index 0 (a `system` message at any later
+ * position is rejected with HTTP 400, #6135): the Xiaomi MiMo endpoint (`xiaomi-mimo`, alias
+ * `mimo`) and the TokenRouter gateway (`tokenrouter`). Self-hosted deployments extend the list
+ * with OMNIROUTE_STRICT_SYSTEM_PROVIDERS (comma-separated provider ids, case-insensitive), e.g. a
+ * custom OpenAI-compatible connection in front of a Qwen3.5+/3.6 model whose chat template
+ * enforces the same single-leading-system-message constraint. Add other providers here only when
+ * they are documented as strict.
+ */
+const BUILTIN_PROVIDERS_SYSTEM_MUST_BE_FIRST = new Set(["xiaomi-mimo", "mimo", "tokenrouter"]);
+
+/** True when the provider requires the system message to be first; false for unknown/null. */
+export function systemMessageMustBeFirst(
+  provider: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  if (!provider) return false;
+  const normalized = provider.toLowerCase().trim();
+  if (BUILTIN_PROVIDERS_SYSTEM_MUST_BE_FIRST.has(normalized)) return true;
+  return (env.OMNIROUTE_STRICT_SYSTEM_PROVIDERS ?? "")
+    .split(",")
+    .some((id) => id.trim().toLowerCase() === normalized);
+}
 
 type Message = { role: string; content: unknown; [key: string]: unknown };
 
@@ -19,8 +41,7 @@ function toTextContent(content: unknown): string {
 
 /**
  * #7293: hoist every `system`-role message onto index 0 for providers that reject a
- * non-first system message (`systemMessageMustBeFirst()` — the single source of truth
- * already used by `src/lib/memory/injection.ts`'s memory-injection half, #6135/PR#6225).
+ * non-first system message (`systemMessageMustBeFirst()`, #6135/PR#6225).
  *
  * `translateRequest()` is the single outbound choke point every request passes through,
  * including same-format (OpenAI→OpenAI) passthrough where none of the format-specific

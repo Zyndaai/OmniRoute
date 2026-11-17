@@ -62,7 +62,7 @@ export async function POST(request: Request) {
 
       created.push(sanitizeConnectionForResponse(connection as Record<string, unknown>));
 
-      logAuditEvent({
+      await logAuditEvent({
         action: "provider.credentials.imported",
         actor: "admin",
         target: getProviderAuditTarget(connection),
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
     }
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     action: "provider.credentials.bulk_imported",
     actor: "admin",
     target: "agy",

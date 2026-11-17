@@ -14,7 +14,7 @@
  * Sliced out of #3500 (proxy_logs cluster, slice 4).
  */
 
-import { getDbInstance } from "./core";
+import { db, ts } from "./pg";
 import { normalizeProxyHostForLog } from "../proxyLogHost";
 import { sanitizeTimingMs } from "@omniroute/open-sse/utils/timingMs.ts";
 
@@ -28,12 +28,19 @@ import { sanitizeTimingMs } from "@omniroute/open-sse/utils/timingMs.ts";
  *
  * @param since - ISO-8601 timestamp lower bound, e.g. "2024-01-01T00:00:00.000Z".
  */
-export function exportProxyLogsSince(since: string): Record<string, unknown>[] {
-  const db = getDbInstance();
-  const stmt = db.prepare(
-    "SELECT * FROM proxy_logs WHERE timestamp >= @since ORDER BY timestamp DESC"
+export async function exportProxyLogsSince(since: string): Promise<Record<string, unknown>[]> {
+  const rows = await db().query<Record<string, unknown>>(
+    `SELECT * FROM proxy_logs WHERE "timestamp" >= $1 ORDER BY "timestamp" DESC`,
+    [ts(since)]
   );
-  return stmt.all({ since }) as Record<string, unknown>[];
+  return rows.map(toLegacyExportRow);
+}
+
+// The export API has always emitted tls_fingerprint as 0/1; the column is boolean now.
+function toLegacyExportRow(row: Record<string, unknown>): Record<string, unknown> {
+  return typeof row.tls_fingerprint === "boolean"
+    ? { ...row, tls_fingerprint: row.tls_fingerprint ? 1 : 0 }
+    : row;
 }
 
 /**
@@ -42,12 +49,12 @@ export function exportProxyLogsSince(since: string): Record<string, unknown>[] {
  * Used by /api/logs/export to report `totalAvailable` without paying the
  * cost of fetching every row just to count them (#13123).
  */
-export function countProxyLogsSince(since: string): number {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT COUNT(*) AS count FROM proxy_logs WHERE timestamp >= @since")
-    .get({ since }) as { count: number };
-  return row.count;
+export async function countProxyLogsSince(since: string): Promise<number> {
+  const row = await db().queryOne<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM proxy_logs WHERE "timestamp" >= $1`,
+    [ts(since)]
+  );
+  return Number(row?.count ?? 0);
 }
 
 const PAGE_SIZE = 500;
@@ -57,31 +64,28 @@ const PAGE_SIZE = 500;
  * ordered by timestamp descending — paginated via SQL LIMIT/OFFSET in fixed
  * batches, never buffering more than `PAGE_SIZE` rows at once (#13123: the
  * previous `exportProxyLogsSince()` + slice-after-fetch approach still
- * materialized every matching row before the row cap was even applied). Note:
- * the `SqliteAdapter` (`./adapters/types.ts`) intentionally exposes only
- * `run`/`get`/`all` — no `.iterate()` cursor — so LIMIT/OFFSET batching is
- * the cursor-equivalent available without widening that shared interface
- * across all 4 driver adapters.
+ * materialized every matching row before the row cap was even applied).
  * This is a live, best-effort export, not a transactionally consistent snapshot:
  * concurrent inserts/deletes can shift OFFSET pages and repeat or omit rows.
  * The preflight COUNT is an estimate; the route reports its emitted count last.
  */
-export function* iterateProxyLogsSince(
+export async function* iterateProxyLogsSince(
   since: string,
   limit: number
-): Generator<Record<string, unknown>, void, void> {
-  const db = getDbInstance();
+): AsyncGenerator<Record<string, unknown>, void, void> {
   let offset = 0;
   let yielded = 0;
+  const sinceTs = ts(since);
   while (yielded < limit) {
     const pageLimit = Math.min(PAGE_SIZE, limit - yielded);
-    const stmt = db.prepare(
-      "SELECT * FROM proxy_logs WHERE timestamp >= @since ORDER BY timestamp DESC LIMIT @pageLimit OFFSET @offset"
+    const page = await db().query<Record<string, unknown>>(
+      `SELECT * FROM proxy_logs WHERE "timestamp" >= $1
+        ORDER BY "timestamp" DESC, id DESC LIMIT $2 OFFSET $3`,
+      [sinceTs, pageLimit, offset]
     );
-    const page = stmt.all({ since, pageLimit, offset }) as Record<string, unknown>[];
     if (page.length === 0) break;
     for (const row of page) {
-      yield row;
+      yield toLegacyExportRow(row);
       yielded++;
     }
     offset += page.length;
@@ -102,23 +106,19 @@ export const EGRESS_IP_LOOKUP_WINDOW_MS = 24 * 60 * 60 * 1000;
  * Last non-null egress IP observed for a connection within the window, or
  * null. Best-effort by design: egress_ip is only populated once the egress IP
  * has been probed (cache TTL 5 min), so a cold cache yields null and the
- * caller must fall back to today's behavior. Synchronous read (#10539 — no
- * in-memory cache to go stale). The table has no index on connection_id
- * (migration 134, YAGNI); the scan is bounded by the window via
- * idx_pl_timestamp and this helper only runs at 429 frequency.
+ * caller must fall back to today's behavior. No in-memory cache to go
+ * stale (#10539). Served by proxy_logs_connection_egress_idx.
  */
-export function getRecentEgressIpForConnection(
+export async function getRecentEgressIpForConnection(
   connectionId: string,
   since: string
-): { egressIp: string; at: string } | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT egress_ip, timestamp FROM proxy_logs
-       WHERE connection_id = ? AND egress_ip IS NOT NULL AND timestamp >= ?
-       ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(connectionId, since) as { egress_ip: string; timestamp: string } | undefined;
+): Promise<{ egressIp: string; at: string } | null> {
+  const row = await db().queryOne<{ egress_ip: string; timestamp: string }>(
+    `SELECT egress_ip, "timestamp" FROM proxy_logs
+       WHERE connection_id = $1 AND egress_ip IS NOT NULL AND "timestamp" >= $2
+       ORDER BY "timestamp" DESC LIMIT 1`,
+    [connectionId, ts(since)]
+  );
   if (!row) return null;
   return { egressIp: row.egress_ip, at: row.timestamp };
 }
@@ -137,30 +137,26 @@ function normalizeProxyHostKey(host: unknown): string {
  * window, keyed by (host, port), or null. Best-effort by design: egress_ip is
  * only populated once the egress IP has been probed (cache TTL 5 min), so a
  * cold cache yields null and the caller must fall back to today's behavior.
- * Synchronous read (no in-memory cache to go stale). The table has no index
- * on (proxy_host, proxy_port) (migration 134, YAGNI); the scan is bounded by
- * the window via idx_pl_timestamp, same as getRecentEgressIpForConnection.
+ * No in-memory cache to go stale. Served by proxy_logs_proxy_ts_idx.
  * The host key is normalized (trim, strip one bracket pair, lowercase);
  * IPv4-mapped IPv6 forms are intentionally not unmapped. The port must be an
  * integer in 1-65535 — anything else returns null instead of throwing.
  */
-export function getRecentEgressIpForProxy(
+export async function getRecentEgressIpForProxy(
   host: string,
   port: number
-): { egressIp: string; at: string } | null {
+): Promise<{ egressIp: string; at: string } | null> {
   const h = normalizeProxyHostKey(host);
   if (!h) return null;
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
-  const db = getDbInstance();
   const since = new Date(Date.now() - EGRESS_IP_LOOKUP_WINDOW_MS).toISOString();
-  const row = db
-    .prepare(
-      `SELECT egress_ip, timestamp FROM proxy_logs
-       WHERE proxy_host = ? AND proxy_port = ?
-         AND egress_ip IS NOT NULL AND timestamp >= ?
-       ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(h, port, since) as { egress_ip: string; timestamp: string } | undefined;
+  const row = await db().queryOne<{ egress_ip: string; timestamp: string }>(
+    `SELECT egress_ip, "timestamp" FROM proxy_logs
+       WHERE proxy_host = $1 AND proxy_port = $2
+         AND egress_ip IS NOT NULL AND "timestamp" >= $3
+       ORDER BY "timestamp" DESC LIMIT 1`,
+    [h, port, since]
+  );
   if (!row) return null;
   return { egressIp: row.egress_ip, at: row.timestamp };
 }
@@ -170,26 +166,26 @@ export function getRecentEgressIpForProxy(
  * `sinceIso` (up to `limit`). Same host-key normalization and port validation
  * as `getRecentEgressIpForProxy`: anything unusable yields `[]`, never a throw.
  */
-export function getRecentEgressIpsForProxy(
+export async function getRecentEgressIpsForProxy(
   host: string,
   port: number,
   sinceIso: string,
   limit = 3
-): string[] {
+): Promise<string[]> {
   const h = normalizeProxyHostKey(host);
   if (!h) return [];
   if (!Number.isInteger(port) || port < 1 || port > 65535) return [];
   if (typeof sinceIso !== "string" || !sinceIso) return [];
+  const sinceTs = ts(sinceIso);
+  if (!sinceTs) return [];
   const capped = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 10) : 3;
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT egress_ip FROM proxy_logs
-       WHERE proxy_host = ? AND proxy_port = ?
-         AND egress_ip IS NOT NULL AND timestamp >= ?
-       LIMIT ?`
-    )
-    .all(h, port, sinceIso, capped) as Array<{ egress_ip: string }>;
+  const rows = await db().query<{ egress_ip: string }>(
+    `SELECT DISTINCT egress_ip FROM proxy_logs
+       WHERE proxy_host = $1 AND proxy_port = $2
+         AND egress_ip IS NOT NULL AND "timestamp" >= $3
+       LIMIT $4`,
+    [h, port, sinceTs, capped]
+  );
   return rows.map((r) => r.egress_ip).filter((ip) => typeof ip === "string" && ip);
 }
 
@@ -252,30 +248,30 @@ export const POOL_EGRESS_ATTRIBUTION_NOTE =
  * `idx_pl_timestamp`.
  * `scope`/`scopeId` must already be normalized; an empty pool yields empties.
  */
-export function getPoolEgressFailureBreakdown(
+export async function getPoolEgressFailureBreakdown(
   scope: string,
   scopeId: string | null,
   since: string
-): PoolEgressFailureBreakdown {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT exit, family, COUNT(*) AS n
+): Promise<PoolEgressFailureBreakdown> {
+  // proxy_assignments.scope_id is NOT NULL; the global scope stores '__global__'.
+  const rows = await db().query<{ exit: string; family: string | null; n: number }>(
+    `SELECT egress_exit AS exit, family, COUNT(*) AS n
        FROM (
-         SELECT l.egress_ip AS exit,
+         SELECT l.egress_ip AS egress_exit,
                 (SELECT c.error_type FROM call_logs c
                  WHERE c.correlation_id = l.correlation_id
-                 ORDER BY c.rowid LIMIT 1) AS family
+                 ORDER BY c.seq LIMIT 1) AS family
          FROM proxy_logs l
          JOIN proxy_registry r ON l.proxy_host = r.host AND l.proxy_port = r.port
-         WHERE r.id IN (SELECT proxy_id FROM proxy_assignments WHERE scope = ? AND scope_id IS ?)
-           AND l.timestamp >= ? AND l.status != 'success'
+         WHERE r.id IN (SELECT proxy_id FROM proxy_assignments
+                         WHERE scope = $1 AND scope_id = COALESCE($2, '__global__'))
+           AND l."timestamp" >= $3 AND l.status != 'success'
            AND l.egress_ip IS NOT NULL AND l.connection_id IS NOT NULL
-       )
-       GROUP BY exit, family
-       ORDER BY exit ASC`
-    )
-    .all(scope, scopeId, since) as Array<{ exit: string; family: string | null; n: number }>;
+       ) failures
+       GROUP BY egress_exit, family
+       ORDER BY egress_exit ASC`,
+    [scope, scopeId, ts(since)]
+  );
   const byExitMap = new Map<string, Map<string, number>>();
   const byFamilyMap = new Map<string, number>();
   let unattributed = 0;
@@ -314,28 +310,38 @@ export function getPoolEgressFailureBreakdown(
  * partially migrated databases and clock skew never corrupt the row.
  * Returns true when exactly one row was patched.
  */
-export function updateAttemptTiming(
+export async function updateAttemptTiming(
   id: string,
-  patch: { headersMs?: number | null; firstChunkMs?: number | null }
-): boolean {
+  patch: { headersMs?: number | null; firstChunkMs?: number | null },
+  timestamp?: string | null
+): Promise<boolean> {
   if (typeof id !== "string" || !id) return false;
   const clean = {
     headersMs: sanitizeTimingValue(patch.headersMs),
     firstChunkMs: sanitizeTimingValue(patch.firstChunkMs),
   };
   if (clean.headersMs === undefined && clean.firstChunkMs === undefined) return false;
-  const db = getDbInstance();
   const sets: string[] = [];
-  const params: Record<string, unknown> = { id };
+  const params: unknown[] = [id];
   if (clean.headersMs !== undefined) {
-    sets.push("headers_ms = @headersMs");
-    params.headersMs = clean.headersMs;
+    params.push(Math.round(clean.headersMs));
+    sets.push(`headers_ms = $${params.length}`);
   }
   if (clean.firstChunkMs !== undefined) {
-    sets.push("first_chunk_ms = @firstChunkMs");
-    params.firstChunkMs = clean.firstChunkMs;
+    params.push(Math.round(clean.firstChunkMs));
+    sets.push(`first_chunk_ms = $${params.length}`);
   }
-  const result = db.prepare(`UPDATE proxy_logs SET ${sets.join(", ")} WHERE id = @id`).run(params);
+  // Passing the row's partition key lets the planner prune to one partition.
+  const rowTs = ts(timestamp);
+  let where = "id = $1";
+  if (rowTs) {
+    params.push(rowTs);
+    where += ` AND "timestamp" = $${params.length}`;
+  }
+  const result = await db().execute(
+    `UPDATE proxy_logs SET ${sets.join(", ")} WHERE ${where}`,
+    params
+  );
   return Number(result.changes) === 1;
 }
 
@@ -352,35 +358,35 @@ function sanitizeTimingValue(value: number | null | undefined): number | undefin
  * `scope` and `scopeId` must already be normalized (normalizeScope and
  * normalizeAssignmentScopeId); an empty pool simply matches no rows.
  */
-export function getPoolEgressObservation(
+export async function getPoolEgressObservation(
   scope: string,
   scopeId: string | null,
   since: string
-): PoolEgressObservation {
-  const db = getDbInstance();
-  const perExit = db
-    .prepare(
-      `SELECT COUNT(DISTINCT l.connection_id) AS n
+): Promise<PoolEgressObservation> {
+  const sinceTs = ts(since);
+  const perExit = await db().query<{ n: number }>(
+    `SELECT COUNT(DISTINCT l.connection_id) AS n
        FROM proxy_logs l
        JOIN proxy_registry r ON l.proxy_host = r.host AND l.proxy_port = r.port
-       WHERE r.id IN (SELECT proxy_id FROM proxy_assignments WHERE scope = ? AND scope_id IS ?)
-         AND l.timestamp >= ? AND l.egress_ip IS NOT NULL AND l.connection_id IS NOT NULL
-       GROUP BY l.egress_ip`
-    )
-    .all(scope, scopeId, since) as Array<{ n: number }>;
-  const total = db
-    .prepare(
-      `SELECT COUNT(DISTINCT l.connection_id) AS n
+       WHERE r.id IN (SELECT proxy_id FROM proxy_assignments
+                       WHERE scope = $1 AND scope_id = COALESCE($2, '__global__'))
+         AND l."timestamp" >= $3 AND l.egress_ip IS NOT NULL AND l.connection_id IS NOT NULL
+       GROUP BY l.egress_ip`,
+    [scope, scopeId, sinceTs]
+  );
+  const total = await db().queryOne<{ n: number }>(
+    `SELECT COUNT(DISTINCT l.connection_id) AS n
        FROM proxy_logs l
        JOIN proxy_registry r ON l.proxy_host = r.host AND l.proxy_port = r.port
-       WHERE r.id IN (SELECT proxy_id FROM proxy_assignments WHERE scope = ? AND scope_id IS ?)
-         AND l.timestamp >= ? AND l.egress_ip IS NOT NULL AND l.connection_id IS NOT NULL`
-    )
-    .get(scope, scopeId, since) as { n: number };
+       WHERE r.id IN (SELECT proxy_id FROM proxy_assignments
+                       WHERE scope = $1 AND scope_id = COALESCE($2, '__global__'))
+         AND l."timestamp" >= $3 AND l.egress_ip IS NOT NULL AND l.connection_id IS NOT NULL`,
+    [scope, scopeId, sinceTs]
+  );
   return {
-    connections: total.n,
+    connections: Number(total?.n ?? 0),
     distinctExits: perExit.length,
-    maxConnectionsOnOneExit: perExit.reduce((max, row) => Math.max(max, row.n), 0),
-    failures: getPoolEgressFailureBreakdown(scope, scopeId, since),
+    maxConnectionsOnOneExit: perExit.reduce((max, row) => Math.max(max, Number(row.n)), 0),
+    failures: await getPoolEgressFailureBreakdown(scope, scopeId, since),
   };
 }

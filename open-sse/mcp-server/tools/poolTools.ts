@@ -137,7 +137,7 @@ export async function handlePoolWarm(
 export async function handlePoolHealth(
   args: z.infer<typeof poolHealthInput>,
 ): Promise<Record<string, unknown>> {
-  const report = getWebSessionPoolHealth(args.provider);
+  const report = await getWebSessionPoolHealth(args.provider);
   return report as unknown as Record<string, unknown>;
 }
 

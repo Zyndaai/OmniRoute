@@ -324,7 +324,7 @@ export async function evaluateExecuteTargetGates(opts: {
 
   // Lift-as-is: combo.ts reads the env flag inline, not via AttemptLoopDeps.
   if (process.env.OMNIROUTE_QUOTA_AWARE_ROUTING === "1" && provider && target.connectionId) {
-    const quotaDecision = canAffordRequest(
+    const quotaDecision = await canAffordRequest(
       target.connectionId,
       modelStr,
       deps.body as Record<string, unknown> | null | undefined

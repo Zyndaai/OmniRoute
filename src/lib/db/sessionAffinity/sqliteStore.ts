@@ -1,26 +1,53 @@
 import { createHash } from "crypto";
 
-import { getDbInstance } from "../core";
+import { db, ts } from "../pg";
 import type { SessionAccountAffinityRecord } from "./store";
 
-const NAMESPACE = "session_account_affinity";
+// Backed by the `session_affinities` table. The module keeps its historical name (and the
+// `sqliteSessionAffinityStore` export) because the Redis store and the factory import it.
+
 const CLEANUP_INTERVAL_MS = 5 * 60_000;
+const ACCOUNT_IDENTITY_PATTERN = /^[a-f0-9]{64}$/;
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+type AffinityRow = {
+  connection_id: string;
+  account_identity: string | null;
+  created_at: string;
+  last_used_at: string;
+  expires_at: string;
+};
 
 function normalizePositiveTtl(ttlMs: number | null | undefined): number {
   return Number.isFinite(ttlMs) && Number(ttlMs) > 0 ? Number(ttlMs) : 0;
 }
 
-function affinityKey(sessionKey: string, provider: string): string {
-  const hash = createHash("sha256").update(`${provider}:${sessionKey}`).digest("hex");
-  return `${provider}:${hash}`;
+function sessionHash(sessionKey: string, provider: string): string {
+  return createHash("sha256").update(`${provider}:${sessionKey}`).digest("hex");
 }
 
 function isoFromMs(ms: number): string {
   return new Date(ms).toISOString();
 }
 
+function toIso(value: string): string {
+  return new Date(value).toISOString();
+}
+
+function rowToRecord(row: AffinityRow): SessionAccountAffinityRecord {
+  return {
+    connectionId: row.connection_id,
+    ...(row.account_identity && ACCOUNT_IDENTITY_PATTERN.test(row.account_identity)
+      ? { accountIdentity: row.account_identity }
+      : {}),
+    createdAt: toIso(row.created_at),
+    lastUsedAt: toIso(row.last_used_at),
+    expiresAt: toIso(row.expires_at),
+  };
+}
+
+/** Parses a serialized record (the Redis store keeps these as JSON text). */
 export function parseRecord(value: unknown): SessionAccountAffinityRecord | null {
   if (typeof value !== "string") return null;
   try {
@@ -34,7 +61,7 @@ export function parseRecord(value: unknown): SessionAccountAffinityRecord | null
     return {
       connectionId: parsed.connectionId,
       ...(typeof parsed.accountIdentity === "string" &&
-      /^[a-f0-9]{64}$/.test(parsed.accountIdentity)
+      ACCOUNT_IDENTITY_PATTERN.test(parsed.accountIdentity)
         ? { accountIdentity: parsed.accountIdentity }
         : {}),
       createdAt:
@@ -52,119 +79,167 @@ export function parseRecord(value: unknown): SessionAccountAffinityRecord | null
   }
 }
 
-function deleteAffinityKey(key: string): void {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?")
-    .run(NAMESPACE, key);
+async function readRow(sessionKey: string, provider: string): Promise<AffinityRow | undefined> {
+  return db().queryOne<AffinityRow>(
+    `SELECT connection_id, account_identity, created_at, last_used_at, expires_at
+       FROM session_affinities WHERE provider = $1 AND session_hash = $2`,
+    [provider, sessionHash(sessionKey, provider)]
+  );
 }
 
-/** Redis-only fallback provenance helpers; callers must compare exact SQLite bytes. */
-export function getSessionAccountAffinitySerialized(
+async function deleteAffinity(sessionKey: string, provider: string): Promise<void> {
+  await db().execute("DELETE FROM session_affinities WHERE provider = $1 AND session_hash = $2", [
+    provider,
+    sessionHash(sessionKey, provider),
+  ]);
+}
+
+/** Redis-only fallback provenance: the stored record as the JSON text `persist` wrote. */
+export async function getSessionAccountAffinitySerialized(
   sessionKey: string,
   provider: string
-): string | null {
+): Promise<string | null> {
   if (!sessionKey || !provider) return null;
-  const row = getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, affinityKey(sessionKey, provider)) as { value?: unknown } | undefined;
-  return typeof row?.value === "string" ? row.value : null;
+  const row = await readRow(sessionKey, provider);
+  return row ? JSON.stringify(rowToRecord(row)) : null;
 }
 
-export function deleteSessionAccountAffinityIfValue(
+/** Deletes the row only when it still holds exactly `serializedValue`. */
+export async function deleteSessionAccountAffinityIfValue(
   sessionKey: string,
   provider: string,
   serializedValue: string
-): boolean {
+): Promise<boolean> {
   if (!sessionKey || !provider || typeof serializedValue !== "string") return false;
-  const result = getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ? AND key = ? AND value = ?")
-    .run(NAMESPACE, affinityKey(sessionKey, provider), serializedValue);
-  return Number(result.changes) > 0;
+  const record = parseRecord(serializedValue);
+  if (!record) return false;
+  const { changes } = await db().execute(
+    `DELETE FROM session_affinities
+      WHERE provider = $1 AND session_hash = $2 AND connection_id = $3
+        AND account_identity IS NOT DISTINCT FROM $4
+        AND created_at = $5 AND last_used_at = $6 AND expires_at = $7`,
+    [
+      provider,
+      sessionHash(sessionKey, provider),
+      record.connectionId,
+      record.accountIdentity ?? null,
+      ts(record.createdAt),
+      ts(record.lastUsedAt),
+      ts(record.expiresAt),
+    ]
+  );
+  return changes > 0;
 }
 
-export function getSessionAccountAffinity(
+export async function getSessionAccountAffinity(
   sessionKey: string,
   provider: string,
   ttlMs = 0,
   now: number = Date.now()
-): SessionAccountAffinityRecord | null {
+): Promise<SessionAccountAffinityRecord | null> {
   if (!sessionKey || !provider || normalizePositiveTtl(ttlMs) <= 0) return null;
 
-  const key = affinityKey(sessionKey, provider);
-  const row = getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, key) as { value?: unknown } | undefined;
-  const record = parseRecord(row?.value);
-  if (!record) return null;
+  const row = await readRow(sessionKey, provider);
+  if (!row) return null;
+  const record = rowToRecord(row);
 
   if (Date.parse(record.expiresAt) <= now) {
-    deleteAffinityKey(key);
+    await db().execute(
+      "DELETE FROM session_affinities WHERE provider = $1 AND session_hash = $2 AND expires_at <= $3",
+      [provider, sessionHash(sessionKey, provider), ts(now)]
+    );
     return null;
   }
 
   return record;
 }
 
-export function upsertSessionAccountAffinity(
+/** The creation time survives while the existing row is still live; an expired row restarts it. */
+export async function upsertSessionAccountAffinity(
   sessionKey: string,
   provider: string,
   connectionId: string,
   now: number = Date.now(),
   ttlMs = 0,
   accountIdentity?: string
-): void {
+): Promise<void> {
   const normalizedTtlMs = normalizePositiveTtl(ttlMs);
   if (!sessionKey || !provider || !connectionId || normalizedTtlMs <= 0) return;
 
-  const existing = getSessionAccountAffinity(sessionKey, provider, normalizedTtlMs, now);
   const timestamp = isoFromMs(now);
-  const record: SessionAccountAffinityRecord = {
-    connectionId,
-    ...(accountIdentity && /^[a-f0-9]{64}$/.test(accountIdentity) ? { accountIdentity } : {}),
-    createdAt: existing?.createdAt ?? timestamp,
-    lastUsedAt: timestamp,
-    expiresAt: isoFromMs(now + normalizedTtlMs),
-  };
-
-  persistSessionAccountAffinity(sessionKey, provider, record);
+  await db().execute(
+    `INSERT INTO session_affinities
+       (provider, session_hash, connection_id, account_identity, created_at, last_used_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $5, $6)
+     ON CONFLICT (provider, session_hash) DO UPDATE SET
+       connection_id = EXCLUDED.connection_id,
+       account_identity = EXCLUDED.account_identity,
+       created_at = CASE WHEN session_affinities.expires_at > $5
+                         THEN session_affinities.created_at ELSE EXCLUDED.created_at END,
+       last_used_at = EXCLUDED.last_used_at,
+       expires_at = EXCLUDED.expires_at`,
+    [
+      provider,
+      sessionHash(sessionKey, provider),
+      connectionId,
+      accountIdentity && ACCOUNT_IDENTITY_PATTERN.test(accountIdentity) ? accountIdentity : null,
+      timestamp,
+      isoFromMs(now + normalizedTtlMs),
+    ]
+  );
 }
 
 /** Persist an exact local record; also used to seed identity-guard regression tests. */
-function persistSessionAccountAffinity(
+async function persistSessionAccountAffinity(
   sessionKey: string,
   provider: string,
   record: SessionAccountAffinityRecord
-): void {
-  getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run(NAMESPACE, affinityKey(sessionKey, provider), JSON.stringify(record));
+): Promise<void> {
+  await db().execute(
+    `INSERT INTO session_affinities
+       (provider, session_hash, connection_id, account_identity, created_at, last_used_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (provider, session_hash) DO UPDATE SET
+       connection_id = EXCLUDED.connection_id,
+       account_identity = EXCLUDED.account_identity,
+       created_at = EXCLUDED.created_at,
+       last_used_at = EXCLUDED.last_used_at,
+       expires_at = EXCLUDED.expires_at`,
+    [
+      provider,
+      sessionHash(sessionKey, provider),
+      record.connectionId,
+      record.accountIdentity ?? null,
+      ts(record.createdAt),
+      ts(record.lastUsedAt),
+      ts(record.expiresAt),
+    ]
+  );
 }
 
-export function touchSessionAccountAffinity(
+/** Slides the expiry of a live row (no index covers these columns, so the update stays HOT). */
+export async function touchSessionAccountAffinity(
   sessionKey: string,
   provider: string,
   now: number = Date.now(),
   ttlMs = 0
-): void {
+): Promise<void> {
   const normalizedTtlMs = normalizePositiveTtl(ttlMs);
-  if (normalizedTtlMs <= 0) return;
+  if (!sessionKey || !provider || normalizedTtlMs <= 0) return;
 
-  const existing = getSessionAccountAffinity(sessionKey, provider, normalizedTtlMs, now);
-  if (!existing) return;
-
-  upsertSessionAccountAffinity(
-    sessionKey,
-    provider,
-    existing.connectionId,
-    now,
-    normalizedTtlMs,
-    existing.accountIdentity
+  await db().execute(
+    `UPDATE session_affinities SET last_used_at = $3, expires_at = $4
+      WHERE provider = $1 AND session_hash = $2 AND expires_at > $3`,
+    [provider, sessionHash(sessionKey, provider), isoFromMs(now), isoFromMs(now + normalizedTtlMs)]
   );
 }
 
-export function deleteSessionAccountAffinity(sessionKey: string, provider: string): void {
+export async function deleteSessionAccountAffinity(
+  sessionKey: string,
+  provider: string
+): Promise<void> {
   if (!sessionKey || !provider) return;
-  deleteAffinityKey(affinityKey(sessionKey, provider));
+  await deleteAffinity(sessionKey, provider);
 }
 
 /**
@@ -176,64 +251,42 @@ export function deleteSessionAccountAffinity(sessionKey: string, provider: strin
  * (previously the session stayed pinned until process restart).
  *
  * Unlike `getSessionAccountAffinity`, this reads the stored record INDEPENDENT
- * of the TTL gate — a 2-arg `getSessionAccountAffinity(key, provider)` read
- * (ttl defaulting to 0) always returns null, which silently defeated the
- * connection-match guard on the earlier failover branches. The connection-match
- * guard is preserved here so a pin pointing at a different (still-healthy)
- * connection is never nuked. Returns true when a pin was evicted.
+ * of the TTL gate. The connection-match guard is preserved here so a pin
+ * pointing at a different (still-healthy) connection is never nuked. When both
+ * the stored pin and the caller carry an account identity, the identity decides.
+ * Returns true when a pin was evicted.
  */
-export function evictSessionAccountAffinityForConnection(
+export async function evictSessionAccountAffinityForConnection(
   sessionKey: string,
   provider: string,
   connectionId: string,
   accountIdentity?: string
-): boolean {
+): Promise<boolean> {
   if (!sessionKey || !provider || !connectionId) return false;
 
-  const key = affinityKey(sessionKey, provider);
-  const row = getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, key) as { value?: unknown } | undefined;
-  const record = parseRecord(row?.value);
-  if (
-    !record ||
-    (record.accountIdentity && accountIdentity
-      ? record.accountIdentity !== accountIdentity
-      : record.connectionId !== connectionId)
-  )
-    return false;
-
-  deleteAffinityKey(key);
-  return true;
+  const { changes } = await db().execute(
+    `DELETE FROM session_affinities
+      WHERE provider = $1 AND session_hash = $2
+        AND CASE WHEN account_identity IS NOT NULL AND $4::text IS NOT NULL
+                 THEN account_identity = $4::text
+                 ELSE connection_id = $3 END`,
+    [provider, sessionHash(sessionKey, provider), connectionId, accountIdentity || null]
+  );
+  return changes > 0;
 }
 
-export function cleanupStaleSessionAccountAffinities(
+export async function cleanupStaleSessionAccountAffinities(
   _ttlMs: number = 30 * 60 * 1000,
   now: number = Date.now()
-): number {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-    .all(NAMESPACE) as Array<{ key?: unknown; value?: unknown }>;
-  let deleted = 0;
-
-  const tx = db.transaction(() => {
-    for (const row of rows) {
-      if (typeof row.key !== "string") continue;
-      const record = parseRecord(row.value);
-      if (!record || Date.parse(record.expiresAt) <= now) {
-        db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(NAMESPACE, row.key);
-        deleted++;
-      }
-    }
-  });
-
-  tx();
-  return deleted;
+): Promise<number> {
+  const { changes } = await db().execute("DELETE FROM session_affinities WHERE expires_at <= $1", [
+    ts(now),
+  ]);
+  return changes;
 }
 
-// Exact-record seeding remains SQLite-only for existing identity regression tests;
-// it is not part of SessionAffinityStore and is never called by the Redis driver.
+// Exact-record seeding stays here for the identity regression tests; it is not part of
+// SessionAffinityStore and is never called by the Redis driver.
 export const sqliteSessionAffinityStore = {
   driver: "sqlite" as const,
   get: getSessionAccountAffinity,
@@ -249,18 +302,14 @@ export const sqliteSessionAffinityStore = {
 export function startSessionAccountAffinityCleanup(): void {
   if (cleanupTimer) return;
 
-  try {
-    cleanupStaleSessionAccountAffinities();
-  } catch (error) {
+  cleanupStaleSessionAccountAffinities().catch((error) => {
     console.warn("[SESSION_AFFINITY] Startup cleanup failed:", error);
-  }
+  });
 
   cleanupTimer = setInterval(() => {
-    try {
-      cleanupStaleSessionAccountAffinities();
-    } catch (error) {
+    cleanupStaleSessionAccountAffinities().catch((error) => {
       console.warn("[SESSION_AFFINITY] Periodic cleanup failed:", error);
-    }
+    });
   }, CLEANUP_INTERVAL_MS);
   if (typeof cleanupTimer === "object" && "unref" in cleanupTimer) cleanupTimer.unref?.();
 }

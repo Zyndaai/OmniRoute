@@ -303,6 +303,8 @@ const nextConfig = {
     "pino-pretty",
     "thread-stream",
     "pino-abstract-transport",
+    // node-postgres has an optional `pg-native` require that bundlers try to resolve.
+    "pg",
     "better-sqlite3",
     // sql.js WASM is resolved at runtime via createRequire(); Next's static
     // analysis can't follow _require.resolve("sql.js/package.json") and spams

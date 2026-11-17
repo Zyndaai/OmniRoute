@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   try {
     const combos = await getCombos();
     const allCombos = Array.isArray(combos) ? combos : [];
-    const data = projectComboCollectionWithCapabilities(allCombos);
+    const data = await projectComboCollectionWithCapabilities(allCombos);
 
     return new Response(JSON.stringify({ object: "list", data, combos: data }), {
       headers: {

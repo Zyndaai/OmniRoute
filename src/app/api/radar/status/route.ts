@@ -54,15 +54,15 @@ export async function GET(request: Request) {
     });
   }
   try {
-    const settings = getRadarSettings();
+    const settings = await getRadarSettings();
     return NextResponse.json(
       {
         settings: { optIn: settings.optIn, hasSupporterKey: settings.supporterKey !== null },
         feeds: {
-          catalog: cacheStatus(getRadarCache()),
-          referrals: cacheStatus(getRadarReferralsCache()),
-          offers: cacheStatus(getRadarOffersCache()),
-          intel: cacheStatus(getRadarIntelCache()),
+          catalog: cacheStatus(await getRadarCache()),
+          referrals: cacheStatus(await getRadarReferralsCache()),
+          offers: cacheStatus(await getRadarOffersCache()),
+          intel: cacheStatus(await getRadarIntelCache()),
         },
       },
       { headers: { ...CORS_HEADERS, "Cache-Control": "no-store" } }

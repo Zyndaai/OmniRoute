@@ -49,15 +49,17 @@ async function runBunExport(
     );
   }
   const client = getLogExportDestinationType(start.destination.type)!.createClient(start.config);
-  const throughRowId = getMaxCallLogRowId();
+  const throughRowId = await getMaxCallLogRowId();
   let cursor = start.cursorRowId;
   let exported = 0;
   let prepared = false;
   while (exported < start.maxRowsPerRun) {
-    const summaries = getCallLogsForExport(
-      cursor,
-      Math.min(start.batchSize, start.maxRowsPerRun - exported),
-      { includeBodies: start.includeBodies }
+    const summaries = (
+      await getCallLogsForExport(
+        cursor,
+        Math.min(start.batchSize, start.maxRowsPerRun - exported),
+        { includeBodies: start.includeBodies }
+      )
     ).filter((row) => row.rowId <= throughRowId);
     if (!summaries.length) break;
     const batch = start.includeBodies
@@ -117,10 +119,10 @@ export function createClientForDestination(destination: LogExportDestinationRow)
  * A cursor above the table's high-water mark means `call_logs` was purged and rowids
  * restarted; without this guard every future row would sit below the cursor forever.
  */
-function reconcileCursor(destination: LogExportDestinationRow): number {
-  const maxRowId = getMaxCallLogRowId();
+async function reconcileCursor(destination: LogExportDestinationRow): Promise<number> {
+  const maxRowId = await getMaxCallLogRowId();
   if (destination.cursorRowId > maxRowId) {
-    resetLogExportCursor(destination.id, 0);
+    await resetLogExportCursor(destination.id, 0);
     console.warn(
       `[LogExport] ${destination.name}: cursor ${destination.cursorRowId} is above max ` +
         `call_logs rowid ${maxRowId}; logs were purged, restarting from the beginning.`
@@ -156,24 +158,28 @@ export async function runDestinationExport(
 
   if (inFlight.has(destination.id)) {
     result.skipped = true;
-    result.pendingAfterRun = countCallLogsAfterRowId(destination.cursorRowId);
+    result.pendingAfterRun = await countCallLogsAfterRowId(destination.cursorRowId);
     return result;
   }
   inFlight.add(destination.id);
 
   let secretValues: string[] = [];
+  // Cursor writes are chained so they land in batch order; the run only finishes once the
+  // last one has, and a failed write fails the run (the cursor must never lag silently).
+  let cursorWrites: Promise<void> = Promise.resolve();
+  let cursorWriteError: unknown = null;
   try {
     const config = parseDestinationConfig(destination);
     secretValues = exportSecretValues(
       config,
       getLogExportDestinationType(destination.type)?.secretFields ?? []
     );
-    const cursor = reconcileCursor(destination);
+    const cursor = await reconcileCursor(destination);
     result.cursorRowId = cursor;
     const batchSize = Math.max(1, Math.min(destination.batchSize, 10_000));
     // A body export stops at the first still-pending artifact write; expire abandoned
     // ones first so a crashed writer cannot hold the cursor forever.
-    if (destination.includeBodies) expirePendingExportDetails();
+    if (destination.includeBodies) await expirePendingExportDetails();
     const run = selectLogExportRuntime() === "child" ? runExportChild : runBunExport;
     await run(
       {
@@ -187,21 +193,31 @@ export async function runDestinationExport(
         cursorRowId: cursor,
       },
       (batchCursor, count) => {
-        // Persist BEFORE acknowledging: the child cannot send another batch until this succeeds.
-        advanceLogExportCursor(destination.id, batchCursor, count);
+        cursorWrites = cursorWrites
+          .then(() => advanceLogExportCursor(destination.id, batchCursor, count))
+          .catch((err) => {
+            cursorWriteError ??= err;
+          });
         result.exported += count;
         result.batches += 1;
         result.cursorRowId = batchCursor;
       },
       secretValues
     );
-    result.pendingAfterRun = countCallLogsAfterRowId(result.cursorRowId);
-    recordLogExportRun(destination.id, "success", null);
+    await cursorWrites;
+    if (cursorWriteError) throw cursorWriteError;
+    result.pendingAfterRun = await countCallLogsAfterRowId(result.cursorRowId);
+    await recordLogExportRun(destination.id, "success", null);
   } catch (error) {
     result.success = false;
     result.error = safeExportError(error, secretValues);
-    result.pendingAfterRun = countCallLogsAfterRowId(result.cursorRowId);
-    recordLogExportRun(destination.id, "failure", result.error);
+    await cursorWrites;
+    try {
+      result.pendingAfterRun = await countCallLogsAfterRowId(result.cursorRowId);
+      await recordLogExportRun(destination.id, "failure", result.error);
+    } catch (recordError) {
+      console.error(`[LogExport] ${destination.name} could not record the failure:`, recordError);
+    }
     console.error(`[LogExport] ${destination.name} failed: ${result.error}`);
   } finally {
     inFlight.delete(destination.id);
@@ -212,14 +228,14 @@ export async function runDestinationExport(
 
 /** Run one destination by id. Returns null when it does not exist. */
 export async function runSingleLogExport(id: string): Promise<DestinationRunResult | null> {
-  const destination = getLogExportDestination(id);
+  const destination = await getLogExportDestination(id);
   if (!destination) return null;
   return runDestinationExport(destination);
 }
 
 /** Run every enabled destination. This is what the hourly job calls. */
 export async function runAllLogExports(): Promise<LogExportRunSummary> {
-  const rows = getEnabledLogExportDestinations();
+  const rows = await getEnabledLogExportDestinations();
   const destinations: DestinationRunResult[] = [];
 
   // Sequential on purpose: destinations share the same SQLite read path and a slow

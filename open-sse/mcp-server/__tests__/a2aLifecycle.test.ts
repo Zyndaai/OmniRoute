@@ -4,13 +4,13 @@ import { executeA2ATaskWithState } from "../../../src/lib/a2a/taskExecution.ts";
 
 const managers: A2ATaskManager[] = [];
 
-// Default persistence opens SQLite (167 migrations) inside the vitest thread pool.
-// Tests inject a no-op so they never touch the DB (same seam as a2a-task-persistence.test.ts).
+// Default persistence writes to PostgreSQL. Tests inject a no-op so they never touch
+// the DB (same seam as a2a-task-persistence.test.ts).
 function noopPersistence(): A2APersistence {
   return {
-    upsert: (() => {}) as A2APersistence["upsert"],
-    appendEvent: (() => {}) as A2APersistence["appendEvent"],
-    purge: ((): number => 0) as A2APersistence["purge"],
+    upsert: async () => {},
+    appendEvent: async () => {},
+    purge: async () => 0,
   };
 }
 
@@ -59,8 +59,7 @@ describe("A2A task lifecycle regressions", () => {
         task,
         async () => {
           throw new Error("upstream failure");
-        },
-        { search: async () => [], appendEvent: () => {} }
+        }
       )
     ).rejects.toThrow("upstream failure");
 

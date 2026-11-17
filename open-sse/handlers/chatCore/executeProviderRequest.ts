@@ -100,8 +100,8 @@ type ChatLog =
 
 export type ExecuteProviderRequestDeps = {
   agentGoalPolicy: AgentGoalPolicy;
-  assertManagedLeaseFence: (attemptConnectionId: string | null | undefined) => void;
-  buildUpstreamHeadersForExecute: (modelToCall: string) => Record<string, string>;
+  assertManagedLeaseFence: (attemptConnectionId: string | null | undefined) => Promise<void>;
+  buildUpstreamHeadersForExecute: (modelToCall: string) => Promise<Record<string, string>>;
   clientRawRequest: {
     headers?: Headers | Record<string, unknown> | null;
     signal?: AbortSignal | null;
@@ -116,7 +116,7 @@ export type ExecuteProviderRequestDeps = {
   effectiveModel: string;
   executor: Pick<BaseExecutor, "execute">;
   extendedContext?: boolean;
-  getExecutionCredentials: () => Record<string, unknown>;
+  getExecutionCredentials: () => Promise<Record<string, unknown>>;
   getExecutorClientHeaders: () => Record<string, string>;
   isModelScope: () => boolean;
   isOpencodeClient: boolean;
@@ -208,7 +208,7 @@ export async function executeProviderRequest(
       ...trustedEffortContext,
       provider,
       targetFormat,
-      credentials: getExecutionCredentials(),
+      credentials: await getExecutionCredentials(),
       log,
       bypassDefaultToolLimit: isOpencodeClient,
       isOpencodeClient,
@@ -247,7 +247,7 @@ export async function executeProviderRequest(
           updatePendingScope(pendingScope, {
             stage: "sending_to_provider",
           });
-          const execCreds = getExecutionCredentials();
+          const execCreds = await getExecutionCredentials();
           const executionConnectionId = getExecutionConnectionId(execCreds);
           const attemptConnectionId = executionConnectionId || connectionId;
           const accountSemaphoreMaxConcurrency = resolveAccountSemaphoreMaxConcurrency(
@@ -331,7 +331,8 @@ export async function executeProviderRequest(
                 updatePendingScope(pendingScope, {
                   stage: "rate_limit_slot_acquired",
                 });
-                assertManagedLeaseFence(attemptConnectionId);
+                await assertManagedLeaseFence(attemptConnectionId);
+                const upstreamExtraHeaders = await buildUpstreamHeadersForExecute(modelToCall);
                 return executeWithUpstreamStartTimeout({
                   executor,
                   provider,
@@ -349,7 +350,7 @@ export async function executeProviderRequest(
                         signal,
                         log,
                         extendedContext,
-                        upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
+                        upstreamExtraHeaders,
                         clientHeaders: getExecutorClientHeaders(),
                         clientResponseFormat,
                         onCredentialsRefreshed,
@@ -535,7 +536,9 @@ export async function executeProviderRequest(
                   body: unknown
                 ): Promise<ReadableStream<Uint8Array> | null> => {
                   try {
-                    assertManagedLeaseFence(attemptConnectionId);
+                    await assertManagedLeaseFence(attemptConnectionId);
+                    const retryUpstreamExtraHeaders =
+                      await buildUpstreamHeadersForExecute(modelToCall);
                     const retryRaw = await executeWithUpstreamStartTimeout({
                       executor,
                       provider,
@@ -555,7 +558,7 @@ export async function executeProviderRequest(
                             signal,
                             log,
                             extendedContext,
-                            upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
+                            upstreamExtraHeaders: retryUpstreamExtraHeaders,
                             clientHeaders: getExecutorClientHeaders(),
                             clientResponseFormat,
                             onCredentialsRefreshed,

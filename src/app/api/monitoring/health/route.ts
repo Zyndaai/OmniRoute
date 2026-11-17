@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/db/providers";
 import { getCachedSettings } from "@/lib/db/readCache";
-import { getWalMaintenanceState } from "@/lib/db/walMaintenance";
 import { buildHealthPayload } from "@/lib/monitoring/observability";
 import { getEventLoopStallStats as readEventLoopStallStats } from "@/lib/healthzLag";
 import { readRunningBuildSha } from "@/lib/monitoring/buildSha";
@@ -76,7 +75,7 @@ function scheduleHealthPayloadRefresh(): void {
 }
 
 function startHealthPayloadRefresh(): Promise<unknown> {
-  if (healthPayloadRefresh) return healthPayloadRefresh;
+  if (healthPayloadRefresh !== null) return healthPayloadRefresh;
 
   const generation = healthPayloadCacheGeneration;
   const refresh = new Promise<unknown>((resolve, reject) => {
@@ -221,14 +220,19 @@ async function rebuildHealthPayload(generation: number): Promise<unknown> {
     getProviderConnections(),
   ]);
 
-  const circuitBreakers =
-    circuitBreakerModule.status === "fulfilled"
-      ? readHealthValue(
-          "circuit breakers",
-          () => circuitBreakerModule.value.getAllCircuitBreakerStatuses(),
-          []
-        )
-      : [];
+  let circuitBreakers: Awaited<
+    ReturnType<(typeof import("@/shared/utils/circuitBreaker"))["getAllCircuitBreakerStatuses"]>
+  > = [];
+  if (circuitBreakerModule.status === "fulfilled") {
+    try {
+      circuitBreakers = await circuitBreakerModule.value.getAllCircuitBreakerStatuses();
+    } catch (error) {
+      console.warn(
+        "[API] GET /api/monitoring/health circuit breakers unavailable:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
   const rateLimitStatus =
     rateLimitModule.status === "fulfilled"
       ? readHealthValue("rate limits", () => rateLimitModule.value.getAllRateLimitStatus(), {})
@@ -306,10 +310,6 @@ async function rebuildHealthPayload(generation: number): Promise<unknown> {
           null
         )
       : null;
-  // #12853: WAL maintenance state (ticks/busy streak + totals) next to the
-  // admission gates. getWalMaintenanceState never throws and never touches
-  // the DB — a monitoring read stays cheap. Additive key, nothing moves.
-  const walMaintenance = readHealthValue("wal maintenance", () => getWalMaintenanceState(), null);
   // Stall counters from the boot recorder (static import above; readHealthValue
   // traces a failure and falls back to {0,0}, so health stays 200).
   const eventLoopStall = readHealthValue("event loop stall", () => readEventLoopStallStats(), {
@@ -341,7 +341,6 @@ async function rebuildHealthPayload(generation: number): Promise<unknown> {
     credentialHealth,
     adaptiveAdmission,
     chatAdmission,
-    walMaintenance,
     eventLoopStall,
   });
 
@@ -366,10 +365,10 @@ export async function DELETE(request: Request) {
     const { resetAllCircuitBreakers, getAllCircuitBreakerStatuses } =
       await import("@/shared/utils/circuitBreaker");
 
-    const before = getAllCircuitBreakerStatuses();
+    const before = await getAllCircuitBreakerStatuses();
     const resetCount = before.length;
 
-    resetAllCircuitBreakers();
+    await resetAllCircuitBreakers();
     healthPayloadCache = null; // a reset just happened — don't serve a stale GET snapshot
 
     console.log(`[API] DELETE /api/monitoring/health — Reset ${resetCount} circuit breakers`);

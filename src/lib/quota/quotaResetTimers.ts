@@ -7,7 +7,7 @@
  * Part of: Quota-aware provider scheduling (Phase 2).
  */
 
-import { getDbInstance } from "@/lib/db/core";
+import { db, toMs, ts } from "@/lib/db/pg";
 import { createLogger } from "@/shared/utils/logger";
 
 const log = createLogger("quota:reset-timers");
@@ -24,26 +24,32 @@ export interface QuotaResetItem {
 /**
  * Get all active quota states and their remaining window reset times.
  */
-export function getActiveQuotaResetItems(): QuotaResetItem[] {
+export async function getActiveQuotaResetItems(): Promise<QuotaResetItem[]> {
   try {
-    const db = getDbInstance();
-    const rows = db.prepare("SELECT * FROM provider_quota_state WHERE window_reset > 0").all() as Array<{
+    const rows = await db().query<{
       connection_id: string;
       model: string;
       tokens_used: number;
       token_limit: number;
-      window_reset: number;
-    }>;
+      window_reset: string;
+    }>(
+      `SELECT connection_id, model, tokens_used, token_limit, window_reset
+       FROM provider_quota_state WHERE window_reset > to_timestamp(0)
+       ORDER BY connection_id, model`
+    );
 
     const now = Date.now();
-    return rows.map((r) => ({
-      connectionId: String(r.connection_id),
-      model: String(r.model),
-      tokensUsed: Number(r.tokens_used),
-      tokenLimit: Number(r.token_limit),
-      windowReset: Number(r.window_reset),
-      timeRemainingMs: Math.max(0, Number(r.window_reset) - now),
-    }));
+    return rows.map((r) => {
+      const windowReset = toMs(r.window_reset) ?? 0;
+      return {
+        connectionId: String(r.connection_id),
+        model: String(r.model),
+        tokensUsed: Number(r.tokens_used),
+        tokenLimit: Number(r.token_limit),
+        windowReset,
+        timeRemainingMs: Math.max(0, windowReset - now),
+      };
+    });
   } catch (error) {
     log.error({ err: error }, "Failed to query active quota reset items");
     return [];
@@ -51,16 +57,15 @@ export function getActiveQuotaResetItems(): QuotaResetItem[] {
 }
 
 /**
- * Purge or reset all expired quota windows in SQLite.
+ * Purge all expired quota windows.
  * Returns the count of reset connections.
  */
-export function resetExpiredQuotaWindows(): number {
+export async function resetExpiredQuotaWindows(): Promise<number> {
   try {
-    const db = getDbInstance();
-    const now = Date.now();
-    const result = db
-      .prepare("DELETE FROM provider_quota_state WHERE window_reset > 0 AND window_reset <= ?")
-      .run(now);
+    const result = await db().execute(
+      "DELETE FROM provider_quota_state WHERE window_reset > to_timestamp(0) AND window_reset <= $1",
+      [ts(Date.now())]
+    );
     return result.changes ?? 0;
   } catch (error) {
     log.error({ err: error }, "Failed to reset expired quota windows");

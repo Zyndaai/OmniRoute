@@ -1,6 +1,6 @@
 /** Durable, opt-in recovery state for unanswered quota-failed requests. */
 import { createHash, randomUUID } from "node:crypto";
-import { getDbInstance } from "./core";
+import { db, ts } from "./pg";
 import { decrypt, encrypt, isEncryptionEnabled, looksEncrypted } from "./encryption";
 
 export type QuotaRecoveryState =
@@ -35,6 +35,8 @@ type TicketRow = {
   result_ciphertext: string | null;
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function toTicket(row: TicketRow): QuotaRecoveryTicket {
   return {
     id: row.id,
@@ -61,105 +63,121 @@ function encryptRequired(payload: string): string {
   return ciphertext as string;
 }
 
-function getRow(id: string): TicketRow | undefined {
-  return getDbInstance().prepare("SELECT * FROM quota_recovery_tickets WHERE id = ?").get(id) as
-    TicketRow | undefined;
+async function getRow(id: string): Promise<TicketRow | undefined> {
+  if (!UUID_RE.test(id)) return undefined;
+  return db().queryOne<TicketRow>("SELECT * FROM quota_recovery_tickets WHERE id = $1", [id]);
 }
 
-export function enqueueQuotaRecoveryTicket(input: {
+export async function enqueueQuotaRecoveryTicket(input: {
   apiKeyId: string;
   turnKey: string;
   endpoint: QuotaRecoveryTicket["endpoint"];
   requestPayload: string;
   nextAttemptAt: string;
   expiresAt: string;
-}): QuotaRecoveryTicket {
+}): Promise<QuotaRecoveryTicket> {
   const ciphertext = encryptRequired(input.requestPayload);
-  const db = getDbInstance();
-  const now = new Date().toISOString();
   const id = randomUUID();
   const requestHash = createHash("sha256")
     .update(input.endpoint)
     .update("\0")
     .update(input.requestPayload)
     .digest("hex");
-  db.prepare(
-    `INSERT OR IGNORE INTO quota_recovery_tickets
+  const inserted = await db().queryOne<TicketRow>(
+    `INSERT INTO quota_recovery_tickets
       (id, api_key_id, turn_key, request_hash, endpoint, request_ciphertext, next_attempt_at,
-       expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.apiKeyId,
-    input.turnKey,
-    requestHash,
-    input.endpoint,
-    ciphertext,
-    input.nextAttemptAt,
-    input.expiresAt,
-    now,
-    now
+       expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (api_key_id, turn_key) DO NOTHING
+     RETURNING *`,
+    [
+      id,
+      input.apiKeyId,
+      input.turnKey,
+      requestHash,
+      input.endpoint,
+      ciphertext,
+      ts(input.nextAttemptAt),
+      ts(input.expiresAt),
+    ]
   );
-  const row = db
-    .prepare("SELECT * FROM quota_recovery_tickets WHERE api_key_id = ? AND turn_key = ?")
-    .get(input.apiKeyId, input.turnKey) as TicketRow;
+  const row =
+    inserted ??
+    (await db().queryOne<TicketRow>(
+      "SELECT * FROM quota_recovery_tickets WHERE api_key_id = $1 AND turn_key = $2",
+      [input.apiKeyId, input.turnKey]
+    ));
+  if (!row) throw new Error("Quota recovery ticket could not be created");
   if (row.request_hash !== requestHash) {
     throw new Error("Recovery turn identity was reused with a different request");
   }
   return toTicket(row);
 }
 
-export function getQuotaRecoveryTicket(id: string, apiKeyId: string): QuotaRecoveryTicket | null {
-  const row = getRow(id);
+export async function getQuotaRecoveryTicket(
+  id: string,
+  apiKeyId: string
+): Promise<QuotaRecoveryTicket | null> {
+  const row = await getRow(id);
   return row?.api_key_id === apiKeyId ? toTicket(row) : null;
 }
 
 /** Claim before dispatch. A crash while running is ambiguous and must not auto-replay. */
-export function claimQuotaRecoveryTicket(id: string, now = new Date()): QuotaRecoveryTicket | null {
-  const db = getDbInstance();
+export async function claimQuotaRecoveryTicket(
+  id: string,
+  now = new Date()
+): Promise<QuotaRecoveryTicket | null> {
+  if (!UUID_RE.test(id)) return null;
   const iso = now.toISOString();
-  const updated = db
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'running', attempt_count = attempt_count + 1, updated_at = ?
-       WHERE id = ? AND state = 'pending' AND next_attempt_at <= ? AND expires_at > ?`
-    )
-    .run(iso, id, iso, iso);
-  return updated.changes === 1 ? toTicket(getRow(id)!) : null;
+  const row = await db().queryOne<TicketRow>(
+    `UPDATE quota_recovery_tickets
+     SET state = 'running', attempt_count = attempt_count + 1, updated_at = $1
+     WHERE id = $2 AND state = 'pending' AND next_attempt_at <= $1 AND expires_at > $1
+     RETURNING *`,
+    [iso, id]
+  );
+  return row ? toTicket(row) : null;
 }
 
-export function listDueQuotaRecoveryTickets(now = new Date(), limit = 25): QuotaRecoveryTicket[] {
-  const iso = now.toISOString();
-  const rows = getDbInstance()
-    .prepare(
-      `SELECT * FROM quota_recovery_tickets
-       WHERE state = 'pending' AND next_attempt_at <= ? AND expires_at > ?
-       ORDER BY next_attempt_at, created_at LIMIT ?`
-    )
-    .all(iso, iso, Math.max(1, Math.min(limit, 100))) as TicketRow[];
+export async function listDueQuotaRecoveryTickets(
+  now = new Date(),
+  limit = 25
+): Promise<QuotaRecoveryTicket[]> {
+  const rows = await db().query<TicketRow>(
+    `SELECT * FROM quota_recovery_tickets
+     WHERE state = 'pending' AND next_attempt_at <= $1 AND expires_at > $1
+     ORDER BY next_attempt_at, created_at LIMIT $2`,
+    [now.toISOString(), Math.max(1, Math.min(Math.floor(limit), 100))]
+  );
   return rows.map(toTicket);
 }
 
-export function readQuotaRecoveryRequest(id: string): string | null {
-  const row = getRow(id);
+export async function readQuotaRecoveryRequest(id: string): Promise<string | null> {
+  const row = await getRow(id);
   if (row?.state !== "running" || !looksEncrypted(row.request_ciphertext)) return null;
   return decrypt(row.request_ciphertext) ?? null;
 }
 
-export function completeQuotaRecoveryTicket(id: string, resultPayload: string): boolean {
+export async function completeQuotaRecoveryTicket(
+  id: string,
+  resultPayload: string
+): Promise<boolean> {
   const ciphertext = encryptRequired(resultPayload);
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'completed', result_ciphertext = ?, request_ciphertext = '', updated_at = ?
-       WHERE id = ? AND state = 'running'`
-    )
-    .run(ciphertext, new Date().toISOString(), id);
+  if (!UUID_RE.test(id)) return false;
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets
+     SET state = 'completed', result_ciphertext = $1, request_ciphertext = '', updated_at = now()
+     WHERE id = $2 AND state = 'running'`,
+    [ciphertext, id]
+  );
   return changed.changes === 1;
 }
 
-export function readQuotaRecoveryResult(id: string, apiKeyId: string): string | null {
-  const row = getRow(id);
+export async function readQuotaRecoveryResult(
+  id: string,
+  apiKeyId: string
+): Promise<string | null> {
+  const row = await getRow(id);
   if (row?.api_key_id !== apiKeyId || row.state !== "completed" || !row.result_ciphertext) {
     return null;
   }
@@ -167,82 +185,84 @@ export function readQuotaRecoveryResult(id: string, apiKeyId: string): string | 
   return decrypt(row.result_ciphertext) ?? null;
 }
 
-export function rescheduleQuotaRecoveryTicket(id: string, nextAttemptAt: string): boolean {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets SET state = 'pending', next_attempt_at = ?, updated_at = ?
-       WHERE id = ? AND state = 'running'`
-    )
-    .run(nextAttemptAt, new Date().toISOString(), id);
+export async function rescheduleQuotaRecoveryTicket(
+  id: string,
+  nextAttemptAt: string
+): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets SET state = 'pending', next_attempt_at = $1, updated_at = now()
+     WHERE id = $2 AND state = 'running'`,
+    [ts(nextAttemptAt), id]
+  );
   return changed.changes === 1;
 }
 
-export function failQuotaRecoveryTicket(id: string): boolean {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'failed', request_ciphertext = '', updated_at = ?
-       WHERE id = ? AND state = 'running'`
-    )
-    .run(new Date().toISOString(), id);
+export async function failQuotaRecoveryTicket(id: string): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets
+     SET state = 'failed', request_ciphertext = '', updated_at = now()
+     WHERE id = $1 AND state = 'running'`,
+    [id]
+  );
   return changed.changes === 1;
 }
 
-export function markQuotaRecoveryNeedsConfirmation(id: string): boolean {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'needs_confirmation', updated_at = ?
-       WHERE id = ? AND state = 'running'`
-    )
-    .run(new Date().toISOString(), id);
+export async function markQuotaRecoveryNeedsConfirmation(id: string): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets
+     SET state = 'needs_confirmation', updated_at = now()
+     WHERE id = $1 AND state = 'running'`,
+    [id]
+  );
   return changed.changes === 1;
 }
 
-/** A dispatch may have reached upstream before a process died. Require a client decision. */
-export function reconcileInterruptedQuotaRecoveries(): number {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets SET state = 'needs_confirmation', updated_at = ?
-       WHERE state = 'running'`
-    )
-    .run(new Date().toISOString());
+/**
+ * A dispatch may have reached upstream before a process died. Require a client decision.
+ * Shared state: only the leader process may run this at startup, or it flips the
+ * live tickets of other processes.
+ */
+export async function reconcileInterruptedQuotaRecoveries(): Promise<number> {
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets SET state = 'needs_confirmation', updated_at = now()
+     WHERE state = 'running'`
+  );
   return changed.changes;
 }
 
 /** A long-dead dispatch is ambiguous; do not replay it after a restart. */
-export function reconcileStaleRunningQuotaRecoveries(
+export async function reconcileStaleRunningQuotaRecoveries(
   now = new Date(),
   staleMs = 30 * 60_000
-): number {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets SET state = 'needs_confirmation', updated_at = ?
-       WHERE state = 'running' AND updated_at < ?`
-    )
-    .run(now.toISOString(), new Date(now.getTime() - staleMs).toISOString());
+): Promise<number> {
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets SET state = 'needs_confirmation', updated_at = $1
+     WHERE state = 'running' AND updated_at < $2`,
+    [now.toISOString(), new Date(now.getTime() - staleMs).toISOString()]
+  );
   return changed.changes;
 }
 
-export function cancelQuotaRecoveryTicket(id: string, apiKeyId: string): boolean {
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'cancelled', request_ciphertext = '', result_ciphertext = NULL, updated_at = ?
-       WHERE id = ? AND api_key_id = ? AND state IN ('pending', 'needs_confirmation')`
-    )
-    .run(new Date().toISOString(), id, apiKeyId);
+export async function cancelQuotaRecoveryTicket(id: string, apiKeyId: string): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets
+     SET state = 'cancelled', request_ciphertext = '', result_ciphertext = NULL, updated_at = now()
+     WHERE id = $1 AND api_key_id = $2 AND state IN ('pending', 'needs_confirmation')`,
+    [id, apiKeyId]
+  );
   return changed.changes === 1;
 }
 
-export function expireQuotaRecoveryTickets(now = new Date()): number {
-  const iso = now.toISOString();
-  const changed = getDbInstance()
-    .prepare(
-      `UPDATE quota_recovery_tickets
-       SET state = 'expired', request_ciphertext = '', result_ciphertext = NULL, updated_at = ?
-       WHERE expires_at <= ? AND state IN ('pending', 'completed', 'failed', 'needs_confirmation')`
-    )
-    .run(iso, iso);
+export async function expireQuotaRecoveryTickets(now = new Date()): Promise<number> {
+  const changed = await db().execute(
+    `UPDATE quota_recovery_tickets
+     SET state = 'expired', request_ciphertext = '', result_ciphertext = NULL, updated_at = $1
+     WHERE expires_at <= $1 AND state IN ('pending', 'completed', 'failed', 'needs_confirmation')`,
+    [now.toISOString()]
+  );
   return changed.changes;
 }

@@ -1,4 +1,4 @@
-import { getDbInstance } from "../db/core";
+import { db } from "@/lib/db/pg";
 import type { PendingRequestDetail } from "./usageHistory";
 
 const COMPLETED_DETAIL_TTL_MS = 120_000;
@@ -161,13 +161,12 @@ export function maybeEnrichCompletedDetail(updated: PendingRequestDetail, connec
     try {
       if (!isUnset(updated.providerResponse) && !isUnset(updated.clientResponse)) return;
 
-      const db = getDbInstance();
       const sinceIso = new Date(Date.now() - 30_000).toISOString();
-      const rows = db
-        .prepare(
-          `SELECT artifact_relpath FROM call_logs WHERE connection_id = ? AND model = ? AND timestamp >= ? AND detail_state = 'ready' AND artifact_relpath IS NOT NULL ORDER BY timestamp DESC LIMIT 5`
-        )
-        .all(connectionId, updated.model, sinceIso) as Array<{ artifact_relpath: string | null }>;
+      // "Has an artifact" is `detail_state = 'ready'`: artifact_relpath is set at insert.
+      const rows = await db().query<{ artifact_relpath: string | null }>(
+        `SELECT artifact_relpath FROM call_logs WHERE connection_id = $1 AND model = $2 AND "timestamp" >= $3 AND detail_state = 'ready' ORDER BY "timestamp" DESC LIMIT 5`,
+        [connectionId, updated.model, sinceIso]
+      );
       for (const row of rows) {
         if (!row.artifact_relpath) continue;
         const { readCallArtifact, isSizeLimitOmissionMarker } = await import("./callLogArtifacts");

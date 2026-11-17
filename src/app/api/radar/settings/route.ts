@@ -76,7 +76,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const settings = getRadarSettings();
+    const settings = await getRadarSettings();
     return NextResponse.json(
       {
         optIn: settings.optIn,
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
 
   try {
     if (optIn !== undefined) {
-      setRadarOptIn(optIn);
+      await setRadarOptIn(optIn);
       if (optIn) {
         // Opting in is the moment the daily background sync becomes wanted —
         // arm the scheduler lazily so a flag-off/opt-out install never even
@@ -156,7 +156,7 @@ export async function POST(request: Request) {
       }
     }
     if (supporterKey !== undefined) {
-      setRadarKey(supporterKey);
+      await setRadarKey(supporterKey);
     }
 
     return NextResponse.json(

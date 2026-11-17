@@ -41,7 +41,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = getRadarCatalog();
+    const result = await getRadarCatalog();
     return NextResponse.json(
       { entries: result.entries, meta: result.meta },
       { headers: { ...CORS_HEADERS, "Cache-Control": "no-store" } }

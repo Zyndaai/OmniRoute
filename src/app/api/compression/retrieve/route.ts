@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     );
   }
   try {
-    const block = retrieveBlock(parsed.data.hash); // string | null; no principalId → management scope
+    const block = await retrieveBlock(parsed.data.hash); // string | null; no principalId → management scope
     if (block == null) return NextResponse.json({ found: false });
     if (!parsed.data.mode || parsed.data.mode === "full") {
       return NextResponse.json({ found: true, block });

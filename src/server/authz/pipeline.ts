@@ -410,7 +410,10 @@ export async function runAuthzPipeline(
     );
     // The stamped client address (resolved above) is judged; requests without that stamp
     // keep the earlier rule.
-    const ipVerdict = checkRequestIP(request, stampedClientIp ?? (viaProxy ? null : trustedPeerIp));
+    const ipVerdict = await checkRequestIP(
+      request,
+      stampedClientIp ?? (viaProxy ? null : trustedPeerIp)
+    );
     if (!ipVerdict.allowed) {
       const blocked = NextResponse.json(
         { error: ipVerdict.reason || "Access denied" },

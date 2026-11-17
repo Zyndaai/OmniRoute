@@ -18,9 +18,11 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    const destinations = getLogExportDestinations().map(toDestinationView);
+    const destinations = await Promise.all(
+      (await getLogExportDestinations()).map((row) => toDestinationView(row))
+    );
     const registry = getJobRegistry();
-    const job = registry.listJobs().find((entry) => entry.id === LOG_EXPORT_JOB_ID) ?? null;
+    const job = (await registry.listJobs()).find((entry) => entry.id === LOG_EXPORT_JOB_ID) ?? null;
 
     return NextResponse.json({
       job: job
@@ -31,8 +33,8 @@ export async function GET(request: Request) {
             timezone: (job.config?.timezone as string) ?? "UTC",
           }
         : null,
-      runs: job ? registry.getRuns(LOG_EXPORT_JOB_ID, 20) : [],
-      maxCallLogRowId: getMaxCallLogRowId(),
+      runs: job ? await registry.getRuns(LOG_EXPORT_JOB_ID, 20) : [],
+      maxCallLogRowId: await getMaxCallLogRowId(),
       destinations,
     });
   } catch (error: any) {

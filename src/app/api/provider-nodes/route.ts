@@ -100,7 +100,7 @@ export async function GET(request?: Request) {
     const offset =
       Number.isInteger(parsedOffset) && parsedOffset && parsedOffset > 0 ? parsedOffset : 0;
 
-    const total = getProviderNodesCount();
+    const total = await getProviderNodesCount();
     const nodes = await getProviderNodes({}, limit, offset);
     return NextResponse.json({
       nodes,

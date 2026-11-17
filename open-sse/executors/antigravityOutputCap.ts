@@ -36,7 +36,9 @@ export const MAX_ANTIGRAVITY_OUTPUT_TOKENS = 16384;
  * ceiling either starves the first group or lets an oversized request
  * through to the second, so the number has to come from the model.
  */
-export function resolveAntigravityOutputCap(modelId: string | null | undefined): number {
+export async function resolveAntigravityOutputCap(
+  modelId: string | null | undefined
+): Promise<number> {
   const id = typeof modelId === "string" ? modelId.trim() : "";
   if (!id) return MAX_ANTIGRAVITY_OUTPUT_TOKENS;
   // MODEL_SPECS is provider-neutral: other providers may continue serving old
@@ -44,7 +46,7 @@ export function resolveAntigravityOutputCap(modelId: string | null | undefined):
   // specs make a retired Antigravity id look active on this provider path.
   if (!isDiscoverableAntigravityModelId(id)) return MAX_ANTIGRAVITY_OUTPUT_TOKENS;
   try {
-    const declared = getExplicitModelOutputCap({ provider: "antigravity", model: id });
+    const declared = await getExplicitModelOutputCap({ provider: "antigravity", model: id });
     return typeof declared === "number" && Number.isFinite(declared) && declared > 0
       ? declared
       : MAX_ANTIGRAVITY_OUTPUT_TOKENS;

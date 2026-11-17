@@ -115,7 +115,7 @@ export async function POST(request: Request): Promise<Response> {
         apiKeyId: policy.apiKeyInfo.id,
       };
       if (parsed.data.action === "status") {
-        const status = getExclusiveConnectionLeaseStatus(input);
+        const status = await getExclusiveConnectionLeaseStatus(input);
         return status
           ? json(200, {
               ...lifecycle(status.lease),
@@ -128,8 +128,8 @@ export async function POST(request: Request): Promise<Response> {
       }
       const result =
         parsed.data.action === "renew"
-          ? renewExclusiveConnectionLease(input)
-          : releaseExclusiveConnectionLease({ ...input, reason: parsed.data.reason });
+          ? await renewExclusiveConnectionLease(input)
+          : await releaseExclusiveConnectionLease({ ...input, reason: parsed.data.reason });
       return result.kind !== "STALE"
         ? json(200, lifecycle(result.lease))
         : error(409, "LEASE_FENCE_STALE", "The lease generation is stale");

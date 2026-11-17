@@ -30,7 +30,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       });
     }
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "sync.token.revoked",
       actor: "admin",
       target: revoked.name,

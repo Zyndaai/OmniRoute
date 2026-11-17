@@ -3,7 +3,9 @@ import { FORMATS } from "../formats.ts";
 import { ANTIGRAVITY_DEFAULT_SYSTEM } from "../../config/constants.ts";
 import {
   buildGeminiThoughtSignatureKey,
-  resolveGeminiThoughtSignature,
+  getGeminiThoughtSignatureMode,
+  isValidBasicGeminiThoughtSignature,
+  isValidFullGeminiThoughtSignature,
 } from "../../services/geminiThoughtSignatureStore.ts";
 import {
   generateAntigravityRequestId,
@@ -167,9 +169,50 @@ type CloudCodeEnvelope = {
   _toolNameMap?: Map<string, string>;
 };
 
+/**
+ * Persisted thought signatures read ahead of translation (`prefetchThoughtSignatures` in
+ * translator/index.ts), keyed by `buildGeminiThoughtSignatureKey(namespace, toolCallId)`. The
+ * translators are synchronous while the signature store is asynchronous, so the async caller
+ * resolves the store once and the translators read this snapshot.
+ */
+export type ThoughtSignatureMap = ReadonlyMap<unknown, string | null>;
+
+/**
+ * Same selection policy as `resolveGeminiThoughtSignature` in the store, over a prefetched
+ * snapshot: a key missing from the map is a cache miss, never an error.
+ */
+export function resolvePrefetchedThoughtSignature(
+  prefetched: ThoughtSignatureMap | null | undefined,
+  key: unknown,
+  clientSignature?: unknown
+): string | null {
+  const persisted = prefetched?.get(key) ?? null;
+  if (typeof clientSignature !== "string" || clientSignature.length === 0) return persisted;
+
+  const mode = getGeminiThoughtSignatureMode();
+  if (mode === "enabled") return persisted;
+
+  const isValid =
+    mode === "bypass-strict"
+      ? isValidFullGeminiThoughtSignature(clientSignature)
+      : isValidBasicGeminiThoughtSignature(clientSignature);
+  if (isValid) return clientSignature;
+
+  console.warn(`[signature-cache] ${mode}: invalid client thought signature, falling back`);
+  return persisted;
+}
+
+/** The prefetched snapshot the translate entry point threaded through `credentials`. */
+export function thoughtSignaturesFromCredentials(credentials: unknown): ThoughtSignatureMap | null {
+  if (!credentials || typeof credentials !== "object") return null;
+  const value = (credentials as Record<string, unknown>)._thoughtSignatures;
+  return value instanceof Map ? (value as ThoughtSignatureMap) : null;
+}
+
 type GeminiToolNameOptions = {
   stripNamespace?: boolean;
   signatureNamespace?: string | null;
+  thoughtSignatures?: ThoughtSignatureMap | null;
   signaturelessToolCallMode?: "native" | "text" | "context";
   // Vertex AI's FunctionCall/FunctionResponse protos have no `id` field; emitting it
   // makes Vertex reject the request with 400 "Unknown name id" (#3440). The public
@@ -213,7 +256,7 @@ type GeminiBaseOptions = {
 };
 
 // Core: Convert OpenAI request to Gemini format (base for all variants)
-function openaiToGeminiBase(
+async function openaiToGeminiBase(
   model: string,
   body: Record<string, unknown>,
   stream: boolean,
@@ -262,7 +305,7 @@ function openaiToGeminiBase(
   if (stopSequences.length > 0) {
     result.generationConfig.stopSequences = stopSequences;
   }
-  const maxOutputTokens = capMaxOutputTokens(
+  const maxOutputTokens = await capMaxOutputTokens(
     model,
     (body.max_tokens ?? body.max_completion_tokens) as number | undefined
   );
@@ -289,11 +332,11 @@ function openaiToGeminiBase(
     // distinct from the no-knob-at-all default-injection case below (#4170).
     // Port of decolua/9router#2043 by @nguyenxvotanminh3.
     if (body.reasoning_effort) {
-      const highBudget = capThinkingBudget(model, 32768);
+      const highBudget = await capThinkingBudget(model, 32768);
       const budgetMap: Record<string, number> = {
         none: 0,
-        low: capThinkingBudget(model, 1024),
-        medium: capThinkingBudget(model, getDefaultThinkingBudget(model) || 8192),
+        low: await capThinkingBudget(model, 1024),
+        medium: await capThinkingBudget(model, (await getDefaultThinkingBudget(model)) || 8192),
         high: highBudget,
         auto: highBudget,
         max: highBudget,
@@ -301,7 +344,7 @@ function openaiToGeminiBase(
       };
       const budget =
         budgetMap[body.reasoning_effort as string] ??
-        capThinkingBudget(model, getDefaultThinkingBudget(model) ?? 8192);
+        (await capThinkingBudget(model, (await getDefaultThinkingBudget(model)) ?? 8192));
       // Always send thinkingConfig on this path — including for models with
       // thinkingBudgetCap:0 (e.g. gemini-3-flash), where the cap collapses the
       // requested budget down to 0. Omitting thinkingConfig entirely here regressed
@@ -315,7 +358,7 @@ function openaiToGeminiBase(
       result.generationConfig.thinkingConfig = explicitThinkingLevel
         ? { includeThoughts: budget !== 0 }
         : isGemini38Model(model)
-          ? gemini38ThinkingConfig(model, budget, body)
+          ? await gemini38ThinkingConfig(model, budget, body)
           : buildGeminiThinkingConfig(model, budget, budget !== 0);
     }
     // 2. Claude format: thinking (type: enabled, budget_tokens)
@@ -327,7 +370,7 @@ function openaiToGeminiBase(
     if (thinking?.type === "enabled" && typeof thinking.budget_tokens === "number") {
       // typeof check ensures only numeric budget_tokens triggers thinking path;
       // non-numeric values (e.g. string "auto") fall through to the effort-based path.
-      const cappedBudget = capThinkingBudget(model, thinking.budget_tokens);
+      const cappedBudget = await capThinkingBudget(model, thinking.budget_tokens);
       // Only send thinkingConfig if the model supports thinking via budget.
       // Models with thinkingBudgetCap:0 (e.g. gemini-3-flash) reject
       // thinkingConfig even when capped to 0. The supportsThinking flag
@@ -339,7 +382,7 @@ function openaiToGeminiBase(
         result.generationConfig.thinkingConfig = explicitThinkingLevel
           ? { includeThoughts: cappedBudget !== 0 }
           : isGemini38Model(model)
-            ? gemini38ThinkingConfig(model, cappedBudget, body)
+            ? await gemini38ThinkingConfig(model, cappedBudget, body)
             : buildGeminiThinkingConfig(model, cappedBudget, cappedBudget !== 0);
       }
     }
@@ -376,7 +419,8 @@ function openaiToGeminiBase(
       if (explicitThinkingLevel || isGeminiFlashLiteModel(model)) {
         result.generationConfig.thinkingConfig = { includeThoughts: true };
       } else {
-        let defaultBudget = getDefaultThinkingBudget(model) || capThinkingBudget(model, 24576);
+        let defaultBudget =
+          (await getDefaultThinkingBudget(model)) || (await capThinkingBudget(model, 24576));
         // Gemini counts thinking tokens against maxOutputTokens. This budget was not
         // requested by the client, so it must not be allowed to swallow the whole output
         // cap: with max_tokens 50 and an injected budget of 24576 the model can spend
@@ -393,7 +437,7 @@ function openaiToGeminiBase(
           );
         }
         result.generationConfig.thinkingConfig = isGemini38Model(model)
-          ? gemini38ThinkingConfig(model, defaultBudget, body)
+          ? await gemini38ThinkingConfig(model, defaultBudget, body)
           : { thinkingBudget: defaultBudget, includeThoughts: true };
       }
     }
@@ -501,7 +545,8 @@ function openaiToGeminiBase(
           const resolvedSignatures = new Map<string, string>();
           for (const tc of toolCalls) {
             const id = tc.id as string;
-            const resolved = resolveGeminiThoughtSignature(
+            const resolved = resolvePrefetchedThoughtSignature(
+              toolNameOptions.thoughtSignatures,
               buildGeminiThoughtSignatureKey(toolNameOptions.signatureNamespace, id),
               extractClientThoughtSignature(tc)
             );
@@ -803,7 +848,7 @@ function openaiToGeminiBase(
 }
 
 // OpenAI -> Gemini (standard API)
-export function openaiToGeminiRequest(
+export async function openaiToGeminiRequest(
   model: string,
   body: Record<string, unknown>,
   stream: boolean,
@@ -822,28 +867,31 @@ export function openaiToGeminiRequest(
       : null;
   return openaiToGeminiBase(model, body, stream, {
     signatureNamespace,
+    thoughtSignatures: thoughtSignaturesFromCredentials(credentials),
     signaturelessToolCallMode: options.signaturelessToolCallMode,
     stripFunctionCallId: isVertexGeminiProvider(credentials?._provider),
   });
 }
 
 // OpenAI -> Cloud Code Gemini payload used by Antigravity.
-export function openaiToCloudCodeGeminiRequest(
+export async function openaiToCloudCodeGeminiRequest(
   model: string,
   body: Record<string, unknown>,
   stream: boolean,
   options: {
     signatureNamespace?: string | null;
+    thoughtSignatures?: ThoughtSignatureMap | null;
     signaturelessToolCallMode?: "native" | "text" | "context";
   } = {}
 ) {
-  const request = openaiToGeminiBase(
+  const request = await openaiToGeminiBase(
     model,
     body,
     stream,
     {
       stripNamespace: true,
       signatureNamespace: options.signatureNamespace,
+      thoughtSignatures: options.thoughtSignatures,
       signaturelessToolCallMode: options.signaturelessToolCallMode,
       supportsSignatureBypass: true,
     },
@@ -975,7 +1023,7 @@ function getAntigravityClaudeOutputTokens(body: Record<string, unknown>): number
 }
 
 // OpenAI -> Antigravity (Sandbox Cloud Code with wrapper)
-export function openaiToAntigravityRequest(model, body, stream, credentials = null) {
+export async function openaiToAntigravityRequest(model, body, stream, credentials = null) {
   const isClaude = model.toLowerCase().includes("claude");
   // All modern Gemini models (2.5+, 3.x, pro-agent, etc.) use thinking by default
   // and require thought_signature for multi-turn tool calls.
@@ -993,8 +1041,9 @@ export function openaiToAntigravityRequest(model, body, stream, credentials = nu
     typeof (credentials as Record<string, unknown>)._signatureNamespace === "string"
       ? ((credentials as Record<string, unknown>)._signatureNamespace as string)
       : null;
-  const cloudCodeRequest = openaiToCloudCodeGeminiRequest(model, body, stream, {
+  const cloudCodeRequest = await openaiToCloudCodeGeminiRequest(model, body, stream, {
     signatureNamespace,
+    thoughtSignatures: thoughtSignaturesFromCredentials(credentials),
     signaturelessToolCallMode: isThinkingGemini ? "context" : "native",
   });
 

@@ -56,9 +56,9 @@ export function readSelectorAllowlistEnv(): string[] {
  *
  * Sync variant: takes an optional injected `dbValue` (the raw
  * `feature_flags`/`SELECTOR_CONTROL_ALLOWLIST` setting). When omitted, falls
- * back to env (no sync DB read exists in ESM — server paths use the async
- * `resolveSelectorAllowlist` below). The setting is a free-form `key_value`
- * row, not a registered feature flag (no `setFeatureFlagOverride`).
+ * back to env (server paths use the async `resolveSelectorAllowlist` below).
+ * The setting is a free-form `config_entries('feature_flags')` row, not a
+ * registered feature flag (no `setFeatureFlagOverride`).
  */
 export function readSelectorAllowlist(dbValue?: string | null): string[] {
   if (typeof dbValue === "string" && dbValue.trim() !== "") {
@@ -67,30 +67,15 @@ export function readSelectorAllowlist(dbValue?: string | null): string[] {
   return readSelectorAllowlistEnv();
 }
 
-async function loadDb(): Promise<{
-  prepare: (sql: string) => {
-    get: (...args: string[]) => { value?: string } | undefined;
-  };
-} | null> {
-  try {
-    const core = await import("@/lib/db/core");
-    return core.getDbInstance() as unknown as {
-      prepare: (sql: string) => {
-        get: (...args: string[]) => { value?: string } | undefined;
-      };
-    };
-  } catch {
-    return null;
-  }
-}
-
 /** Async DB-first resolver for server paths (trigger, routes). Never throws. */
 export async function resolveSelectorAllowlist(): Promise<string[]> {
   try {
-    const db = await loadDb();
-    const row = db
-      ?.prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get("feature_flags", ALLOWLIST_ENV) as { value?: string } | undefined;
+    // `feature_flags` values are raw text stored as JSON strings.
+    const { db } = await import("@/lib/db/pg");
+    const row = await db().queryOne<{ value: string | null }>(
+      "SELECT value #>> '{}' AS value FROM config_entries WHERE namespace = 'feature_flags' AND key = $1",
+      [ALLOWLIST_ENV]
+    );
     if (typeof row?.value === "string" && row.value.trim() !== "") {
       return parseAllowlist(row.value);
     }

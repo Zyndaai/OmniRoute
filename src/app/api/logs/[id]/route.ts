@@ -217,7 +217,7 @@ export async function GET(
       persistedRequest.pipelinePayloads as Record<string, unknown> | null | undefined
     );
     const parentLogId = previousResponseId
-      ? resolveCallLogIdByResponseId(previousResponseId, persistedRequest.apiKeyId ?? null)
+      ? await resolveCallLogIdByResponseId(previousResponseId, persistedRequest.apiKeyId ?? null)
       : null;
 
     return NextResponse.json({ ...persistedRequest, previousResponseId, parentLogId });

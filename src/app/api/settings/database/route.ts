@@ -3,12 +3,30 @@ import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { databaseSettingsSchema } from "@/shared/validation/settingsSchemas";
-import { getDatabaseSettings, updateDatabaseSettings } from "@/lib/db/databaseSettings";
-import { redactCacheSecrets } from "@/lib/db/cacheSecrets";
-import type { UserDatabaseSettings } from "@/lib/db/databaseSettings";
+import { getDatabaseSettingsSection } from "@/lib/db/databaseSettingsSections";
+import { setConfigValue } from "@/lib/db/configEntries";
+import { updateSettings } from "@/lib/db/settings";
+import { invalidateDbCache } from "@/lib/db/readCache";
+import {
+  CACHE_SECRET_MASK,
+  assertCacheCredentialEndpoint,
+  encryptCacheValue,
+  isCacheSecret,
+  redactCacheSecrets,
+} from "@/lib/db/cacheSecrets";
+import type { DatabaseSettings } from "@/types/databaseSettings";
 
-function publicDatabaseSettings() {
-  const settings = getDatabaseSettings();
+type UserDatabaseSettings = Omit<DatabaseSettings, "location" | "stats">;
+
+// Backup and optimization settings were SQLite-file concerns and are no longer persisted.
+const PERSISTED_SECTIONS = ["logs", "cache", "retention", "aggregation"] as const;
+const READ_SECTIONS = [...PERSISTED_SECTIONS, "backup", "optimization"] as const;
+
+async function publicDatabaseSettings() {
+  const entries = await Promise.all(
+    READ_SECTIONS.map(async (section) => [section, await getDatabaseSettingsSection(section)] as const)
+  );
+  const settings = Object.fromEntries(entries) as UserDatabaseSettings;
   return { ...settings, cache: redactCacheSecrets(settings.cache) };
 }
 
@@ -24,13 +42,39 @@ const databaseSettingsPatchSchema = z
   .partial()
   .strict();
 
+async function updateDatabaseSettings(updates: Partial<UserDatabaseSettings>) {
+  if (updates.cache) {
+    const currentCache = await getDatabaseSettingsSection("cache");
+    assertCacheCredentialEndpoint(
+      currentCache as unknown as Record<string, unknown>,
+      updates.cache as Record<string, unknown>
+    );
+  }
+
+  for (const section of PERSISTED_SECTIONS) {
+    const sectionUpdate = updates[section] as Record<string, unknown> | undefined;
+    if (!sectionUpdate) continue;
+    for (const [key, value] of Object.entries(sectionUpdate)) {
+      if (section === "cache" && isCacheSecret(key) && value === CACHE_SECRET_MASK) continue;
+      const stored = section === "cache" ? encryptCacheValue(key, value) : value;
+      await setConfigValue("databaseSettings", `${section}.${key}`, stored);
+    }
+  }
+
+  const pipelineEnabled = updates.logs?.callLogPipelineEnabled;
+  if (pipelineEnabled !== undefined) {
+    await updateSettings({ call_log_pipeline_enabled: Boolean(pipelineEnabled) });
+  }
+  invalidateDbCache("settings");
+}
+
 export async function GET(request: NextRequest) {
   if (!(await isAuthenticated(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    return NextResponse.json(publicDatabaseSettings());
+    return NextResponse.json(await publicDatabaseSettings());
   } catch (error) {
     console.error("Error getting database settings:", error);
     return NextResponse.json({ error: "Failed to load database settings" }, { status: 500 });
@@ -50,10 +94,10 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    updateDatabaseSettings(validation.data as Partial<UserDatabaseSettings>);
+    await updateDatabaseSettings(validation.data as Partial<UserDatabaseSettings>);
 
     // Return merged settings (GET response pattern)
-    return NextResponse.json(publicDatabaseSettings());
+    return NextResponse.json(await publicDatabaseSettings());
   } catch (error) {
     console.error("Error updating database settings:", error);
     return NextResponse.json({ error: "Failed to update database settings" }, { status: 500 });

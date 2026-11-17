@@ -1,12 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { SqliteAdapter } from "../db/adapters/types";
-import { parseStoredPayload } from "./parseStoredPayload";
 
-/** Read-only surface shared by the dashboard and isolated export process. */
-export interface CallLogReadDb {
-  prepare(sql: string): Pick<ReturnType<SqliteAdapter["prepare"]>, "get" | "all">;
-}
 export interface CallLogDetailEntry {
   id: string;
   timestamp: string | null;
@@ -31,26 +25,6 @@ export const dashboardDetailIo: DetailFileIo = {
   readdir: (dir) => fs.readdirSync(dir),
 };
 
-function hasTable(db: CallLogReadDb, table: string): boolean {
-  return Boolean(
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)
-  );
-}
-function legacyPipeline(db: CallLogReadDb, id: string): Record<string, unknown> | null {
-  if (!hasTable(db, "request_detail_logs")) return null;
-  const row = db
-    .prepare(
-      `SELECT * FROM request_detail_logs WHERE call_log_id = ? ORDER BY timestamp DESC LIMIT 1`
-    )
-    .get(id) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    clientRequest: parseStoredPayload(row.client_request),
-    providerRequest: parseStoredPayload(row.translated_request),
-    providerResponse: parseStoredPayload(row.provider_response),
-    clientResponse: parseStoredPayload(row.client_response),
-  };
-}
 async function legacyDisk(
   entry: CallLogDetailEntry,
   baseDir: string | null,
@@ -93,11 +67,10 @@ interface ArtifactRead {
 }
 
 async function readArtifactPayload(
-  db: CallLogReadDb,
   entry: CallLogDetailEntry,
   baseDir: string | null,
   io: DetailFileIo,
-  onArtifactState?: (relativePath: string, state: ArtifactState) => void
+  onArtifactState?: (relativePath: string, state: ArtifactState) => void | Promise<void>
 ): Promise<ArtifactRead> {
   const relPath = entry.artifactRelPath;
   const unchanged: ArtifactRead = {
@@ -114,12 +87,12 @@ async function readArtifactPayload(
       payload,
       detailState: "ready",
       artifactRelPath: relPath,
-      pipelinePayloads: (payload.pipeline ?? legacyPipeline(db, entry.id)) as DetailPayload | null,
+      pipelinePayloads: (payload.pipeline ?? null) as DetailPayload | null,
     };
   } catch (error) {
     const state: ArtifactState =
       (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "corrupt";
-    onArtifactState?.(relPath, state);
+    await onArtifactState?.(relPath, state);
     return {
       payload: null,
       detailState: state,
@@ -129,68 +102,40 @@ async function readArtifactPayload(
   }
 }
 
-/** Legacy inline error column: blank → null, JSON → parsed, plain text kept verbatim. */
-function parseLegacyError(value: unknown): unknown {
-  if (typeof value !== "string" || !value.trim()) return null;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value; // Historical plain-text error.
-  }
-}
-
-function readLegacyInline(db: CallLogReadDb, id: string): DetailPayload | null {
-  if (!hasTable(db, "call_logs_v1_legacy")) return null;
-  const row = db
-    .prepare("SELECT request_body, response_body, error FROM call_logs_v1_legacy WHERE id = ?")
-    .get(id) as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return {
-    requestBody: parseStoredPayload(row.request_body),
-    responseBody: parseStoredPayload(row.response_body),
-    error: parseLegacyError(row.error),
-  };
-}
-
 /** Body/error fields; an inline legacy row's error wins even when null (historical shape). */
-function detailBodyFields(payload: DetailPayload | null, inline: boolean, entryError: unknown) {
+function detailBodyFields(payload: DetailPayload | null, entryError: unknown) {
   return {
     requestBody: payload?.requestBody ?? null,
     responseBody: payload?.responseBody ?? null,
-    error: inline ? payload?.error : (payload?.error ?? entryError),
+    error: payload?.error ?? entryError,
   };
 }
 
 /**
- * Pure detail resolution: artifact → legacy-inline → legacy-disk → none.
- * Never updates SQLite. The dashboard owns missing/corrupt bookkeeping via onArtifactState;
+ * Pure detail resolution: artifact → legacy-disk → none.
+ * Never updates the database. The dashboard owns missing/corrupt bookkeeping via onArtifactState;
  * the export child deliberately supplies no callback and uses asynchronous filesystem IO.
+ * The old `request_detail_logs` and `call_logs_v1_legacy` fallbacks left with the SQLite schema.
  */
 export async function resolveCallLogDetail<T extends CallLogDetailEntry>(
-  db: CallLogReadDb,
   entry: T,
   baseDir: string | null,
   options: {
     io?: DetailFileIo;
-    onArtifactState?: (relativePath: string, state: ArtifactState) => void;
+    onArtifactState?: (relativePath: string, state: ArtifactState) => void | Promise<void>;
   } = {}
 ) {
   const io = options.io ?? asyncIo;
-  const artifact = await readArtifactPayload(db, entry, baseDir, io, options.onArtifactState);
+  const artifact = await readArtifactPayload(entry, baseDir, io, options.onArtifactState);
   const artifactReady = artifact.payload !== null;
-  const inlinePayload =
-    !artifactReady && artifact.detailState === "legacy-inline"
-      ? readLegacyInline(db, entry.id)
-      : null;
-  const inline = inlinePayload !== null;
-  const payload = artifact.payload ?? inlinePayload ?? (await legacyDisk(entry, baseDir, io));
-  const pipelinePayloads = artifact.pipelinePayloads || legacyPipeline(db, entry.id);
+  const payload = artifact.payload ?? (await legacyDisk(entry, baseDir, io));
+  const pipelinePayloads = artifact.pipelinePayloads;
   const hasPipelineDetails = artifactReady ? Boolean(payload?.pipeline) : Boolean(pipelinePayloads);
   return {
     ...entry,
     detailState: artifact.detailState,
     artifactRelPath: artifact.artifactRelPath,
-    ...detailBodyFields(payload, inline, entry.error),
+    ...detailBodyFields(payload, entry.error),
     pipelinePayloads,
     hasPipelineDetails: hasPipelineDetails || entry.hasPipelineDetails,
     active: false,

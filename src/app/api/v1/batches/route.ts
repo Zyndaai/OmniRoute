@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     // must be allowed to READ that file: own key, or the operator's session. A
     // null-owner input file is denied to a foreign key and to an anonymous
     // caller alike (GHSA-2jm2-mpx8-6523).
-    const inputFile = getFile(validated.input_file_id);
+    const inputFile = await getFile(validated.input_file_id);
     if (
       !inputFile ||
       !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, inputFile.apiKeyId)
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const batch = createBatch({
+    const batch = await createBatch({
       endpoint: validated.endpoint as any,
       completionWindow: validated.completion_window,
       inputFileId: validated.input_file_id,
@@ -163,13 +163,13 @@ export async function GET(request: Request) {
   const limit = parsedLimit.limit;
   const after = url.searchParams.get("after") || undefined;
 
-  const batches = listBatches(ownerFilter, limit + 1, after);
+  const batches = await listBatches(ownerFilter, limit + 1, after);
   const hasMore = batches.length > limit;
   const data = hasMore ? batches.slice(0, limit) : batches;
 
   const formattedData = data.map((b) => formatBatchResponse(b));
 
-  const totalCount = countBatches(ownerFilter);
+  const totalCount = await countBatches(ownerFilter);
 
   return NextResponse.json(
     {

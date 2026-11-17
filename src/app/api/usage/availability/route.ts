@@ -11,16 +11,18 @@ export async function GET() {
       getCachedRawProviderConnections(),
       getCachedSettings(),
     ]);
-    const caches = getAllProviderLimitsCache();
+    const caches = await getAllProviderLimitsCache();
     const policy = resolveResilienceSettings(settings).quotaPreflight;
     return NextResponse.json(
       {
         generatedAt: new Date().toISOString(),
-        connections: connections.map((connection) =>
-          buildConnectionQuotaAvailability(
-            connection,
-            caches[(connection as { id: string }).id],
-            policy
+        connections: await Promise.all(
+          connections.map((connection) =>
+            buildConnectionQuotaAvailability(
+              connection,
+              caches[(connection as { id: string }).id],
+              policy
+            )
           )
         ),
       },

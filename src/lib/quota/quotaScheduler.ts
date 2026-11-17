@@ -38,16 +38,16 @@ export interface QuotaDecision {
  * @param requestBody parsed chat body (used for the cost estimate)
  * @returns a decision — always resolves, never throws
  */
-export function canAffordRequest(
+export async function canAffordRequest(
   connectionId: string,
   model: string,
   requestBody: Record<string, unknown> | null | undefined
-): QuotaDecision {
+): Promise<QuotaDecision> {
   if (!connectionId || !model) {
     return { affordable: true, reason: "unconfigured", remainingRatio: 1 };
   }
 
-  const snapshot = getProviderQuota(connectionId, model);
+  const snapshot = await getProviderQuota(connectionId, model);
   if (!snapshot || !snapshot.known || snapshot.tokenLimit <= 0) {
     // No configured budget → nothing to enforce → affordable.
     return { affordable: true, reason: "unconfigured", remainingRatio: 1 };
@@ -89,14 +89,14 @@ export function canAffordRequest(
  * Reserve budget for a request (call AFTER a successful dispatch decision,
  * before/around the upstream call). Best-effort: never throws.
  */
-export function reserveQuota(
+export async function reserveQuota(
   connectionId: string,
   model: string,
   requestBody: Record<string, unknown> | null | undefined,
   opts: { tokenLimit?: number; windowMs?: number } = {}
-): void {
+): Promise<void> {
   if (!connectionId || !model) return;
   const cost = estimateChatTokenCost(requestBody);
   if (cost.totalTokens <= 0) return;
-  recordProviderQuotaUsage(connectionId, model, cost.totalTokens, opts);
+  await recordProviderQuotaUsage(connectionId, model, cost.totalTokens, opts);
 }

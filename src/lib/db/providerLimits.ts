@@ -2,26 +2,12 @@ import {
   sanitizeProviderBillingStatus,
   type ProviderBillingStatus,
 } from "@/shared/utils/providerBilling";
-import { getDbInstance, isBuildPhase, isCloud } from "./core";
+import { isBuildPhase, isCloud } from "./core";
+import { db, type DbExecutor } from "./pg";
+import { jsonValueParam } from "./pgJsonText";
 import { parseCodexPaidCredits, type CodexPaidCredits } from "@/lib/providers/codexPaidCredits";
 
 type JsonRecord = Record<string, unknown>;
-
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  transaction: <T extends (...args: any[]) => unknown>(fn: T) => T;
-}
-
-interface KeyValueRow {
-  key: string;
-  value: string;
-}
 
 export interface ProviderLimitsCacheEntry {
   quotas: JsonRecord | null;
@@ -37,16 +23,6 @@ export interface ProviderLimitsCacheEntry {
   limitReached?: boolean;
   sparkLimitReached?: boolean;
   rateLimitReachedType?: string;
-}
-
-const PROVIDER_LIMITS_CACHE_NAMESPACE = "providerLimitsCache";
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function toRecord(value: unknown): JsonRecord | null {
@@ -99,76 +75,76 @@ function normalizeCacheEntry(value: unknown): ProviderLimitsCacheEntry | null {
   };
 }
 
-export function getProviderLimitsCache(connectionId: string): ProviderLimitsCacheEntry | null {
+export async function getProviderLimitsCache(
+  connectionId: string
+): Promise<ProviderLimitsCacheEntry | null> {
   if (isBuildPhase || isCloud) return null;
-  const db = getDbInstance() as unknown as DbLike;
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(PROVIDER_LIMITS_CACHE_NAMESPACE, connectionId) as KeyValueRow | undefined;
-  if (!row?.value) return null;
-  return normalizeCacheEntry(parseJson(row.value));
+  const row = await db().queryOne<{ data: unknown }>(
+    "SELECT data FROM connection_limits_cache WHERE connection_id = $1",
+    [connectionId]
+  );
+  return row ? normalizeCacheEntry(row.data) : null;
 }
 
-export function getAllProviderLimitsCache(): Record<string, ProviderLimitsCacheEntry> {
+export async function getAllProviderLimitsCache(): Promise<Record<string, ProviderLimitsCacheEntry>> {
   if (isBuildPhase || isCloud) return {};
-  const db = getDbInstance() as unknown as DbLike;
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-    .all(PROVIDER_LIMITS_CACHE_NAMESPACE) as KeyValueRow[];
+  const rows = await db().query<{ connection_id: string; data: unknown }>(
+    "SELECT connection_id, data FROM connection_limits_cache"
+  );
 
   const result: Record<string, ProviderLimitsCacheEntry> = {};
   for (const row of rows) {
-    const parsed = normalizeCacheEntry(parseJson(row.value));
+    const parsed = normalizeCacheEntry(row.data);
     if (parsed) {
-      result[row.key] = parsed;
+      result[row.connection_id] = parsed;
     }
   }
   return result;
 }
 
-export function setProviderLimitsCache(
+// The row is written only while its connection exists: the table has a foreign key to
+// provider_connections, and a refresh that finishes after the connection was deleted
+// must not fail (or resurrect an orphan) — it is simply dropped.
+async function upsertEntry(
+  executor: DbExecutor,
   connectionId: string,
   entry: ProviderLimitsCacheEntry
-): ProviderLimitsCacheEntry {
+): Promise<void> {
+  await executor.execute(
+    `INSERT INTO connection_limits_cache (connection_id, data, updated_at)
+     SELECT $1::text, $2::jsonb, now()
+      WHERE EXISTS (SELECT 1 FROM provider_connections WHERE id = $1::text)
+     ON CONFLICT (connection_id) DO UPDATE
+       SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+    [connectionId, jsonValueParam(entry)]
+  );
+}
+
+export async function setProviderLimitsCache(
+  connectionId: string,
+  entry: ProviderLimitsCacheEntry
+): Promise<ProviderLimitsCacheEntry> {
   const sanitized = sanitizeCacheEntryForStorage(entry);
   if (isBuildPhase || isCloud) return sanitized;
-  const db = getDbInstance() as unknown as DbLike;
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    PROVIDER_LIMITS_CACHE_NAMESPACE,
-    connectionId,
-    JSON.stringify(sanitized)
-  );
+  await upsertEntry(db(), connectionId, sanitized);
   return sanitized;
 }
 
-export function setProviderLimitsCacheBatch(
+export async function setProviderLimitsCacheBatch(
   entries: Array<{ connectionId: string; entry: ProviderLimitsCacheEntry }>
-): number {
+): Promise<number> {
   if (isBuildPhase || isCloud || entries.length === 0) return 0;
-  const db = getDbInstance() as unknown as DbLike;
-  const insert = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)"
-  );
-  const tx = db.transaction(
-    (items: Array<{ connectionId: string; entry: ProviderLimitsCacheEntry }>) => {
-      for (const item of items) {
-        insert.run(
-          PROVIDER_LIMITS_CACHE_NAMESPACE,
-          item.connectionId,
-          JSON.stringify(sanitizeCacheEntryForStorage(item.entry))
-        );
-      }
+  await db().transaction(async (tx) => {
+    for (const item of entries) {
+      await upsertEntry(tx, item.connectionId, sanitizeCacheEntryForStorage(item.entry));
     }
-  );
-  tx(entries);
+  });
   return entries.length;
 }
 
-export function deleteProviderLimitsCache(connectionId: string): void {
+export async function deleteProviderLimitsCache(connectionId: string): Promise<void> {
   if (isBuildPhase || isCloud) return;
-  const db = getDbInstance() as unknown as DbLike;
-  db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(
-    PROVIDER_LIMITS_CACHE_NAMESPACE,
-    connectionId
-  );
+  await db().execute("DELETE FROM connection_limits_cache WHERE connection_id = $1", [
+    connectionId,
+  ]);
 }

@@ -26,8 +26,7 @@ import {
 import { getCachedProviderNodes } from "@/lib/db/readCache";
 import { getComboByName, getCombos } from "@/lib/db/combos";
 import { getProviderConnections } from "@/lib/db/providers";
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
-import { resolveProxyForConnection } from "@/lib/db/settings";
+import { getSettings, resolveProxyForConnection } from "@/lib/db/settings";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
 import { handleComboChat } from "@omniroute/open-sse/services/combo.ts";
 import { resolveBareModelToConnectionDefault } from "@omniroute/open-sse/services/model.ts";
@@ -135,7 +134,7 @@ export async function createEmbeddingResponse(
         // different models are not comparable). The generic combo engine has no
         // notion of embedding families, so reject loudly here before dispatch.
         // See _tasks/features-v3.8.12/01-embeddings-combo-family-guard.plan.md.
-        const dimConflict = findEmbeddingComboDimensionConflict(combo as any, allCombos as any);
+        const dimConflict = await findEmbeddingComboDimensionConflict(combo as any, allCombos as any);
         if (dimConflict.conflict) {
           return errorResponse(
             HTTP_STATUS.BAD_REQUEST,
@@ -147,7 +146,7 @@ export async function createEmbeddingResponse(
 
         let settings = {};
         try {
-          settings = getUserDatabaseSettings();
+          settings = await getSettings();
         } catch {}
 
         // Inject the combo's configured dimensions into the request body so that

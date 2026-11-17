@@ -23,7 +23,9 @@ import { normalizeComboModels } from "./steps";
  * pins. Connections without a name/displayName/email are left out so the
  * caller can fall back to the step label and then to the full connection id.
  */
-export function buildComboConnectionLabels(combo: { models?: unknown }): Record<string, string> {
+export async function buildComboConnectionLabels(combo: {
+  models?: unknown;
+}): Promise<Record<string, string>> {
   const steps = normalizeComboModels(Array.isArray(combo.models) ? combo.models : [], {
     comboName: null,
   });
@@ -33,7 +35,7 @@ export function buildComboConnectionLabels(combo: { models?: unknown }): Record<
   if (connectionIds.length === 0) return {};
 
   const labels: Record<string, string> = {};
-  for (const meta of getProviderConnectionDisplayMetadata(connectionIds)) {
+  for (const meta of await getProviderConnectionDisplayMetadata(connectionIds)) {
     const name =
       (meta.name || "").trim() || (meta.displayName || "").trim() || (meta.email || "").trim();
     if (name) labels[meta.id] = name;

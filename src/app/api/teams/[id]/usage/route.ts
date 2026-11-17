@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   if (authError) return authError;
   try {
     const { id } = await params;
-    if (!getTeam(id))
+    if (!(await getTeam(id)))
       return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const search = new URL(request.url).searchParams;
     const startIso = parseIso(search.get("startDate"), "startDate");

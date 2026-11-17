@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { rollupDailyUsage, rollupHourlyQuota } from "@/lib/usage/aggregateHistory";
+import { rollupDailyUsage } from "@/lib/usage/aggregateHistory";
 
 interface BackfillOptions {
   from: string;
@@ -88,16 +88,7 @@ async function backfillAggregation() {
     }
 
     if (options.granularity === "hourly" || options.granularity === "both") {
-      console.log("\n[Hourly Aggregation] Starting...");
-      const fromDateTime = `${options.from} 00:00:00`;
-      const toDateTime = `${options.to} 23:59:59`;
-      const hourlyResult = await rollupHourlyQuota(fromDateTime, toDateTime);
-      totalProcessed += hourlyResult.processed;
-      totalInserted += hourlyResult.inserted;
-      totalErrors += hourlyResult.errors;
-      console.log(
-        `[Hourly Aggregation] Processed: ${hourlyResult.processed}, Inserted: ${hourlyResult.inserted}, Errors: ${hourlyResult.errors}`
-      );
+      console.log("\n[Hourly Aggregation] Skipped: hourly quota summaries no longer exist.");
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -120,4 +111,4 @@ async function backfillAggregation() {
   }
 }
 
-backfillAggregation();
+void backfillAggregation();

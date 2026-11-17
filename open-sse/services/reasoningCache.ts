@@ -237,11 +237,9 @@ export function cacheReasoningByKey(
     createdAt: now,
   });
 
-  try {
-    setReasoningCache(key, provider, model, reasoning, TTL_MS);
-  } catch {
-    // DB persistence failure is non-fatal; memory cache still serves the hot path.
-  }
+  // Best-effort persistence off the hot path: a DB failure is non-fatal because the
+  // memory cache still serves lookups.
+  void setReasoningCache(key, provider, model, reasoning, TTL_MS).catch(() => {});
 }
 
 function stableCacheValue(value: unknown): unknown {
@@ -385,75 +383,95 @@ export function cacheReasoningFromAssistantMessage(
 }
 
 /**
- * Look up cached reasoning_content by tool_call_id.
- * Memory first → DB fallback → null (miss).
+ * Look up cached reasoning_content by tool_call_id in the memory cache only.
+ *
+ * Synchronous because the request translators that call it are synchronous. Entries that
+ * only exist in the DB (after a restart or an LRU eviction) are pulled into memory by
+ * `preloadReasoningFromStore` / `lookupReasoningFromStore` before translation.
  */
 export function lookupReasoning(toolCallId: string): string | null {
   if (!isReasoningReplayEnabled()) return null;
   return lookupStoredReasoning(toolCallId);
 }
 
+/** Memory read without counters; drops expired entries and the internal placeholder. */
+function readMemoryReasoning(toolCallId: string): string | null {
+  const mem = memoryCache.get(toolCallId);
+  if (!mem) return null;
+  if (Date.now() >= mem.expiresAt) {
+    memoryCache.delete(toolCallId);
+    return null;
+  }
+  // ponytail: never replay the internal placeholder from memory.
+  if (isInternalReasoningPlaceholder(mem.reasoning)) {
+    memoryCache.delete(toolCallId);
+    return null;
+  }
+  return mem.reasoning;
+}
+
 function lookupStoredReasoning(toolCallId: string): string | null {
+  const reasoning = toolCallId ? readMemoryReasoning(toolCallId) : null;
+  if (reasoning) hits++;
+  else misses++;
+  return reasoning;
+}
+
+/** DB read that promotes a live entry back into memory; no counters. */
+async function fetchReasoningFromStore(toolCallId: string): Promise<string | null> {
+  let dbResult: { reasoning: string; provider: string; model: string; expiresAt: string } | null =
+    null;
+  try {
+    dbResult = await getReasoningCache(toolCallId);
+  } catch {
+    // DB lookup failure is non-fatal; treat it as a cache miss.
+  }
+  if (!dbResult) return null;
+  // ponytail: never promote/replay the internal placeholder from DB.
+  if (isInternalReasoningPlaceholder(dbResult.reasoning)) return null;
+  const persistedExpiresAt = Date.parse(dbResult.expiresAt);
+  if (!Number.isFinite(persistedExpiresAt) || persistedExpiresAt <= Date.now()) return null;
+  let promotedReasoning = dbResult.reasoning;
+  if (promotedReasoning.length > MAX_ENTRY_BYTES) {
+    promotedReasoning = promotedReasoning.slice(0, MAX_ENTRY_BYTES);
+  }
+  // Promote back to memory for fast subsequent lookups
+  memoryCache.set(toolCallId, {
+    reasoning: promotedReasoning,
+    provider: dbResult.provider,
+    model: dbResult.model,
+    expiresAt: persistedExpiresAt,
+    createdAt: Date.now(),
+  });
+  return promotedReasoning;
+}
+
+/**
+ * Look up cached reasoning_content by tool_call_id.
+ * Memory first → DB fallback → null (miss).
+ */
+export async function lookupReasoningFromStore(toolCallId: string): Promise<string | null> {
+  if (!isReasoningReplayEnabled()) return null;
   if (!toolCallId) {
     misses++;
     return null;
   }
+  const reasoning = readMemoryReasoning(toolCallId) ?? (await fetchReasoningFromStore(toolCallId));
+  if (reasoning) hits++;
+  else misses++;
+  return reasoning;
+}
 
-  // 1. Check memory
-  const mem = memoryCache.get(toolCallId);
-  if (mem) {
-    if (Date.now() < mem.expiresAt) {
-      // ponytail: never replay the internal placeholder from memory.
-      if (isInternalReasoningPlaceholder(mem.reasoning)) {
-        memoryCache.delete(toolCallId);
-        misses++;
-        return null;
-      }
-      hits++;
-      return mem.reasoning;
-    }
-    // Expired in memory — remove
-    memoryCache.delete(toolCallId);
-  }
-
-  // 2. Fallback to DB
-  let dbResult: { reasoning: string; provider: string; model: string; expiresAt: string } | null =
-    null;
-  try {
-    dbResult = getReasoningCache(toolCallId);
-  } catch {
-    // DB lookup failure is non-fatal; treat it as a cache miss.
-  }
-  if (dbResult) {
-    // ponytail: never promote/replay the internal placeholder from DB.
-    if (isInternalReasoningPlaceholder(dbResult.reasoning)) {
-      misses++;
-      return null;
-    }
-    const persistedExpiresAt = Date.parse(dbResult.expiresAt);
-    if (!Number.isFinite(persistedExpiresAt) || persistedExpiresAt <= Date.now()) {
-      misses++;
-      return null;
-    }
-    hits++;
-    let promotedReasoning = dbResult.reasoning;
-    if (promotedReasoning.length > MAX_ENTRY_BYTES) {
-      promotedReasoning = promotedReasoning.slice(0, MAX_ENTRY_BYTES);
-    }
-    // Promote back to memory for fast subsequent lookups
-    memoryCache.set(toolCallId, {
-      reasoning: promotedReasoning,
-      provider: dbResult.provider,
-      model: dbResult.model,
-      expiresAt: persistedExpiresAt,
-      createdAt: Date.now(),
-    });
-    return promotedReasoning;
-  }
-
-  // 3. Miss
-  misses++;
-  return null;
+/**
+ * Pull the given tool_call ids from the DB into memory so the synchronous
+ * `lookupReasoning` calls made during request translation can find them.
+ */
+export async function preloadReasoningFromStore(toolCallIds: Iterable<string>): Promise<void> {
+  if (!isReasoningReplayEnabled()) return;
+  const missing = [...new Set(toolCallIds)].filter(
+    (id) => id && readMemoryReasoning(id) === null
+  );
+  await Promise.all(missing.map((id) => fetchReasoningFromStore(id)));
 }
 
 /**
@@ -468,7 +486,7 @@ export function recordReplay(): void {
 /**
  * Get combined stats from memory + DB + counters.
  */
-export function getReasoningCacheServiceStats(): {
+export async function getReasoningCacheServiceStats(): Promise<{
   memoryEntries: number;
   dbEntries: number;
   totalEntries: number;
@@ -481,7 +499,7 @@ export function getReasoningCacheServiceStats(): {
   byModel: Record<string, { entries: number; chars: number }>;
   oldestEntry: string | null;
   newestEntry: string | null;
-} {
+}> {
   // Purge expired memory entries before reporting
   purgeExpiredMemory();
 
@@ -494,7 +512,7 @@ export function getReasoningCacheServiceStats(): {
     newestEntry: null as string | null,
   };
   try {
-    dbStats = getReasoningCacheStats();
+    dbStats = await getReasoningCacheStats();
   } catch {
     // DB stats are unavailable; return memory counters with empty persisted stats.
   }
@@ -521,16 +539,16 @@ export function getReasoningCacheServiceStats(): {
 /**
  * Get paginated entries (delegates to DB).
  */
-export function getReasoningCacheServiceEntries(
+export async function getReasoningCacheServiceEntries(
   opts: {
     limit?: number;
     offset?: number;
     provider?: string;
     model?: string;
   } = {}
-): unknown[] {
+): Promise<unknown[]> {
   try {
-    return getReasoningCacheEntries(opts);
+    return await getReasoningCacheEntries(opts);
   } catch {
     return [];
   }
@@ -540,7 +558,7 @@ export function getReasoningCacheServiceEntries(
  * Clear all reasoning cache entries (memory + DB).
  * Returns count of DB entries removed.
  */
-export function clearReasoningCacheAll(provider?: string): number {
+export async function clearReasoningCacheAll(provider?: string): Promise<number> {
   // Clear memory
   if (provider) {
     for (const [key, entry] of memoryCache) {
@@ -556,7 +574,7 @@ export function clearReasoningCacheAll(provider?: string): number {
   replays = 0;
 
   try {
-    return clearAllReasoningCache(provider);
+    return await clearAllReasoningCache(provider);
   } catch {
     return 0;
   }
@@ -565,12 +583,12 @@ export function clearReasoningCacheAll(provider?: string): number {
 /**
  * Delete one reasoning cache entry by tool_call_id from memory + DB.
  */
-export function deleteReasoningCacheEntry(toolCallId: string): number {
+export async function deleteReasoningCacheEntry(toolCallId: string): Promise<number> {
   if (!toolCallId) return 0;
   const existedInMemory = memoryCache.delete(toolCallId);
   let deletedFromDb = 0;
   try {
-    deletedFromDb = deleteReasoningCache(toolCallId);
+    deletedFromDb = await deleteReasoningCache(toolCallId);
   } catch {
     // Memory delete already happened; DB delete can be retried by a later cleanup.
   }
@@ -581,10 +599,10 @@ export function deleteReasoningCacheEntry(toolCallId: string): number {
  * Cleanup expired entries from both memory and DB.
  * Called periodically (e.g., every 30 min from health-check).
  */
-export function cleanupReasoningCache(): number {
+export async function cleanupReasoningCache(): Promise<number> {
   purgeExpiredMemory();
   try {
-    return cleanupExpiredReasoning();
+    return await cleanupExpiredReasoning();
   } catch {
     return 0;
   }
@@ -611,27 +629,24 @@ function getCleanupIntervalMs(): number {
   return Number.isFinite(parsed) && parsed >= 60_000 ? parsed : DEFAULT_CLEANUP_INTERVAL_MS;
 }
 
-function startAutoCleanup(): void {
-  // Run once immediately on boot
+async function runCleanup(label: "boot" | "periodic"): Promise<void> {
   try {
-    const deleted = cleanupReasoningCache();
+    const deleted = await cleanupReasoningCache();
     if (deleted > 0) {
-      console.log(`[ReasoningCache] boot cleanup removed ${deleted} expired entries`);
+      console.log(`[ReasoningCache] ${label} cleanup removed ${deleted} expired entries`);
     }
   } catch (error) {
-    console.error("[ReasoningCache] boot cleanup failed:", error);
+    console.error(`[ReasoningCache] ${label} cleanup failed:`, error);
   }
+}
+
+function startAutoCleanup(): void {
+  // Run once immediately on boot
+  void runCleanup("boot");
 
   // Schedule periodic cleanup
   const timer = setInterval(() => {
-    try {
-      const deleted = cleanupReasoningCache();
-      if (deleted > 0) {
-        console.log(`[ReasoningCache] periodic cleanup removed ${deleted} expired entries`);
-      }
-    } catch (error) {
-      console.error("[ReasoningCache] periodic cleanup failed:", error);
-    }
+    void runCleanup("periodic");
   }, getCleanupIntervalMs());
 
   timer.unref?.();

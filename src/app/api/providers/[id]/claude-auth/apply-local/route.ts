@@ -38,7 +38,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { id } = await params;
     const result = await writeClaudeAuthFileToLocalCli(id);
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.applied",
       actor: "admin",
       target: id,

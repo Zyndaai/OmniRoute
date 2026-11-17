@@ -22,7 +22,7 @@ import { extractSystemRoleMessages } from "./claudeSystemRole.ts";
 
 type LoggerLike = { debug?: (...args: unknown[]) => void } | null | undefined;
 
-export function buildClaudeCodeBridgeBody({
+export async function buildClaudeCodeBridgeBody({
   body,
   sourceFormat,
   targetFormat,
@@ -42,6 +42,7 @@ export function buildClaudeCodeBridgeBody({
   applyReasoningRuleDirective,
   getModelNormalizeToolCallId,
   getModelPreserveOpenAIDeveloperRole,
+  getModelPreserveVideoUrl,
   log,
 }: {
   body: Record<string, unknown>;
@@ -68,14 +69,20 @@ export function buildClaudeCodeBridgeBody({
     providerId: string,
     modelId: string,
     sourceFormat?: string | null
-  ) => boolean;
+  ) => boolean | Promise<boolean>;
   getModelPreserveOpenAIDeveloperRole: (
     providerId: string,
     modelId: string,
     sourceFormat?: string | null
-  ) => boolean | undefined;
+  ) => boolean | undefined | Promise<boolean | undefined>;
+  /** Per-provider/model preserveVideoUrl compat flag (async DB lookup injected by the handler);
+   *  when omitted translateRequest falls back to the moonshot/kimi default. */
+  getModelPreserveVideoUrl?: (
+    providerId: string,
+    modelId: string
+  ) => boolean | undefined | Promise<boolean | undefined>;
   log?: LoggerLike;
-}): { translatedBody: Record<string, unknown>; ccSessionId: string } {
+}): Promise<{ translatedBody: Record<string, unknown>; ccSessionId: string }> {
   let normalizedForCc = { ...body };
 
   // Claude Code-compatible providers expect Anthropic Messages-shaped payloads,
@@ -87,17 +94,20 @@ export function buildClaudeCodeBridgeBody({
     ) as typeof normalizedForCc;
     log?.debug?.("FORMAT", "claude-code semantic passthrough enabled for compatible bridge");
   } else if (sourceFormat !== FORMATS.OPENAI) {
-    const normalizeToolCallId = getModelNormalizeToolCallId(
+    const normalizeToolCallId = await getModelNormalizeToolCallId(
       provider || "",
       model || "",
       sourceFormat
     );
-    const preserveDeveloperRole = getModelPreserveOpenAIDeveloperRole(
+    const preserveDeveloperRole = await getModelPreserveOpenAIDeveloperRole(
       provider || "",
       model || "",
       sourceFormat
     );
-    normalizedForCc = translateRequest(
+    const preserveVideoUrl = getModelPreserveVideoUrl
+      ? await getModelPreserveVideoUrl(String(provider ?? ""), String(model ?? ""))
+      : undefined;
+    normalizedForCc = await translateRequest(
       sourceFormat,
       FORMATS.OPENAI,
       model,
@@ -109,6 +119,7 @@ export function buildClaudeCodeBridgeBody({
       {
         normalizeToolCallId,
         preserveDeveloperRole,
+        preserveVideoUrl,
         preserveCacheControl,
         copilotClient: copilotCompatibleReasoning,
         reasoningCacheScope,

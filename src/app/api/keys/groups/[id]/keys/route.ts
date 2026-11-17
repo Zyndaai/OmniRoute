@@ -20,9 +20,9 @@ const addKeyToGroupSchema = z.object({
 export async function GET(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const group = getKeyGroup(id);
+    const group = await getKeyGroup(id);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
-    const members = getGroupMembers(id);
+    const members = await getGroupMembers(id);
     return NextResponse.json({ members });
   } catch (error) {
     return NextResponse.json({ error: "Failed to list members" }, { status: 500 });
@@ -36,7 +36,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const group = getKeyGroup(id);
+    const group = await getKeyGroup(id);
     if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
     const rawBody = await request.json();
@@ -44,7 +44,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (isValidationFailure(validation)) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
-    const added = addKeyToGroup(validation.data.keyId, id);
+    const added = await addKeyToGroup(validation.data.keyId, id);
     if (!added) {
       return NextResponse.json({ error: "Failed to add key" }, { status: 500 });
     }
@@ -65,7 +65,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     if (!keyId) {
       return NextResponse.json({ error: "keyId query param required" }, { status: 400 });
     }
-    const removed = removeKeyFromGroup(keyId, id);
+    const removed = await removeKeyFromGroup(keyId, id);
     if (!removed) {
       return NextResponse.json({ error: "Key not found in group" }, { status: 404 });
     }

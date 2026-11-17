@@ -291,7 +291,7 @@ export async function getRecentEgressSharingSummary(): Promise<{
   const { exportProxyLogsSince } = await import("./db/proxyLogs");
   const end = new Date();
   const start = new Date(end.getTime() - EGRESS_SHARING_WINDOW_MS);
-  const rows: EgressLogRow[] = exportProxyLogsSince(start.toISOString()).map((r) => ({
+  const rows: EgressLogRow[] = (await exportProxyLogsSince(start.toISOString())).map((r) => ({
     provider: (r.provider as string | null) ?? null,
     account: (r.account as string | null) ?? null,
     connectionId: (r.connection_id as string | null) ?? null,

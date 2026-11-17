@@ -3,15 +3,29 @@
  *
  * Module: src/lib/db/middleware.ts
  * Table: middleware_hooks
- * Logs:  middleware_logs
+ *
+ * Hook execution logs are not persisted (the `middleware_logs` table is gone); the live
+ * registry keeps them in memory (see `getHookLogs` in src/lib/middleware/registry.ts).
  */
 
-import { getDbInstance } from "@/lib/db/core";
-import type { HookConfig, HookConfigRow, HookLogEntry } from "@/lib/middleware/types";
+import { db } from "./pg";
+import type { HookConfig } from "@/lib/middleware/types";
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+interface HookRow {
+  name: string;
+  description: string;
+  priority: number;
+  scope_type: "global" | "combo";
+  combo_id: string | null;
+  enabled: boolean;
+  code: string;
+  created_at: string;
+  updated_at: string;
+  run_count: number;
+  last_error: string | null;
+}
 
-function rowToHookConfig(row: HookConfigRow): HookConfig {
+function rowToHookConfig(row: HookRow): HookConfig {
   return {
     name: row.name,
     description: row.description,
@@ -20,7 +34,7 @@ function rowToHookConfig(row: HookConfigRow): HookConfig {
       row.scope_type === "combo" && row.combo_id
         ? { type: "combo", comboId: row.combo_id }
         : { type: "global" },
-    enabled: row.enabled === 1,
+    enabled: row.enabled === true,
     code: row.code,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -29,150 +43,124 @@ function rowToHookConfig(row: HookConfigRow): HookConfig {
   };
 }
 
-function hookConfigToRow(config: HookConfig): HookConfigRow {
-  return {
-    name: config.name,
-    description: config.description,
-    priority: config.priority,
-    scope_type: config.scope.type,
-    combo_id: config.scope.type === "combo" ? config.scope.comboId : null,
-    enabled: config.enabled ? 1 : 0,
-    code: config.code,
-    created_at: config.createdAt || new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    run_count: config.runCount || 0,
-    last_error: config.lastError,
-  };
-}
-
 // ── CRUD Operations ───────────────────────────────────────────────────────
 
 /**
  * Get all hooks from DB.
  */
-export function getAllMiddlewareHooks(): HookConfig[] {
-  const db = getDbInstance() as any;
-  const rows = db
-    .prepare("SELECT * FROM middleware_hooks ORDER BY priority ASC, name ASC")
-    .all() as HookConfigRow[];
+export async function getAllMiddlewareHooks(): Promise<HookConfig[]> {
+  const rows = await db().query<HookRow>(
+    "SELECT * FROM middleware_hooks ORDER BY priority ASC, name ASC"
+  );
   return rows.map(rowToHookConfig);
 }
 
 /**
  * Get enabled hooks from DB (for runtime loading).
  */
-export function getEnabledMiddlewareHooks(): HookConfig[] {
-  const db = getDbInstance() as any;
-  const rows = db
-    .prepare("SELECT * FROM middleware_hooks WHERE enabled = 1 ORDER BY priority ASC")
-    .all() as HookConfigRow[];
+export async function getEnabledMiddlewareHooks(): Promise<HookConfig[]> {
+  const rows = await db().query<HookRow>(
+    "SELECT * FROM middleware_hooks WHERE enabled ORDER BY priority ASC, name ASC"
+  );
   return rows.map(rowToHookConfig);
 }
 
 /**
  * Get a single hook by name.
  */
-export function getMiddlewareHook(name: string): HookConfig | undefined {
-  const db = getDbInstance() as any;
-  const row = db.prepare("SELECT * FROM middleware_hooks WHERE name = ?").get(name) as
-    HookConfigRow | undefined;
+export async function getMiddlewareHook(name: string): Promise<HookConfig | undefined> {
+  const row = await db().queryOne<HookRow>("SELECT * FROM middleware_hooks WHERE name = $1", [
+    name,
+  ]);
   return row ? rowToHookConfig(row) : undefined;
 }
 
 /**
  * Create a new middleware hook.
  */
-export function createMiddlewareHook(config: HookConfig): HookConfig {
-  const db = getDbInstance() as any;
-  const row = hookConfigToRow(config);
-  row.created_at = new Date().toISOString();
-  row.updated_at = row.created_at;
-
-  db.prepare(
-    `
-    INSERT INTO middleware_hooks (name, description, priority, scope_type, combo_id, enabled, code, created_at, updated_at, run_count, last_error)
-    VALUES (@name, @description, @priority, @scope_type, @combo_id, @enabled, @code, @created_at, @updated_at, @run_count, @last_error)
-  `
-  ).run(row);
-
-  return getMiddlewareHook(config.name)!;
+export async function createMiddlewareHook(config: HookConfig): Promise<HookConfig> {
+  const row = await db().queryOne<HookRow>(
+    `INSERT INTO middleware_hooks
+       (name, description, priority, scope_type, combo_id, enabled, code, run_count, last_error)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING *`,
+    [
+      config.name,
+      config.description ?? "",
+      Math.round(config.priority),
+      config.scope.type,
+      config.scope.type === "combo" ? config.scope.comboId : null,
+      Boolean(config.enabled),
+      config.code ?? "",
+      Math.round(config.runCount || 0),
+      config.lastError ?? null,
+    ]
+  );
+  return rowToHookConfig(row!);
 }
 
 /**
  * Update an existing middleware hook.
  */
-export function updateMiddlewareHook(
+export async function updateMiddlewareHook(
   name: string,
   updates: Partial<HookConfig>
-): HookConfig | undefined {
-  const existing = getMiddlewareHook(name);
-  if (!existing) return undefined;
-
-  const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-  const row = hookConfigToRow(updated);
-  const db = getDbInstance() as any;
-
-  db.prepare(
-    `
-    UPDATE middleware_hooks SET
-      description = @description,
-      priority = @priority,
-      scope_type = @scope_type,
-      combo_id = @combo_id,
-      enabled = @enabled,
-      code = @code,
-      updated_at = @updated_at,
-      run_count = @run_count,
-      last_error = @last_error
-    WHERE name = @name
-  `
-  ).run(row);
-
-  return getMiddlewareHook(name);
+): Promise<HookConfig | undefined> {
+  // Row lock so the merge sees a concurrent recordHookExecution; run_count/last_error are
+  // written only when the caller passes them.
+  return db().transaction(async (tx) => {
+    const current = await tx.queryOne<HookRow>(
+      "SELECT * FROM middleware_hooks WHERE name = $1 FOR UPDATE",
+      [name]
+    );
+    if (!current) return undefined;
+    const updated = { ...rowToHookConfig(current), ...updates };
+    const params: unknown[] = [
+      name,
+      updated.description ?? "",
+      Math.round(updated.priority),
+      updated.scope.type,
+      updated.scope.type === "combo" ? updated.scope.comboId : null,
+      Boolean(updated.enabled),
+      updated.code ?? "",
+    ];
+    const extra: string[] = [];
+    if ("runCount" in updates) {
+      params.push(Math.round(updates.runCount || 0));
+      extra.push(`run_count = $${params.length}`);
+    }
+    if ("lastError" in updates) {
+      params.push(updates.lastError ?? null);
+      extra.push(`last_error = $${params.length}`);
+    }
+    const row = await tx.queryOne<HookRow>(
+      `UPDATE middleware_hooks SET
+         description = $2, priority = $3, scope_type = $4, combo_id = $5,
+         enabled = $6, code = $7, updated_at = now()${extra.map((e) => `, ${e}`).join("")}
+       WHERE name = $1
+       RETURNING *`,
+      params
+    );
+    return row ? rowToHookConfig(row) : undefined;
+  });
 }
 
 /**
  * Delete a middleware hook.
  */
-export function deleteMiddlewareHook(name: string): boolean {
-  const db = getDbInstance() as any;
-  const result = db.prepare("DELETE FROM middleware_hooks WHERE name = ?").run(name);
+export async function deleteMiddlewareHook(name: string): Promise<boolean> {
+  const result = await db().execute("DELETE FROM middleware_hooks WHERE name = $1", [name]);
   return result.changes > 0;
 }
 
 /**
  * Increment run count and optionally update last error.
  */
-export function recordHookExecution(name: string, error?: string): void {
-  const db = getDbInstance() as any;
-  if (error) {
-    db.prepare(
-      "UPDATE middleware_hooks SET run_count = run_count + 1, last_error = ?, updated_at = datetime('now') WHERE name = ?"
-    ).run(error, name);
-  } else {
-    db.prepare(
-      "UPDATE middleware_hooks SET run_count = run_count + 1, last_error = NULL, updated_at = datetime('now') WHERE name = ?"
-    ).run(name);
-  }
-}
-export function getHookLogs(hookName?: string, limit = 50): HookLogEntry[] {
-  const db = getDbInstance() as any;
-  let rows: any[];
-  if (hookName) {
-    rows = db
-      .prepare("SELECT * FROM middleware_logs WHERE hook_name = ? ORDER BY timestamp DESC LIMIT ?")
-      .all(hookName, limit);
-  } else {
-    rows = db.prepare("SELECT * FROM middleware_logs ORDER BY timestamp DESC LIMIT ?").all(limit);
-  }
-  return rows.map((r: any) => ({
-    id: r.id,
-    hookName: r.hook_name,
-    requestId: r.request_id,
-    durationMs: r.duration_ms,
-    mutated: r.mutated === 1,
-    skipped: r.skipped === 1,
-    error: r.error,
-    timestamp: r.timestamp,
-  }));
+export async function recordHookExecution(name: string, error?: string): Promise<void> {
+  await db().execute(
+    `UPDATE middleware_hooks
+        SET run_count = run_count + 1, last_error = $2, updated_at = now()
+      WHERE name = $1`,
+    [name, error || null]
+  );
 }

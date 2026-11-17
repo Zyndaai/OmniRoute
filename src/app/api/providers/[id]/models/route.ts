@@ -106,7 +106,11 @@ import {
 } from "@/lib/providerModels/modelDiscovery";
 import { buildProviderModelsUrl, getDiscoveryClientVersionOptions } from "./discoveryClientVersion";
 import { getAdobeModels } from "./adobeFireflyDiscovery";
-import { getSyncedAvailableModels, getCustomModels, getModelIsHidden } from "@/lib/db/models";
+import {
+  getSyncedAvailableModels,
+  getCustomModels,
+  getHiddenModelsByProvider,
+} from "@/lib/db/models";
 import { isConnectionUnavailableToAuxiliaryActivity } from "@/lib/exclusiveLeaseIsolation";
 import { AUTHZ_HEADER_PEER_LOCALITY } from "@/server/authz/headers";
 import { fetchCursorAgentModels } from "@/lib/providerModels/cursorAgent";
@@ -257,6 +261,11 @@ export async function GET(
       }
     }
 
+    // Loaded once so buildResponse stays synchronous for the discovery helpers.
+    const hiddenModelIds: ReadonlySet<string> = excludeHidden
+      ? ((await getHiddenModelsByProvider()).get(provider) ?? new Set<string>())
+      : new Set<string>();
+
     const mergeCustomModels = (models: any[]) => {
       if (customModelsForProvider.length === 0) return models;
       const base = (Array.isArray(models) ? models : []).flatMap((model) => {
@@ -278,7 +287,7 @@ export async function GET(
       }
       if (excludeHidden && payload.models && Array.isArray(payload.models)) {
         payload.models = payload.models.filter(
-          (m: any) => m.visibility !== "hide" && !getModelIsHidden(provider, m.id)
+          (m: any) => m.visibility !== "hide" && !hiddenModelIds.has(m.id)
         );
       }
       // The single place where a discovery response gets its public shape: the
@@ -288,7 +297,7 @@ export async function GET(
       // Keep the outcome of this discovery: the response carrying it is gone on
       // the next read. The outcome is read from the public payload, so it
       // carries the same reason the caller sees.
-      recordDiscoveryOutcome(publicPayload);
+      void recordDiscoveryOutcome(publicPayload).catch(() => {});
       return NextResponse.json(publicPayload, statusConfig);
     };
 

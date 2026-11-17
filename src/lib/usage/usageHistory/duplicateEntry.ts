@@ -1,50 +1,57 @@
-import type { getDbInstance } from "../../db/core";
+import type { DbExecutor } from "@/lib/db/pg";
 import { resolveProviderId } from "@/shared/constants/providers";
 import type { UsageEntry } from "../usageHistory";
 
-/** Look up and backfill a legacy natural-key duplicate inside the caller's transaction. */
-export function backfillDuplicateUsageEntry(
-  db: ReturnType<typeof getDbInstance>,
+/**
+ * Look up and backfill a legacy natural-key duplicate inside the caller's transaction.
+ * `timestamp` must already be a normalised ISO string: it is the partition key, so the
+ * lookup and the backfill UPDATEs touch exactly one `usage_history` partition.
+ */
+export async function backfillDuplicateUsageEntry(
+  tx: DbExecutor,
   entry: UsageEntry,
   timestamp: string,
   tokensInput: number,
   tokensOutput: number
-): boolean {
-  const existing = db
-    .prepare(
-      `SELECT id, endpoint, cpa_auth_index FROM usage_history
-       WHERE timestamp = ?
-         AND COALESCE(provider, '')     = COALESCE(?, '')
-         AND COALESCE(model, '')        = COALESCE(?, '')
-         AND COALESCE(connection_id, '') = COALESCE(?, '')
-         AND COALESCE(api_key_id, '')   = COALESCE(?, '')
-         AND tokens_input  = ?
-         AND tokens_output = ?
-       ORDER BY id DESC LIMIT 1`
-    )
-    .get(
+): Promise<boolean> {
+  const existing = await tx.queryOne<{
+    id: number;
+    endpoint: string | null;
+    cpa_auth_index: string | null;
+  }>(
+    `SELECT id, endpoint, cpa_auth_index FROM usage_history
+     WHERE "timestamp" = $1
+       AND COALESCE(provider, '')      = COALESCE($2::text, '')
+       AND COALESCE(model, '')         = COALESCE($3::text, '')
+       AND COALESCE(connection_id, '') = COALESCE($4::text, '')
+       AND COALESCE(api_key_id, '')    = COALESCE($5::text, '')
+       AND tokens_input  = $6
+       AND tokens_output = $7
+     ORDER BY id DESC LIMIT 1`,
+    [
       timestamp,
       entry.provider ? resolveProviderId(entry.provider) : null,
       entry.model || null,
       entry.connectionId || null,
       entry.apiKeyId || null,
       tokensInput,
-      tokensOutput
-    ) as { id: number; endpoint: string | null; cpa_auth_index: string | null } | undefined;
+      tokensOutput,
+    ]
+  );
 
   if (!existing) return false;
   // Back-fill endpoint if the original row missed it.
   if (!existing.endpoint && entry.endpoint) {
-    db.prepare(`UPDATE usage_history SET endpoint = ? WHERE id = ?`).run(
-      entry.endpoint,
-      existing.id
+    await tx.execute(
+      `UPDATE usage_history SET endpoint = $1 WHERE id = $2 AND "timestamp" = $3`,
+      [entry.endpoint, existing.id, timestamp]
     );
   }
   // A later completed attempt can carry the trace the first write missed.
   if (!existing.cpa_auth_index && entry.cpaAuthIndex) {
-    db.prepare(`UPDATE usage_history SET cpa_auth_index = ? WHERE id = ?`).run(
-      entry.cpaAuthIndex,
-      existing.id
+    await tx.execute(
+      `UPDATE usage_history SET cpa_auth_index = $1 WHERE id = $2 AND "timestamp" = $3`,
+      [entry.cpaAuthIndex, existing.id, timestamp]
     );
   }
   return true;

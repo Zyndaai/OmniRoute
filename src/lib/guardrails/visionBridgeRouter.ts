@@ -281,14 +281,17 @@ async function getVisionCapableModels(
   const candidatesByProvider = await Promise.all(
     Object.entries(PROVIDER_MODELS).map(async ([providerAlias, models]) => {
       if (!Array.isArray(models)) return [];
-      const visionModels = models.filter((model) => {
-        if (!model?.id) return false;
-        const fullModelId = `${providerAlias}/${model.id}`;
-        return (
-          getResolvedModelCapabilities(fullModelId).supportsVision === true &&
-          !isVisionBridgeForcedModel(fullModelId)
-        );
-      });
+      const visionChecks = await Promise.all(
+        models.map(async (model) => {
+          if (!model?.id) return false;
+          const fullModelId = `${providerAlias}/${model.id}`;
+          return (
+            (await getResolvedModelCapabilities(fullModelId)).supportsVision === true &&
+            !isVisionBridgeForcedModel(fullModelId)
+          );
+        })
+      );
+      const visionModels = models.filter((_model, index) => visionChecks[index]);
       if (visionModels.length === 0) return [];
 
       const credentialedModels = (

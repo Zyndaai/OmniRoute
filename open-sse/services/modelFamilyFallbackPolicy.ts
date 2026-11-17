@@ -53,7 +53,7 @@ export async function getRequestModelFamily(
     getHeader(policy.headers, CROSS_VERSION_FALLBACK_HEADER)?.trim().toLowerCase() === "true";
   const connectionId =
     typeof policy.connectionId === "function" ? policy.connectionId() : policy.connectionId || "";
-  const candidates = getEligibleModelFamily(current, provider, connectionId)
+  const candidates = (await getEligibleModelFamily(current, provider, connectionId))
     .slice(1)
     .filter((candidate) => allowCrossVersion || isSameModelVersion(current, candidate, provider));
   if (!policy.hasApiKeyMetadata && !policy.headers) return [current, ...candidates];
@@ -79,11 +79,11 @@ export async function getNextRequestFamilyFallback(
   const excluded = new Set(tried);
   const connectionId =
     typeof policy.connectionId === "function" ? policy.connectionId() : policy.connectionId || "";
-  let candidate = getNextEligibleFamilyFallback(current, excluded, provider, connectionId);
+  let candidate = await getNextEligibleFamilyFallback(current, excluded, provider, connectionId);
   while (candidate) {
     if (permitted.has(candidate)) return candidate;
     excluded.add(candidate);
-    candidate = getNextEligibleFamilyFallback(current, excluded, provider, connectionId);
+    candidate = await getNextEligibleFamilyFallback(current, excluded, provider, connectionId);
   }
   return null;
 }
@@ -112,7 +112,7 @@ export function createRequestFamilyFallback(provider: string, policy: RequestFam
         typeof policy.connectionId === "function"
           ? policy.connectionId()
           : policy.connectionId || "";
-      return getContextFamilyFallback(current, tried, provider, connectionId, permitted);
+      return await getContextFamilyFallback(current, tried, provider, connectionId, permitted);
     },
   };
 }

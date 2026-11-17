@@ -56,12 +56,15 @@ function persistStreamingUsageRow(usage: object, ctx: RecordStreamingUsageStatsC
   });
 }
 
-function recordStreamingBillableTokens(usage: object, ctx: RecordStreamingUsageStatsContext): void {
+async function recordStreamingBillableTokens(
+  usage: object,
+  ctx: RecordStreamingUsageStatsContext
+): Promise<void> {
   if (!ctx.apiKeyInfo?.id || ctx.streamStatus !== 200) return;
   try {
     const billable = computeBillableTokens(usage);
     // Key-quota tpm/rpm counters advance on every completed stream.
-    recordKeyQuotaUsage(ctx.apiKeyInfo.id, billable);
+    await recordKeyQuotaUsage(ctx.apiKeyInfo.id, billable);
     if (billable > 0)
       recordTokenUsage(
         ctx.apiKeyInfo.id,
@@ -74,11 +77,11 @@ function recordStreamingBillableTokens(usage: object, ctx: RecordStreamingUsageS
   }
 }
 
-export function recordStreamingUsageStats(
+export async function recordStreamingUsageStats(
   usage: unknown,
   ctx: RecordStreamingUsageStatsContext
-): void {
+): Promise<void> {
   if (!usage || typeof usage !== "object") return;
   persistStreamingUsageRow(usage, ctx);
-  recordStreamingBillableTokens(usage, ctx);
+  await recordStreamingBillableTokens(usage, ctx);
 }

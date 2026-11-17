@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "@/lib/db/pg";
 
 export type TeamStatus = "active" | "archived";
 export type TeamBudgetDuration = "1d" | "7d" | "30d";
@@ -76,6 +76,18 @@ const BUDGET_DURATION_MS: Record<TeamBudgetDuration, number> = {
 const CONCURRENT_ASSIGNMENT_ERROR =
   "API key billing team changed concurrently; retry the assignment";
 
+const DUPLICATE_NAME_ERROR = "Team name already exists";
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: unknown; kind?: unknown };
+  return e.code === "23505" || e.kind === "unique_violation";
+}
+
+function ms(value: string): number {
+  return Date.parse(value);
+}
+
 function normalizeIso(value: string | undefined = undefined): string {
   const date = value ? new Date(value) : new Date();
   if (!Number.isFinite(date.getTime())) throw new Error("Invalid effective timestamp");
@@ -148,62 +160,61 @@ function rowToBillingHistory(row: BillingRow): ApiKeyBillingTeamHistory {
   };
 }
 
-export function createTeam(input: TeamCreateInput): Team {
-  const db = getDbInstance();
+export async function createTeam(input: TeamCreateInput): Promise<Team> {
   const now = new Date().toISOString();
   const budget = normalizeBudget(input, now);
   const id = crypto.randomUUID();
-  db.prepare(
-    `INSERT INTO teams (
-      id, name, description, status, max_budget_usd, budget_duration,
-      budget_reset_at, created_at, updated_at
-    ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    normalizeName(input.name),
-    input.description?.trim() || "",
-    budget.maxBudgetUsd,
-    budget.budgetDuration,
-    budget.budgetResetAt,
-    now,
-    now
-  );
-  return getTeam(id)!;
+  try {
+    await db().execute(
+      `INSERT INTO teams (
+        id, name, description, status, max_budget_usd, budget_duration,
+        budget_reset_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, 'active', $4, $5, $6::timestamptz, $7::timestamptz, $7::timestamptz)`,
+      [
+        id,
+        normalizeName(input.name),
+        input.description?.trim() || "",
+        budget.maxBudgetUsd,
+        budget.budgetDuration,
+        budget.budgetResetAt,
+        now,
+      ]
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new Error(DUPLICATE_NAME_ERROR);
+    throw error;
+  }
+  return (await getTeam(id))!;
 }
 
-export function listTeams(options: { includeArchived?: boolean } = {}): Team[] {
-  const db = getDbInstance();
+export async function listTeams(options: { includeArchived?: boolean } = {}): Promise<Team[]> {
   const rows = options.includeArchived
-    ? (db.prepare("SELECT * FROM teams ORDER BY created_at ASC").all() as TeamRow[])
-    : (db
-        .prepare("SELECT * FROM teams WHERE status = 'active' ORDER BY created_at ASC")
-        .all() as TeamRow[]);
+    ? await db().query<TeamRow>("SELECT * FROM teams ORDER BY created_at ASC")
+    : await db().query<TeamRow>(
+        "SELECT * FROM teams WHERE status = 'active' ORDER BY created_at ASC"
+      );
   return rows.map(rowToTeam);
 }
 
-export function getTeam(id: string): Team | null {
-  const row = getDbInstance().prepare("SELECT * FROM teams WHERE id = ?").get(id) as
-    TeamRow | undefined;
+export async function getTeam(id: string): Promise<Team | null> {
+  const row = await db().queryOne<TeamRow>("SELECT * FROM teams WHERE id = $1", [id]);
   return row ? rowToTeam(row) : null;
 }
 
-export function updateTeam(id: string, input: TeamUpdateInput): Team | null {
-  const db = getDbInstance();
-  const existing = getTeam(id);
+export async function updateTeam(id: string, input: TeamUpdateInput): Promise<Team | null> {
+  const existing = await getTeam(id);
   if (!existing) return null;
   if (existing.status !== "active") throw new Error("Archived teams cannot be updated");
 
   const now = new Date().toISOString();
-  const updates: string[] = ["updated_at = @updatedAt"];
-  const params: Record<string, unknown> = { id, updatedAt: now };
-  if (input.name !== undefined) {
-    updates.push("name = @name");
-    params.name = normalizeName(input.name);
-  }
-  if (input.description !== undefined) {
-    updates.push("description = @description");
-    params.description = input.description.trim();
-  }
+  const params: unknown[] = [now];
+  const updates: string[] = ["updated_at = $1::timestamptz"];
+  const set = (column: string, value: unknown, cast = "") => {
+    params.push(value);
+    updates.push(`${column} = $${params.length}${cast}`);
+  };
+  if (input.name !== undefined) set("name", normalizeName(input.name));
+  if (input.description !== undefined) set("description", input.description.trim());
   if (input.maxBudgetUsd !== undefined || input.budgetDuration !== undefined) {
     const budget = normalizeBudget(
       {
@@ -213,155 +224,169 @@ export function updateTeam(id: string, input: TeamUpdateInput): Team | null {
       },
       now
     );
-    updates.push(
-      "max_budget_usd = @maxBudgetUsd",
-      "budget_duration = @budgetDuration",
-      "budget_reset_at = @budgetResetAt"
-    );
-    params.maxBudgetUsd = budget.maxBudgetUsd;
-    params.budgetDuration = budget.budgetDuration;
+    set("max_budget_usd", budget.maxBudgetUsd);
+    set("budget_duration", budget.budgetDuration);
     // Editing a live soft budget must not restart its rolling cadence. A new
     // reset instant is minted only when a budget is first enabled; disabling
     // it still clears all three fields together.
-    params.budgetResetAt =
+    set(
+      "budget_reset_at",
       budget.maxBudgetUsd !== null && existing.budgetResetAt
         ? existing.budgetResetAt
-        : budget.budgetResetAt;
+        : budget.budgetResetAt,
+      "::timestamptz"
+    );
   }
-  db.prepare(`UPDATE teams SET ${updates.join(", ")} WHERE id = @id`).run(params);
-  const updated = getTeam(id);
+  params.push(id);
+  try {
+    await db().execute(
+      `UPDATE teams SET ${updates.join(", ")} WHERE id = $${params.length}`,
+      params
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) throw new Error(DUPLICATE_NAME_ERROR);
+    throw error;
+  }
+  const updated = await getTeam(id);
   if (updated?.maxBudgetUsd && updated.budgetDuration && updated.budgetResetAt) {
-    advanceTeamBudgetWindow(updated, Date.now());
+    await advanceTeamBudgetWindow(updated, Date.now());
   }
   return getTeam(id);
 }
 
-export function archiveTeam(id: string, archivedAt?: string): Team | null {
-  const db = getDbInstance();
-  const team = getTeam(id);
+export async function archiveTeam(id: string, archivedAt?: string): Promise<Team | null> {
+  const team = await getTeam(id);
   if (!team) return null;
   if (team.status === "archived") return team;
   const when = normalizeIso(archivedAt);
-  const archive = db.transaction(() => {
+  await db().transaction(async (tx) => {
+    // Lock the team row so a concurrent assignment (FOR SHARE) cannot bind a key
+    // between closing the open bindings and flipping the status.
+    await tx.queryOne("SELECT id FROM teams WHERE id = $1 FOR UPDATE", [id]);
     // Close every still-open binding of this team. `valid_to` must satisfy the
-    // migration-161 CHECK (valid_to IS NULL OR valid_to > valid_from), which a
-    // same-instant archive would violate: a key assigned in the same millisecond
-    // the team is archived has valid_from === when. Archiving is an unconditional
+    // CHECK (valid_to IS NULL OR valid_to > valid_from), which a same-instant
+    // archive would violate: a key assigned in the same millisecond the team is
+    // archived has valid_from === when. Archiving is an unconditional
     // administrative action with no client-supplied timestamp, so rejecting it
     // would turn an internal clock-granularity collision into a spurious 500 and
     // leave the team active. Clamp the degenerate interval to valid_from + 1ms
     // instead, keeping the interval non-empty and the archive effective.
-    const open = db
-      .prepare(
-        "SELECT id, valid_from FROM api_key_billing_team_history WHERE team_id = ? AND valid_to IS NULL"
-      )
-      .all(id) as { id: string; valid_from: string }[];
-    const close = db.prepare(
-      "UPDATE api_key_billing_team_history SET valid_to = ? WHERE id = ? AND valid_to IS NULL"
+    const open = await tx.query<{ id: string; valid_from: string }>(
+      "SELECT id, valid_from FROM api_key_billing_team_history WHERE team_id = $1 AND valid_to IS NULL",
+      [id]
     );
     for (const binding of open) {
       const validTo =
-        when > binding.valid_from
+        ms(when) > ms(binding.valid_from)
           ? when
-          : new Date(new Date(binding.valid_from).getTime() + 1).toISOString();
-      close.run(validTo, binding.id);
+          : new Date(ms(binding.valid_from) + 1).toISOString();
+      await tx.execute(
+        "UPDATE api_key_billing_team_history SET valid_to = $1::timestamptz WHERE id = $2 AND valid_to IS NULL",
+        [validTo, binding.id]
+      );
     }
-    db.prepare(
+    await tx.execute(
       `UPDATE teams
-       SET status = 'archived', archived_at = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(when, when, id);
+       SET status = 'archived', archived_at = $1::timestamptz, updated_at = $1::timestamptz
+       WHERE id = $2`,
+      [when, id]
+    );
   });
-  archive();
   return getTeam(id);
 }
 
-type TeamsDb = ReturnType<typeof getDbInstance>;
-
-function assertAssignableTeamAndKey(db: TeamsDb, teamId: string, apiKeyId: string): void {
-  const team = db.prepare("SELECT status FROM teams WHERE id = ?").get(teamId) as
-    { status: TeamStatus } | undefined;
+async function assertAssignableTeamAndKey(
+  tx: DbExecutor,
+  teamId: string,
+  apiKeyId: string
+): Promise<void> {
+  // FOR SHARE on the team blocks a concurrent archive; FOR NO KEY UPDATE on the key
+  // serializes concurrent assignments of the same key.
+  const team = await tx.queryOne<{ status: TeamStatus }>(
+    "SELECT status FROM teams WHERE id = $1 FOR SHARE",
+    [teamId]
+  );
   if (!team) throw new Error("Team not found");
   if (team.status !== "active") throw new Error("Cannot assign an API key to an archived team");
-  const key = db.prepare("SELECT id FROM api_keys WHERE id = ?").get(apiKeyId);
+  const key = await tx.queryOne("SELECT id FROM api_keys WHERE id = $1 FOR NO KEY UPDATE", [
+    apiKeyId,
+  ]);
   if (!key) throw new Error("API key not found");
 }
 
 // A closed interval may end just after a same-instant archive. Reject genuinely
 // backdated explicit assignments; advance an implicit wall-clock reassignment to
 // the prior half-open end without changing stored history.
-function resolveAssignmentInstant(
-  db: TeamsDb,
+async function resolveAssignmentInstant(
+  tx: DbExecutor,
   apiKeyId: string,
   when: string,
   explicit: boolean
-): string {
-  const latestClosed = db
-    .prepare(
-      "SELECT MAX(valid_to) AS valid_to FROM api_key_billing_team_history WHERE api_key_id = ? AND valid_to IS NOT NULL"
-    )
-    .get(apiKeyId) as { valid_to: string | null };
-  if (!latestClosed.valid_to || when >= latestClosed.valid_to) return when;
-  if (explicit && Date.parse(latestClosed.valid_to) - Date.parse(when) > 1) {
+): Promise<string> {
+  const latestClosed = await tx.queryOne<{ valid_to: string | null }>(
+    "SELECT MAX(valid_to) AS valid_to FROM api_key_billing_team_history WHERE api_key_id = $1 AND valid_to IS NOT NULL",
+    [apiKeyId]
+  );
+  const validTo = latestClosed?.valid_to ?? null;
+  if (!validTo || ms(when) >= ms(validTo)) return when;
+  if (explicit && ms(validTo) - ms(when) > 1) {
     throw new Error("Assignment time overlaps closed billing history");
   }
-  return latestClosed.valid_to;
+  return validTo;
 }
 
-function closeActiveBinding(db: TeamsDb, current: BillingRow, when: string): void {
-  if (when <= current.valid_from) {
+async function closeActiveBinding(
+  tx: DbExecutor,
+  current: BillingRow,
+  when: string
+): Promise<void> {
+  if (ms(when) <= ms(current.valid_from)) {
     throw new Error("Assignment time must be after the active assignment start");
   }
-  const closed = db
-    .prepare(
-      "UPDATE api_key_billing_team_history SET valid_to = ? WHERE id = ? AND valid_to IS NULL"
-    )
-    .run(when, current.id);
+  const closed = await tx.execute(
+    "UPDATE api_key_billing_team_history SET valid_to = $1::timestamptz WHERE id = $2 AND valid_to IS NULL",
+    [when, current.id]
+  );
   if (closed.changes !== 1) throw new Error(CONCURRENT_ASSIGNMENT_ERROR);
 }
 
-function insertBillingBinding(db: TeamsDb, row: BillingRow): void {
+async function insertBillingBinding(tx: DbExecutor, row: BillingRow): Promise<void> {
   try {
-    db.prepare(
+    await tx.execute(
       `INSERT INTO api_key_billing_team_history
         (id, api_key_id, team_id, valid_from, valid_to, created_at)
-       VALUES (?, ?, ?, ?, NULL, ?)`
-    ).run(row.id, row.api_key_id, row.team_id, row.valid_from, row.created_at);
+       VALUES ($1, $2, $3, $4::timestamptz, NULL, $5::timestamptz)`,
+      [row.id, row.api_key_id, row.team_id, row.valid_from, row.created_at]
+    );
   } catch (error) {
-    if (/unique constraint/i.test(error instanceof Error ? error.message : "")) {
-      throw new Error(CONCURRENT_ASSIGNMENT_ERROR);
-    }
+    if (isUniqueViolation(error)) throw new Error(CONCURRENT_ASSIGNMENT_ERROR);
     throw error;
   }
 }
 
-export function assignApiKeyBillingTeam(
+export async function assignApiKeyBillingTeam(
   apiKeyId: string,
   teamId: string,
   effectiveAt?: string,
   expectedTeamId?: string | null
-): ApiKeyBillingTeamHistory {
-  const db = getDbInstance();
+): Promise<ApiKeyBillingTeamHistory> {
   const requestedAt = normalizeIso(effectiveAt);
-  let result: ApiKeyBillingTeamHistory | null = null;
 
-  const assign = db.transaction(() => {
-    assertAssignableTeamAndKey(db, teamId, apiKeyId);
+  return db().transaction(async (tx) => {
+    await assertAssignableTeamAndKey(tx, teamId, apiKeyId);
 
-    const current = db
-      .prepare(
-        "SELECT * FROM api_key_billing_team_history WHERE api_key_id = ? AND valid_to IS NULL"
-      )
-      .get(apiKeyId) as BillingRow | undefined;
+    const current = await tx.queryOne<BillingRow>(
+      "SELECT * FROM api_key_billing_team_history WHERE api_key_id = $1 AND valid_to IS NULL",
+      [apiKeyId]
+    );
     if (expectedTeamId !== undefined && (current?.team_id ?? null) !== expectedTeamId) {
       throw new Error(CONCURRENT_ASSIGNMENT_ERROR);
     }
     if (current?.team_id === teamId) {
-      result = rowToBillingHistory(current);
-      return;
+      return rowToBillingHistory(current);
     }
-    const when = resolveAssignmentInstant(db, apiKeyId, requestedAt, Boolean(effectiveAt));
-    if (current) closeActiveBinding(db, current, when);
+    const when = await resolveAssignmentInstant(tx, apiKeyId, requestedAt, Boolean(effectiveAt));
+    if (current) await closeActiveBinding(tx, current, when);
 
     const row: BillingRow = {
       id: crypto.randomUUID(),
@@ -371,94 +396,86 @@ export function assignApiKeyBillingTeam(
       valid_to: null,
       created_at: when,
     };
-    insertBillingBinding(db, row);
-    result = rowToBillingHistory(row);
+    await insertBillingBinding(tx, row);
+    return rowToBillingHistory(row);
   });
-  assign();
-  return result!;
 }
 
-export function unassignApiKeyBillingTeam(
+export async function unassignApiKeyBillingTeam(
   apiKeyId: string,
   effectiveAt?: string,
   expectedTeamId?: string
-): boolean {
-  const db = getDbInstance();
+): Promise<boolean> {
   const when = normalizeIso(effectiveAt);
-  const current = db
-    .prepare(
-      "SELECT id, team_id, valid_from FROM api_key_billing_team_history WHERE api_key_id = ? AND valid_to IS NULL"
-    )
-    .get(apiKeyId) as { id: string; team_id: string; valid_from: string } | undefined;
-  if (!current || (expectedTeamId && current.team_id !== expectedTeamId)) return false;
-  if (when <= current.valid_from)
-    throw new Error("Unassignment time must be after assignment start");
-  return (
-    db
-      .prepare(
-        "UPDATE api_key_billing_team_history SET valid_to = ? WHERE id = ? AND valid_to IS NULL"
-      )
-      .run(when, current.id).changes > 0
+  const current = await db().queryOne<{ id: string; team_id: string; valid_from: string }>(
+    "SELECT id, team_id, valid_from FROM api_key_billing_team_history WHERE api_key_id = $1 AND valid_to IS NULL",
+    [apiKeyId]
   );
+  if (!current || (expectedTeamId && current.team_id !== expectedTeamId)) return false;
+  if (ms(when) <= ms(current.valid_from))
+    throw new Error("Unassignment time must be after assignment start");
+  const result = await db().execute(
+    "UPDATE api_key_billing_team_history SET valid_to = $1::timestamptz WHERE id = $2 AND valid_to IS NULL",
+    [when, current.id]
+  );
+  return result.changes > 0;
 }
 
-export function getActiveBillingTeamForApiKey(apiKeyId: string): Team | null {
-  const row = getDbInstance()
-    .prepare(
-      `SELECT teams.*
+export async function getActiveBillingTeamForApiKey(apiKeyId: string): Promise<Team | null> {
+  const row = await db().queryOne<TeamRow>(
+    `SELECT teams.*
        FROM api_key_billing_team_history binding
        JOIN teams ON teams.id = binding.team_id
-       WHERE binding.api_key_id = ? AND binding.valid_to IS NULL AND teams.status = 'active'`
-    )
-    .get(apiKeyId) as TeamRow | undefined;
+       WHERE binding.api_key_id = $1 AND binding.valid_to IS NULL AND teams.status = 'active'`,
+    [apiKeyId]
+  );
   return row ? rowToTeam(row) : null;
 }
 
-export function resolveBillingTeamIdForApiKeyAt(
+export async function resolveBillingTeamIdForApiKeyAt(
   apiKeyId: string | null | undefined,
   at: string
-): string | null {
+): Promise<string | null> {
   if (!apiKeyId) return null;
-  const row = getDbInstance()
-    .prepare(
-      `SELECT team_id
+  const atMs = Date.parse(at);
+  if (!Number.isFinite(atMs)) return null;
+  const row = await db().queryOne<{ team_id: string }>(
+    `SELECT team_id
        FROM api_key_billing_team_history
-       WHERE api_key_id = ? AND valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
-       ORDER BY valid_from DESC LIMIT 1`
-    )
-    .get(apiKeyId, at, at) as { team_id: string } | undefined;
+       WHERE api_key_id = $1 AND valid_from <= $2::timestamptz AND (valid_to IS NULL OR valid_to > $2::timestamptz)
+       ORDER BY valid_from DESC LIMIT 1`,
+    [apiKeyId, new Date(atMs).toISOString()]
+  );
   return row?.team_id ?? null;
 }
 
-export function listApiKeyBillingHistory(apiKeyId: string): ApiKeyBillingTeamHistory[] {
-  return (
-    getDbInstance()
-      .prepare(
-        "SELECT * FROM api_key_billing_team_history WHERE api_key_id = ? ORDER BY valid_from ASC"
-      )
-      .all(apiKeyId) as BillingRow[]
-  ).map(rowToBillingHistory);
+export async function listApiKeyBillingHistory(
+  apiKeyId: string
+): Promise<ApiKeyBillingTeamHistory[]> {
+  const rows = await db().query<BillingRow>(
+    "SELECT * FROM api_key_billing_team_history WHERE api_key_id = $1 ORDER BY valid_from ASC",
+    [apiKeyId]
+  );
+  return rows.map(rowToBillingHistory);
 }
 
-export function listAllApiKeyBillingHistory(): ApiKeyBillingTeamHistory[] {
-  return (
-    getDbInstance()
-      .prepare("SELECT * FROM api_key_billing_team_history ORDER BY valid_from ASC")
-      .all() as BillingRow[]
-  ).map(rowToBillingHistory);
+export async function listAllApiKeyBillingHistory(): Promise<ApiKeyBillingTeamHistory[]> {
+  const rows = await db().query<BillingRow>(
+    "SELECT * FROM api_key_billing_team_history ORDER BY valid_from ASC"
+  );
+  return rows.map(rowToBillingHistory);
 }
 
-export function listTeamMembers(teamId: string): TeamMember[] {
-  return getDbInstance()
-    .prepare(
-      `SELECT binding.api_key_id as apiKeyId, api_keys.name as apiKeyName,
-              binding.valid_from as assignedAt
+export async function listTeamMembers(teamId: string): Promise<TeamMember[]> {
+  return db().query<TeamMember>(
+    `SELECT binding.api_key_id AS "apiKeyId", api_keys.name AS "apiKeyName",
+              binding.valid_from AS "assignedAt"
        FROM api_key_billing_team_history binding
        JOIN api_keys ON api_keys.id = binding.api_key_id
-       WHERE binding.team_id = ? AND binding.valid_to IS NULL
-       ORDER BY api_keys.name COLLATE NOCASE ASC`
-    )
-    .all(teamId) as TeamMember[];
+       WHERE binding.team_id = $1 AND binding.valid_to IS NULL
+       ORDER BY lower(api_keys.name) ASC`,
+    [teamId]
+  );
 }
 
 export interface TeamKeyOption {
@@ -469,36 +486,38 @@ export interface TeamKeyOption {
 }
 
 /** Management projection: never select credential columns. */
-export function listTeamKeyOptions(): TeamKeyOption[] {
-  return getDbInstance()
-    .prepare(
-      `
-    SELECT k.id, k.name, t.id AS teamId, t.name AS teamName
+export async function listTeamKeyOptions(): Promise<TeamKeyOption[]> {
+  return db().query<TeamKeyOption>(
+    `SELECT k.id, k.name, t.id AS "teamId", t.name AS "teamName"
     FROM api_keys k
     LEFT JOIN api_key_billing_team_history b ON b.api_key_id = k.id AND b.valid_to IS NULL
     LEFT JOIN teams t ON t.id = b.team_id AND t.status = 'active'
-    ORDER BY k.name COLLATE NOCASE, k.id
-  `
-    )
-    .all() as TeamKeyOption[];
+    ORDER BY lower(k.name), k.id`
+  );
 }
 
 /** Whether retained UTC-day buckets overlap a non-midnight budget boundary.
  * The existing soft policy excludes those buckets; the dashboard must not imply
  * that the displayed subtotal or remaining allowance is complete. */
-export function hasPartialRetainedTeamUsage(teamId: string, start: string, reset: string): boolean {
+export async function hasPartialRetainedTeamUsage(
+  teamId: string,
+  start: string,
+  reset: string
+): Promise<boolean> {
   const startDate = start.slice(0, 10);
   const endDate = reset.slice(0, 10);
   const dates = new Set<string>();
   if (start !== `${startDate}T00:00:00.000Z`) dates.add(startDate);
   if (reset !== `${endDate}T00:00:00.000Z`) dates.add(endDate);
-  const statement = getDbInstance().prepare(
-    "SELECT 1 FROM daily_team_usage_summary WHERE team_id = ? AND date = ? AND successful_requests > 0 LIMIT 1"
+  if (dates.size === 0) return false;
+  const row = await db().queryOne(
+    "SELECT 1 FROM daily_team_usage_summary WHERE team_id = $1 AND date = ANY($2::date[]) AND successful_requests > 0 LIMIT 1",
+    [teamId, [...dates]]
   );
-  return [...dates].some((date) => Boolean(statement.get(teamId, date)));
+  return Boolean(row);
 }
 
-export function advanceTeamBudgetWindow(team: Team, nowMs = Date.now()): Team {
+export async function advanceTeamBudgetWindow(team: Team, nowMs = Date.now()): Promise<Team> {
   if (!team.maxBudgetUsd || !team.budgetDuration || !team.budgetResetAt) return team;
   const durationMs = BUDGET_DURATION_MS[team.budgetDuration];
   let resetAtMs = Date.parse(team.budgetResetAt);
@@ -508,14 +527,14 @@ export function advanceTeamBudgetWindow(team: Team, nowMs = Date.now()): Team {
   resetAtMs += elapsedWindows * durationMs;
   const nextReset = new Date(resetAtMs).toISOString();
   const updatedAt = new Date(nowMs).toISOString();
-  const result = getDbInstance()
-    .prepare(
-      `UPDATE teams
-       SET budget_reset_at = ?, updated_at = ?
-       WHERE id = ? AND budget_reset_at = ?`
-    )
-    .run(nextReset, updatedAt, team.id, team.budgetResetAt);
-  if (result.changes !== 1) return getTeam(team.id) ?? team;
+  // Compare-and-set on the old reset instant: only one caller advances a window.
+  const result = await db().execute(
+    `UPDATE teams
+       SET budget_reset_at = $1::timestamptz, updated_at = $2::timestamptz
+       WHERE id = $3 AND budget_reset_at = $4::timestamptz`,
+    [nextReset, updatedAt, team.id, team.budgetResetAt]
+  );
+  if (result.changes !== 1) return (await getTeam(team.id)) ?? team;
   return { ...team, budgetResetAt: nextReset, updatedAt };
 }
 

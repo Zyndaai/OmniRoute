@@ -8,17 +8,24 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { getDbInstance } from "../db/core";
+import { db } from "../db/pg";
 import { expirePendingCallLogDetails } from "../db/callLogDetails";
 import {
   findReferencedArtifacts,
+  keyInList,
+  parseArtifactRelPath,
   selectCallLogIdsBefore,
   selectOverflowArtifactPaths,
+  type CallLogKey,
 } from "./callLogsBoundedQueries";
 import { getCallLogsDir, deleteCallArtifact, type CallLogDetailState } from "./callLogArtifacts";
-import { getCallLogMaxEntries, getCallLogsTableMaxRows } from "../logEnv";
-import { resolveCallLogRetentionDays } from "./callLogRetention";
-import { isSqlitePagerCorruptError, notePagerCorruption } from "../db/healthCheck";
+import {
+  getCallLogMaxEntries,
+  getCallLogRetentionDays,
+  getCallLogRetentionDaysOverride,
+  getCallLogsTableMaxRows,
+} from "../logEnv";
+import { getPersistedRetentionDays } from "../db/retentionSettings";
 
 const CALL_LOG_ROTATE_THROTTLE_MS = 60_000;
 const CALL_LOG_ROTATE_BATCH_SIZE = 100;
@@ -27,61 +34,80 @@ let lastCallLogRotationScheduledAt = 0;
 let callLogRotateInFlight = false;
 let callLogRotateScheduled = false;
 
+/**
+ * Request log retention in days: explicit variable override, then the dashboard-saved
+ * `retention.callLogs`, then the variable-or-7-day fallback. A settings read failure
+ * (very early startup) falls back to the variable.
+ */
+async function resolveCallLogRetentionDays(): Promise<number> {
+  const override = getCallLogRetentionDaysOverride();
+  if (override !== null) return override;
+  try {
+    return (await getPersistedRetentionDays("callLogs")) ?? getCallLogRetentionDays();
+  } catch {
+    return getCallLogRetentionDays();
+  }
+}
+
 export type DeleteResult = {
   deletedRows: number;
   deletedArtifacts: number;
 };
 
-export function clearArtifactReference(relativePath: string, nextState: CallLogDetailState) {
-  const db = getDbInstance();
-  db.prepare(
+/**
+ * Frees the artifact reference of the row that owns `relativePath`. The path is a pure
+ * function of the row's (timestamp, id), so the row is found through the primary key; a
+ * legacy path that does not follow the pattern falls back to a scan by path.
+ */
+export async function clearArtifactReference(
+  relativePath: string,
+  nextState: CallLogDetailState
+): Promise<void> {
+  const key = parseArtifactRelPath(relativePath);
+  await db().execute(
     `
       UPDATE call_logs
-      SET detail_state = ?,
+      SET detail_state = $1,
           artifact_relpath = NULL,
           artifact_size_bytes = NULL,
           artifact_sha256 = NULL
-      WHERE artifact_relpath = ?
-    `
-  ).run(nextState, relativePath);
+      WHERE ${key ? `id = $3 AND "timestamp" = $4::timestamptz AND` : ""} artifact_relpath = $2
+    `,
+    key ? [nextState, relativePath, key.id, key.timestamp] : [nextState, relativePath]
+  );
 }
 
-// #5217: SQLite caps a statement at SQLITE_MAX_VARIABLE_NUMBER bound params
-// (~999 on many builds). Callers like trimCallLogsToMaxRows() passed up to 5000
-// ids in one `IN (...)` → "too many SQL variables" aborted trimming. Chunk well
-// under the limit so each DELETE/SELECT stays valid.
+// Batches stay well under the 65535 bound-parameter limit (two parameters per key).
 const DELETE_ID_CHUNK_SIZE = 500;
 
-function takeOverflowArtifactSlot(relativePath: string, baseDir: string): boolean {
+async function takeOverflowArtifactSlot(relativePath: string, baseDir: string): Promise<boolean> {
   if (deleteCallArtifact(relativePath, baseDir)) {
-    clearArtifactReference(relativePath, "missing");
+    await clearArtifactReference(relativePath, "missing");
     return true;
   }
   if (relativePath && fs.existsSync(path.join(baseDir, relativePath))) return false;
   // Reference without a file: free it like a detail read does,
   // so later passes select new rows instead of stalling.
-  clearArtifactReference(relativePath, "missing");
+  await clearArtifactReference(relativePath, "missing");
   return true;
 }
 
-function deleteCallLogRowsByIds(ids: string[]): DeleteResult {
-  if (ids.length === 0) {
+async function deleteCallLogRowsByKeys(keys: CallLogKey[]): Promise<DeleteResult> {
+  if (keys.length === 0) {
     return { deletedRows: 0, deletedArtifacts: 0 };
   }
 
-  const db = getDbInstance();
   let deletedRows = 0;
   let deletedArtifacts = 0;
 
-  for (let i = 0; i < ids.length; i += DELETE_ID_CHUNK_SIZE) {
-    const chunk = ids.slice(i, i + DELETE_ID_CHUNK_SIZE);
-    const placeholders = chunk.map(() => "?").join(", ");
-    const rows = db
-      .prepare(`SELECT artifact_relpath FROM call_logs WHERE id IN (${placeholders})`)
-      .all(...chunk) as Array<{ artifact_relpath: string | null }>;
-
-    const result = db.prepare(`DELETE FROM call_logs WHERE id IN (${placeholders})`).run(...chunk);
-    deletedRows += result.changes;
+  for (let i = 0; i < keys.length; i += DELETE_ID_CHUNK_SIZE) {
+    const list = keyInList(keys.slice(i, i + DELETE_ID_CHUNK_SIZE));
+    // Each delete prunes to the partitions of its keys.
+    const rows = await db().query<{ artifact_relpath: string | null }>(
+      `DELETE FROM call_logs WHERE ${list.sql} RETURNING artifact_relpath`,
+      list.params
+    );
+    deletedRows += rows.length;
     for (const row of rows) {
       if (deleteCallArtifact(row.artifact_relpath)) {
         deletedArtifacts++;
@@ -187,10 +213,10 @@ function readOrphanCandidates(
   return { candidates, exhausted, scannedEntries };
 }
 
-export function cleanupOrphanCallLogFiles(
+export async function cleanupOrphanCallLogFiles(
   baseDir: string | null = getCallLogsDir(),
   options: { maxCandidates?: number; maxScanEntries?: number; minAgeMs?: number } = {}
-) {
+): Promise<number> {
   if (!baseDir || !fs.existsSync(baseDir)) return 0;
 
   const maxCandidates = options.maxCandidates ?? Number.POSITIVE_INFINITY;
@@ -218,7 +244,7 @@ export function cleanupOrphanCallLogFiles(
           return false;
         }
       });
-      const referenced = findReferencedArtifacts(oldEnough);
+      const referenced = await findReferencedArtifacts(oldEnough);
       for (const relativePath of oldEnough) {
         if (!referenced.has(relativePath) && deleteCallArtifact(relativePath, baseDir)) deleted++;
       }
@@ -232,11 +258,11 @@ export function cleanupOrphanCallLogFiles(
   }
 }
 
-export function cleanupOverflowCallLogFiles(
+export async function cleanupOverflowCallLogFiles(
   baseDir: string | null = getCallLogsDir(),
   maxEntries?: number,
   maxDeletes = Number.POSITIVE_INFINITY
-) {
+): Promise<number> {
   if (!baseDir || !fs.existsSync(baseDir)) return 0;
 
   const limit = maxEntries ?? getCallLogMaxEntries();
@@ -245,14 +271,14 @@ export function cleanupOverflowCallLogFiles(
   try {
     let deleted = 0;
     while (deleted < maxDeletes) {
-      const paths = selectOverflowArtifactPaths(
+      const paths = await selectOverflowArtifactPaths(
         limit,
         Math.min(DELETE_ID_CHUNK_SIZE, maxDeletes - deleted)
       );
       if (paths.length === 0) break;
       let progress = 0;
       for (const relativePath of paths) {
-        if (takeOverflowArtifactSlot(relativePath, baseDir)) progress++;
+        if (await takeOverflowArtifactSlot(relativePath, baseDir)) progress++;
       }
       deleted += progress;
       if (progress === 0) break;
@@ -267,16 +293,16 @@ export function cleanupOverflowCallLogFiles(
   }
 }
 
-export function deleteCallLogsBefore(
+export async function deleteCallLogsBefore(
   cutoff: string,
   maxDeletes = Number.POSITIVE_INFINITY
-): DeleteResult {
+): Promise<DeleteResult> {
   let deletedRows = 0;
   let deletedArtifacts = 0;
   while (deletedRows < maxDeletes) {
-    const ids = selectCallLogIdsBefore(cutoff, Math.min(5000, maxDeletes - deletedRows));
-    if (ids.length === 0) break;
-    const result = deleteCallLogRowsByIds(ids);
+    const keys = await selectCallLogIdsBefore(cutoff, Math.min(5000, maxDeletes - deletedRows));
+    if (keys.length === 0) break;
+    const result = await deleteCallLogRowsByKeys(keys);
     deletedRows += result.deletedRows;
     deletedArtifacts += result.deletedArtifacts;
     if (result.deletedRows === 0) break;
@@ -284,75 +310,61 @@ export function deleteCallLogsBefore(
   return { deletedRows, deletedArtifacts };
 }
 
-export function trimCallLogsToMaxRows(
+export async function trimCallLogsToMaxRows(
   maxRows = getCallLogsTableMaxRows(),
   maxDeletes = Number.POSITIVE_INFINITY
-) {
+): Promise<DeleteResult> {
   if (!Number.isInteger(maxRows) || maxRows < 1 || maxDeletes <= 0) {
     return { deletedRows: 0, deletedArtifacts: 0 };
   }
 
-  const db = getDbInstance();
   let deletedRows = 0;
   let deletedArtifacts = 0;
 
   while (deletedRows < maxDeletes) {
-    const currentCount = db.prepare("SELECT COUNT(*) AS cnt FROM call_logs").get() as {
-      cnt: number;
-    };
-    if (currentCount.cnt <= maxRows) break;
+    const currentCount = await db().queryOne<{ cnt: number }>(
+      "SELECT COUNT(*) AS cnt FROM call_logs"
+    );
+    const total = Number(currentCount?.cnt ?? 0);
+    if (total <= maxRows) break;
 
-    const toDelete = Math.min(currentCount.cnt - maxRows, 5000, maxDeletes - deletedRows);
-    const ids = db
-      .prepare("SELECT id FROM call_logs ORDER BY timestamp ASC LIMIT ?")
-      .all(toDelete)
-      .map((row) => String((row as { id: string }).id));
-    const result = deleteCallLogRowsByIds(ids);
+    const toDelete = Math.min(total - maxRows, 5000, maxDeletes - deletedRows);
+    // (id, "timestamp") pairs, oldest first: the delete then prunes to their partitions.
+    const keys = (
+      await db().query<{ id: string; timestamp: string }>(
+        `SELECT id, "timestamp" FROM call_logs ORDER BY "timestamp" ASC LIMIT $1`,
+        [toDelete]
+      )
+    ).map((row) => ({ id: String(row.id), timestamp: row.timestamp }));
+    const result = await deleteCallLogRowsByKeys(keys);
     deletedRows += result.deletedRows;
     deletedArtifacts += result.deletedArtifacts;
     if (result.deletedRows === 0) break;
   }
 
   return { deletedRows, deletedArtifacts };
-}
-
-let callLogRotatePaused = false;
-
-export function isCallLogRotatePaused(): boolean {
-  return callLogRotatePaused;
-}
-
-export function resetCallLogRotateFence(): void {
-  callLogRotatePaused = false;
 }
 
 export function handleCallLogRotateError(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   console.error("[callLogs] Failed to rotate request artifacts:", message);
-  if (!isSqlitePagerCorruptError(error)) return;
-  callLogRotatePaused = true;
-  notePagerCorruption("call-log-rotate", error);
-  console.error(
-    "[callLogs] SQLITE_CORRUPT during rotation; pausing further rotate writes. Check /api/db/health."
-  );
 }
 
-export function rotateCallLogs() {
-  if (callLogRotatePaused) return;
+export async function rotateCallLogs(): Promise<void> {
   try {
     const logsDir = getCallLogsDir();
     if (!logsDir || !fs.existsSync(logsDir)) return;
 
-    const retentionMs = resolveCallLogRetentionDays() * 24 * 60 * 60 * 1000;
+    const retentionMs = (await resolveCallLogRetentionDays()) * 24 * 60 * 60 * 1000;
     const cutoff = new Date(Date.now() - retentionMs).toISOString();
 
     // A process that died mid-write leaves its row 'pending'; once the insert-time
     // deadline passes, the write can no longer publish, so make it terminal 'missing'.
-    expirePendingCallLogDetails(getDbInstance());
-    deleteCallLogsBefore(cutoff, CALL_LOG_ROTATE_BATCH_SIZE);
-    trimCallLogsToMaxRows(getCallLogsTableMaxRows(), CALL_LOG_ROTATE_BATCH_SIZE);
-    cleanupOverflowCallLogFiles(logsDir, getCallLogMaxEntries(), CALL_LOG_ROTATE_BATCH_SIZE);
-    cleanupOrphanCallLogFiles(logsDir, {
+    await expirePendingCallLogDetails(db());
+    await deleteCallLogsBefore(cutoff, CALL_LOG_ROTATE_BATCH_SIZE);
+    await trimCallLogsToMaxRows(getCallLogsTableMaxRows(), CALL_LOG_ROTATE_BATCH_SIZE);
+    await cleanupOverflowCallLogFiles(logsDir, getCallLogMaxEntries(), CALL_LOG_ROTATE_BATCH_SIZE);
+    await cleanupOrphanCallLogFiles(logsDir, {
       maxCandidates: CALL_LOG_ROTATE_BATCH_SIZE,
       maxScanEntries: CALL_LOG_ROTATE_BATCH_SIZE,
       minAgeMs: CALL_LOG_ORPHAN_MIN_AGE_MS,
@@ -366,13 +378,11 @@ function runScheduledCallLogRotation() {
   if (callLogRotateInFlight) return;
   callLogRotateInFlight = true;
   setImmediate(() => {
-    try {
-      rotateCallLogs();
-    } catch (error) {
-      handleCallLogRotateError(error);
-    } finally {
-      callLogRotateInFlight = false;
-    }
+    rotateCallLogs()
+      .catch(handleCallLogRotateError)
+      .finally(() => {
+        callLogRotateInFlight = false;
+      });
   });
 }
 

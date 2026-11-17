@@ -59,8 +59,8 @@ function stripTrailingEffortSuffix(modelId: string): string | null {
  * `provider/GLM-5.3-high` while `model_context_overrides` is keyed on
  * `GLM-5.3`. Dispatcher already strips the suffix; the compat filter did not.
  */
-function lookupOverrideWithEffortInheritance(modelStr: string): number | null {
-  const exact = getResolvedModelContextOverride(modelStr);
+async function lookupOverrideWithEffortInheritance(modelStr: string): Promise<number | null> {
+  const exact = await getResolvedModelContextOverride(modelStr);
   if (exact != null) return exact;
 
   const parsed = parseModel(modelStr);
@@ -69,9 +69,9 @@ function lookupOverrideWithEffortInheritance(modelStr: string): number | null {
   if (!base || base === modelId) return null;
 
   if (parsed.provider) {
-    return getResolvedModelContextOverride({ provider: parsed.provider, model: base });
+    return await getResolvedModelContextOverride({ provider: parsed.provider, model: base });
   }
-  return getResolvedModelContextOverride(base);
+  return await getResolvedModelContextOverride(base);
 }
 
 /**
@@ -80,12 +80,12 @@ function lookupOverrideWithEffortInheritance(modelStr: string): number | null {
  * exists, so the caller falls through to the catalog-based check; otherwise
  * returns the fit verdict for the override itself.
  */
-function resolveContextOverrideVerdict(
+async function resolveContextOverrideVerdict(
   modelStr: string | undefined,
   requiredContextTokens: number
-): boolean | undefined {
+): Promise<boolean | undefined> {
   if (!modelStr) return undefined;
-  const override = lookupOverrideWithEffortInheritance(modelStr);
+  const override = await lookupOverrideWithEffortInheritance(modelStr);
   if (override == null) return undefined;
   return override >= requiredContextTokens;
 }
@@ -101,9 +101,11 @@ function resolveContextOverrideVerdict(
  * that rejected it is itself known to overstate real usage (issue #13870
  * measured a ~3.7x overestimate on a repetitive agent-session body).
  */
-export function getModelContextOverrideValue(modelStr: string | undefined): number | null {
+export async function getModelContextOverrideValue(
+  modelStr: string | undefined
+): Promise<number | null> {
   if (!modelStr) return null;
-  return lookupOverrideWithEffortInheritance(modelStr);
+  return await lookupOverrideWithEffortInheritance(modelStr);
 }
 
 /**
@@ -121,17 +123,27 @@ export function getModelContextOverrideValue(modelStr: string | undefined): numb
  * Returns `true` when the known limit accommodates the request, `false` when
  * it is known to be too small, and `null` when no limit metadata is known.
  */
-export function evaluateContextLimit(
+export async function evaluateContextLimit(
   capabilities: { maxInputTokens?: number | null; contextWindow?: number | null },
   requirements: { estimatedInputTokens: number; requiredContextTokens: number },
   modelStr?: string
-): boolean | null {
-  const overrideVerdict = resolveContextOverrideVerdict(
+): Promise<boolean | null> {
+  const overrideVerdict = await resolveContextOverrideVerdict(
     modelStr,
     requirements.requiredContextTokens
   );
   if (overrideVerdict !== undefined) return overrideVerdict;
+  return evaluateCatalogContextLimit(capabilities, requirements);
+}
 
+/**
+ * Synchronous catalog-only half of evaluateContextLimit (no persisted override
+ * lookup). Use it where no model string is available, so no override can apply.
+ */
+export function evaluateCatalogContextLimit(
+  capabilities: { maxInputTokens?: number | null; contextWindow?: number | null },
+  requirements: { estimatedInputTokens: number; requiredContextTokens: number }
+): boolean | null {
   const hasMaxInput = capabilities.maxInputTokens != null;
   const hasContextWindow = capabilities.contextWindow != null;
 

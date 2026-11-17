@@ -143,7 +143,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const record = createFile({
+    const record = await createFile({
       bytes,
       filename,
       purpose,
@@ -206,7 +206,7 @@ export async function GET(request: Request) {
   const { limit, after, order, purpose } = parsed;
 
   // We fetch limit + 1 to check if there are more items
-  const files = listFiles({
+  const files = await listFiles({
     apiKeyId: ownerFilter,
     purpose,
     limit: limit + 1,
@@ -216,7 +216,7 @@ export async function GET(request: Request) {
 
   const hasMore = files.length > limit;
   const data = files.slice(0, limit);
-  const totalCount = countFiles({ apiKeyId: ownerFilter, purpose });
+  const totalCount = await countFiles({ apiKeyId: ownerFilter, purpose });
 
   return NextResponse.json(
     {

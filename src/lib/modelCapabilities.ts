@@ -128,7 +128,7 @@ type CapabilityInput =
       model?: string | null;
     };
 
-type SyncedCapabilities = ReturnType<typeof getSyncedCapability>;
+type SyncedCapabilities = Awaited<ReturnType<typeof getSyncedCapability>>;
 
 /**
  * Controls whether persisted operator/discovery overrides participate in resolution.
@@ -215,12 +215,15 @@ function getRegistryModel(providerIdOrAlias: string | null, modelId: string | nu
  * names another provider (`openrouter` + `meta-llama/…`) or when the full id is
  * the provider's own registry id (`nvidia` + `nvidia/nemotron-…`, #12112).
  */
-function isCustomNodePrefix(provider: string, prefix: string): boolean {
-  const nodePrefix = getProviderNodePrefixSync(provider);
+async function isCustomNodePrefix(provider: string, prefix: string): Promise<boolean> {
+  const nodePrefix = await getProviderNodePrefixSync(provider);
   return !!nodePrefix && nodePrefix.toLowerCase() === prefix.trim().toLowerCase();
 }
 
-function stripOwnProviderPrefix(provider: string, model: string | null): string | null {
+async function stripOwnProviderPrefix(
+  provider: string,
+  model: string | null
+): Promise<string | null> {
   const slash = model ? model.indexOf("/") : -1;
   if (!model || slash <= 0) return model;
   const scopedModel = model.slice(slash + 1).trim();
@@ -230,12 +233,12 @@ function stripOwnProviderPrefix(provider: string, model: string | null): string 
   const ownPrefix =
     prefixProvider === provider ||
     prefixProvider === resolveProviderAlias(provider) ||
-    isCustomNodePrefix(provider, model.slice(0, slash));
+    (await isCustomNodePrefix(provider, model.slice(0, slash)));
   if (!scopedModel || !ownPrefix || hasKnownProviderModel(provider, model)) return model;
   return scopedModel;
 }
 
-function resolveCapabilityInput(input: CapabilityInput) {
+async function resolveCapabilityInput(input: CapabilityInput) {
   if (typeof input === "string") {
     const parsed = parseModel(input);
     const rawModel = toNonEmptyString(parsed.model);
@@ -265,7 +268,7 @@ function resolveCapabilityInput(input: CapabilityInput) {
   if (rawProvider) {
     const canonical = resolveCanonicalProviderModel(
       rawProvider,
-      stripOwnProviderPrefix(rawProvider, rawModel)
+      await stripOwnProviderPrefix(rawProvider, rawModel)
     );
     return {
       provider: canonical.provider,
@@ -476,12 +479,12 @@ function reverseModelsDevProviders(provider: string): readonly string[] {
   return result;
 }
 
-function getSyncedCapabilityForResolved(
+async function getSyncedCapabilityForResolved(
   provider: string | null,
   model: string | null,
   rawModel: string | null,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): SyncedCapabilities {
+): Promise<SyncedCapabilities> {
   if (!provider || !model) return null;
 
   const modelCandidates = Array.from(
@@ -513,7 +516,7 @@ function getSyncedCapabilityForResolved(
   const bulk = snapshot?.synced ?? null;
   for (const prov of providerCandidates) {
     for (const mid of modelCandidates) {
-      const found = getSyncedCapability(prov, mid, bulk);
+      const found = await getSyncedCapability(prov, mid, bulk);
       if (found) return found;
     }
   }
@@ -672,30 +675,30 @@ function resolveVisionCapability(
  * deliberately NO suffix/effort/family inheritance: an override for
  * `codex/gpt-5.6` never applies to `codex/gpt-5.6-high`.
  */
-function getCapabilityOverride(
+async function getCapabilityOverride(
   resolved: { provider: string | null; model: string | null; rawModel: string | null },
   key: "max_input_tokens" | "max_output_tokens"
-): number | null {
-  const canonical = getModelCapabilityOverride(resolved.provider, resolved.model, key);
+): Promise<number | null> {
+  const canonical = await getModelCapabilityOverride(resolved.provider, resolved.model, key);
   if (canonical !== null) return canonical;
   return resolved.rawModel && resolved.rawModel !== resolved.model
-    ? getModelCapabilityOverride(resolved.provider, resolved.rawModel, key)
+    ? await getModelCapabilityOverride(resolved.provider, resolved.rawModel, key)
     : null;
 }
 
-function getContextOverride(
+async function getContextOverride(
   resolved: {
     provider: string | null;
     model: string | null;
     rawModel: string | null;
   },
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): number | null {
+): Promise<number | null> {
   const bulk = snapshot?.contextOverrides ?? null;
-  const canonical = getModelContextOverride(resolved.provider, resolved.model, bulk);
+  const canonical = await getModelContextOverride(resolved.provider, resolved.model, bulk);
   if (canonical !== null) return canonical;
   return resolved.rawModel && resolved.rawModel !== resolved.model
-    ? getModelContextOverride(resolved.provider, resolved.rawModel, bulk)
+    ? await getModelContextOverride(resolved.provider, resolved.rawModel, bulk)
     : null;
 }
 
@@ -706,18 +709,18 @@ function getContextOverride(
  * `snapshot` is the #9147 build-local bulk load; when supplied the on-demand
  * SQLite read is skipped and the preloaded nested map is used instead.
  */
-export function getResolvedModelContextOverride(
+export async function getResolvedModelContextOverride(
   input: CapabilityInput,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): number | null {
-  return getContextOverride(resolveCapabilityInput(input), snapshot);
+): Promise<number | null> {
+  return getContextOverride(await resolveCapabilityInput(input), snapshot);
 }
 
 function getInputTokenCapabilityOverride(resolved: {
   provider: string | null;
   model: string | null;
   rawModel: string | null;
-}): number | null {
+}): Promise<number | null> {
   return getCapabilityOverride(resolved, "max_input_tokens");
 }
 
@@ -725,7 +728,7 @@ function getOutputTokenCapabilityOverride(resolved: {
   provider: string | null;
   model: string | null;
   rawModel: string | null;
-}): number | null {
+}): Promise<number | null> {
   return getCapabilityOverride(resolved, "max_output_tokens");
 }
 
@@ -734,19 +737,29 @@ function getOutputTokenCapabilityOverride(resolved: {
  * supplied its preloaded map is used; otherwise falls back to the on-demand
  * read (same precedence as getOutputTokenCapabilityOverride).
  */
-function getMaxTokenCapabilityOverride(
+async function getMaxTokenCapabilityOverride(
   resolved: {
     provider: string | null;
     model: string | null;
     rawModel: string | null;
   },
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): number | null {
+): Promise<number | null> {
   const bulk = snapshot?.maxTokenOverrides ?? null;
   return (
-    getModelCapabilityOverride(resolved.provider, resolved.model, "max_output_tokens", bulk) ??
+    (await getModelCapabilityOverride(
+      resolved.provider,
+      resolved.model,
+      "max_output_tokens",
+      bulk
+    )) ??
     (resolved.rawModel && resolved.rawModel !== resolved.model
-      ? getModelCapabilityOverride(resolved.provider, resolved.rawModel, "max_output_tokens", bulk)
+      ? await getModelCapabilityOverride(
+          resolved.provider,
+          resolved.rawModel,
+          "max_output_tokens",
+          bulk
+        )
       : null)
   );
 }
@@ -755,44 +768,54 @@ function getMaxTokenCapabilityOverride(
  * Bulk-load friendly max_input_tokens override lookup (#9199): resolves from the
  * snapshot's preloaded map instead of a per-model SQLite read.
  */
-function getMaxInputTokenCapabilityOverride(
+async function getMaxInputTokenCapabilityOverride(
   resolved: {
     provider: string | null;
     model: string | null;
     rawModel: string | null;
   },
   snapshot: ModelCapabilityResolutionSnapshot
-): number | null {
+): Promise<number | null> {
   const bulk = snapshot.maxInputTokenOverrides;
   return (
-    getModelCapabilityOverride(resolved.provider, resolved.model, "max_input_tokens", bulk) ??
+    (await getModelCapabilityOverride(
+      resolved.provider,
+      resolved.model,
+      "max_input_tokens",
+      bulk
+    )) ??
     (resolved.rawModel && resolved.rawModel !== resolved.model
-      ? getModelCapabilityOverride(resolved.provider, resolved.rawModel, "max_input_tokens", bulk)
+      ? await getModelCapabilityOverride(
+          resolved.provider,
+          resolved.rawModel,
+          "max_input_tokens",
+          bulk
+        )
       : null)
   );
 }
 
 /** Resolve an exact reasoning-effort vocabulary from the build-local snapshot
  * when present, otherwise from the on-demand persisted override lookup. */
-function getReasoningEffortsCapabilityOverride(
+async function getReasoningEffortsCapabilityOverride(
   resolved: {
     provider: string | null;
     model: string | null;
     rawModel: string | null;
   },
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): readonly string[] | null {
+): Promise<readonly string[] | null> {
   const bulk = snapshot?.reasoningEffortsOverrides ?? null;
   return (
-    getReasoningEffortsOverride(resolved.provider, resolved.model, bulk) ??
+    (await getReasoningEffortsOverride(resolved.provider, resolved.model, bulk)) ??
     (resolved.rawModel && resolved.rawModel !== resolved.model
-      ? getReasoningEffortsOverride(resolved.provider, resolved.rawModel, bulk)
+      ? await getReasoningEffortsOverride(resolved.provider, resolved.rawModel, bulk)
       : null)
   );
 }
 
 /** Resolve the runtime-compatible provider/model keys for a compat vision override. */
-function getCompatVisionOverride(
+async function getCompatVisionOverride(
   resolved: {
     provider: string | null;
     model: string | null;
@@ -800,7 +823,7 @@ function getCompatVisionOverride(
     rawModel: string | null;
   },
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): boolean | null {
+): Promise<boolean | null> {
   if (!resolved.provider || !resolved.model) return null;
   const directCandidates = [
     ...getNoAuthHydrationProviderIds(resolved.provider),
@@ -814,15 +837,15 @@ function getCompatVisionOverride(
   // node id — so map every candidate prefix back to its node id. Mapped ids go
   // LAST: a direct key match always wins, so this can only ADD a resolution that
   // the direct candidates missed.
-  const mappedNodeIds = directCandidates
-    .map((candidate) => getProviderNodeIdByPrefixSync(candidate))
-    .filter((value): value is string => Boolean(value));
+  const mappedNodeIds = (
+    await Promise.all(directCandidates.map((candidate) => getProviderNodeIdByPrefixSync(candidate)))
+  ).filter((value): value is string => Boolean(value));
   const providerCandidates = Array.from(new Set([...directCandidates, ...mappedNodeIds]));
   const modelCandidates = Array.from(
     new Set([resolved.model, resolved.rawModel].filter((value): value is string => Boolean(value)))
   );
   for (const providerId of providerCandidates) {
-    const value = getModelCompatVisionOverride(
+    const value = await getModelCompatVisionOverride(
       providerId,
       modelCandidates,
       snapshot?.compatVisionOverrides
@@ -832,17 +855,17 @@ function getCompatVisionOverride(
   return null;
 }
 
-export function getExplicitModelOutputCap(
+export async function getExplicitModelOutputCap(
   input: CapabilityInput,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): number | null {
-  const resolved = resolveCapabilityInput(input);
+): Promise<number | null> {
+  const resolved = await resolveCapabilityInput(input);
   const maxTokenOverride = snapshot
-    ? getMaxTokenCapabilityOverride(resolved, snapshot)
-    : getOutputTokenCapabilityOverride(resolved);
+    ? await getMaxTokenCapabilityOverride(resolved, snapshot)
+    : await getOutputTokenCapabilityOverride(resolved);
   if (maxTokenOverride !== null) return maxTokenOverride;
 
-  const synced = getSyncedCapabilityForResolved(
+  const synced = await getSyncedCapabilityForResolved(
     resolved.provider,
     resolved.model,
     resolved.rawModel,
@@ -869,18 +892,18 @@ function resolveSyncedEffortTierFallback(
   return isModelsDevEffortTiersEnabled() ? knownReasoningEffortTiers(syncedEfforts) : null;
 }
 
-export function getResolvedModelCapabilities(
+export async function getResolvedModelCapabilities(
   input: CapabilityInput,
   options?: ResolveModelCapabilitiesOptions,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): ResolvedModelCapabilities {
+): Promise<ResolvedModelCapabilities> {
   // Reconciliation / auto-discovery needs the override-free catalog view so a
   // persisted override never feeds back into the comparison that (re)writes it.
   const usePersistedOverrides = options?.persistedOverrides !== false;
-  const resolved = resolveCapabilityInput(input);
+  const resolved = await resolveCapabilityInput(input);
   let spec = getStaticSpec(resolved.model, resolved.rawModel);
   let registryModel = getRegistryModel(resolved.provider, resolved.model);
-  let synced = getSyncedCapabilityForResolved(
+  let synced = await getSyncedCapabilityForResolved(
     resolved.provider,
     resolved.model,
     resolved.rawModel,
@@ -903,7 +926,7 @@ export function getResolvedModelCapabilities(
       effortBaseModelId = baseModelId;
       spec = getStaticSpec(baseModelId, resolved.rawModel);
       registryModel = getRegistryModel(resolved.provider, baseModelId);
-      synced = getSyncedCapabilityForResolved(
+      synced = await getSyncedCapabilityForResolved(
         resolved.provider,
         baseModelId,
         resolved.rawModel,
@@ -941,7 +964,7 @@ export function getResolvedModelCapabilities(
     (providerDeniesTools ? false : null);
 
   const reasoningEffortsOverride = usePersistedOverrides
-    ? getReasoningEffortsCapabilityOverride(resolved, snapshot)
+    ? await getReasoningEffortsCapabilityOverride(resolved, snapshot)
     : null;
   const supportsThinking = reasoningEffortsOverride
     ? true
@@ -963,7 +986,7 @@ export function getResolvedModelCapabilities(
   // `maxInputTokens` still follows its own precedence chain; only when that
   // chain has no narrower source does it naturally fall back to this window.
   const persistedContextWindow = usePersistedOverrides
-    ? getContextOverride(resolved, snapshot)
+    ? await getContextOverride(resolved, snapshot)
     : null;
   const limitRows = { synced, registryModel, spec, authoritativeContextWindow };
   const contextLimit = pickContextWindow(limitRows, persistedContextWindow);
@@ -972,12 +995,12 @@ export function getResolvedModelCapabilities(
   const maxInputOverride = !usePersistedOverrides
     ? null
     : snapshot
-      ? getMaxInputTokenCapabilityOverride(resolved, snapshot)
-      : getInputTokenCapabilityOverride(resolved);
+      ? await getMaxInputTokenCapabilityOverride(resolved, snapshot)
+      : await getInputTokenCapabilityOverride(resolved);
   const maxTokenOverride = snapshot
-    ? getMaxTokenCapabilityOverride(resolved, snapshot)
+    ? await getMaxTokenCapabilityOverride(resolved, snapshot)
     : usePersistedOverrides
-      ? getOutputTokenCapabilityOverride(resolved)
+      ? await getOutputTokenCapabilityOverride(resolved)
       : null;
 
   const inputLimit = pickMaxInputTokens(limitRows, maxInputOverride, contextLimit);
@@ -1001,7 +1024,7 @@ export function getResolvedModelCapabilities(
   // recovers the stored connection-id row via lookupKey / path leftover.
   const customVisionOverride =
     resolved.provider && resolved.model
-      ? getCustomModelVisionOverride(
+      ? await getCustomModelVisionOverride(
           resolved.provider,
           resolved.model,
           snapshot?.customVisionOverrides,
@@ -1010,14 +1033,14 @@ export function getResolvedModelCapabilities(
       : null;
 
   const compatVisionOverride = usePersistedOverrides
-    ? getCompatVisionOverride(resolved, snapshot)
+    ? await getCompatVisionOverride(resolved, snapshot)
     : null;
 
   // #14081: positive-only vision verdict from a custom node's synced
   // `syncedAvailableModels` row, mirroring the catalog's buildSyncedCapabilities.
   const syncedAvailableModelVision =
     resolved.provider && resolved.model
-      ? getSyncedAvailableModelVision(
+      ? await getSyncedAvailableModelVision(
           resolved.provider,
           resolved.model,
           snapshot?.syncedAvailableModelVision
@@ -1102,12 +1125,12 @@ export function getResolvedModelCapabilities(
  * Same resolution as `getResolvedModelCapabilities`, plus which source supplied each
  * token limit (diagnostics only — the resolved capabilities are identical).
  */
-export function getResolvedModelCapabilitiesWithLimitSources(
+export async function getResolvedModelCapabilitiesWithLimitSources(
   input: CapabilityInput,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): { capabilities: ResolvedModelCapabilities; limitSources: ModelLimitSources } {
+): Promise<{ capabilities: ResolvedModelCapabilities; limitSources: ModelLimitSources }> {
   const limitSources: Partial<ModelLimitSources> = {};
-  const capabilities = getResolvedModelCapabilities(input, { limitSources }, snapshot);
+  const capabilities = await getResolvedModelCapabilities(input, { limitSources }, snapshot);
   return { capabilities, limitSources: limitSources as ModelLimitSources };
 }
 
@@ -1135,51 +1158,54 @@ export function getResolvedModelCapabilitiesWithLimitSources(
  * The returned cap is still only an *input* bound — the total-window/output
  * reserve check is enforced separately by `enforceOutputTokenBudget`.
  */
-export function resolveInputTokenCapForGate(
+export async function resolveInputTokenCapForGate(
   input: CapabilityInput,
   { isCombo = false }: { isCombo?: boolean } = {}
-): number | null {
-  const resolved = resolveCapabilityInput(input);
+): Promise<number | null> {
+  const resolved = await resolveCapabilityInput(input);
 
   // 1. An explicit `max_input_tokens` override always wins and is never bypassed.
-  const explicitInputOverride = getInputTokenCapabilityOverride(resolved);
+  const explicitInputOverride = await getInputTokenCapabilityOverride(resolved);
   if (explicitInputOverride !== null) return explicitInputOverride;
 
   // 2. Combo rescue: an exact persisted context override supersedes the smaller
   //    catalog/client input hint (mirrors contextOverrideGate.evaluateContextLimit).
   if (isCombo) {
-    const contextOverride = getContextOverride(resolved);
+    const contextOverride = await getContextOverride(resolved);
     if (contextOverride !== null) return contextOverride;
   }
 
   // 3. Canonical chain (already clamped to the total window by the resolver).
-  return getResolvedModelCapabilities(input).maxInputTokens;
+  return (await getResolvedModelCapabilities(input)).maxInputTokens;
 }
 
-export function supportsToolCalling(input: CapabilityInput): boolean {
+export async function supportsToolCalling(input: CapabilityInput): Promise<boolean> {
   if (typeof input === "string" && !String(input || "").trim()) return false;
-  return getResolvedModelCapabilities(input).toolCalling;
+  return (await getResolvedModelCapabilities(input)).toolCalling;
 }
 
-export function supportsReasoning(input: CapabilityInput): boolean {
+export async function supportsReasoning(input: CapabilityInput): Promise<boolean> {
   if (typeof input === "string" && !String(input || "").trim()) return true;
-  return getResolvedModelCapabilities(input).reasoning;
+  return (await getResolvedModelCapabilities(input)).reasoning;
 }
 
-export function supportsMaxTokens(input: CapabilityInput): boolean {
+export async function supportsMaxTokens(input: CapabilityInput): Promise<boolean> {
   if (typeof input === "string" && !String(input || "").trim()) return true;
-  return getResolvedModelCapabilities(input).supportsMaxTokens;
+  return (await getResolvedModelCapabilities(input)).supportsMaxTokens;
 }
 
-export function capMaxOutputTokens(input: CapabilityInput, requested?: number): number | null {
-  const cap = getResolvedModelCapabilities(input).maxOutputTokens;
+export async function capMaxOutputTokens(
+  input: CapabilityInput,
+  requested?: number
+): Promise<number | null> {
+  const cap = (await getResolvedModelCapabilities(input)).maxOutputTokens;
   const hasRequested = typeof requested === "number" && Number.isFinite(requested);
   if (cap === null) return hasRequested ? requested : null;
   return hasRequested ? Math.min(requested, cap) : cap;
 }
 
-export function getDefaultThinkingBudget(input: CapabilityInput): number {
-  return getResolvedModelCapabilities(input).defaultThinkingBudget;
+export async function getDefaultThinkingBudget(input: CapabilityInput): Promise<number> {
+  return (await getResolvedModelCapabilities(input)).defaultThinkingBudget;
 }
 
 /**
@@ -1197,8 +1223,8 @@ export function getDefaultThinkingBudget(input: CapabilityInput): number {
  *     models already carry their explicit 24576 cap via rule 1, so this only
  *     fires for unregistered Gemini ids.
  */
-export function capThinkingBudget(input: CapabilityInput, budget: number): number {
-  const resolved = getResolvedModelCapabilities(input);
+export async function capThinkingBudget(input: CapabilityInput, budget: number): Promise<number> {
+  const resolved = await getResolvedModelCapabilities(input);
   let cap = resolved.thinkingBudgetCap;
 
   const modelId = resolved.model ?? resolved.rawModel ?? "";
@@ -1223,23 +1249,23 @@ export function capThinkingBudget(input: CapabilityInput, budget: number): numbe
   return Math.min(budget, cap ?? budget);
 }
 
-export function getModelContextLimit(
+export async function getModelContextLimit(
   providerOrInput: CapabilityInput,
   modelId?: string,
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): number | null {
+): Promise<number | null> {
   const resolved =
     typeof providerOrInput === "string" && modelId !== undefined
-      ? getResolvedModelCapabilities(
+      ? await getResolvedModelCapabilities(
           { provider: providerOrInput, model: modelId },
           undefined,
           snapshot
         )
-      : getResolvedModelCapabilities(providerOrInput, undefined, snapshot);
+      : await getResolvedModelCapabilities(providerOrInput, undefined, snapshot);
   // Feature 5004: a persisted override (operator-set or auto-discovered) wins over the
   // static catalog / models.dev sync. `getResolvedModelCapabilities` stays override-free
   // so the reconciler can compare the catalog value against provider-declared windows.
-  const override = getModelContextOverride(
+  const override = await getModelContextOverride(
     resolved.provider,
     resolved.model,
     snapshot?.contextOverrides ?? null

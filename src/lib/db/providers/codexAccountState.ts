@@ -1,19 +1,10 @@
-import { backupDbFile } from "../backup";
-import { getDbInstance, rowToCamel } from "../core";
+import { db } from "../pg";
+import { rowToCamel } from "../caseMapping";
 import { invalidateDbCache } from "../readCache";
+import { jsonValueParam } from "../pgJsonText";
 import { toRecord } from "./columns";
 
 type JsonRecord = Record<string, unknown>;
-
-interface StatementLike<TRow = unknown> {
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  transaction: <T>(fn: () => T) => () => T;
-}
 
 type CodexScopedQuotaPatch = {
   quotaState?: JsonRecord;
@@ -60,22 +51,18 @@ function connectionHasCodexChildCooldown(psd: JsonRecord): boolean {
  * nulled in the same transaction so a crash between the two writes cannot
  * leave a nested child map behind a cleared parent column.
  */
-export function stripCodexChildCooldownsFromConnection(
+export async function stripCodexChildCooldownsFromConnection(
   id: string,
   options?: { alsoClearTopLevel?: boolean }
-): void {
+): Promise<void> {
   if (typeof id !== "string" || id.length === 0) return;
-  const db = getDbInstance() as unknown as DbLike;
   const alsoClearTopLevel = options?.alsoClearTopLevel === true;
-  const candidate = db.prepare("SELECT provider FROM provider_connections WHERE id = ?").get(id);
-  const isCodex = toRecord(candidate).provider === "codex";
-  if (!alsoClearTopLevel && !isCodex) return;
 
-  backupDbFile("pre-write");
-  const wrote = db.transaction(() => {
-    const existing = db
-      .prepare("SELECT provider, provider_specific_data FROM provider_connections WHERE id = ?")
-      .get(id);
+  const wrote = await db().transaction(async (tx) => {
+    const existing = await tx.queryOne(
+      "SELECT provider, provider_specific_data FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
+    );
     if (!existing) return false;
     const existingRecord = toRecord(rowToCamel(existing));
     const providerSpecificData = toRecord(existingRecord.providerSpecificData);
@@ -85,30 +72,33 @@ export function stripCodexChildCooldownsFromConnection(
 
     const now = new Date().toISOString();
     if (alsoClearTopLevel && stripNested) {
-      db.prepare(
+      await tx.execute(
         `UPDATE provider_connections
          SET rate_limited_until = NULL,
-             provider_specific_data = ?,
-             updated_at = ?
-         WHERE id = ?`
-      ).run(JSON.stringify(stripCodexChildCooldownFields(providerSpecificData)), now, id);
+             provider_specific_data = $1,
+             updated_at = $2
+         WHERE id = $3`,
+        [jsonValueParam(stripCodexChildCooldownFields(providerSpecificData)), now, id]
+      );
       return true;
     }
     if (alsoClearTopLevel) {
-      db.prepare(
+      await tx.execute(
         `UPDATE provider_connections
-         SET rate_limited_until = NULL, updated_at = ?
-         WHERE id = ?`
-      ).run(now, id);
+         SET rate_limited_until = NULL, updated_at = $1
+         WHERE id = $2`,
+        [now, id]
+      );
       return true;
     }
-    db.prepare(
+    await tx.execute(
       `UPDATE provider_connections
-       SET provider_specific_data = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(JSON.stringify(stripCodexChildCooldownFields(providerSpecificData)), now, id);
+       SET provider_specific_data = $1, updated_at = $2
+       WHERE id = $3`,
+      [jsonValueParam(stripCodexChildCooldownFields(providerSpecificData)), now, id]
+    );
     return true;
-  })();
+  });
   // Touches only rate_limited_until and codex-scope cooldown keys inside
   // provider_specific_data — none are read by the /v1/models catalog builder.
   if (wrote) invalidateDbCache("connections", id, { skipModelCatalog: true });
@@ -123,13 +113,11 @@ export async function updateCodexScopedQuotaState(
   scope: "codex" | "spark",
   patch: CodexScopedQuotaPatch
 ): Promise<JsonRecord | null> {
-  const db = getDbInstance() as unknown as DbLike;
-  const candidate = db.prepare("SELECT provider FROM provider_connections WHERE id = ?").get(id);
-  if (toRecord(candidate).provider !== "codex") return null;
-
-  backupDbFile("pre-write");
-  const persisted = db.transaction(() => {
-    const existing = db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(id);
+  const persisted = await db().transaction(async (tx) => {
+    const existing = await tx.queryOne(
+      "SELECT provider, provider_specific_data FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
+    );
     if (!existing) return null;
 
     const existingRecord = toRecord(rowToCamel(existing));
@@ -193,13 +181,14 @@ export async function updateCodexScopedQuotaState(
       else delete nextProviderSpecificData.codexScopeRateLimitSource;
     }
 
-    db.prepare(
+    await tx.execute(
       `UPDATE provider_connections
-       SET provider_specific_data = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(JSON.stringify(nextProviderSpecificData), new Date().toISOString(), id);
+       SET provider_specific_data = $1, updated_at = $2
+       WHERE id = $3`,
+      [jsonValueParam(nextProviderSpecificData),new Date().toISOString(), id]
+    );
     return nextProviderSpecificData;
-  })();
+  });
 
   // Codex-scope quota/cooldown keys only (codexQuotaState*, codexExhaustedWindow*,
   // codexScopeRateLimit*) — routing metadata the /v1/models builder never reads.
@@ -211,12 +200,15 @@ export async function updateCodexScopedQuotaState(
 const QUOTA_RESET_CLOCK_SKEW_GRACE_MS = 30_000;
 
 /** Cheap probe: does this connection+scope currently carry a child cooldown? */
-export function hasCodexScopeCooldown(id: string, scope: "codex" | "spark"): boolean {
+export async function hasCodexScopeCooldown(
+  id: string,
+  scope: "codex" | "spark"
+): Promise<boolean> {
   if (typeof id !== "string" || id.length === 0) return false;
-  const db = getDbInstance() as unknown as DbLike;
-  const row = db
-    .prepare("SELECT provider, provider_specific_data FROM provider_connections WHERE id = ?")
-    .get(id);
+  const row = await db().queryOne(
+    "SELECT provider, provider_specific_data FROM provider_connections WHERE id = $1",
+    [id]
+  );
   if (!row) return false;
   const record = toRecord(rowToCamel(row));
   if (record.provider !== "codex") return false;
@@ -230,19 +222,21 @@ export function hasCodexScopeCooldown(id: string, scope: "codex" | "spark"): boo
  * Cooldowns sourced from upstream 429 quota_reset retain their authority
  * until their reset timestamp has elapsed.
  */
-export function liftCodexScopeCooldownOnHeadroom(id: string, scope: "codex" | "spark"): boolean {
+export async function liftCodexScopeCooldownOnHeadroom(
+  id: string,
+  scope: "codex" | "spark"
+): Promise<boolean> {
   if (typeof id !== "string" || id.length === 0) return false;
-  const db = getDbInstance() as unknown as DbLike;
 
-  // Cheap eligibility probe so the backup only runs when a write is plausible.
+  // Cheap eligibility probe so the row lock is only taken when a write is plausible.
   // The transaction below re-reads under lock and remains the authority.
-  if (!hasCodexScopeCooldown(id, scope)) return false;
+  if (!(await hasCodexScopeCooldown(id, scope))) return false;
 
-  backupDbFile("pre-write");
-  const wrote = db.transaction(() => {
-    const existing = db
-      .prepare("SELECT provider, provider_specific_data FROM provider_connections WHERE id = ?")
-      .get(id);
+  const wrote = await db().transaction(async (tx) => {
+    const existing = await tx.queryOne(
+      "SELECT provider, provider_specific_data FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
+    );
     if (!existing) return false;
     const existingRecord = toRecord(rowToCamel(existing));
     if (existingRecord.provider !== "codex") return false;
@@ -290,14 +284,14 @@ export function liftCodexScopeCooldownOnHeadroom(id: string, scope: "codex" | "s
       }
     }
 
-    const now = new Date().toISOString();
-    db.prepare(
+    await tx.execute(
       `UPDATE provider_connections
-       SET provider_specific_data = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(JSON.stringify(nextPsd), now, id);
+       SET provider_specific_data = $1, updated_at = $2
+       WHERE id = $3`,
+      [jsonValueParam(nextPsd),new Date().toISOString(), id]
+    );
     return true;
-  })();
+  });
 
   // Codex-scope cooldown/exhaustion keys only — routing metadata the
   // /v1/models builder never reads.

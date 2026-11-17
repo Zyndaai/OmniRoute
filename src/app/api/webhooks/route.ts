@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     if (parsedLimit.ok === false) return parsedLimit.response;
     const parsedOffset = parseIntegerQueryParam(searchParams, "offset", 0);
     if (parsedOffset.ok === false) return parsedOffset.response;
-    const result = getWebhooks(
+    const result = await getWebhooks(
       searchParams.get("limit")
         ? { limit: parsedLimit.value, offset: parsedOffset.value }
         : undefined
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     }
 
     const metadataEncrypted = data.metadata ? encryptMetadata(data.metadata) : undefined;
-    const webhook = createWebhook({
+    const webhook = await createWebhook({
       url: data.url,
       events: data.events,
       secret: data.secret,

@@ -22,7 +22,9 @@ import {
 
 export interface AudioBridgeDependencies {
   getSettings?: () => Promise<Record<string, unknown>>;
-  getCapabilities?: (model: string) => { supportsAudio: boolean | null };
+  getCapabilities?: (
+    model: string
+  ) => { supportsAudio: boolean | null } | Promise<{ supportsAudio: boolean | null }>;
   hasUsableCredentials?: AudioCredentialCheck;
   selectModel?: (
     configuredModel: string,
@@ -74,7 +76,7 @@ export class AudioBridgeGuardrail extends BaseGuardrail {
     const audioParts = extractAudioParts(body.messages);
     if (audioParts.length === 0) return { block: false };
 
-    const capabilities = (this.deps.getCapabilities ?? getResolvedModelCapabilities)(model);
+    const capabilities = await (this.deps.getCapabilities ?? getResolvedModelCapabilities)(model);
     if (capabilities.supportsAudio === true) return { block: false };
 
     const limitedParts = audioParts.slice(0, runtime.maxClips);

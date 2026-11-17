@@ -165,7 +165,7 @@ export async function POST(request: Request) {
     await applyOmniRoutePiProvider({ baseUrl, apiKey, model, modelName: model });
 
     try {
-      saveCliToolLastConfigured(PI_TOOL_ID);
+      await saveCliToolLastConfigured(PI_TOOL_ID);
     } catch {
       /* non-critical bookkeeping */
     }
@@ -200,7 +200,7 @@ export async function DELETE(request: Request) {
 
     if (removed) {
       try {
-        deleteCliToolLastConfigured(PI_TOOL_ID);
+        await deleteCliToolLastConfigured(PI_TOOL_ID);
       } catch {
         /* non-critical bookkeeping */
       }

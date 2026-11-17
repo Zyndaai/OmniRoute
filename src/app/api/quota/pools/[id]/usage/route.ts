@@ -33,7 +33,7 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
     const { id } = await params;
 
     // 1. Get pool — 404 if not found
-    const pool = getPool(id);
+    const pool = await getPool(id);
     if (!pool) {
       return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
@@ -43,7 +43,7 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
     //    connection so catalog-only pools surface their plan dimensions
     //    (passing "" here previously degraded every catalog pool to empty).
     const provider = await resolveConnectionProvider(pool.connectionId);
-    const plan = resolvePlan(pool.connectionId, provider);
+    const plan = await resolvePlan(pool.connectionId, provider);
 
     // 3. Scale each dimension by the pool's member count, mirroring enforce.ts:
     //    a pool with N same-type connections has an effective budget of

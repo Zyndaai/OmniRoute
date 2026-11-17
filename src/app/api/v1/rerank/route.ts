@@ -35,7 +35,7 @@ import { CORS_HEADERS } from "@omniroute/open-sse/utils/cors.ts";
 import { deriveRerankProviderForChatProvider } from "@omniroute/open-sse/config/rerankRegistry.ts";
 import { resolveAlibabaQwen3RerankUrl } from "@/shared/constants/alibabaProviderRegions";
 import { getComboByName, getCombos } from "@/lib/db/combos";
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
+import { getSettings } from "@/lib/db/settings";
 import { handleComboChat } from "@omniroute/open-sse/services/combo.ts";
 import * as log from "@/sse/utils/logger";
 
@@ -146,7 +146,7 @@ export async function handleValidatedRerankRequestBody(
 
         let settings = {};
         try {
-          settings = getUserDatabaseSettings();
+          settings = await getSettings();
         } catch {}
 
         return handleComboChat({

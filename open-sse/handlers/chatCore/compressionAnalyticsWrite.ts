@@ -106,7 +106,7 @@ export function writeCompressionSkip(opts: WriteOpts, skipReason: string): Promi
     try {
       const { insertCompressionAnalyticsRow } = await import("@/lib/db/compressionAnalytics");
       const { stats } = opts;
-      insertCompressionAnalyticsRow({
+      await insertCompressionAnalyticsRow({
         timestamp: new Date().toISOString(),
         combo_id: opts.comboName ?? null,
         provider: opts.provider ?? null,
@@ -160,12 +160,12 @@ export function writeCompressionAnalytics(
           "Compression cost estimate skipped: " + (err instanceof Error ? err.message : String(err))
         );
       }
-      insertCompressionAnalyticsRow(
+      await insertCompressionAnalyticsRow(
         buildAnalyticsRow(opts, tokensSaved, rtkPointers, estimatedUsdSaved)
       );
       const breakdownRows = buildEngineBreakdownRows(stats, opts.skillRequestId);
       if (breakdownRows.length > 0) {
-        insertCompressionEngineBreakdown(breakdownRows);
+        await insertCompressionEngineBreakdown(breakdownRows);
       }
     } catch (err) {
       opts.log?.warn?.(

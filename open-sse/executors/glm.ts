@@ -362,7 +362,7 @@ export class GlmExecutor extends DefaultExecutor {
     );
   }
 
-  transformForTransport(
+  async transformForTransport(
     model: string,
     body: unknown,
     stream: boolean,
@@ -427,7 +427,7 @@ export class GlmExecutor extends DefaultExecutor {
       return transformed;
     }
 
-    const translated = translateRequest(
+    const translated = await translateRequest(
       FORMATS.OPENAI,
       FORMATS.CLAUDE,
       effectiveModel,
@@ -498,7 +498,7 @@ export class GlmExecutor extends DefaultExecutor {
     applyConfiguredUserAgent(headers, credentials.providerSpecificData);
     mergeUpstreamExtraHeaders(headers, input.upstreamExtraHeaders);
 
-    let transformedBody = this.transformForTransport(
+    let transformedBody = await this.transformForTransport(
       input.model,
       input.body,
       input.stream,

@@ -20,20 +20,20 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   if (authError) return authError;
   try {
     const { id } = await params;
-    const team = getTeam(id);
+    const team = await getTeam(id);
     if (!team) return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const status = await getTeamUsageLimitStatusForTeam(id);
     const budgetStatus = status
       ? {
           ...status,
-          hasPartialRetainedUsage: hasPartialRetainedTeamUsage(
+          hasPartialRetainedUsage: await hasPartialRetainedTeamUsage(
             id,
             status.windowStartIso,
             status.resetAtIso
           ),
         }
       : null;
-    return NextResponse.json({ team, members: listTeamMembers(id), budgetStatus });
+    return NextResponse.json({ team, members: await listTeamMembers(id), budgetStatus });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to get team";
     return NextResponse.json(buildErrorBody(500, message), { status: 500 });
@@ -49,10 +49,10 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     if (!parsed.success) {
       return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
-    const team = updateTeam(id, parsed.data);
+    const team = await updateTeam(id, parsed.data);
     if (!team) return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "team.update",
       target: team.id,
       resourceType: "team",
@@ -79,10 +79,10 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
   if (authError) return authError;
   try {
     const { id } = await params;
-    const team = archiveTeam(id);
+    const team = await archiveTeam(id);
     if (!team) return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "team.archive",
       target: team.id,
       resourceType: "team",

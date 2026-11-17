@@ -113,16 +113,16 @@ function allowances(
   return reasons;
 }
 
-function readCachedUsage(
+async function readCachedUsage(
   id: string,
   provider: string,
   connection: ReturnType<typeof toProviderConnection>,
   persistedUsage: Usage | undefined,
   requestedModel: string | null
-): Usage & { cached?: ReturnType<typeof getQuotaCache> } {
+): Promise<Usage & { cached?: ReturnType<typeof getQuotaCache> }> {
   getQuotaSnapshotFetchedAt(id);
   seedReadView(id, provider, persistedUsage || {});
-  hydrateCodexQuotaCacheForRequest(connection, requestedModel);
+  await hydrateCodexQuotaCacheForRequest(connection, requestedModel);
   const cached = getQuotaCache(id);
   return {
     ...(persistedUsage ||
@@ -287,16 +287,16 @@ function appendCachedBlockers(
     );
 }
 
-export function evaluateCachedQuotaAvailability(
+export async function evaluateCachedQuotaAvailability(
   input: unknown,
   persistedUsage: Usage | undefined,
   policy: QuotaPreflightPolicy,
   requestedModel: string | null = null
-): QuotaAvailabilityDecision {
-  return withQuotaCacheReadView(() => {
+): Promise<QuotaAvailabilityDecision> {
+  return withQuotaCacheReadView(async () => {
     const connection = toProviderConnection(input);
     const { id, provider, providerSpecificData } = connection;
-    const { cached, ...readUsage } = readCachedUsage(
+    const { cached, ...readUsage } = await readCachedUsage(
       id,
       provider,
       connection,
@@ -351,11 +351,11 @@ export function evaluateCachedQuotaAvailability(
   });
 }
 
-export function buildConnectionQuotaAvailability(
+export async function buildConnectionQuotaAvailability(
   input: unknown,
   usage: Usage | undefined,
   policy: QuotaPreflightPolicy
-): ConnectionQuotaAvailability {
+): Promise<ConnectionQuotaAvailability> {
   const connection = toProviderConnection(input);
   const cachedUsage = withQuotaCacheReadView(() => {
     getQuotaSnapshotFetchedAt(connection.id);
@@ -371,38 +371,42 @@ export function buildConnectionQuotaAvailability(
         : {})
     );
   });
-  const evaluated = appendSavedRouterScopes(
-    connection,
-    availabilityScopes(
-      connection.provider,
-      cachedUsage,
-      connection.providerSpecificData?.antigravityFamilyRateLimitedUntil
-    )
-  ).map((scope) => ({
-    ...scope,
-    // Routing has no request-specific selector for this display-only window.
-    decision:
-      scope.id === "code_review" &&
-      connection.provider === "codex" &&
-      scope.windows.some((name) => {
-        const q = normalizeQuotas(cachedUsage.quotas || {})[name];
-        return q && q.fractionReported !== false && q.remainingPercentage <= 0;
-      })
-        ? {
-            usable: null,
-            blockers: [],
-            allowanceReasons: [],
-            fetchedAt: cachedUsage.fetchedAt || null,
-          }
-        : scope.models
-          ? combineQuotaAlternatives(
-              scope.models.map((model) =>
-                evaluateCachedQuotaAvailability(input, usage, policy, model)
-              ),
-              evaluateCachedQuotaAvailability(input, usage, policy, scope.model)
-            )
-          : evaluateCachedQuotaAvailability(input, usage, policy, scope.model),
-  }));
+  const evaluated = await Promise.all(
+    appendSavedRouterScopes(
+      connection,
+      availabilityScopes(
+        connection.provider,
+        cachedUsage,
+        connection.providerSpecificData?.antigravityFamilyRateLimitedUntil
+      )
+    ).map(async (scope) => ({
+      ...scope,
+      // Routing has no request-specific selector for this display-only window.
+      decision:
+        scope.id === "code_review" &&
+        connection.provider === "codex" &&
+        scope.windows.some((name) => {
+          const q = normalizeQuotas(cachedUsage.quotas || {})[name];
+          return q && q.fractionReported !== false && q.remainingPercentage <= 0;
+        })
+          ? {
+              usable: null,
+              blockers: [],
+              allowanceReasons: [],
+              fetchedAt: cachedUsage.fetchedAt || null,
+            }
+          : scope.models
+            ? combineQuotaAlternatives(
+                await Promise.all(
+                  scope.models.map((model) =>
+                    evaluateCachedQuotaAvailability(input, usage, policy, model)
+                  )
+                ),
+                await evaluateCachedQuotaAvailability(input, usage, policy, scope.model)
+              )
+            : await evaluateCachedQuotaAvailability(input, usage, policy, scope.model),
+    }))
+  );
   const candidates = evaluated.filter((scope) => scope.id !== "code_review");
   // Ordinary requests define the account verdict. Only peer pools may use any-usable
   // aggregation; attached scopes remain visible without promoting a blocked account.
@@ -410,7 +414,7 @@ export function buildConnectionQuotaAvailability(
   const decisions = evaluated
     .filter((scope) => scope.kind === "group")
     .map((scope) => scope.decision);
-  const fallback = evaluateCachedQuotaAvailability(input, usage, policy);
+  const fallback = await evaluateCachedQuotaAvailability(input, usage, policy);
   const account = ordinary ? ordinary.decision : combineQuotaAlternatives(decisions, fallback);
   const payloadScopes = evaluated.flatMap((scope) =>
     scope.kind === "account"

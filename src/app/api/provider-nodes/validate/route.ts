@@ -340,7 +340,7 @@ export async function POST(request) {
             : "Validation failed";
       const message = augmentDockerLocalhostHint(error, attemptedBaseUrl, rawMessage);
       if (error instanceof SafeOutboundFetchError && error.code === "URL_GUARD_BLOCKED") {
-        logAuditEvent({
+        await logAuditEvent({
           action: "provider.validation.ssrf_blocked",
           actor: "admin",
           target: "provider-node",

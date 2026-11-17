@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 
     const now = Date.now();
     const requestIds = readRequestedIds(request.url);
-    const noneHonored = getNoneHonoredSnapshot(undefined, now);
+    const noneHonored = await getNoneHonoredSnapshot(undefined, now);
     const data = scoped.rows.map((row) => {
       const byId = readNoneHonored(noneHonored, row.id);
       const noneEntry =

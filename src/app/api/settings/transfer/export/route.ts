@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   try {
     const bundle = await exportProviderTransferBundle(validation.data);
     const auditContext = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.exported",
       actor: "admin",
       target: "provider-transfer",

@@ -8,7 +8,7 @@
  * Sliced out of #3500 (semantic_cache cluster, slice 4).
  */
 
-import { getDbInstance } from "./core";
+import { db } from "@/lib/db/pg";
 import {
   getSemanticCachePruneConfig,
   type SemanticCachePruneConfig,
@@ -52,8 +52,9 @@ const VALID_SORT_COLUMNS = ["created_at", "expires_at", "hit_count", "tokens_sav
  * Returns a paginated, filtered, sorted list of semantic cache entries.
  * All dynamic inputs (sortBy/sortOrder) are validated before use.
  */
-export function listSemanticCacheEntries(opts: SemanticCacheListOptions): SemanticCacheListResult {
-  const db = getDbInstance();
+export async function listSemanticCacheEntries(
+  opts: SemanticCacheListOptions
+): Promise<SemanticCacheListResult> {
   const { page, limit, search, model, sortBy, sortOrder } = opts;
   const offset = (page - 1) * limit;
 
@@ -61,33 +62,35 @@ export function listSemanticCacheEntries(opts: SemanticCacheListOptions): Semant
   const params: unknown[] = [];
 
   if (search) {
-    conditions.push("(signature LIKE ? OR model LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    params.push(`%${search}%`);
+    conditions.push(`(signature ILIKE $${params.length} OR model ILIKE $${params.length})`);
   }
 
   if (model) {
-    conditions.push("model = ?");
     params.push(model);
+    conditions.push(`model = $${params.length}`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const orderBy = VALID_SORT_COLUMNS.includes(sortBy) ? sortBy : "created_at";
   const order = sortOrder === "asc" ? "ASC" : "DESC";
 
-  const countRow = db
-    .prepare(`SELECT COUNT(*) as total FROM semantic_cache ${whereClause}`)
-    .get(...params) as { total: number };
+  const countRow = await db().queryOne<{ total: number }>(
+    `SELECT COUNT(*) as total FROM semantic_cache ${whereClause}`,
+    params
+  );
 
-  const entries = db
-    .prepare(
-      `SELECT id, signature, model, hit_count, tokens_saved, created_at, expires_at
+  const rows = await db().query<Omit<SemanticCacheEntry, "id">>(
+    `SELECT signature, model, hit_count, tokens_saved, created_at, expires_at
        FROM semantic_cache ${whereClause}
-       ORDER BY ${orderBy} ${order}
-       LIMIT ? OFFSET ?`
-    )
-    .all(...params, limit, offset) as SemanticCacheEntry[];
+       ORDER BY ${orderBy} ${order}, signature
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset]
+  );
 
-  return { entries, total: countRow?.total || 0 };
+  // The surrogate `id` column is gone; the signature is the primary key.
+  const entries: SemanticCacheEntry[] = rows.map((row) => ({ ...row, id: row.signature }));
+  return { entries, total: Number(countRow?.total || 0) };
 }
 
 export interface DeleteSemanticCacheBySignatureResult {
@@ -98,11 +101,10 @@ export interface DeleteSemanticCacheBySignatureResult {
  * Deletes the single semantic cache entry matching the given signature.
  * Returns `{ deleted: 1 }` on success.
  */
-export function deleteSemanticCacheBySignature(
+export async function deleteSemanticCacheBySignature(
   signature: string
-): DeleteSemanticCacheBySignatureResult {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM semantic_cache WHERE signature = ?").run(signature);
+): Promise<DeleteSemanticCacheBySignatureResult> {
+  await db().execute("DELETE FROM semantic_cache WHERE signature = $1", [signature]);
   return { deleted: 1 };
 }
 
@@ -114,9 +116,10 @@ export interface DeleteSemanticCacheByModelResult {
  * Deletes all semantic cache entries for the given model.
  * Returns `{ deleted: N }` where N is the number of rows removed.
  */
-export function deleteSemanticCacheByModel(model: string): DeleteSemanticCacheByModelResult {
-  const db = getDbInstance();
-  const result = db.prepare("DELETE FROM semantic_cache WHERE model = ?").run(model);
+export async function deleteSemanticCacheByModel(
+  model: string
+): Promise<DeleteSemanticCacheByModelResult> {
+  const result = await db().execute("DELETE FROM semantic_cache WHERE model = $1", [model]);
   return { deleted: result.changes };
 }
 
@@ -142,35 +145,36 @@ export async function pruneSemanticCache(
   > = getSemanticCachePruneConfig(),
   now = new Date()
 ): Promise<SemanticCachePruneResult> {
-  const db = getDbInstance();
   const cutoff = now.toISOString();
   const result = { expiredDeleted: 0, capDeleted: 0, batches: 0 };
-  const deleteExpired = db.prepare(
-    `DELETE FROM semantic_cache WHERE rowid IN
-     (SELECT rowid FROM semantic_cache WHERE expires_at <= ? LIMIT ?)`
-  );
   const yieldBetweenBatches = () => new Promise<void>((resolve) => setImmediate(resolve));
   while (result.batches < maxBatches) {
     if (result.batches > 0) await yieldBetweenBatches();
-    const { changes } = deleteExpired.run(cutoff, batchSize);
+    const { changes } = await db().execute(
+      `DELETE FROM semantic_cache WHERE signature IN
+       (SELECT signature FROM semantic_cache WHERE expires_at <= $1 LIMIT $2)`,
+      [cutoff, batchSize]
+    );
     result.expiredDeleted += changes;
     result.batches++;
     if (changes < batchSize) break;
   }
 
   if (maxRows <= 0 || result.batches >= maxBatches) return result;
-  const count = db.prepare("SELECT COUNT(*) AS total FROM semantic_cache");
-  const deleteOldest = db.prepare(
-    `DELETE FROM semantic_cache WHERE rowid IN
-     (SELECT rowid FROM semantic_cache ORDER BY created_at, rowid LIMIT ?)`
-  );
   while (result.batches < maxBatches) {
     await yieldBetweenBatches();
     // Recount after yielding: concurrent cache writes/deletes may have changed the excess.
-    const excess = (count.get() as { total: number }).total - maxRows;
+    const countRow = await db().queryOne<{ total: number }>(
+      "SELECT COUNT(*) AS total FROM semantic_cache"
+    );
+    const excess = Number(countRow?.total ?? 0) - maxRows;
     if (excess <= 0) break;
     const limit = Math.min(batchSize, excess);
-    const { changes } = deleteOldest.run(limit);
+    const { changes } = await db().execute(
+      `DELETE FROM semantic_cache WHERE signature IN
+       (SELECT signature FROM semantic_cache ORDER BY created_at, signature LIMIT $1)`,
+      [limit]
+    );
     result.capDeleted += changes;
     result.batches++;
     if (changes < batchSize) break;

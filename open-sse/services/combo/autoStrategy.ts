@@ -35,7 +35,7 @@ import { isRuntimeRetiredProviderId } from "@/shared/constants/providerRetiremen
 import { isCommonChatGptWebRetiredProviderId } from "@/shared/constants/chatgptWebRetirement";
 import { filterChatSelectableModels } from "../modelEndpointPolicy.ts";
 import { DEFAULT_INTENT_CONFIG, type IntentClassifierConfig } from "../intentClassifier.ts";
-import { getTaskFitness } from "../autoCombo/taskFitness.ts";
+import { loadTaskFitnessLookup } from "../autoCombo/fitnessLookup.ts";
 import {
   calculateFactors,
   calculateScore,
@@ -369,7 +369,7 @@ export async function applyRequestTagRouting(
   return filteredTargets;
 }
 
-export function scoreAutoTargets(
+export async function scoreAutoTargets(
   targets: ResolvedComboTarget[],
   candidates: AutoProviderCandidate[],
   taskType: string | null,
@@ -383,6 +383,10 @@ export function scoreAutoTargets(
   // candidate pools (#OOM incident, zero-config auto combo expanding to 1000s
   // of provider/model targets).
   const poolMaxima = computePoolMaxima(activeCandidates as unknown as ProviderCandidate[]);
+  const taskFitness = await loadTaskFitnessLookup(
+    activeCandidates.map((candidate) => candidate.model),
+    taskType ?? "general"
+  );
 
   return activeCandidates
     .map((candidate) => {
@@ -407,7 +411,7 @@ export function scoreAutoTargets(
         candidate as ProviderCandidate,
         activeCandidates as unknown as ProviderCandidate[],
         taskType ?? "general",
-        getTaskFitness,
+        taskFitness,
         manifestHint ?? undefined,
         poolMaxima
       );
@@ -524,7 +528,7 @@ export async function expandAutoComboCandidatePool(
     // expansion doesn't turn into O(n^2) per provider. See #OOM incident
     // (zero-config auto combo expanding to 1000s of provider/model targets).
     const seenModelStrs = new Set(eligibleTargets.map((t) => t.modelStr));
-    const hiddenModelsMap = getHiddenModelsByProvider();
+    const hiddenModelsMap = await getHiddenModelsByProvider();
     for (const providerId of providerIds) {
       // #auto-pool-visible-only: when the operator has synced/custom models for
       // this provider, expand ONLY those (minus hidden); fall back to the static
@@ -735,7 +739,7 @@ async function expandRestrictedAutoComboCandidatePool(
   const seenTargets = new Set(
     scopedTargets.map((target) => `${target.modelStr}\0${target.connectionId ?? ""}`)
   );
-  const hiddenModelsMap = getHiddenModelsByProvider();
+  const hiddenModelsMap = await getHiddenModelsByProvider();
   for (const [providerId, providerConnections] of connectionsByProvider) {
     try {
       const modelIds = await resolveRestrictedProviderModelIds(

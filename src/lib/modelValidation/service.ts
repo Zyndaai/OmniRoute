@@ -90,9 +90,9 @@ export async function validateAndAddModel(input: ValidationInput, clientSignal: 
   const signal = operation.signal;
   try {
     signal.throwIfAborted();
-    const pluginFence = createValidationPluginFence();
+    const pluginFence = await createValidationPluginFence();
     pluginFence.assertIdle();
-    const snapshot = createValidationSnapshot(input);
+    const snapshot = await createValidationSnapshot(input);
     await abortable(
       withPluginExecutionGuard(pluginFence, async () =>
         runProofs(await abortable(createProofRunner(input, snapshot, signal), signal))
@@ -100,6 +100,7 @@ export async function validateAndAddModel(input: ValidationInput, clientSignal: 
       signal
     );
     signal.throwIfAborted();
+    await pluginFence.refresh();
     pluginFence.assertIdle();
     const validation = {
       id: randomUUID(),
@@ -110,7 +111,7 @@ export async function validateAndAddModel(input: ValidationInput, clientSignal: 
       validatedAt: new Date().toISOString(),
       stages: { generation: "passed", toolCall: "passed", continuation: "passed" },
     };
-    const model = commitValidatedModel(snapshot, input, validation);
+    const model = await commitValidatedModel(snapshot, input, validation);
     return { schemaVersion: 1, model, persistenceVerified: true, validation };
   } catch (error) {
     if (

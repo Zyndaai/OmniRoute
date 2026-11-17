@@ -1,11 +1,11 @@
 /**
  * db/skills.ts — Database operations for the skills table.
  *
- * Encapsulates all SQL for the `skills` and `skill_executions` tables so that
- * route handlers never contain raw SQL (Hard Rule #5).
+ * Encapsulates all SQL for the `skills` table so that route handlers never
+ * contain raw SQL (Hard Rule #5).
  */
 
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
 // ──────────────── Allowed patch columns ────────────────
 //
@@ -15,7 +15,6 @@ import { getDbInstance } from "./core";
 const UPDATABLE_COLUMNS = new Set<string>([
   "enabled",
   "mode",
-  "updated_at",
   // future-safe: add writable columns here as schema grows
 ]);
 
@@ -32,21 +31,19 @@ export interface SkillPatch {
  *               Only columns present in UPDATABLE_COLUMNS are touched;
  *               unknown keys are silently ignored.
  *
- * The function always appends `updated_at = datetime('now')` so the record's
- * timestamp reflects the mutation.
+ * The function always sets `updated_at = now()` so the record's timestamp reflects
+ * the mutation.
  *
  * @returns number of rows changed (0 if skill not found, 1 if updated).
  */
-export function updateSkill(id: string, patch: SkillPatch): number {
-  const db = getDbInstance();
-
+export async function updateSkill(id: string, patch: SkillPatch): Promise<number> {
   const setClauses: string[] = [];
   const params: unknown[] = [];
 
   for (const [key, value] of Object.entries(patch)) {
     if (!UPDATABLE_COLUMNS.has(key)) continue; // allowlist guard
-    setClauses.push(`${key} = ?`);
-    params.push(value);
+    params.push(key === "enabled" ? Boolean(value) : value);
+    setClauses.push(`${key} = $${params.length}`);
   }
 
   if (setClauses.length === 0) {
@@ -54,9 +51,12 @@ export function updateSkill(id: string, patch: SkillPatch): number {
     return 0;
   }
 
-  setClauses.push("updated_at = datetime('now')");
+  setClauses.push("updated_at = now()");
   params.push(id);
 
-  const result = db.prepare(`UPDATE skills SET ${setClauses.join(", ")} WHERE id = ?`).run(...params);
-  return (result as { changes: number }).changes;
+  const result = await db().execute(
+    `UPDATE skills SET ${setClauses.join(", ")} WHERE id = $${params.length}`,
+    params
+  );
+  return result.changes;
 }

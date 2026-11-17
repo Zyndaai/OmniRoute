@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     }
 
     const { from, to, skill, state, limit, offset } = parsed.data;
-    const { rows, total } = listA2ATaskHistory({
+    const { rows, total } = await listA2ATaskHistory({
       from,
       to,
       skill,

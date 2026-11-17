@@ -1,41 +1,6 @@
-import {
-  evictSessionAccountAffinityForConnection,
-  evictSessionAccountAffinityForConnectionAsync,
-  getSessionAffinityStore,
-} from "@/lib/db/sessionAccountAffinity";
+import { evictSessionAccountAffinityForConnectionAsync } from "@/lib/db/sessionAccountAffinity";
 import { isComboPerModelTimeoutAbort } from "@omniroute/open-sse/services/combo/comboAbortReasons.ts";
 import * as log from "../utils/logger";
-
-/** Request-path helper: keep the legacy SQLite eviction and its logging synchronous. */
-export function evictSessionAffinityOnComboTimeoutAsync(
-  params: ComboTimeoutAffinityEvictionParams
-): boolean | Promise<boolean> {
-  if (getSessionAffinityStore().driver === "sqlite")
-    return evictSessionAffinityOnComboTimeout(params);
-  return evictRedisSessionAffinityOnComboTimeout(params);
-}
-
-async function evictRedisSessionAffinityOnComboTimeout(
-  params: ComboTimeoutAffinityEvictionParams
-): Promise<boolean> {
-  const { sessionKey, provider, connectionId, modelAbortSignal } = params;
-  if (!sessionKey || !provider || !connectionId || !isComboPerModelTimeoutAbort(modelAbortSignal))
-    return false;
-  try {
-    const evicted = await evictSessionAccountAffinityForConnectionAsync(
-      sessionKey,
-      provider,
-      connectionId
-    );
-    if (evicted)
-      log.warn("AUTH", `Session account affinity evicted after ${provider} combo target timeout`);
-    return evicted;
-  } catch {
-    // Local persistence failures are best-effort too; preserve the dispatch result.
-    log.warn("AUTH", "Session affinity timeout eviction failed");
-    return false;
-  }
-}
 
 /** Inputs the combo-timeout eviction needs from the dispatch site. */
 export interface ComboTimeoutAffinityEvictionParams {
@@ -67,15 +32,19 @@ export interface ComboTimeoutAffinityEvictionParams {
  *
  * @returns true when a pin was actually evicted.
  */
-export function evictSessionAffinityOnComboTimeout(
+export async function evictSessionAffinityOnComboTimeout(
   params: ComboTimeoutAffinityEvictionParams
-): boolean {
+): Promise<boolean> {
   const { sessionKey, provider, connectionId, modelAbortSignal } = params;
   if (!sessionKey || !provider || !connectionId) return false;
   if (!isComboPerModelTimeoutAbort(modelAbortSignal)) return false;
 
   try {
-    const evicted = evictSessionAccountAffinityForConnection(sessionKey, provider, connectionId);
+    const evicted = await evictSessionAccountAffinityForConnectionAsync(
+      sessionKey,
+      provider,
+      connectionId
+    );
     if (evicted) {
       const sessionLabel = `${sessionKey.slice(0, 18)}...`;
       log.warn(
@@ -89,6 +58,10 @@ export function evictSessionAffinityOnComboTimeout(
     return evicted;
   } catch {
     // Best-effort: a failed eviction must never break the dispatch path.
+    log.warn("AUTH", "Session affinity timeout eviction failed");
     return false;
   }
 }
+
+/** Former name of the request-path entry point; both now resolve through the same store call. */
+export const evictSessionAffinityOnComboTimeoutAsync = evictSessionAffinityOnComboTimeout;

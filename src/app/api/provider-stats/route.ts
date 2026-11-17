@@ -32,8 +32,8 @@ export async function GET(request: Request) {
     try {
       // Hard Rule #5: SQL lives in src/lib/db/providerStats.ts, not inline here.
       const since = buildProviderStatsSince(new Date(), days);
-      const providerStats = getProviderCallStats(since);
-      const modelStats = getModelCallStats(since);
+      const providerStats = await getProviderCallStats(since);
+      const modelStats = await getModelCallStats(since);
 
       let comboMetrics: Record<string, unknown> = {};
       try {

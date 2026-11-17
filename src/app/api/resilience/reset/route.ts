@@ -11,17 +11,14 @@ export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    const { getAllCircuitBreakerStatuses, getCircuitBreaker } =
+    const { getAllCircuitBreakerStatuses, resetAllCircuitBreakers } =
       await import("@/shared/utils/circuitBreaker");
 
-    const statuses = getAllCircuitBreakerStatuses();
-    let resetCount = 0;
+    const statuses = await getAllCircuitBreakerStatuses();
+    const resetCount = statuses.length;
 
-    for (const { name } of statuses) {
-      const breaker = getCircuitBreaker(name);
-      breaker.reset();
-      resetCount++;
-    }
+    // Also clears the persisted breaker state, not just the in-memory registry.
+    await resetAllCircuitBreakers();
 
     // Also clear in-memory model lockouts (per-model quota cooldowns)
     const { clearAllModelLockouts } =

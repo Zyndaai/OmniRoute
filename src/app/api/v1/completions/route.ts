@@ -63,7 +63,7 @@ async function postHandler(request: Request) {
     const cloned = request.clone();
     const body = await cloned.json().catch(() => null);
     if (body) {
-      const { blocked, result } = injectionGuard(body);
+      const { blocked, result } = await injectionGuard(body);
       if (blocked) {
         return new Response(
           JSON.stringify({

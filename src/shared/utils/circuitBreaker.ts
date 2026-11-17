@@ -247,6 +247,10 @@ export class CircuitBreaker {
   transitionHistory: TransitionRecord[];
   /** Max transition history entries */
   maxTransitionHistory: number;
+  /** Settles once the persisted state has been applied (never rejects). */
+  _restored: Promise<void>;
+  /** Serializes writes so an older snapshot can never land after a newer one. */
+  _persistChain: Promise<void> = Promise.resolve();
 
   constructor(name: string, options: CircuitBreakerOptions = {}) {
     this.name = name;
@@ -277,13 +281,14 @@ export class CircuitBreaker {
     this.transitionHistory = [];
     this.maxTransitionHistory = 20;
 
-    this._restoreFromDb();
+    this._restored = this._restoreFromDb();
   }
 
-  _restoreFromDb() {
+  async _restoreFromDb(): Promise<void> {
     try {
-      const saved = loadCircuitBreakerState(this.name);
-      if (saved) {
+      const saved = await loadCircuitBreakerState(this.name);
+      // Local activity during the load is newer than the stored row.
+      if (saved && this.failureCount === 0 && this.transitionHistory.length === 0) {
         if (
           saved.state === STATE.CLOSED ||
           saved.state === STATE.DEGRADED ||
@@ -314,24 +319,32 @@ export class CircuitBreaker {
     }
   }
 
-  _persistToDb() {
-    try {
-      saveCircuitBreakerState(this.name, {
-        state: this.state,
-        failureCount: this.failureCount,
-        lastFailureTime: this.lastFailureTime,
-        options: {
-          failureThreshold: this.failureThreshold,
-          resetTimeout: this.resetTimeout,
-          halfOpenRequests: this.halfOpenRequests,
-          lastFailureKind: this.lastFailureKind,
-          openCycleCount: this.openCycleCount,
-          kindFailureCounts: this.kindFailureCounts,
-        },
+  /** Snapshot the state now and write it in the background (non-critical, never rejects). */
+  _persistToDb(): Promise<void> {
+    const snapshot = {
+      state: this.state,
+      failureCount: this.failureCount,
+      lastFailureTime: this.lastFailureTime,
+      options: {
+        failureThreshold: this.failureThreshold,
+        resetTimeout: this.resetTimeout,
+        halfOpenRequests: this.halfOpenRequests,
+        lastFailureKind: this.lastFailureKind,
+        openCycleCount: this.openCycleCount,
+        kindFailureCounts: { ...this.kindFailureCounts },
+      },
+    };
+    const write = this._persistChain
+      .then(() => saveCircuitBreakerState(this.name, snapshot))
+      .catch(() => {
+        // Non-critical
+      })
+      .finally(() => {
+        pendingPersists.delete(write);
       });
-    } catch {
-      // Non-critical
-    }
+    this._persistChain = write;
+    pendingPersists.add(write);
+    return write;
   }
 
   /**
@@ -350,6 +363,7 @@ export class CircuitBreaker {
   }
 
   async execute<T>(fn: () => Promise<T>, options?: CircuitBreakerExecuteOptions<T>): Promise<T> {
+    await this._restored;
     this._refreshOpenState();
 
     if (this.state === STATE.OPEN) {
@@ -452,7 +466,7 @@ export class CircuitBreaker {
     this.failureCount = 0;
     this.lastFailureKind = null;
     this.kindFailureCounts = {};
-    this._persistToDb();
+    void this._persistToDb();
     return true;
   }
 
@@ -464,7 +478,7 @@ export class CircuitBreaker {
     this.lastFailureKind = null;
     this.openCycleCount = 0;
     this.kindFailureCounts = {};
-    this._persistToDb();
+    void this._persistToDb();
   }
 
   // ─── Internal ─────────────────────────────────
@@ -515,7 +529,7 @@ export class CircuitBreaker {
         this._transition(STATE.CLOSED, "recovery");
       }
     }
-    this._persistToDb();
+    void this._persistToDb();
   }
 
   _onFailure(kind?: FailureKind | null) {
@@ -573,7 +587,7 @@ export class CircuitBreaker {
         );
       }
     }
-    this._persistToDb();
+    void this._persistToDb();
   }
 
   _openCircuit(kind: FailureKind | null) {
@@ -643,7 +657,7 @@ export class CircuitBreaker {
     this._decayStaleDegradation();
     if (this.state === STATE.OPEN && this._shouldAttemptReset()) {
       this._transition(STATE.HALF_OPEN, "timeout-elapsed");
-      this._persistToDb();
+      void this._persistToDb();
     } else if (
       this.state === STATE.HALF_OPEN &&
       this.halfOpenAllowed <= 0 &&
@@ -699,6 +713,13 @@ export class CircuitBreakerOpenError extends Error {
 
 const MAX_REGISTRY_SIZE = 500;
 const registry = new Map<string, CircuitBreaker>();
+const pendingPersists = new Set<Promise<void>>();
+
+function deleteStoredStateInBackground(name: string): void {
+  void deleteCircuitBreakerState(name).catch(() => {
+    // Non-critical
+  });
+}
 
 /** Test-only: current number of registered circuit breakers. */
 export function __getCircuitRegistrySizeForTests(): number {
@@ -715,9 +736,7 @@ const _registrySweep = setInterval(() => {
       (!status.lastFailureTime || now - status.lastFailureTime > 30 * 60 * 1000)
     ) {
       registry.delete(name);
-      try {
-        deleteCircuitBreakerState(name);
-      } catch {}
+      deleteStoredStateInBackground(name);
     }
   }
 }, 5 * 60_000);
@@ -747,9 +766,7 @@ function evictColdBreakersIfNeeded(): void {
   const target = registry.size - MAX_REGISTRY_SIZE + 1;
   for (let i = 0; i < candidates.length && i < target; i++) {
     registry.delete(candidates[i].name);
-    try {
-      deleteCircuitBreakerState(candidates[i].name);
-    } catch {}
+    deleteStoredStateInBackground(candidates[i].name);
   }
 }
 
@@ -802,32 +819,36 @@ export function getCircuitBreaker(name: string, options?: CircuitBreakerOptions)
     if (typeof options.backoffEscalationCount === "number") {
       breaker.backoffEscalationCount = options.backoffEscalationCount;
     }
-    breaker._persistToDb();
+    void breaker._persistToDb();
   }
   return breaker;
 }
 
-export function getAllCircuitBreakerStatuses() {
+export async function getAllCircuitBreakerStatuses() {
   try {
-    const persisted = loadAllCircuitBreakerStates();
+    const persisted = await loadAllCircuitBreakerStates();
+    const restoring: Promise<void>[] = [];
     for (const cb of persisted) {
       if (!registry.has(cb.name)) {
-        getCircuitBreaker(cb.name);
+        restoring.push(getCircuitBreaker(cb.name)._restored);
       }
     }
+    await Promise.all(restoring);
   } catch {
     // Use registry only
   }
   return Array.from(registry.values()).map((cb) => cb.getStatus());
 }
 
-export function resetAllCircuitBreakers() {
+export async function resetAllCircuitBreakers() {
   for (const cb of registry.values()) {
     cb.reset();
   }
   registry.clear();
+  // Let the writes queued by reset() land first so the delete below is the last word.
+  await Promise.allSettled([...pendingPersists]);
   try {
-    deleteAllCircuitBreakerStates();
+    await deleteAllCircuitBreakerStates();
   } catch {
     // Non-critical
   }

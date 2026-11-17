@@ -2,17 +2,18 @@
  * db/keyQuota.ts — Per-API-key tpm/rpm/monthly-amount quota (RIC-741 / M3 D5).
  *
  * KISS counter + threshold quota: a single config row on `api_key_quota_limits`
- * (tpm / rpm / monthly USD) plus 2-bucket sliding-window counters on
- * `api_key_quota_counters` for tpm & rpm. The monthly amount is not counted
- * here — it is read from the cost ledger's current-calendar-month SUM
- * (`aggregateLedgerThisMonth`), so one source of truth for money.
+ * (tpm / rpm / monthly USD) plus 2-bucket sliding-window counters in
+ * `quota_counters` (dimension keys `key-quota:tpm` / `key-quota:rpm`). The
+ * monthly amount is not counted here — it is read from the cost ledger's
+ * current-calendar-month SUM (`aggregateLedgerThisMonth`), so one source of
+ * truth for money.
  *
  * A NULL limit means "unlimited" (0 is normalized to unlimited on read).
  *
  * @module db/keyQuota
  */
 
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 import { aggregateLedgerThisMonth } from "./costLedger";
 import { toNumber } from "@/shared/utils/numeric";
 
@@ -79,10 +80,18 @@ function toLimitOrNull(value: unknown): number | null {
   return numeric > 0 ? numeric : null;
 }
 
-/** Convert a limit back to a null-safe string for the DB (NULL stores unlimited). */
+/** Convert a limit back to a null-safe value for the DB (NULL stores unlimited). */
 function limitToDb(value: number | null | undefined): number | null {
   if (value === undefined) return null;
   return value !== null && value > 0 ? value : null;
+}
+
+/** tpm/rpm are integer columns: a fractional limit is rounded, below 1 reads as unlimited. */
+function intLimitToDb(value: number | null | undefined): number | null {
+  const limit = limitToDb(value);
+  if (limit === null) return null;
+  const rounded = Math.round(limit);
+  return rounded > 0 ? rounded : null;
 }
 
 function toIsoWindowStart(nowMs: number): string {
@@ -107,15 +116,13 @@ function rowToLimits(row: unknown): KeyQuotaLimits {
 /**
  * Load quota limits for a key. Returns all-null limits when no row exists.
  */
-export function getKeyQuotaLimits(apiKeyId: string): KeyQuotaLimits {
+export async function getKeyQuotaLimits(apiKeyId: string): Promise<KeyQuotaLimits> {
   if (!apiKeyId) return { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT api_key_id, tpm_limit, rpm_limit, monthly_amount_usd
-       FROM api_key_quota_limits WHERE api_key_id = ?`
-    )
-    .get(apiKeyId);
+  const row = await db().queryOne(
+    `SELECT api_key_id, tpm_limit, rpm_limit, monthly_amount_usd
+     FROM api_key_quota_limits WHERE api_key_id = $1`,
+    [apiKeyId]
+  );
   return row
     ? rowToLimits(row)
     : { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
@@ -131,41 +138,49 @@ export interface UpsertKeyQuotaLimitsInput {
  * Upsert quota limits for a key. Omitted fields keep their existing value.
  * Returns the resulting limits.
  */
-export function upsertKeyQuotaLimits(
+export async function upsertKeyQuotaLimits(
   apiKeyId: string,
   input: UpsertKeyQuotaLimitsInput
-): KeyQuotaLimits {
+): Promise<KeyQuotaLimits> {
   if (!apiKeyId) return { apiKeyId, tpmLimit: null, rpmLimit: null, monthlyAmountUsd: null };
 
-  const db = getDbInstance();
-  const existing = getKeyQuotaLimits(apiKeyId);
-  const tpm = limitToDb(input.tpmLimit !== undefined ? input.tpmLimit : existing.tpmLimit);
-  const rpm = limitToDb(input.rpmLimit !== undefined ? input.rpmLimit : existing.rpmLimit);
-  const monthly = limitToDb(
-    input.monthlyAmountUsd !== undefined ? input.monthlyAmountUsd : existing.monthlyAmountUsd
+  // One statement: omitted fields keep the stored value, so two concurrent
+  // partial updates cannot overwrite each other's field. Saving the quota is
+  // an operator action: a month closed by unpriced usage starts over.
+  const row = await db().queryOne(
+    `INSERT INTO api_key_quota_limits
+       (api_key_id, tpm_limit, rpm_limit, monthly_amount_usd, unpriced_usage_since, updated_at)
+     VALUES ($1, $2, $3, $4, NULL, now())
+     ON CONFLICT (api_key_id) DO UPDATE SET
+       tpm_limit = CASE WHEN $5 THEN EXCLUDED.tpm_limit ELSE api_key_quota_limits.tpm_limit END,
+       rpm_limit = CASE WHEN $6 THEN EXCLUDED.rpm_limit ELSE api_key_quota_limits.rpm_limit END,
+       monthly_amount_usd = CASE WHEN $7 THEN EXCLUDED.monthly_amount_usd
+                                 ELSE api_key_quota_limits.monthly_amount_usd END,
+       unpriced_usage_since = NULL,
+       updated_at = now()
+     RETURNING api_key_id, tpm_limit, rpm_limit, monthly_amount_usd`,
+    [
+      apiKeyId,
+      intLimitToDb(input.tpmLimit),
+      intLimitToDb(input.rpmLimit),
+      limitToDb(input.monthlyAmountUsd),
+      input.tpmLimit !== undefined,
+      input.rpmLimit !== undefined,
+      input.monthlyAmountUsd !== undefined,
+    ]
   );
-
-  db.prepare(
-    `INSERT INTO api_key_quota_limits (api_key_id, tpm_limit, rpm_limit, monthly_amount_usd, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(api_key_id) DO UPDATE SET
-       tpm_limit = excluded.tpm_limit,
-       rpm_limit = excluded.rpm_limit,
-       monthly_amount_usd = excluded.monthly_amount_usd,
-       updated_at = excluded.updated_at`
-  ).run(apiKeyId, tpm, rpm, monthly);
-  // Saving the quota is an operator action: a month closed by unpriced usage starts over.
-  deleteUnpricedQuotaMonthStart(apiKeyId);
-
-  return { apiKeyId, tpmLimit: tpm, rpmLimit: rpm, monthlyAmountUsd: monthly };
+  return rowToLimits(row);
 }
 
-export function clearKeyQuotaLimits(apiKeyId: string): void {
+export async function clearKeyQuotaLimits(apiKeyId: string): Promise<void> {
   if (!apiKeyId) return;
-  const db = getDbInstance();
-  db.prepare("DELETE FROM api_key_quota_limits WHERE api_key_id = ?").run(apiKeyId);
-  db.prepare("DELETE FROM api_key_quota_counters WHERE api_key_id = ?").run(apiKeyId);
-  deleteUnpricedQuotaMonthStart(apiKeyId);
+  await db().transaction(async (tx) => {
+    await tx.execute("DELETE FROM api_key_quota_limits WHERE api_key_id = $1", [apiKeyId]);
+    await tx.execute(
+      "DELETE FROM quota_counters WHERE api_key_id = $1 AND dimension_key IN ($2, $3)",
+      [apiKeyId, DIMENSION_TPM, DIMENSION_RPM]
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -175,31 +190,38 @@ export function clearKeyQuotaLimits(apiKeyId: string): void {
 /**
  * The calendar month in which a key used a metered model it could not price (no
  * pricing row and no provider-reported cost). That usage never reaches the
- * ledger the monthly cap sums, so it is recorded here, in `key_value`, and needs
- * no schema change.
+ * ledger the monthly cap sums, so it is recorded on the key's limits row
+ * (`unpriced_usage_since`). Without a limits row there is nothing to cap, so
+ * saving the marker is a no-op.
  */
-const UNPRICED_QUOTA_NAMESPACE = "keyQuotaUnpricedUsage";
 
 /** Start (UTC ms) of the month that recorded unpriced usage for a key, or null. */
-export function loadUnpricedQuotaMonthStart(apiKeyId: string): number | null {
+export async function loadUnpricedQuotaMonthStart(apiKeyId: string): Promise<number | null> {
   if (!apiKeyId) return null;
-  const row = getDbInstance()
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(UNPRICED_QUOTA_NAMESPACE, apiKeyId);
-  const monthStart = toNumber(asRecord(row).value, 0);
+  const row = await db().queryOne<{ ms: number | null }>(
+    `SELECT (extract(epoch FROM unpriced_usage_since) * 1000)::bigint AS ms
+     FROM api_key_quota_limits WHERE api_key_id = $1`,
+    [apiKeyId]
+  );
+  const monthStart = toNumber(row?.ms, 0);
   return monthStart > 0 ? monthStart : null;
 }
 
-export function saveUnpricedQuotaMonthStart(apiKeyId: string, monthStartMs: number): void {
-  getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run(UNPRICED_QUOTA_NAMESPACE, apiKeyId, String(monthStartMs));
+export async function saveUnpricedQuotaMonthStart(
+  apiKeyId: string,
+  monthStartMs: number
+): Promise<void> {
+  await db().execute(
+    "UPDATE api_key_quota_limits SET unpriced_usage_since = $2 WHERE api_key_id = $1",
+    [apiKeyId, new Date(monthStartMs).toISOString()]
+  );
 }
 
-export function deleteUnpricedQuotaMonthStart(apiKeyId: string): void {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?")
-    .run(UNPRICED_QUOTA_NAMESPACE, apiKeyId);
+export async function deleteUnpricedQuotaMonthStart(apiKeyId: string): Promise<void> {
+  await db().execute(
+    "UPDATE api_key_quota_limits SET unpriced_usage_since = NULL WHERE api_key_id = $1",
+    [apiKeyId]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -210,26 +232,28 @@ function bucketIndex(nowMs: number): number {
   return Math.floor(nowMs / KEY_QUOTA_WINDOW_MS);
 }
 
-function getBucketCount(apiKeyId: string, dimensionKey: string, bucket: number): number {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT consumed FROM api_key_quota_counters
-       WHERE api_key_id = ? AND dimension_key = ? AND bucket_index = ?`
-    )
-    .get(apiKeyId, dimensionKey, bucket) as { consumed?: number } | undefined;
-  return toNumber(row?.consumed);
-}
-
 /**
  * Effective count for a 2-bucket sliding window:
  *   effective = prev × (1 − elapsed/window) + curr
  */
-function effectiveWindowCount(apiKeyId: string, dimensionKey: string, nowMs: number): number {
+async function effectiveWindowCount(
+  apiKeyId: string,
+  dimensionKey: string,
+  nowMs: number
+): Promise<number> {
   const current = bucketIndex(nowMs);
   const prev = current - 1;
-  const curr = getBucketCount(apiKeyId, dimensionKey, current);
-  const prevCount = getBucketCount(apiKeyId, dimensionKey, prev);
+  const rows = await db().query<{ bucket_index: number; consumed: number }>(
+    `SELECT bucket_index, consumed FROM quota_counters
+     WHERE api_key_id = $1 AND dimension_key = $2 AND bucket_index IN ($3, $4)`,
+    [apiKeyId, dimensionKey, current, prev]
+  );
+  let curr = 0;
+  let prevCount = 0;
+  for (const r of rows) {
+    if (Number(r.bucket_index) === current) curr = toNumber(r.consumed);
+    else prevCount = toNumber(r.consumed);
+  }
   const elapsed = nowMs - current * KEY_QUOTA_WINDOW_MS;
   const weight = Math.max(0, Math.min(1, elapsed / KEY_QUOTA_WINDOW_MS));
   return prevCount * (1 - weight) + curr;
@@ -238,36 +262,36 @@ function effectiveWindowCount(apiKeyId: string, dimensionKey: string, nowMs: num
 /**
  * Atomically add `delta` to the current window bucket (UPSERT).
  */
-export function incrementKeyQuotaCounter(
+export async function incrementKeyQuotaCounter(
   apiKeyId: string,
   dimension: KeyQuotaDimension,
   delta: number,
   nowMs = Date.now()
-): void {
+): Promise<void> {
   if (!apiKeyId || delta <= 0) return;
   const dimensionKey = dimension === "tpm" ? DIMENSION_TPM : DIMENSION_RPM;
   const bucket = bucketIndex(nowMs);
-  const db = getDbInstance();
-  db.prepare(
-    `INSERT INTO api_key_quota_counters (api_key_id, dimension_key, bucket_index, consumed, updated_at)
-     VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(api_key_id, dimension_key, bucket_index) DO UPDATE SET
-       consumed = consumed + excluded.consumed,
-       updated_at = excluded.updated_at`
-  ).run(apiKeyId, dimensionKey, bucket, delta, nowMs);
+  await db().execute(
+    `INSERT INTO quota_counters (api_key_id, dimension_key, bucket_index, consumed, updated_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (api_key_id, dimension_key, bucket_index) DO UPDATE SET
+       consumed = quota_counters.consumed + EXCLUDED.consumed,
+       updated_at = EXCLUDED.updated_at`,
+    [apiKeyId, dimensionKey, bucket, delta, new Date(nowMs).toISOString()]
+  );
 }
 
 /**
  * Increment both tpm (by billable tokens) and rpm (by 1) for a completed call.
  */
-export function recordKeyQuotaUsage(
+export async function recordKeyQuotaUsage(
   apiKeyId: string,
   billableTokens: number,
   nowMs = Date.now()
-): void {
+): Promise<void> {
   if (!apiKeyId) return;
-  if (billableTokens > 0) incrementKeyQuotaCounter(apiKeyId, "tpm", billableTokens, nowMs);
-  incrementKeyQuotaCounter(apiKeyId, "rpm", 1, nowMs);
+  if (billableTokens > 0) await incrementKeyQuotaCounter(apiKeyId, "tpm", billableTokens, nowMs);
+  await incrementKeyQuotaCounter(apiKeyId, "rpm", 1, nowMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -277,26 +301,25 @@ export function recordKeyQuotaUsage(
 /**
  * Effective usage in the current windows plus the month ledger total.
  */
-export function getKeyQuotaCounters(
+export async function getKeyQuotaCounters(
   apiKeyId: string,
   deps: { now?: () => number; monthTotalUsd?: number } = {}
-): KeyQuotaCounters {
+): Promise<KeyQuotaCounters> {
   const nowMs = (deps.now ?? Date.now)();
-  return {
-    tpmUsed: effectiveWindowCount(apiKeyId, DIMENSION_TPM, nowMs),
-    rpmUsed: effectiveWindowCount(apiKeyId, DIMENSION_RPM, nowMs),
-    monthlyAmountUsd:
-      deps.monthTotalUsd !== undefined ? deps.monthTotalUsd : getLedgerMonthTotal(apiKeyId, nowMs),
-  };
+  const [tpmUsed, rpmUsed, monthlyAmountUsd] = await Promise.all([
+    effectiveWindowCount(apiKeyId, DIMENSION_TPM, nowMs),
+    effectiveWindowCount(apiKeyId, DIMENSION_RPM, nowMs),
+    deps.monthTotalUsd !== undefined
+      ? Promise.resolve(deps.monthTotalUsd)
+      : getLedgerMonthTotal(apiKeyId, nowMs),
+  ]);
+  return { tpmUsed, rpmUsed, monthlyAmountUsd };
 }
 
-/**
- * Resolve the current calendar-month ledger total for a key, with a lazy
- * dynamic import to avoid a hard module cycle cost on cold starts.
- */
-function getLedgerMonthTotal(apiKeyId: string, nowMs: number): number {
+/** Resolve the current calendar-month ledger total for a key. */
+async function getLedgerMonthTotal(apiKeyId: string, nowMs: number): Promise<number> {
   try {
-    return aggregateLedgerThisMonth(apiKeyId, new Date(nowMs).toISOString()).amountUsd;
+    return (await aggregateLedgerThisMonth(apiKeyId, new Date(nowMs).toISOString())).amountUsd;
   } catch {
     return 0;
   }
@@ -308,26 +331,26 @@ function getLedgerMonthTotal(apiKeyId: string, nowMs: number): number {
  * Enforcement-only reads skip unlimited dimensions and report their counters
  * as zero. Dashboard callers retain full usage reads by default.
  */
-export function getKeyQuotaStatus(
+export async function getKeyQuotaStatus(
   apiKeyId: string,
   deps: { now?: () => number; monthTotalUsd?: number; enforcementOnly?: boolean } = {}
-): KeyQuotaStatus {
-  const limits = getKeyQuotaLimits(apiKeyId);
+): Promise<KeyQuotaStatus> {
+  const limits = await getKeyQuotaLimits(apiKeyId);
   const nowMs = (deps.now ?? Date.now)();
   const counters = deps.enforcementOnly
     ? {
         tpmUsed:
-          limits.tpmLimit !== null ? effectiveWindowCount(apiKeyId, DIMENSION_TPM, nowMs) : 0,
+          limits.tpmLimit !== null ? await effectiveWindowCount(apiKeyId, DIMENSION_TPM, nowMs) : 0,
         rpmUsed:
-          limits.rpmLimit !== null ? effectiveWindowCount(apiKeyId, DIMENSION_RPM, nowMs) : 0,
+          limits.rpmLimit !== null ? await effectiveWindowCount(apiKeyId, DIMENSION_RPM, nowMs) : 0,
         monthlyAmountUsd:
           limits.monthlyAmountUsd !== null
             ? deps.monthTotalUsd !== undefined
               ? deps.monthTotalUsd
-              : getLedgerMonthTotal(apiKeyId, nowMs)
+              : await getLedgerMonthTotal(apiKeyId, nowMs)
             : 0,
       }
-    : getKeyQuotaCounters(apiKeyId, { ...deps, now: () => nowMs });
+    : await getKeyQuotaCounters(apiKeyId, { ...deps, now: () => nowMs });
   const enabled =
     limits.tpmLimit !== null || limits.rpmLimit !== null || limits.monthlyAmountUsd !== null;
 

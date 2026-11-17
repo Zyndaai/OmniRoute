@@ -755,7 +755,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           pruneStaleComboModelRefs(staleComboRefs)
         );
         for (const ref of prunedComboRefs) {
-          logAuditEvent({
+          await logAuditEvent({
             action: "combo.stale_model_ref.pruned",
             actor: "system",
             target: ref.comboName,
@@ -774,7 +774,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         }
         // Audit only when the catalog changed, so periodic syncs don't repeat it.
         if (shouldLog) {
-          logAuditEvent({
+          await logAuditEvent({
             action: "combo.stale_model_refs.flagged",
             actor: "system",
             target: logProvider,

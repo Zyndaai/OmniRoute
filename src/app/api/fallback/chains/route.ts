@@ -5,7 +5,7 @@ import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 
 export async function GET() {
   try {
-    const chains = getAllFallbackChains();
+    const chains = await getAllFallbackChains();
     return NextResponse.json(chains);
   } catch (error) {
     console.error("Error fetching fallback chains:", error);
@@ -36,7 +36,7 @@ export async function POST(request) {
     }
     const { model, chain } = validation.data;
 
-    registerFallback(model, chain);
+    await registerFallback(model, chain);
     return NextResponse.json({ success: true, model });
   } catch (error) {
     console.error("Error registering fallback chain:", error);
@@ -66,7 +66,7 @@ export async function DELETE(request) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
     const { model } = validation.data;
-    const removed = removeFallback(model);
+    const removed = await removeFallback(model);
     return NextResponse.json({ success: true, removed });
   } catch (error) {
     console.error("Error removing fallback chain:", error);

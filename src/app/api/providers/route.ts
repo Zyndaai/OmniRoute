@@ -142,11 +142,11 @@ export async function GET(request: Request) {
     const filter = provider ? { provider } : {};
 
     const connections = await getProviderConnections(filter, limit, offset);
-    const total = getProviderConnectionsCount(filter);
+    const total = await getProviderConnectionsCount(filter);
     const revealKeys = isApiKeyRevealEnabled();
 
     const quotaCache = connections.some((c) => c.provider === "codex")
-      ? getAllProviderLimitsCache()
+      ? await getAllProviderLimitsCache()
       : {};
 
     // Hide or mask sensitive fields
@@ -160,7 +160,7 @@ export async function GET(request: Request) {
         provider: String(c.provider ?? ""),
         id: String(c.id ?? ""),
       }));
-      discoveryStates = getDiscoveryStatesForConnections(discoveryEntries);
+      discoveryStates = await getDiscoveryStatesForConnections(discoveryEntries);
     } catch (error) {
       console.error("Failed to read the stored discovery outcomes:", error);
     }
@@ -489,7 +489,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      logAuditEvent({
+      await logAuditEvent({
         action: "provider.credentials.created",
         actor: "admin",
         target: getProviderAuditTarget(newConnection),
@@ -572,7 +572,7 @@ export async function PATCH(request: Request) {
 
     // Partial failure (some ids no longer exist) is logged as "warn" so the
     // Activity feed reflects that not every requested id was applied.
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.batch_updated",
       actor: "admin",
       resourceType: "provider_credentials",
@@ -646,7 +646,7 @@ export async function DELETE(request: Request) {
 
     await syncToCloudIfEnabled();
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.batch_revoked",
       actor: "admin",
       resourceType: "provider_credentials",

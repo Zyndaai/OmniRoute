@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getRegistryEntry } from "@omniroute/open-sse/config/providerRegistry.ts";
 import { filterChatSelectableModels } from "@omniroute/open-sse/services/modelEndpointPolicy.ts";
 import { filterSelectableModels } from "@omniroute/open-sse/services/modelLifecycle.ts";
-import { getModelIsHidden } from "@/lib/db/models";
+import { getHiddenModelsByProvider } from "@/lib/db/models";
 import { getSettings } from "@/lib/db/settings";
 import { getStaticModelsForProvider } from "@/lib/providers/staticModels";
 import { SAFE_OUTBOUND_FETCH_PRESETS, safeOutboundFetch } from "@/shared/network/safeOutboundFetch";
@@ -37,6 +37,15 @@ function toLiveModel(item: Record<string, unknown>): { id: string; name: string 
  * live catalog could not be used. The reason is a code or an HTTP status —
  * never a message, a body or an URL.
  */
+/** One bulk read of the hidden-model map instead of a lookup per model. */
+async function dropHiddenModels<T extends { id: string }>(
+  providerId: string,
+  models: T[]
+): Promise<T[]> {
+  const hidden = (await getHiddenModelsByProvider()).get(providerId);
+  return hidden ? models.filter((model) => !hidden.has(model.id)) : models;
+}
+
 type NoAuthLiveOutcome =
   | { kind: "live"; payload: Record<string, unknown> }
   | { kind: "failed"; failure: DiscoveryFailure };
@@ -66,9 +75,7 @@ async function fetchLiveNoAuthModels(
     if (liveModels.length === 0) return { kind: "failed", failure: { code: "EMPTY_CATALOG" } };
 
     const selectable = filterModelsForRoute(providerId, liveModels, chatOnly);
-    const visible = excludeHidden
-      ? selectable.filter((model) => !getModelIsHidden(providerId, model.id))
-      : selectable;
+    const visible = excludeHidden ? await dropHiddenModels(providerId, selectable) : selectable;
     const payload = {
       provider: providerId,
       connectionId,
@@ -113,35 +120,33 @@ export async function buildNoAuthModelsResponse(
   const payload =
     livePayload ??
     applyDiscoveryDegradation({
-      ...buildLocalCatalogPayload(
+      ...(await buildLocalCatalogPayload(
         providerId,
         connectionId,
         excludeHidden,
         chatOnly,
         Boolean(modelsUrl)
-      ),
+      )),
       ...(liveFailure ? { failure: liveFailure } : {}),
     });
   // Keep the outcome of this discovery: the response carrying it is gone on the next read.
-  recordDiscoveryOutcome(payload);
+  await recordDiscoveryOutcome(payload);
   return NextResponse.json(payload);
 }
 
-function buildLocalCatalogPayload(
+async function buildLocalCatalogPayload(
   providerId: string,
   connectionId: string,
   excludeHidden: boolean,
   chatOnly: boolean,
   hasModelsUrl: boolean
-): Record<string, unknown> {
+): Promise<Record<string, unknown>> {
   const catalog = mergeLocalCatalogModels(
     getModelsByProviderId(providerId) || [],
     getStaticModelsForProvider(providerId) || []
   ).map((model) => ({ id: model.id, name: model.name || model.id }));
   const selectable = filterModelsForRoute(providerId, catalog, chatOnly);
-  const visible = excludeHidden
-    ? selectable.filter((model) => !getModelIsHidden(providerId, model.id))
-    : selectable;
+  const visible = excludeHidden ? await dropHiddenModels(providerId, selectable) : selectable;
   return {
     provider: providerId,
     connectionId,

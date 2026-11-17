@@ -12,7 +12,7 @@ lastUpdated: 2026-06-28
 
 ## TL;DR
 
-Two opt-in compose profiles (`memory`, `bifrost`) for the existing 8-service deployment in [`docker-compose.yml`](../../docker-compose.yml). Default-up behaviour is **unchanged**: 3 × `omniroute` replicas + Caddy + Redis + CliproxyAPI. The two new profiles add Qdrant and Bifrost as optional sidecars, gated by `docker compose --profile <name> up`. **No existing service is removed or replaced.**
+Two opt-in compose profiles (`memory`, `bifrost`) for the existing 8-service deployment in [`docker-compose.yml`](../../docker-compose.yml). This proposal does not change the default-up stack (3 × `omniroute` replicas, Caddy, Redis, CliproxyAPI); the database and process roles those replicas run are decided in [`persistence-shared-state.md`](persistence-shared-state.md). The two new profiles add Qdrant and Bifrost as optional sidecars, gated by `docker compose --profile <name> up`. **No existing service is removed or replaced.**
 
 ## Why this is conservative
 
@@ -71,7 +71,7 @@ The original issue thread floated a larger cluster rewrite. After auditing the a
 | ------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------ |
 | **Dragonfly**                        | **DROP** | `redis:7-alpine` is already fine for the rate-limit workload at production scale; no ceiling to break. |
 | **NATS**                             | **DROP** | Each `omniroute` replica is a single Node.js process; no multi-process pub/sub workload exists.        |
-| **PostgreSQL**                       | **DROP** | SQLite + sqlite-vec + FTS5 cover all 3 use cases; 97 migrations block migration.                       |
+| **PostgreSQL**                       | ~~DROP~~ | Adopted 2026-11-16: PostgreSQL, see [`persistence-shared-state.md`](persistence-shared-state.md)       |
 | **Neo4j**                            | **DROP** | Routing is a 5-table join; recursive CTE on SQLite is sufficient.                                      |
 | **MinIO**                            | **DROP** | No multi-MB blob workload; images/audio are passthrough proxies.                                       |
 | **pgvector / pg_ai / pg_textsearch** | **DROP** | Same SQLite-ceiling reason as PostgreSQL; pgvector ecosystem fragmented.                               |

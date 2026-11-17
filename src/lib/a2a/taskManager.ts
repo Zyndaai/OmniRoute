@@ -154,9 +154,9 @@ export class A2ATaskManager {
    * (SQLite unavailable, schema drift, …) is logged and swallowed — the in-memory `Map` stays
    * the source of truth for live tasks, and this call must never break the caller's write path.
    */
-  private persist(task: A2ATask, eventType: string, message?: string): void {
+  private async persist(task: A2ATask, eventType: string, message?: string): Promise<void> {
     try {
-      this.persistence.upsert({
+      await this.persistence.upsert({
         id: task.id,
         state: task.state,
         skillId: task.skill,
@@ -167,7 +167,7 @@ export class A2ATaskManager {
         updatedAt: task.updatedAt,
         completedAt: TERMINAL.has(task.state) ? task.updatedAt : null,
       });
-      this.persistence.appendEvent(
+      await this.persistence.appendEvent(
         task.id,
         eventType,
         message ? JSON.stringify({ message }) : undefined
@@ -181,11 +181,11 @@ export class A2ATaskManager {
    * Purge task history rows older than the retention window, throttled to at most once per 24h
    * (called from the existing `cleanupExpired` interval). Best-effort, like `persist`.
    */
-  private maybePurge(): void {
+  private async maybePurge(): Promise<void> {
     if (Date.now() - this.lastPurgeAt <= DAY_MS) return;
     this.lastPurgeAt = Date.now();
     try {
-      this.persistence.purge(historyRetentionDays());
+      await this.persistence.purge(historyRetentionDays());
     } catch (err) {
       log.warn("a2a task history purge failed", { err });
     }
@@ -215,7 +215,7 @@ export class A2ATaskManager {
     };
     this.tasks.set(task.id, task);
     emitAgentTaskUpdated("a2a", task.id, "submitted");
-    this.persist(task, "state:submitted");
+    void this.persist(task, "state:submitted");
     return task;
   }
 
@@ -261,7 +261,7 @@ export class A2ATaskManager {
     if (artifacts) task.artifacts.push(...artifacts);
 
     emitAgentTaskUpdated("a2a", taskId, state);
-    this.persist(task, `state:${state}`, message);
+    void this.persist(task, `state:${state}`, message);
     return task;
   }
 
@@ -348,7 +348,7 @@ export class A2ATaskManager {
         task.updatedAt = now.toISOString();
         task.events.push({ timestamp: now.toISOString(), state: "failed", message: "TTL expired" });
         emitAgentTaskUpdated("a2a", id, "failed");
-        this.persist(task, "state:failed", "TTL expired");
+        void this.persist(task, "state:failed", "TTL expired");
       }
       // Remove terminal tasks older than 2x TTL
       if (
@@ -358,7 +358,7 @@ export class A2ATaskManager {
         this.tasks.delete(id);
       }
     }
-    this.maybePurge();
+    void this.maybePurge();
   }
 
   destroy() {

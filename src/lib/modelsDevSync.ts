@@ -21,9 +21,10 @@
  * honor settings. `1|true|on|yes` forces sync on even if the setting is off.
  */
 
-import { getDbInstance } from "./db/core";
+import { db, type DbExecutor } from "./db/pg";
+import { jsonToText } from "./db/pgJsonText";
+import { clearPricingSource, readPricingSource, replacePricingSource } from "./db/modelPricing";
 import { invalidateDbCache, getModelCatalogCacheVersion } from "./db/readCache";
-import { backupDbFile } from "./db/backup";
 import { preserveStoredModalitySets } from "./db/models/capabilityModalities";
 
 import {
@@ -31,7 +32,6 @@ import {
   transformModelsDevToCapabilities,
 } from "./modelsDevSync/transform";
 import type {
-  PricingModels,
   PricingByProvider,
   ModelCapabilityEntry,
   CapabilitiesByProvider,
@@ -198,36 +198,33 @@ function toRecord(value: unknown): Record<string, unknown> {
 }
 
 function parseReasoningEfforts(value: unknown): string[] | null {
-  if (typeof value !== "string" || value.length === 0) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return null;
-    const efforts = parsed.filter(
-      (entry): entry is string => typeof entry === "string" && entry.length > 0
-    );
-    return efforts.length > 0 ? efforts : null;
-  } catch {
-    return null;
-  }
+  if (!Array.isArray(value)) return null;
+  const efforts = value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0
+  );
+  return efforts.length > 0 ? efforts : null;
+}
+
+/** Nullable boolean column: real booleans from Postgres, NULL stays "unknown". */
+function toTriState(value: unknown): boolean | null {
+  return value === true ? true : value === false ? false : null;
 }
 
 function mapCapabilityRecord(record: Record<string, unknown>): ModelCapabilityEntry {
   return {
-    tool_call: record.tool_call === 1 ? true : record.tool_call === 0 ? false : null,
-    reasoning: record.reasoning === 1 ? true : record.reasoning === 0 ? false : null,
-    attachment: record.attachment === 1 ? true : record.attachment === 0 ? false : null,
-    structured_output:
-      record.structured_output === 1 ? true : record.structured_output === 0 ? false : null,
-    temperature: record.temperature === 1 ? true : record.temperature === 0 ? false : null,
-    modalities_input: typeof record.modalities_input === "string" ? record.modalities_input : "[]",
-    modalities_output:
-      typeof record.modalities_output === "string" ? record.modalities_output : "[]",
+    tool_call: toTriState(record.tool_call),
+    reasoning: toTriState(record.reasoning),
+    attachment: toTriState(record.attachment),
+    structured_output: toTriState(record.structured_output),
+    temperature: toTriState(record.temperature),
+    modalities_input: jsonToText(record.modalities_input) ?? "[]",
+    modalities_output: jsonToText(record.modalities_output) ?? "[]",
     knowledge_cutoff: typeof record.knowledge_cutoff === "string" ? record.knowledge_cutoff : null,
     release_date: typeof record.release_date === "string" ? record.release_date : null,
     last_updated: typeof record.last_updated === "string" ? record.last_updated : null,
     status: typeof record.status === "string" ? record.status : null,
     family: typeof record.family === "string" ? record.family : null,
-    open_weights: record.open_weights === 1 ? true : record.open_weights === 0 ? false : null,
+    open_weights: toTriState(record.open_weights),
     limit_context: typeof record.limit_context === "number" ? record.limit_context : null,
     limit_input: typeof record.limit_input === "number" ? record.limit_input : null,
     limit_output: typeof record.limit_output === "number" ? record.limit_output : null,
@@ -251,9 +248,9 @@ let pricingMemoVersion = -1; // -1: never equals a real cacheVersion (starts at 
  * Read synced pricing from `models_dev_pricing` namespace.
  * Results are memoized until `saveModelsDevPricing` / `clearModelsDevPricing`.
  */
-export function getModelsDevPricing(): PricingByProvider {
-  // Kill switch: skip the SQL + JSON.parse scan entirely so a leftover
-  // models_dev_pricing namespace cannot pin the event loop (#9685 / #10052).
+export async function getModelsDevPricing(): Promise<PricingByProvider> {
+  // Kill switch: skip the query entirely so a leftover models.dev price table
+  // cannot pin the event loop (#9685 / #10052).
   if (isModelsDevSyncEnvDisabled()) {
     return {};
   }
@@ -263,92 +260,35 @@ export function getModelsDevPricing(): PricingByProvider {
     return pricingMemo;
   }
 
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = 'models_dev_pricing'")
-    .all();
-  const synced: PricingByProvider = {};
-  for (const row of rows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-    try {
-      synced[key] = JSON.parse(rawValue) as PricingModels;
-    } catch {
-      console.warn(`[MODELS_DEV] Corrupted pricing data for provider "${key}", skipping`);
-    }
-  }
+  const synced = (await readPricingSource("models_dev")) as PricingByProvider;
   pricingMemo = synced;
   pricingMemoVersion = currentVersion;
   return synced;
 }
 
 /**
- * Save synced pricing to `models_dev_pricing` namespace (full replace).
+ * Save synced pricing (`model_pricing` rows of source `models_dev`, full replace).
  */
-export function saveModelsDevPricing(data: PricingByProvider): void {
-  const db = getDbInstance();
-  const del = db.prepare("DELETE FROM key_value WHERE namespace = 'models_dev_pricing'");
-  const insert = db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('models_dev_pricing', ?, ?)"
-  );
-  const tx = db.transaction(() => {
-    del.run();
-    for (const [provider, models] of Object.entries(data)) {
-      insert.run(provider, JSON.stringify(models));
-    }
-  });
-  tx();
-  backupDbFile("pre-write");
+export async function saveModelsDevPricing(data: PricingByProvider): Promise<void> {
+  await replacePricingSource("models_dev", data);
   invalidateDbCache("pricing");
 }
 
 /**
  * Clear all models.dev synced pricing data.
  */
-export function clearModelsDevPricing(): void {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM key_value WHERE namespace = 'models_dev_pricing'").run();
-  backupDbFile("pre-write");
+export async function clearModelsDevPricing(): Promise<void> {
+  await clearPricingSource("models_dev");
   invalidateDbCache("pricing");
 }
 
 // ─── DB: model_capabilities table ────────────────────────
 
 /**
- * Ensure the model_capabilities table exists.
- * Call this before any capability operations.
+ * Kept for callers written when the table was created lazily. The table is part of the
+ * schema migration now, so there is nothing left to ensure.
  */
-export function ensureCapabilitiesTable(): void {
-  const db = getDbInstance();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS model_capabilities (
-      provider TEXT NOT NULL,
-      model_id TEXT NOT NULL,
-      tool_call BOOLEAN,
-      reasoning BOOLEAN,
-      attachment BOOLEAN,
-      structured_output BOOLEAN,
-      temperature BOOLEAN,
-      modalities_input TEXT,
-      modalities_output TEXT,
-      knowledge_cutoff TEXT,
-      release_date TEXT,
-      last_updated TEXT,
-      status TEXT,
-      family TEXT,
-      open_weights BOOLEAN,
-      limit_context INTEGER,
-      limit_input INTEGER,
-      limit_output INTEGER,
-      interleaved_field TEXT,
-      reasoning_efforts TEXT,
-      last_synced TEXT,
-      PRIMARY KEY (provider, model_id)
-    )
-  `);
-}
+export async function ensureCapabilitiesTable(): Promise<void> {}
 
 function defineEnumerableDataProperty<T extends object>(
   target: T,
@@ -386,17 +326,14 @@ function capabilitiesFromRows(rows: unknown[]): CapabilitiesByProvider {
  * Shares mapping with the ordinary all-row API but never mutates the module-global
  * `cachedCapabilities` / `cachedCapabilitiesLoadedAll` runtime cache.
  */
-export function loadAllSyncedCapabilitiesUncached(): CapabilitiesByProvider {
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-  const rows = db.prepare("SELECT * FROM model_capabilities").all();
+export async function loadAllSyncedCapabilitiesUncached(): Promise<CapabilitiesByProvider> {
+  const rows = await db().query("SELECT * FROM model_capabilities");
   return capabilitiesFromRows(rows);
 }
 
 /**
  * Reasoning tiers already resident in this process. A catalog/discovery read
- * must use this instead of `getSyncedCapabilities()` — that path opens SQLite
- * and runs migrations.
+ * must use this instead of `getSyncedCapabilities()` — that path queries the database.
  */
 export function peekCachedReasoningEfforts(provider: string, modelId: string): string[] | null {
   if (!cachedCapabilitiesLoadedAll || !cachedCapabilities) return null;
@@ -407,7 +344,10 @@ export function peekCachedReasoningEfforts(provider: string, modelId: string): s
 /**
  * Read synced capabilities from `model_capabilities` table.
  */
-export function getSyncedCapabilities(provider?: string, modelId?: string): CapabilitiesByProvider {
+export async function getSyncedCapabilities(
+  provider?: string,
+  modelId?: string
+): Promise<CapabilitiesByProvider> {
   if (cachedCapabilitiesLoadedAll) {
     if (!provider) {
       return cachedCapabilities || {};
@@ -421,22 +361,19 @@ export function getSyncedCapabilities(provider?: string, modelId?: string): Capa
     return providerCaps?.[modelId] ? { [provider]: { [modelId]: providerCaps[modelId] } } : {};
   }
 
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-
   let query = "SELECT * FROM model_capabilities";
-  const params: (string | number)[] = [];
+  const params: string[] = [];
 
   if (provider) {
-    query += " WHERE provider = ?";
+    query += " WHERE provider = $1";
     params.push(provider);
     if (modelId) {
-      query += " AND model_id = ?";
+      query += " AND model_id = $2";
       params.push(modelId);
     }
   }
 
-  const result = capabilitiesFromRows(db.prepare(query).all(...params));
+  const result = capabilitiesFromRows(await db().query(query, params));
 
   if (!provider && !modelId) {
     cachedCapabilities = result;
@@ -457,17 +394,17 @@ const SYNCED_CAPABILITY_FALLBACK_ALIASES: Record<string, string[]> = {
   "opencode-go": ["opencode-zen"],
 };
 
-function lookupSyncedCapabilityWithFallbacks(
+async function lookupSyncedCapabilityWithFallbacks(
   provider: string,
-  lookup: (provider: string) => ModelCapabilityEntry | null
-): ModelCapabilityEntry | null {
-  const direct = lookup(provider);
+  lookup: (provider: string) => Promise<ModelCapabilityEntry | null> | ModelCapabilityEntry | null
+): Promise<ModelCapabilityEntry | null> {
+  const direct = await lookup(provider);
   if (direct) return direct;
 
   const fallbacks = SYNCED_CAPABILITY_FALLBACK_ALIASES[provider];
   if (fallbacks) {
     for (const alt of fallbacks) {
-      const found = lookup(alt);
+      const found = await lookup(alt);
       if (found) return found;
     }
   }
@@ -475,18 +412,18 @@ function lookupSyncedCapabilityWithFallbacks(
   return null;
 }
 
-export function getSyncedCapability(
+export async function getSyncedCapability(
   provider: string,
   modelId: string,
   bulk?: CapabilitiesByProvider | null
-): ModelCapabilityEntry | null {
+): Promise<ModelCapabilityEntry | null> {
   if (!provider || !modelId) return null;
 
   if (bulk) {
     return lookupSyncedCapabilityWithFallbacks(provider, (p) => bulk[p]?.[modelId] ?? null);
   }
 
-  // Fast path: every provider is in the in-memory cache, skip SQLite entirely.
+  // Fast path: every provider is in the in-memory cache, skip the database entirely.
   if (cachedCapabilitiesLoadedAll) {
     return lookupSyncedCapabilityWithFallbacks(
       provider,
@@ -494,71 +431,138 @@ export function getSyncedCapability(
     );
   }
 
-  // Cold path: hit SQLite. Prepare the statement once, reuse for every alias.
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-  const stmt = db.prepare(
-    "SELECT * FROM model_capabilities WHERE provider = ? AND model_id = ? LIMIT 1"
-  );
-  return lookupSyncedCapabilityWithFallbacks(provider, (p) => {
-    const row = stmt.get(p, modelId);
+  // Cold path: query the table for the provider and each fallback alias.
+  return lookupSyncedCapabilityWithFallbacks(provider, async (p) => {
+    const row = await db().queryOne(
+      "SELECT * FROM model_capabilities WHERE provider = $1 AND model_id = $2 LIMIT 1",
+      [p, modelId]
+    );
     if (!row) return null;
     return mapCapabilityRecord(toRecord(row));
   });
 }
 
+type CapabilityRowParams = readonly unknown[];
+
+const nullableInt = (value: number | null): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null;
+
+/**
+ * Multi-row insert of capability rows through `unnest` (one round trip per chunk instead of
+ * one per row). With `upsert`, an existing row is rewritten only when a capability column
+ * actually differs, so the returned count is the number of semantic changes (a re-sync that
+ * only refreshes `last_synced` counts as none).
+ */
+async function insertCapabilityRows(
+  ex: DbExecutor,
+  rows: Array<{ provider: string; modelId: string; cap: ModelCapabilityEntry }>,
+  upsert: boolean
+): Promise<number> {
+  const CHUNK = 1500;
+  let changes = 0;
+  for (let start = 0; start < rows.length; start += CHUNK) {
+    const chunk = rows.slice(start, start + CHUNK);
+    const params: CapabilityRowParams[] = [
+      chunk.map((r) => r.provider),
+      chunk.map((r) => r.modelId),
+      chunk.map((r) => r.cap.tool_call),
+      chunk.map((r) => r.cap.reasoning),
+      chunk.map((r) => r.cap.attachment),
+      chunk.map((r) => r.cap.structured_output),
+      chunk.map((r) => r.cap.temperature),
+      chunk.map((r) => r.cap.modalities_input),
+      chunk.map((r) => r.cap.modalities_output),
+      chunk.map((r) => r.cap.knowledge_cutoff),
+      chunk.map((r) => r.cap.release_date),
+      chunk.map((r) => r.cap.last_updated),
+      chunk.map((r) => r.cap.status),
+      chunk.map((r) => r.cap.family),
+      chunk.map((r) => r.cap.open_weights),
+      chunk.map((r) => nullableInt(r.cap.limit_context)),
+      chunk.map((r) => nullableInt(r.cap.limit_input)),
+      chunk.map((r) => nullableInt(r.cap.limit_output)),
+      chunk.map((r) => r.cap.interleaved_field),
+      chunk.map((r) => (r.cap.reasoning_efforts ? JSON.stringify(r.cap.reasoning_efforts) : null)),
+    ];
+    const conflict = upsert
+      ? `ON CONFLICT (provider, model_id) DO UPDATE SET
+           tool_call = EXCLUDED.tool_call, reasoning = EXCLUDED.reasoning,
+           attachment = EXCLUDED.attachment, structured_output = EXCLUDED.structured_output,
+           temperature = EXCLUDED.temperature, modalities_input = EXCLUDED.modalities_input,
+           modalities_output = EXCLUDED.modalities_output,
+           knowledge_cutoff = EXCLUDED.knowledge_cutoff, release_date = EXCLUDED.release_date,
+           last_updated = EXCLUDED.last_updated, status = EXCLUDED.status,
+           family = EXCLUDED.family, open_weights = EXCLUDED.open_weights,
+           limit_context = EXCLUDED.limit_context, limit_input = EXCLUDED.limit_input,
+           limit_output = EXCLUDED.limit_output, interleaved_field = EXCLUDED.interleaved_field,
+           reasoning_efforts = EXCLUDED.reasoning_efforts, last_synced = EXCLUDED.last_synced
+         WHERE (
+           model_capabilities.tool_call, model_capabilities.reasoning,
+           model_capabilities.attachment, model_capabilities.structured_output,
+           model_capabilities.temperature, model_capabilities.modalities_input,
+           model_capabilities.modalities_output, model_capabilities.knowledge_cutoff,
+           model_capabilities.release_date, model_capabilities.last_updated,
+           model_capabilities.status, model_capabilities.family, model_capabilities.open_weights,
+           model_capabilities.limit_context, model_capabilities.limit_input,
+           model_capabilities.limit_output, model_capabilities.interleaved_field,
+           model_capabilities.reasoning_efforts
+         ) IS DISTINCT FROM (
+           EXCLUDED.tool_call, EXCLUDED.reasoning, EXCLUDED.attachment, EXCLUDED.structured_output,
+           EXCLUDED.temperature, EXCLUDED.modalities_input, EXCLUDED.modalities_output,
+           EXCLUDED.knowledge_cutoff, EXCLUDED.release_date, EXCLUDED.last_updated,
+           EXCLUDED.status, EXCLUDED.family, EXCLUDED.open_weights,
+           EXCLUDED.limit_context, EXCLUDED.limit_input, EXCLUDED.limit_output,
+           EXCLUDED.interleaved_field, EXCLUDED.reasoning_efforts
+         )`
+      : "";
+    const result = await ex.execute(
+      `INSERT INTO model_capabilities (
+         provider, model_id, tool_call, reasoning, attachment, structured_output,
+         temperature, modalities_input, modalities_output, knowledge_cutoff,
+         release_date, last_updated, status, family, open_weights,
+         limit_context, limit_input, limit_output, interleaved_field, reasoning_efforts,
+         last_synced
+       )
+       SELECT t.provider, t.model_id, t.tool_call, t.reasoning, t.attachment, t.structured_output,
+         t.temperature, t.modalities_input::jsonb, t.modalities_output::jsonb, t.knowledge_cutoff,
+         t.release_date, t.last_updated, t.status, t.family, t.open_weights,
+         t.limit_context, t.limit_input, t.limit_output, t.interleaved_field,
+         t.reasoning_efforts::jsonb, now()
+       FROM unnest(
+         $1::text[], $2::text[], $3::boolean[], $4::boolean[], $5::boolean[], $6::boolean[],
+         $7::boolean[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[],
+         $13::text[], $14::text[], $15::boolean[], $16::int[], $17::int[], $18::int[],
+         $19::text[], $20::text[]
+       ) AS t(provider, model_id, tool_call, reasoning, attachment, structured_output,
+         temperature, modalities_input, modalities_output, knowledge_cutoff,
+         release_date, last_updated, status, family, open_weights,
+         limit_context, limit_input, limit_output, interleaved_field, reasoning_efforts)
+       ${conflict}`,
+      params
+    );
+    changes += result.changes;
+  }
+  return changes;
+}
+
+function flattenCapabilities(
+  data: CapabilitiesByProvider
+): Array<{ provider: string; modelId: string; cap: ModelCapabilityEntry }> {
+  return Object.entries(data).flatMap(([provider, models]) =>
+    Object.entries(models).map(([modelId, cap]) => ({ provider, modelId, cap }))
+  );
+}
+
 /**
  * Save synced capabilities to `model_capabilities` table (full replace).
  */
-export function saveModelsDevCapabilities(data: CapabilitiesByProvider): void {
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-
-  const del = db.prepare("DELETE FROM model_capabilities");
-  const insert = db.prepare(`
-    INSERT INTO model_capabilities (
-      provider, model_id, tool_call, reasoning, attachment, structured_output,
-      temperature, modalities_input, modalities_output, knowledge_cutoff,
-      release_date, last_updated, status, family, open_weights,
-      limit_context, limit_input, limit_output, interleaved_field, reasoning_efforts, last_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const now = new Date().toISOString();
-  let changed = false;
-  const tx = db.transaction(() => {
-    if (del.run().changes > 0) changed = true;
-    for (const [provider, models] of Object.entries(data)) {
-      for (const [modelId, cap] of Object.entries(models)) {
-        const info = insert.run(
-          provider,
-          modelId,
-          cap.tool_call === null ? null : cap.tool_call ? 1 : 0,
-          cap.reasoning === null ? null : cap.reasoning ? 1 : 0,
-          cap.attachment === null ? null : cap.attachment ? 1 : 0,
-          cap.structured_output === null ? null : cap.structured_output ? 1 : 0,
-          cap.temperature === null ? null : cap.temperature ? 1 : 0,
-          cap.modalities_input,
-          cap.modalities_output,
-          cap.knowledge_cutoff,
-          cap.release_date,
-          cap.last_updated,
-          cap.status,
-          cap.family,
-          cap.open_weights === null ? null : cap.open_weights ? 1 : 0,
-          cap.limit_context,
-          cap.limit_input,
-          cap.limit_output,
-          cap.interleaved_field,
-          cap.reasoning_efforts ? JSON.stringify(cap.reasoning_efforts) : null,
-          now
-        );
-        if (info.changes > 0) changed = true;
-      }
-    }
+export async function saveModelsDevCapabilities(data: CapabilitiesByProvider): Promise<void> {
+  const rows = flattenCapabilities(data);
+  const changed = await db().transaction(async (tx) => {
+    const deleted = await tx.execute("DELETE FROM model_capabilities");
+    const inserted = await insertCapabilityRows(tx, rows, false);
+    return deleted.changes > 0 || inserted > 0;
   });
-  tx();
-  backupDbFile("pre-write");
   cachedCapabilities = data;
   cachedCapabilitiesLoadedAll = true;
   if (changed) invalidateDbCache("model-capabilities");
@@ -569,94 +573,19 @@ export function saveModelsDevCapabilities(data: CapabilitiesByProvider): void {
  * Used by the OpenRouter live catalog walk so architecture.input_modalities
  * survive into the next combo LCD (#12613).
  */
-export function upsertSyncedCapabilities(
+export async function upsertSyncedCapabilities(
   provider: string,
   models: Record<string, ModelCapabilityEntry>
-): void {
+): Promise<void> {
   if (!provider || Object.keys(models).length === 0) return;
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-  const insert = db.prepare(`
-    INSERT INTO model_capabilities (
-      provider, model_id, tool_call, reasoning, attachment, structured_output,
-      temperature, modalities_input, modalities_output, knowledge_cutoff,
-      release_date, last_updated, status, family, open_weights,
-      limit_context, limit_input, limit_output, interleaved_field, reasoning_efforts, last_synced
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(provider, model_id) DO UPDATE SET
-      tool_call=excluded.tool_call,
-      reasoning=excluded.reasoning,
-      attachment=excluded.attachment,
-      structured_output=excluded.structured_output,
-      temperature=excluded.temperature,
-      modalities_input=excluded.modalities_input,
-      modalities_output=excluded.modalities_output,
-      knowledge_cutoff=excluded.knowledge_cutoff,
-      release_date=excluded.release_date,
-      last_updated=excluded.last_updated,
-      status=excluded.status,
-      family=excluded.family,
-      open_weights=excluded.open_weights,
-      limit_context=excluded.limit_context,
-      limit_input=excluded.limit_input,
-      limit_output=excluded.limit_output,
-      interleaved_field=excluded.interleaved_field,
-      reasoning_efforts=excluded.reasoning_efforts,
-      last_synced=excluded.last_synced
-    WHERE (
-      model_capabilities.tool_call, model_capabilities.reasoning,
-      model_capabilities.attachment, model_capabilities.structured_output,
-      model_capabilities.temperature, model_capabilities.modalities_input,
-      model_capabilities.modalities_output, model_capabilities.knowledge_cutoff,
-      model_capabilities.release_date, model_capabilities.last_updated,
-      model_capabilities.status, model_capabilities.family, model_capabilities.open_weights,
-      model_capabilities.limit_context, model_capabilities.limit_input,
-      model_capabilities.limit_output, model_capabilities.interleaved_field,
-      model_capabilities.reasoning_efforts
-    ) IS NOT (
-      excluded.tool_call, excluded.reasoning, excluded.attachment, excluded.structured_output,
-      excluded.temperature, excluded.modalities_input, excluded.modalities_output,
-      excluded.knowledge_cutoff, excluded.release_date, excluded.last_updated,
-      excluded.status, excluded.family, excluded.open_weights,
-      excluded.limit_context, excluded.limit_input, excluded.limit_output,
-      excluded.interleaved_field, excluded.reasoning_efforts
-    )
-  `);
-  const now = new Date().toISOString();
-  let changed = false;
-  let persistedModels = models;
-  const tx = db.transaction(() => {
-    persistedModels = preserveStoredModalitySets(provider, models);
-    for (const [modelId, cap] of Object.entries(persistedModels)) {
-      const info = insert.run(
-        provider,
-        modelId,
-        cap.tool_call === null ? null : cap.tool_call ? 1 : 0,
-        cap.reasoning === null ? null : cap.reasoning ? 1 : 0,
-        cap.attachment === null ? null : cap.attachment ? 1 : 0,
-        cap.structured_output === null ? null : cap.structured_output ? 1 : 0,
-        cap.temperature === null ? null : cap.temperature ? 1 : 0,
-        cap.modalities_input,
-        cap.modalities_output,
-        cap.knowledge_cutoff,
-        cap.release_date,
-        cap.last_updated,
-        cap.status,
-        cap.family,
-        cap.open_weights === null ? null : cap.open_weights ? 1 : 0,
-        cap.limit_context,
-        cap.limit_input,
-        cap.limit_output,
-        cap.interleaved_field,
-        cap.reasoning_efforts ? JSON.stringify(cap.reasoning_efforts) : null,
-        now
-      );
-      // A catalog read must not invalidate its own generation just by refreshing
-      // last_synced. The null-safe SQL predicate counts only semantic changes.
-      if (info.changes > 0) changed = true;
-    }
+  // A catalog read must not invalidate its own generation just by refreshing
+  // last_synced. The null-safe SQL predicate counts only semantic changes.
+  const { persistedModels, changed } = await db().transaction(async (tx) => {
+    const persisted = await preserveStoredModalitySets(provider, models, tx);
+    const rows = Object.entries(persisted).map(([modelId, cap]) => ({ provider, modelId, cap }));
+    const changes = await insertCapabilityRows(tx, rows, true);
+    return { persistedModels: persisted, changed: changes > 0 };
   });
-  tx();
   if (cachedCapabilities) {
     cachedCapabilities[provider] = {
       ...(cachedCapabilities[provider] || {}),
@@ -669,11 +598,8 @@ export function upsertSyncedCapabilities(
 /**
  * Clear all synced capability data.
  */
-export function clearModelsDevCapabilities(): void {
-  const db = getDbInstance();
-  ensureCapabilitiesTable();
-  const info = db.prepare("DELETE FROM model_capabilities").run();
-  backupDbFile("pre-write");
+export async function clearModelsDevCapabilities(): Promise<void> {
+  const info = await db().execute("DELETE FROM model_capabilities");
   cachedCapabilities = {};
   cachedCapabilitiesLoadedAll = true;
   if (info.changes > 0) invalidateDbCache("model-capabilities");
@@ -721,10 +647,9 @@ export async function syncModelsDev(opts?: {
       }
 
       if (!dryRun) {
-        saveModelsDevPricing(pricing);
+        await saveModelsDevPricing(pricing);
         if (syncCapabilities) {
-          ensureCapabilitiesTable();
-          saveModelsDevCapabilities(capabilities);
+          await saveModelsDevCapabilities(capabilities);
         }
         lastSyncTime = new Date().toISOString();
         lastSyncModelCount = modelCount;

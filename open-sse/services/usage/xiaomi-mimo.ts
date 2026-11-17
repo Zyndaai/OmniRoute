@@ -232,7 +232,7 @@ export async function getXiaomiMimoUsage(
   // Fallback: self-tracked monthly counter against the configured budget.
   try {
     const { getMonthlyProviderTokensForConnection } = await import("@/lib/usage/usageStats");
-    const used = getMonthlyProviderTokensForConnection(provider, connectionId);
+    const used = await getMonthlyProviderTokensForConnection(provider, connectionId);
     const total = resolveMonthlyTokenLimit(providerSpecificData);
     return {
       plan: PLAN_LABEL_TRACKED,

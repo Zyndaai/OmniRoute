@@ -333,7 +333,7 @@ export async function POST(request: Request) {
 
     // Persist last-configured timestamp
     try {
-      saveCliToolLastConfigured("codex");
+      await saveCliToolLastConfigured("codex");
     } catch {
       /* non-critical */
     }
@@ -435,7 +435,7 @@ export async function DELETE(request: Request) {
 
     // Clear last-configured timestamp
     try {
-      deleteCliToolLastConfigured("codex");
+      await deleteCliToolLastConfigured("codex");
     } catch {
       /* non-critical */
     }

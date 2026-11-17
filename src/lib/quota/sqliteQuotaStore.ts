@@ -86,10 +86,10 @@ export class SqliteQuotaStore implements QuotaStore {
 
     return withMutex(mutexKey(apiKeyId, dimKey), async () => {
       // UPSERT is atomic at the DB level
-      incrementBucket(apiKeyId, dimKey, currentBucket, cost, nowMs);
+      await incrementBucket(apiKeyId, dimKey, currentBucket, cost, nowMs);
 
       // Read fresh pair to compute effective
-      const { curr, prev } = getPair(apiKeyId, dimKey, currentBucket);
+      const { curr, prev } = await getPair(apiKeyId, dimKey, currentBucket);
       return slidingWindowEffective(curr, prev, nowMs, windowMs);
     });
   }
@@ -103,7 +103,7 @@ export class SqliteQuotaStore implements QuotaStore {
     const windowMs = WINDOW_MS[dim.window];
     const currentBucket = Math.floor(nowMs / windowMs);
 
-    const { curr, prev } = getPair(apiKeyId, dimKey, currentBucket);
+    const { curr, prev } = await getPair(apiKeyId, dimKey, currentBucket);
     return slidingWindowEffective(curr, prev, nowMs, windowMs);
   }
 
@@ -121,7 +121,7 @@ export class SqliteQuotaStore implements QuotaStore {
     const windowMs = WINDOW_MS[dim.window];
     const currentBucket = Math.floor(nowMs / windowMs);
 
-    const { currTotal, prevTotal } = sumPoolDimension(dimKey, currentBucket);
+    const { currTotal, prevTotal } = await sumPoolDimension(dimKey, currentBucket);
     return slidingWindowEffective(currTotal, prevTotal, nowMs, windowMs);
   }
 
@@ -132,7 +132,7 @@ export class SqliteQuotaStore implements QuotaStore {
    */
   async poolUsage(poolId: string): Promise<PoolUsageSnapshot> {
     const nowMs = Date.now();
-    const pool = getPool(poolId);
+    const pool = await getPool(poolId);
 
     if (!pool) {
       return {
@@ -167,7 +167,7 @@ export class SqliteQuotaStore implements QuotaStore {
     planDimensions: Array<{ unit: string; window: string; limit: number }>
   ): Promise<PoolUsageSnapshot> {
     const nowMs = Date.now();
-    const pool = getPool(poolId);
+    const pool = await getPool(poolId);
 
     if (!pool) {
       return {
@@ -203,14 +203,14 @@ export class SqliteQuotaStore implements QuotaStore {
 
     await withMutex(mutexKey(apiKeyId, dimKey), async () => {
       // Zero current bucket
-      const currVal = getBucket(apiKeyId, dimKey, currentBucket);
+      const currVal = await getBucket(apiKeyId, dimKey, currentBucket);
       if (currVal !== 0) {
-        incrementBucket(apiKeyId, dimKey, currentBucket, -currVal, nowMs);
+        await incrementBucket(apiKeyId, dimKey, currentBucket, -currVal, nowMs);
       }
       // Zero previous bucket
-      const prevVal = getBucket(apiKeyId, dimKey, prevBucket);
+      const prevVal = await getBucket(apiKeyId, dimKey, prevBucket);
       if (prevVal !== 0) {
-        incrementBucket(apiKeyId, dimKey, prevBucket, -prevVal, nowMs);
+        await incrementBucket(apiKeyId, dimKey, prevBucket, -prevVal, nowMs);
       }
     });
   }

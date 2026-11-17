@@ -16,7 +16,7 @@
  */
 
 import { evaluateFirstAllowed, evaluateRequest, PolicyEngine } from "../domain/policyEngine.ts";
-import { getDbInstance } from "./db/core.ts";
+import { db } from "./db/pg.ts";
 import {
   decrypt,
   decryptConnectionFields,
@@ -95,7 +95,7 @@ container.register("settings", () => {
 });
 
 container.register("db", () => {
-  return getDbInstance();
+  return db();
 });
 
 container.register("encryption", () => {

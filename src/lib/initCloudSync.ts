@@ -42,9 +42,9 @@ export async function ensureCloudSyncInitialized() {
       // check's first sweep sat behind a 10s timer. Awaiting the init is a firmer
       // guarantee than the timer was.
       const registry = getJobRegistry();
-      registerBudgetResetJob(registry);
-      registerTokenHealthCheck(registry);
-      registerLogExportJob(registry);
+      await registerBudgetResetJob(registry);
+      await registerTokenHealthCheck(registry);
+      await registerLogExportJob(registry);
       await registry.startAll();
 
       initialized = true;

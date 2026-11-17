@@ -44,7 +44,8 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json({ tasks: listCodexWakeupTasks(), runs: listCodexWakeupRuns(20) });
+    const [tasks, runs] = await Promise.all([listCodexWakeupTasks(), listCodexWakeupRuns(20)]);
+    return NextResponse.json({ tasks, runs });
   } catch {
     return createErrorResponse({ status: 500, message: "Failed to load wakeup tasks" });
   }
@@ -59,8 +60,8 @@ async function saveTask(task: CodexWakeupTaskInput, id: string | null) {
   const nowMs = Date.now();
   const nextRunAt = task.enabled ? nextWakeupAt(task.schedule, nowMs) : null;
   const saved = id
-    ? updateCodexWakeupTask(id, task, nextRunAt, nowMs)
-    : createCodexWakeupTask(task, nextRunAt, nowMs);
+    ? await updateCodexWakeupTask(id, task, nextRunAt, nowMs)
+    : await createCodexWakeupTask(task, nextRunAt, nowMs);
   return NextResponse.json({ task: saved }, { status: id ? 200 : 201 });
 }
 
@@ -87,10 +88,10 @@ export async function POST(request: Request) {
       case "update":
         return await saveTask(body.task, body.id);
       case "delete":
-        deleteCodexWakeupTask(body.id);
+        await deleteCodexWakeupTask(body.id);
         return NextResponse.json({ ok: true });
       case "run": {
-        const run = runCodexWakeupTaskNow(body.id);
+        const run = await runCodexWakeupTaskNow(body.id);
         if (!run) return createErrorResponse({ status: 409, message: STORE_ERRORS.running[1] });
         return NextResponse.json({ run }, { status: 202 });
       }

@@ -3,16 +3,16 @@
  *
  * Extracted from db/providers.ts (god-file shrink): the three provider
  * connection delete paths plus the connection reorder helper they share.
- * Each delete path also purges the connection's account-scoped
- * proxy_assignments (#9232) so orphans never keep routing to removed
- * connections.
+ * Each delete path also purges the rows that have no foreign key to the
+ * connection (account-scoped proxy_assignments #9232, provider_quota_state,
+ * auto_candidate_overrides) so orphans never keep routing to removed
+ * connections. Rows with a foreign key (quota_snapshots, connection_limits_cache,
+ * connection_runtime_state, ...) go with the connection by ON DELETE CASCADE.
  */
 
-import { getDbInstance } from "../core";
-import { backupDbFile } from "../backup";
+import { db, type DbExecutor } from "../pg";
 import { cleanupComboConnectionRefs } from "../combos";
 import { deleteLKGPByConnectionIds } from "../settings/lkgp";
-import { deleteProviderLimitsCache } from "../providerLimits";
 import {
   removeConnectionHealth,
   removeConnectionIndex,
@@ -25,48 +25,19 @@ import {
   deleteDiscoveryStatesForConnections,
   deleteDiscoveryStatesForProvider,
 } from "../discoveryState";
-import { toRecord } from "./columns";
 
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  transaction: <T>(fn: () => T) => () => T;
-}
-
-// Purge account-scoped proxy_assignments for the deleted connections (#9232):
-// orphan assignments otherwise keep routing to provider_connections that no
-// longer exist. scope='account' lives in exactly this one place.
-function _deleteAccountProxyAssignments(db: DbLike, ids: string[]) {
+// Tables that reference a connection id without a foreign key. The account-scoped
+// proxy_assignments rows live in exactly one place (scope = 'account').
+async function _deleteRowsWithoutForeignKey(tx: DbExecutor, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
-  const placeholders = ids.map(() => "?").join(",");
-  db.prepare(
-    `DELETE FROM proxy_assignments WHERE scope = 'account' AND scope_id IN (${placeholders})`
-  ).run(...ids);
-}
-
-function _selectExistingConnections(
-  db: DbLike,
-  ids: string[]
-): Array<{ id: string; provider: string }> {
-  if (ids.length === 0) return [];
-
-  const placeholders = ids.map(() => "?").join(",");
-
-  return db
-    .prepare(`SELECT id, provider FROM provider_connections WHERE id IN (${placeholders})`)
-    .all(...ids)
-    .map((row) => {
-      const record = toRecord(row);
-      const id = typeof record.id === "string" ? record.id : null;
-      const provider = typeof record.provider === "string" ? record.provider : "";
-      return id ? { id, provider } : null;
-    })
-    .filter((entry): entry is { id: string; provider: string } => entry !== null);
+  await tx.execute(
+    "DELETE FROM proxy_assignments WHERE scope = 'account' AND scope_id = ANY($1::text[])",
+    [ids]
+  );
+  await tx.execute("DELETE FROM provider_quota_state WHERE connection_id = ANY($1::text[])", [ids]);
+  await tx.execute("DELETE FROM auto_candidate_overrides WHERE connection_id = ANY($1::text[])", [
+    ids,
+  ]);
 }
 
 async function _cleanupDeletedComboConnectionRefs(connectionIds: string | string[]): Promise<void> {
@@ -88,60 +59,45 @@ async function _cleanupDeletedLKGPConnectionRefs(connectionIds: string | string[
   }
 }
 
-// Purge the provider limits cache of the deleted connections (#15531): orphan
-// cache entries otherwise keep serving quotas for provider_connections that no
-// longer exist. Do not turn a leftover purge into a failed delete.
-function _purgeProviderLimitsCacheForConnections(ids: string[]) {
-  if (ids.length === 0) return;
-  for (const id of ids) {
-    try {
-      deleteProviderLimitsCache(id);
-    } catch (error) {
-      console.error("Failed to purge provider limits cache for deleted connection:", error);
-    }
-  }
+function _revokeNativeCodexTurnPins(connectionId: string): void {
+  void import("@omniroute/open-sse/services/combo/nativeCodexTurnPin.ts")
+    .then((module) => module.revokeNativeCodexTurnPinsForConnection(connectionId))
+    .catch(() => {});
 }
 
 export async function deleteProviderConnection(id: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  const existing = db.prepare("SELECT provider FROM provider_connections WHERE id = ?").get(id);
-  if (!existing) return false;
-
-  db.transaction(() => {
-    _deleteAccountProxyAssignments(db, [id]);
-    db.prepare("DELETE FROM quota_snapshots WHERE connection_id = ?").run(id);
-    db.prepare("DELETE FROM provider_connections WHERE id = ?").run(id);
-  })();
+  const deleted = await db().transaction(async (tx) => {
+    const row = await tx.queryOne<{ provider: string }>(
+      "DELETE FROM provider_connections WHERE id = $1 RETURNING provider",
+      [id]
+    );
+    if (!row) return null;
+    await _deleteRowsWithoutForeignKey(tx, [id]);
+    return row;
+  });
+  if (!deleted) return false;
 
   // These two helpers touch disjoint tables (combos vs lkgp) and are safe to run concurrently.
   await Promise.all([
     _cleanupDeletedComboConnectionRefs(id),
     _cleanupDeletedLKGPConnectionRefs(id),
   ]);
-  void import("@omniroute/open-sse/services/combo/nativeCodexTurnPin.ts")
-    .then((module) => module.revokeNativeCodexTurnPinsForConnection(id))
-    .catch(() => {});
+  _revokeNativeCodexTurnPins(id);
 
   removeConnectionHealth(id);
   removeConnectionIndex(id);
-  _purgeProviderLimitsCacheForConnections([id]);
-  bumpProxyConfigGeneration();
-  const existingRecord = toRecord(existing);
-  const providerId =
-    typeof existingRecord.provider === "string"
-      ? existingRecord.provider
-      : String(existingRecord.provider || "");
+  await bumpProxyConfigGeneration();
+  const providerId = typeof deleted.provider === "string" ? deleted.provider : "";
   // The discovery outcome of the deleted connection goes with it: a stored
   // failure of a connection that no longer exists is a leftover.
   try {
-    deleteDiscoveryStatesForConnections([{ provider: providerId, id }]);
+    await deleteDiscoveryStatesForConnections([{ provider: providerId, id }]);
   } catch (error) {
     // Do not turn a leftover purge into a 500, but leave a trace: the stored
     // outcome of a connection that no longer exists stays behind.
     console.error("Failed to purge the stored discovery outcome of a deleted connection:", error);
   }
-  reorderConnections(db, providerId);
-  backupDbFile("pre-write");
+  await reorderConnections(db(), providerId);
   invalidateDbCache("connections"); // Bust connections read cache
   invalidateReasoningRoutingRuleCache();
   return true;
@@ -150,122 +106,103 @@ export async function deleteProviderConnection(id: string) {
 export async function deleteProviderConnections(ids: string[]): Promise<number> {
   if (ids.length === 0) return 0;
 
-  const db = getDbInstance() as unknown as DbLike;
-  const existingConnections = _selectExistingConnections(db, ids);
-
-  const deletedCount = db.transaction(() => {
-    const placeholders = ids.map(() => "?").join(",");
-
-    db.prepare(`DELETE FROM quota_snapshots WHERE connection_id IN (${placeholders})`).run(...ids);
-
-    _deleteAccountProxyAssignments(db, ids);
-
-    const result = db
-      .prepare(`DELETE FROM provider_connections WHERE id IN (${placeholders})`)
-      .run(...ids);
-
-    return result.changes ?? 0;
-  })();
+  const deletedConnections = await db().transaction(async (tx) => {
+    const rows = await tx.query<{ id: string; provider: string }>(
+      "DELETE FROM provider_connections WHERE id = ANY($1::text[]) RETURNING id, provider",
+      [ids]
+    );
+    await _deleteRowsWithoutForeignKey(
+      tx,
+      rows.map((row) => row.id)
+    );
+    return rows;
+  });
+  const deletedIds = deletedConnections.map((entry) => entry.id);
 
   await Promise.all([
-    _cleanupDeletedComboConnectionRefs(existingConnections.map((entry) => entry.id)),
-    _cleanupDeletedLKGPConnectionRefs(existingConnections.map((entry) => entry.id)),
+    _cleanupDeletedComboConnectionRefs(deletedIds),
+    _cleanupDeletedLKGPConnectionRefs(deletedIds),
   ]);
 
   // The discovery outcomes of the deleted connections go with them.
   try {
-    deleteDiscoveryStatesForConnections(existingConnections);
+    await deleteDiscoveryStatesForConnections(deletedConnections);
   } catch (error) {
     // Do not turn a leftover purge into a 500, but leave a trace: the stored
     // outcomes of connections that no longer exist stay behind.
     console.error("Failed to purge the stored discovery outcomes of deleted connections:", error);
   }
 
-  _purgeProviderLimitsCacheForConnections(ids);
   for (const id of ids) {
     removeConnectionHealth(id);
     removeConnectionIndex(id);
-    void import("@omniroute/open-sse/services/combo/nativeCodexTurnPin.ts")
-      .then((module) => module.revokeNativeCodexTurnPinsForConnection(id))
-      .catch(() => {});
+    _revokeNativeCodexTurnPins(id);
   }
 
-  backupDbFile("pre-write");
   invalidateDbCache("connections");
   invalidateReasoningRoutingRuleCache();
 
-  return deletedCount;
+  return deletedConnections.length;
 }
 
 export async function deleteProviderConnectionsByProvider(providerId: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  const connectionIds = db
-    .prepare("SELECT id FROM provider_connections WHERE provider = ?")
-    .all(providerId)
-    .map((row) => {
-      const record = toRecord(row);
-      return typeof record.id === "string" ? record.id : null;
-    })
-    .filter((id): id is string => id !== null);
-
-  const result = db.transaction(() => {
-    if (connectionIds.length > 0) {
-      const deleteSnapshots = db.prepare("DELETE FROM quota_snapshots WHERE connection_id = ?");
-      for (const connectionId of connectionIds) {
-        deleteSnapshots.run(connectionId);
-      }
-      _deleteAccountProxyAssignments(db, connectionIds);
-    }
-    return db.prepare("DELETE FROM provider_connections WHERE provider = ?").run(providerId);
-  })();
+  const deletedIds = await db().transaction(async (tx) => {
+    const rows = await tx.query<{ id: string }>(
+      "DELETE FROM provider_connections WHERE provider = $1 RETURNING id",
+      [providerId]
+    );
+    const ids = rows.map((row) => row.id);
+    await _deleteRowsWithoutForeignKey(tx, ids);
+    return ids;
+  });
 
   await Promise.all([
-    _cleanupDeletedComboConnectionRefs(connectionIds),
-    _cleanupDeletedLKGPConnectionRefs(connectionIds),
+    _cleanupDeletedComboConnectionRefs(deletedIds),
+    _cleanupDeletedLKGPConnectionRefs(deletedIds),
   ]);
 
-  _purgeProviderLimitsCacheForConnections(connectionIds);
-  for (const connectionId of connectionIds) {
+  for (const connectionId of deletedIds) {
     removeConnectionHealth(connectionId);
     removeConnectionIndex(connectionId);
-    void import("@omniroute/open-sse/services/combo/nativeCodexTurnPin.ts")
-      .then((module) => module.revokeNativeCodexTurnPinsForConnection(connectionId))
-      .catch(() => {});
+    _revokeNativeCodexTurnPins(connectionId);
   }
-  backupDbFile("pre-write");
   invalidateDbCache("connections");
   invalidateReasoningRoutingRuleCache();
-  bumpProxyConfigGeneration();
+  await bumpProxyConfigGeneration();
   try {
     await deleteSyncedAvailableModelsForProvider(providerId);
   } catch {
     // Rows are already gone. Do not turn a leftover purge into a 500.
   }
   try {
-    deleteDiscoveryStatesForProvider(providerId);
+    await deleteDiscoveryStatesForProvider(providerId);
   } catch (error) {
     // Do not turn a leftover purge into a 500, but leave a trace: the stored
     // outcomes of a provider that no longer exists stay behind.
     console.error("Failed to purge the stored discovery outcomes of a deleted provider:", error);
   }
-  return result.changes;
+  return deletedIds.length;
 }
 
 export async function reorderProviderConnections(providerId: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  reorderConnections(db, providerId);
+  await reorderConnections(db(), providerId);
 }
 
-export function reorderConnections(db: DbLike, providerId: string) {
-  const rows = db
-    .prepare(
-      "SELECT id, priority, updated_at FROM provider_connections WHERE provider = ? ORDER BY priority ASC, updated_at DESC"
-    )
-    .all(providerId);
-
-  const update = db.prepare("UPDATE provider_connections SET priority = ? WHERE id = ?");
-  rows.forEach((row, index) => {
-    const current = toRecord(row);
-    update.run(index + 1, current.id);
-  });
+/**
+ * Renumbers a provider's connections 1..n in their current (priority, updated_at)
+ * order, in one statement so a concurrent writer cannot interleave. Only rows
+ * whose priority changes are touched.
+ */
+export async function reorderConnections(executor: DbExecutor, providerId: string): Promise<void> {
+  await executor.execute(
+    `UPDATE provider_connections AS pc
+        SET priority = ranked.rank, updated_at = now()
+       FROM (
+         SELECT id, ROW_NUMBER() OVER (ORDER BY priority ASC, updated_at DESC, id ASC)::integer AS rank
+           FROM provider_connections
+          WHERE provider = $1
+       ) AS ranked
+      WHERE pc.id = ranked.id AND pc.priority IS DISTINCT FROM ranked.rank`,
+    [providerId]
+  );
 }

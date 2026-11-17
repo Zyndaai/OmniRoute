@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SqliteAdapter } from "./adapters/types";
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "./pg";
 import {
   sanitizeErrorMessage,
   sanitizeUpstreamDetails,
@@ -8,6 +7,8 @@ import {
 
 const MAX_PERSISTED_OUTPUT_CHARS = 32_768;
 const MAX_PERSISTED_ERROR_CHARS = 4_096;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type ServerToolClaim =
   | { kind: "claimed"; executionId: string }
@@ -22,32 +23,23 @@ export type ServerToolClaim =
   | { kind: "unknown"; executionId: string }
   | { kind: "identity_conflict"; executionId: string };
 
-function isUniqueConstraintError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const code = String((err as { code?: unknown }).code ?? "");
-  const msg = String((err as { message?: unknown }).message ?? "");
-  // Accept only extended UNIQUE/PRIMARYKEY codes — NOT generic SQLITE_CONSTRAINT
-  // (NOT NULL/CHECK constraints must NOT be swallowed)
-  if (/SQLITE_CONSTRAINT_PRIMARYKEY/i.test(code)) return true;
-  if (/SQLITE_CONSTRAINT_UNIQUE/i.test(code)) return true;
-  // Fallback: message must explicitly reference UNIQUE (not just CONSTRAINT)
-  if (/UNIQUE constraint failed/i.test(msg)) return true;
-  if (/UNIQUE constraint violation/i.test(msg)) return true;
-  return false;
+/** Postgres rejects U+0000 in text; tool output is upstream content. */
+function stripNul(value: string): string {
+  return value.includes("\u0000") ? value.replace(/\u0000/g, "") : value;
 }
 
 function sanitizeAndBounded(value: unknown, maxChars: number): string | null {
   if (value === null || value === undefined) return null;
   // Strings: sanitize credentials/stack, store as bounded plain text (error_message is TEXT)
   if (typeof value === "string") {
-    const sanitized = sanitizeErrorMessage(value);
+    const sanitized = stripNul(sanitizeErrorMessage(value));
     return sanitized.length > maxChars ? sanitized.slice(0, maxChars) : sanitized;
   }
   // Objects/arrays: recursive sanitization, JSON.stringify, then guaranteed-valid truncation
   const sanitized = sanitizeUpstreamDetails(value);
   let text: string;
   try {
-    text = JSON.stringify(sanitized);
+    text = stripNul(JSON.stringify(sanitized));
   } catch {
     text = JSON.stringify({ error: "Value is not JSON-serializable" });
   }
@@ -63,57 +55,52 @@ function sanitizeAndBounded(value: unknown, maxChars: number): string | null {
   return JSON.stringify(envelope);
 }
 
-export function readRow(
-  db: SqliteAdapter,
+export async function readRow(
+  executor: DbExecutor,
   executionId: string
-): {
+): Promise<{
   id: string;
   tool_name: string;
   input_digest: string;
   status: string;
   output: string | null;
   error_message: string | null;
-} | null {
-  const row = db
-    .prepare(
-      "SELECT id, tool_name, input_digest, status, output, error_message FROM server_tool_executions WHERE id = ?"
-    )
-    .get(executionId) as
-    | {
-        id: string;
-        tool_name: string;
-        input_digest: string;
-        status: string;
-        output: string | null;
-        error_message: string | null;
-      }
-    | undefined;
+} | null> {
+  if (!UUID_RE.test(executionId)) return null;
+  const row = await executor.queryOne<{
+    id: string;
+    tool_name: string;
+    input_digest: string;
+    status: string;
+    output: string | null;
+    error_message: string | null;
+  }>(
+    "SELECT id, tool_name, input_digest, status, output, error_message FROM server_tool_executions WHERE id = $1",
+    [executionId]
+  );
   return row ?? null;
 }
 
-function readExistingByIdentity(
-  db: SqliteAdapter,
+async function readExistingByIdentity(
+  executor: DbExecutor,
   apiKeyId: string,
   requestIdentity: string,
   toolCallId: string
-): (ReturnType<typeof readRow> & { claim_expires_at: string }) | null {
-  const row = db
-    .prepare(
-      `SELECT id, tool_name, input_digest, status, output, error_message, claim_expires_at
-       FROM server_tool_executions
-       WHERE api_key_id = ? AND request_identity = ? AND tool_call_id = ?`
-    )
-    .get(apiKeyId, requestIdentity, toolCallId) as
-    | {
-        id: string;
-        tool_name: string;
-        input_digest: string;
-        status: string;
-        output: string | null;
-        error_message: string | null;
-        claim_expires_at: string;
-      }
-    | undefined;
+) {
+  const row = await executor.queryOne<{
+    id: string;
+    tool_name: string;
+    input_digest: string;
+    status: string;
+    output: string | null;
+    error_message: string | null;
+    claim_expires_at: string;
+  }>(
+    `SELECT id, tool_name, input_digest, status, output, error_message, claim_expires_at
+     FROM server_tool_executions
+     WHERE api_key_id = $1 AND request_identity = $2 AND tool_call_id = $3`,
+    [apiKeyId, requestIdentity, toolCallId]
+  );
   return row ?? null;
 }
 
@@ -140,7 +127,7 @@ function buildReplayClaim(row: {
   };
 }
 
-export function claimServerToolExecution(
+export async function claimServerToolExecution(
   input: {
     apiKeyId: string;
     requestIdentity: string;
@@ -149,42 +136,38 @@ export function claimServerToolExecution(
     inputDigest: string;
     leaseExpiresAt: string;
   },
-  db: SqliteAdapter = getDbInstance(),
+  executor: DbExecutor = db(),
   nowMs?: number
-): ServerToolClaim {
+): Promise<ServerToolClaim> {
   const executionId = randomUUID();
   const now = nowMs ?? Date.now();
 
-  // Try INSERT in a transaction
-  const tryInsert = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO server_tool_executions
-        (id, api_key_id, request_identity, tool_call_id, tool_name, input_digest, status, claim_expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`
-    ).run(
+  // ON CONFLICT DO NOTHING: a conflict returns no row instead of aborting the
+  // transaction, so the re-read below works on the same connection.
+  const inserted = await executor.queryOne(
+    `INSERT INTO server_tool_executions
+      (id, api_key_id, request_identity, tool_call_id, tool_name, input_digest, status, claim_expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'running', $7)
+     ON CONFLICT (api_key_id, request_identity, tool_call_id) DO NOTHING
+     RETURNING id`,
+    [
       executionId,
       input.apiKeyId,
       input.requestIdentity,
       input.toolCallId,
       input.toolName,
       input.inputDigest,
-      input.leaseExpiresAt
-    );
-  });
+      input.leaseExpiresAt,
+    ]
+  );
+  if (inserted) return { kind: "claimed", executionId };
 
-  try {
-    tryInsert();
-    return { kind: "claimed", executionId };
-  } catch (err: unknown) {
-    if (!isUniqueConstraintError(err)) {
-      throw err;
-    }
-  }
-
-  // UNIQUE conflict — re-read in a fresh transaction
-  const existing = db.transaction(() => {
-    return readExistingByIdentity(db, input.apiKeyId, input.requestIdentity, input.toolCallId);
-  })();
+  const existing = await readExistingByIdentity(
+    executor,
+    input.apiKeyId,
+    input.requestIdentity,
+    input.toolCallId
+  );
 
   if (!existing) {
     return { kind: "unknown", executionId };
@@ -214,7 +197,7 @@ export function claimServerToolExecution(
   return { kind: "in_progress", executionId: existing.id };
 }
 
-export function finalizeServerToolExecution(
+export async function finalizeServerToolExecution(
   input: {
     executionId: string;
     status: "success" | "error" | "timeout";
@@ -222,20 +205,18 @@ export function finalizeServerToolExecution(
     errorMessage: string | null;
     durationMs: number;
   },
-  db: SqliteAdapter = getDbInstance()
-): boolean {
+  executor: DbExecutor = db()
+): Promise<boolean> {
+  if (!UUID_RE.test(input.executionId)) return false;
   const safeOutput = sanitizeAndBounded(input.output, MAX_PERSISTED_OUTPUT_CHARS);
   const safeError = sanitizeAndBounded(input.errorMessage, MAX_PERSISTED_ERROR_CHARS);
 
-  const result = db.transaction(() => {
-    return db
-      .prepare(
-        `UPDATE server_tool_executions
-         SET status = ?, output = ?, error_message = ?, duration_ms = ?, completed_at = datetime('now')
-         WHERE id = ? AND status = 'running'`
-      )
-      .run(input.status, safeOutput, safeError, input.durationMs, input.executionId);
-  })();
+  const result = await executor.execute(
+    `UPDATE server_tool_executions
+     SET status = $1, output = $2, error_message = $3, duration_ms = $4, completed_at = now()
+     WHERE id = $5 AND status = 'running'`,
+    [input.status, safeOutput, safeError, Math.round(input.durationMs), input.executionId]
+  );
 
   return result.changes > 0;
 }

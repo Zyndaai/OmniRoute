@@ -133,7 +133,7 @@ export async function GET(request: Request) {
 
     if (logType === "call-logs" || logType === "request-logs") {
       tableName = "call_logs";
-      totalAvailable = countCallLogsSince(since);
+      totalAvailable = await countCallLogsSince(since);
       rows = iterateCallLogsSince(since, limit);
     } else if (logType === "proxy-logs") {
       tableName = "proxy_logs";
@@ -142,7 +142,7 @@ export async function GET(request: Request) {
       // exposes the value as `clientIp`. Callers of this export endpoint should read
       // `public_ip`. This inconsistency will be resolved in a future DB migration
       // (#2880).
-      totalAvailable = countProxyLogsSince(since);
+      totalAvailable = await countProxyLogsSince(since);
       rows = iterateProxyLogsSince(since, limit);
     }
 

@@ -83,7 +83,7 @@ describe("MCP HTTP auth context", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     const client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);
@@ -117,7 +117,7 @@ describe("MCP HTTP auth context", () => {
     vi.stubEnv("OMNIROUTE_API_KEY", "env-fallback-key");
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     const client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);
@@ -155,7 +155,7 @@ describe("MCP HTTP auth context", () => {
     vi.stubEnv("OMNIROUTE_INTERNAL_SERVICE_TOKEN", "internal-hop-token");
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     const client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);

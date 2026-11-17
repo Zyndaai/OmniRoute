@@ -1,17 +1,8 @@
-import { getDbInstance } from "../core";
+import { db } from "../pg";
 import { encryptConnectionFields } from "../encryption";
 import { invalidateDbCache } from "../readCache";
 import { parseProviderSpecificData } from "../webSessionDedup";
-
-interface StatementLike<TRow = unknown> {
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-  transaction: <T>(fn: () => T) => () => T;
-}
+import { jsonValueParam } from "../pgJsonText";
 
 /**
  * Merge a patch into a connection's `provider_specific_data` WITHOUT dropping
@@ -25,26 +16,26 @@ export async function mergeConnectionProviderSpecificData(
   id: string,
   patch: Record<string, unknown>
 ): Promise<void> {
-  const db = getDbInstance() as unknown as DbLike;
-  // Transaction so a concurrent merge cannot lose a key: the SELECT and
-  // UPDATE must observe the same row version (codex account-state precedent).
-  db.transaction(() => {
-    const row = db
-      .prepare("SELECT provider_specific_data FROM provider_connections WHERE id = ?")
-      .get(id);
-    if (!row) return;
-
-    const existing = parseProviderSpecificData(
-      (row as { provider_specific_data?: unknown }).provider_specific_data
+  // The row is locked from the read to the write, so a concurrent merge (in this
+  // process or another) cannot lose a key.
+  const merged = await db().transaction(async (tx) => {
+    const row = await tx.queryOne<{ provider_specific_data?: unknown }>(
+      "SELECT provider_specific_data FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
     );
-    const merged = { ...existing, ...patch };
+    if (!row) return false;
+
+    const existing = parseProviderSpecificData(row.provider_specific_data);
+    const next = { ...existing, ...patch };
     // A patch carrying a declared secret field in plaintext (a quota fetcher refreshing
     // a console cookie, an executor minting a bearer) is enveloped exactly like a
     // full-row write; values already stored as envelopes are left as they are.
-    const stored = encryptConnectionFields({ providerSpecificData: merged }).providerSpecificData;
-    db.prepare(
-      "UPDATE provider_connections SET provider_specific_data = ?, updated_at = ? WHERE id = ?"
-    ).run(JSON.stringify(stored), new Date().toISOString(), id);
-    invalidateDbCache("connections", id, { skipModelCatalog: true });
-  })();
+    const stored = encryptConnectionFields({ providerSpecificData: next }).providerSpecificData;
+    await tx.execute(
+      "UPDATE provider_connections SET provider_specific_data = $1, updated_at = now() WHERE id = $2",
+      [jsonValueParam(stored), id]
+    );
+    return true;
+  });
+  if (merged) invalidateDbCache("connections", id, { skipModelCatalog: true });
 }

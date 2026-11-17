@@ -178,17 +178,20 @@ const CREDIT_BALANCE_TTL_MS = 5 * 60 * 1000;
 const creditBalanceCache = new Map<string, { balance: number; updatedAt: number }>();
 let creditCacheHydrated = false;
 
+// The readers of this cache are synchronous, so the persisted balances load in the background
+// on first use: until they land, a lookup is a cache miss, the same as an expired entry.
 function hydrateCreditCacheFromDb(): void {
   if (creditCacheHydrated) return;
   creditCacheHydrated = true;
-  try {
-    const persisted = getAllPersistedCreditBalances();
-    for (const [accountId, balance] of persisted) {
-      if (!creditBalanceCache.has(accountId)) {
-        creditBalanceCache.set(accountId, { balance, updatedAt: Date.now() });
+  getAllPersistedCreditBalances()
+    .then((persisted) => {
+      for (const [accountId, balance] of persisted) {
+        if (!creditBalanceCache.has(accountId)) {
+          creditBalanceCache.set(accountId, { balance, updatedAt: Date.now() });
+        }
       }
-    }
-  } catch {}
+    })
+    .catch(() => {});
 }
 
 function evictStaleCreditBalanceEntries(): void {
@@ -227,9 +230,7 @@ export function updateAntigravityRemainingCredits(accountId: string, balance: nu
     if (oldestKey !== undefined) creditBalanceCache.delete(oldestKey);
   }
   creditBalanceCache.set(accountId, { balance, updatedAt: Date.now() });
-  try {
-    persistCreditBalance(accountId, balance);
-  } catch {}
+  persistCreditBalance(accountId, balance).catch(() => {});
 }
 
 /**
@@ -259,7 +260,8 @@ export function markConnectionQuotaExhausted(
 ): void {
   try {
     if (markAntigravityModelQuotaExhausted(connectionId, retryAfterMs, model)) return;
-    setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs);
+    // Best effort: the write is async now, so its failure is caught here, not by the try.
+    void setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs).catch(() => {});
   } catch {}
 }
 
@@ -268,10 +270,10 @@ export function markConnectionQuotaExhausted(
  * tests (the markdown / candidate-parts extraction branches). @internal
  */
 
-function applyAntigravityGenerationDefaults(
+async function applyAntigravityGenerationDefaults(
   request: Record<string, unknown>,
   modelId?: string | null
-): void {
+): Promise<void> {
   const generationConfig =
     request.generationConfig && typeof request.generationConfig === "object"
       ? (request.generationConfig as Record<string, unknown>)
@@ -304,7 +306,7 @@ function applyAntigravityGenerationDefaults(
   // (32K–65K) that trigger upstream 400 "Invalid Argument". Clamp silently
   // — the cap is provider-driven, not client-driven, and only matters when
   // the request would otherwise be rejected outright.
-  const cap = resolveAntigravityOutputCap(modelId);
+  const cap = await resolveAntigravityOutputCap(modelId);
   const finalMax = Number(generationConfig.maxOutputTokens);
   if (Number.isFinite(finalMax) && finalMax > cap) {
     generationConfig.maxOutputTokens = cap;
@@ -889,7 +891,7 @@ export class AntigravityExecutor extends BaseExecutor {
           )
         : rawTransformedRequest;
 
-    applyAntigravityGenerationDefaults(transformedRequest, upstreamModel);
+    await applyAntigravityGenerationDefaults(transformedRequest, upstreamModel);
 
     const {
       project: _project,

@@ -21,6 +21,10 @@ export interface ModelSpec {
   // (upstream returns 400). Used to normalize the request when a combo/route substitutes
   // this model after the client already chose `disabled`. See issue #3554.
   rejectsThinkingDisabled?: boolean;
+  // What a rejected `disabled` becomes instead of being dropped, where the model has its own
+  // "no thinking" value. Sonnet 5.5's 400 says to send `between_tools`: no thinking before
+  // the answer, only short notes between tool calls. Dropping it made every call think.
+  disabledThinkingType?: "between_tools";
   // Model ONLY supports adaptive thinking: manual extended thinking was removed. Sending
   // `thinking.type:"enabled"` or any `thinking.budget_tokens` returns HTTP 400; reasoning
   // is steered exclusively by `output_config.effort` (low/medium/high/xhigh/max). True for
@@ -482,9 +486,8 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
 
   // ── Claude Sonnet 5.5 ───────────────────────────────────────────
   "claude-sonnet-5-5": {
-    // Same shape as Sonnet 5, but it rejects forced tool_choice (any/tool).
-    // It accepts thinking.type:"disabled" and then does not think (measured
-    // through Anthropic's API 2026-11-16); stripping it made every call think.
+    // Same shape as Sonnet 5, but it rejects thinking.type:"disabled" (its 400
+    // says to send between_tools instead) and forced tool_choice (any/tool).
     maxOutputTokens: 128000,
     contextWindow: 1000000,
     defaultThinkingBudget: 32000,
@@ -493,6 +496,8 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportsTools: true,
     supportsVision: true,
     adaptiveThinkingOnly: true,
+    rejectsThinkingDisabled: true,
+    disabledThinkingType: "between_tools",
     rejectsForcedToolChoice: true,
     aliases: BEDROCK_CLAUDE_ALIASES("claude-sonnet-5-5"),
   },
@@ -1096,8 +1101,9 @@ export function getAuthoritativeProviderContextWindow(
  * value. Claude Code sends `thinking:{type:"disabled"}` for internal title/name-generation
  * calls — valid for opus/sonnet, but claude-fable-5 defaults to adaptive thinking and rejects
  * `type:"disabled"` with an upstream 400. When the resolved target model is flagged
- * `rejectsThinkingDisabled`, drop the now-invalid `thinking` so the model uses its adaptive
- * default instead of hard-failing. Models that accept `disabled` are left untouched, and any
+ * `rejectsThinkingDisabled`, send its own no-thinking value (`disabledThinkingType`) where it
+ * has one, or else drop the now-invalid `thinking` so the model uses its adaptive default
+ * instead of hard-failing. Models that accept `disabled` are left untouched, and any
  * non-`disabled` thinking (enabled/adaptive) is always preserved. See issue #3554.
  */
 export function normalizeThinkingForModel<T extends Record<string, unknown>>(
@@ -1105,12 +1111,19 @@ export function normalizeThinkingForModel<T extends Record<string, unknown>>(
   modelId: string
 ): T {
   const thinking = body?.thinking as Record<string, unknown> | undefined;
+  const spec = getModelSpec(modelId);
   if (
     thinking &&
     typeof thinking === "object" &&
     thinking.type === "disabled" &&
-    getModelSpec(modelId)?.rejectsThinkingDisabled
+    spec?.rejectsThinkingDisabled
   ) {
+    if (spec.disabledThinkingType) {
+      return normalizeForcedToolChoiceForModel(
+        { ...body, thinking: { type: spec.disabledThinkingType } },
+        modelId
+      );
+    }
     const { thinking: _omitted, ...rest } = body as Record<string, unknown>;
     return normalizeForcedToolChoiceForModel(rest as T, modelId);
   }

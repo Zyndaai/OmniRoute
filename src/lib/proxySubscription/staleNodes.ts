@@ -1,7 +1,5 @@
-import type { getDbInstance } from "../db/core";
+import type { DbExecutor } from "@/lib/db/pg";
 import { deleteProxyById, updateProxy } from "../db/proxies";
-
-type DbHandle = ReturnType<typeof getDbInstance>;
 
 /**
  * Subscription delete: a row the sync wrote is deleted (unchanged behavior); a
@@ -31,36 +29,25 @@ export async function detachOrDeleteSubscriptionRow(row: {
  * sync would detach it again.
  */
 export async function removeStaleSubscriptionNodes(
-  db: DbHandle,
+  executor: DbExecutor,
   id: string,
   keptIds: string[]
 ): Promise<void> {
-  if (keptIds.length > 0) {
-    const placeholders = keptIds.map(() => "?").join(",");
-    const stale = db
-      .prepare(
-        `SELECT id FROM proxy_registry WHERE subscription_id = ? AND source = 'subscription' AND id NOT IN (${placeholders})`
-      )
-      .all(id, ...keptIds) as Array<{ id: string }>;
-    for (const r of stale) {
-      try {
-        await deleteProxyById(r.id, { force: true });
-      } catch {
-        // ignore
-      }
-    }
-  } else {
-    const stale = db
-      .prepare(
-        "SELECT id FROM proxy_registry WHERE subscription_id = ? AND source = 'subscription'"
-      )
-      .all(id) as Array<{ id: string }>;
-    for (const r of stale) {
-      try {
-        await deleteProxyById(r.id, { force: true });
-      } catch {
-        // ignore
-      }
+  const stale =
+    keptIds.length > 0
+      ? await executor.query<{ id: string }>(
+          "SELECT id FROM proxy_registry WHERE subscription_id = $1 AND source = 'subscription' AND id <> ALL($2::text[])",
+          [id, keptIds]
+        )
+      : await executor.query<{ id: string }>(
+          "SELECT id FROM proxy_registry WHERE subscription_id = $1 AND source = 'subscription'",
+          [id]
+        );
+  for (const r of stale) {
+    try {
+      await deleteProxyById(r.id, { force: true });
+    } catch {
+      // ignore
     }
   }
 }

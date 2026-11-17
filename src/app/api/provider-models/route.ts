@@ -70,8 +70,8 @@ export async function GET(request) {
     const provider = searchParams.get("provider");
 
     const models = provider ? await getCustomModels(provider) : await getAllCustomModels();
-    const modelCompatOverrides = provider ? getModelCompatOverrides(provider) : [];
-    const modelOutputOverrides = listProviderOutputOverrides(provider);
+    const modelCompatOverrides = provider ? await getModelCompatOverrides(provider) : [];
+    const modelOutputOverrides = await listProviderOutputOverrides(provider);
     const outputOverrides = new Map(
       modelOutputOverrides.map((row) => [row.modelId, row.maxOutputTokenOverride])
     );
@@ -79,9 +79,9 @@ export async function GET(request) {
     // each custom-model row so the UI can show/edit it without a second round trip.
     const modelsWithContextOverride =
       provider && Array.isArray(models)
-        ? models.map((model: Record<string, unknown>) => {
+        ? await Promise.all(models.map(async (model: Record<string, unknown>) => {
             const modelId = typeof model?.id === "string" ? model.id : null;
-            const record = modelId ? getModelContextOverrideRecord(provider, modelId) : null;
+            const record = modelId ? await getModelContextOverrideRecord(provider, modelId) : null;
             const outputOverride = modelId ? outputOverrides.get(modelId) : undefined;
             const outputFields =
               outputOverride === undefined ? {} : { maxOutputTokenOverride: outputOverride };
@@ -93,14 +93,14 @@ export async function GET(request) {
                   contextWindowOverrideSource: record.source,
                 }
               : { ...model, ...outputFields };
-          })
+          }))
         : models;
 
     // #9203: surface the unified hidden-model map (customModels.isHidden +
     // modelCompatOverrides.isHidden) so the client can filter every model source
     // (system catalog, fallback, aliases, auto-fetched) — not just custom rows.
     const hiddenModelsByProvider: Record<string, string[]> = {};
-    for (const [providerId, hiddenModelIds] of getHiddenModelsByProvider()) {
+    for (const [providerId, hiddenModelIds] of await getHiddenModelsByProvider()) {
       if (hiddenModelIds.size > 0) {
         hiddenModelsByProvider[providerId] = [...hiddenModelIds];
       }
@@ -112,7 +112,7 @@ export async function GET(request) {
     // UI had no value to show or edit. Return the provider's overrides directly
     // so a row without a custom entry can still carry one.
     const modelContextOverrides = provider
-      ? listModelContextOverrides()
+      ? (await listModelContextOverrides())
           .filter((override) => override.provider === provider)
           .map((override) => ({
             modelId: override.modelId,
@@ -286,10 +286,10 @@ export async function PUT(request) {
     let contextWindowOverrideResult: number | null | undefined;
     if ("contextWindowOverride" in raw) {
       if (contextWindowOverride == null) {
-        removeModelContextOverride(provider, modelId);
+        await removeModelContextOverride(provider, modelId);
         contextWindowOverrideResult = null;
       } else {
-        setModelContextOverride(provider, modelId, contextWindowOverride, "manual");
+        await setModelContextOverride(provider, modelId, contextWindowOverride, "manual");
         contextWindowOverrideResult = contextWindowOverride;
       }
     }
@@ -297,7 +297,7 @@ export async function PUT(request) {
     const model = await updateCustomModel(provider, modelId, updates, {
       createIfMissing: maxOutputTokenOverride === undefined || Object.keys(updates).length > 0,
     });
-    clearLegacyVisionOverride(provider, modelId, updates);
+    await clearLegacyVisionOverride(provider, modelId, updates);
 
     if (!model) {
       const rawKeys = Object.keys(raw);
@@ -378,12 +378,12 @@ export async function PUT(request) {
               : undefined;
         }
         if (Object.keys(patch).length > 0) {
-          mergeModelCompatOverride(provider, modelId, patch);
+          await mergeModelCompatOverride(provider, modelId, patch);
         }
         return Response.json({
           ok: true,
-          ...persistOutputTokenOverride(provider, modelId, maxOutputTokenOverride),
-          modelCompatOverrides: getModelCompatOverrides(provider),
+          ...(await persistOutputTokenOverride(provider, modelId, maxOutputTokenOverride)),
+          modelCompatOverrides: await getModelCompatOverrides(provider),
           ...(contextWindowOverrideResult !== undefined
             ? { contextWindowOverride: contextWindowOverrideResult }
             : {}),
@@ -397,7 +397,7 @@ export async function PUT(request) {
 
     return Response.json({
       model,
-      ...persistOutputTokenOverride(provider, modelId, maxOutputTokenOverride),
+      ...(await persistOutputTokenOverride(provider, modelId, maxOutputTokenOverride)),
       ...(contextWindowOverrideResult !== undefined
         ? { contextWindowOverride: contextWindowOverrideResult }
         : {}),
@@ -478,7 +478,7 @@ export async function PATCH(request) {
     for (const modelId of modelIds) {
       const updatedModel = await updateCustomModel(provider, modelId, { isHidden: body.isHidden });
       if (!updatedModel) {
-        mergeModelCompatOverride(provider, modelId, { isHidden: body.isHidden, modality });
+        await mergeModelCompatOverride(provider, modelId, { isHidden: body.isHidden, modality });
       }
     }
 
@@ -497,7 +497,7 @@ export async function PATCH(request) {
       updated: modelIds.length,
       aliasChanges,
       models: await getCustomModels(provider),
-      modelCompatOverrides: getModelCompatOverrides(provider),
+      modelCompatOverrides: await getModelCompatOverrides(provider),
     });
   } catch (error) {
     console.error("Error patching provider models:", error);
@@ -538,7 +538,7 @@ export async function DELETE(request) {
     const all = searchParams.get("all");
     if (all === "true") {
       await replaceCustomModels(provider, [], { allowEmpty: true });
-      clearModelCompatOverrides(provider);
+      await clearModelCompatOverrides(provider);
       const syncedAvailableModelListsRemoved =
         await deleteSyncedAvailableModelsForProvider(provider);
       const removedAliases = await deleteManagedAvailableModelAliasesForProvider(provider);
@@ -579,7 +579,7 @@ export async function DELETE(request) {
       removedCustom || resetOverride ? false : await removeSyncedAvailableModel(provider, modelId);
     const removed = removedCustom || removedSynced;
     if (resetOverride && removedCustom) {
-      removeModelContextOverride(provider, modelId);
+      await removeModelContextOverride(provider, modelId);
       const aliasChanges = await syncManagedAvailableModelAliases(provider, [modelId], {
         pruneMissing: false,
       });

@@ -3,9 +3,9 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { getDbInstance, rowToCamel } from "../core";
+import { db, jsonb } from "../pg";
+import { rowToCamel } from "../caseMapping";
 import { selectProviderNodeForConnection } from "../providerNodeSelect";
-import { backupDbFile } from "../backup";
 import { invalidateDbCache } from "../readCache";
 import { toRecord, type JsonRecord } from "./columns";
 import { resetProviderNodePrefixCache } from "./nodePrefix";
@@ -14,68 +14,63 @@ function normalizeDailyQuotaResetHour(value: unknown): number | null {
   return value === 0 || value ? Number(value) : null;
 }
 
-function withParsedCustomHeaders(node: JsonRecord, storedJson: string | null): JsonRecord {
-  const result: JsonRecord = { ...node };
-  if (storedJson) {
+// A blank prefix would violate the provider_nodes CHECK; it means "no prefix".
+function normalizePrefix(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function toCustomHeaders(value: unknown): JsonRecord | null {
+  if (value && typeof value === "object") return value as JsonRecord;
+  // Tolerate callers that still hand over the JSON text.
+  if (typeof value === "string" && value) {
     try {
-      result.customHeaders = JSON.parse(storedJson);
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? (parsed as JsonRecord) : null;
     } catch {
-      result.customHeaders = null;
+      return null;
     }
-  } else {
-    result.customHeaders = null;
   }
-  delete result.customHeadersJson;
-  return result;
+  return null;
 }
 
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
+function nodeFromRow(row: unknown): JsonRecord | null {
+  return rowToCamel(row);
 }
 
 export async function getProviderNodes(filter: JsonRecord = {}, limit?: number, offset?: number) {
-  const db = getDbInstance() as unknown as DbLike;
+  const params: unknown[] = [];
   let sql = "SELECT * FROM provider_nodes";
-  const params: Record<string, unknown> = {};
 
   if (filter.type) {
-    sql += " WHERE type = @type";
-    params.type = filter.type;
+    params.push(filter.type);
+    sql += ` WHERE type = $${params.length}`;
   }
   sql += " ORDER BY id ASC";
   if (limit !== undefined) {
-    sql += " LIMIT @limit OFFSET @offset";
-    params.limit = limit;
-    params.offset = offset ?? 0;
+    params.push(limit, offset ?? 0);
+    sql += ` LIMIT $${params.length - 1} OFFSET $${params.length}`;
   }
 
-  return db.prepare(sql).all(params).map(rowToCamel);
+  const rows = await db().query(sql, params);
+  return rows.map(nodeFromRow);
 }
 
-export function getProviderNodesCount(filter: JsonRecord = {}): number {
-  const db = getDbInstance() as unknown as DbLike;
-  let sql = "SELECT count(*) as cnt FROM provider_nodes";
-  const params: Record<string, unknown> = {};
+export async function getProviderNodesCount(filter: JsonRecord = {}): Promise<number> {
+  const params: unknown[] = [];
+  let sql = "SELECT count(*) AS cnt FROM provider_nodes";
 
   if (filter.type) {
-    sql += " WHERE type = @type";
-    params.type = filter.type;
+    params.push(filter.type);
+    sql += " WHERE type = $1";
   }
 
-  const row = db.prepare(sql).get(params) as { cnt: number };
-  return row.cnt;
+  const row = await db().queryOne<{ cnt: number }>(sql, params);
+  return Number(row?.cnt ?? 0);
 }
 
 export async function getProviderNodeById(id: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  const row = db.prepare("SELECT * FROM provider_nodes WHERE id = ?").get(id);
-  return row ? rowToCamel(row) : null;
+  const row = await db().queryOne("SELECT * FROM provider_nodes WHERE id = $1", [id]);
+  return row ? nodeFromRow(row) : null;
 }
 
 // #4421: resolve the provider node for a new connection from either its concrete id
@@ -117,117 +112,159 @@ export function isProviderNodeIdConflictError(
   );
 }
 
+export const PROVIDER_NODE_PREFIX_CONFLICT = "PROVIDER_NODE_PREFIX_CONFLICT";
+
+/** Thrown by createProviderNode / updateProviderNode when another node already uses the prefix. */
+export class ProviderNodePrefixConflictError extends Error {
+  readonly code = PROVIDER_NODE_PREFIX_CONFLICT;
+  readonly prefix: string;
+
+  constructor(prefix: string) {
+    super(`Provider node prefix "${prefix}" is already in use`);
+    this.name = "ProviderNodePrefixConflictError";
+    this.prefix = prefix;
+  }
+}
+
+export function isProviderNodePrefixConflictError(
+  error: unknown
+): error is ProviderNodePrefixConflictError {
+  return (
+    error instanceof ProviderNodePrefixConflictError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === PROVIDER_NODE_PREFIX_CONFLICT)
+  );
+}
+
+// provider_nodes_prefix_uq compares lower(btrim(prefix)), so "Zed" and "zed " collide.
+function asPrefixConflict(error: unknown, prefix: unknown): unknown {
+  const message = error instanceof Error ? error.message : "";
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "23505" && message.includes("provider_nodes_prefix_uq")) {
+    return new ProviderNodePrefixConflictError(String(prefix ?? ""));
+  }
+  return error;
+}
+
 export async function createProviderNode(data: JsonRecord) {
-  const db = getDbInstance() as unknown as DbLike;
   const now = new Date().toISOString();
 
-  const customHeadersJson = data.customHeaders ? JSON.stringify(data.customHeaders) : null;
+  const customHeaders = data.customHeaders ? toCustomHeaders(data.customHeaders) : null;
 
   const node = {
     id: data.id || uuidv4(),
     type: data.type,
     name: data.name,
-    prefix: data.prefix || null,
+    prefix: normalizePrefix(data.prefix),
     apiType: data.apiType || null,
     baseUrl: data.baseUrl || null,
     chatPath: data.chatPath || null,
     modelsPath: data.modelsPath || null,
-    // Optional operator-supplied remote icon URL (#2166) — plain TEXT, no JSON parsing needed.
+    // Optional operator-supplied remote icon URL (#2166) — plain text.
     iconUrl: data.iconUrl || null,
-    customHeadersJson,
+    customHeaders,
     dailyQuotaResetTimezone: data.dailyQuotaResetTimezone || null,
     dailyQuotaResetHour: normalizeDailyQuotaResetHour(data.dailyQuotaResetHour),
     createdAt: now,
     updatedAt: now,
   };
 
-  const result = db
-    .prepare(
-      `
-    INSERT INTO provider_nodes (id, type, name, prefix, api_type, base_url, chat_path, models_path, icon_url, custom_headers_json, daily_quota_reset_timezone, daily_quota_reset_hour, created_at, updated_at)
-    VALUES (@id, @type, @name, @prefix, @apiType, @baseUrl, @chatPath, @modelsPath, @iconUrl, @customHeadersJson, @dailyQuotaResetTimezone, @dailyQuotaResetHour, @createdAt, @updatedAt)
-    ON CONFLICT(id) DO NOTHING
-  `
+  const result = await db()
+    .execute(
+      `INSERT INTO provider_nodes (id, type, name, prefix, api_type, base_url, chat_path, models_path, icon_url, custom_headers, daily_quota_reset_timezone, daily_quota_reset_hour, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
+     ON CONFLICT (id) DO NOTHING`,
+      [
+        node.id,
+        node.type,
+        node.name,
+        node.prefix,
+        node.apiType,
+        node.baseUrl,
+        node.chatPath,
+        node.modelsPath,
+        node.iconUrl,
+        jsonb(node.customHeaders),
+        node.dailyQuotaResetTimezone,
+        node.dailyQuotaResetHour,
+        now,
+      ]
     )
-    .run(node);
+    .catch((err: unknown) => {
+      throw asPrefixConflict(err, node.prefix);
+    });
   // Ids can be operator-chosen (custom suffix), so a collision is a caller error,
   // never a silent overwrite nor an unhandled constraint failure.
-  if ((result?.changes ?? 0) === 0) throw new ProviderNodeIdConflictError(String(node.id));
+  if (result.changes === 0) throw new ProviderNodeIdConflictError(String(node.id));
 
-  backupDbFile("pre-write");
   invalidateDbCache("nodes");
   resetProviderNodePrefixCache();
 
-  return withParsedCustomHeaders({ ...node }, customHeadersJson);
+  return { ...node };
 }
 
 export async function updateProviderNode(id: string, data: JsonRecord) {
-  const db = getDbInstance() as unknown as DbLike;
-  const existing = db.prepare("SELECT * FROM provider_nodes WHERE id = ?").get(id);
-  if (!existing) return null;
+  const merged = await db()
+    .transaction(async (tx) => {
+      const existing = await tx.queryOne("SELECT * FROM provider_nodes WHERE id = $1 FOR UPDATE", [
+        id,
+      ]);
+      if (!existing) return null;
 
-  const merged: JsonRecord = {
-    ...toRecord(rowToCamel(existing)),
-    ...data,
-    updatedAt: new Date().toISOString(),
-  };
+      const stored = toRecord(nodeFromRow(existing));
+      const next: JsonRecord = { ...stored, ...data, updatedAt: new Date().toISOString() };
+      // Partial update that omits customHeaders must PRESERVE the stored value; an
+      // explicit falsy value clears it.
+      next.customHeaders = toCustomHeaders(
+        data.customHeaders !== undefined ? data.customHeaders : stored.customHeaders
+      );
 
-  if (data.customHeaders !== undefined) {
-    merged["customHeadersJson"] = data.customHeaders ? JSON.stringify(data.customHeaders) : null;
-  } else {
-    // Partial update that omits customHeaders must PRESERVE the stored value.
-    // rowToCamel surfaces the column under `customHeaders` (suffix stripped),
-    // never `customHeadersJson`, so read the raw stored JSON from `existing`
-    // directly instead of relying on the (absent) merged key — otherwise the
-    // UPDATE would bind null and silently wipe the saved headers.
-    const existingJson = (existing as JsonRecord).custom_headers_json;
-    merged["customHeadersJson"] = typeof existingJson === "string" ? existingJson : null;
-  }
+      await tx.execute(
+        `UPDATE provider_nodes SET type = $2, name = $3, prefix = $4,
+         api_type = $5, base_url = $6, chat_path = $7,
+         models_path = $8, icon_url = $9,
+         custom_headers = $10,
+         daily_quota_reset_timezone = $11,
+         daily_quota_reset_hour = $12,
+         updated_at = $13
+       WHERE id = $1`,
+        [
+          id,
+          next["type"],
+          next["name"],
+          normalizePrefix(next["prefix"]),
+          next["apiType"] || null,
+          next["baseUrl"] || null,
+          next["chatPath"] || null,
+          next["modelsPath"] || null,
+          // #2166: iconUrl is nullable — explicit `null` (not omission) clears a previously
+          // stored custom icon when the caller submits an empty value.
+          next["iconUrl"] || null,
+          jsonb(next["customHeaders"]),
+          next["dailyQuotaResetTimezone"] || null,
+          normalizeDailyQuotaResetHour(next["dailyQuotaResetHour"]),
+          next["updatedAt"],
+        ]
+      );
+      return next;
+    })
+    .catch((err: unknown) => {
+      throw asPrefixConflict(err, data.prefix);
+    });
+  if (!merged) return null;
 
-  db.prepare(
-    `
-    UPDATE provider_nodes SET type = @type, name = @name, prefix = @prefix,
-    api_type = @apiType, base_url = @baseUrl, chat_path = @chatPath,
-    models_path = @modelsPath, icon_url = @iconUrl,
-    custom_headers_json = @customHeadersJson,
-    daily_quota_reset_timezone = @dailyQuotaResetTimezone,
-    daily_quota_reset_hour = @dailyQuotaResetHour,
-    updated_at = @updatedAt
-    WHERE id = @id
-  `
-  ).run({
-    id,
-    type: merged["type"],
-    name: merged["name"],
-    prefix: merged["prefix"] || null,
-    apiType: merged["apiType"] || null,
-    baseUrl: merged["baseUrl"] || null,
-    chatPath: merged["chatPath"] || null,
-    modelsPath: merged["modelsPath"] || null,
-    // #2166: iconUrl is nullable — explicit `null` (not omission) clears a previously
-    // stored custom icon when the caller submits an empty value.
-    iconUrl: merged["iconUrl"] || null,
-    customHeadersJson: merged["customHeadersJson"] || null,
-    dailyQuotaResetTimezone: merged["dailyQuotaResetTimezone"] || null,
-    dailyQuotaResetHour: normalizeDailyQuotaResetHour(merged["dailyQuotaResetHour"]),
-    updatedAt: merged["updatedAt"],
-  });
-
-  backupDbFile("pre-write");
   invalidateDbCache("nodes");
   resetProviderNodePrefixCache();
 
-  return withParsedCustomHeaders(merged, (merged["customHeadersJson"] as string | null) ?? null);
+  return merged;
 }
 
 export async function deleteProviderNode(id: string) {
-  const db = getDbInstance() as unknown as DbLike;
-  const existing = db.prepare("SELECT * FROM provider_nodes WHERE id = ?").get(id);
-  if (!existing) return null;
+  const row = await db().queryOne("DELETE FROM provider_nodes WHERE id = $1 RETURNING *", [id]);
+  if (!row) return null;
 
-  db.prepare("DELETE FROM provider_nodes WHERE id = ?").run(id);
-  backupDbFile("pre-write");
   invalidateDbCache("nodes");
   resetProviderNodePrefixCache();
-  return rowToCamel(existing);
+  return nodeFromRow(row);
 }

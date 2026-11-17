@@ -58,11 +58,9 @@ if (typeof _mcpSessionSweep === "object" && "unref" in _mcpSessionSweep) {
 
 function closeSseTransport(): void {
   if (_sseTransport) {
-    try {
-      _sseTransport.close();
-    } catch {
+    void _sseTransport.close().catch(() => {
       // ignore shutdown errors
-    }
+    });
   }
   _sseServer = null;
   _sseTransport = null;
@@ -75,11 +73,9 @@ function closeStreamableSession(sessionId: string): void {
     return;
   }
 
-  try {
-    session.transport.close();
-  } catch {
+  void session.transport.close().catch(() => {
     // ignore shutdown errors
-  }
+  });
   _streamableSessions.delete(sessionId);
 }
 
@@ -89,33 +85,46 @@ function closeAllStreamableSessions(): void {
   }
 }
 
-function ensureSseServer(): {
+let _ssePending: Promise<{
   server: McpServer;
   transport: WebStandardStreamableHTTPServerTransport;
-} {
+}> | null = null;
+
+async function ensureSseServer(): Promise<{
+  server: McpServer;
+  transport: WebStandardStreamableHTTPServerTransport;
+}> {
   if (_sseServer && _sseTransport) {
     return { server: _sseServer, transport: _sseTransport };
   }
+  if (_ssePending) return _ssePending;
 
   closeAllStreamableSessions();
 
-  _sseServer = createMcpServer();
-  _sseTransport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
+  _ssePending = (async () => {
+    const server = await createMcpServer();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+    });
+    _sseServer = server;
+    _sseTransport = transport;
+    _sseStartedAt = Date.now();
+
+    void server.connect(transport);
+
+    console.log("[MCP] HTTP transport started (sse)");
+    return { server, transport };
+  })().finally(() => {
+    _ssePending = null;
   });
-  _sseStartedAt = Date.now();
-
-  void _sseServer.connect(_sseTransport);
-
-  console.log("[MCP] HTTP transport started (sse)");
-  return { server: _sseServer, transport: _sseTransport };
+  return _ssePending;
 }
 
-function createStreamableSession(): StreamableSession {
+async function createStreamableSession(): Promise<StreamableSession> {
   closeSseTransport();
 
   const sessionId = randomUUID();
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => sessionId,
   });
@@ -240,7 +249,7 @@ async function handleStreamableRequest(request: Request): Promise<Response> {
       // initialization rather than hard-failing with 404. This avoids requiring users
       // to manually restart their MCP client after every server restart.
       if (await isInitializeRequest(request)) {
-        const newSession = createStreamableSession();
+        const newSession = await createStreamableSession();
         try {
           const response = await withMcpHttpAuthContext(request, () =>
             handleRequestWithAuthInfo(newSession.transport, request)
@@ -283,7 +292,7 @@ async function handleStreamableRequest(request: Request): Promise<Response> {
     return errorResponse("Bad Request: Mcp-Session-Id header is required", -32000);
   }
 
-  const session = createStreamableSession();
+  const session = await createStreamableSession();
 
   try {
     const response = await withMcpHttpAuthContext(request, () =>
@@ -332,7 +341,7 @@ export async function handleMcpSSE(request: Request): Promise<Response> {
       }
     } catch (err) {}
   }
-  const { transport } = ensureSseServer();
+  const { transport } = await ensureSseServer();
 
   try {
     const response = await withMcpHttpAuthContext(request, () =>

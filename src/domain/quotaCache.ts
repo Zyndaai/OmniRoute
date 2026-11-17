@@ -383,14 +383,14 @@ function mergeCodexPersistedQuota(
 }
 
 /** Overlay one Codex child's persisted quota facts into the existing request cache. */
-export function hydrateCodexQuotaCacheForRequest(
+export async function hydrateCodexQuotaCacheForRequest(
   connection: {
     id: string;
     provider: string;
     providerSpecificData?: Readonly<Record<string, unknown>> | null;
   },
   requestedModel: string | null
-): void {
+): Promise<void> {
   if (connection.provider !== "codex" || !requestedModel?.trim()) return;
   const pool = createCodexAccountPool({
     id: connection.id,
@@ -404,7 +404,7 @@ export function hydrateCodexQuotaCacheForRequest(
 
   const { cache } = getState();
   const entry = cache.get(connection.id) ||
-    hydrateQuotaCacheFromSnapshots(connection.id) || {
+    (await hydrateQuotaCacheFromSnapshots(connection.id)) || {
       connectionId: connection.id,
       provider: connection.provider,
       quotas: {},
@@ -712,7 +712,7 @@ export function isQuotaExhaustedForRequest(
   // Subscription snapshots cannot decide paid-credit eligibility. The mandatory
   // Codex preflight checks the credit balance before dispatch; cooldowns remain separate.
   if (isCodexPaidCreditsEnabled(provider, providerSpecificData, requestedModel)) return false;
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   if (!entry) return false;
 
   const now = Date.now();
@@ -789,6 +789,9 @@ export function setQuotaCache(
   };
   getState().cache.set(connectionId, entry);
 
+  // The cache above is the source of truth for routing; persistence is fire-and-forget and
+  // runs in order so one window's reset event always lands before its snapshot row.
+  const persistOps: Array<() => Promise<unknown>> = [];
   if (entry && rawQuotas) {
     for (const [windowKey, quotaInfo] of Object.entries(rawQuotas)) {
       if (!quotaInfo || typeof quotaInfo !== "object") continue;
@@ -797,19 +800,22 @@ export function setQuotaCache(
       const { remainingPercentage } = normalized;
       const fractionReported = normalized.fractionReported !== false;
       if (fractionReported) {
-        recordProviderQuotaResetEventIfChanged({
-          provider,
-          connectionId,
-          windowKey,
-          currentResetAt: normalized.resetAt,
-          currentRemainingPercentage: remainingPercentage,
-          previousObservation: prior?.quotas?.[windowKey]
-            ? {
-                resetAt: prior.quotas[windowKey].resetAt,
-                remainingPercentage: prior.quotas[windowKey].remainingPercentage,
-              }
-            : null,
-        });
+        const previousObservation = prior?.quotas?.[windowKey]
+          ? {
+              resetAt: prior.quotas[windowKey].resetAt,
+              remainingPercentage: prior.quotas[windowKey].remainingPercentage,
+            }
+          : null;
+        persistOps.push(() =>
+          recordProviderQuotaResetEventIfChanged({
+            provider,
+            connectionId,
+            windowKey,
+            currentResetAt: normalized.resetAt,
+            currentRemainingPercentage: remainingPercentage,
+            previousObservation,
+          })
+        );
       }
       // #5923 (Finding #5) — is_exhausted must reflect THIS window's own remaining
       // percentage, not the connection-wide AND-across-all-windows aggregate
@@ -822,7 +828,7 @@ export function setQuotaCache(
         prior?.quotas?.[windowKey]?.fractionReported === normalized.fractionReported
       )
         continue;
-      try {
+      persistOps.push(() =>
         saveQuotaSnapshot({
           provider,
           connection_id: connectionId,
@@ -833,11 +839,20 @@ export function setQuotaCache(
           window_duration_ms: entry.windowDurationMs ?? null,
           // Persist only the interpretation, never the raw provider payload.
           raw_data: fractionReported ? null : JSON.stringify({ fractionReported: false }),
-        });
-      } catch (error) {
-        console.error("[quotaCache] Failed to save snapshot:", error);
-      }
+        })
+      );
     }
+  }
+  if (persistOps.length > 0) {
+    void (async () => {
+      for (const op of persistOps) {
+        try {
+          await op();
+        } catch (error) {
+          console.error("[quotaCache] Failed to persist quota observation:", error);
+        }
+      }
+    })();
   }
 }
 
@@ -848,16 +863,48 @@ export function getQuotaCache(connectionId: string): QuotaCacheEntry | null {
   return getState().cache.get(connectionId) || null;
 }
 
-function hydrateQuotaCacheFromSnapshots(connectionId: string): QuotaCacheEntry | null {
+const inflightSnapshotHydrations = new Map<string, Promise<QuotaCacheEntry | null>>();
+
+/**
+ * Synchronous cache read for the routing hot path. On a miss it starts one background
+ * hydration from the stored snapshots (deduplicated), so a later call sees the entry;
+ * callers that must see the stored state first await `hydrateQuotaCacheFromSnapshots`.
+ */
+function peekQuotaCacheEntry(connectionId: string): QuotaCacheEntry | null {
+  const cached = getState().cache.get(connectionId);
+  if (cached) return cached;
+  void hydrateQuotaCacheFromSnapshots(connectionId).catch(() => {});
+  return null;
+}
+
+/** Load a connection's stored quota snapshots into the in-memory cache (no-op when cached). */
+export function hydrateQuotaCacheFromSnapshots(
+  connectionId: string
+): Promise<QuotaCacheEntry | null> {
   const { cache } = getState();
-  if (cache.has(connectionId)) return cache.get(connectionId) || null;
+  const cached = cache.get(connectionId);
+  if (cached) return Promise.resolve(cached);
+  const inflight = inflightSnapshotHydrations.get(connectionId);
+  if (inflight) return inflight;
+  const pending = loadQuotaCacheFromSnapshots(connectionId).finally(() => {
+    inflightSnapshotHydrations.delete(connectionId);
+  });
+  inflightSnapshotHydrations.set(connectionId, pending);
+  return pending;
+}
+
+async function loadQuotaCacheFromSnapshots(connectionId: string): Promise<QuotaCacheEntry | null> {
+  const { cache } = getState();
 
   let snapshots;
   try {
-    snapshots = getLatestQuotaSnapshotsForConnection(connectionId);
+    snapshots = await getLatestQuotaSnapshotsForConnection(connectionId);
   } catch {
     return null;
   }
+  // A live observation may have landed while the query ran; it wins over stored rows.
+  const existing = cache.get(connectionId);
+  if (existing) return existing;
   if (!snapshots.length) return null;
 
   const quotas: Record<string, QuotaInfo> = {};
@@ -934,7 +981,7 @@ function hydrateQuotaCacheFromSnapshots(connectionId: string): QuotaCacheEntry |
 export function isAccountQuotaExhausted(connectionId: string): boolean {
   // #14359 — mirror of the request-time predicate: honour the healthy override.
   if (isQuotaHealthy(connectionId)) return false;
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   if (!entry) return false;
   if (!entry.exhausted) return false;
 
@@ -966,7 +1013,7 @@ export function getQuotaWindowStatus(
   windowName: string,
   thresholdPercent = DEFAULT_QUOTA_THRESHOLD_PERCENT
 ): QuotaWindowStatus | null {
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   if (!entry) return null;
 
   const now = Date.now();
@@ -1012,7 +1059,7 @@ export function getQuotaWindowObservation(
   connectionId: string,
   windowName: string
 ): QuotaWindowObservation | null {
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   if (!entry) return null;
 
   const window = resolveQuotaWindow(entry.quotas, windowName);
@@ -1056,7 +1103,7 @@ export function getQuotaWeightedRemainingPercent(
   connectionId: string,
   requestedModel: string | null = null
 ): number | null {
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   if (!entry) return null;
   if (isAccountQuotaExhausted(connectionId)) return 0;
 
@@ -1084,7 +1131,7 @@ export function getQuotaWeightedRemainingPercent(
 
 /** Epoch-ms of the observation backing this connection's snapshot, if any. */
 export function getQuotaSnapshotFetchedAt(connectionId: string): number | null {
-  const entry = getState().cache.get(connectionId) || hydrateQuotaCacheFromSnapshots(connectionId);
+  const entry = peekQuotaCacheEntry(connectionId);
   return entry ? entry.fetchedAt : null;
 }
 
@@ -1180,7 +1227,11 @@ async function backgroundRefreshTick() {
 export function startBackgroundRefresh() {
   const state = getState();
   if (state.refreshTimer) return;
-  state.refreshTimer = setInterval(backgroundRefreshTick, REFRESH_INTERVAL_MS);
+  state.refreshTimer = setInterval(() => {
+    void backgroundRefreshTick().catch((error) => {
+      console.warn("[QuotaCache] Background refresh tick failed:", error);
+    });
+  }, REFRESH_INTERVAL_MS);
   state.refreshTimer?.unref?.();
 }
 

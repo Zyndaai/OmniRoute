@@ -12,15 +12,10 @@
  * open-sse/services/conversationTurnContent.ts), reusing the same full,
  * untruncated payloads call_logs already persists instead of storing a
  * second, truncated copy of conversation content here.
- *
- * `last_message_count`/`last_messages_hash` on `agentic_conversations` are
- * dead columns kept only for backward on-disk compatibility (superseded by
- * `conversation_turn_nodes`, migration 156) — never read, written as
- * placeholders.
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
 export interface AgenticConversationRow {
   id: string;
@@ -49,22 +44,20 @@ function toRow(value: unknown): AgenticConversationRow {
   };
 }
 
-export function createAgenticConversation(input: {
+export async function createAgenticConversation(input: {
   id?: string;
   apiKeyId: string | null;
   fingerprintHash: string;
-}): AgenticConversationRow {
-  const db = getDbInstance();
+}): Promise<AgenticConversationRow> {
   const now = new Date().toISOString();
   const id = input.id || `conv_${uuidv4()}`;
 
-  // last_message_count/last_messages_hash are dead columns (superseded by
-  // conversation_turn_nodes, migration 156) — 0/'' placeholders only.
-  db.prepare(
+  await db().execute(
     `INSERT INTO agentic_conversations
-       (id, api_key_id, fingerprint_hash, last_message_count, last_messages_hash, turn_count, first_seen_at, last_seen_at)
-     VALUES (?, ?, ?, 0, '', 1, ?, ?)`
-  ).run(id, input.apiKeyId, input.fingerprintHash, now, now);
+       (id, api_key_id, fingerprint_hash, turn_count, first_seen_at, last_seen_at)
+     VALUES ($1, $2, $3, 1, $4, $4)`,
+    [id, input.apiKeyId, input.fingerprintHash, now]
+  );
 
   return {
     id,
@@ -76,37 +69,37 @@ export function createAgenticConversation(input: {
   };
 }
 
-export function findAgenticConversationsByFingerprint(
+export async function findAgenticConversationsByFingerprint(
   fingerprintHash: string
-): AgenticConversationRow[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT * FROM agentic_conversations WHERE fingerprint_hash = ? ORDER BY last_seen_at DESC LIMIT 20`
-    )
-    .all(fingerprintHash);
+): Promise<AgenticConversationRow[]> {
+  const rows = await db().query(
+    `SELECT * FROM agentic_conversations WHERE fingerprint_hash = $1 ORDER BY last_seen_at DESC LIMIT 20`,
+    [fingerprintHash]
+  );
   return rows.map(toRow);
 }
 
 /**
- * SQL behind findAgenticConversationsByContent for `probeCount` content hashes. Params, in
- * order: the hashes, the fingerprint hash, the scan limit, the result limit. Exported so
- * the migration test can assert its plan uses idx_turn_nodes_content_hash (migration 211):
- * without it each correlated probe filters a conversation's nodes row by row.
+ * SQL behind findAgenticConversationsByContent. Params, in order: the content-hash array,
+ * the fingerprint hash, the scan limit, the result limit. Exported so a test can assert
+ * its plan uses conversation_turn_nodes_content_idx: without it each correlated probe
+ * filters a conversation's nodes row by row. `_probeCount` is kept for the old call shape;
+ * the hashes are one `text[]` parameter now.
  */
-export function contentCandidatesSql(probeCount: number): string {
-  const placeholders = Array.from({ length: probeCount }, () => "?").join(", ");
-  return `SELECT c.*, (
+export function contentCandidatesSql(_probeCount?: number): string {
+  return `SELECT * FROM (
+       SELECT c.*, (
          SELECT COUNT(DISTINCT n.content_hash) FROM conversation_turn_nodes n
-         WHERE n.conversation_id = c.id AND n.content_hash IN (${placeholders})
+         WHERE n.conversation_id = c.id AND n.content_hash = ANY($1::text[])
        ) AS hits
        FROM (
-         SELECT * FROM agentic_conversations WHERE fingerprint_hash = ?
-         ORDER BY last_seen_at DESC LIMIT ?
+         SELECT * FROM agentic_conversations WHERE fingerprint_hash = $2
+         ORDER BY last_seen_at DESC LIMIT $3
        ) c
-       WHERE hits > 0
-       ORDER BY hits DESC, c.last_seen_at DESC
-       LIMIT ?`;
+     ) scored
+     WHERE hits > 0
+     ORDER BY hits DESC, last_seen_at DESC
+     LIMIT $4`;
 }
 
 /**
@@ -115,32 +108,41 @@ export function contentCandidatesSql(probeCount: number): string {
  * recently seen conversations are probed, through the (conversation_id, content_hash)
  * index. Unlike the plain recency window above, a busy bucket (many parallel agents on
  * one key or session) cannot push a conversation out of the candidates as long as it is
- * among the bucket's recent `scanLimit`. The index was dropped by migration 201 and
- * recreated by 211 for this query (see contentCandidatesSql).
+ * among the bucket's recent `scanLimit`.
  */
-export function findAgenticConversationsByContent(
+export async function findAgenticConversationsByContent(
   fingerprintHash: string,
   contentHashes: string[],
   { scanLimit = 500, limit = 20 }: { scanLimit?: number; limit?: number } = {}
-): AgenticConversationRow[] {
+): Promise<AgenticConversationRow[]> {
   if (contentHashes.length === 0) return [];
-  const db = getDbInstance();
-  const rows = db
-    .prepare(contentCandidatesSql(contentHashes.length))
-    .all(...contentHashes, fingerprintHash, scanLimit, limit);
+  const rows = await db().query(contentCandidatesSql(contentHashes.length), [
+    contentHashes,
+    fingerprintHash,
+    scanLimit,
+    limit,
+  ]);
   return rows.map(toRow);
 }
 
-export function updateAgenticConversation(id: string, patch: { turnCount: number }): void {
-  const db = getDbInstance();
-  db.prepare(`UPDATE agentic_conversations SET turn_count = ?, last_seen_at = ? WHERE id = ?`).run(
-    patch.turnCount,
-    new Date().toISOString(),
-    id
+/**
+ * Records one more request on the conversation. `turnCount` is the caller's expected new
+ * count, and the increment is applied in SQL, so two requests touching one conversation
+ * at once both count: the stored value becomes `GREATEST(turn_count + 1, turnCount)`.
+ */
+export async function updateAgenticConversation(
+  id: string,
+  patch: { turnCount: number }
+): Promise<void> {
+  await db().execute(
+    `UPDATE agentic_conversations
+        SET turn_count = GREATEST(turn_count + 1, $1), last_seen_at = $2
+      WHERE id = $3`,
+    [Math.round(patch.turnCount), new Date().toISOString(), id]
   );
 }
 
-// ── Turn-node tree (migration 156) ───────────────────────────────────────
+// ── Turn-node tree ───────────────────────────────────────────────────────
 
 export interface ConversationTurnNode {
   id: string;
@@ -200,13 +202,13 @@ export interface ConversationTurnIndex {
  * (conversationTracker.ts). Chains are small in practice (tens to low
  * hundreds of turns), so one bulk load per candidate is cheap.
  */
-export function getConversationTurnIndex(conversationId: string): ConversationTurnIndex {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT id, parent_id, content_hash FROM conversation_turn_nodes WHERE conversation_id = ?`
-    )
-    .all(conversationId);
+export async function getConversationTurnIndex(
+  conversationId: string
+): Promise<ConversationTurnIndex> {
+  const rows = await db().query(
+    `SELECT id, parent_id, content_hash FROM conversation_turn_nodes WHERE conversation_id = $1`,
+    [conversationId]
+  );
   const nodeIds = new Set<string>();
   const byContentHash = new Map<string, string[]>();
   const parentsWithChildren = new Set<string>();
@@ -231,7 +233,7 @@ export function getConversationTurnIndex(conversationId: string): ConversationTu
  * re-inserted or touched here — only the newly-diverging tail from the
  * fork/reconnect point onward reaches this function (see conversationTracker.ts).
  */
-export function insertConversationTurnNodes(
+export async function insertConversationTurnNodes(
   conversationId: string,
   correlationId: string | null,
   nodes: Array<{
@@ -240,36 +242,26 @@ export function insertConversationTurnNodes(
     role: string;
     contentHash: string;
   }>
-): void {
+): Promise<void> {
   if (nodes.length === 0) return;
-  const db = getDbInstance();
   const now = new Date().toISOString();
-  const insert = db.prepare(
-    `INSERT OR IGNORE INTO conversation_turn_nodes
-       (id, conversation_id, parent_id, role, content_hash, last_correlation_id, first_seen_at, last_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertMany = db.transaction((rows: typeof nodes) => {
-    for (const node of rows) {
-      insert.run(
-        node.id,
-        conversationId,
-        node.parentId,
-        node.role,
-        node.contentHash,
-        correlationId,
-        now,
-        now
+  await db().transaction(async (tx) => {
+    for (const node of nodes) {
+      await tx.execute(
+        `INSERT INTO conversation_turn_nodes
+           (id, conversation_id, parent_id, role, content_hash, last_correlation_id, first_seen_at, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+         ON CONFLICT (id) DO NOTHING`,
+        [node.id, conversationId, node.parentId, node.role, node.contentHash, correlationId, now]
       );
     }
   });
-  insertMany(nodes);
 }
 
 export interface ConversationTurnNodeWithSeq extends ConversationTurnNode {
-  /** SQLite rowid — a stable, monotonically-increasing insertion-order
+  /** The identity `seq` column — a stable, monotonically-increasing insertion-order
    * cursor for pagination (first_seen_at can tie within the same request's
-   * batch insert; rowid never does). */
+   * batch insert; seq never does). */
   seq: number;
 }
 
@@ -292,37 +284,33 @@ export interface ConversationTurnPage {
  * Only one of beforeSeq/afterSeq is meaningful per call; afterSeq wins if
  * both are somehow given.
  */
-export function getConversationTurnPage(
+export async function getConversationTurnPage(
   conversationId: string,
   opts: { limit?: number; beforeSeq?: number; afterSeq?: number } = {}
-): ConversationTurnPage {
-  const db = getDbInstance();
+): Promise<ConversationTurnPage> {
   const limit = Math.max(1, Math.min(opts.limit ?? 20, 500));
 
   if (opts.afterSeq != null) {
-    const rows = db
-      .prepare(
-        `SELECT rowid as seq, * FROM conversation_turn_nodes
-         WHERE conversation_id = ? AND rowid > ? ORDER BY rowid ASC`
-      )
-      .all(conversationId, opts.afterSeq);
+    const rows = await db().query(
+      `SELECT * FROM conversation_turn_nodes
+         WHERE conversation_id = $1 AND seq > $2 ORDER BY seq ASC`,
+      [conversationId, opts.afterSeq]
+    );
     return { nodes: rows.map(toTurnNodeWithSeq), hasMore: false };
   }
 
   const rows =
     opts.beforeSeq != null
-      ? db
-          .prepare(
-            `SELECT rowid as seq, * FROM conversation_turn_nodes
-             WHERE conversation_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?`
-          )
-          .all(conversationId, opts.beforeSeq, limit + 1)
-      : db
-          .prepare(
-            `SELECT rowid as seq, * FROM conversation_turn_nodes
-             WHERE conversation_id = ? ORDER BY rowid DESC LIMIT ?`
-          )
-          .all(conversationId, limit + 1);
+      ? await db().query(
+          `SELECT * FROM conversation_turn_nodes
+             WHERE conversation_id = $1 AND seq < $2 ORDER BY seq DESC LIMIT $3`,
+          [conversationId, opts.beforeSeq, limit + 1]
+        )
+      : await db().query(
+          `SELECT * FROM conversation_turn_nodes
+             WHERE conversation_id = $1 ORDER BY seq DESC LIMIT $2`,
+          [conversationId, limit + 1]
+        );
 
   const hasMore = rows.length > limit;
   const page = (hasMore ? rows.slice(0, limit) : rows).reverse();
@@ -342,16 +330,17 @@ function toTurnNodeWithSeq(value: unknown): ConversationTurnNodeWithSeq {
  * a `correlation_id -> call_logs.id` map so the tree view can link each node
  * to a navigable request.
  */
-export function resolveCallLogIdsByCorrelationIds(correlationIds: string[]): Map<string, string> {
+export async function resolveCallLogIdsByCorrelationIds(
+  correlationIds: string[]
+): Promise<Map<string, string>> {
   const unique = [...new Set(correlationIds.filter(Boolean))];
   const result = new Map<string, string>();
   if (unique.length === 0) return result;
 
-  const db = getDbInstance();
-  const placeholders = unique.map(() => "?").join(",");
-  const rows = db
-    .prepare(`SELECT id, correlation_id FROM call_logs WHERE correlation_id IN (${placeholders})`)
-    .all(...unique);
+  const rows = await db().query(
+    `SELECT id, correlation_id FROM call_logs WHERE correlation_id = ANY($1::text[]) ORDER BY seq`,
+    [unique]
+  );
   for (const r of rows) {
     const rec = asRecord(r);
     const correlationId = typeof rec.correlation_id === "string" ? rec.correlation_id : null;
@@ -369,30 +358,25 @@ export function resolveCallLogIdsByCorrelationIds(correlationIds: string[]): Map
 /**
  * Upsert for the client-supplied `x-omniroute-session-id` path: the header
  * value is used directly as the conversation id, so this only needs to keep
- * `turn_count`/`last_seen_at` moving — the fingerprint/prefix-hash fields are
- * unused for header-pinned conversations (continuation is guaranteed by the
- * client, not detected heuristically).
+ * `turn_count`/`last_seen_at` moving — the fingerprint hash is unused for
+ * header-pinned conversations (continuation is guaranteed by the client, not
+ * detected heuristically). One statement, so concurrent requests on a new
+ * session id cannot both insert.
  */
-export function touchOrCreateExternalConversation(
+export async function touchOrCreateExternalConversation(
   id: string,
   ctx: { apiKeyId: string | null }
-): void {
-  const db = getDbInstance();
+): Promise<void> {
   const now = new Date().toISOString();
-  const existing = db.prepare(`SELECT id FROM agentic_conversations WHERE id = ?`).get(id);
-
-  if (existing) {
-    db.prepare(
-      `UPDATE agentic_conversations SET turn_count = turn_count + 1, last_seen_at = ? WHERE id = ?`
-    ).run(now, id);
-    return;
-  }
-
-  db.prepare(
+  await db().execute(
     `INSERT INTO agentic_conversations
-       (id, api_key_id, fingerprint_hash, last_message_count, last_messages_hash, turn_count, first_seen_at, last_seen_at)
-     VALUES (?, ?, '', 0, '', 1, ?, ?)`
-  ).run(id, ctx.apiKeyId, now, now);
+       (id, api_key_id, fingerprint_hash, turn_count, first_seen_at, last_seen_at)
+     VALUES ($1, $2, '', 1, $3, $3)
+     ON CONFLICT (id) DO UPDATE
+       SET turn_count = agentic_conversations.turn_count + 1,
+           last_seen_at = EXCLUDED.last_seen_at`,
+    [id, ctx.apiKeyId, now]
+  );
 }
 
 export interface MultiTurnConversationRow extends AgenticConversationRow {
@@ -424,40 +408,36 @@ export interface MultiTurnConversationRow extends AgenticConversationRow {
  * them permanently invisible despite having a rich multi-turn transcript
  * (2026-08-06, request 1785975096139-6627d2 / conv_36fff6fa...: turn_count=1,
  * 398 real conversation_turn_nodes rows). Joined to each
- * conversation's most recent call_logs row (by MAX(timestamp) per
- * session_tag) in a single query rather than one lookup per row, since this
+ * conversation's most recent call_logs row (by timestamp per session_tag)
+ * in a single query rather than one lookup per row, since this
  * is a list view that can have many conversations.
  */
-export function listMultiTurnConversations(
+export async function listMultiTurnConversations(
   filter: {
     limit?: number;
     offset?: number;
   } = {}
-): { rows: MultiTurnConversationRow[]; total: number } {
-  const db = getDbInstance();
+): Promise<{ rows: MultiTurnConversationRow[]; total: number }> {
   const limit = Math.max(1, Math.min(filter.limit ?? 50, 200));
   const offset = Math.max(0, filter.offset ?? 0);
 
-  const total = asRecord(
-    db
-      .prepare(
-        `SELECT COUNT(*) as c FROM agentic_conversations ac
+  const totalRow = asRecord(
+    await db().queryOne(
+      `SELECT COUNT(*) AS c FROM agentic_conversations ac
          WHERE (SELECT COUNT(*) FROM conversation_turn_nodes n WHERE n.conversation_id = ac.id) >= 2`
-      )
-      .get()
-  ).c as number;
+    )
+  );
 
-  const rows = db
-    .prepare(
-      `${MULTI_TURN_CONVERSATION_SELECT}
+  const rows = await db().query(
+    `${MULTI_TURN_CONVERSATION_SELECT}
        WHERE (SELECT COUNT(*) FROM conversation_turn_nodes n WHERE n.conversation_id = ac.id) >= 2
        ORDER BY ac.last_seen_at DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(limit, offset);
+       LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
 
   return {
-    total: Number(total ?? 0),
+    total: Number(totalRow.c ?? 0),
     rows: rows.map(toMultiTurnConversationRow),
   };
 }
@@ -476,20 +456,24 @@ function toMultiTurnConversationRow(value: unknown): MultiTurnConversationRow {
   };
 }
 
+// `latest` is the conversation's newest call_logs row (session_tag = conversation id),
+// found through call_logs_session_tag_idx. The artifact path is only reported once the
+// detail is published: it is stored at insert, before the artifact exists.
 const MULTI_TURN_CONVERSATION_SELECT = `
-  SELECT ac.*, latest.id as last_call_log_id, latest.model as last_model,
-         latest.provider as last_provider, latest.status as last_status,
-         latest.artifact_relpath as last_artifact_relpath,
-         latest.api_key_id as last_api_key_id
+  SELECT ac.*, latest.id AS last_call_log_id, latest.model AS last_model,
+         latest.provider AS last_provider, latest.status AS last_status,
+         latest.artifact_relpath AS last_artifact_relpath,
+         latest.api_key_id AS last_api_key_id
   FROM agentic_conversations ac
-  LEFT JOIN (
-    SELECT cl1.id, cl1.session_tag, cl1.model, cl1.provider, cl1.status,
-           cl1.artifact_relpath, cl1.api_key_id
-    FROM call_logs cl1
-    WHERE cl1.timestamp = (
-      SELECT MAX(cl2.timestamp) FROM call_logs cl2 WHERE cl2.session_tag = cl1.session_tag
-    )
-  ) latest ON latest.session_tag = ac.id
+  LEFT JOIN LATERAL (
+    SELECT cl.id, cl.model, cl.provider, cl.status,
+           CASE WHEN cl.detail_state = 'ready' THEN cl.artifact_relpath END AS artifact_relpath,
+           cl.api_key_id
+    FROM call_logs cl
+    WHERE cl.session_tag = ac.id
+    ORDER BY cl."timestamp" DESC, cl.seq DESC
+    LIMIT 1
+  ) latest ON true
 `;
 
 /**
@@ -502,8 +486,9 @@ const MULTI_TURN_CONVERSATION_SELECT = `
  * specifically-requested conversation should resolve even if it hasn't (yet)
  * reached 2 turn nodes.
  */
-export function getMultiTurnConversationById(id: string): MultiTurnConversationRow | null {
-  const db = getDbInstance();
-  const row = db.prepare(`${MULTI_TURN_CONVERSATION_SELECT} WHERE ac.id = ?`).get(id);
+export async function getMultiTurnConversationById(
+  id: string
+): Promise<MultiTurnConversationRow | null> {
+  const row = await db().queryOne(`${MULTI_TURN_CONVERSATION_SELECT} WHERE ac.id = $1`, [id]);
   return row ? toMultiTurnConversationRow(row) : null;
 }

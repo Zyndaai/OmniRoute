@@ -263,7 +263,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
         persistConnectionPatch: updateProviderConnection,
         setConnectionRateLimitedUntil: async (id, untilMs) => {
           const { setConnectionRateLimitUntil } = await import("@/lib/db/providers");
-          setConnectionRateLimitUntil(id, untilMs);
+          await setConnectionRateLimitUntil(id, untilMs);
         },
         lockModel,
         recordAntigravityQuotaState: recordCoreOwnedAntigravityQuotaState,
@@ -291,7 +291,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
           deleteSessionAccountAffinityBestEffort(key, "codex");
         },
         onAuditAccountRotation: (params) => {
-          logAuditEvent({
+          void logAuditEvent({
             action: params.action,
             actor: apiKeyInfo?.name || "system",
             target: params.newConnectionId,
@@ -701,7 +701,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
           ...trustedEffortContext,
           provider,
           targetFormat,
-          credentials: getExecutionCredentials(),
+          credentials: await getExecutionCredentials(),
           log,
           bypassDefaultToolLimit: isOpencodeClient,
           isOpencodeClient,
@@ -709,18 +709,21 @@ export async function runStreamingResponse(deps: StreamingDeps) {
           clientRawRequest,
           toolDisclosure,
         });
-        assertManagedLeaseFence(getExecutionConnectionId(getExecutionCredentials()));
+        const retryFenceCredentials = await getExecutionCredentials();
+        await assertManagedLeaseFence(getExecutionConnectionId(retryFenceCredentials));
+        const retryExecCredentials = await getExecutionCredentials();
+        const retryUpstreamExtraHeaders = await buildUpstreamHeadersForExecute(retryModelId);
         const retryResult = normalizeExecutorResult(
           await runWithCapture(providerRequestCapture, () =>
             executor.execute({
               model: retryModelId,
               body: retryBody,
               stream: upstreamStream,
-              credentials: getExecutionCredentials(),
+              credentials: retryExecCredentials,
               signal: streamController.signal,
               log,
               extendedContext,
-              upstreamExtraHeaders: buildUpstreamHeadersForExecute(retryModelId),
+              upstreamExtraHeaders: retryUpstreamExtraHeaders,
               clientHeaders: getExecutorClientHeaders(),
               clientResponseFormat,
               onCredentialsRefreshed: isPassiveCodex(provider)
@@ -954,7 +957,10 @@ export async function runStreamingResponse(deps: StreamingDeps) {
     // poison fallback/cooldown bookkeeping for a request that is only a probe.
     if (
       !stream &&
-      isTinyBudgetReasoningProbe({ model: currentModel, body: finalBody || translatedBody }) &&
+      (await isTinyBudgetReasoningProbe({
+        model: currentModel,
+        body: finalBody || translatedBody,
+      })) &&
       isEmptyContentUpstreamFailure(statusCode, message)
     ) {
       providerResponse = buildReasoningProbeTruncatedResponse({

@@ -1,16 +1,9 @@
+import type { DbExecutor } from "../pg";
 import { resolveUsageAccountIdentity } from "@/lib/usage/accountIdentity";
 import { parseProviderSpecificData } from "../webSessionDedup";
 import { toStringOrNull } from "./columns";
 
 type JsonRecord = Record<string, unknown>;
-
-interface StatementLike {
-  run: (...params: unknown[]) => { changes?: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike;
-}
 
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -45,15 +38,15 @@ function isSafeCodexIdentityEnrichment(existing: JsonRecord, merged: JsonRecord)
  * user identity. The caller invokes this inside the same transaction as the
  * provider row update, so history and connection identity cannot diverge.
  */
-export function reconcileCodexUsageHistory(
-  db: DbLike,
+export async function reconcileCodexUsageHistory(
+  tx: DbExecutor,
   input: {
     connectionId: string;
     existing: JsonRecord;
     merged: JsonRecord;
     matchedExistingCodexByWorkspace?: boolean;
   }
-): void {
+): Promise<void> {
   const oldIdentity = resolveUsageAccountIdentity(input.existing);
   const newIdentity = resolveUsageAccountIdentity(input.merged);
   const identityChanged = oldIdentity.accountKey !== newIdentity.accountKey;
@@ -63,25 +56,26 @@ export function reconcileCodexUsageHistory(
 
   if (!identityChanged || !permitted) return;
 
-  db.prepare(
+  await tx.execute(
     `UPDATE usage_history
-     SET account_key = @newAccountKey,
+     SET account_key = $1::text,
          account_label = CASE
-           WHEN @newLabelPriority > COALESCE(account_label_priority, 0)
-           THEN @newLabel
+           WHEN $2::integer > COALESCE(account_label_priority, 0)
+           THEN $3::text
            ELSE account_label
          END,
-         account_label_priority = MAX(
+         account_label_priority = GREATEST(
            COALESCE(account_label_priority, 0),
-           @newLabelPriority
+           $2::integer
          )
-     WHERE connection_id = @connectionId
-       AND account_key = @oldAccountKey`
-  ).run({
-    connectionId: input.connectionId,
-    oldAccountKey: oldIdentity.accountKey,
-    newAccountKey: newIdentity.accountKey,
-    newLabel: newIdentity.accountLabel,
-    newLabelPriority: newIdentity.accountLabelPriority,
-  });
+     WHERE connection_id = $4
+       AND account_key = $5`,
+    [
+      newIdentity.accountKey,
+      newIdentity.accountLabelPriority,
+      newIdentity.accountLabel,
+      input.connectionId,
+      oldIdentity.accountKey,
+    ]
+  );
 }

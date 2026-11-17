@@ -1,13 +1,14 @@
-import { getDbInstance } from "../db/core";
+import { db } from "@/lib/db/pg";
 import { decrypt } from "../db/encryption";
 import { reloadCore, type SecretProvider } from "./coreConfig/reload";
 
 /** Control secret for one subscription (deferred reloads re-read via this). */
-export function readControlSecret(id: string): string | null {
+export async function readControlSecret(id: string): Promise<string | null> {
   try {
-    const row = getDbInstance()
-      .prepare("SELECT control_secret_enc FROM proxy_subscriptions WHERE id = ?")
-      .get(id) as { control_secret_enc?: unknown } | undefined;
+    const row = await db().queryOne<{ control_secret_enc?: unknown }>(
+      "SELECT control_secret_enc FROM proxy_subscriptions WHERE id = $1",
+      [id]
+    );
     const enc = row?.control_secret_enc;
     if (typeof enc !== "string" || !enc) return null;
     try {
@@ -40,7 +41,7 @@ export async function reloadAfterReplace(
 ): Promise<string | null> {
   const secretProvider: SecretProvider = async () => {
     try {
-      return readControlSecret(subscriptionId);
+      return await readControlSecret(subscriptionId);
     } catch {
       return null;
     }
@@ -50,7 +51,7 @@ export async function reloadAfterReplace(
     outcome = await reloadCore({
       subscriptionId,
       controlUrl,
-      secret: readControlSecret(subscriptionId),
+      secret: await readControlSecret(subscriptionId),
       configPath,
       secretProvider,
     });

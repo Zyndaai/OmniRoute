@@ -80,9 +80,9 @@ export async function handleCompressionStatus(
   try {
     const settings = await getCompressionSettings();
     await snapshotMcpDescriptionCompressionStats();
-    const analyticsSummary = getCompressionAnalyticsSummary();
+    const analyticsSummary = await getCompressionAnalyticsSummary();
     const mcpDescriptionStats = getMcpDescriptionCompressionStats();
-    const cacheStats = getCacheStatsSummary();
+    const cacheStats = await getCacheStatsSummary();
 
     const result = {
       enabled: settings.enabled,
@@ -349,7 +349,7 @@ export async function handleCcrRetrieveTool(
     await logToolCall("omniroute_ccr_retrieve", args, output, Date.now() - start, true);
     return output;
   }
-  const queried = handleCcrRetrieve(args, principal);
+  const queried = await handleCcrRetrieve(args, principal);
   const refreshedMetadata = inspectCcrBlock(args.hash, principal) ?? metadata;
   const output =
     "content" in queried
@@ -472,15 +472,15 @@ export async function handleSetCompressionEngine(
 }
 
 export async function handleListCompressionCombos(): Promise<{
-  combos: ReturnType<typeof listCompressionCombos>;
+  combos: Awaited<ReturnType<typeof listCompressionCombos>>;
 }> {
-  return { combos: listCompressionCombos() };
+  return { combos: await listCompressionCombos() };
 }
 
 export async function handleCompressionComboStats(
   args: z.infer<typeof compressionComboStatsInput>
 ): Promise<Record<string, unknown>> {
-  const summary = getCompressionAnalyticsSummary(args.since === "all" ? undefined : args.since);
+  const summary = await getCompressionAnalyticsSummary(args.since === "all" ? undefined : args.since);
   if (!args.comboId) return summary as unknown as Record<string, unknown>;
   return {
     comboId: args.comboId,

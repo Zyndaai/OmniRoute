@@ -48,18 +48,20 @@ export type RadarTickResult =
   | { action: "skipped"; reason: "opt_out" | "not_due" }
   | { action: "synced"; result: SyncStatus };
 
+type MaybePromise<T> = T | Promise<T>;
+
 export interface RadarSchedulerDeps {
   getFlag?: (key: string) => boolean;
-  getSettings?: () => { optIn: boolean };
-  getCache?: () => { fetchedAt: string } | null;
+  getSettings?: () => MaybePromise<{ optIn: boolean }>;
+  getCache?: () => MaybePromise<{ fetchedAt: string } | null>;
   sync?: () => Promise<SyncStatus>;
   /** Referrals cache reader — separate from `getCache` (the catalog cache). */
-  getReferralsCache?: () => { fetchedAt: string } | null;
+  getReferralsCache?: () => MaybePromise<{ fetchedAt: string } | null>;
   /** Referrals sync — separate from `sync` (the catalog sync). */
   syncReferrals?: () => Promise<ReferralsSyncStatus>;
-  getOffersCache?: () => { fetchedAt: string } | null;
+  getOffersCache?: () => MaybePromise<{ fetchedAt: string } | null>;
   syncOffers?: () => Promise<OffersSyncStatus>;
-  getIntelCache?: () => { fetchedAt: string } | null;
+  getIntelCache?: () => MaybePromise<{ fetchedAt: string } | null>;
   syncIntel?: () => Promise<IntelSyncStatus>;
   now?: () => number;
   setIntervalFn?: typeof setInterval;
@@ -76,7 +78,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
  */
 async function maybeSyncReferrals(deps: RadarSchedulerDeps, nowMs: number): Promise<void> {
   try {
-    const referralsCache = (deps.getReferralsCache ?? getRadarReferralsCache)();
+    const referralsCache = await (deps.getReferralsCache ?? getRadarReferralsCache)();
     if (!shouldSyncReferralsOnRead(referralsCache?.fetchedAt ?? null, nowMs)) return;
     await (deps.syncReferrals ?? syncRadarReferrals)();
   } catch (err) {
@@ -87,7 +89,7 @@ async function maybeSyncReferrals(deps: RadarSchedulerDeps, nowMs: number): Prom
 
 async function maybeSyncSupporterFeeds(deps: RadarSchedulerDeps, nowMs: number): Promise<void> {
   try {
-    const offersCache = (deps.getOffersCache ?? getRadarOffersCache)();
+    const offersCache = await (deps.getOffersCache ?? getRadarOffersCache)();
     if (nowMs >= nextSyncTime(offersCache?.fetchedAt ?? null).getTime()) {
       await (deps.syncOffers ?? syncRadarOffers)();
     }
@@ -97,7 +99,7 @@ async function maybeSyncSupporterFeeds(deps: RadarSchedulerDeps, nowMs: number):
   }
 
   try {
-    const intelCache = (deps.getIntelCache ?? getRadarIntelCache)();
+    const intelCache = await (deps.getIntelCache ?? getRadarIntelCache)();
     if (shouldSyncRadarIntel(intelCache?.fetchedAt ?? null, nowMs)) {
       await (deps.syncIntel ?? syncRadarIntel)();
     }
@@ -118,7 +120,7 @@ export async function radarSchedulerTick(deps: RadarSchedulerDeps = {}): Promise
     return { action: "stopped", reason: "flag_off" };
   }
 
-  const settings = (deps.getSettings ?? getRadarSettings)();
+  const settings = await (deps.getSettings ?? getRadarSettings)();
   if (!settings.optIn) return { action: "skipped", reason: "opt_out" };
 
   const nowMs = (deps.now ?? Date.now)();
@@ -128,7 +130,7 @@ export async function radarSchedulerTick(deps: RadarSchedulerDeps = {}): Promise
   await maybeSyncReferrals(deps, nowMs);
   await maybeSyncSupporterFeeds(deps, nowMs);
 
-  const cache = (deps.getCache ?? getRadarCache)();
+  const cache = await (deps.getCache ?? getRadarCache)();
   if (nowMs < nextSyncTime(cache?.fetchedAt ?? null).getTime()) {
     return { action: "skipped", reason: "not_due" };
   }
@@ -174,11 +176,11 @@ export function stopRadarSyncScheduler(deps: RadarSchedulerDeps = {}): void {
  * already on (a flag-off install stays byte-identical — no timer, no DB
  * polling loop). Never throws.
  */
-export function initRadarSyncScheduler(deps: RadarSchedulerDeps = {}): boolean {
+export async function initRadarSyncScheduler(deps: RadarSchedulerDeps = {}): Promise<boolean> {
   try {
     const getFlag = deps.getFlag ?? isFeatureFlagEnabled;
     if (!getFlag("RADAR_ENABLED")) return false;
-    const settings = (deps.getSettings ?? getRadarSettings)();
+    const settings = await (deps.getSettings ?? getRadarSettings)();
     if (!settings.optIn) return false;
     return ensureRadarSyncScheduler(deps);
   } catch (err) {

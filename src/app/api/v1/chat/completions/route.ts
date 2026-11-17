@@ -69,8 +69,9 @@ const injectionGuard = createInjectionGuard({ logger: null });
  */
 function ensureInitialized() {
   if (!initPromise) {
-    ensureSemanticCacheDbBridge();
-    initPromise = Promise.resolve(initTranslators()).then(() => {
+    // Bridge failures must not block translator init: the cache falls back to its defaults.
+    const bridgeReady = ensureSemanticCacheDbBridge().catch(() => {});
+    initPromise = Promise.all([bridgeReady, Promise.resolve(initTranslators())]).then(() => {
       console.log("[SSE] Translators initialized");
     });
   }
@@ -287,7 +288,7 @@ export async function POST(request) {
           });
         }
 
-        const { blocked, result } = injectionGuard(parsedBody);
+        const { blocked, result } = await injectionGuard(parsedBody);
         if (blocked) {
           return finishAdmission(
             new Response(

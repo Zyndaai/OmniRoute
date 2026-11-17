@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
   try {
     // Fail-fast if JWT_SECRET is not configured
     if (!process.env.JWT_SECRET) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.misconfigured",
         actor: "system",
         target: "dashboard-auth",
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
         process.env.OIDC_DISABLE_PASSWORD_LOGIN === "true");
 
     if (oidcDisabledPassword) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.password_disabled_by_oidc",
         actor: "anonymous",
         target: "dashboard-auth",
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
 
     const guardCheck = beginLoginAttempt(lockoutKey, { enabled: bruteForceEnabled });
     if (!guardCheck.allowed) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.locked",
         actor: "anonymous",
         target: "dashboard-auth",
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     const storedHash = getStoredManagementPassword(passwordState.settings);
 
     if (!storedHash) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.setup_required",
         actor: "anonymous",
         target: "dashboard-auth",
@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
     // from the socket peer the authz pipeline stamped, not from forwarding
     // headers: a remote caller can send `X-Forwarded-For: 127.0.0.1` at will.
     if (isValid && isKnownInsecureManagementPassword(password) && !isHostOperatorRequest(request)) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.insecure_default_blocked",
         actor: "anonymous",
         target: "dashboard-auth",
@@ -244,7 +244,7 @@ export async function POST(request: NextRequest) {
         maxAge: 60 * 60 * 24 * 30,
       });
 
-      logAuditEvent({
+      await logAuditEvent({
         action: "auth.login.success",
         actor: "admin",
         target: "dashboard-auth",
@@ -265,7 +265,7 @@ export async function POST(request: NextRequest) {
 
     const failureDecision = recordLoginFailure(lockoutKey, { enabled: bruteForceEnabled });
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "auth.login.failed",
       actor: "anonymous",
       target: "dashboard-auth",
@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   } catch (error) {
     console.error("[AUTH] Login failed:", error);
-    logAuditEvent({
+    await logAuditEvent({
       action: "auth.login.error",
       actor: "system",
       target: "dashboard-auth",

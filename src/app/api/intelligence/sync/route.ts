@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const { getArenaEloSyncStatus } = await import("@/lib/arenaEloSync");
-    return NextResponse.json(getArenaEloSyncStatus());
+    return NextResponse.json(await getArenaEloSyncStatus());
   } catch (err) {
     return NextResponse.json(
       { error: sanitizeErrorMessage(err) },
@@ -71,7 +71,7 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const { clearSyncedIntelligence } = await import("@/lib/arenaEloSync");
-    clearSyncedIntelligence();
+    await clearSyncedIntelligence();
     return NextResponse.json({ success: true, message: "Synced intelligence data cleared" });
   } catch (err) {
     return NextResponse.json(

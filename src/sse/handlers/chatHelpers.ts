@@ -100,6 +100,8 @@ type TrafficType = "production" | "shadow";
 
 type ExecuteChatWithBreakerOptions = {
   trafficType?: TrafficType;
+  /** chatCore awaits this hook so a MuseOwnershipError propagates. */
+  beforeUpstreamAttempt?: (...args: any[]) => void | Promise<void>;
   [key: string]: any;
 };
 
@@ -1078,7 +1080,7 @@ export async function safeResolveProxy(
     // opts back into direct). Explicit "proxy off" is not a leak (see the guard).
     if (
       !(resolved as { proxy?: unknown } | null)?.proxy &&
-      hasBlockingProxyAssignment(connectionId, providerId, comboName)
+      (await hasBlockingProxyAssignment(connectionId, providerId, comboName))
     ) {
       return decideProxyResolutionFailure(
         Object.assign(

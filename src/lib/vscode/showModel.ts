@@ -76,8 +76,11 @@ function getOllamaModelFamily(model: OpenAiCatalogModel, canonicalFamily?: strin
     : "omniroute";
 }
 
-export function matchesRequestedModel(model: OpenAiCatalogModel, requestedName: string): boolean {
-  const canonicalMetadata = getCanonicalModelMetadata({
+export async function matchesRequestedModel(
+  model: OpenAiCatalogModel,
+  requestedName: string
+): Promise<boolean> {
+  const canonicalMetadata = await getCanonicalModelMetadata({
     provider: model.owned_by || null,
     model: model.root || model.id || model.name || null,
   });
@@ -148,7 +151,7 @@ function buildModelCapabilities(model: OpenAiCatalogModel, reasoningFields: Reas
 function buildArchitecture(
   model: OpenAiCatalogModel,
   family: string,
-  canonicalMetadata: ReturnType<typeof getCanonicalModelMetadata>
+  canonicalMetadata: Awaited<ReturnType<typeof getCanonicalModelMetadata>>
 ) {
   return normalizeArchitectureKey(
     normalizeArchitectureSource(
@@ -190,13 +193,13 @@ function buildModelInfo(
   };
 }
 
-export function buildShowPayload(
+export async function buildShowPayload(
   model: OpenAiCatalogModel,
   displayName: string,
   responseModelId?: string
 ) {
   const actualModelId = getCatalogModelId(model);
-  const canonicalMetadata = getCanonicalModelMetadata({
+  const canonicalMetadata = await getCanonicalModelMetadata({
     provider: model.owned_by || null,
     model: model.root || model.id || model.name || null,
   });

@@ -26,10 +26,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const config = getLocalCorpusConfig();
+    const config = await getLocalCorpusConfig();
     return NextResponse.json({
       ...config,
-      status: getConfiguredLocalCorpusStatus(),
+      status: await getConfiguredLocalCorpusStatus(),
     });
   } catch (error) {
     return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const rootPath = await canonicalizeLocalCorpusRoot(parsed.data.rootPath);
-    setLocalCorpusRoot(rootPath);
+    await setLocalCorpusRoot(rootPath);
     resetLocalCorpusIndex();
     return NextResponse.json({
       configured: true,
@@ -76,7 +76,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    clearLocalCorpusRoot();
+    await clearLocalCorpusRoot();
     resetLocalCorpusIndex();
     return NextResponse.json({
       configured: false,

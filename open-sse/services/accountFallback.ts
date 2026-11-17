@@ -1345,13 +1345,15 @@ export function clearProviderFailure(provider: string | null | undefined): void 
 /**
  * Get all providers currently blocked by the shared breaker.
  */
-export function getProvidersInCooldown(): Array<{
-  provider: string;
-  failureCount: number;
-  cooldownRemainingMs: number | null;
-  lastFailureAt: number | null;
-}> {
-  return getAllCircuitBreakerStatuses()
+export async function getProvidersInCooldown(): Promise<
+  Array<{
+    provider: string;
+    failureCount: number;
+    cooldownRemainingMs: number | null;
+    lastFailureAt: number | null;
+  }>
+> {
+  return (await getAllCircuitBreakerStatuses())
     .filter((status) => {
       const breaker = getProviderBreaker(status.name);
       return Boolean(breaker && !breaker.canExecute());
@@ -2464,11 +2466,8 @@ export function resetAccountState<T extends AccountState | null | undefined>(
   // Best-effort: a DB write failure must not crash the request path.
   const connId = (account as AccountState | null | undefined)?.id;
   if (typeof connId === "string" && connId.length > 0) {
-    try {
-      setConnectionRateLimitUntil(connId, null);
-    } catch {
-      // ignore — best effort
-    }
+    // Best effort, not awaited (this function is sync); a failed write is ignored.
+    void setConnectionRateLimitUntil(connId, null).catch(() => {});
   }
   return {
     ...account,
@@ -2539,7 +2538,7 @@ export function applyErrorState<T extends AccountState | null | undefined>(
     try {
       const untilMs = cooldownUntilMs(nextState.rateLimitedUntil);
       if (Number.isFinite(untilMs) && untilMs > Date.now()) {
-        setConnectionRateLimitUntil(connId, untilMs);
+        void setConnectionRateLimitUntil(connId, untilMs).catch(() => {});
       }
     } catch {
       // ignore — best effort

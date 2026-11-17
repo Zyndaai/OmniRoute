@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json(buildPayload(getPiiSettings()));
+    return NextResponse.json(buildPayload(await getPiiSettings()));
   } catch (error) {
     console.error("[PII] Failed to read PII settings:", error);
     return createErrorResponse({ status: 500, message: "Failed to read PII settings" });
@@ -53,9 +53,9 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const saved = setPiiSettings(validation.data);
+    const saved = await setPiiSettings(validation.data);
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "settings.pii.updated",
       // Counts only: patterns can encode what the operator considers sensitive.
       metadata: {

@@ -75,7 +75,7 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
   private async run<T>(
     operation: (client: AffinityRedisClient, signal: AbortSignal) => Promise<T>,
     fallback: () => T | Promise<T>,
-    late?: () => void
+    late?: () => void | Promise<void>
   ): Promise<T> {
     if (this.outstanding >= MAX_OUTSTANDING_REDIS_OPERATIONS) {
       if (this.throttle.shouldLog("capacity")) {
@@ -90,7 +90,11 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
     const cleanLate = () => {
       // A sent command can settle after the deadline, before OR after fallback.
       // Clean only once both have settled, including late rejection/error replies.
-      if (controller.signal.aborted && commandSettled && callSettled) late?.();
+      if (controller.signal.aborted && commandSettled && callSettled) {
+        Promise.resolve()
+          .then(() => late?.())
+          .catch(() => {});
+      }
     };
     let timer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_resolve, reject) => {
@@ -144,7 +148,7 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
           await client.eval(READ_WITH_TTL, 1, keyFor(sessionKey, provider))
         );
         const record = liveRedisRecord(result, now);
-        if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+        if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
         if (record) this.observations.set(record, result.raw!);
         return record;
       },
@@ -171,7 +175,7 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
         if (observed === undefined) {
           commandStarted = true;
           raw = redisReadResult(await client.eval(READ_WITH_TTL, 1, key)).raw;
-          if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+          if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
         } else {
           raw = observed === null ? null : (this.observations.get(observed) ?? null);
         }
@@ -190,29 +194,21 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
           await client.eval(COMPARE_AND_UPDATE, 1, key, raw ?? "", JSON.stringify(record), ttlMs)
         );
         if (signal.aborted) return;
-        this.fallback.delete(sessionKey, provider);
+        await this.fallback.delete(sessionKey, provider);
         if (result.updated <= 0) {
           const winner = liveRedisRecord(result, now);
           if (winner) this.observations.set(winner, result.raw!);
           return winner;
         }
       },
-      () => {
-        const result = this.fallback.upsert(
-          sessionKey,
-          provider,
-          connectionId,
-          now,
-          ttlMs,
-          accountIdentity
-        );
-        fallbackValue = this.fallback.getSerialized(sessionKey, provider);
-        return result;
+      async () => {
+        await this.fallback.upsert(sessionKey, provider, connectionId, now, ttlMs, accountIdentity);
+        fallbackValue = await this.fallback.getSerialized(sessionKey, provider);
       },
-      () => {
-        // SQLite's exact-value compare+delete is synchronous, with no await.
+      async () => {
+        // deleteIfValue is one atomic compare+delete statement.
         if (commandStarted && fallbackValue !== null)
-          this.fallback.deleteIfValue(sessionKey, provider, fallbackValue);
+          await this.fallback.deleteIfValue(sessionKey, provider, fallbackValue);
       }
     );
   }
@@ -227,7 +223,7 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
         commandStarted = true;
         const result = redisReadResult(await client.eval(READ_WITH_TTL, 1, key));
         signal.throwIfAborted();
-        this.fallback.delete(sessionKey, provider);
+        await this.fallback.delete(sessionKey, provider);
         const existing = liveRedisRecord(result, now);
         if (!existing) return;
         const record = {
@@ -236,16 +232,15 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
           expiresAt: new Date(now + ttlMs).toISOString(),
         };
         await client.eval(COMPARE_AND_UPDATE, 1, key, result.raw!, JSON.stringify(record), ttlMs);
-        if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+        if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
       },
-      () => {
-        const result = this.fallback.touch(sessionKey, provider, now, ttlMs);
-        fallbackValue = this.fallback.getSerialized(sessionKey, provider);
-        return result;
+      async () => {
+        await this.fallback.touch(sessionKey, provider, now, ttlMs);
+        fallbackValue = await this.fallback.getSerialized(sessionKey, provider);
       },
-      () => {
+      async () => {
         if (commandStarted && fallbackValue !== null)
-          this.fallback.deleteIfValue(sessionKey, provider, fallbackValue);
+          await this.fallback.deleteIfValue(sessionKey, provider, fallbackValue);
       }
     );
   }
@@ -262,17 +257,17 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
         let raw: string | null;
         if (observed === undefined) {
           raw = await client.get(key);
-          if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+          if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
         } else {
           raw = observed === null ? null : (this.observations.get(observed) ?? null);
         }
         signal.throwIfAborted();
         if (raw === null) {
-          this.fallback.delete(sessionKey, provider);
+          await this.fallback.delete(sessionKey, provider);
           return;
         }
         await client.eval(COMPARE_AND_UPDATE, 1, key, raw, "", 0);
-        if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+        if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
       },
       () => this.fallback.delete(sessionKey, provider)
     );
@@ -287,14 +282,14 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
     if (!sessionKey || !provider || !connectionId) return false;
     // Remove this failed account locally even when Redis is down. No shared reply
     // can reinstall it; a later outage fallback is the only possible local writer.
-    const localEvicted = this.fallback.evict(sessionKey, provider, connectionId, accountIdentity);
+    const localEvicted = await this.fallback.evict(sessionKey, provider, connectionId, accountIdentity);
     return this.run(
       async (client, signal) => {
         const key = keyFor(sessionKey, provider);
         const raw = await client.get(key);
         signal.throwIfAborted();
         const record = parseRecord(raw);
-        this.fallback.delete(sessionKey, provider);
+        await this.fallback.delete(sessionKey, provider);
         if (
           !record ||
           (record.accountIdentity && accountIdentity
@@ -304,7 +299,7 @@ export class RedisSessionAffinityStore implements SessionAffinityStore {
           return localEvicted;
         const reply = await client.eval(COMPARE_AND_UPDATE, 1, key, raw!, "", 0);
         const deleted = Array.isArray(reply) ? Number(reply[0]) : Number(reply);
-        if (!signal.aborted) this.fallback.delete(sessionKey, provider);
+        if (!signal.aborted) await this.fallback.delete(sessionKey, provider);
         return deleted > 0 || localEvicted;
       },
       () => localEvicted

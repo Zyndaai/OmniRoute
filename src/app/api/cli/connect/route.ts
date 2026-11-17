@@ -75,7 +75,7 @@ export async function POST(request: Request) {
 
     const guardCheck = beginLoginAttempt(lockoutKey, { enabled: bruteForceEnabled });
     if (!guardCheck.allowed) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "cli.connect.locked",
         actor: "anonymous",
         target: "cli-access-token",
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     const isValid = await verifyManagementPassword(password, storedHash);
     if (!isValid) {
       const failureDecision = recordLoginFailure(lockoutKey, { enabled: bruteForceEnabled });
-      logAuditEvent({
+      await logAuditEvent({
         action: "cli.connect.failed",
         actor: "anonymous",
         target: "cli-access-token",
@@ -146,7 +146,7 @@ export async function POST(request: Request) {
     // admin from anywhere the port is reachable. Pair from a local console first,
     // then rotate.
     if (isKnownInsecureManagementPassword(password) && !isHostOperatorRequest(request)) {
-      logAuditEvent({
+      await logAuditEvent({
         action: "cli.connect.insecure_default_blocked",
         actor: "anonymous",
         target: "cli-access-token",
@@ -179,13 +179,13 @@ export async function POST(request: Request) {
         ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString()
         : null;
 
-    const { record, secret } = createAccessToken({
+    const { record, secret } = await createAccessToken({
       name: tokenName,
       scope: tokenScope,
       expiresAt,
     });
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "cli.connect.success",
       actor: "admin",
       target: "cli-access-token",

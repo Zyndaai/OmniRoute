@@ -26,13 +26,15 @@ export interface WebSessionPoolHealthDeps {
   getSessionDetails: (provider: string) => PoolSessionDetail[] | null;
   isProviderInCooldown: (provider: string) => boolean;
   getProviderCooldownRemainingMs: (provider: string) => number | null;
-  getProviderBreakerState: (provider: string) => {
+  getProviderBreakerState: (provider: string) => MaybePromise<{
     state?: string;
     failureCount?: number;
     lastFailureTime?: number | null;
     retryAfterMs?: number;
-  } | null;
+  } | null>;
 }
+
+type MaybePromise<T> = T | Promise<T>;
 
 const defaultDeps: WebSessionPoolHealthDeps = {
   listProviders: () => PoolRegistry.listProviders(),
@@ -40,8 +42,8 @@ const defaultDeps: WebSessionPoolHealthDeps = {
   getSessionDetails: (p) => PoolRegistry.getSessionDetails(p),
   isProviderInCooldown: (p) => isProviderInCooldown(p),
   getProviderCooldownRemainingMs: (p) => getProviderCooldownRemainingMs(p),
-  getProviderBreakerState: (p) => {
-    const statuses = getAllCircuitBreakerStatuses();
+  getProviderBreakerState: async (p) => {
+    const statuses = await getAllCircuitBreakerStatuses();
     const match = statuses.find((s) => s.name === p);
     if (!match) return null;
     return {
@@ -190,11 +192,11 @@ function buildPoolInfo(stats: (PoolStats & { createdAt: number }) | null): WebSe
 /**
  * Build breaker info from accountFallback functions.
  */
-function buildBreakerInfo(
+async function buildBreakerInfo(
   provider: string,
   deps: WebSessionPoolHealthDeps,
-): WebSessionPoolBreakerInfo | null {
-  const breakerState = deps.getProviderBreakerState(provider);
+): Promise<WebSessionPoolBreakerInfo | null> {
+  const breakerState = await deps.getProviderBreakerState(provider);
   if (!breakerState) return null;
 
   const inCooldown = deps.isProviderInCooldown(provider);
@@ -256,20 +258,20 @@ function formatDuration(ms: number): string {
  * @param provider - Optional provider name. If omitted, returns all registered pools.
  * @returns Health report with per-provider pool stats, breaker state, and health classification.
  */
-export function getWebSessionPoolHealth(
+export async function getWebSessionPoolHealth(
   provider?: string,
   deps: WebSessionPoolHealthDeps = defaultDeps,
-): WebSessionPoolHealthReport {
+): Promise<WebSessionPoolHealthReport> {
   const checkedAt = new Date().toISOString();
 
   const providers: string[] = provider ? [provider] : deps.listProviders();
 
-  const results: WebSessionPoolProviderHealth[] = providers.map((p) => {
+  const results: WebSessionPoolProviderHealth[] = await Promise.all(providers.map(async (p) => {
     const stats = deps.getStats(p);
     const sessionDetails = deps.getSessionDetails(p);
 
     const poolInfo = buildPoolInfo(stats);
-    const breakerInfo = buildBreakerInfo(p, deps);
+    const breakerInfo = await buildBreakerInfo(p, deps);
     const sessions = mapSessionDetails(sessionDetails);
     const { health, issues } = computeHealth(poolInfo, breakerInfo);
 
@@ -281,7 +283,7 @@ export function getWebSessionPoolHealth(
       health,
       issues,
     };
-  });
+  }));
 
   return { checkedAt, providers: results };
 }

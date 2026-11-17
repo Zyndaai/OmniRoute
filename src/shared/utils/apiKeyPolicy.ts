@@ -762,19 +762,19 @@ function formatResetDurationSuffix(untilMs: unknown, nowMs = Date.now()): string
  * The metered dollar budget check, skipped when the caller defers it to the
  * resolved candidate (see {@link EnforceApiKeyPolicyOptions.meteredBudget}).
  */
-function validateBudgetUnlessDeferred(
+async function validateBudgetUnlessDeferred(
   context: PolicyContext,
   options: EnforceApiKeyPolicyOptions | undefined
-): Response | null {
+): Promise<Response | null> {
   if (options?.meteredBudget === "defer-to-candidate") return null;
   return validateBudget(context);
 }
 
-function validateBudget(context: PolicyContext): Response | null {
+async function validateBudget(context: PolicyContext): Promise<Response | null> {
   const { apiKeyInfo } = context;
   if (!apiKeyInfo.id) return null;
   try {
-    const budgetOk = checkBudget(apiKeyInfo.id);
+    const budgetOk = await checkBudget(apiKeyInfo.id);
     if (budgetOk.allowed) return null;
     const resetSuffix = formatResetDurationSuffix(budgetOk.budgetResetAt);
     const reason = budgetOk.reason || "Budget limit exceeded";
@@ -792,11 +792,11 @@ function validateBudget(context: PolicyContext): Response | null {
   }
 }
 
-function validateTokenLimit(context: PolicyContext): Response | null {
+async function validateTokenLimit(context: PolicyContext): Promise<Response | null> {
   const { apiKeyInfo, modelStr } = context;
   if (!apiKeyInfo.id) return null;
   try {
-    const breach = checkTokenLimits(apiKeyInfo.id, undefined, modelStr ?? undefined);
+    const breach = await checkTokenLimits(apiKeyInfo.id, undefined, modelStr ?? undefined);
     if (!breach) return null;
     const scopeLabel =
       breach.scopeType === "global" ? "account" : `${breach.scopeType} "${breach.scopeValue}"`;
@@ -812,11 +812,11 @@ function validateTokenLimit(context: PolicyContext): Response | null {
   }
 }
 
-function validateKeyQuota(context: PolicyContext): Response | null {
+async function validateKeyQuota(context: PolicyContext): Promise<Response | null> {
   const { apiKeyInfo } = context;
   if (!apiKeyInfo.id) return null;
   try {
-    const verdict = checkKeyQuota(apiKeyInfo.id);
+    const verdict = await checkKeyQuota(apiKeyInfo.id);
     if (verdict.allowed) return null;
     return errorResponse(HTTP_STATUS.RATE_LIMITED, verdict.reason || "API key quota exceeded");
   } catch (error) {
@@ -892,7 +892,7 @@ function extractUngatedClientApiKey(request: Request): string | null {
  * to no key and silently drops the user's entire policy — the same
  * auth-vs-policy divergence as GHSA-2phc-xp22-9f56 above.
  */
-function resolveSsoApiKeySecret(request: Request): string | null {
+async function resolveSsoApiKeySecret(request: Request): Promise<string | null> {
   const kind = request.headers.get(AUTHZ_HEADER_AUTH_KIND);
   if (kind !== "sso_user") return null;
 
@@ -900,7 +900,7 @@ function resolveSsoApiKeySecret(request: Request): string | null {
   if (!oid || !oid.trim()) return null;
 
   try {
-    return getSsoShadowSecret(oid.trim());
+    return await getSsoShadowSecret(oid.trim());
   } catch (error) {
     log.error("API_POLICY", "Failed to resolve SSO shadow key", { error });
     return null;
@@ -917,7 +917,7 @@ function resolveSsoApiKeySecret(request: Request): string | null {
  */
 export async function resolvePolicyApiKey(request: Request): Promise<string | null> {
   // SSO first: its bearer is a JWT, not a key, and must map to the shadow key.
-  const ssoSecret = resolveSsoApiKeySecret(request);
+  const ssoSecret = await resolveSsoApiKeySecret(request);
   if (ssoSecret) return ssoSecret;
   const resolved = await resolveClientApiKey(request);
   return (
@@ -1092,11 +1092,11 @@ export async function enforceApiKeyPolicy(
   const accessRejection = await runAccessValidators(context, options);
   if (accessRejection) return { apiKey, apiKeyInfo, rejection: accessRejection };
 
-  const budgetRejection = validateBudgetUnlessDeferred(context, options);
+  const budgetRejection = await validateBudgetUnlessDeferred(context, options);
   if (budgetRejection) return { apiKey, apiKeyInfo, rejection: budgetRejection };
-  const keyQuotaRejection = validateKeyQuota(context);
+  const keyQuotaRejection = await validateKeyQuota(context);
   if (keyQuotaRejection) return { apiKey, apiKeyInfo, rejection: keyQuotaRejection };
-  const tokenRejection = validateTokenLimit(context);
+  const tokenRejection = await validateTokenLimit(context);
   if (tokenRejection) return { apiKey, apiKeyInfo, rejection: tokenRejection };
   const rateRejection = await validateRateLimitAndThrottle(context);
   if (rateRejection) return { apiKey, apiKeyInfo, rejection: rateRejection };

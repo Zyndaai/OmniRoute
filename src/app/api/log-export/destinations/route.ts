@@ -37,8 +37,9 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
+    const destinations = await getLogExportDestinations();
     return NextResponse.json({
-      destinations: getLogExportDestinations().map(toDestinationView),
+      destinations: await Promise.all(destinations.map((row) => toDestinationView(row))),
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const created = createLogExportDestination({
+    const created = await createLogExportDestination({
       name: data.name,
       type: data.type,
       enabled: data.enabled,
@@ -106,11 +107,13 @@ export async function POST(request: Request) {
       maxRowsPerRun: data.maxRowsPerRun,
     });
 
-    // Capture the high-water mark without an await between creation and reset: an enabled
-    // destination cannot be scheduled with cursor zero in the middle of this handler.
-    if (data.startFromCurrentPosition) resetLogExportCursor(created.id, getMaxCallLogRowId());
-    const view = data.startFromCurrentPosition ? getLogExportDestination(created.id)! : created;
-    return NextResponse.json({ destination: toDestinationView(view) }, { status: 201 });
+    if (data.startFromCurrentPosition) {
+      await resetLogExportCursor(created.id, await getMaxCallLogRowId());
+    }
+    const view = data.startFromCurrentPosition
+      ? (await getLogExportDestination(created.id))!
+      : created;
+    return NextResponse.json({ destination: await toDestinationView(view) }, { status: 201 });
   } catch (error: any) {
     return NextResponse.json(
       { error: sanitizeErrorMessage(error) || "Failed to create log export destination" },

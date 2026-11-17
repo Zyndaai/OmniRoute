@@ -29,7 +29,7 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
 
   try {
     const { id } = await params;
-    const pool = getPool(id);
+    const pool = await getPool(id);
     if (!pool) {
       return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
@@ -57,7 +57,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     const exclusivePresent = body !== null && typeof body === "object" && "exclusive" in body;
     const prevApiKeyIds: string[] = [];
     if (exclusivePresent) {
-      const existingPool = getPool(id);
+      const existingPool = await getPool(id);
       if (existingPool) {
         for (const alloc of existingPool.allocations) {
           prevApiKeyIds.push(alloc.apiKeyId);
@@ -83,7 +83,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
       }
     }
 
-    const pool = updatePool(id, parsed.data);
+    const pool = await updatePool(id, parsed.data);
     if (!pool) {
       return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
@@ -109,7 +109,7 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     }
 
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "quota.pool.updated",
       target: id,
       metadata: parsed.data,
@@ -136,7 +136,7 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
     }
 
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "quota.pool.deleted",
       target: id,
       ipAddress: ctx.ipAddress ?? undefined,

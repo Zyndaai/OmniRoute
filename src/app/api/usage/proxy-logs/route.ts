@@ -41,7 +41,7 @@ export async function GET(request: Request) {
  */
 export async function DELETE() {
   try {
-    clearProxyLogs();
+    await clearProxyLogs();
     return Response.json({ cleared: true });
   } catch (error) {
     return serverErrorResponse(error);

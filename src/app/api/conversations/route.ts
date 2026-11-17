@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * whether the caller asked for one row or many. Strips the internal-only
  * lastArtifactRelPath/lastApiKeyId fields before they reach the client.
  */
-export function annotateConversationRow(
+export async function annotateConversationRow(
   row: MultiTurnConversationRow,
   activeCallLogIdByConversation: ReadonlyMap<string, string>
 ) {
@@ -28,7 +28,7 @@ export function annotateConversationRow(
     ...rest,
     isActive,
     activeCallLogId: activeCallLogIdByConversation.get(row.id) ?? null,
-    isGenuineContinuation: isGenuineContinuationTurn(lastArtifactRelPath, lastApiKeyId),
+    isGenuineContinuation: await isGenuineContinuationTurn(lastArtifactRelPath, lastApiKeyId),
     // "Didn't end in stop" badge: a truncated/failed stream, or a tool call
     // still unanswered 5+ minutes after lastSeenAt with nothing having
     // continued. See resolveConversationStalledState's own doc comment for
@@ -71,14 +71,14 @@ export async function GET(req: Request) {
     const limit = Number(searchParams.get("limit") ?? "50");
     const offset = Number(searchParams.get("offset") ?? "0");
 
-    const { rows, total } = listMultiTurnConversations({
+    const { rows, total } = await listMultiTurnConversations({
       limit: Number.isFinite(limit) ? limit : undefined,
       offset: Number.isFinite(offset) ? offset : undefined,
     });
 
     const activeCallLogIdByConversation = buildActiveCallLogIdByConversation();
-    const conversations = rows.map((row) =>
-      annotateConversationRow(row, activeCallLogIdByConversation)
+    const conversations = await Promise.all(
+      rows.map((row) => annotateConversationRow(row, activeCallLogIdByConversation))
     );
 
     return NextResponse.json({ conversations, total });

@@ -44,7 +44,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (policy.rejection) return policy.rejection;
 
   const { id } = await params;
-  const batch = getBatch(id);
+  const batch = await getBatch(id);
 
   // A key resolved only via the ungated x-api-key/x-goog-api-key transport
   // never sets scope.apiKeyId — fall back to the id enforceApiKeyPolicy()
@@ -95,7 +95,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (policy.rejection) return policy.rejection;
 
   const { id } = await params;
-  const batch = getBatch(id);
+  const batch = await getBatch(id);
 
   // A key resolved only via the ungated x-api-key/x-goog-api-key transport
   // never sets scope.apiKeyId — fall back to the id enforceApiKeyPolicy()
@@ -119,7 +119,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     );
   }
 
-  deleteBatch(id);
+  await deleteBatch(id);
 
   return NextResponse.json({ id, object: "batch", deleted: true }, { headers: CORS_HEADERS });
 }

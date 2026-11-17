@@ -230,7 +230,7 @@ async function resolveImageComboTargets(comboName: string, keyScope: ComboKeySco
   }
 
   const allCombos = await getCombos();
-  const targets = resolveComboTargets(combo as never, allCombos as never);
+  const targets = await resolveComboTargets(combo as never, allCombos as never);
   if (!targets || targets.length === 0) {
     return {
       response: errorResponse(

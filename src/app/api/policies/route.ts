@@ -5,7 +5,7 @@ import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 
 export async function GET() {
   try {
-    const lockedIdentifiers = getLockedIdentifiers();
+    const lockedIdentifiers = await getLockedIdentifiers();
     return NextResponse.json({ lockedIdentifiers });
   } catch (error) {
     console.error("Error loading policies:", error);
@@ -37,7 +37,7 @@ export async function POST(request) {
     const { action, identifier } = validation.data;
 
     if (action === "unlock" && identifier) {
-      forceUnlock(identifier);
+      await forceUnlock(identifier);
       return NextResponse.json({ success: true, action: "unlocked", identifier });
     }
 

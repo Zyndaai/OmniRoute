@@ -7,7 +7,7 @@
 // generation counter (addProxyToScopePool, removeProxyFromScopePool,
 // setScopeRotationStrategy) stay in ../proxies.ts and import the pure helpers here.
 import { randomInt } from "crypto";
-import { getDbInstance } from "../core";
+import { db, type DbExecutor } from "@/lib/db/pg";
 import { pickByLatency } from "../proxyLatency";
 import {
   hasProxyRefusals,
@@ -25,6 +25,7 @@ import { getCachedProxyHealth } from "@/lib/proxyHealth";
 import { getRecentEgressIpForProxy, getRecentEgressIpsForProxy } from "../proxyLogs";
 import { egressKeyForAddresses, normalizeEgressAddress } from "@/shared/network/egressAddress";
 import { readOperatorEgressForMember } from "../proxyOperatorEgress";
+import { decryptProxyPassword } from "./sanitize";
 import type { JsonRecord, ProxyScope, ProxyRotationStrategy } from "./types";
 import { PROXY_ROTATION_STRATEGIES, DEFAULT_PROXY_ROTATION_STRATEGY } from "./types";
 import {
@@ -34,31 +35,37 @@ import {
   normalizeAssignmentScopeId,
 } from "./mappers";
 
+// The cursor column is an int4; wrapping keeps a hot pool from overflowing it after 2^31 picks.
+// The wrap only skews fairness once per cycle.
+const CURSOR_WRAP = 1_000_000_000;
+
 // Rotation state keys off the SAME normalized scope_id as assignments so a global
 // pool ('__global__') and a per-scope pool share one deterministic cursor row.
 export function normalizeRotationScopeId(scope: ProxyScope, scopeId?: string | null): string {
   return normalizeAssignmentScopeId(scope, scopeId) ?? "";
 }
 
-export function clearRotationState(
-  db: ReturnType<typeof getDbInstance>,
+/** `executor` is `db()` or the `tx` of a surrounding transaction. */
+export async function clearRotationState(
+  executor: DbExecutor,
   scope: string,
   normalizedScopeId: string | null
-) {
-  db.prepare("DELETE FROM proxy_scope_rotation WHERE scope = ? AND scope_id IS ?").run(
+): Promise<void> {
+  await executor.execute("DELETE FROM proxy_scope_rotation WHERE scope = $1 AND scope_id = $2", [
     scope,
-    normalizedScopeId ?? ""
-  );
+    normalizedScopeId ?? "",
+  ]);
 }
 
-export function resetRotationCursor(
-  db: ReturnType<typeof getDbInstance>,
+export async function resetRotationCursor(
+  executor: DbExecutor,
   scope: string,
   normalizedScopeId: string | null
-) {
-  db.prepare(
-    "UPDATE proxy_scope_rotation SET cursor = 0, rotated_at = NULL, updated_at = ? WHERE scope = ? AND scope_id IS ?"
-  ).run(new Date().toISOString(), scope, normalizedScopeId ?? "");
+): Promise<void> {
+  await executor.execute(
+    "UPDATE proxy_scope_rotation SET cursor = 0, rotated_at = NULL, updated_at = now() WHERE scope = $1 AND scope_id = $2",
+    [scope, normalizedScopeId ?? ""]
+  );
 }
 
 export function normalizeRotationStrategy(strategy: unknown): ProxyRotationStrategy {
@@ -75,13 +82,11 @@ export function normalizeRotationStrategy(strategy: unknown): ProxyRotationStrat
 export async function getScopeProxyPool(scope: string, scopeId?: string | null) {
   const normalizedScope = normalizeScope(scope);
   const normalizedScopeId = normalizeAssignmentScopeId(normalizedScope, scopeId);
-  const db = getDbInstance();
-  return db
-    .prepare(
-      "SELECT id, proxy_id, scope, scope_id, position, created_at, updated_at FROM proxy_assignments WHERE scope = ? AND scope_id IS ? ORDER BY position ASC, datetime(created_at) ASC, id ASC"
-    )
-    .all(normalizedScope, normalizedScopeId)
-    .map(mapAssignmentRow);
+  const rows = await db().query(
+    "SELECT id, proxy_id, scope, scope_id, position, created_at, updated_at FROM proxy_assignments WHERE scope = $1 AND scope_id = $2 ORDER BY position ASC, created_at ASC, id ASC",
+    [normalizedScope, normalizedScopeId]
+  );
+  return rows.map(mapAssignmentRow);
 }
 
 /** Read a scope's rotation strategy (#6365). Defaults to `round-robin`. */
@@ -91,38 +96,35 @@ export async function getScopeRotationStrategy(
 ): Promise<ProxyRotationStrategy> {
   const normalizedScope = normalizeScope(scope);
   const rotationScopeId = normalizeRotationScopeId(normalizedScope, scopeId);
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT strategy FROM proxy_scope_rotation WHERE scope = ? AND scope_id IS ?")
-    .get(normalizedScope, rotationScopeId) as { strategy?: string } | undefined;
+  const row = await db().queryOne<{ strategy?: string }>(
+    "SELECT strategy FROM proxy_scope_rotation WHERE scope = $1 AND scope_id = $2",
+    [normalizedScope, rotationScopeId]
+  );
   return normalizeRotationStrategy(row?.strategy);
 }
 
 // Read the rotation row for a scope, creating a default one lazily so the
 // round-robin cursor has somewhere to live. Best-effort: any write failure leaves
 // the caller on the default strategy with an ephemeral cursor.
-function getOrCreateRotationRow(
-  db: ReturnType<typeof getDbInstance>,
+async function getOrCreateRotationRow(
+  executor: DbExecutor,
   normalizedScope: string,
   rotationScopeId: string
-): {
+): Promise<{
   strategy: ProxyRotationStrategy;
   cursor: number;
   stickyWindowMinutes: number;
   rotatedAt: string | null;
-} {
-  const row = db
-    .prepare(
-      "SELECT strategy, cursor, sticky_window_minutes, rotated_at FROM proxy_scope_rotation WHERE scope = ? AND scope_id IS ?"
-    )
-    .get(normalizedScope, rotationScopeId) as
-    | {
-        strategy?: string;
-        cursor?: number;
-        sticky_window_minutes?: number;
-        rotated_at?: string | null;
-      }
-    | undefined;
+}> {
+  const row = await executor.queryOne<{
+    strategy?: string;
+    cursor?: number;
+    sticky_window_minutes?: number;
+    rotated_at?: string | null;
+  }>(
+    "SELECT strategy, cursor, sticky_window_minutes, rotated_at FROM proxy_scope_rotation WHERE scope = $1 AND scope_id = $2",
+    [normalizedScope, rotationScopeId]
+  );
 
   if (row) {
     return {
@@ -133,10 +135,12 @@ function getOrCreateRotationRow(
     };
   }
 
-  const now = new Date().toISOString();
-  db.prepare(
-    "INSERT OR IGNORE INTO proxy_scope_rotation (scope, scope_id, strategy, cursor, updated_at) VALUES (?, ?, ?, 0, ?)"
-  ).run(normalizedScope, rotationScopeId, DEFAULT_PROXY_ROTATION_STRATEGY, now);
+  await executor.execute(
+    `INSERT INTO proxy_scope_rotation (scope, scope_id, strategy, cursor, updated_at)
+     VALUES ($1, $2, $3, 0, now())
+     ON CONFLICT (scope, scope_id) DO NOTHING`,
+    [normalizedScope, rotationScopeId, DEFAULT_PROXY_ROTATION_STRATEGY]
+  );
   return {
     strategy: DEFAULT_PROXY_ROTATION_STRATEGY,
     cursor: 0,
@@ -154,13 +158,13 @@ function getOrCreateRotationRow(
 // scopes and a null provider keep the entry-level behavior. The scope gate is
 // isEgressBucketedLockScope (case-insensitive, the same gate as
 // buildHotEgressPredicate). Model and endpoint stay reserved and are never compared.
-function eligibleMemberIndexes(
+async function eligibleMemberIndexes(
   candidates: unknown[],
   provider?: string | null,
   nowMs: number = Date.now()
-): number[] | null {
+): Promise<number[] | null> {
   if (!hasProxyRefusals()) return null;
-  const addressScope = addressScopeFor(provider, candidates, nowMs);
+  const addressScope = await addressScopeFor(provider, candidates, nowMs);
   const eligible: number[] = [];
   candidates.forEach((row, index) => {
     if (!isProxyAvoided(proxyEgressKey(row), nowMs) && !addressScope.isShared(row))
@@ -175,44 +179,53 @@ function eligibleMemberIndexes(
 // buildHotEgressPredicate's seed discipline. Only scopes in the egress-bucketed lock
 // set expand: a refusal for one bucketed scope never sets aside members picked for
 // another scope.
-function addressScopeFor(
+async function addressScopeFor(
   provider: string | null | undefined,
   candidates: unknown[],
   nowMs: number
-): { isShared: (row: unknown) => boolean; isAvoidedKey: (key: string | null) => boolean } {
+): Promise<{
+  isShared: (row: unknown) => boolean;
+  isAvoidedKey: (key: string | null) => boolean;
+}> {
   const none = {
     isShared: () => false,
     isAvoidedKey: (key: string | null) => isProxyAvoided(key, nowMs),
   };
   if (provider == null) return none;
   if (!isEgressBucketedLockScope(provider)) return none;
+  // The egress reads are async, so each candidate's keys are read once up front
+  // and the predicates below stay synchronous.
+  const memberKeys = new Map<unknown, Set<string>>();
   const hot = new Set<string>();
   for (const row of candidates) {
     if (!isProxyAvoided(proxyEgressKey(row), nowMs)) continue;
-    for (const key of readEgressKeysForMember(row, nowMs).keys) hot.add(key);
+    const keys = (await readEgressKeysForMember(row, nowMs)).keys;
+    memberKeys.set(row, keys);
+    for (const key of keys) hot.add(key);
   }
   if (hot.size === 0) return none;
+  for (const row of candidates) {
+    if (!memberKeys.has(row)) memberKeys.set(row, (await readEgressKeysForMember(row, nowMs)).keys);
+  }
   const byKey = new Map<string, unknown>();
   for (const row of candidates) {
     const key = proxyEgressKey(row);
     if (key !== null) byKey.set(key, row);
   }
+  const sharesHot = (row: unknown): boolean => {
+    for (const key of memberKeys.get(row) ?? []) {
+      if (hot.has(key)) return true;
+    }
+    return false;
+  };
   return {
-    isShared: (row: unknown) => {
-      for (const key of readEgressKeysForMember(row, nowMs).keys) {
-        if (hot.has(key)) return true;
-      }
-      return false;
-    },
+    isShared: sharesHot,
     isAvoidedKey: (key: string | null) => {
       if (isProxyAvoided(key, nowMs)) return true;
       if (key === null) return false;
       const row = byKey.get(key);
       if (row === undefined) return false;
-      for (const key of readEgressKeysForMember(row, nowMs).keys) {
-        if (hot.has(key)) return true;
-      }
-      return false;
+      return sharesHot(row);
     },
   };
 }
@@ -396,7 +409,10 @@ const EMPTY_EGRESS_OBSERVATION: MemberEgressObservation = Object.freeze({
  * under. Best-effort by design: a cold probe cache yields no observation and
  * the caller keeps today's order.
  */
-function readMemberEgressObservation(row: unknown, nowMs: number): MemberEgressObservation {
+async function readMemberEgressObservation(
+  row: unknown,
+  nowMs: number
+): Promise<MemberEgressObservation> {
   const record = row as Record<string, unknown>;
   const host = typeof record.host === "string" ? record.host : "";
   const port = Number(record.port);
@@ -410,7 +426,12 @@ function readMemberEgressObservation(row: unknown, nowMs: number): MemberEgressO
   let observation: MemberEgressObservation = EMPTY_EGRESS_OBSERVATION;
   try {
     const sinceIso = new Date(nowMs - EGRESS_RANKING_WINDOW_MS).toISOString();
-    const observed = getRecentEgressIpsForProxy(host, port, sinceIso, EGRESS_RANKING_ADDRESS_LIMIT);
+    const observed = await getRecentEgressIpsForProxy(
+      host,
+      port,
+      sinceIso,
+      EGRESS_RANKING_ADDRESS_LIMIT
+    );
     const distinct = new Set<string>();
     for (const ip of observed) {
       const normalized = normalizeEgressAddressForRanking(ip);
@@ -455,14 +476,17 @@ export type EgressKeySet = {
  * observation across both sources — a 20 h operator row loses to a 2 min
  * probe, and wins when the probe is the older one.
  */
-export function readEgressKeysForMember(row: unknown, nowMs: number = Date.now()): EgressKeySet {
-  const observation = readMemberEgressObservation(row, nowMs);
+export async function readEgressKeysForMember(
+  row: unknown,
+  nowMs: number = Date.now()
+): Promise<EgressKeySet> {
+  const observation = await readMemberEgressObservation(row, nowMs);
   // The journal's freshest observation stays an exact address: it is what the
   // observation screen shows. A member rotating inside one range has no
   // single address, so it has no journal freshest (as before).
   const single = observation.addresses.length === 1 ? observation.addresses[0] : null;
   const journalFreshest =
-    single !== null ? { address: single, at: journalFreshestAt(row, nowMs) } : null;
+    single !== null ? { address: single, at: await journalFreshestAt(row, nowMs) } : null;
   if (!isOperatorEgressEnabled()) {
     return {
       keys: observation.key !== null ? new Set([observation.key]) : new Set(),
@@ -472,7 +496,7 @@ export function readEgressKeysForMember(row: unknown, nowMs: number = Date.now()
   const record = row as Record<string, unknown>;
   const host = typeof record.host === "string" ? record.host : "";
   const port = Number(record.port);
-  const operator = readOperatorEgressForMemberSafe(host, port, nowMs);
+  const operator = await readOperatorEgressForMemberSafe(host, port, nowMs);
   const keys = new Set<string>(operator.addresses);
   if (observation.key !== null) keys.add(observation.key);
   let freshest = operator.freshest;
@@ -485,7 +509,7 @@ export function readEgressKeysForMember(row: unknown, nowMs: number = Date.now()
   return { keys, freshest };
 }
 
-function journalFreshestAt(row: unknown, nowMs: number): string {
+async function journalFreshestAt(row: unknown, nowMs: number): Promise<string> {
   try {
     const record = row as Record<string, unknown>;
     const host = typeof record.host === "string" ? record.host : "";
@@ -493,7 +517,7 @@ function journalFreshestAt(row: unknown, nowMs: number): string {
     if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
       return new Date(nowMs).toISOString();
     }
-    const recent = getRecentEgressIpForProxy(host, port);
+    const recent = await getRecentEgressIpForProxy(host, port);
     if (recent?.at) return recent.at;
   } catch {
     // Best-effort: fall through to nowMs.
@@ -501,13 +525,13 @@ function journalFreshestAt(row: unknown, nowMs: number): string {
   return new Date(nowMs).toISOString();
 }
 
-function readOperatorEgressForMemberSafe(
+async function readOperatorEgressForMemberSafe(
   host: string,
   port: number,
   nowMs: number
-): { addresses: Set<string>; freshest: { address: string; at: string } | null } {
+): Promise<{ addresses: Set<string>; freshest: { address: string; at: string } | null }> {
   try {
-    return readOperatorEgressForMember(host, port, nowMs);
+    return await readOperatorEgressForMember(host, port, nowMs);
   } catch {
     return { addresses: new Set(), freshest: null };
   }
@@ -521,29 +545,37 @@ function readOperatorEgressForMemberSafe(
  * any read failure yields a predicate that is false for every candidate, so
  * the pool keeps today's order (order only, never exclude).
  */
-export function buildHotEgressPredicate(
+export async function buildHotEgressPredicate(
   provider: string | null | undefined,
   candidates: unknown[],
   signals?: Partial<PoolRankSignals>,
   nowMs: number = Date.now()
-): (candidate: unknown) => boolean {
+): Promise<(candidate: unknown) => boolean> {
   const none = () => false;
   if (!isProxySkipRecentlyFailedEnabled()) return none;
   if (!isProxyPoolSharedEgressOrderEnabled()) return none;
   if (!isEgressBucketedLockScope(provider)) return none;
   if (!hasProxyRefusals()) return none;
   const isAvoided = signals?.isAvoided ?? DEFAULT_POOL_RANK_SIGNALS.isAvoided;
+  // The egress reads are async: each candidate is read once here (the predicate
+  // is then a lookup over the candidates passed in).
+  const memberKeys = new Map<unknown, Set<string>>();
   const hot = new Set<string>();
   for (const row of candidates) {
     if (!isAvoided(proxyEgressKey(row))) continue;
     // Avoided members seed from the journal AND the fresh operator rows:
     // either source can name the refused key. The journal contributes when
     // its window stays inside one range (one address, or one range key).
-    for (const key of readEgressKeysForMember(row, nowMs).keys) hot.add(key);
+    const keys = (await readEgressKeysForMember(row, nowMs)).keys;
+    memberKeys.set(row, keys);
+    for (const key of keys) hot.add(key);
   }
   if (hot.size === 0) return none;
+  for (const row of candidates) {
+    if (!memberKeys.has(row)) memberKeys.set(row, (await readEgressKeysForMember(row, nowMs)).keys);
+  }
   return (candidate: unknown) => {
-    for (const key of readEgressKeysForMember(candidate, nowMs).keys) {
+    for (const key of memberKeys.get(candidate) ?? []) {
       if (hot.has(key)) return true;
     }
     return false;
@@ -589,15 +621,15 @@ type RotationPickState = {
 
 // A held sticky member is served untouched (replaced for this pick only when set
 // aside): no extra write, no ranking. Returns undefined when not held.
-function pickHeldStickyMember<T>(
+async function pickHeldStickyMember<T>(
   state: RotationPickState,
   candidates: T[],
   provider?: string | null,
   nowMs: number = Date.now()
-): T | undefined {
+): Promise<T | undefined> {
   if (state.strategy !== "sticky" || isStickyExpired(state)) return undefined;
   const idx = ((state.cursor % candidates.length) + candidates.length) % candidates.length;
-  const eligible = eligibleMemberIndexes(candidates, provider, nowMs);
+  const eligible = await eligibleMemberIndexes(candidates, provider, nowMs);
   return candidates[eligible ? firstEligibleFrom(idx, eligible, candidates.length) : idx];
 }
 
@@ -611,11 +643,11 @@ function pickHeldStickyMember<T>(
 // (not the cursor member itself when it was set aside) — the cursor then
 // advances past the member served, preserving rotation without re-serving the
 // failed head first.
-function rankCandidatesForPick<T>(candidates: T[], provider?: string | null): T[] {
+async function rankCandidatesForPick<T>(candidates: T[], provider?: string | null): Promise<T[]> {
   if (!isProxySkipRecentlyFailedEnabled()) return [...candidates];
   if (provider == null) return rankPoolCandidates(candidates);
   return rankPoolCandidates(candidates, {
-    sharesHotEgress: buildHotEgressPredicate(provider, candidates),
+    sharesHotEgress: await buildHotEgressPredicate(provider, candidates),
   });
 }
 
@@ -628,35 +660,44 @@ function pickRandomCandidate<T>(ranked: T[], eligible: number[] | null): T {
   return ranked[randomInt(ranked.length)];
 }
 
-function pickLatencyCandidate<T>(
-  db: ReturnType<typeof getDbInstance>,
+async function pickLatencyCandidate<T>(
+  executor: DbExecutor,
   ranked: T[],
   eligible: number[] | null
-): T {
-  return pickByLatency(db, eligible ? eligible.map((index) => ranked[index]) : ranked);
+): Promise<T> {
+  return pickByLatency(executor, eligible ? eligible.map((index) => ranked[index]) : ranked);
 }
 
-function pickStickyCandidate<T>(
-  db: ReturnType<typeof getDbInstance>,
+async function pickStickyCandidate<T>(
+  executor: DbExecutor,
   state: RotationPickState,
   normalizedScope: string,
   rotationScopeId: string,
   ranked: T[],
   eligible: number[] | null
-): T {
+): Promise<T> {
   const expired = isStickyExpired(state);
   let cursor = state.cursor;
   if (expired) {
-    cursor = state.cursor + 1;
-    db.prepare(
-      "UPDATE proxy_scope_rotation SET cursor = ?, rotated_at = ?, updated_at = ? WHERE scope = ? AND scope_id IS ?"
-    ).run(
-      cursor,
-      new Date().toISOString(),
-      new Date().toISOString(),
-      normalizedScope,
-      rotationScopeId
+    // Atomic advance: of several concurrent pickers that all saw the window
+    // elapsed, only one moves the cursor (the others re-read the new value).
+    const cutoff = new Date(Date.now() - state.stickyWindowMinutes * 60_000).toISOString();
+    const advanced = await executor.queryOne<{ cursor: number }>(
+      `UPDATE proxy_scope_rotation
+          SET cursor = (cursor + 1) % ${CURSOR_WRAP}, rotated_at = now(), updated_at = now()
+        WHERE scope = $1 AND scope_id = $2 AND (rotated_at IS NULL OR rotated_at <= $3)
+        RETURNING cursor`,
+      [normalizedScope, rotationScopeId, cutoff]
     );
+    if (advanced) {
+      cursor = Number(advanced.cursor);
+    } else {
+      const current = await executor.queryOne<{ cursor: number }>(
+        "SELECT cursor FROM proxy_scope_rotation WHERE scope = $1 AND scope_id = $2",
+        [normalizedScope, rotationScopeId]
+      );
+      cursor = current ? Number(current.cursor) : state.cursor + 1;
+    }
   }
   const idx = ((cursor % ranked.length) + ranked.length) % ranked.length;
   // A held member set aside is replaced for this pick only: no extra write.
@@ -665,20 +706,33 @@ function pickStickyCandidate<T>(
 
 // round-robin (default): pick at the current cursor, then advance it monotonically,
 // past any member skipped so the next pick starts after the one actually served.
-function pickRoundRobinCandidate<T>(
-  db: ReturnType<typeof getDbInstance>,
+async function pickRoundRobinCandidate<T>(
+  executor: DbExecutor,
   state: RotationPickState,
   normalizedScope: string,
   rotationScopeId: string,
   ranked: T[],
   eligible: number[] | null
-): T {
-  const idx = ((state.cursor % ranked.length) + ranked.length) % ranked.length;
+): Promise<T> {
+  // Atomic fetch-and-add: the UPDATE hands every concurrent picker its own
+  // cursor value, so two requests never read the same position. The row is
+  // advanced by one here and by the skipped members below.
+  const claimed = await executor.queryOne<{ prev: number }>(
+    `UPDATE proxy_scope_rotation SET cursor = (cursor + 1) % ${CURSOR_WRAP}, updated_at = now()
+      WHERE scope = $1 AND scope_id = $2
+      RETURNING (cursor + ${CURSOR_WRAP - 1}) % ${CURSOR_WRAP} AS prev`,
+    [normalizedScope, rotationScopeId]
+  );
+  const base = claimed ? Number(claimed.prev) : state.cursor;
+  const idx = ((base % ranked.length) + ranked.length) % ranked.length;
   const served = eligible ? firstEligibleFrom(idx, eligible, ranked.length) : idx;
   const skipped = (served - idx + ranked.length) % ranked.length;
-  db.prepare(
-    "UPDATE proxy_scope_rotation SET cursor = ?, updated_at = ? WHERE scope = ? AND scope_id IS ?"
-  ).run(state.cursor + skipped + 1, new Date().toISOString(), normalizedScope, rotationScopeId);
+  if (claimed && skipped > 0) {
+    await executor.execute(
+      `UPDATE proxy_scope_rotation SET cursor = (cursor + $3) % ${CURSOR_WRAP} WHERE scope = $1 AND scope_id = $2`,
+      [normalizedScope, rotationScopeId, skipped]
+    );
+  }
   return ranked[served];
 }
 
@@ -690,20 +744,20 @@ function pickRoundRobinCandidate<T>(
  * Members that just failed (see proxyRefusalMemory) are skipped while another member is
  * eligible; the cursor then advances past the member actually served.
  */
-function pickFromCandidates<T>(
-  db: ReturnType<typeof getDbInstance>,
+async function pickFromCandidates<T>(
+  executor: DbExecutor,
   normalizedScope: string,
   rotationScopeId: string,
   candidates: T[],
   provider?: string | null
-): T {
+): Promise<T> {
   // Pool-exhausted check first: a single-member pool set aside is exhausted
   // too, and this runs before the length-1 early return below. Flag-gated
   // inside (zero cost when off), rebound window shared with the bridge. The
   // check shares the selection predicate: a pool whose every address is set
   // aside emits like an all-set-aside legacy pool.
   const nowMs = Date.now();
-  const addressScope = addressScopeFor(provider, candidates, nowMs);
+  const addressScope = await addressScopeFor(provider, candidates, nowMs);
   maybeEmitPoolExhausted(
     normalizedScope,
     candidates,
@@ -712,57 +766,66 @@ function pickFromCandidates<T>(
   );
   if (candidates.length === 1) return candidates[0];
 
-  const state = getOrCreateRotationRow(db, normalizedScope, rotationScopeId);
+  const state = await getOrCreateRotationRow(executor, normalizedScope, rotationScopeId);
 
-  const held = pickHeldStickyMember(state, candidates, provider, nowMs);
+  const held = await pickHeldStickyMember(state, candidates, provider, nowMs);
   if (held !== undefined) return held;
 
   // Sticky past its window and every other strategy rank normally; a held sticky
   // member returns above, untouched. The eligible-skip below still applies on the
   // ranked list, so a set-aside member stays skipped while another is eligible and
   // the cursor advances past the member actually served.
-  const ranked = rankCandidatesForPick(candidates, provider);
-  const eligible = eligibleMemberIndexes(ranked, provider, nowMs);
+  const ranked = await rankCandidatesForPick(candidates, provider);
+  const eligible = await eligibleMemberIndexes(ranked, provider, nowMs);
 
   if (state.strategy === "random") return pickRandomCandidate(ranked, eligible);
-  if (state.strategy === "latency") return pickLatencyCandidate(db, ranked, eligible);
+  if (state.strategy === "latency") return pickLatencyCandidate(executor, ranked, eligible);
   if (state.strategy === "sticky") {
-    return pickStickyCandidate(db, state, normalizedScope, rotationScopeId, ranked, eligible);
+    return pickStickyCandidate(executor, state, normalizedScope, rotationScopeId, ranked, eligible);
   }
-  return pickRoundRobinCandidate(db, state, normalizedScope, rotationScopeId, ranked, eligible);
+  return pickRoundRobinCandidate(
+    executor,
+    state,
+    normalizedScope,
+    rotationScopeId,
+    ranked,
+    eligible
+  );
 }
 
 // Fetch the alive, position-ordered candidate rows for a (scope, scope_id) pool.
-// `scope_id` is matched with `IS` (NULL-safe); pass the query-level scope_id
-// (connection id / provider / '__global__' / combo id) — global callers pass null
-// to match the historical "any global row" behavior.
-function fetchAlivePoolRows(
-  db: ReturnType<typeof getDbInstance>,
+// Pass the query-level scope_id (connection id / provider / '__global__' / combo
+// id) — global callers pass null to match the historical "any global row"
+// behavior. A null filter with `matchAnyScopeId` false matches nothing
+// (scope_id is NOT NULL).
+async function fetchAlivePoolRows(
+  executor: DbExecutor,
   scope: string,
   scopeIdFilter: string | null,
   matchAnyScopeId: boolean
-): JsonRecord[] {
+): Promise<JsonRecord[]> {
   const baseSelect =
-    "SELECT p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.notes, p.family, a.position AS __pos, a.id AS __aid " +
-    "FROM proxy_assignments a JOIN proxy_registry p ON p.id = a.proxy_id WHERE a.scope = ? ";
+    'SELECT p.id, p.name, p.type, p.host, p.port, p.username, p.password, p.notes, p.family, a.position AS "__pos", a.id AS "__aid" ' +
+    "FROM proxy_assignments a JOIN proxy_registry p ON p.id = a.proxy_id WHERE a.scope = $1 ";
   const order = " ORDER BY a.position ASC, a.id ASC";
-  if (matchAnyScopeId) {
-    return db
-      .prepare(`${baseSelect}AND ${PROXY_ALIVE_PREDICATE}${order}`)
-      .all(scope) as JsonRecord[];
-  }
-  return db
-    .prepare(`${baseSelect}AND a.scope_id IS ? AND ${PROXY_ALIVE_PREDICATE}${order}`)
-    .all(scope, scopeIdFilter) as JsonRecord[];
+  const rows = matchAnyScopeId
+    ? await executor.query<JsonRecord>(`${baseSelect}AND ${PROXY_ALIVE_PREDICATE}${order}`, [scope])
+    : await executor.query<JsonRecord>(
+        `${baseSelect}AND a.scope_id = $2 AND ${PROXY_ALIVE_PREDICATE}${order}`,
+        [scope, scopeIdFilter]
+      );
+  return rows.map((row) => ({ ...row, password: decryptProxyPassword(row.password) }));
 }
 
 // Read-only view of a scope pool's alive candidate rows (same joined source as the
 // selection path above): registry fields joined to assignments, alive-predicate
 // applied, position order. Lets a read-only status screen rank the same rows the
 // selector ranks, without embedding SQL in a route (Hard Rule #5).
-export function getScopePoolEgressRows(scope: string, scopeIdFilter: string | null): JsonRecord[] {
-  const db = getDbInstance();
-  return fetchAlivePoolRows(db, scope, scopeIdFilter, scopeIdFilter === null);
+export async function getScopePoolEgressRows(
+  scope: string,
+  scopeIdFilter: string | null
+): Promise<JsonRecord[]> {
+  return fetchAlivePoolRows(db(), scope, scopeIdFilter, scopeIdFilter === null);
 }
 
 // A proxy is "alive" for resolution unless it has been explicitly marked dead
@@ -777,25 +840,25 @@ export const PROXY_ALIVE_PREDICATE =
 // Returns the standard registry resolution shape, or null when the pool is empty
 // or every member is dead (preserving the #6246 fail-closed contract — a dead
 // pool never falls through to direct egress; the caller's guard blocks it).
-function resolveScopePoolInternal(
-  db: ReturnType<typeof getDbInstance>,
+async function resolveScopePoolInternal(
+  executor: DbExecutor,
   scope: ProxyScope,
   levelId: string | null,
   options: { rotationScopeId: string; matchAnyScopeId?: boolean; scopeIdFilter?: string | null }
-): ReturnType<typeof toRegistryProxyResolution> | null {
-  const rows = fetchAlivePoolRows(
-    db,
+): Promise<ReturnType<typeof toRegistryProxyResolution> | null> {
+  const rows = await fetchAlivePoolRows(
+    executor,
     scope,
     options.scopeIdFilter ?? null,
     options.matchAnyScopeId === true
   );
   if (rows.length === 0) return null;
-  const picked = pickFromCandidates(
-    db,
+  const picked = await pickFromCandidates(
+    executor,
     scope,
     options.rotationScopeId,
     rows,
-    resolvePoolProvider(db, scope, levelId, options)
+    await resolvePoolProvider(executor, scope, levelId, options)
   );
   return toRegistryProxyResolution(picked, scope, levelId);
 }
@@ -804,12 +867,12 @@ function resolveScopePoolInternal(
 // Provider scope already knows it; an account pool resolves its connection's
 // provider with one bounded row (only reached when the signal guards already
 // passed); combo and global pools serve several providers, so they abstain.
-function resolvePoolProvider(
-  db: ReturnType<typeof getDbInstance>,
+async function resolvePoolProvider(
+  executor: DbExecutor,
   scope: ProxyScope,
   levelId: string | null,
   options: { rotationScopeId: string; matchAnyScopeId?: boolean; scopeIdFilter?: string | null }
-): string | null {
+): Promise<string | null> {
   if (scope === "provider") return levelId;
   if (scope !== "account" || !options.scopeIdFilter) return null;
   if (
@@ -819,9 +882,10 @@ function resolvePoolProvider(
   )
     return null;
   try {
-    const row = db
-      .prepare("SELECT provider FROM provider_connections WHERE id = ?")
-      .get(options.scopeIdFilter) as { provider?: string } | undefined;
+    const row = await executor.queryOne<{ provider?: string }>(
+      "SELECT provider FROM provider_connections WHERE id = $1",
+      [options.scopeIdFilter]
+    );
     return typeof row?.provider === "string" && row.provider ? row.provider : null;
   } catch {
     return null;
@@ -829,63 +893,52 @@ function resolvePoolProvider(
 }
 
 export async function resolveProxyForConnectionFromRegistry(connectionId: string) {
-  try {
-    const db = getDbInstance();
+  const executor = db();
 
-    const account = resolveScopePoolInternal(db, "account", connectionId, {
-      rotationScopeId: connectionId,
-      scopeIdFilter: connectionId,
+  const account = await resolveScopePoolInternal(executor, "account", connectionId, {
+    rotationScopeId: connectionId,
+    scopeIdFilter: connectionId,
+  });
+  if (account) return account;
+
+  const connection = await executor.queryOne<{ provider?: string }>(
+    "SELECT provider FROM provider_connections WHERE id = $1",
+    [connectionId]
+  );
+
+  if (connection?.provider) {
+    const provider = await resolveScopePoolInternal(executor, "provider", connection.provider, {
+      rotationScopeId: connection.provider,
+      scopeIdFilter: connection.provider,
     });
-    if (account) return account;
-
-    const connection = db
-      .prepare("SELECT provider FROM provider_connections WHERE id = ?")
-      .get(connectionId) as { provider?: string } | undefined;
-
-    if (connection?.provider) {
-      const provider = resolveScopePoolInternal(db, "provider", connection.provider, {
-        rotationScopeId: connection.provider,
-        scopeIdFilter: connection.provider,
-      });
-      if (provider) return provider;
-    }
-
-    const global = resolveScopePoolInternal(db, "global", null, {
-      rotationScopeId: normalizeRotationScopeId("global", null),
-      matchAnyScopeId: true,
-    });
-    if (global) return global;
-
-    return null;
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("no such table")) return null;
-    throw error;
+    if (provider) return provider;
   }
+
+  const global = await resolveScopePoolInternal(executor, "global", null, {
+    rotationScopeId: normalizeRotationScopeId("global", null),
+    matchAnyScopeId: true,
+  });
+  if (global) return global;
+
+  return null;
 }
 
 export async function resolveProxyForScopeFromRegistry(scope: string, scopeId?: string | null) {
-  try {
-    const db = getDbInstance();
-    const normalizedScope = normalizeScope(scope);
+  const executor = db();
+  const normalizedScope = normalizeScope(scope);
 
-    if (normalizedScope === "global") {
-      return resolveScopePoolInternal(db, "global", null, {
-        rotationScopeId: normalizeRotationScopeId("global", null),
-        matchAnyScopeId: true,
-      });
-    }
-
-    const normalizedScopeId = scopeId || null;
-    if (!normalizedScopeId) return null;
-
-    return resolveScopePoolInternal(db, normalizedScope, normalizedScopeId, {
-      rotationScopeId: normalizeRotationScopeId(normalizedScope, normalizedScopeId),
-      scopeIdFilter: normalizedScopeId,
+  if (normalizedScope === "global") {
+    return resolveScopePoolInternal(executor, "global", null, {
+      rotationScopeId: normalizeRotationScopeId("global", null),
+      matchAnyScopeId: true,
     });
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("no such table")) return null;
-    throw error;
   }
+
+  const normalizedScopeId = scopeId || null;
+  if (!normalizedScopeId) return null;
+
+  return resolveScopePoolInternal(executor, normalizedScope, normalizedScopeId, {
+    rotationScopeId: normalizeRotationScopeId(normalizedScope, normalizedScopeId),
+    scopeIdFilter: normalizedScopeId,
+  });
 }

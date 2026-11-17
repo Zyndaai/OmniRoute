@@ -39,9 +39,9 @@ export interface IntelSyncDeps {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   getFlag?: (key: string) => boolean;
-  getSettings?: () => RadarSettingsSnapshot;
-  getCache?: () => RadarIntelCacheEntry | null;
-  setCache?: (entry: RadarIntelCacheEntry) => void;
+  getSettings?: () => RadarSettingsSnapshot | Promise<RadarSettingsSnapshot>;
+  getCache?: () => RadarIntelCacheEntry | null | Promise<RadarIntelCacheEntry | null>;
+  setCache?: (entry: RadarIntelCacheEntry) => void | Promise<unknown>;
 }
 
 function supporterIdentity(key: string): string {
@@ -61,8 +61,8 @@ export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyn
   try {
     if (!getFlag("RADAR_ENABLED")) return { status: "disabled" };
     const settings = getSettingsFn
-      ? getSettingsFn()
-      : (await import("@/lib/db/radar")).getRadarSettings();
+      ? await getSettingsFn()
+      : await (await import("@/lib/db/radar")).getRadarSettings();
     if (!settings.optIn) return { status: "opt_out" };
     if (!settings.supporterKey) return { status: "no_key" };
 
@@ -96,8 +96,8 @@ export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyn
     }
 
     const existing = getCacheFn
-      ? getCacheFn()
-      : (await import("@/lib/db/radar")).getRadarIntelCache();
+      ? await getCacheFn()
+      : await (await import("@/lib/db/radar")).getRadarIntelCache();
     if (existing && compareVersions(feed.version, existing.version) <= 0) {
       return { status: "stale" };
     }
@@ -110,8 +110,8 @@ export async function syncRadarIntel(deps: IntelSyncDeps = {}): Promise<IntelSyn
       supporterIdentity: supporterIdentity(settings.supporterKey),
       fetchedAt: now().toISOString(),
     };
-    if (setCacheFn) setCacheFn(cacheEntry);
-    else (await import("@/lib/db/radar")).setRadarIntelCache(cacheEntry);
+    if (setCacheFn) await setCacheFn(cacheEntry);
+    else await (await import("@/lib/db/radar")).setRadarIntelCache(cacheEntry);
 
     return { status: "updated", version: feed.version };
   } catch (error: unknown) {

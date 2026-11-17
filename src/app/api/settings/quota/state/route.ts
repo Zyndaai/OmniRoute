@@ -40,8 +40,10 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    const analytics = getQuotaAnalyticsSummary();
-    const resetTimers = getActiveQuotaResetItems();
+    const [analytics, resetTimers] = await Promise.all([
+      getQuotaAnalyticsSummary(),
+      getActiveQuotaResetItems(),
+    ]);
 
     return NextResponse.json(
       {
@@ -78,7 +80,7 @@ export async function POST(request: Request) {
     const { action } = parsed.data;
 
     if (action === "reset_expired") {
-      const resetCount = resetExpiredQuotaWindows();
+      const resetCount = await resetExpiredQuotaWindows();
       return NextResponse.json(
         { success: true, resetCount, message: `Reset ${resetCount} expired quota windows.` },
         { headers: CORS_HEADERS }
@@ -87,7 +89,7 @@ export async function POST(request: Request) {
 
     // action === "clear_connection"
     const { connectionId, model } = parsed.data;
-    clearProviderQuota(connectionId);
+    await clearProviderQuota(connectionId);
     return NextResponse.json(
       { success: true, message: `Cleared quota state for connection ${connectionId} (${model}).` },
       { headers: CORS_HEADERS }

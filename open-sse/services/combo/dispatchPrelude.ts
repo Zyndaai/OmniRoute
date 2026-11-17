@@ -308,7 +308,7 @@ export async function tryPinnedModelDispatch(args: {
   // #5501 also needs these targets eagerly for the combo system_message expansion;
   // the release refactor threads `hiddenModelsByProvider` through the resolver so
   // hidden models stay filtered on both the pin-validity and expansion paths.
-  const comboTargets = resolveComboTargets(
+  const comboTargets = await resolveComboTargets(
     combo,
     haveFullCombos ? allCombos : undefined,
     clampComboDepth(config.maxComboDepth),
@@ -422,7 +422,7 @@ export async function tryFusionDispatch(args: {
   const judgeLacksConfirmedVision =
     judgeFusionRequirements.requiresVision &&
     !!configuredJudge &&
-    getResolvedModelCapabilities(configuredJudge).supportsVision !== true;
+    (await getResolvedModelCapabilities(configuredJudge)).supportsVision !== true;
   // The panel is filtered for hidden models by resolveComboTargets, but the
   // explicit judge is a bare string that never passes through it (#8878). Drop a
   // hidden judge so fusion falls back to a surviving panel member instead of
@@ -446,7 +446,7 @@ export async function tryFusionDispatch(args: {
   }
   if (!isFusion) return null;
 
-  let allResolvedFusionTargets = resolveComboTargets(
+  let allResolvedFusionTargets = await resolveComboTargets(
     combo,
     args.allCombos,
     clampComboDepth(config.maxComboDepth),
@@ -484,11 +484,15 @@ export async function tryFusionDispatch(args: {
   // (isVisionIncompatibleTarget: unknown is excluded too): a panel fan-out has no
   // "last resort" tier, so the panel only receives targets with confirmed vision.
   const fusionRequirements = judgeFusionRequirements;
-  const resolvedFusionTargets = fusionRequirements.requiresVision
-    ? allResolvedFusionTargets.filter(
-        (target) => !isVisionIncompatibleTarget(target, fusionRequirements)
+  let resolvedFusionTargets = allResolvedFusionTargets;
+  if (fusionRequirements.requiresVision) {
+    const visionVerdicts = await Promise.all(
+      allResolvedFusionTargets.map((target) =>
+        isVisionIncompatibleTarget(target, fusionRequirements)
       )
-    : allResolvedFusionTargets;
+    );
+    resolvedFusionTargets = allResolvedFusionTargets.filter((_, index) => !visionVerdicts[index]);
+  }
   if (fusionRequirements.requiresVision && resolvedFusionTargets.length === 0) {
     log.warn(
       "COMBO",
@@ -599,7 +603,7 @@ export async function tryPipelineDispatch(args: {
     hiddenModelsByProvider,
   } = args;
   if (getStrategyTraits(strategy).dispatchPrelude !== "pipeline") return null;
-  const resolvedTargets = resolveComboTargets(
+  const resolvedTargets = await resolveComboTargets(
     combo,
     allCombos,
     clampComboDepth(config.maxComboDepth),
@@ -779,7 +783,7 @@ export async function tryRuntimeUnitDispatch(args: {
 
   const executeModeUnits =
     nestedComboMode === "execute" && allCombos
-      ? resolveComboRuntimeUnits(
+      ? await resolveComboRuntimeUnits(
           combo,
           allCombos,
           "execute",

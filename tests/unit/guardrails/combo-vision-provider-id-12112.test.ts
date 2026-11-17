@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 
-process.env.DATA_DIR = `/tmp/omniroute-test-12112-${Date.now()}`;
+// os.tmpdir(), not "/tmp": on Windows "/tmp" resolves to <current drive>:\tmp.
+process.env.DATA_DIR = path.join(os.tmpdir(), `omniroute-test-12112-${Date.now()}`);
 
 const { getComboVisionBridgeDecision } =
   await import("../../../src/lib/guardrails/visionBridge.ts");

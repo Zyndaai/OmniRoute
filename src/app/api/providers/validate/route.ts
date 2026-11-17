@@ -152,7 +152,7 @@ export async function POST(request) {
 
     if (!result.valid && typeof result.statusCode === "number") {
       if (result.securityBlocked) {
-        logAuditEvent({
+        await logAuditEvent({
           action: "provider.validation.ssrf_blocked",
           actor: "admin",
           target: provider,

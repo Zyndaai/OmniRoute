@@ -10,17 +10,13 @@
  *    (detected by the `claude-cli` User-Agent substring, the same signal
  *    open-sse/utils/bypassHandler.ts already uses)
  *
- * Deliberately reuses the generic `key_value` namespace/key store (the same
- * pattern as src/lib/db/sessionAccountAffinity.ts) instead of a dedicated
- * migration — this is a v1 aggregate-counter feature, not a per-event log,
- * so no new table is warranted.
+ * Counters live in the `cc_discovery_metrics` table (metric_key, count).
  *
  * Every write is best-effort: a DB hiccup here must never break the request
  * it is instrumenting (mirrors src/lib/db/pluginMetrics.ts).
  */
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
-const NAMESPACE = "ccDiscoveryMetrics";
 const TOTAL_KEY = "req:total";
 const HIT_KEY = "discovery:hits";
 const MODEL_KEY_PREFIX = "req:model:";
@@ -35,18 +31,14 @@ function modelKey(realModelId: string): string {
   return `${MODEL_KEY_PREFIX}${realModelId}`;
 }
 
-function incrementCounter(key: string): void {
+async function incrementCounter(key: string): Promise<void> {
   // Atomic upsert increment — a single statement so two concurrent requests
-  // never lose a count the way a read-then-write pair would. `value` is TEXT, so
-  // CAST it to INTEGER for the arithmetic; an absent row starts at '1' via the
-  // INSERT branch, and a non-numeric prior value CASTs to 0 → 1 on update.
-  getDbInstance()
-    .prepare(
-      `INSERT INTO key_value (namespace, key, value) VALUES (?, ?, '1')
-       ON CONFLICT(namespace, key)
-       DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)`
-    )
-    .run(NAMESPACE, key);
+  // never lose a count the way a read-then-write pair would.
+  await db().execute(
+    `INSERT INTO cc_discovery_metrics (metric_key, count) VALUES ($1, 1)
+     ON CONFLICT (metric_key) DO UPDATE SET count = cc_discovery_metrics.count + 1`,
+    [key]
+  );
 }
 
 /**
@@ -54,11 +46,11 @@ function incrementCounter(key: string): void {
  * `realModelId` is the id AFTER stripping (e.g. `kimi/kimi-k2.6`, `my-combo`).
  * Never throws — a metrics failure must not affect the request it instruments.
  */
-export function incrementCcAliasRequestCount(realModelId: string): void {
+export async function incrementCcAliasRequestCount(realModelId: string): Promise<void> {
   try {
-    incrementCounter(TOTAL_KEY);
+    await incrementCounter(TOTAL_KEY);
     if (typeof realModelId === "string" && realModelId.length > 0) {
-      incrementCounter(modelKey(realModelId));
+      await incrementCounter(modelKey(realModelId));
     }
   } catch {
     // Best-effort: DB hiccup should never break the request it instruments.
@@ -69,9 +61,9 @@ export function incrementCcAliasRequestCount(realModelId: string): void {
  * Record one `GET /v1/models` hit whose User-Agent identified it as a
  * Claude Code discovery request.
  */
-export function incrementCcDiscoveryHitCount(): void {
+export async function incrementCcDiscoveryHitCount(): Promise<void> {
   try {
-    incrementCounter(HIT_KEY);
+    await incrementCounter(HIT_KEY);
   } catch {
     // Best-effort — same rationale as incrementCcAliasRequestCount.
   }
@@ -81,28 +73,26 @@ export function incrementCcDiscoveryHitCount(): void {
  * Read the aggregated cc-discovery metrics. Never throws — returns the
  * zero-value shape on any DB failure so a monitoring read never 500s.
  */
-export function getCcDiscoveryMetrics(): CcDiscoveryMetrics {
+export async function getCcDiscoveryMetrics(): Promise<CcDiscoveryMetrics> {
   try {
-    const db = getDbInstance();
-    const rows = db
-      .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-      .all(NAMESPACE) as Array<{ key?: unknown; value?: unknown }>;
+    const rows = await db().query<{ metric_key: string; count: number }>(
+      "SELECT metric_key, count FROM cc_discovery_metrics"
+    );
 
     let aliasRequests = 0;
     let discoveryHits = 0;
     const byModel: Record<string, number> = {};
 
     for (const row of rows) {
-      if (typeof row.key !== "string") continue;
-      const value = typeof row.value === "string" ? parseInt(row.value, 10) : Number(row.value);
+      const value = Number(row.count);
       const count = Number.isFinite(value) && value >= 0 ? value : 0;
 
-      if (row.key === TOTAL_KEY) {
+      if (row.metric_key === TOTAL_KEY) {
         aliasRequests = count;
-      } else if (row.key === HIT_KEY) {
+      } else if (row.metric_key === HIT_KEY) {
         discoveryHits = count;
-      } else if (row.key.startsWith(MODEL_KEY_PREFIX)) {
-        byModel[row.key.slice(MODEL_KEY_PREFIX.length)] = count;
+      } else if (row.metric_key.startsWith(MODEL_KEY_PREFIX)) {
+        byModel[row.metric_key.slice(MODEL_KEY_PREFIX.length)] = count;
       }
     }
 

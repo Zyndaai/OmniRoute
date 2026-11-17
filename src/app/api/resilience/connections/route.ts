@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
     // API. The outer try/catch handles this case.
     let breakers: BreakerWithHistory[] = [];
     try {
-      const allStatuses = getAllCircuitBreakerStatuses();
+      const allStatuses = await getAllCircuitBreakerStatuses();
       breakers = allStatuses.map((status) => ({
         name: status.name,
         state: status.state,
@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
     let totalConnections = connections.length;
     let countFailed = false;
     try {
-      totalConnections = getProviderConnectionsCount({ provider });
+      totalConnections = await getProviderConnectionsCount({ provider });
     } catch (err) {
       // Non-critical: connections.length is acceptable fallback
       console.error("[API] resilience/connections count error:", err);

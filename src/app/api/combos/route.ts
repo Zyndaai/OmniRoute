@@ -32,13 +32,15 @@ export async function GET(request: Request) {
     }
 
     const range = validation.data;
-    const total = getCombosCount();
+    const total = await getCombosCount();
     const rawCombos = await getCombos(range.limit, range.offset);
     const resolution = createComboContextResolution();
-    const combos = rawCombos.map((combo) => ({
-      ...combo,
-      computed_context_length: computeComboContextLength(combo, rawCombos, resolution),
-    }));
+    const combos = await Promise.all(
+      rawCombos.map(async (combo) => ({
+        ...combo,
+        computed_context_length: await computeComboContextLength(combo, rawCombos, resolution),
+      }))
+    );
     return NextResponse.json({ combos, total });
   } catch (error) {
     console.log("Error fetching combos:", error);

@@ -1,17 +1,13 @@
 /** db/models/compat.ts — model-compat overrides (normalizeToolCallId, per-protocol flags, upstream headers). */
 
-import { getDbInstance } from "../core";
 import {
   MODEL_COMPAT_PROTOCOL_KEYS,
   type ModelCompatProtocolKey,
 } from "@/shared/constants/modelCompat";
 import { isForbiddenUpstreamHeaderName } from "@/shared/constants/upstreamHeaders";
 import { isHiddenForModality } from "@/shared/utils/modelVisibility";
-import { getKeyValue } from "./shared";
-import { finishModelCatalogWriteWithBackup } from "./modelCatalogWriteSignals";
-
-/** Built-in / alias models: tool-call + developer-role flags without a full custom row */
-const MODEL_COMPAT_NAMESPACE = "modelCompatOverrides";
+import { readAllCatalogColumn, readCatalogColumn, updateCatalogColumn } from "./catalogRow";
+import { finishModelCatalogWriteWithoutBackup } from "./modelCatalogWriteSignals";
 
 export { MODEL_COMPAT_PROTOCOL_KEYS, type ModelCompatProtocolKey };
 
@@ -147,59 +143,59 @@ export function isOverrideHiddenForModality(
   return isHiddenForModality(override, modality);
 }
 
-export function readCompatList(providerId: string): ModelCompatOverride[] {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(MODEL_COMPAT_NAMESPACE, providerId);
-  const value = getKeyValue(row).value;
-  if (!value) return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((raw): ModelCompatOverride[] => {
-      if (!raw || typeof raw !== "object") return [];
-      // Old releases persisted an `isDeleted` tombstone alongside `isHidden`.
-      // Ignore that retired state while preserving the visibility choice.
-      const entry = { ...(raw as Record<string, unknown>) };
-      delete entry.isDeleted;
-      return typeof entry.id === "string" ? [entry as ModelCompatOverride] : [];
-    });
-  } catch {
-    return [];
-  }
+/** Normalises a stored `compat_overrides` document into a clean override list. */
+function normalizeCompatList(parsed: unknown): ModelCompatOverride[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((raw): ModelCompatOverride[] => {
+    if (!raw || typeof raw !== "object") return [];
+    // Old releases persisted an `isDeleted` tombstone alongside `isHidden`.
+    // Ignore that retired state while preserving the visibility choice.
+    const entry = { ...(raw as Record<string, unknown>) };
+    delete entry.isDeleted;
+    return typeof entry.id === "string" ? [entry as ModelCompatOverride] : [];
+  });
 }
 
-export function writeCompatList(providerId: string, list: ModelCompatOverride[]) {
-  const db = getDbInstance();
-  if (list.length === 0) {
-    db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(
-      MODEL_COMPAT_NAMESPACE,
-      providerId
-    );
-  } else {
-    db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-      MODEL_COMPAT_NAMESPACE,
-      providerId,
-      JSON.stringify(list)
-    );
-  }
-  finishModelCatalogWriteWithBackup();
+export async function readCompatList(providerId: string): Promise<ModelCompatOverride[]> {
+  return normalizeCompatList(await readCatalogColumn("compat_overrides", providerId));
 }
 
-export function getModelCompatOverrides(providerId: string): ModelCompatOverride[] {
+export async function writeCompatList(providerId: string, list: ModelCompatOverride[]) {
+  await updateCompatList(providerId, () => list);
+}
+
+/**
+ * Atomic read-modify-write of a provider's override list. `mutate` returns the new list, or
+ * `null` to leave the stored one untouched. Returns true when something was written.
+ */
+export async function updateCompatList(
+  providerId: string,
+  mutate: (list: ModelCompatOverride[]) => ModelCompatOverride[] | null
+): Promise<boolean> {
+  const written = await updateCatalogColumn("compat_overrides", providerId, (current) => {
+    const next = mutate(normalizeCompatList(current));
+    if (next === null || (next.length === 0 && current === undefined)) {
+      return { skip: true, result: false };
+    }
+    return { value: next, result: true };
+  });
+  if (written) finishModelCatalogWriteWithoutBackup();
+  return written;
+}
+
+export async function getModelCompatOverrides(providerId: string): Promise<ModelCompatOverride[]> {
   return readCompatList(providerId);
 }
 
 /**
  * Resolve one exact provider/model `supportsVision` compat override.
- * A supplied bulk map performs no SQLite work.
+ * A supplied bulk map performs no database work.
  */
-export function getModelCompatVisionOverride(
+export async function getModelCompatVisionOverride(
   providerId: string,
   modelIds: readonly string[],
   bulk?: ModelCompatVisionOverrideMap | null
-): boolean | null {
+): Promise<boolean | null> {
   if (!providerId || modelIds.length === 0) return null;
   const candidates = new Set(modelIds.filter(Boolean));
   if (candidates.size === 0) return null;
@@ -208,7 +204,7 @@ export function getModelCompatVisionOverride(
     const overrides = bulk
       ? bulk.get(providerId)
       : new Map(
-          readCompatList(providerId).flatMap((entry) =>
+          (await readCompatList(providerId)).flatMap((entry) =>
             typeof entry.supportsVision === "boolean"
               ? [[entry.id, entry.supportsVision] as const]
               : []
@@ -225,9 +221,8 @@ export function getModelCompatVisionOverride(
   return null;
 }
 
-function parseCompatVisionOverrides(value: string): Map<string, boolean> {
+function parseCompatVisionOverrides(parsed: unknown): Map<string, boolean> {
   try {
-    const parsed = JSON.parse(value) as unknown;
     if (!Array.isArray(parsed)) return new Map<string, boolean>();
     return new Map(
       parsed.flatMap((candidate) => {
@@ -246,18 +241,14 @@ function parseCompatVisionOverrides(value: string): Map<string, boolean> {
   }
 }
 
-/** Bulk-load all explicit model-compat vision overrides with one SQLite query. */
-export function listModelCompatVisionOverrides(): ModelCompatVisionOverrideMap {
+/** Bulk-load all explicit model-compat vision overrides with one query. */
+export async function listModelCompatVisionOverrides(): Promise<ModelCompatVisionOverrideMap> {
   try {
-    const rows = getDbInstance()
-      .prepare("SELECT key, value FROM key_value WHERE namespace = 'modelCompatOverrides'")
-      .all();
+    const rows = await readAllCatalogColumn("compat_overrides");
     const result = new Map<string, Map<string, boolean>>();
-    for (const row of rows) {
-      const { key, value } = getKeyValue(row);
-      if (!key || !value) continue;
+    for (const { provider, value } of rows) {
       const byModel = parseCompatVisionOverrides(value);
-      if (byModel.size > 0) result.set(key, byModel);
+      if (byModel.size > 0) result.set(provider, byModel);
     }
     return result;
   } catch {
@@ -293,12 +284,19 @@ export function compatByProtocolHasEntries(map: CompatByProtocolMap | undefined)
   });
 }
 
-export function mergeModelCompatOverride(
+export async function mergeModelCompatOverride(
   providerId: string,
   modelId: string,
   patch: ModelCompatPatch
-) {
-  const list = readCompatList(providerId);
+): Promise<void> {
+  await updateCompatList(providerId, (list) => applyCompatPatch(list, modelId, patch));
+}
+
+function applyCompatPatch(
+  list: ModelCompatOverride[],
+  modelId: string,
+  patch: ModelCompatPatch
+): ModelCompatOverride[] {
   const idx = list.findIndex((e) => e.id === modelId);
   const prev = idx >= 0 ? { ...list[idx] } : { id: modelId };
   const next: ModelCompatOverride = { ...prev, id: modelId };
@@ -395,16 +393,16 @@ export function mergeModelCompatOverride(
   ) {
     filtered.push(next);
   }
-  writeCompatList(providerId, filtered);
+  return filtered;
 }
 
-export function removeModelCompatOverride(providerId: string, modelId: string) {
-  const list = readCompatList(providerId);
-  const filtered = list.filter((e) => e.id !== modelId);
-  if (filtered.length === list.length) return;
-  writeCompatList(providerId, filtered);
+export async function removeModelCompatOverride(providerId: string, modelId: string) {
+  await updateCompatList(providerId, (list) => {
+    const filtered = list.filter((e) => e.id !== modelId);
+    return filtered.length === list.length ? null : filtered;
+  });
 }
 
-export function clearModelCompatOverrides(providerId: string) {
-  writeCompatList(providerId, []);
+export async function clearModelCompatOverrides(providerId: string) {
+  await writeCompatList(providerId, []);
 }

@@ -1,21 +1,11 @@
-import { retrieveMemories } from "@/lib/memory/retrieval";
-import {
-  getMemorySettings,
-  DEFAULT_MEMORY_SETTINGS,
-  toMemoryRetrievalConfig,
-} from "@/lib/memory/settings";
-import { injectMemory, shouldInjectMemory } from "@/lib/memory/injection";
 import { injectSkillsWithMetadata } from "@/lib/skills/injection";
-import { buildMemoryToolsForProvider } from "@/lib/skills/memoryBuiltins";
 import { skillRegistry } from "@/lib/skills/registry";
 import { FORMATS } from "../../translator/formats.ts";
-import { detectCachingContext } from "../../services/compression/cachingAware.ts";
 
-type MemorySkillsLogger = { debug?: (...args: unknown[]) => void } | null | undefined;
+type SkillsLogger = { debug?: (...args: unknown[]) => void } | null | undefined;
 
-export interface MemorySkillsInjectionResult {
+export interface SkillsInjectionResult {
   body: Record<string, unknown>;
-  memorySettings: { enabled: boolean; skillsEnabled: boolean; maxTokens: number } | null;
   builtinToolNames: string[];
   injectedCustomSkillNames: string[];
 }
@@ -36,7 +26,7 @@ export function sortToolsByName<T>(tools: T[]): T[] {
   return [...tools].sort((a, b) => getToolName(a).localeCompare(getToolName(b)));
 }
 
-// #12234: injected tools (memory / skills) are sorted by name so the prompt-cache prefix
+// #12234: injected tools (skills) are sorted by name so the prompt-cache prefix
 // is deterministic; they follow the client's tools, which keep the client's own order.
 function orderToolsForCaching<T>(tools: T[], clientToolNames: Set<string>): T[] {
   const fromClient = tools.filter((tool) => clientToolNames.has(getToolName(tool)));
@@ -57,10 +47,10 @@ export function getSkillsProviderForFormat(
   }
 }
 
-export async function injectMemoryAndSkills({
+export async function injectSkills({
   body,
-  memoryOwnerId,
-  provider,
+  skillsOwnerId,
+  skillsEnabled,
   effectiveModel,
   sourceFormat,
   targetFormat,
@@ -68,184 +58,37 @@ export async function injectMemoryAndSkills({
   log,
 }: {
   body: Record<string, unknown>;
-  memoryOwnerId: string | null;
-  provider: string;
+  /** API key that owns the skills for this request; null disables injection. */
+  skillsOwnerId: string | null;
+  skillsEnabled: boolean;
   effectiveModel: string;
   sourceFormat: string;
   targetFormat: string;
   backgroundReason: string | null;
-  log: MemorySkillsLogger;
-}): Promise<MemorySkillsInjectionResult> {
-  const memorySettings = memoryOwnerId
-    ? await getMemorySettings().catch(() => DEFAULT_MEMORY_SETTINGS)
-    : null;
-
+  log: SkillsLogger;
+}): Promise<SkillsInjectionResult> {
   // Tools the client sent keep their order: a later cap (upstreamBody) keeps the head of
   // the list, so sorting client tools alphabetically made it drop the built-ins (#18120).
   const clientToolNames = new Set(
     Array.isArray(body.tools) ? body.tools.map((tool) => getToolName(tool)) : []
   );
-  const builtinOwnerSet: string[] = [];
   const injectedCustomSkillNames: string[] = [];
 
-  if (
-    memoryOwnerId &&
-    memorySettings &&
-    shouldInjectMemory(body as Parameters<typeof shouldInjectMemory>[0], {
-      enabled: memorySettings.enabled && memorySettings.maxTokens > 0,
-    })
-  ) {
-    try {
-      const lastUserQuery = ((): string => {
-        const NON_USER_TYPES = new Set([
-          "function_call",
-          "function_call_output",
-          "tool_call",
-          "tool_call_output",
-          "reasoning",
-          "computer_call",
-          "computer_call_output",
-          "web_search_call",
-          "file_search_call",
-        ]);
-
-        function pickFrom(arr: unknown[]): string {
-          for (let i = arr.length - 1; i >= 0; i--) {
-            const item = arr[i] as Record<string, unknown> | undefined;
-            if (!item) continue;
-            if (item.role !== undefined && item.role !== "user") continue;
-            if (item.role === undefined && typeof item.type === "string") {
-              if (NON_USER_TYPES.has(item.type)) continue;
-            }
-            const content = item.content ?? item.text;
-            if (typeof content === "string" && content.trim().length > 0) {
-              return content;
-            }
-            if (Array.isArray(content)) {
-              const parts: string[] = [];
-              for (const p of content) {
-                if (typeof p === "string") {
-                  parts.push(p);
-                } else if (p && typeof p === "object") {
-                  const pp = p as Record<string, unknown>;
-                  const ptype = typeof pp.type === "string" ? pp.type : "";
-                  if (
-                    ptype &&
-                    ptype !== "text" &&
-                    ptype !== "input_text" &&
-                    ptype !== "output_text"
-                  ) {
-                    continue;
-                  }
-                  const t = pp.text ?? pp.input_text;
-                  if (typeof t === "string") parts.push(t);
-                }
-              }
-              if (parts.length > 0) return parts.join(" ").trim();
-            }
-          }
-          return "";
-        }
-
-        if (Array.isArray(body.messages)) {
-          const r = pickFrom(body.messages);
-          if (r) return r;
-        }
-        if (Array.isArray(body.input)) {
-          const r = pickFrom(body.input);
-          if (r) return r;
-        }
-        return "";
-      })();
-
-      const memories = await retrieveMemories(
-        memoryOwnerId,
-        toMemoryRetrievalConfig(memorySettings, { query: lastUserQuery })
-      );
-      if (memories.length > 0) {
-        // #3890: when the client uses prompt caching (cache_control breakpoints), inject
-        // memory cache-safely (before the last user message) so the per-query memory text
-        // does not poison the cacheable prefix and force a cache miss on every turn.
-        const cacheSafe = detectCachingContext(body, { provider, targetFormat }).hasCacheControl;
-        const injected = injectMemory(
-          body as Parameters<typeof injectMemory>[0],
-          memories,
-          provider,
-          { cacheSafe }
-        );
-        body = injected as typeof body;
-        log?.debug?.("MEMORY", `Injected ${memories.length} memories for key=${memoryOwnerId}`);
-      }
-    } catch (memErr) {
-      log?.debug?.(
-        "MEMORY",
-        `Memory injection skipped: ${memErr instanceof Error ? memErr.message : String(memErr)}`
-      );
-    }
-  }
-
-  if (memoryOwnerId && memorySettings?.enabled && body.stream !== true) {
-    // Server-side builtin memory tools (memory_save/update/search/delete) are
-    // executed by the gateway's tool-call interception, which runs only on the
-    // non-stream path. Stream clients (opencode etc.) execute tools client-side,
-    // so for them these tools would be announced but never executed; they should
-    // use the MCP memory tools (omniroute_memory_*) instead.
-    const existingTools = Array.isArray(body.tools) ? body.tools : [];
-    const existingToolNames = new Set(
-      existingTools.flatMap((tool) => {
-        const record = tool as Record<string, unknown> | null;
-        if (!record || typeof record !== "object") return [];
-        const fn = record.function as Record<string, unknown> | undefined;
-        if (typeof fn?.name === "string") return [fn.name];
-        if (typeof record.name === "string") return [record.name];
-        return [];
-      })
-    );
-    const newMemoryTools = buildMemoryToolsForProvider(
-      getSkillsProviderForFormat(sourceFormat)
-    ).filter((tool) => {
-      const record = tool as Record<string, unknown>;
-      const name = (record.function as Record<string, unknown> | undefined)?.name ?? record.name;
-      return typeof name === "string" && !existingToolNames.has(name);
-    });
-    if (newMemoryTools.length > 0) {
-      body = {
-        ...body,
-        tools: [...existingTools, ...newMemoryTools],
-      };
-      // Track the names of newly injected memory tools for the owner set.
-      builtinOwnerSet.push(
-        ...newMemoryTools
-          .map((tool) => {
-            const record = tool as Record<string, unknown>;
-            const name =
-              (record.function as Record<string, unknown> | undefined)?.name ?? record.name;
-            return typeof name === "string" ? name : "";
-          })
-          .filter(Boolean)
-      );
-      log?.debug?.(
-        "MEMORY",
-        `Injected ${newMemoryTools.length} memory tool(s) for key=${memoryOwnerId}`
-      );
-    }
-  }
-
-  if (memoryOwnerId && memorySettings?.skillsEnabled && body.stream !== true) {
+  if (skillsOwnerId && skillsEnabled && body.stream !== true) {
     // Ensure the registry cache is warm before listing: on a cold/fresh
     // process skills that exist only in the DB would be missed (false
     // negative -> silent skip). loadFromDatabase() is a no-op when the cache
     // is already warm (TTL = 60 s), so repeated calls are cheap. Mirrors the
     // pattern in src/lib/skills/interception.ts (#2815).
-    // Memory builtins and registered Skills are only executed by the
-    // non-streaming server-owned tool loop; stream clients execute tools
-    // client-side, so we skip injection for stream requests.
-    await skillRegistry.loadFromDatabase(memoryOwnerId);
+    // Registered Skills are only executed by the non-streaming server-owned
+    // tool loop; stream clients execute tools client-side, so we skip
+    // injection for stream requests.
+    await skillRegistry.loadFromDatabase(skillsOwnerId);
     const existingTools = Array.isArray(body.tools) ? body.tools : [];
     const { tools: mergedTools, injectedNames } = injectSkillsWithMetadata({
       provider: getSkillsProviderForFormat(sourceFormat),
       existingTools,
-      apiKeyId: memoryOwnerId,
+      apiKeyId: skillsOwnerId,
       model: typeof effectiveModel === "string" ? effectiveModel : undefined,
       sourceFormat,
       targetFormat,
@@ -274,7 +117,7 @@ export async function injectMemoryAndSkills({
     };
   }
 
-  return { body, memorySettings, builtinToolNames: builtinOwnerSet, injectedCustomSkillNames };
+  return { body, builtinToolNames: [], injectedCustomSkillNames };
 }
 
 interface FallbackPlan {

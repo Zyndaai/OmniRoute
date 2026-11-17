@@ -9,8 +9,7 @@
  * Import is two-step: preview (open the file, match every item against the
  * destination, report new / identical / conflict / unsupported) and apply
  * (per-item add / skip / replace). Every decision is validated before the first
- * write, a pre-import database backup is taken, and nothing in the destination
- * is ever deleted. Destination-local policy is kept: priority, global priority,
+ * write, and nothing in the destination is ever deleted. Destination-local policy is kept: priority, global priority,
  * the active flag, proxy toggles and runtime health state never travel.
  *
  * All writes go through the provider DB modules (`createProviderConnection`,
@@ -19,7 +18,6 @@
  * existing dedup / dashboard-password guards still apply.
  */
 import { z } from "zod";
-import { backupDbFile } from "@/lib/db/backup";
 import {
   createProviderConnection,
   createProviderNode,
@@ -683,8 +681,6 @@ export async function applyProviderTransfer(
   const existingNodeIds = new Set(destination.nodes.map((node) => String(node.id)));
   const resolved = resolveDecisions(plan, decisions, existingNodeIds);
   const existingConnectionIds = new Set(destination.connections.map((c) => String(c.id)));
-
-  backupDbFile("pre-transfer-import");
 
   const result: TransferApplyResult = {
     success: true,

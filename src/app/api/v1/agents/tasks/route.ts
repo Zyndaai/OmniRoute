@@ -45,11 +45,11 @@ export async function GET(request: NextRequest) {
 
     let tasks: CloudAgentTaskRow[];
     if (providerId) {
-      tasks = getCloudAgentTasksByProvider(providerId, limit);
+      tasks = await getCloudAgentTasksByProvider(providerId, limit);
     } else if (status) {
-      tasks = getCloudAgentTasksByStatus(status, limit);
+      tasks = await getCloudAgentTasksByStatus(status, limit);
     } else {
-      tasks = getAllCloudAgentTasks(limit);
+      tasks = await getAllCloudAgentTasks(limit);
     }
 
     return NextResponse.json(
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     );
 
     createCloudAgentTaskTable();
-    insertCloudAgentTask({
+    await insertCloudAgentTask({
       id: task.id,
       provider_id: task.providerId,
       external_id: task.externalId || null,
@@ -175,7 +175,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    deleteCloudAgentTask(taskId);
+    await deleteCloudAgentTask(taskId);
 
     return NextResponse.json({ success: true }, { headers: getCloudAgentCorsHeaders(request) });
   } catch (error) {

@@ -13,14 +13,8 @@
  */
 
 import { opaqueTokenFingerprint } from "@omniroute/open-sse/utils/opaqueTokenFingerprint.ts";
+import { db, type DbExecutor } from "@/lib/db/pg";
 import { decrypt, encrypt, isEncryptionEnabled, looksEncrypted } from "../encryption";
-
-interface SecretAtRestDb {
-  prepare: (sql: string) => {
-    all: (...params: unknown[]) => unknown[];
-    run: (...params: unknown[]) => unknown;
-  };
-}
 
 interface LegacyKeyRow {
   id?: unknown;
@@ -29,11 +23,14 @@ interface LegacyKeyRow {
   key_prefix?: unknown;
 }
 
-/** Rows older writers left behind: no hash yet, or (with encryption on) a plaintext secret. */
-const LEGACY_ROWS_SQL =
-  "SELECT id, key, key_hash, key_prefix FROM api_keys WHERE key_hash IS NULL OR key_hash = ''";
-const LEGACY_PLAINTEXT_ROWS_SQL = `${LEGACY_ROWS_SQL} OR substr(key, 1, 7) <> 'enc:v1:'`;
-const UPDATE_SECRET_SQL = "UPDATE api_keys SET key = ?, key_hash = ?, key_prefix = ? WHERE id = ?";
+/**
+ * Rows that still hold a plaintext secret while encryption is on. `key_hash` is NOT NULL in
+ * Postgres, so the "no hash yet" legacy case no longer exists.
+ */
+const LEGACY_PLAINTEXT_ROWS_SQL =
+  "SELECT id, key, key_hash, key_prefix FROM api_keys WHERE substr(key, 1, 7) <> 'enc:v1:'";
+const UPDATE_SECRET_SQL =
+  "UPDATE api_keys SET key = $1, key_hash = $2, key_prefix = $3 WHERE id = $4";
 
 function hasText(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
@@ -68,27 +65,24 @@ function legacyRowUpdate(row: LegacyKeyRow, encryptAtRest: boolean) {
 }
 
 /**
- * Idempotent in-place pass over legacy rows: computes a missing `key_hash` / `key_prefix` from
- * the plaintext and, when encryption is on, moves the plaintext secret into the envelope
- * (`looksEncrypted` guard — never double-encrypts). Runs at first use of the api-keys module
- * and again when a hash lookup misses, so a row an older writer or a restore added after
- * module init still authenticates. Returns how many rows it rewrote. No numbered migration:
- * same lazy, in-module style as `ensureApiKeyFallbackColumns`.
+ * Idempotent in-place pass over legacy rows: when encryption is on, moves a plaintext secret
+ * into the envelope (`looksEncrypted` guard — never double-encrypts) and fills a missing
+ * `key_prefix`. Runs at first use of the api-keys module and again when a hash lookup misses,
+ * so a row an older writer or a restore added after module init still gets secured. Returns
+ * how many rows it rewrote. With encryption off there is nothing to do (`key_hash` is NOT NULL).
  */
-export function backfillApiKeySecretsAtRest(db: SecretAtRestDb): number {
+export async function backfillApiKeySecretsAtRest(executor: DbExecutor = db()): Promise<number> {
   const encryptAtRest = isEncryptionEnabled();
-  const rows = db
-    .prepare(encryptAtRest ? LEGACY_PLAINTEXT_ROWS_SQL : LEGACY_ROWS_SQL)
-    .all() as LegacyKeyRow[];
+  if (!encryptAtRest) return 0;
+  const rows = await executor.query<LegacyKeyRow>(LEGACY_PLAINTEXT_ROWS_SQL);
   if (rows.length === 0) return 0;
 
-  const update = db.prepare(UPDATE_SECRET_SQL);
   let rewritten = 0;
   for (const row of rows) {
     const next = legacyRowUpdate(row, encryptAtRest);
     if (!next) continue;
     try {
-      update.run(next.key, next.keyHash, next.keyPrefix, row.id);
+      await executor.execute(UPDATE_SECRET_SQL, [next.key, next.keyHash, next.keyPrefix, row.id]);
       rewritten++;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

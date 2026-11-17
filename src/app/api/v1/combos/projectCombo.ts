@@ -75,10 +75,13 @@ export interface PublicCombo {
 }
 
 /** Capability subset projectCombo needs; injectable so tests stay DB-free + deterministic. */
-export type ComboCapabilityResolver = (model: string) => {
+export type ComboCapabilityVerdict = {
   supportsVision: boolean | null;
   reasoning: boolean;
 };
+export type ComboCapabilityResolver = (
+  model: string
+) => ComboCapabilityVerdict | Promise<ComboCapabilityVerdict>;
 
 export interface ProjectComboOptions {
   /** When true, attach the resolved `capabilities` block to the projection (#3979). */
@@ -95,8 +98,8 @@ export interface ProjectComboOptions {
   allCombos?: ComboCollectionLike;
 }
 
-const defaultCapabilityResolver: ComboCapabilityResolver = (model) => {
-  const caps = getResolvedModelCapabilities(model);
+const defaultCapabilityResolver: ComboCapabilityResolver = async (model) => {
+  const caps = await getResolvedModelCapabilities(model);
   return { supportsVision: caps.supportsVision, reasoning: caps.reasoning };
 };
 
@@ -132,11 +135,11 @@ export function projectComboStep(step: Record<string, unknown>): PublicComboStep
  *   choice (no registry caching flag exists), so caching is never advertised
  *   unless the operator opted in — avoiding surprise prompt-cache cost.
  */
-export function computeComboCapabilities(
+export async function computeComboCapabilities(
   combo: Record<string, unknown>,
   resolve: ComboCapabilityResolver = defaultCapabilityResolver,
   allCombos?: ComboCollectionLike
-): PublicComboCapabilities {
+): Promise<PublicComboCapabilities> {
   const rawModels = Array.isArray(combo.models) ? combo.models : [];
   let hasComboRef = false;
   const directModelIds: string[] = [];
@@ -171,7 +174,7 @@ export function computeComboCapabilities(
 
   if (multimodal || reasoning) {
     for (const id of modelIds) {
-      const caps = resolve(id);
+      const caps = await resolve(id);
       if (caps.supportsVision !== true) multimodal = false;
       if (caps.reasoning !== true) reasoning = false;
     }
@@ -183,20 +186,20 @@ export function computeComboCapabilities(
 }
 
 /** #14587: attach the per-member vision verdict to each direct model step. */
-function annotateMemberVision(
+async function annotateMemberVision(
   steps: PublicComboStep[],
   resolve: ComboCapabilityResolver = defaultCapabilityResolver
-): void {
+): Promise<void> {
   for (const step of steps) {
     if (step.kind !== "model" || typeof step.model !== "string") continue;
-    step.supportsVision = resolve(step.model).supportsVision;
+    step.supportsVision = (await resolve(step.model)).supportsVision;
   }
 }
 
-export function projectCombo(
+export async function projectCombo(
   combo: Record<string, unknown>,
   options?: ProjectComboOptions
-): PublicCombo | null {
+): Promise<PublicCombo | null> {
   const name = typeof combo.name === "string" ? combo.name.trim() : "";
   if (!name) return null;
 
@@ -216,8 +219,8 @@ export function projectCombo(
   }
 
   if (options?.includeCapabilities) {
-    annotateMemberVision(out.models, options.resolveCapabilities);
-    out.capabilities = computeComboCapabilities(
+    await annotateMemberVision(out.models, options.resolveCapabilities);
+    out.capabilities = await computeComboCapabilities(
       combo,
       options.resolveCapabilities,
       options.allCombos
@@ -228,23 +231,26 @@ export function projectCombo(
 }
 
 /** Project one request's combo collection with a single bulk capability snapshot. */
-export function projectComboCollectionWithCapabilities(combos: readonly unknown[]): PublicCombo[] {
+export async function projectComboCollectionWithCapabilities(
+  combos: readonly unknown[]
+): Promise<PublicCombo[]> {
   const allCombos = combos.filter(
     (combo): combo is Record<string, unknown> => Boolean(combo) && typeof combo === "object"
   );
-  const snapshot = createModelCapabilityResolutionSnapshot();
-  const resolveCapabilities: ComboCapabilityResolver = (model) => {
-    const caps = getResolvedModelCapabilities(model, undefined, snapshot);
+  const snapshot = await createModelCapabilityResolutionSnapshot();
+  const resolveCapabilities: ComboCapabilityResolver = async (model) => {
+    const caps = await getResolvedModelCapabilities(model, undefined, snapshot);
     return { supportsVision: caps.supportsVision, reasoning: caps.reasoning };
   };
 
-  return allCombos
-    .map((combo) =>
-      projectCombo(combo, {
-        includeCapabilities: true,
-        resolveCapabilities,
-        allCombos,
-      })
-    )
-    .filter((combo): combo is PublicCombo => combo !== null);
+  const projected: PublicCombo[] = [];
+  for (const combo of allCombos) {
+    const out = await projectCombo(combo, {
+      includeCapabilities: true,
+      resolveCapabilities,
+      allCombos,
+    });
+    if (out !== null) projected.push(out);
+  }
+  return projected;
 }

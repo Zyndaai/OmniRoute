@@ -1,27 +1,55 @@
-import { getDbInstance } from "../db/core";
+import { db, ts, type DbExecutor } from "../db/pg";
 
-// #5618 — node:sqlite's StatementSync.all() materializes the ENTIRE result set as
-// JS objects at once. On a large storage.sqlite (~170 MB+) an unbounded
-// `SELECT … FROM call_logs` over the whole table blows the V8 heap during the
-// startup cleanup pass (`cleanupExpiredLogs` → `rotateCallLogs`), crashing the
-// daemon before it binds. These helpers page through call_logs in bounded chunks
-// so peak memory stays flat regardless of table size.
+// call_logs is partitioned by day with PK (id, "timestamp"). Row batches are addressed by that
+// pair so each statement prunes to the partitions it needs, and bounded pages keep memory flat on
+// a large table (#5618).
 const CALL_LOG_QUERY_PAGE = 5000;
+
+/** The primary key of a call_logs row. */
+export type CallLogKey = { id: string; timestamp: string };
+
+const ARTIFACT_PATH_PATTERN =
+  /^\d{4}-\d{2}-\d{2}\/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2}\.\d{3})Z_(.+)\.json$/;
+
+/**
+ * Recovers the (id, timestamp) of the row that owns an artifact path, which
+ * `buildArtifactRelativePath` derives from exactly those two values:
+ * `<day>/<timestamp with ':' as '-'>_<id>.json`. Legacy paths that do not follow
+ * the pattern return null.
+ */
+export function parseArtifactRelPath(relativePath: string): CallLogKey | null {
+  const match = ARTIFACT_PATH_PATTERN.exec(relativePath);
+  if (!match) return null;
+  const [, day, hour, minute, seconds, id] = match;
+  return { id, timestamp: `${day}T${hour}:${minute}:${seconds}Z` };
+}
+
+/** `(id, "timestamp") IN (($1, $2), ...)` over bound parameters, starting at `$offset + 1`. */
+export function keyInList(
+  keys: CallLogKey[],
+  offset = 0
+): { sql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  const tuples = keys.map((key) => {
+    params.push(key.id, ts(key.timestamp));
+    const base = offset + params.length;
+    return `($${base - 1}, $${base}::timestamptz)`;
+  });
+  return { sql: `(id, "timestamp") IN (${tuples.join(", ")})`, params };
+}
 
 /**
  * Collect every non-null `artifact_relpath` referenced by call_logs, paging with
- * LIMIT/OFFSET so a huge table never loads into memory in one `.all()`.
+ * LIMIT/OFFSET so a huge table never loads into memory in one query.
  */
-export function collectReferencedArtifacts(): Set<string> {
-  const db = getDbInstance();
+export async function collectReferencedArtifacts(): Promise<Set<string>> {
   const referenced = new Set<string>();
-  const stmt = db.prepare(
-    "SELECT artifact_relpath FROM call_logs WHERE artifact_relpath IS NOT NULL LIMIT ? OFFSET ?"
-  );
   for (let offset = 0; ; offset += CALL_LOG_QUERY_PAGE) {
-    const rows = stmt.all(CALL_LOG_QUERY_PAGE, offset) as Array<{
-      artifact_relpath: string | null;
-    }>;
+    const rows = await db().query<{ artifact_relpath: string | null }>(
+      `SELECT artifact_relpath FROM call_logs WHERE artifact_relpath IS NOT NULL
+        ORDER BY "timestamp", id LIMIT $1 OFFSET $2`,
+      [CALL_LOG_QUERY_PAGE, offset]
+    );
     for (const row of rows) {
       if (typeof row.artifact_relpath === "string") referenced.add(row.artifact_relpath);
     }
@@ -31,44 +59,67 @@ export function collectReferencedArtifacts(): Set<string> {
 }
 
 /**
- * Select one bounded page of call_log ids older than `cutoff` (oldest first).
- * Callers loop until it returns an empty page, deleting each batch, so the id
+ * Select one bounded page of call_log keys older than `cutoff` (oldest first).
+ * Callers loop until it returns an empty page, deleting each batch, so the key
  * list never grows to the full retention backlog at once.
  */
-export function selectCallLogIdsBefore(cutoff: string, limit = CALL_LOG_QUERY_PAGE): string[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT id FROM call_logs WHERE timestamp < ? ORDER BY timestamp ASC LIMIT ?")
-    .all(cutoff, limit) as Array<{ id: string }>;
-  return rows.map((row) => String(row.id));
+export async function selectCallLogIdsBefore(
+  cutoff: string,
+  limit = CALL_LOG_QUERY_PAGE,
+  executor: DbExecutor = db()
+): Promise<CallLogKey[]> {
+  const rows = await executor.query<{ id: string; timestamp: string }>(
+    `SELECT id, "timestamp" FROM call_logs WHERE "timestamp" < $1 ORDER BY "timestamp" ASC LIMIT $2`,
+    [ts(cutoff), limit]
+  );
+  return rows.map((row) => ({ id: String(row.id), timestamp: row.timestamp }));
 }
 
-export function selectOverflowArtifactPaths(maxEntries: number, limit: number): string[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT artifact_relpath
+/** Artifact paths of the rows beyond the newest `maxEntries` that still hold a published artifact. */
+export async function selectOverflowArtifactPaths(
+  maxEntries: number,
+  limit: number
+): Promise<string[]> {
+  const rows = await db().query<{ artifact_relpath: string }>(
+    `SELECT artifact_relpath
        FROM call_logs
-       WHERE artifact_relpath IS NOT NULL
-       ORDER BY timestamp DESC, id DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(limit, maxEntries) as Array<{ artifact_relpath: string }>;
+       WHERE detail_state = 'ready' AND artifact_relpath IS NOT NULL
+       ORDER BY "timestamp" DESC, id DESC
+       LIMIT $1 OFFSET $2`,
+    [limit, maxEntries]
+  );
   return rows.map((row) => row.artifact_relpath);
 }
 
-export function findReferencedArtifacts(relativePaths: string[]): Set<string> {
+/** Which of these artifact paths still belong to a call_logs row. */
+export async function findReferencedArtifacts(relativePaths: string[]): Promise<Set<string>> {
   if (relativePaths.length === 0) return new Set();
 
-  const db = getDbInstance();
-  const placeholders = relativePaths.map(() => "?").join(", ");
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT artifact_relpath
-       FROM call_logs
-       WHERE artifact_relpath IN (${placeholders})
-       LIMIT ?`
-    )
-    .all(...relativePaths, relativePaths.length) as Array<{ artifact_relpath: string }>;
-  return new Set(rows.map((row) => row.artifact_relpath));
+  const referenced = new Set<string>();
+  const keys: CallLogKey[] = [];
+  const legacyPaths: string[] = [];
+  for (const relativePath of relativePaths) {
+    const key = parseArtifactRelPath(relativePath);
+    if (key) keys.push(key);
+    else legacyPaths.push(relativePath);
+  }
+
+  if (keys.length > 0) {
+    const list = keyInList(keys);
+    const rows = await db().query<{ artifact_relpath: string | null }>(
+      `SELECT artifact_relpath FROM call_logs WHERE ${list.sql}`,
+      list.params
+    );
+    for (const row of rows) {
+      if (row.artifact_relpath) referenced.add(row.artifact_relpath);
+    }
+  }
+  if (legacyPaths.length > 0) {
+    const rows = await db().query<{ artifact_relpath: string }>(
+      `SELECT DISTINCT artifact_relpath FROM call_logs WHERE artifact_relpath = ANY($1::text[])`,
+      [legacyPaths]
+    );
+    for (const row of rows) referenced.add(row.artifact_relpath);
+  }
+  return referenced;
 }

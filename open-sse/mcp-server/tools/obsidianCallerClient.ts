@@ -29,7 +29,7 @@ export async function getObsidianCallerClient(extra?: CallerExtra) {
       "Obsidian API token not configured. Authenticate with an API key to access Obsidian."
     );
   }
-  const config = getObsidianConfigForApiKey(id);
+  const config = await getObsidianConfigForApiKey(id);
   if (!config.token) {
     throw new Error(
       "Obsidian API token not configured. Set it in Settings > Context Sources or in your API key's context source settings."

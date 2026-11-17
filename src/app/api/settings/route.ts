@@ -343,7 +343,7 @@ async function validateEntraSsoPatch(
   const referenced = collectEntraKeyGroupIds(mappings, defaultKeyGroupId);
   if (referenced.length > 0) {
     const { filterExistingActiveKeyGroupIds } = await import("@/lib/db/apiKeyGroups");
-    const live = new Set(filterExistingActiveKeyGroupIds(referenced));
+    const live = new Set(await filterExistingActiveKeyGroupIds(referenced));
     const unknown = [...new Set(referenced)].filter((id) => !live.has(id));
     if (unknown.length > 0) {
       return {
@@ -629,7 +629,7 @@ export async function PATCH(request: Request) {
       const diff = computeSettingsDiff(beforeSnapshot, afterSnapshot, candidateKeys);
       if (Object.keys(diff).length > 0) {
         const { ipAddress, requestId } = getAuditRequestContext(request);
-        logAuditEvent({
+        await logAuditEvent({
           action: "settings.update",
           actor,
           target: "settings",

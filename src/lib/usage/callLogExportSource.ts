@@ -1,22 +1,22 @@
-/** Server compatibility wrappers; query/mapping code is shared with the read-only child. */
-import { getDbInstance } from "../db/core";
+/** Server compatibility wrappers; query/mapping code is shared with the export child. */
+import { db } from "../db/pg";
 import { expirePendingCallLogDetails } from "../db/callLogDetails";
 import { getCallLogById } from "./callLogs";
 import * as queries from "./callLogExportQueries";
 import type { LogExportSourceRow } from "../logExport/types";
-export function getMaxCallLogRowId(): number {
-  return queries.getMaxCallLogRowId(getDbInstance());
+export function getMaxCallLogRowId(): Promise<number> {
+  return queries.getMaxCallLogRowId(db());
 }
-export function countCallLogsAfterRowId(afterRowId: number): number {
-  return queries.countCallLogsAfterRowId(getDbInstance(), afterRowId);
+export function countCallLogsAfterRowId(afterRowId: number): Promise<number> {
+  return queries.countCallLogsAfterRowId(db(), afterRowId);
 }
 export function getCallLogsForExport(
   afterRowId: number,
   limit: number,
   options: { includeBodies?: boolean } = {}
-): LogExportSourceRow[] {
+): Promise<LogExportSourceRow[]> {
   return queries.getCallLogsForExport(
-    getDbInstance(),
+    db(),
     afterRowId,
     limit,
     Number.MAX_SAFE_INTEGER,
@@ -24,15 +24,16 @@ export function getCallLogsForExport(
   );
 }
 /**
- * Make abandoned artifact writes terminal before a body export reads the barrier. Runs in
- * the server: the export child holds a read-only connection and cannot write.
+ * Make abandoned artifact writes terminal before a body export reads the barrier.
  */
-export function expirePendingExportDetails(): void {
-  expirePendingCallLogDetails(getDbInstance());
+export function expirePendingExportDetails(): Promise<void> {
+  return expirePendingCallLogDetails(db());
 }
 export function attachExportBodies(
   rows: LogExportSourceRow[],
   maxBodyBytes = queries.DEFAULT_MAX_BODY_BYTES
 ): Promise<LogExportSourceRow[]> {
-  return queries.attachExportBodies(rows, maxBodyBytes, getCallLogById);
+  return queries.attachExportBodies(rows, maxBodyBytes, (id, timestamp) =>
+    getCallLogById(id, timestamp)
+  );
 }

@@ -42,7 +42,7 @@ function toProviderMetric(row: ProviderMetricRow): ProviderMetric {
  */
 export async function GET() {
   try {
-    const rows = getProviderMetrics();
+    const rows = await getProviderMetrics();
 
     const metrics: Record<string, ProviderMetric> = {};
     let lastProvider = "";

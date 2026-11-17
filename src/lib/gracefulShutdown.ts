@@ -101,7 +101,7 @@ async function waitForDrain(): Promise<void> {
 }
 
 /**
- * Perform cleanup: close DB connections, flush logs.
+ * Perform cleanup: flush spend writes, close the PostgreSQL pool, flush logs.
  */
 async function cleanup(): Promise<void> {
   try {
@@ -132,7 +132,7 @@ async function cleanup(): Promise<void> {
     }
     try {
       if (await shutdownDbInstance()) {
-        console.log("[Shutdown] SQLite database checkpointed and closed.");
+        console.log("[Shutdown] PostgreSQL connection pool closed.");
       }
     } catch (error) {
       console.error("[Shutdown] Database cleanup failed:", (error as Error).message);

@@ -179,7 +179,7 @@ async function postHandler(request: any) {
 
     let guardResult;
     try {
-      guardResult = injectionGuard(parsedBody);
+      guardResult = await injectionGuard(parsedBody);
     } catch (error) {
       console.error("[SECURITY] Injection guard error:", error);
       return finishAdmission(

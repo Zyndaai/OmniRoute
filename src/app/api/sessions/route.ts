@@ -30,10 +30,10 @@ export async function GET() {
       // the managed candidate set; SQLite occupancy is the source of truth for
       // which of those connections are actually leased right now.
       const managedConnectionIds = Array.from(await getExclusiveLeaseConnectionIds());
-      const occupancy = getExclusiveLeaseOccupancy(managedConnectionIds);
+      const occupancy = await getExclusiveLeaseOccupancy(managedConnectionIds);
       const leasedConnectionIds = new Set(occupancy.keys());
       const connectionNames = new Map(
-        getProviderConnectionDisplayMetadata([...leasedConnectionIds]).map((connection) => [
+        (await getProviderConnectionDisplayMetadata([...leasedConnectionIds])).map((connection) => [
           connection.id,
           getAccountDisplayName(connection),
         ])

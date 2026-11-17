@@ -5,8 +5,7 @@ import type {
 } from "@omniroute/open-sse/services/compression/types.ts";
 import type { OutputStyleSelectionEntry } from "@omniroute/open-sse/services/compression/outputStyles/apply.ts";
 
-import { backupDbFile } from "./backup";
-import { getDbInstance, rowToCamel } from "./core";
+import { db, jsonb, ts, type DbExecutor } from "./pg";
 
 export interface CompressionCombo {
   id: string;
@@ -22,6 +21,7 @@ export interface CompressionCombo {
   updatedAt: string;
 }
 
+/** `id` is the routing combo id: the assignment's primary key (there is no surrogate id). */
 export interface CompressionComboAssignment {
   id: string;
   compressionComboId: string;
@@ -29,7 +29,7 @@ export interface CompressionComboAssignment {
   createdAt: string;
 }
 
-type JsonRecord = Record<string, unknown>;
+type Row = Record<string, unknown>;
 
 const DEFAULT_COMPRESSION_COMBO_ID = "default-caveman";
 const DEFAULT_COMPRESSION_COMBO_NAME = "Standard Savings";
@@ -106,12 +106,11 @@ function isLegacySeededDefaultPipeline(pipeline: CompressionPipelineStep[]): boo
   return step.engine === "caveman" && (step.intensity === undefined || step.intensity === "full");
 }
 
-function upgradeLegacySeededDefaultCompressionCombo(): void {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT name, description, pipeline FROM compression_combos WHERE id = ?")
-    .get(DEFAULT_COMPRESSION_COMBO_ID) as
-    { name?: string; description?: string; pipeline?: string } | undefined;
+async function upgradeLegacySeededDefaultCompressionCombo(): Promise<void> {
+  const row = await db().queryOne<{ name?: string; description?: string; pipeline?: unknown }>(
+    "SELECT name, description, pipeline FROM compression_combos WHERE id = $1",
+    [DEFAULT_COMPRESSION_COMBO_ID]
+  );
 
   if (!row) return;
 
@@ -127,98 +126,66 @@ function upgradeLegacySeededDefaultCompressionCombo(): void {
     isLegacySeededDefaultPipeline(pipeline) || isPreviousLossySeedPipeline(pipeline);
   if (!isSeededMetadata || !untouchedSeed) return;
 
-  db.prepare(
-    `
-    UPDATE compression_combos
-    SET description = ?, pipeline = ?, updated_at = ?
-    WHERE id = ?
-  `
-  ).run(
-    DEFAULT_COMPRESSION_COMBO_DESCRIPTION,
-    JSON.stringify(defaultCompressionComboPipeline()),
-    new Date().toISOString(),
-    DEFAULT_COMPRESSION_COMBO_ID
+  await db().execute(
+    `UPDATE compression_combos
+        SET description = $1, pipeline = $2::jsonb, updated_at = now()
+      WHERE id = $3`,
+    [
+      DEFAULT_COMPRESSION_COMBO_DESCRIPTION,
+      jsonb(defaultCompressionComboPipeline()),
+      DEFAULT_COMPRESSION_COMBO_ID,
+    ]
   );
 }
 
-function ensureCompressionComboTables(): void {
-  const db = getDbInstance();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS compression_combos (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      pipeline TEXT NOT NULL DEFAULT '[]',
-      language_packs TEXT DEFAULT '["en"]',
-      output_mode INTEGER DEFAULT 0,
-      output_mode_intensity TEXT DEFAULT 'full',
-      output_styles TEXT DEFAULT '[]',
-      is_default INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS compression_combo_assignments (
-      id TEXT PRIMARY KEY,
-      compression_combo_id TEXT NOT NULL REFERENCES compression_combos(id) ON DELETE CASCADE,
-      routing_combo_id TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(routing_combo_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_compression_combos_default
-      ON compression_combos(is_default);
-    CREATE INDEX IF NOT EXISTS idx_compression_combo_assignments_combo
-      ON compression_combo_assignments(compression_combo_id);
-    CREATE INDEX IF NOT EXISTS idx_compression_combo_assignments_routing
-      ON compression_combo_assignments(routing_combo_id);
-  `);
-  db.prepare(
-    `
-    INSERT OR IGNORE INTO compression_combos (
-      id, name, description, pipeline, language_packs, output_mode, output_mode_intensity, is_default
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    DEFAULT_COMPRESSION_COMBO_ID,
-    DEFAULT_COMPRESSION_COMBO_NAME,
-    DEFAULT_COMPRESSION_COMBO_DESCRIPTION,
-    JSON.stringify(defaultCompressionComboPipeline()),
-    JSON.stringify(["en"]),
-    0,
-    "full",
-    1
+/**
+ * Seeds the default combo on every call (as before: one cheap statement), so it
+ * reappears after a restore or reset. It becomes the default only when no other
+ * combo already is (a unique index allows a single default).
+ */
+async function ensureCompressionComboSeed(): Promise<void> {
+  await db().execute(
+    `INSERT INTO compression_combos (
+       id, name, description, pipeline, language_packs, output_mode, output_mode_intensity,
+       is_default
+     )
+     VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, false, 'full',
+             NOT EXISTS (SELECT 1 FROM compression_combos WHERE is_default))
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      DEFAULT_COMPRESSION_COMBO_ID,
+      DEFAULT_COMPRESSION_COMBO_NAME,
+      DEFAULT_COMPRESSION_COMBO_DESCRIPTION,
+      jsonb(defaultCompressionComboPipeline()),
+      jsonb(["en"]),
+    ]
   );
-  upgradeLegacySeededDefaultCompressionCombo();
+  await upgradeLegacySeededDefaultCompressionCombo();
 }
 
-function rowToCompressionCombo(row: unknown): CompressionCombo | null {
+function rowToCompressionCombo(row: Row | undefined | null): CompressionCombo | null {
   if (!row) return null;
-  const camel = rowToCamel(row as Record<string, unknown>) as JsonRecord;
   return {
-    id: String(camel.id),
-    name: String(camel.name ?? ""),
-    description: String(camel.description ?? ""),
-    pipeline: normalizePipeline(camel.pipeline),
-    languagePacks: normalizeLanguagePacks(camel.languagePacks),
-    outputMode: Boolean(camel.outputMode),
-    outputModeIntensity: String(camel.outputModeIntensity ?? "full"),
-    outputStyles: normalizeOutputStyles(camel.outputStyles),
-    isDefault: Boolean(camel.isDefault),
-    createdAt: String(camel.createdAt ?? ""),
-    updatedAt: String(camel.updatedAt ?? ""),
+    id: String(row.id),
+    name: String(row.name ?? ""),
+    description: String(row.description ?? ""),
+    pipeline: normalizePipeline(row.pipeline),
+    languagePacks: normalizeLanguagePacks(row.language_packs),
+    outputMode: Boolean(row.output_mode),
+    outputModeIntensity: String(row.output_mode_intensity ?? "full"),
+    outputStyles: normalizeOutputStyles(row.output_styles),
+    isDefault: Boolean(row.is_default),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
   };
 }
 
-function rowToAssignment(row: unknown): CompressionComboAssignment | null {
-  if (!row) return null;
-  const camel = rowToCamel(row as Record<string, unknown>) as JsonRecord;
+function rowToAssignment(row: Row): CompressionComboAssignment {
   return {
-    id: String(camel.id),
-    compressionComboId: String(camel.compressionComboId),
-    routingComboId: String(camel.routingComboId),
-    createdAt: String(camel.createdAt ?? ""),
+    id: String(row.routing_combo_id),
+    compressionComboId: String(row.compression_combo_id),
+    routingComboId: String(row.routing_combo_id),
+    createdAt: String(row.created_at ?? ""),
   };
 }
 
@@ -251,171 +218,157 @@ function buildComboPayload(data: Partial<CompressionCombo>, existing?: Compressi
   };
 }
 
-export function listCompressionCombos(): CompressionCombo[] {
-  ensureCompressionComboTables();
-  const db = getDbInstance();
-  return db
-    .prepare("SELECT * FROM compression_combos ORDER BY is_default DESC, name COLLATE NOCASE ASC")
-    .all()
+async function clearDefaultFlag(ex: DbExecutor): Promise<void> {
+  await ex.execute("UPDATE compression_combos SET is_default = false WHERE is_default");
+}
+
+export async function listCompressionCombos(): Promise<CompressionCombo[]> {
+  await ensureCompressionComboSeed();
+  const rows = await db().query<Row>(
+    "SELECT * FROM compression_combos ORDER BY is_default DESC, lower(name) ASC, name ASC"
+  );
+  return rows
     .map(rowToCompressionCombo)
     .filter((combo): combo is CompressionCombo => combo !== null);
 }
 
-export function getCompressionCombo(id: string): CompressionCombo | null {
-  ensureCompressionComboTables();
-  const row = getDbInstance().prepare("SELECT * FROM compression_combos WHERE id = ?").get(id);
+export async function getCompressionCombo(id: string): Promise<CompressionCombo | null> {
+  await ensureCompressionComboSeed();
+  const row = await db().queryOne<Row>("SELECT * FROM compression_combos WHERE id = $1", [id]);
   return rowToCompressionCombo(row);
 }
 
-export function getDefaultCompressionCombo(): CompressionCombo | null {
-  ensureCompressionComboTables();
-  const row = getDbInstance()
-    .prepare(
-      "SELECT * FROM compression_combos WHERE is_default = 1 ORDER BY updated_at DESC LIMIT 1"
-    )
-    .get();
+export async function getDefaultCompressionCombo(): Promise<CompressionCombo | null> {
+  await ensureCompressionComboSeed();
+  const row = await db().queryOne<Row>(
+    "SELECT * FROM compression_combos WHERE is_default ORDER BY updated_at DESC LIMIT 1"
+  );
   return rowToCompressionCombo(row);
 }
 
-export function createCompressionCombo(data: Partial<CompressionCombo>): CompressionCombo {
-  ensureCompressionComboTables();
-  const db = getDbInstance();
+export async function createCompressionCombo(
+  data: Partial<CompressionCombo>
+): Promise<CompressionCombo> {
+  await ensureCompressionComboSeed();
   const combo = buildComboPayload(data);
-  const tx = db.transaction(() => {
-    if (combo.isDefault) db.prepare("UPDATE compression_combos SET is_default = 0").run();
-    db.prepare(
-      `
-      INSERT INTO compression_combos (
-        id, name, description, pipeline, language_packs, output_mode, output_mode_intensity,
-        output_styles, is_default, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    ).run(
-      combo.id,
-      combo.name,
-      combo.description,
-      JSON.stringify(combo.pipeline),
-      JSON.stringify(combo.languagePacks),
-      combo.outputMode ? 1 : 0,
-      combo.outputModeIntensity,
-      JSON.stringify(combo.outputStyles),
-      combo.isDefault ? 1 : 0,
-      combo.createdAt,
-      combo.updatedAt
+  await db().transaction(async (tx) => {
+    if (combo.isDefault) await clearDefaultFlag(tx);
+    await tx.execute(
+      `INSERT INTO compression_combos (
+         id, name, description, pipeline, language_packs, output_mode, output_mode_intensity,
+         output_styles, is_default, created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11)`,
+      [
+        combo.id,
+        combo.name,
+        combo.description,
+        jsonb(combo.pipeline),
+        jsonb(combo.languagePacks),
+        combo.outputMode,
+        combo.outputModeIntensity,
+        jsonb(combo.outputStyles),
+        combo.isDefault,
+        ts(combo.createdAt),
+        ts(combo.updatedAt),
+      ]
     );
   });
-  tx();
-  backupDbFile("pre-write");
-  return getCompressionCombo(combo.id) as CompressionCombo;
+  return (await getCompressionCombo(combo.id)) as CompressionCombo;
 }
 
-export function updateCompressionCombo(
+export async function updateCompressionCombo(
   id: string,
   data: Partial<CompressionCombo>
-): CompressionCombo | null {
-  ensureCompressionComboTables();
-  const existing = getCompressionCombo(id);
+): Promise<CompressionCombo | null> {
+  const existing = await getCompressionCombo(id);
   if (!existing) return null;
   const combo = buildComboPayload(data, existing);
-  const db = getDbInstance();
-  const tx = db.transaction(() => {
-    if (combo.isDefault) db.prepare("UPDATE compression_combos SET is_default = 0").run();
-    db.prepare(
-      `
-      UPDATE compression_combos
-      SET name = ?, description = ?, pipeline = ?, language_packs = ?, output_mode = ?,
-          output_mode_intensity = ?, output_styles = ?, is_default = ?, updated_at = ?
-      WHERE id = ?
-    `
-    ).run(
-      combo.name,
-      combo.description,
-      JSON.stringify(combo.pipeline),
-      JSON.stringify(combo.languagePacks),
-      combo.outputMode ? 1 : 0,
-      combo.outputModeIntensity,
-      JSON.stringify(combo.outputStyles),
-      combo.isDefault ? 1 : 0,
-      combo.updatedAt,
-      id
+  await db().transaction(async (tx) => {
+    if (combo.isDefault) await clearDefaultFlag(tx);
+    await tx.execute(
+      `UPDATE compression_combos
+          SET name = $1, description = $2, pipeline = $3::jsonb, language_packs = $4::jsonb,
+              output_mode = $5, output_mode_intensity = $6, output_styles = $7::jsonb,
+              is_default = $8, updated_at = $9
+        WHERE id = $10`,
+      [
+        combo.name,
+        combo.description,
+        jsonb(combo.pipeline),
+        jsonb(combo.languagePacks),
+        combo.outputMode,
+        combo.outputModeIntensity,
+        jsonb(combo.outputStyles),
+        combo.isDefault,
+        ts(combo.updatedAt),
+        id,
+      ]
     );
   });
-  tx();
-  backupDbFile("pre-write");
   return getCompressionCombo(id);
 }
 
-export function deleteCompressionCombo(id: string): boolean {
-  ensureCompressionComboTables();
-  const existing = getCompressionCombo(id);
+export async function deleteCompressionCombo(id: string): Promise<boolean> {
+  const existing = await getCompressionCombo(id);
   if (!existing || existing.isDefault) return false;
-  const result = getDbInstance().prepare("DELETE FROM compression_combos WHERE id = ?").run(id);
-  if (result.changes > 0) backupDbFile("pre-write");
+  // Assignments go with the row (FK ON DELETE CASCADE).
+  const result = await db().execute("DELETE FROM compression_combos WHERE id = $1", [id]);
   return result.changes > 0;
 }
 
-export function setDefaultCompressionCombo(id: string): boolean {
-  ensureCompressionComboTables();
-  if (!getCompressionCombo(id)) return false;
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.transaction(() => {
-    db.prepare("UPDATE compression_combos SET is_default = 0").run();
-    db.prepare("UPDATE compression_combos SET is_default = 1, updated_at = ? WHERE id = ?").run(
-      now,
-      id
+export async function setDefaultCompressionCombo(id: string): Promise<boolean> {
+  if (!(await getCompressionCombo(id))) return false;
+  await db().transaction(async (tx) => {
+    await clearDefaultFlag(tx);
+    await tx.execute(
+      "UPDATE compression_combos SET is_default = true, updated_at = now() WHERE id = $1",
+      [id]
     );
-  })();
-  backupDbFile("pre-write");
+  });
   return true;
 }
 
-export function getAssignmentsForCompressionCombo(id: string): CompressionComboAssignment[] {
-  ensureCompressionComboTables();
-  return getDbInstance()
-    .prepare(
-      "SELECT * FROM compression_combo_assignments WHERE compression_combo_id = ? ORDER BY routing_combo_id"
-    )
-    .all(id)
-    .map(rowToAssignment)
-    .filter((assignment): assignment is CompressionComboAssignment => assignment !== null);
+export async function getAssignmentsForCompressionCombo(
+  id: string
+): Promise<CompressionComboAssignment[]> {
+  await ensureCompressionComboSeed();
+  const rows = await db().query<Row>(
+    "SELECT * FROM compression_combo_assignments WHERE compression_combo_id = $1 ORDER BY routing_combo_id",
+    [id]
+  );
+  return rows.map(rowToAssignment);
 }
 
-export function getCompressionComboForRoutingCombo(
+export async function getCompressionComboForRoutingCombo(
   routingComboId: string
-): CompressionCombo | null {
-  ensureCompressionComboTables();
-  const row = getDbInstance()
-    .prepare(
-      `
-      SELECT c.*
-      FROM compression_combos c
-      JOIN compression_combo_assignments a ON a.compression_combo_id = c.id
-      WHERE a.routing_combo_id = ?
-      LIMIT 1
-    `
-    )
-    .get(routingComboId);
+): Promise<CompressionCombo | null> {
+  await ensureCompressionComboSeed();
+  const row = await db().queryOne<Row>(
+    `SELECT c.*
+       FROM compression_combos c
+       JOIN compression_combo_assignments a ON a.compression_combo_id = c.id
+      WHERE a.routing_combo_id = $1
+      LIMIT 1`,
+    [routingComboId]
+  );
   return rowToCompressionCombo(row);
 }
 
-export function assignRoutingCombo(compressionComboId: string, routingComboId: string): boolean {
-  ensureCompressionComboTables();
-  if (!getCompressionCombo(compressionComboId) || !routingComboId.trim()) return false;
-  getDbInstance()
-    .prepare(
-      `
-      INSERT OR REPLACE INTO compression_combo_assignments (
-        id, compression_combo_id, routing_combo_id, created_at
-      )
-      VALUES (?, ?, ?, ?)
-    `
-    )
-    .run(uuidv4(), compressionComboId, routingComboId.trim(), new Date().toISOString());
-  backupDbFile("pre-write");
+const UPSERT_ASSIGNMENT_SQL = `INSERT INTO compression_combo_assignments (routing_combo_id, compression_combo_id, created_at)
+   VALUES ($1, $2, now())
+   ON CONFLICT (routing_combo_id) DO UPDATE
+     SET compression_combo_id = EXCLUDED.compression_combo_id, created_at = EXCLUDED.created_at`;
+
+export async function assignRoutingCombo(
+  compressionComboId: string,
+  routingComboId: string
+): Promise<boolean> {
+  if (!(await getCompressionCombo(compressionComboId)) || !routingComboId.trim()) return false;
+  await db().execute(UPSERT_ASSIGNMENT_SQL, [routingComboId.trim(), compressionComboId]);
   return true;
 }
+
 // Static stackPriority map — mirrors the values defined in each engine file.
 // Using a static map avoids cross-workspace imports (open-sse → src/lib/db) that
 // would introduce a circular dependency detected by check:cycles.
@@ -431,78 +384,73 @@ const ENGINE_STACK_PRIORITY: Record<string, number> = {
   "codex-responses": 12,
 };
 
-export function setEngineInDefaultCombo(
+export async function setEngineInDefaultCombo(
   engineId: string,
   enabled: boolean,
   config?: Record<string, unknown>
-): CompressionCombo | null {
+): Promise<CompressionCombo | null> {
   if (!KNOWN_ENGINE_IDS.includes(engineId)) return null;
-  ensureCompressionComboTables();
-  const existing = getDefaultCompressionCombo();
-  if (!existing) return null;
+  await ensureCompressionComboSeed();
 
-  let newPipeline = [...existing.pipeline];
-  if (enabled) {
-    const idx = newPipeline.findIndex((s) => s.engine === engineId);
-    if (idx >= 0) {
-      if (config !== undefined) {
-        newPipeline[idx] = { ...newPipeline[idx], config };
+  // Read-modify-write of the pipeline document: lock the default row for the update.
+  const updatedId = await db().transaction(async (tx) => {
+    const row = await tx.queryOne<Row>(
+      "SELECT * FROM compression_combos WHERE is_default ORDER BY updated_at DESC LIMIT 1 FOR UPDATE"
+    );
+    const existing = rowToCompressionCombo(row);
+    if (!existing) return null;
+
+    let newPipeline = [...existing.pipeline];
+    if (enabled) {
+      const idx = newPipeline.findIndex((s) => s.engine === engineId);
+      if (idx >= 0) {
+        if (config !== undefined) {
+          newPipeline[idx] = { ...newPipeline[idx], config };
+        }
+      } else {
+        newPipeline.push({
+          engine: engineId as CompressionEngineId,
+          ...(config ? { config } : {}),
+        });
       }
+      // Sort by stackPriority ascending so the pipeline runs in the correct order.
+      newPipeline.sort((a, b) => {
+        const pa = ENGINE_STACK_PRIORITY[a.engine] ?? 50;
+        const pb = ENGINE_STACK_PRIORITY[b.engine] ?? 50;
+        return pa - pb;
+      });
     } else {
-      newPipeline.push({ engine: engineId as CompressionEngineId, ...(config ? { config } : {}) });
+      newPipeline = newPipeline.filter((s) => s.engine !== engineId);
     }
-    // Sort by stackPriority ascending so the pipeline runs in the correct order.
-    newPipeline.sort((a, b) => {
-      const pa = ENGINE_STACK_PRIORITY[a.engine] ?? 50;
-      const pb = ENGINE_STACK_PRIORITY[b.engine] ?? 50;
-      return pa - pb;
-    });
-  } else {
-    newPipeline = newPipeline.filter((s) => s.engine !== engineId);
-  }
 
-  // Direct UPDATE — preserves empty pipeline (Fix #2) without going through
-  // buildComboPayload which falls back to defaultCompressionComboPipeline() when
-  // the incoming array is empty.
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare("UPDATE compression_combos SET pipeline = ?, updated_at = ? WHERE id = ?").run(
-    JSON.stringify(newPipeline),
-    now,
-    existing.id
-  );
-  backupDbFile("pre-write");
+    // Direct UPDATE — preserves empty pipeline (Fix #2) without going through
+    // buildComboPayload which falls back to defaultCompressionComboPipeline() when
+    // the incoming array is empty.
+    await tx.execute(
+      "UPDATE compression_combos SET pipeline = $1::jsonb, updated_at = now() WHERE id = $2",
+      [jsonb(newPipeline), existing.id]
+    );
+    return existing.id;
+  });
 
-  return getCompressionCombo(existing.id);
+  return updatedId ? getCompressionCombo(updatedId) : null;
 }
 
-export function updateAssignments(compressionComboId: string, routingComboIds: string[]): boolean {
-  ensureCompressionComboTables();
-  if (!getCompressionCombo(compressionComboId)) return false;
+export async function updateAssignments(
+  compressionComboId: string,
+  routingComboIds: string[]
+): Promise<boolean> {
+  if (!(await getCompressionCombo(compressionComboId))) return false;
   const cleanedIds = [...new Set(routingComboIds.map((id) => id.trim()).filter(Boolean))];
-  const db = getDbInstance();
-  db.transaction(() => {
-    db.prepare("DELETE FROM compression_combo_assignments WHERE compression_combo_id = ?").run(
-      compressionComboId
-    );
-    if (cleanedIds.length > 0) {
-      const deleteExisting = db.prepare(
-        "DELETE FROM compression_combo_assignments WHERE routing_combo_id = ?"
-      );
-      const insert = db.prepare(
-        `
-        INSERT INTO compression_combo_assignments (
-          id, compression_combo_id, routing_combo_id, created_at
-        )
-        VALUES (?, ?, ?, ?)
-      `
-      );
-      for (const routingComboId of cleanedIds) {
-        deleteExisting.run(routingComboId);
-        insert.run(uuidv4(), compressionComboId, routingComboId, new Date().toISOString());
-      }
+  await db().transaction(async (tx) => {
+    await tx.execute("DELETE FROM compression_combo_assignments WHERE compression_combo_id = $1", [
+      compressionComboId,
+    ]);
+    // The primary key is the routing combo, so the upsert also moves a routing combo
+    // away from whichever compression combo held it.
+    for (const routingComboId of cleanedIds) {
+      await tx.execute(UPSERT_ASSIGNMENT_SQL, [routingComboId, compressionComboId]);
     }
-  })();
-  backupDbFile("pre-write");
+  });
   return true;
 }

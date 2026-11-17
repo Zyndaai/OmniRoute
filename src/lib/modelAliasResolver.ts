@@ -18,10 +18,12 @@ let cachedAliases: Record<string, unknown> | null = null;
 let lastFetch = 0;
 const CACHE_TTL_MS = 60_000; // 1 minute
 
-function isTargetModelHidden(provider: string, modelId: string): boolean {
-  if (getModelIsHidden(provider, modelId)) return true;
+async function isTargetModelHidden(provider: string, modelId: string): Promise<boolean> {
+  if (await getModelIsHidden(provider, modelId)) return true;
   const canonicalProvider = resolveProviderId(provider);
-  if (canonicalProvider !== provider && getModelIsHidden(canonicalProvider, modelId)) return true;
+  if (canonicalProvider !== provider && (await getModelIsHidden(canonicalProvider, modelId))) {
+    return true;
+  }
   return false;
 }
 
@@ -65,7 +67,7 @@ export async function resolveModelAliasWithSeedFallback(
     if (slashIndex > 0) {
       const targetProvider = target.slice(0, slashIndex);
       const targetModel = target.slice(slashIndex + 1);
-      if (isTargetModelHidden(targetProvider, targetModel)) {
+      if (await isTargetModelHidden(targetProvider, targetModel)) {
         return model;
       }
     }
@@ -79,7 +81,7 @@ export async function resolveModelAliasWithSeedFallback(
       if (slashIndex > 0) {
         const targetProvider = first.slice(0, slashIndex);
         const targetModel = first.slice(slashIndex + 1);
-        if (isTargetModelHidden(targetProvider, targetModel)) {
+        if (await isTargetModelHidden(targetProvider, targetModel)) {
           return model;
         }
       }
@@ -91,7 +93,7 @@ export async function resolveModelAliasWithSeedFallback(
   if (typeof target === "object" && target !== null) {
     const t = target as { provider?: string; model?: string };
     if (t.provider && t.model) {
-      if (isTargetModelHidden(t.provider, t.model)) {
+      if (await isTargetModelHidden(t.provider, t.model)) {
         return model;
       }
       return `${t.provider}/${t.model}`;

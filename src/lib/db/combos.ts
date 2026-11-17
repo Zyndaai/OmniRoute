@@ -7,9 +7,8 @@
  */
 
 import type { ComboRecord } from "@/domain/persistence/comboRepositories";
-import { backupDbFile } from "./backup";
 import { clearSessionModelHistoryForCombo } from "./contextHandoffs";
-import { getDbInstance } from "./core";
+import { db, jsonb } from "./pg";
 import { invalidateDbCache } from "./readCache";
 import { invalidateReasoningRoutingRuleCache } from "./reasoningRoutingRules";
 import { routingConfigRepositories } from "./repositories/routingConfigRepositories";
@@ -20,9 +19,8 @@ export function getCombos(limit?: number, offset?: number): Promise<ComboRecord[
   return repository.list(limit, offset);
 }
 
-/** Keep the existing synchronous facade contract while repository APIs become async. */
-export function getCombosCount(): number {
-  return routingConfigRepositories.legacySync.getCombosCount();
+export function getCombosCount(): Promise<number> {
+  return repository.count();
 }
 
 export function getComboById(id: string): Promise<ComboRecord | null> {
@@ -40,7 +38,6 @@ export function getComboByNameInsensitive(name: string): Promise<ComboRecord | n
 export async function createCombo(data: ComboRecord): Promise<ComboRecord> {
   const combo = await repository.create(data);
   invalidateDbCache("combos");
-  backupDbFile("pre-write");
   return combo;
 }
 
@@ -49,14 +46,13 @@ export async function updateCombo(id: string, data: ComboRecord): Promise<ComboR
   if (!result) return null;
 
   if (result.modelsFieldProvided) {
-    const cleared = clearSessionModelHistoryForCombo(result.previousName);
+    const cleared = await clearSessionModelHistoryForCombo(result.previousName);
     if (cleared > 0 && result.currentName !== result.previousName) {
-      clearSessionModelHistoryForCombo(result.currentName);
+      await clearSessionModelHistoryForCombo(result.currentName);
     }
   }
 
   invalidateDbCache("combos");
-  backupDbFile("pre-write");
   return result.combo;
 }
 
@@ -64,7 +60,6 @@ export async function reorderCombos(comboIds: string[]): Promise<ComboRecord[]> 
   const result = await repository.reorder(comboIds);
   if (result.rowsReordered > 0) {
     invalidateDbCache("combos");
-    backupDbFile("pre-write");
   }
   return result.combos;
 }
@@ -75,7 +70,6 @@ export async function deleteCombo(id: string): Promise<boolean> {
 
   invalidateDbCache("combos");
   invalidateReasoningRoutingRuleCache();
-  backupDbFile("pre-write");
   return true;
 }
 
@@ -85,10 +79,12 @@ export async function deleteComboByName(name: string): Promise<boolean> {
   return deleteCombo(combo.id);
 }
 
-export function setActiveCombo(name: string, db = getDbInstance()): void {
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'activeCombo', ?)"
-  ).run(JSON.stringify(name));
+export async function setActiveCombo(name: string): Promise<void> {
+  await db().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('settings', 'activeCombo', $1::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [jsonb(name)]
+  );
 }
 
 /**

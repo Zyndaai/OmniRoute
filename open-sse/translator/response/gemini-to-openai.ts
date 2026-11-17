@@ -273,7 +273,7 @@ function emitFunctionCallPart(
   };
 
   if (state.pendingThoughtSignature) {
-    storeGeminiThoughtSignature(
+    void storeGeminiThoughtSignature(
       getSignatureCacheKey(state, toolCall.id),
       state.pendingThoughtSignature
     );

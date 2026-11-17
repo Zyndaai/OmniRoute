@@ -15,7 +15,7 @@ import {
 import { withPathTokenApiKey } from "@/app/api/v1/vscode/[token]/tokenizedRequest";
 import { isUsableChatModel } from "@/app/api/v1/vscode/[token]/usableChatModel";
 
-function filterCanonicalTagModels(models: OpenAiCatalogModel[]) {
+async function filterCanonicalTagModels(models: OpenAiCatalogModel[]) {
   const allModelIds = new Set(
     models.map((model) => (model.id || model.root || model.name || "").trim()).filter(Boolean)
   );
@@ -37,7 +37,7 @@ function filterCanonicalTagModels(models: OpenAiCatalogModel[]) {
 
     const groupKey = tierParsedModel.serviceTier
       ? canonicalModelId
-      : getVscodeModelGroupingKey(model) || canonicalModelId;
+      : (await getVscodeModelGroupingKey(model)) || canonicalModelId;
     const current = groupedModels.get(groupKey);
     if (!current) {
       groupedModels.set(groupKey, model);
@@ -82,10 +82,12 @@ export async function GET(
   }
 
   const usableModels = Array.isArray(body.data) ? body.data.filter(isUsableChatModel) : [];
-  const preferredModels = filterCanonicalTagModels(
+  const preferredModels = await filterCanonicalTagModels(
     expandVscodeServiceTierModels(await selectPreferredModels(usableModels))
   );
-  const models = preferredModels.map((model) => toOllamaTagModel(model, "grouped"));
+  const models = await Promise.all(
+    preferredModels.map((model) => toOllamaTagModel(model, "grouped"))
+  );
 
   return Response.json(
     {

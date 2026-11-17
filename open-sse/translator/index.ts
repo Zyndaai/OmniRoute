@@ -27,12 +27,15 @@ import {
 } from "./helpers/schemaCoercion.ts";
 import { getRequestTranslator, getResponseTranslator } from "./registry.ts";
 import { bootstrapTranslatorRegistry } from "./bootstrap.ts";
-import { scopeGeminiThoughtSignatureNamespace } from "../services/geminiThoughtSignatureStore.ts";
+import {
+  buildGeminiThoughtSignatureKey,
+  getGeminiThoughtSignature,
+  scopeGeminiThoughtSignatureNamespace,
+} from "../services/geminiThoughtSignatureStore.ts";
 import { extractResponsesWebSearchEvidence } from "./response/openai-responses/pureHelpers.ts";
 import { hasThinkingConfig, normalizeThinkingConfig } from "../services/provider.ts";
 import { applyThinkingBudget } from "../services/thinkingBudget.ts";
 import { applyReasoningRuleDirective } from "@/lib/reasoningRouting/policy";
-import { getModelPreserveVideoUrl } from "@/lib/db/models/modelPreserveVideoUrl";
 import { getResolvedModelCapabilities, supportsReasoning } from "../services/modelCapabilities.ts";
 import { normalizeRoles, resolvePreserveDeveloperRole } from "../services/roleNormalizer.ts";
 import { hoistLeadingSystemMessage } from "./helpers/strictSystemHoist.ts";
@@ -41,6 +44,7 @@ import { acceptsInlineToolAdditions, hoistToolAdditions } from "./helpers/claude
 import {
   buildAssistantMessageCacheKey,
   lookupReasoning,
+  preloadReasoningFromStore,
   recordReplay,
   requiresReasoningReplay,
 } from "../services/reasoningCache.ts";
@@ -342,7 +346,84 @@ const OPENAI_INCOMPATIBLE_ECHO_FIELDS = [
   "cache_control",
 ];
 
-export function translateRequest(
+/**
+ * Read the persisted thought signatures of a request's historical tool calls, for
+ * `translateRequest`'s `thoughtSignatures` option. The Gemini-family request translators are
+ * synchronous but the signature store is asynchronous, so the async caller resolves the store
+ * first. Returns undefined when the target is not Gemini-family or no tool call is in the history.
+ *
+ * Keys are built exactly as the translators build them (model-family scoped namespace + tool call
+ * id), and the ids are collected from the three shapes a tool call arrives in: Claude `tool_use`
+ * blocks, OpenAI `tool_calls[]` and Responses `function_call` items.
+ */
+export async function prefetchThoughtSignatures(
+  targetFormat: string,
+  model: string,
+  body: unknown,
+  signatureNamespace: string | null | undefined
+): Promise<Map<unknown, string | null> | undefined> {
+  if (targetFormat !== FORMATS.GEMINI && targetFormat !== FORMATS.ANTIGRAVITY) return undefined;
+  if (signatureNamespace == null || !body || typeof body !== "object") return undefined;
+  const record = body as Record<string, unknown>;
+  const ids = new Set<string>();
+  const addId = (value: unknown) => {
+    if (typeof value === "string" && value.length > 0) ids.add(value);
+  };
+  for (const message of Array.isArray(record.messages) ? record.messages : []) {
+    if (!message || typeof message !== "object") continue;
+    const entry = message as Record<string, unknown>;
+    for (const call of Array.isArray(entry.tool_calls) ? entry.tool_calls : []) {
+      addId((call as Record<string, unknown> | null)?.id);
+    }
+    for (const block of Array.isArray(entry.content) ? entry.content : []) {
+      const part = block as Record<string, unknown> | null;
+      if (part?.type === "tool_use") addId(part.id);
+    }
+  }
+  for (const item of Array.isArray(record.input) ? record.input : []) {
+    const entry = item as Record<string, unknown> | null;
+    if (entry?.type === "function_call") addId(entry.call_id ?? entry.id);
+  }
+  if (ids.size === 0) return undefined;
+
+  const namespace = scopeGeminiThoughtSignatureNamespace(signatureNamespace, model);
+  const keys = [...ids].map((id) => buildGeminiThoughtSignatureKey(namespace, id));
+  const signatures = await Promise.all(keys.map((key) => getGeminiThoughtSignature(key)));
+  return new Map(keys.map((key, index) => [key, signatures[index] ?? null]));
+}
+
+/**
+ * Pull the DB-only reasoning cache entries a replay pass is about to read into memory.
+ * `lookupReasoning` is synchronous (memory only), so the keys it will ask for are
+ * collected here exactly as the replay passes build them: the first tool call / tool_use id
+ * of an assistant turn, or the conversation digest key for a plain assistant turn.
+ */
+async function preloadReplayReasoning(
+  messages: Array<Record<string, unknown>>,
+  reasoningCacheScope: string | null | undefined
+): Promise<void> {
+  const keys = new Set<string>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (!message || typeof message !== "object" || message.role !== "assistant") continue;
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    const firstToolCall = toolCalls[0] as Record<string, unknown> | undefined;
+    if (typeof firstToolCall?.id === "string" && firstToolCall.id) keys.add(firstToolCall.id);
+    const firstToolUse = Array.isArray(message.content)
+      ? (message.content as Array<Record<string, unknown> | null>).find(
+          (block) => block?.type === "tool_use"
+        )
+      : undefined;
+    if (typeof firstToolUse?.id === "string" && firstToolUse.id) keys.add(firstToolUse.id);
+    if (toolCalls.length === 0 && !firstToolUse) {
+      const key = buildAssistantMessageCacheKey(reasoningCacheScope, messages, index);
+      if (key) keys.add(key);
+    }
+  }
+  if (keys.size > 0) await preloadReasoningFromStore(keys);
+}
+
+export async function translateRequest(
   sourceFormat,
   targetFormat,
   model,
@@ -369,6 +450,13 @@ export function translateRequest(
     /** UA-detected GitHub Copilot client. Forwarded to translators via the
      *  transient `_copilotClient` credential flag (see openai-responses → openai). */
     copilotClient?: boolean;
+    /** Per-provider/model preserveVideoUrl compat override, resolved by the (async) caller with
+     *  `getModelPreserveVideoUrl`; undefined falls back to the moonshot/kimi default. */
+    preserveVideoUrl?: boolean;
+    /** Persisted Gemini thought signatures read ahead of the (synchronous) translation with
+     *  `prefetchThoughtSignatures`; Gemini-family request translators re-attach them to
+     *  historical tool calls. */
+    thoughtSignatures?: ReadonlyMap<unknown, string | null>;
   }
 ) {
   // Claude Code inline-tools `tool_addition` blocks only reach Anthropic-native targets;
@@ -400,7 +488,7 @@ export function translateRequest(
     /glm|zhipu|z-ai/i.test(normalizedModel);
 
   // Phase 2: Apply thinking budget control before normalization
-  result = applyThinkingBudget(result);
+  result = await applyThinkingBudget(result);
   // Explicit reasoning-routing policies are final. The marker is internal and is
   // consumed here before any provider translation can see it.
   result = applyReasoningRuleDirective(result);
@@ -410,7 +498,7 @@ export function translateRequest(
 
   // Resolve the replay contract before Responses input is converted: conversion
   // must know whether reasoning items are protocol history rather than display metadata.
-  const resolvedCapabilities = getResolvedModelCapabilities({
+  const resolvedCapabilities = await getResolvedModelCapabilities({
     provider: normalizedProvider,
     model: normalizedModel,
   });
@@ -418,7 +506,7 @@ export function translateRequest(
     provider: normalizedProvider,
     model: normalizedModel,
     thinkingEnabled: hasThinkingConfig(result),
-    supportsReasoning: supportsReasoning({
+    supportsReasoning: await supportsReasoning({
       provider: normalizedProvider,
       model: normalizedModel,
     }),
@@ -513,11 +601,13 @@ export function translateRequest(
       // thoughtSignature on tool-use history (#8979 / #2504 parity with the hub path).
       const hasNs = options?.signatureNamespace != null;
       const hasProvider = provider != null;
+      const hasThoughtSignatures = options?.thoughtSignatures != null;
       const directCredentials =
-        hasNs || hasProvider
+        hasNs || hasProvider || hasThoughtSignatures
           ? {
               ...(credentials && typeof credentials === "object" ? credentials : {}),
               ...(hasProvider ? { _provider: provider } : {}),
+              ...(hasThoughtSignatures ? { _thoughtSignatures: options.thoughtSignatures } : {}),
               ...(hasNs
                 ? {
                     _signatureNamespace: scopeGeminiThoughtSignatureNamespace(
@@ -528,7 +618,7 @@ export function translateRequest(
                 : {}),
             }
           : credentials;
-      result = directTranslator(model, result, stream, directCredentials);
+      result = await directTranslator(model, result, stream, directCredentials);
     } else {
       // Fallback: hub-and-spoke via OpenAI
       // Step 1: source -> openai (if source is not openai)
@@ -566,7 +656,7 @@ export function translateRequest(
                   ...(isGlmFamilyUpstream ? { _ensureUserTurn: true } : {}),
                 }
               : credentials;
-          result = toOpenAI(model, result, stream, step1Credentials);
+          result = await toOpenAI(model, result, stream, step1Credentials);
           // Log OpenAI intermediate format
           reqLogger?.logOpenAIRequest?.(result);
         }
@@ -589,6 +679,9 @@ export function translateRequest(
         Array.isArray(result.messages)
       ) {
         const messages = result.messages as Array<Record<string, unknown>>;
+        if (!options?.videoTranscriptSensitive) {
+          await preloadReplayReasoning(messages, options?.reasoningCacheScope);
+        }
         const replayOptions: OpenAIReplayOptions = {
           canReplayReasoningOnly: isReasoningOnlyReplayTarget(normalizedProvider, normalizedModel),
           requiresExplicitReasoningReplay,
@@ -612,10 +705,17 @@ export function translateRequest(
           const hasCopilot = options?.copilotClient === true;
           const hasProvider = provider != null;
           const videoSensitive = options?.videoTranscriptSensitive === true;
+          const hasThoughtSignatures = options?.thoughtSignatures != null;
           const translationCredentials =
-            hasNs || hasPreCompression || hasCopilot || hasProvider || videoSensitive
+            hasNs ||
+            hasPreCompression ||
+            hasCopilot ||
+            hasProvider ||
+            videoSensitive ||
+            hasThoughtSignatures
               ? {
                   ...(credentials && typeof credentials === "object" ? credentials : {}),
+                  ...(hasThoughtSignatures ? { _thoughtSignatures: options.thoughtSignatures } : {}),
                   ...(hasNs
                     ? {
                         _signatureNamespace: scopeGeminiThoughtSignatureNamespace(
@@ -639,7 +739,7 @@ export function translateRequest(
           // #7936 seam then gets null and namespace sub-tool calls come back
           // flattened, which Codex rejects with `unsupported call: <name>`.
           const identityMap = (result as Record<string, unknown>)._namespaceToolIdentityMap;
-          const translated = fromOpenAI(model, result, stream, translationCredentials);
+          const translated = await fromOpenAI(model, result, stream, translationCredentials);
           if (
             identityMap instanceof Map &&
             translated &&
@@ -675,7 +775,7 @@ export function translateRequest(
       // Per-provider/model preserveVideoUrl flag from compat overrides.
       // Falls back to true for moonshot/kimi when unset (legacy behavior).
       preserveVideoUrl:
-        getModelPreserveVideoUrl(normalizedProvider, normalizedModel) ??
+        options?.preserveVideoUrl ??
         (normalizedProvider === "moonshot" || normalizedProvider === "kimi"),
       // Same decision normalizeRoles made above — never undo it here.
       preserveDeveloperRole: resolvePreserveDeveloperRole(preserveDeveloperRole, provider),
@@ -772,6 +872,9 @@ export function translateRequest(
   // could honor reasoning-replay providers.
   if (isReasoner && result.messages && Array.isArray(result.messages)) {
     const canReplayReasoningOnly = isReasoningOnlyReplayTarget(normalizedProvider, normalizedModel);
+    if (!options?.videoTranscriptSensitive) {
+      await preloadReplayReasoning(result.messages, options?.reasoningCacheScope);
+    }
 
     for (const [messageIndex, msg] of result.messages.entries()) {
       if (msg.role !== "assistant") continue;

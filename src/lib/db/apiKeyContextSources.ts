@@ -1,4 +1,5 @@
-import { getDbInstance } from "./core";
+import { db } from "@/lib/db/pg";
+import { decrypt, encrypt } from "./encryption";
 
 export interface ApiKeyContextSource {
   apiKeyId: string;
@@ -15,93 +16,76 @@ interface ContextSourceRow {
   token: string | null;
   base_url: string | null;
   vault_path: string | null;
-  enabled: number;
+  enabled: boolean;
 }
 
 function rowToSource(row: ContextSourceRow): ApiKeyContextSource {
   return {
     apiKeyId: row.api_key_id,
     sourceType: row.source_type,
-    token: row.token,
+    // The token is stored as an enc:v1 envelope; plaintext rows from older writers pass through.
+    token: (decrypt(row.token) as string | null | undefined) ?? null,
     baseUrl: row.base_url,
     vaultPath: row.vault_path,
-    enabled: row.enabled === 1,
+    enabled: row.enabled === true,
   };
 }
 
-export function getApiKeyContextSource(
+export async function getApiKeyContextSource(
   apiKeyId: string | null | undefined,
   sourceType: string
-): (ApiKeyContextSource & { enabled: true }) | null {
+): Promise<(ApiKeyContextSource & { enabled: true }) | null> {
   if (!apiKeyId) return null;
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      "SELECT * FROM api_key_context_sources WHERE api_key_id = ? AND source_type = ? AND enabled = 1"
-    )
-    .get(apiKeyId, sourceType) as ContextSourceRow | undefined;
+  const row = await db().queryOne<ContextSourceRow>(
+    "SELECT * FROM api_key_context_sources WHERE api_key_id = $1 AND source_type = $2 AND enabled = true",
+    [apiKeyId, sourceType]
+  );
   if (!row) return null;
   return rowToSource(row) as ApiKeyContextSource & { enabled: true };
 }
 
-export function setApiKeyContextSource(
+export async function setApiKeyContextSource(
   apiKeyId: string,
   sourceType: string,
   config: { token?: string; baseUrl?: string; vaultPath?: string; enabled?: boolean }
-): void {
-  const db = getDbInstance();
-  const existing = db
-    .prepare("SELECT * FROM api_key_context_sources WHERE api_key_id = ? AND source_type = ?")
-    .get(apiKeyId, sourceType) as ContextSourceRow | undefined;
-
-  const now = new Date().toISOString();
-  if (existing) {
-    db.prepare(
-      `UPDATE api_key_context_sources SET
-        token = COALESCE(?, token),
-        base_url = COALESCE(?, base_url),
-        vault_path = COALESCE(?, vault_path),
-        enabled = COALESCE(?, enabled),
-        updated_at = ?
-      WHERE api_key_id = ? AND source_type = ?`
-    ).run(
-      config.token ?? null,
-      config.baseUrl ?? null,
-      config.vaultPath ?? null,
-      config.enabled !== undefined ? (config.enabled ? 1 : 0) : null,
-      now,
-      apiKeyId,
-      sourceType
-    );
-  } else {
-    db.prepare(
-      `INSERT INTO api_key_context_sources
+): Promise<void> {
+  const token = config.token === undefined ? null : (encrypt(config.token) ?? null);
+  // Insert defaults a missing `enabled` to true; an update keeps the stored value.
+  await db().execute(
+    `INSERT INTO api_key_context_sources
         (api_key_id, source_type, token, base_url, vault_path, enabled, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+      VALUES ($1, $2, $3, $4, $5, COALESCE($6::boolean, true), now(), now())
+      ON CONFLICT (api_key_id, source_type) DO UPDATE SET
+        token = COALESCE($3, api_key_context_sources.token),
+        base_url = COALESCE($4, api_key_context_sources.base_url),
+        vault_path = COALESCE($5, api_key_context_sources.vault_path),
+        enabled = COALESCE($6::boolean, api_key_context_sources.enabled),
+        updated_at = now()`,
+    [
       apiKeyId,
       sourceType,
-      config.token ?? null,
+      token,
       config.baseUrl ?? null,
       config.vaultPath ?? null,
-      config.enabled !== undefined ? (config.enabled ? 1 : 0) : 1,
-      now,
-      now
-    );
-  }
+      config.enabled === undefined ? null : config.enabled,
+    ]
+  );
 }
 
-export function deleteApiKeyContextSource(apiKeyId: string, sourceType: string): void {
-  const db = getDbInstance();
-  db.prepare(
-    "DELETE FROM api_key_context_sources WHERE api_key_id = ? AND source_type = ?"
-  ).run(apiKeyId, sourceType);
+export async function deleteApiKeyContextSource(
+  apiKeyId: string,
+  sourceType: string
+): Promise<void> {
+  await db().execute(
+    "DELETE FROM api_key_context_sources WHERE api_key_id = $1 AND source_type = $2",
+    [apiKeyId, sourceType]
+  );
 }
 
-export function listApiKeyContextSources(apiKeyId: string): ApiKeyContextSource[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT * FROM api_key_context_sources WHERE api_key_id = ?")
-    .all(apiKeyId) as ContextSourceRow[];
+export async function listApiKeyContextSources(apiKeyId: string): Promise<ApiKeyContextSource[]> {
+  const rows = await db().query<ContextSourceRow>(
+    "SELECT * FROM api_key_context_sources WHERE api_key_id = $1",
+    [apiKeyId]
+  );
   return rows.map(rowToSource);
 }

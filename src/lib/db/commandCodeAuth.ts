@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 
-import { getDbInstance, rowToCamel } from "./core";
+import { db } from "./pg";
 import { decrypt, encrypt } from "./encryption";
 
 export type CommandCodeAuthStatus = "pending" | "received" | "applied" | "expired";
@@ -28,33 +28,18 @@ export interface ConsumedCommandCodeAuthSecret extends CommandCodeAuthSafeStatus
   apiKey: string;
 }
 
-type DbRunResult = { changes?: number };
-type DbStatement<TRow = unknown> = {
-  get: (...params: unknown[]) => TRow | undefined;
-  all: (...params: unknown[]) => TRow[];
-  run: (...params: unknown[]) => DbRunResult;
-};
-type DbLike = {
-  prepare: <TRow = unknown>(sql: string) => DbStatement<TRow>;
-  transaction: <T extends (...args: unknown[]) => unknown>(fn: T) => T;
-};
-
 type AuthSessionRow = {
   id: string;
   state_hash: string;
   status: CommandCodeAuthStatus;
   encrypted_api_key?: string | null;
-  metadata_json?: string | null;
+  metadata?: unknown;
   created_at: string;
   expires_at: string;
   received_at?: string | null;
   applied_at?: string | null;
   updated_at: string;
 };
-
-function db(): DbLike {
-  return getDbInstance() as unknown as DbLike;
-}
 
 export function hashCommandCodeAuthState(state: string): string {
   return createHash("sha256").update(state, "utf8").digest("hex");
@@ -66,9 +51,7 @@ function nowIso(): string {
 
 function parseMetadata(value: unknown): CommandCodeAuthMetadata | null {
   if (!value) return null;
-  // rowToCamel auto-parses the `metadata_json` column and exposes the object under
-  // `camel.metadata` (already parsed); accept that directly. Fall back to parsing a
-  // raw string for any other caller.
+  // jsonb arrives parsed; a raw JSON string is still accepted.
   if (typeof value === "object" && !Array.isArray(value)) {
     return value as CommandCodeAuthMetadata;
   }
@@ -82,117 +65,106 @@ function parseMetadata(value: unknown): CommandCodeAuthMetadata | null {
 }
 
 function toSafeStatus(row: AuthSessionRow): CommandCodeAuthSafeStatus {
-  const camel = rowToCamel(row) as Record<string, unknown>;
   return {
-    id: String(camel.id),
-    stateHash: String(camel.stateHash),
-    status: camel.status as CommandCodeAuthStatus,
-    metadata: parseMetadata(camel.metadata ?? camel.metadataJson),
-    createdAt: String(camel.createdAt),
-    expiresAt: String(camel.expiresAt),
-    receivedAt: (camel.receivedAt as string | null | undefined) ?? null,
-    appliedAt: (camel.appliedAt as string | null | undefined) ?? null,
-    updatedAt: String(camel.updatedAt),
+    id: String(row.id),
+    stateHash: String(row.state_hash),
+    status: row.status,
+    metadata: parseMetadata(row.metadata),
+    createdAt: String(row.created_at),
+    expiresAt: String(row.expires_at),
+    receivedAt: row.received_at ?? null,
+    appliedAt: row.applied_at ?? null,
+    updatedAt: String(row.updated_at),
   };
 }
 
-function markExpiredForState(stateHash: string, now = nowIso()): void {
-  db()
-    .prepare(
-      `UPDATE command_code_auth_sessions
-       SET status = 'expired', updated_at = ?
-       WHERE state_hash = ? AND status IN ('pending', 'received') AND expires_at <= ?`
-    )
-    .run(now, stateHash, now);
+async function markExpiredForState(stateHash: string, now = nowIso()): Promise<void> {
+  await db().execute(
+    `UPDATE command_code_auth_sessions
+     SET status = 'expired', updated_at = $1
+     WHERE state_hash = $2 AND status IN ('pending', 'received') AND expires_at <= $1`,
+    [now, stateHash]
+  );
 }
 
-export function createPendingCommandCodeAuthSession(input: {
+export async function createPendingCommandCodeAuthSession(input: {
   stateHash: string;
   expiresAt: string;
-}): CommandCodeAuthSafeStatus {
-  const id = randomUUID();
-  const now = nowIso();
-  db()
-    .prepare(
-      `INSERT INTO command_code_auth_sessions (
-        id, state_hash, status, encrypted_api_key, metadata_json,
-        created_at, expires_at, received_at, applied_at, updated_at
-      ) VALUES (?, ?, 'pending', NULL, NULL, ?, ?, NULL, NULL, ?)`
-    )
-    .run(id, input.stateHash, now, input.expiresAt, now);
-
-  const row = db()
-    .prepare<AuthSessionRow>("SELECT * FROM command_code_auth_sessions WHERE id = ?")
-    .get(id);
+}): Promise<CommandCodeAuthSafeStatus> {
+  const row = await db().queryOne<AuthSessionRow>(
+    `INSERT INTO command_code_auth_sessions (id, state_hash, status, expires_at)
+     VALUES ($1, $2, 'pending', $3)
+     RETURNING *`,
+    [randomUUID(), input.stateHash, input.expiresAt]
+  );
   if (!row) throw new Error("Failed to create Command Code auth session");
   return toSafeStatus(row);
 }
 
-export function markCommandCodeAuthSessionReceived(input: {
+export async function markCommandCodeAuthSessionReceived(input: {
   stateHash: string;
   apiKey: string;
   metadata?: CommandCodeAuthMetadata;
-}): CommandCodeAuthSafeStatus | null {
+}): Promise<CommandCodeAuthSafeStatus | null> {
   const now = nowIso();
-  markExpiredForState(input.stateHash, now);
+  await markExpiredForState(input.stateHash, now);
   const metadata: CommandCodeAuthMetadata = {
     ...(input.metadata || {}),
     receivedAt: now,
   };
   const encryptedApiKey = encrypt(input.apiKey);
-  db()
-    .prepare(
-      `UPDATE command_code_auth_sessions
-       SET status = 'received', encrypted_api_key = ?, metadata_json = ?, received_at = ?, updated_at = ?
-       WHERE state_hash = ? AND status IN ('pending', 'received') AND expires_at > ?`
-    )
-    .run(encryptedApiKey, JSON.stringify(metadata), now, now, input.stateHash, now);
+  await db().execute(
+    `UPDATE command_code_auth_sessions
+     SET status = 'received', encrypted_api_key = $1, metadata = $2::jsonb, received_at = $3, updated_at = $3
+     WHERE state_hash = $4 AND status IN ('pending', 'received') AND expires_at > $3`,
+    [encryptedApiKey, JSON.stringify(metadata), now, input.stateHash]
+  );
 
   return getCommandCodeAuthSessionSafeStatus(input.stateHash);
 }
 
-export function getCommandCodeAuthSessionSafeStatus(
+export async function getCommandCodeAuthSessionSafeStatus(
   stateHash: string
-): CommandCodeAuthSafeStatus | null {
-  markExpiredForState(stateHash);
-  const row = db()
-    .prepare<AuthSessionRow>("SELECT * FROM command_code_auth_sessions WHERE state_hash = ?")
-    .get(stateHash);
+): Promise<CommandCodeAuthSafeStatus | null> {
+  await markExpiredForState(stateHash);
+  const row = await db().queryOne<AuthSessionRow>(
+    "SELECT * FROM command_code_auth_sessions WHERE state_hash = $1",
+    [stateHash]
+  );
   return row ? toSafeStatus(row) : null;
 }
 
-export function consumeCommandCodeAuthSecret(
+export async function consumeCommandCodeAuthSecret(
   stateHash: string
-): ConsumedCommandCodeAuthSecret | null {
-  const database = db();
-  return database.transaction(() => {
+): Promise<ConsumedCommandCodeAuthSecret | null> {
+  return db().transaction(async (tx): Promise<ConsumedCommandCodeAuthSecret | null> => {
     const now = nowIso();
-    database
-      .prepare(
-        `UPDATE command_code_auth_sessions
-         SET status = 'expired', updated_at = ?
-         WHERE state_hash = ? AND status IN ('pending', 'received') AND expires_at <= ?`
-      )
-      .run(now, stateHash, now);
+    await tx.execute(
+      `UPDATE command_code_auth_sessions
+       SET status = 'expired', updated_at = $1
+       WHERE state_hash = $2 AND status IN ('pending', 'received') AND expires_at <= $1`,
+      [now, stateHash]
+    );
 
-    const row = database
-      .prepare<AuthSessionRow>(
-        `SELECT * FROM command_code_auth_sessions
-         WHERE state_hash = ? AND status = 'received' AND expires_at > ? AND encrypted_api_key IS NOT NULL`
-      )
-      .get(stateHash, now);
+    // FOR UPDATE: two processes redeeming the same state cannot both read the secret.
+    const row = await tx.queryOne<AuthSessionRow>(
+      `SELECT * FROM command_code_auth_sessions
+       WHERE state_hash = $1 AND status = 'received' AND expires_at > $2
+         AND encrypted_api_key IS NOT NULL
+       FOR UPDATE`,
+      [stateHash, now]
+    );
     if (!row?.encrypted_api_key) return null;
 
     const apiKey = decrypt(row.encrypted_api_key);
     if (!apiKey) return null;
 
-    const result = database
-      .prepare(
-        `UPDATE command_code_auth_sessions
-         SET status = 'applied', encrypted_api_key = NULL, applied_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'received'`
-      )
-      .run(now, now, row.id);
+    const result = await tx.execute(
+      `UPDATE command_code_auth_sessions
+       SET status = 'applied', encrypted_api_key = NULL, applied_at = $1, updated_at = $1
+       WHERE id = $2 AND status = 'received'`,
+      [now, row.id]
+    );
     if (!result.changes) return null;
 
     return {
@@ -205,5 +177,5 @@ export function consumeCommandCodeAuthSecret(
       }),
       apiKey,
     };
-  })() as ConsumedCommandCodeAuthSecret | null;
+  });
 }

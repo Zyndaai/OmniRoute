@@ -4,17 +4,16 @@
  * A discovery response only lives for the request that produced it: after a
  * failed discovery the next read looked exactly like a successful one, with no
  * trace of the failure left anywhere. This module stores the last outcome
- * (status, cause, date) of every connection in the `key_value` store, under the
- * namespace `discoveryState` and the key `<providerId>:<connectionId>` — the
- * same key convention as `syncedAvailableModels`.
+ * (status, cause, date) of every connection in the `discovery_status`,
+ * `discovery_cause` and `discovery_at` columns of `connection_model_sync`
+ * (one row per connection, shared with the synced model list).
  *
  * The record is display state only: it never touches the connection columns
  * that drive routing (`lastError`, `lastErrorType`, `testStatus`).
  */
 
-import { getDbInstance } from "./core";
-
-const DISCOVERY_STATE_NAMESPACE = "discoveryState";
+import { db } from "./pg";
+import { stripNul } from "./pgJsonText";
 
 export type DiscoveryStateStatus = "healthy" | "degraded";
 
@@ -37,47 +36,29 @@ function discoveryStateKey(providerId: string, connectionId: string): string {
   return `${providerId}:${connectionId}`;
 }
 
-function toRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-/**
- * Parse a stored entry. A row that cannot be read (corrupted JSON, an
- * unexpected shape, an unreadable date) is treated as absent: an unknown
- * outcome must never be mistaken for a healthy one.
- */
-function parseDiscoveryState(raw: unknown): DiscoveryStateRecord | null {
-  const record = toRecord(raw);
-  if (!record) return null;
-  const status = record.status;
-  if (status !== "healthy" && status !== "degraded") return null;
-  const cause = typeof record.cause === "string" && record.cause.length > 0 ? record.cause : null;
-  const at = typeof record.at === "string" ? record.at : "";
-  if (!at || !Number.isFinite(Date.parse(at))) return null;
-  return { status, cause, at };
-}
-
 /**
  * Store the outcome of the last discovery attempt for one connection. The
  * entry is replaced, never appended: the store keeps one row per connection.
+ * The row has a foreign key to its connection, so an outcome for a connection that no
+ * longer exists is dropped.
  */
-export function saveDiscoveryState(
+export async function saveDiscoveryState(
   providerId: string,
   connectionId: string,
   outcome: { status: DiscoveryStateStatus; cause: string | null }
-): void {
-  const db = getDbInstance();
-  const record: DiscoveryStateRecord = {
-    status: outcome.status,
-    cause: outcome.cause,
-    at: new Date().toISOString(),
-  };
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    DISCOVERY_STATE_NAMESPACE,
-    discoveryStateKey(providerId, connectionId),
-    JSON.stringify(record)
+): Promise<void> {
+  await db().execute(
+    `INSERT INTO connection_model_sync
+       (connection_id, provider, discovery_status, discovery_cause, discovery_at)
+     SELECT $1::text, $2::text, $3::text, $4::text, now()
+     WHERE EXISTS (SELECT 1 FROM provider_connections WHERE id = $1)
+     ON CONFLICT (connection_id) DO UPDATE SET
+       provider = EXCLUDED.provider,
+       discovery_status = EXCLUDED.discovery_status,
+       discovery_cause = EXCLUDED.discovery_cause,
+       discovery_at = EXCLUDED.discovery_at,
+       updated_at = now()`,
+    [connectionId, providerId, outcome.status, outcome.cause === null ? null : stripNul(outcome.cause)]
   );
 }
 
@@ -86,59 +67,70 @@ export function saveDiscoveryState(
  * Returns a map keyed by `<providerId>:<connectionId>`; a connection without a
  * readable entry is simply absent from the map.
  */
-export function getDiscoveryStatesForConnections(
+export async function getDiscoveryStatesForConnections(
   entries: DiscoveryStateEntry[]
-): Map<string, DiscoveryStateRecord> {
+): Promise<Map<string, DiscoveryStateRecord>> {
   const states = new Map<string, DiscoveryStateRecord>();
   if (entries.length === 0) return states;
 
-  const db = getDbInstance();
-  const placeholders = entries.map(() => "?").join(",");
-  const rows = db
-    .prepare(`SELECT key, value FROM key_value WHERE namespace = ? AND key IN (${placeholders})`)
-    .all(
-      DISCOVERY_STATE_NAMESPACE,
-      ...entries.map((entry) => discoveryStateKey(entry.provider, entry.id))
-    );
+  const rows = await db().query<{
+    connection_id: string;
+    provider: string;
+    discovery_status: string | null;
+    discovery_cause: string | null;
+    discovery_at: string | null;
+  }>(
+    `SELECT connection_id, provider, discovery_status, discovery_cause, discovery_at
+     FROM connection_model_sync
+     WHERE discovery_status IS NOT NULL AND discovery_at IS NOT NULL
+       AND (provider, connection_id) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
+    [entries.map((entry) => entry.provider), entries.map((entry) => entry.id)]
+  );
 
   for (const row of rows) {
-    const record = toRecord(row);
-    if (!record) continue;
-    const key = typeof record.key === "string" ? record.key : null;
-    if (!key) continue;
-    let parsedValue: unknown = null;
-    try {
-      parsedValue = JSON.parse(typeof record.value === "string" ? record.value : "");
-    } catch {
-      parsedValue = null;
-    }
-    const state = parseDiscoveryState(parsedValue);
-    if (state) states.set(key, state);
+    // An unknown outcome must never be mistaken for a healthy one.
+    if (row.discovery_status !== "healthy" && row.discovery_status !== "degraded") continue;
+    const at = row.discovery_at ? new Date(row.discovery_at).toISOString() : "";
+    if (!at) continue;
+    states.set(discoveryStateKey(row.provider, row.connection_id), {
+      status: row.discovery_status,
+      cause: row.discovery_cause && row.discovery_cause.length > 0 ? row.discovery_cause : null,
+      at,
+    });
   }
   return states;
 }
 
-/** Drop the stored outcomes of the given connections. */
-export function deleteDiscoveryStatesForConnections(entries: DiscoveryStateEntry[]): number {
-  if (entries.length === 0) return 0;
+/** Clear the stored outcome columns, dropping rows that then hold nothing. */
+async function clearDiscoveryColumns(where: string, params: unknown[]): Promise<number> {
+  return db().transaction(async (tx) => {
+    const cleared = await tx.execute(
+      `UPDATE connection_model_sync
+       SET discovery_status = NULL, discovery_cause = NULL, discovery_at = NULL, updated_at = now()
+       WHERE discovery_status IS NOT NULL AND ${where}`,
+      params
+    );
+    await tx.execute(
+      `DELETE FROM connection_model_sync
+       WHERE discovery_status IS NULL AND models = '[]'::jsonb AND ${where}`,
+      params
+    );
+    return cleared.changes;
+  });
+}
 
-  const db = getDbInstance();
-  let changes = 0;
-  for (const entry of entries) {
-    const result = db
-      .prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?")
-      .run(DISCOVERY_STATE_NAMESPACE, discoveryStateKey(entry.provider, entry.id));
-    changes += Number(result.changes || 0);
-  }
-  return changes;
+/** Drop the stored outcomes of the given connections. */
+export async function deleteDiscoveryStatesForConnections(
+  entries: DiscoveryStateEntry[]
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  return clearDiscoveryColumns(
+    "(provider, connection_id) IN (SELECT * FROM unnest($1::text[], $2::text[]))",
+    [entries.map((entry) => entry.provider), entries.map((entry) => entry.id)]
+  );
 }
 
 /** Drop every stored outcome of a provider. */
-export function deleteDiscoveryStatesForProvider(providerId: string): number {
-  const db = getDbInstance();
-  const keyPrefix = `${providerId}:`;
-  const result = db
-    .prepare("DELETE FROM key_value WHERE namespace = ? AND substr(key, 1, ?) = ?")
-    .run(DISCOVERY_STATE_NAMESPACE, keyPrefix.length, keyPrefix);
-  return Number(result.changes || 0);
+export async function deleteDiscoveryStatesForProvider(providerId: string): Promise<number> {
+  return clearDiscoveryColumns("provider = $1", [providerId]);
 }

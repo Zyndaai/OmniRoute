@@ -312,7 +312,7 @@ function buildConnectionOption(
   };
 }
 
-function addModelOption(
+async function addModelOption(
   modelMap: Map<string, ComboBuilderModelOption>,
   providerId: string,
   input: {
@@ -327,10 +327,10 @@ function addModelOption(
     customPrecedence?: boolean;
     visibilityModality?: string;
   }
-) {
+): Promise<void> {
   const modelId = toStringOrNull(input.id);
   if (!modelId) return;
-  if (getModelIsHidden(providerId, modelId, input.visibilityModality)) return;
+  if (await getModelIsHidden(providerId, modelId, input.visibilityModality)) return;
 
   const nextSourcePriority = getSourcePriority(input.source);
   const existing = modelMap.get(modelId);
@@ -415,11 +415,11 @@ function addModelOption(
  * able to select it without entering its id manually.  Keep this local to the
  * builder rather than broadening the chat catalog used by provider pages.
  */
-function addStaticMediaModelOptions(
+async function addStaticMediaModelOptions(
   modelMap: Map<string, ComboBuilderModelOption>,
   providerId: string
-): void {
-  const append = (
+): Promise<void> {
+  const append = async (
     models: unknown,
     apiFormat: string,
     supportedEndpoint: string,
@@ -429,7 +429,7 @@ function addStaticMediaModelOptions(
     for (const model of models) {
       if (!model || typeof model !== "object" || Array.isArray(model)) continue;
       const entry = model as { id?: unknown; name?: unknown };
-      addModelOption(modelMap, providerId, {
+      await addModelOption(modelMap, providerId, {
         id: toStringOrNull(entry.id),
         name: toStringOrNull(entry.name),
         source: "system",
@@ -441,7 +441,7 @@ function addStaticMediaModelOptions(
   };
 
   const imageProvider = getImageProvider(providerId) as { models?: unknown } | null;
-  append(imageProvider?.models, "images", "images", "images");
+  await append(imageProvider?.models, "images", "images", "images");
 
   // Some registries intentionally retain a diagnostic-only provider definition
   // for unsupported transports.  It must not become a selectable combo target.
@@ -450,31 +450,36 @@ function addStaticMediaModelOptions(
     unsupported?: boolean;
   } | null;
   if (!videoProvider?.unsupported) {
-    append(videoProvider?.models, "video", "videos", "videos");
+    await append(videoProvider?.models, "video", "videos", "videos");
   }
 
   const speechProvider = getSpeechProvider(providerId);
-  append(speechProvider?.models, "audio", "audio-speech", "audio-speech");
+  await append(speechProvider?.models, "audio", "audio-speech", "audio-speech");
 
   const transcriptionProvider = getTranscriptionProvider(providerId);
-  append(transcriptionProvider?.models, "audio", "audio-transcriptions", "audio-transcriptions");
+  await append(
+    transcriptionProvider?.models,
+    "audio",
+    "audio-transcriptions",
+    "audio-transcriptions"
+  );
 }
 
-function buildModelOptions(
+async function buildModelOptions(
   providerId: string,
   builtInModels: RegistryModel[],
   syncedModels: SyncedModelLike[],
   customModels: CustomModelLike[]
-): Map<string, ComboBuilderModelOption> {
+): Promise<Map<string, ComboBuilderModelOption>> {
   const modelMap = new Map<string, ComboBuilderModelOption>();
   const fallbackModels = getCompatibleFallbackModels(providerId, builtInModels);
 
   for (const model of syncedModels) {
-    const resolved = getResolvedModelCapabilities({
+    const resolved = await getResolvedModelCapabilities({
       provider: providerId,
       model: toStringOrNull(model.id),
     });
-    addModelOption(modelMap, providerId, {
+    await addModelOption(modelMap, providerId, {
       id: toStringOrNull(model.id),
       name: toStringOrNull(model.name),
       source: "imported",
@@ -540,9 +545,9 @@ function buildModelOptions(
       // either — the base's visibility carries into everything expanded from
       // it. (The variant's own exact-id hidden state is still checked inside
       // addModelOption; this guards the base that no longer reaches the map.)
-      if (getModelIsHidden(providerId, baseId)) continue;
+      if (await getModelIsHidden(providerId, baseId)) continue;
       const base = modelMap.get(baseId);
-      addModelOption(modelMap, providerId, {
+      await addModelOption(modelMap, providerId, {
         id: rawId,
         name: base ? `${base.name} (${rawId.slice(baseId.length + 1)})` : rawId,
         source: "imported",
@@ -555,11 +560,11 @@ function buildModelOptions(
   }
 
   for (const model of builtInModels) {
-    const resolved = getResolvedModelCapabilities({
+    const resolved = await getResolvedModelCapabilities({
       provider: providerId,
       model: toStringOrNull(model.id),
     });
-    addModelOption(modelMap, providerId, {
+    await addModelOption(modelMap, providerId, {
       id: toStringOrNull(model.id),
       name: toStringOrNull(model.name),
       source: "system",
@@ -569,7 +574,7 @@ function buildModelOptions(
     });
   }
 
-  addStaticMediaModelOptions(modelMap, providerId);
+  await addStaticMediaModelOptions(modelMap, providerId);
 
   // #9485: static registry models can declare provider-specific effort tiers even
   // when a connection's synced row does not include supportedThinkingEfforts.
@@ -608,9 +613,9 @@ function buildModelOptions(
       if (modelMap.has(rawId)) continue;
       const baseId = baseRawIdByVariantId.get(variant.id) ?? rawId;
       // #16977: same hidden-base guard as the synced-expansion loop above.
-      if (getModelIsHidden(providerId, baseId)) continue;
+      if (await getModelIsHidden(providerId, baseId)) continue;
       const base = modelMap.get(baseId);
-      addModelOption(modelMap, providerId, {
+      await addModelOption(modelMap, providerId, {
         id: rawId,
         name: base ? `${base.name} (${rawId.slice(baseId.length + 1)})` : rawId,
         source: base?.source ?? "system",
@@ -629,7 +634,7 @@ function buildModelOptions(
     )
       ? "imported"
       : ("custom" as BuilderModelSource);
-    addModelOption(modelMap, providerId, {
+    await addModelOption(modelMap, providerId, {
       id: toStringOrNull(model.id),
       name: toStringOrNull(model.name),
       source,
@@ -645,11 +650,11 @@ function buildModelOptions(
 
   if (Array.isArray(fallbackModels)) {
     for (const model of fallbackModels) {
-      const resolved = getResolvedModelCapabilities({
+      const resolved = await getResolvedModelCapabilities({
         provider: providerId,
         model: toStringOrNull(model.id),
       });
-      addModelOption(modelMap, providerId, {
+      await addModelOption(modelMap, providerId, {
         id: toStringOrNull(model.id),
         name: toStringOrNull(model.name),
         source: "fallback",
@@ -750,7 +755,7 @@ function normalizeSyncedModels(raw: unknown): SyncedModelLike[] {
 }
 
 export async function getComboBuilderOptions(): Promise<ComboBuilderOptionsPayload> {
-  getSyncedCapabilities();
+  await getSyncedCapabilities();
   const [connections, providerNodes, customModelsMap, syncedModelsMap, combos, settings] =
     await Promise.all([
       getProviderConnections(),
@@ -799,7 +804,7 @@ export async function getComboBuilderOptions(): Promise<ComboBuilderOptionsPaylo
       isOpenAICompatibleProvider(providerId) ||
       isAnthropicCompatibleProvider(providerId) ||
       isClaudeCodeCompatibleProvider(providerId);
-    const modelMap = buildModelOptions(
+    const modelMap = await buildModelOptions(
       providerId,
       builtInModels as RegistryModel[],
       syncedModels,
@@ -868,7 +873,7 @@ export async function getComboBuilderOptions(): Promise<ComboBuilderOptionsPaylo
       isOpenAICompatibleProvider(providerId) ||
       isAnthropicCompatibleProvider(providerId) ||
       isClaudeCodeCompatibleProvider(providerId);
-    const modelMap = buildModelOptions(
+    const modelMap = await buildModelOptions(
       providerId,
       builtInModels as RegistryModel[],
       syncedModels,

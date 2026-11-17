@@ -450,7 +450,7 @@ async function buildInspectorCombo(
     configuredCombo.models.length > 0
   ) {
     const comboLike = configuredCombo as ComboLike;
-    const resolvedTargets = resolveComboTargets(comboLike, configuredCombos as ComboLike[]);
+    const resolvedTargets = await resolveComboTargets(comboLike, configuredCombos as ComboLike[]);
     const { resetWindowConfig } = parseAutoConfig(comboLike, resolvedTargets);
     const evaluation = await evaluateAutoCandidates({
       targets: resolvedTargets,
@@ -464,7 +464,8 @@ async function buildInspectorCombo(
     const candidatesByExecutionKey = new Map(
       evaluation.routableCandidates.map((candidate) => [candidate.executionKey, candidate])
     );
-    scored = evaluation.scoredTargets.map((item) => {
+    const scoredTargets = await evaluation.scoredTargets;
+    scored = scoredTargets.map((item) => {
       const candidate = candidatesByExecutionKey.get(item.target.executionKey);
       if (!candidate)
         throw new Error(`Missing evaluated candidate for ${item.target.executionKey}`);
@@ -489,9 +490,17 @@ async function buildInspectorCombo(
       )
     );
     const pool = contexts.map((entry) => entry.candidate);
+    // calculateFactors takes a synchronous lookup, so load the fitness scores first.
+    const fitnessByModel = new Map<string, number>();
+    await Promise.all(
+      [...new Set(pool.map((candidate) => candidate.model))].map(async (model) => {
+        fitnessByModel.set(model, await getTaskFitness(model, taskType));
+      })
+    );
+    const lookupTaskFitness = (model: string) => fitnessByModel.get(model) ?? 0;
     scored = contexts
       .map((entry) => {
-        const factors = calculateFactors(entry.candidate, pool, taskType, getTaskFitness);
+        const factors = calculateFactors(entry.candidate, pool, taskType, lookupTaskFitness);
         const score = calculateScore(factors, weights);
         entry.context.autopilotIssueCount = issueCounts.get(entry.context.target.executionKey) ?? 0;
         return { entry, factors, score };

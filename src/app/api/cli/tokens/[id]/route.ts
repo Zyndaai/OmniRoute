@@ -14,7 +14,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (authError) return authError;
 
   const { id } = await params;
-  const result = revokeAccessToken(id);
+  const result = await revokeAccessToken(id);
   if (result.ambiguous) {
     return NextResponse.json(
       { error: "Token prefix matches more than one token" },

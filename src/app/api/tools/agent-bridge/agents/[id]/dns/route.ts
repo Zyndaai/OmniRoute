@@ -69,7 +69,7 @@ export async function POST(request: Request, { params }: Params): Promise<Respon
       setCachedPassword(suppliedPassword);
     }
 
-    upsertAgentBridgeState({ agent_id: id, dns_enabled: enabled });
+    await upsertAgentBridgeState({ agent_id: id, dns_enabled: enabled });
 
     return Response.json({ ok: true, dns_enabled: enabled });
   } catch (err) {

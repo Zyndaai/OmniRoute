@@ -318,7 +318,7 @@ function isFamilyFallbackCandidateEligible(
   provider: string,
   candidate: string,
   connectionId: string,
-  isVisible: ReturnType<typeof createComboModelVisibility>
+  isVisible: Awaited<ReturnType<typeof createComboModelVisibility>>
 ): boolean {
   const parsedCandidate = parseModel(candidate);
   const candidateModel = parsedCandidate.model || candidate;
@@ -335,16 +335,16 @@ function isFamilyFallbackCandidateEligible(
   );
 }
 
-export function isFamilyFallbackEligible(
+export async function isFamilyFallbackEligible(
   candidate: string,
   provider: string,
   connectionId: string
-): boolean {
+): Promise<boolean> {
   return isFamilyFallbackCandidateEligible(
     provider,
     candidate,
     connectionId,
-    createComboModelVisibility()
+    await createComboModelVisibility()
   );
 }
 
@@ -352,16 +352,16 @@ export function isFamilyFallbackEligible(
  * Get the next same-connection family fallback that passes the routing
  * visibility and resilience gates used by combo targets.
  */
-export function getNextEligibleFamilyFallback(
+export async function getNextEligibleFamilyFallback(
   currentModel: string,
   triedModels: Set<string>,
   providerHint: string | null | undefined,
   connectionId: string
-): string | null {
+): Promise<string | null> {
   const resolved = resolveProviderFamilyCandidates(currentModel, providerHint);
   if (!resolved) return null;
 
-  const isVisible = createComboModelVisibility();
+  const isVisible = await createComboModelVisibility();
   for (const candidate of resolved.candidates) {
     if (wasCandidateTried(candidate, resolved.provider, triedModels)) continue;
     const fallbackModel = `${resolved.outputPrefix}${candidate}`;
@@ -392,15 +392,15 @@ export function getModelFamily(model: string, providerHint?: string | null): str
 }
 
 /** Get same-family siblings that remain eligible on the current connection. */
-export function getEligibleModelFamily(
+export async function getEligibleModelFamily(
   model: string,
   providerHint: string | null | undefined,
   connectionId: string
-): string[] {
+): Promise<string[]> {
   const resolved = resolveProviderFamilyCandidates(model, providerHint);
   if (!resolved) return [model];
 
-  const isVisible = createComboModelVisibility();
+  const isVisible = await createComboModelVisibility();
   const candidates = resolved.candidates
     .map((candidate) => `${resolved.outputPrefix}${candidate}`)
     .filter((candidate) =>
@@ -410,13 +410,13 @@ export function getEligibleModelFamily(
 }
 
 /** Prefer a larger eligible context, then retain normal family fallback order. */
-export function getContextFamilyFallback(
+export async function getContextFamilyFallback(
   currentModel: string,
   triedModels: Set<string>,
   providerHint: string | null | undefined,
   connectionId: string,
   allowedCandidates?: readonly string[]
-): string | null {
+): Promise<string | null> {
   const allowed = allowedCandidates === undefined ? null : new Set(allowedCandidates);
   const excluded = new Set(triedModels);
   if (allowed) {
@@ -424,12 +424,13 @@ export function getContextFamilyFallback(
       if (!allowed.has(candidate)) excluded.add(candidate);
     }
   }
-  const candidates = getEligibleModelFamily(currentModel, providerHint, connectionId).filter(
+  const family = await getEligibleModelFamily(currentModel, providerHint, connectionId);
+  const candidates = family.filter(
     (candidate) => candidate !== currentModel && !excluded.has(candidate)
   );
   return (
-    findLargerContextModel(currentModel, candidates, providerHint) ??
-    getNextEligibleFamilyFallback(currentModel, excluded, providerHint, connectionId)
+    (await findLargerContextModel(currentModel, candidates, providerHint)) ??
+    (await getNextEligibleFamilyFallback(currentModel, excluded, providerHint, connectionId))
   );
 }
 
@@ -437,16 +438,16 @@ export function getContextFamilyFallback(
  * Find a model with larger context window from a list of candidate models.
  * Uses models.dev synced capabilities to compare context limits.
  */
-export function findLargerContextModel(
+export async function findLargerContextModel(
   currentModel: string,
   availableModels: string[],
   providerHint?: string | null
-): string | null {
+): Promise<string | null> {
   const currentParsed = parseModel(currentModel);
   const currentProvider =
     currentParsed.provider || currentParsed.providerAlias || providerHint || "unknown";
   const currentModelId = currentParsed.model || currentModel;
-  const currentLimit = getModelContextLimit(currentProvider, currentModelId) ?? 0;
+  const currentLimit = (await getModelContextLimit(currentProvider, currentModelId)) ?? 0;
 
   let bestModel: string | null = null;
   let bestLimit = currentLimit;
@@ -456,7 +457,7 @@ export function findLargerContextModel(
     const parsed = parseModel(candidate);
     const provider = parsed.provider || parsed.providerAlias || providerHint || "unknown";
     const modelId = parsed.model || candidate;
-    const limit = getModelContextLimit(provider, modelId) ?? 0;
+    const limit = (await getModelContextLimit(provider, modelId)) ?? 0;
 
     if (limit > bestLimit) {
       bestLimit = limit;

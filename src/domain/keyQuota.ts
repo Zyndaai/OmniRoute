@@ -72,15 +72,15 @@ function verdict(
 /**
  * PRE-request quota gate. Always fail-open (B16).
  */
-export function checkKeyQuota(
+export async function checkKeyQuota(
   apiKeyId: string | null | undefined,
   deps: CheckKeyQuotaDeps = {}
-): KeyQuotaVerdict {
+): Promise<KeyQuotaVerdict> {
   if (!apiKeyId) return { allowed: true, reason: null, dimension: null };
   try {
     // One clock sample for the counters, the window reset and the unpriced-month check.
     const nowMs = (deps.now ?? Date.now)();
-    const status = getKeyQuotaStatus(apiKeyId, {
+    const status = await getKeyQuotaStatus(apiKeyId, {
       ...deps,
       now: () => nowMs,
       enforcementOnly: true,
@@ -89,7 +89,7 @@ export function checkKeyQuota(
     if (status.tpmExceeded) return verdict(false, "tpm", status);
     if (status.rpmExceeded) return verdict(false, "rpm", status);
     if (status.monthlyExceeded) return verdict(false, "monthly", status);
-    if (isMonthClosedByUnpricedUsage(apiKeyId, status, nowMs)) {
+    if (await isMonthClosedByUnpricedUsage(apiKeyId, status, nowMs)) {
       return verdict(
         false,
         "monthly",
@@ -116,13 +116,13 @@ function monthStartMs(nowMs: number): number {
  * the usage limit (#12341), the cap fails closed for the rest of that month
  * unless USAGE_LIMIT_IGNORE_UNPRICED is on.
  */
-function isMonthClosedByUnpricedUsage(
+async function isMonthClosedByUnpricedUsage(
   apiKeyId: string,
   status: KeyQuotaStatus,
   nowMs: number
-): boolean {
+): Promise<boolean> {
   if (status.limits.monthlyAmountUsd === null) return false;
-  if (loadUnpricedQuotaMonthStart(apiKeyId) !== monthStartMs(nowMs)) return false;
+  if ((await loadUnpricedQuotaMonthStart(apiKeyId)) !== monthStartMs(nowMs)) return false;
   return !isFeatureFlagEnabled("USAGE_LIMIT_IGNORE_UNPRICED");
 }
 
@@ -131,17 +131,17 @@ function isMonthClosedByUnpricedUsage(
  * priced. A key with a monthly cap then fails closed until the month ends or the
  * operator saves the quota again; a key without one is unaffected. Never throws.
  */
-export function recordUnpricedKeyQuotaUsage(
+export async function recordUnpricedKeyQuotaUsage(
   apiKeyId: string | null | undefined,
   details: { provider?: string | null; model?: string | null } = {},
   deps: RecordKeyQuotaDeps = {}
-): void {
+): Promise<void> {
   if (!apiKeyId) return;
   try {
-    if (getKeyQuotaLimits(apiKeyId).monthlyAmountUsd === null) return;
+    if ((await getKeyQuotaLimits(apiKeyId)).monthlyAmountUsd === null) return;
     const monthStart = monthStartMs((deps.now ?? Date.now)());
-    if (loadUnpricedQuotaMonthStart(apiKeyId) === monthStart) return;
-    saveUnpricedQuotaMonthStart(apiKeyId, monthStart);
+    if ((await loadUnpricedQuotaMonthStart(apiKeyId)) === monthStart) return;
+    await saveUnpricedQuotaMonthStart(apiKeyId, monthStart);
     console.warn(
       `[KeyQuotaWarning] ${apiKeyId} used ${details.provider || "?"}/${details.model || "?"}, which has no price — its monthly USD quota fails closed until the month ends unless USAGE_LIMIT_IGNORE_UNPRICED is on (#12341)`
     );
@@ -154,16 +154,16 @@ export function recordUnpricedKeyQuotaUsage(
  * POST-response consumption recorder. Fire-and-forget (B29): increments tpm by
  * billable tokens and rpm by 1. Never throws to the caller.
  */
-export function recordKeyQuotaUsage(
+export async function recordKeyQuotaUsage(
   apiKeyId: string | null | undefined,
   billableTokens: number,
   deps: RecordKeyQuotaDeps = {}
-): void {
+): Promise<void> {
   if (!apiKeyId) return;
   const nowMs = (deps.now ?? Date.now)();
   try {
-    if (billableTokens > 0) incrementKeyQuotaCounter(apiKeyId, "tpm", billableTokens, nowMs);
-    incrementKeyQuotaCounter(apiKeyId, "rpm", 1, nowMs);
+    if (billableTokens > 0) await incrementKeyQuotaCounter(apiKeyId, "tpm", billableTokens, nowMs);
+    await incrementKeyQuotaCounter(apiKeyId, "rpm", 1, nowMs);
   } catch {
     // B29 — drift acceptable; never propagate.
   }

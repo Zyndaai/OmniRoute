@@ -107,12 +107,12 @@ export function parseProviderQuotaHeaders(
 /**
  * Apply parsed quota headers directly to the provider quota state ledger.
  */
-export function applyQuotaHeadersToState(
+export async function applyQuotaHeadersToState(
   connectionId: string,
   model: string,
   headers: Headers | Record<string, string | string[] | undefined>,
   provider?: string
-): void {
+): Promise<void> {
   const parsed = parseProviderQuotaHeaders(headers, provider);
   if (!parsed || (!parsed.tokensUsed && !parsed.tokenLimit)) return;
 
@@ -121,7 +121,7 @@ export function applyQuotaHeadersToState(
   const tokenLimit = parsed.tokenLimit ?? 0;
   const tokensUsed = parsed.tokensUsed ?? (parsed.tokenLimit && parsed.tokensRemaining ? parsed.tokenLimit - parsed.tokensRemaining : 0);
 
-  recordProviderQuotaUsage(connectionId, model, tokensUsed, {
+  await recordProviderQuotaUsage(connectionId, model, tokensUsed, {
     tokenLimit,
     windowMs: Math.max(0, windowReset - now),
   });

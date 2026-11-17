@@ -65,7 +65,7 @@ export async function isRuntimeUnitAtConcurrencyCap(
   const childCombo = findComboByName(allCombos, unit.comboName);
   if (!childCombo) return false;
 
-  const targets = resolveComboTargets(childCombo, allCombos, 1, hiddenModelsByProvider);
+  const targets = await resolveComboTargets(childCombo, allCombos, 1, hiddenModelsByProvider);
   const byConnection = new Map<string, { provider: string; connectionId: string }>();
   for (const target of targets) {
     if (!target.connectionId || !target.provider) continue;

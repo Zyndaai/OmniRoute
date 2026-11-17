@@ -22,7 +22,7 @@ import { unusableCredentialsResponse } from "@/app/api/v1/_shared/keyScopedRoute
 import { attachOmniRouteMetaToResponse } from "@/domain/omnirouteResponseMeta";
 import { generateRequestId } from "@/shared/utils/requestId";
 import { getComboByName, getCombos } from "@/lib/db/combos";
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
+import { getSettings } from "@/lib/db/settings";
 import { handleComboChat } from "@omniroute/open-sse/services/combo.ts";
 import { log } from "@omniroute/open-sse/utils/logger.ts";
 import { saveCallLog } from "@/lib/usageDb";
@@ -243,7 +243,7 @@ export async function POST(request) {
         } catch {}
         let settings = {};
         try {
-          settings = getUserDatabaseSettings();
+          settings = await getSettings();
         } catch {}
 
         return handleComboChat({

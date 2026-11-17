@@ -56,14 +56,14 @@ type OperatorEgressPushRejection = {
 type LiveRefusal = { key: string; recovered: boolean };
 type OperatorEgressPushRefusal = z.infer<typeof proxyOperatorRefusalSchema>;
 
-function collectLiveRefusals(
+async function collectLiveRefusals(
   refusals: OperatorEgressPushRefusal[],
   nowMs: number
-): { live: LiveRefusal[]; ignored: number } {
+): Promise<{ live: LiveRefusal[]; ignored: number }> {
   const live: LiveRefusal[] = [];
   let ignored = 0;
   for (const refusal of refusals) {
-    const evaluated = splitLiveRefusal(refusal, nowMs);
+    const evaluated = await splitLiveRefusal(refusal, nowMs);
     if ("ignored" in evaluated) {
       ignored += 1;
       continue;
@@ -98,15 +98,15 @@ function refusalFreshness(observedAt: string, nowMs: number): "live" | "stale" |
 
 // Evaluate one outage signal without writing: soft outcomes return a counted
 // ignore reason, hard outcomes never reach here (Zod rejects them first).
-function splitLiveRefusal(
+async function splitLiveRefusal(
   refusal: OperatorEgressPushRefusal,
   nowMs: number
-): { key: string; recovered: boolean } | { ignored: string } {
+): Promise<{ key: string; recovered: boolean } | { ignored: string }> {
   if (!isRoutableEgressAddress(refusal.host)) return { ignored: "unroutable-host" };
   const freshness = refusalFreshness(refusal.observedAt, nowMs);
   if (freshness === "stale") return { ignored: "stale-observed-at" };
   if (freshness === "future") return { ignored: "future-observed-at" };
-  if (!isKnownProxyMember(refusal.host, refusal.port)) return { ignored: "unknown-member" };
+  if (!(await isKnownProxyMember(refusal.host, refusal.port))) return { ignored: "unknown-member" };
   if (!isProxySkipRecentlyFailedEnabled()) return { ignored: "skip-disabled" };
   const key = proxyEgressKey(refusal.entry);
   if (key === null) return { ignored: "unusable-entry" };
@@ -181,12 +181,12 @@ export async function POST(request: Request) {
 
     // Refusal liveness is evaluated before any address write so a hard refusal
     // rejection (400) leaves both the address table and the memory untouched.
-    const { live: liveRefusals, ignored: refusalsIgnored } = collectLiveRefusals(
+    const { live: liveRefusals, ignored: refusalsIgnored } = await collectLiveRefusals(
       validation.data.refusals ?? [],
       nowMs
     );
 
-    const result = upsertOperatorEgress(accepted);
+    const result = await upsertOperatorEgress(accepted);
     const allRejected = [...rejected, ...result.rejected];
     if (accepted.length === 0 && allRejected.length > 0) {
       return createErrorResponse({

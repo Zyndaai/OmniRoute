@@ -1,4 +1,4 @@
-import { getPersistedCallLogRetentionDays } from "../db/databaseSettings";
+import { getPersistedRetentionDays } from "../db/retentionSettings";
 import { getCallLogRetentionDays, getCallLogRetentionDaysOverride } from "../logEnv";
 
 /**
@@ -9,11 +9,11 @@ import { getCallLogRetentionDays, getCallLogRetentionDaysOverride } from "../log
  * merged default never applies). Settings errors fall back to the variable
  * (e.g. very early startup with no settings table yet).
  */
-export function resolveCallLogRetentionDays(): number {
+export async function resolveCallLogRetentionDays(): Promise<number> {
   const override = getCallLogRetentionDaysOverride();
   if (override !== null) return override;
   try {
-    return getPersistedCallLogRetentionDays() ?? getCallLogRetentionDays();
+    return (await getPersistedRetentionDays("callLogs")) ?? getCallLogRetentionDays();
   } catch {
     return getCallLogRetentionDays();
   }

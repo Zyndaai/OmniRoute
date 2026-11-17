@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const applied = await writeCodexAuthFileToLocalCliIfNeeded(id, { force });
     const result = applied.result;
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.applied",
       actor: "admin",
       target: id,

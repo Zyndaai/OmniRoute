@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json(getIPFilterConfig());
+    return NextResponse.json(await getIPFilterConfig());
   } catch (error) {
     console.error("Error getting IP filter config:", error);
     return NextResponse.json({ error: "Failed to get IP filter config" }, { status: 500 });
@@ -51,14 +51,14 @@ export async function PUT(request: Request) {
 
     // Configure entire filter
     if (body.enabled !== undefined || body.mode || body.blacklist || body.whitelist) {
-      configureIPFilter(body);
+      await configureIPFilter(body);
     }
 
     // Add/remove individual IPs
-    if (body.addBlacklist) addToBlacklist(body.addBlacklist);
-    if (body.removeBlacklist) removeFromBlacklist(body.removeBlacklist);
-    if (body.addWhitelist) addToWhitelist(body.addWhitelist);
-    if (body.removeWhitelist) removeFromWhitelist(body.removeWhitelist);
+    if (body.addBlacklist) await addToBlacklist(body.addBlacklist);
+    if (body.removeBlacklist) await removeFromBlacklist(body.removeBlacklist);
+    if (body.addWhitelist) await addToWhitelist(body.addWhitelist);
+    if (body.removeWhitelist) await removeFromWhitelist(body.removeWhitelist);
 
     // Temp bans
     if (body.tempBan) {
@@ -70,7 +70,7 @@ export async function PUT(request: Request) {
     }
     if (body.removeBan) removeTempBan(body.removeBan);
 
-    return NextResponse.json(getIPFilterConfig());
+    return NextResponse.json(await getIPFilterConfig());
   } catch (error) {
     console.error("Error updating IP filter config:", error);
     return NextResponse.json({ error: "Failed to update IP filter config" }, { status: 500 });

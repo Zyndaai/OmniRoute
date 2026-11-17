@@ -33,10 +33,10 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   const apiKeyId = await principal(request);
   if (!apiKeyId) return json({ error: "Unauthorized" }, 401);
   const { id } = await context.params;
-  const ticket = getQuotaRecoveryTicket(id, apiKeyId);
+  const ticket = await getQuotaRecoveryTicket(id, apiKeyId);
   if (!ticket) return json({ error: "Recovery ticket not found" }, 404);
   if (ticket.state === "completed") {
-    const result = readQuotaRecoveryResult(id, apiKeyId);
+    const result = await readQuotaRecoveryResult(id, apiKeyId);
     if (result === null) return json({ error: "Recovered response unavailable" }, 500);
     return new Response(result, {
       status: 200,
@@ -57,9 +57,9 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
   const apiKeyId = await principal(request);
   if (!apiKeyId) return json({ error: "Unauthorized" }, 401);
   const { id } = await context.params;
-  if (!getQuotaRecoveryTicket(id, apiKeyId))
+  if (!(await getQuotaRecoveryTicket(id, apiKeyId)))
     return json({ error: "Recovery ticket not found" }, 404);
-  if (!cancelQuotaRecoveryTicket(id, apiKeyId)) {
+  if (!(await cancelQuotaRecoveryTicket(id, apiKeyId))) {
     return json({ error: "Only pending or confirmation-required tickets can be cancelled" }, 409);
   }
   return json({ recovery: { id, state: "cancelled" } }, 200);

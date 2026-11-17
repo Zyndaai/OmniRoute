@@ -75,7 +75,7 @@ export async function enforceQuotaShare(input: EnforceInput): Promise<EnforceDec
     allocation: import("@/lib/db/quotaPools").PoolAllocation;
   }>;
   try {
-    allocations = listAllocationsForApiKey(input.apiKeyId);
+    allocations = await listAllocationsForApiKey(input.apiKeyId);
   } catch {
     // DB not available or migration not run — fail-open
     return { kind: "allow" };
@@ -92,7 +92,7 @@ export async function enforceQuotaShare(input: EnforceInput): Promise<EnforceDec
   for (const { poolId, allocation } of allocations) {
     let p: import("@/lib/db/quotaPools").QuotaPool | null = null;
     try {
-      p = getPool(poolId);
+      p = await getPool(poolId);
     } catch {
       continue;
     }
@@ -128,7 +128,7 @@ export async function enforceQuotaShare(input: EnforceInput): Promise<EnforceDec
   // A request served through a different pool member must still be checked
   // against that same plan/limit, or a non-primary connection silently falls
   // back to a different (catalog/empty) plan shape (#13876).
-  const plan = resolvePlan(pool.connectionId, input.provider);
+  const plan = await resolvePlan(pool.connectionId, input.provider);
 
   // 3a-bis. Time-aware schedule gate.
   //
@@ -156,7 +156,7 @@ export async function enforceQuotaShare(input: EnforceInput): Promise<EnforceDec
   if (input.model) {
     let modelCap: import("@/lib/db/quotaModelCaps").ModelCap | null = null;
     try {
-      modelCap = getModelCap(pool.id, input.apiKeyId, input.model);
+      modelCap = await getModelCap(pool.id, input.apiKeyId, input.model);
     } catch {
       // DB error — fail-open per B16
     }
@@ -320,7 +320,7 @@ export async function recordConsumption(input: RecordConsumptionInput): Promise<
     allocation: import("@/lib/db/quotaPools").PoolAllocation;
   }>;
   try {
-    allocations = listAllocationsForApiKey(input.apiKeyId);
+    allocations = await listAllocationsForApiKey(input.apiKeyId);
   } catch {
     return; // DB not available — silent no-op
   }
@@ -334,7 +334,7 @@ export async function recordConsumption(input: RecordConsumptionInput): Promise<
   for (const { poolId: pid } of allocations) {
     let p: import("@/lib/db/quotaPools").QuotaPool | null = null;
     try {
-      p = getPool(pid);
+      p = await getPool(pid);
     } catch {
       continue;
     }
@@ -356,7 +356,7 @@ export async function recordConsumption(input: RecordConsumptionInput): Promise<
   // Resolved from the pool's canonical (primary) connection so writes always
   // land under the same dimension shape the dashboard reads back via
   // resolvePlan(pool.connectionId, ...) — see enforceQuotaShare above (#13876).
-  const plan = resolvePlan(matchedPool.connectionId, input.provider);
+  const plan = await resolvePlan(matchedPool.connectionId, input.provider);
   const store = await getQuotaStore();
 
   // Pool-level dimension consumption (existing behaviour).
@@ -377,7 +377,7 @@ export async function recordConsumption(input: RecordConsumptionInput): Promise<
   if (input.model) {
     let modelCap: import("@/lib/db/quotaModelCaps").ModelCap | null = null;
     try {
-      modelCap = getModelCap(poolId, input.apiKeyId, input.model);
+      modelCap = await getModelCap(poolId, input.apiKeyId, input.model);
     } catch {
       // DB not available — silent no-op per B29
     }
@@ -402,7 +402,7 @@ export async function recordConsumption(input: RecordConsumptionInput): Promise<
   // what OmniRoute spent inside this window — never what the account spent in
   // total. Only maintained while a window with a budget is open; outside one
   // there is no bucket to keep.
-  const budgetSchedule = activeBudgetSchedule(poolId);
+  const budgetSchedule = await activeBudgetSchedule(poolId);
   if (budgetSchedule?.budgetUnit) {
     const cost = costForUnit(input.cost, budgetSchedule.budgetUnit);
     if (cost > 0) {
@@ -446,7 +446,7 @@ async function checkSchedules(
   input: EnforceInput,
   store: QuotaStore
 ): Promise<EnforceDecision | null> {
-  const schedules = listEnabledSchedules(poolId);
+  const schedules = await listEnabledSchedules(poolId);
   if (schedules.length === 0) return null;
 
   const verdict = resolveActiveSchedule(schedules, Date.now());
@@ -568,8 +568,8 @@ async function notifyQuotaExceeded(
  * from `checkSchedules` because the POST path must never block or signal — it
  * only needs to know which counter to bump.
  */
-function activeBudgetSchedule(poolId: string): QuotaSchedule | null {
-  const schedules = listEnabledSchedules(poolId);
+async function activeBudgetSchedule(poolId: string): Promise<QuotaSchedule | null> {
+  const schedules = await listEnabledSchedules(poolId);
   if (schedules.length === 0) return null;
   const verdict = resolveActiveSchedule(schedules, Date.now());
   if (verdict.kind !== "active") return null;

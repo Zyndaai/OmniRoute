@@ -442,7 +442,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // Auto sync to Cloud if enabled
     await syncToCloudIfEnabled();
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.updated",
       actor: "admin",
       target: getProviderAuditTarget(updated || existing),
@@ -506,7 +506,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // Auto sync to Cloud if enabled
     await syncToCloudIfEnabled();
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "provider.credentials.revoked",
       actor: "admin",
       target: getProviderAuditTarget(connection),

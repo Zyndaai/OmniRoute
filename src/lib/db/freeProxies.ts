@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
-import { getDbInstance } from "./core";
-import { backupDbFile } from "./backup";
+import { db, jsonb, ts } from "@/lib/db/pg";
+import { stripNul, toIntOrNull } from "@/lib/db/proxies/sanitize";
 import type { FreeProxyItem, FreeProxySourceId } from "@/lib/freeProxyProviders/types";
 
 export interface FreeProxyRecord {
@@ -35,6 +35,7 @@ type DbRow = Record<string, unknown>;
 
 function mapRow(row: unknown): FreeProxyRecord {
   const r = row as DbRow;
+  const poolProxyId = r.pool_proxy_id != null ? String(r.pool_proxy_id) : null;
   return {
     id: String(r.id ?? ""),
     source: String(r.source ?? "1proxy") as FreeProxySourceId,
@@ -46,8 +47,8 @@ function mapRow(row: unknown): FreeProxyRecord {
     latencyMs: r.latency_ms != null ? Number(r.latency_ms) : null,
     anonymity: r.anonymity != null ? String(r.anonymity) : null,
     lastValidated: r.last_validated != null ? String(r.last_validated) : null,
-    inPool: r.in_pool === 1 || r.in_pool === true,
-    poolProxyId: r.pool_proxy_id != null ? String(r.pool_proxy_id) : null,
+    inPool: poolProxyId !== null,
+    poolProxyId,
     createdAt: String(r.created_at ?? ""),
     updatedAt: String(r.updated_at ?? ""),
   };
@@ -56,53 +57,41 @@ function mapRow(row: unknown): FreeProxyRecord {
 export async function upsertFreeProxy(
   item: FreeProxyItem
 ): Promise<{ id: string; action: "created" | "updated" }> {
-  const db = getDbInstance();
   const now = new Date().toISOString();
+  const lastValidated = ts(item.lastValidated) ?? now;
 
-  const existing = db
-    .prepare("SELECT id FROM free_proxies WHERE source = ? AND host = ? AND port = ?")
-    .get(item.source, item.host, item.port) as { id?: string } | undefined;
-
-  if (existing?.id) {
-    db.prepare(
-      `UPDATE free_proxies
-       SET type = ?, country_code = ?, quality_score = ?, latency_ms = ?,
-           anonymity = ?, last_validated = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      item.type,
-      item.countryCode ?? null,
-      item.qualityScore ?? null,
-      item.latencyMs ?? null,
-      item.anonymity ?? null,
-      item.lastValidated ?? now,
-      now,
-      existing.id
-    );
-    return { id: existing.id, action: "updated" };
-  }
-
-  const id = randomUUID();
-  db.prepare(
+  // One atomic statement: the (source, host, port) unique key arbitrates two
+  // concurrent syncs. `xmax = 0` is true only for a freshly inserted tuple.
+  const row = await db().queryOne<{ id: string; inserted: boolean }>(
     `INSERT INTO free_proxies
-     (id, source, host, port, type, country_code, quality_score, latency_ms,
-      anonymity, last_validated, in_pool, pool_proxy_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`
-  ).run(
-    id,
-    item.source,
-    item.host,
-    item.port,
-    item.type,
-    item.countryCode ?? null,
-    item.qualityScore ?? null,
-    item.latencyMs ?? null,
-    item.anonymity ?? null,
-    item.lastValidated ?? now,
-    now,
-    now
+       (id, source, host, port, type, country_code, quality_score, latency_ms,
+        anonymity, last_validated, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+     ON CONFLICT (source, host, port) DO UPDATE SET
+       type = EXCLUDED.type,
+       country_code = EXCLUDED.country_code,
+       quality_score = EXCLUDED.quality_score,
+       latency_ms = EXCLUDED.latency_ms,
+       anonymity = EXCLUDED.anonymity,
+       last_validated = EXCLUDED.last_validated,
+       updated_at = EXCLUDED.updated_at
+     RETURNING id, (xmax = 0) AS inserted`,
+    [
+      randomUUID(),
+      item.source,
+      stripNul(item.host),
+      item.port,
+      item.type,
+      stripNul(item.countryCode ?? null),
+      toIntOrNull(item.qualityScore),
+      toIntOrNull(item.latencyMs),
+      stripNul(item.anonymity ?? null),
+      lastValidated,
+      now,
+    ]
   );
-  return { id, action: "created" };
+  if (!row) throw new Error("free proxy upsert returned no row");
+  return { id: row.id, action: row.inserted ? "created" : "updated" };
 }
 
 interface FreeProxyFilters {
@@ -115,37 +104,38 @@ interface FreeProxyFilters {
   search?: string;
 }
 
-function buildFreeProxyFilter(options?: FreeProxyFilters): { sql: string; params: unknown[] } {
+function buildFreeProxyFilter(
+  options: FreeProxyFilters | undefined,
+  params: unknown[]
+): string {
   let sql = " WHERE 1=1";
-  const params: unknown[] = [];
   if (options?.sources?.length) {
-    sql += ` AND source IN (${options.sources.map(() => "?").join(",")})`;
-    params.push(...options.sources);
+    params.push(options.sources);
+    sql += ` AND source = ANY($${params.length}::text[])`;
   }
   if (options?.protocol) {
-    sql += " AND type = ?";
     params.push(options.protocol);
+    sql += ` AND type = $${params.length}`;
   }
   if (options?.country) {
-    sql += " AND country_code = ?";
     params.push(options.country.toUpperCase());
+    sql += ` AND country_code = $${params.length}`;
   }
   if (options?.minQuality != null) {
-    sql += " AND quality_score >= ?";
     params.push(options.minQuality);
+    sql += ` AND quality_score >= $${params.length}`;
   }
   if (options?.onlyInPool) {
-    sql += " AND in_pool = 1";
+    sql += " AND pool_proxy_id IS NOT NULL";
   }
   if (options?.onlyNotInPool) {
-    sql += " AND in_pool = 0";
+    sql += " AND pool_proxy_id IS NULL";
   }
   if (options?.search) {
-    sql += " AND host LIKE ?";
     params.push(`%${options.search}%`);
+    sql += ` AND host ILIKE $${params.length}`;
   }
-
-  return { sql, params };
+  return sql;
 }
 
 export async function listFreeProxies(
@@ -155,41 +145,36 @@ export async function listFreeProxies(
     offset?: number;
   }
 ): Promise<FreeProxyRecord[]> {
-  const db = getDbInstance();
-  const filter = buildFreeProxyFilter(options);
-  const params = filter.params;
-  let sql = "SELECT * FROM free_proxies" + filter.sql;
+  const params: unknown[] = [];
+  let sql = "SELECT * FROM free_proxies" + buildFreeProxyFilter(options, params);
 
+  // NULLS LAST keeps the SQLite ordering (NULL sorted smallest).
   const sortClause =
     options?.sortBy === "latency"
-      ? "ORDER BY latency_ms IS NULL, latency_ms ASC"
+      ? "ORDER BY latency_ms ASC NULLS LAST"
       : options?.sortBy === "recent"
-        ? "ORDER BY last_validated DESC"
-        : "ORDER BY quality_score DESC, last_validated DESC";
+        ? "ORDER BY last_validated DESC NULLS LAST"
+        : "ORDER BY quality_score DESC NULLS LAST, last_validated DESC NULLS LAST";
   sql += ` ${sortClause}`;
 
   if (options?.limit) {
-    sql += " LIMIT ?";
     params.push(options.limit);
+    sql += ` LIMIT $${params.length}`;
     if (options?.offset) {
-      sql += " OFFSET ?";
       params.push(options.offset);
+      sql += ` OFFSET $${params.length}`;
     }
   }
 
-  const rows = db.prepare(sql).all(...params);
+  const rows = await db().query(sql, params);
   return rows.map(mapRow);
 }
 
 export async function countFreeProxies(options?: FreeProxyFilters): Promise<number> {
-  const db = getDbInstance();
-  const filter = buildFreeProxyFilter(options);
-  const params = filter.params;
-  const sql = "SELECT COUNT(*) AS count FROM free_proxies" + filter.sql;
-
-  const row = db.prepare(sql).get(...params) as DbRow | undefined;
-  const count = row?.count;
-  return typeof count === "number" ? count : Number(count ?? 0);
+  const params: unknown[] = [];
+  const sql = "SELECT COUNT(*) AS count FROM free_proxies" + buildFreeProxyFilter(options, params);
+  const row = await db().queryOne<DbRow>(sql, params);
+  return Number(row?.count ?? 0);
 }
 
 export async function listFreeProxiesBySource(
@@ -222,29 +207,25 @@ export async function listFreeProxiesBySource(
 }
 
 export async function getFreeProxyById(id: string): Promise<FreeProxyRecord | null> {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM free_proxies WHERE id = ?").get(id);
+  const row = await db().queryOne("SELECT * FROM free_proxies WHERE id = $1", [id]);
   return row ? mapRow(row) : null;
 }
 
 export async function markFreeProxyInPool(id: string, poolProxyId: string): Promise<void> {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    "UPDATE free_proxies SET in_pool = 1, pool_proxy_id = ?, updated_at = ? WHERE id = ?"
-  ).run(poolProxyId, now, id);
-  backupDbFile("pre-write");
+  await db().execute(
+    "UPDATE free_proxies SET pool_proxy_id = $1, updated_at = now() WHERE id = $2",
+    [poolProxyId, id]
+  );
 }
 
 /**
- * Atomically inserts the free proxy into `proxy_registry` and flips its
- * `in_pool` flag in a single SQLite transaction. Replaces the previous
- * non-atomic `createProxy() + markFreeProxyInPool()` pair which could leave
- * `free_proxies.in_pool=0` while the registry row already existed if the
- * second call failed.
+ * Atomically inserts the free proxy into `proxy_registry` and links it
+ * (`free_proxies.pool_proxy_id`) in a single transaction. The free-proxy row is
+ * locked first, so two concurrent promotions of the same candidate cannot both
+ * create a registry row: the second one finds the link and returns it.
  *
- * Returns the new `poolProxyId` on success, or `null` if the free proxy id
- * does not exist (caller should return 404).
+ * Returns the `poolProxyId` on success, or `null` if the free proxy id does not
+ * exist (caller should return 404).
  */
 export async function promoteFreeProxyToPool(
   freeProxyId: string,
@@ -256,83 +237,82 @@ export async function promoteFreeProxyToPool(
     source: string;
   }
 ): Promise<string | null> {
-  const db = getDbInstance();
   const now = new Date().toISOString();
   const newRegistryId = randomUUID();
 
-  const result = db.transaction(() => {
-    const exists = db
-      .prepare("SELECT id, in_pool FROM free_proxies WHERE id = ? LIMIT 1")
-      .get(freeProxyId) as { id?: string; in_pool?: number } | undefined;
-    if (!exists?.id) return null;
+  return db().transaction(async (tx) => {
+    const free = await tx.queryOne<{ id: string; pool_proxy_id: string | null }>(
+      "SELECT id, pool_proxy_id FROM free_proxies WHERE id = $1 FOR UPDATE",
+      [freeProxyId]
+    );
+    if (!free) return null;
+    if (free.pool_proxy_id) {
+      const stillThere = await tx.queryOne("SELECT 1 AS one FROM proxy_registry WHERE id = $1", [
+        free.pool_proxy_id,
+      ]);
+      if (stillThere) return free.pool_proxy_id;
+    }
 
-    db.prepare(
+    await tx.execute(
       `INSERT INTO proxy_registry
-        (id, name, type, host, port, username, password, region, notes, status, source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', '', NULL, NULL, 'active', ?, ?, ?)`
-    ).run(
-      newRegistryId,
-      registryPayload.name,
-      registryPayload.type,
-      registryPayload.host,
-      Number(registryPayload.port),
-      registryPayload.source,
-      now,
-      now
+         (id, name, type, host, port, username, password, region, notes, status, source, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, '', '', NULL, NULL, 'active', $6, $7, $7)`,
+      [
+        newRegistryId,
+        registryPayload.name,
+        registryPayload.type,
+        registryPayload.host,
+        Number(registryPayload.port),
+        registryPayload.source,
+        now,
+      ]
     );
 
-    db.prepare(
-      "UPDATE free_proxies SET in_pool = 1, pool_proxy_id = ?, updated_at = ? WHERE id = ?"
-    ).run(newRegistryId, now, freeProxyId);
+    await tx.execute("UPDATE free_proxies SET pool_proxy_id = $1, updated_at = $2 WHERE id = $3", [
+      newRegistryId,
+      now,
+      freeProxyId,
+    ]);
 
     return newRegistryId;
-  })();
-
-  if (result) backupDbFile("pre-write");
-  return result;
+  });
 }
 
 export async function deleteFreeProxy(id: string): Promise<boolean> {
-  const db = getDbInstance();
-  const result = db.prepare("DELETE FROM free_proxies WHERE id = ?").run(id);
-  backupDbFile("pre-write");
+  const result = await db().execute("DELETE FROM free_proxies WHERE id = $1", [id]);
   return result.changes > 0;
 }
 
 export async function clearFreeProxiesBySource(source: FreeProxySourceId): Promise<number> {
-  const db = getDbInstance();
-  const result = db
-    .prepare("DELETE FROM free_proxies WHERE source = ? AND in_pool = 0")
-    .run(source);
-  backupDbFile("pre-write");
+  const result = await db().execute(
+    "DELETE FROM free_proxies WHERE source = $1 AND pool_proxy_id IS NULL",
+    [source]
+  );
   return result.changes;
 }
 
 /**
  * Tombstone rows for `source` whose `host:port` is no longer present in the
  * provider's latest list — e.g. Webshare recycles/retires proxy IDs between
- * syncs. Rows already promoted to the pool (`in_pool = 1`) are left alone so
- * runtime resolution of an in-use proxy is never disturbed; only stale,
+ * syncs. Rows already promoted to the pool (`pool_proxy_id` set) are left alone
+ * so runtime resolution of an in-use proxy is never disturbed; only stale,
  * not-yet-pooled candidates are pruned. Returns the number of rows removed.
  */
 export async function pruneStaleFreeProxies(
   source: FreeProxySourceId,
   activeKeys: ReadonlySet<string>
 ): Promise<number> {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT id, host, port FROM free_proxies WHERE source = ? AND in_pool = 0")
-    .all(source) as Array<{ id: string; host: string; port: number }>;
+  const rows = await db().query<{ id: string; host: string; port: number }>(
+    "SELECT id, host, port FROM free_proxies WHERE source = $1 AND pool_proxy_id IS NULL",
+    [source]
+  );
 
   const staleIds = rows.filter((r) => !activeKeys.has(`${r.host}:${r.port}`)).map((r) => r.id);
-
   if (staleIds.length === 0) return 0;
 
-  const placeholders = staleIds.map(() => "?").join(",");
-  const result = db
-    .prepare(`DELETE FROM free_proxies WHERE id IN (${placeholders})`)
-    .run(...staleIds);
-  backupDbFile("pre-write");
+  const result = await db().execute("DELETE FROM free_proxies WHERE id = ANY($1::text[])", [
+    staleIds,
+  ]);
   return result.changes;
 }
 
@@ -340,54 +320,50 @@ export async function pruneStaleFreeProxies(
 // which only advances when a provider returns at least one new/updated proxy. A
 // sync that returns zero rows (or whose providers all fail) left the timestamp
 // frozen, so "Sync All" appeared to do nothing. We persist an explicit sync
-// timestamp in the generic key_value store and prefer it in the stats.
-const FREE_PROXY_SYNC_NAMESPACE = "free_proxies";
-const FREE_PROXY_SYNC_KEY = "last_sync_at";
+// timestamp in `config_entries('job_state')` and prefer it in the stats. The
+// value is a raw ISO text, stored as a JSON string.
+const FREE_PROXY_SYNC_NAMESPACE = "job_state";
+const FREE_PROXY_SYNC_KEY = "free_proxies.last_sync_at";
 
 /**
  * Persist the moment a free-proxy sync completed. Returns the stored ISO string
  * so the route can echo it back. `at` is overridable for deterministic tests.
  */
 export async function recordFreeProxySync(at?: string): Promise<string> {
-  const db = getDbInstance();
-  const ts = at ?? new Date().toISOString();
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    FREE_PROXY_SYNC_NAMESPACE,
-    FREE_PROXY_SYNC_KEY,
-    ts
+  const stamp = at ?? new Date().toISOString();
+  await db().execute(
+    `INSERT INTO config_entries (namespace, key, value, updated_at)
+     VALUES ($1, $2, to_jsonb($3::text), now())
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [FREE_PROXY_SYNC_NAMESPACE, FREE_PROXY_SYNC_KEY, stamp]
   );
-  backupDbFile("pre-write");
-  return ts;
+  return stamp;
 }
 
-function getRecordedFreeProxySync(db: ReturnType<typeof getDbInstance>): string | null {
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(FREE_PROXY_SYNC_NAMESPACE, FREE_PROXY_SYNC_KEY) as { value?: string } | undefined;
+async function getRecordedFreeProxySync(): Promise<string | null> {
+  const row = await db().queryOne<{ value: string | null }>(
+    "SELECT value #>> '{}' AS value FROM config_entries WHERE namespace = $1 AND key = $2",
+    [FREE_PROXY_SYNC_NAMESPACE, FREE_PROXY_SYNC_KEY]
+  );
   return row?.value != null ? String(row.value) : null;
 }
 
 export async function getFreeProxyStats(): Promise<FreeProxyStats> {
-  const db = getDbInstance();
-  const totals = db
-    .prepare(
-      `SELECT COUNT(*) as total,
-              SUM(CASE WHEN in_pool = 1 THEN 1 ELSE 0 END) as in_pool_count,
-              AVG(quality_score) as avg_quality,
-              MAX(last_validated) as last_sync_at
-       FROM free_proxies`
-    )
-    .get() as DbRow;
+  const totals = (await db().queryOne<DbRow>(
+    `SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE pool_proxy_id IS NOT NULL) AS in_pool_count,
+            AVG(quality_score) AS avg_quality,
+            MAX(last_validated) AS last_sync_at
+     FROM free_proxies`
+  )) ?? {};
 
-  const bySource = db
-    .prepare(
-      "SELECT source, COUNT(*) as count FROM free_proxies GROUP BY source ORDER BY count DESC"
-    )
-    .all() as DbRow[];
+  const bySource = await db().query<DbRow>(
+    "SELECT source, COUNT(*) AS count FROM free_proxies GROUP BY source ORDER BY count DESC, source ASC"
+  );
 
   // Prefer the explicitly recorded sync timestamp (#4878); fall back to the
   // newest last_validated only when no sync has ever been recorded.
-  const recordedSyncAt = getRecordedFreeProxySync(db);
+  const recordedSyncAt = await getRecordedFreeProxySync();
   const derivedSyncAt = totals.last_sync_at != null ? String(totals.last_sync_at) : null;
 
   return {
@@ -398,6 +374,7 @@ export async function getFreeProxyStats(): Promise<FreeProxyStats> {
     lastSyncAt: recordedSyncAt ?? derivedSyncAt,
   };
 }
+
 /**
  * Persist the most recent per-source sync errors. A successful sync for a
  * source should call clearFreeProxySyncErrors instead so the stale error
@@ -407,19 +384,17 @@ export async function recordFreeProxySyncErrors(
   source: FreeProxySourceId,
   errors: string[]
 ): Promise<void> {
-  const db = getDbInstance();
-  const at = new Date().toISOString();
-  db.prepare(
-    "INSERT OR REPLACE INTO free_proxy_sync_errors (source, errors, updated_at) VALUES (?, ?, ?)"
-  ).run(source, JSON.stringify(errors), at);
-  backupDbFile("pre-write");
+  await db().execute(
+    `INSERT INTO free_proxy_sync_errors (source, errors, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (source) DO UPDATE SET errors = EXCLUDED.errors, updated_at = now()`,
+    [source, jsonb(errors)]
+  );
 }
 
 /** Clear a source's stored sync error (called on a successful sync). */
 export async function clearFreeProxySyncErrors(source: FreeProxySourceId): Promise<void> {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM free_proxy_sync_errors WHERE source = ?").run(source);
-  backupDbFile("pre-write");
+  await db().execute("DELETE FROM free_proxy_sync_errors WHERE source = $1", [source]);
 }
 
 /**
@@ -428,20 +403,13 @@ export async function clearFreeProxySyncErrors(source: FreeProxySourceId): Promi
  * state.
  */
 export async function getFreeProxySyncErrors(): Promise<FreeProxySyncErrors> {
-  const db = getDbInstance();
-  const rows = db.prepare("SELECT source, errors FROM free_proxy_sync_errors").all() as Array<{
-    source: string;
-    errors: string;
-  }>;
+  const rows = await db().query<{ source: string; errors: unknown }>(
+    "SELECT source, errors FROM free_proxy_sync_errors"
+  );
   const out: FreeProxySyncErrors = {};
   for (const row of rows) {
     if (!row.source) continue;
-    try {
-      const parsed = JSON.parse(row.errors) as unknown;
-      out[row.source] = Array.isArray(parsed) ? parsed.map(String) : [String(row.errors)];
-    } catch {
-      out[row.source] = [String(row.errors)];
-    }
+    out[row.source] = Array.isArray(row.errors) ? row.errors.map(String) : [String(row.errors)];
   }
   return out;
 }

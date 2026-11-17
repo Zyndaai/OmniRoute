@@ -28,7 +28,6 @@
 
 import { createHash } from "crypto";
 import {
-  getSessionAccountAffinity,
   getSessionAffinityStore,
   type SessionAccountAffinityRecord,
 } from "@/lib/db/sessionAccountAffinity";
@@ -276,17 +275,16 @@ function liveAffinitySnapshot(
   return record && Date.parse(record.expiresAt) > Date.now() ? record : null;
 }
 
-/** Keep obsolete-pin deletion and its log in the caller's synchronous turn. */
-function clearObsoleteSessionAffinity(
+async function clearObsoleteSessionAffinity(
   store: ReturnType<typeof getSessionAffinityStore>,
   existing: SessionAccountAffinityRecord | null,
   sessionKey: string,
   provider: string,
   logSelection: boolean
-): void {
+): Promise<void> {
   if (!existing) return;
   // Redis replaces the obsolete observation in one CAS, never delete-then-create.
-  if (store.driver === "sqlite") store.delete(sessionKey, provider);
+  if (store.driver === "sqlite") await store.delete(sessionKey, provider);
   if (logSelection)
     log.info(
       "AUTH",
@@ -327,8 +325,7 @@ function logSharedSessionAffinitySelection(
  * Session-affinity account selection (moved from auth.ts alongside the #5903
  * pin-override so all session-affinity logic lives in one leaf). Reuses an
  * active pin when its connection is in the pool; otherwise picks the LRU
- * connection and creates a fresh pin. SQLite preserves the original reads,
- * mutation order, first yield and selection logs; Redis store operations are awaited.
+ * connection and creates a fresh pin. Every store operation is awaited.
  */
 export async function selectSessionAffinityConnection<T extends SessionAffinityConnection>(
   provider: string,
@@ -340,29 +337,6 @@ export async function selectSessionAffinityConnection<T extends SessionAffinityC
   if (!sessionKey || connections.length === 0 || ttlMs <= 0) return null;
 
   const store = getSessionAffinityStore();
-  if (store.driver === "sqlite") {
-    // Keep the base selector's single await directly in this function. Awaiting
-    // plan.commit would add a completion microtask even with synchronous storage.
-    const existing =
-      affinityRecord === undefined
-        ? getSessionAccountAffinity(sessionKey, provider, ttlMs)
-        : liveAffinitySnapshot(affinityRecord);
-    const pinned = resolveSessionAffinityConnection(existing, connections, provider);
-    const connection = pinned ?? [...connections].sort(compareLruConnections)[0] ?? null;
-    if (!connection) return null;
-    if (pinned) {
-      store.touch(sessionKey, provider, Date.now(), ttlMs);
-    } else {
-      clearObsoleteSessionAffinity(store, existing, sessionKey, provider, true);
-      store.upsert(sessionKey, provider, connection.id, Date.now(), ttlMs);
-    }
-    const nextCount = pinned ? (connection.consecutiveUseCount || 0) + 1 : 1;
-    await touchConnectionLastUsed(connection.id, nextCount);
-    connection.lastUsedAt = new Date().toISOString();
-    connection.consecutiveUseCount = nextCount;
-    logSessionAffinitySelection(sessionKey, connection, Boolean(pinned));
-    return connection;
-  }
   const existing =
     affinityRecord === undefined ? await store.get(sessionKey, provider, ttlMs) : affinityRecord;
   const plan = planSessionAffinityConnection(provider, sessionKey, connections, ttlMs, existing);
@@ -373,22 +347,21 @@ export async function selectSessionAffinityConnection<T extends SessionAffinityC
 
 /**
  * Read-only affinity selection used when another durable authority must claim
- * the candidate before any affinity/LRU state is changed.
+ * the candidate before any affinity/LRU state is changed. `affinityRecord` is the
+ * caller's prefetched pin (`null` = observed miss); the store is async, so this
+ * planner never reads it itself.
  */
 export function planSessionAffinityConnection<T extends SessionAffinityConnection>(
   provider: string,
   sessionKey: string | null | undefined,
   connections: T[],
-  ttlMs = 0,
-  affinityRecord?: SessionAccountAffinityRecord | null
+  ttlMs: number,
+  affinityRecord: SessionAccountAffinityRecord | null
 ) {
   if (!sessionKey || connections.length === 0 || ttlMs <= 0) return null;
   const store = getSessionAffinityStore();
-  const observed =
-    affinityRecord === undefined
-      ? getSessionAccountAffinity(sessionKey, provider, ttlMs)
-      : affinityRecord;
-  const existing = affinityRecord === undefined ? observed : liveAffinitySnapshot(observed);
+  const observed = affinityRecord;
+  const existing = liveAffinitySnapshot(observed);
   const existingConnection = resolveSessionAffinityConnection(existing, connections, provider);
   const connection = existingConnection ?? [...connections].sort(compareLruConnections)[0] ?? null;
   if (!connection) return null;
@@ -399,8 +372,7 @@ export function planSessionAffinityConnection<T extends SessionAffinityConnectio
     // only, leaving the shared winner untouched; ordinary selection may adopt it.
     commit: async (logSelection = false, adoptSharedWinner = false): Promise<void> => {
       if (existingConnection) {
-        const touched = store.touch(sessionKey, provider, Date.now(), ttlMs);
-        if (touched instanceof Promise) await touched;
+        await store.touch(sessionKey, provider, Date.now(), ttlMs);
         const nextCount = (connection.consecutiveUseCount || 0) + 1;
         await touchConnectionLastUsed(connection.id, nextCount);
         connection.lastUsedAt = new Date().toISOString();
@@ -408,8 +380,8 @@ export function planSessionAffinityConnection<T extends SessionAffinityConnectio
         if (logSelection) logSessionAffinitySelection(sessionKey, connection, true);
         return;
       }
-      clearObsoleteSessionAffinity(store, existing, sessionKey, provider, logSelection);
-      const upserted = store.upsert(
+      await clearObsoleteSessionAffinity(store, existing, sessionKey, provider, logSelection);
+      const winner = await store.upsert(
         sessionKey,
         provider,
         connection.id,
@@ -418,7 +390,6 @@ export function planSessionAffinityConnection<T extends SessionAffinityConnectio
         store.driver === "redis" ? sessionAffinityAccountIdentity(connection, provider) : undefined,
         observed
       );
-      const winner = upserted instanceof Promise ? await upserted : upserted;
       const adopted =
         adoptSharedWinner && winner
           ? resolveSessionAffinityConnection(liveAffinitySnapshot(winner), connections, provider)
@@ -494,8 +465,8 @@ export interface AffinityPinPredicates {
 }
 
 export interface ApplySessionAffinityPinParams extends AffinityPinPredicates {
-  /** Prefetched once by the async request caller; null explicitly means a miss. */
-  affinityRecord?: SessionAccountAffinityRecord | null;
+  /** Prefetched once by the async request caller (the store is async); null means a miss. */
+  affinityRecord: SessionAccountAffinityRecord | null;
   forcedConnectionId: string | null;
   options: AffinityPinOptions;
   sessionAffinityTtlMs: number;
@@ -550,10 +521,7 @@ export function applySessionAffinityPin(params: ApplySessionAffinityPinParams): 
   const sessionKey = options.sessionKey;
   if (!forcedConnectionId || !sessionKey || sessionAffinityTtlMs <= 0) return null;
 
-  const pinned =
-    params.affinityRecord === undefined
-      ? getSessionAccountAffinity(sessionKey, provider, sessionAffinityTtlMs)
-      : liveAffinitySnapshot(params.affinityRecord);
+  const pinned = liveAffinitySnapshot(params.affinityRecord);
   const pinnedConnection = resolveSessionAffinityConnection(pinned, connections, provider);
   if (
     !pinnedConnection ||

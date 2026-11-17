@@ -69,7 +69,7 @@ export function stopBatchProcessor(): void {
 }
 
 export async function processPendingBatches(): Promise<void> {
-  const pending = getPendingBatches();
+  const pending = await getPendingBatches();
 
   // Phase 1: Stale recovery — in_progress/finalizing batches not in activeBatches
   // are from a previous session; reset checkpointed batches to validating so they
@@ -77,13 +77,13 @@ export async function processPendingBatches(): Promise<void> {
   for (const batch of pending) {
     if (batch.status === "in_progress" || batch.status === "finalizing") {
       if (!activeBatches.has(batch.id)) {
-        recoverStaleBatch(batch);
+        await recoverStaleBatch(batch);
       }
     }
   }
 
   // Phase 2: Process actions respecting concurrency limit
-  const remaining = getPendingBatches(); // re-fetch after recovery updates
+  const remaining = await getPendingBatches(); // re-fetch after recovery updates
   let activeCount = activeBatches.size;
 
   for (const batch of remaining) {
@@ -105,8 +105,8 @@ export async function processPendingBatches(): Promise<void> {
   await cleanupExpiredBatches();
 }
 
-function recoverStaleBatch(batch: BatchRecord): void {
-  const checkpointCount = countBatchItemCheckpoints(batch.id);
+async function recoverStaleBatch(batch: BatchRecord): Promise<void> {
+  const checkpointCount = await countBatchItemCheckpoints(batch.id);
   const hasPotentialExternalEffects =
     batch.requestCountsTotal > 0 ||
     batch.requestCountsCompleted > 0 ||
@@ -117,7 +117,7 @@ function recoverStaleBatch(batch: BatchRecord): void {
     console.warn(
       `[BATCH] Stale batch ${batch.id} has no item checkpoints; failing instead of replaying provider calls`
     );
-    failBatch(
+    await failBatch(
       batch.id,
       "Cannot safely recover stale batch because item checkpoints are unavailable; create a new batch to retry intentionally."
     );
@@ -127,13 +127,13 @@ function recoverStaleBatch(batch: BatchRecord): void {
   console.log(`[BATCH] Recovering stale batch ${batch.id} (${batch.status}) → validating`);
 
   if (batch.outputFileId) {
-    deleteFile(batch.outputFileId);
+    await deleteFile(batch.outputFileId);
   }
   if (batch.errorFileId) {
-    deleteFile(batch.errorFileId);
+    await deleteFile(batch.errorFileId);
   }
 
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "validating",
     inProgressAt: null,
     finalizingAt: null,
@@ -241,7 +241,7 @@ export function parseBatchItems(
 async function cleanupExpiredBatches(): Promise<void> {
   try {
     const now = Math.floor(Date.now() / 1_000);
-    const batches = getTerminalBatches();
+    const batches = await getTerminalBatches();
 
     // Delete files for terminal batches that have exceeded their completion window
     for (const batch of batches) {
@@ -262,44 +262,44 @@ async function cleanupExpiredBatches(): Promise<void> {
         batch.inputFileId &&
         inputExpiresAt &&
         now > inputExpiresAt &&
-        !isFileReferencedByOtherBatch(batch.inputFileId, [batch.id])
+        !(await isFileReferencedByOtherBatch(batch.inputFileId, [batch.id]))
       ) {
-        deleteFile(batch.inputFileId);
+        await deleteFile(batch.inputFileId);
       }
       if (
         batch.outputFileId &&
         outputExpiresAt &&
         now > outputExpiresAt &&
-        !isFileReferencedByOtherBatch(batch.outputFileId, [batch.id])
+        !(await isFileReferencedByOtherBatch(batch.outputFileId, [batch.id]))
       ) {
-        deleteFile(batch.outputFileId);
+        await deleteFile(batch.outputFileId);
       }
       if (
         batch.errorFileId &&
         outputExpiresAt &&
         now > outputExpiresAt &&
-        !isFileReferencedByOtherBatch(batch.errorFileId, [batch.id])
+        !(await isFileReferencedByOtherBatch(batch.errorFileId, [batch.id]))
       ) {
-        deleteFile(batch.errorFileId);
+        await deleteFile(batch.errorFileId);
       }
     }
 
     // Expire validating batches that have exceeded their completion window
-    for (const batch of getPendingBatches()) {
+    for (const batch of await getPendingBatches()) {
       if (batch.status === "validating") {
         const windowSeconds = parseBatchWindowSeconds(batch.completionWindow);
         if (now - batch.createdAt > windowSeconds) {
-          updateBatch(batch.id, { status: "expired", expiredAt: now });
+          await updateBatch(batch.id, { status: "expired", expiredAt: now });
         }
       }
     }
 
     // Cleanup orphan files (batch-purpose files stuck in validating after 48h)
     // Use asc order so oldest files are processed first; use a high limit to avoid missing old orphans.
-    const allFiles = listFiles({ order: "asc", limit: 100 });
+    const allFiles = await listFiles({ order: "asc", limit: 100 });
     for (const file of allFiles) {
       if (file.purpose === "batch" && now - file.createdAt > DEFAULT_BATCH_EXPIRATION_SECONDS) {
-        deleteFile(file.id);
+        await deleteFile(file.id);
       }
     }
   } catch (err) {
@@ -310,9 +310,9 @@ async function cleanupExpiredBatches(): Promise<void> {
 async function startBatch(batch: any): Promise<void> {
   console.log(`[BATCH] Starting batch ${batch.id}`);
 
-  const content = getFileContent(batch.inputFileId);
+  const content = await getFileContent(batch.inputFileId);
   if (!content) {
-    failBatch(batch.id, "Input file content not found");
+    await failBatch(batch.id, "Input file content not found");
     return;
   }
 
@@ -325,20 +325,20 @@ async function startBatch(batch: any): Promise<void> {
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
-      updateBatch(batch.id, {
+      await updateBatch(batch.id, {
         requestCountsTotal: lines.length,
         requestCountsFailed: lines.length, // All failed due to validation error
       });
-      failBatch(batch.id, parsedItems.error);
+      await failBatch(batch.id, parsedItems.error);
       return;
     }
     const total = parsedItems.items.length;
 
     console.log(`[BATCH] Batch ${batch.id} contains (${total} items)`);
 
-    ensureBatchItemCheckpoints(batch.id, parsedItems.items);
+    await ensureBatchItemCheckpoints(batch.id, parsedItems.items);
 
-    updateBatch(batch.id, {
+    await updateBatch(batch.id, {
       status: "in_progress",
       inProgressAt: Math.floor(Date.now() / 1000),
       requestCountsTotal: total,
@@ -348,18 +348,20 @@ async function startBatch(batch: any): Promise<void> {
 
     // Fire-and-forget: process items in the background so the poll loop isn't blocked.
     // isProcessing prevents a second poll tick from overlapping.
-    const p = processBatchItems(batch, parsedItems.items).catch((err) => {
+    const p = processBatchItems(batch, parsedItems.items).catch(async (err) => {
       console.error(`[BATCH] Critical error in processBatchItems for ${batch.id}:`, err);
-      failBatch(batch.id, String(err));
+      await failBatch(batch.id, String(err));
     });
     activeProcesses.add(p);
-    p.finally(() => {
-      activeProcesses.delete(p);
-      activeBatches.delete(batch.id);
-    });
+    void p
+      .finally(() => {
+        activeProcesses.delete(p);
+        activeBatches.delete(batch.id);
+      })
+      .catch(() => {});
   } catch (err) {
     console.error(`[BATCH] Error starting batch ${batch.id}:`, err);
-    failBatch(batch.id, err instanceof Error ? err.message : String(err));
+    await failBatch(batch.id, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -370,17 +372,20 @@ const HEADERS_CACHE_TTL_MS = 60_000;
 async function processBatchItems(batch: BatchRecord, items: BatchRequestItem[]): Promise<void> {
   const state = createBatchState(batch);
   const checkpoints = new Map<number, BatchItemCheckpoint>(
-    listBatchItemCheckpoints(batch.id).map((checkpoint) => [checkpoint.lineNumber, checkpoint])
+    (await listBatchItemCheckpoints(batch.id)).map((checkpoint) => [
+      checkpoint.lineNumber,
+      checkpoint,
+    ])
   );
 
   const apiKey = await resolveApiKey(batch);
 
   for (const item of items) {
-    if (isBatchCancelled(batch.id)) break;
+    if (await isBatchCancelled(batch.id)) break;
 
     const checkpoint = checkpoints.get(item.lineNumber);
-    if (checkpoint && applyRecoveredCheckpoint(batch.id, item, checkpoint, state)) {
-      maybePersistProgress(batch.id, state);
+    if (checkpoint && (await applyRecoveredCheckpoint(batch.id, item, checkpoint, state))) {
+      await maybePersistProgress(batch.id, state);
       continue;
     }
 
@@ -393,7 +398,7 @@ async function processBatchItems(batch: BatchRecord, items: BatchRequestItem[]):
       }
     }
 
-    markBatchItemProcessing(batch.id, item);
+    await markBatchItemProcessing(batch.id, item);
 
     try {
       const response = await processSingleItemWithRetry(item, apiKey);
@@ -416,7 +421,7 @@ async function processBatchItems(batch: BatchRecord, items: BatchRequestItem[]):
         },
       };
 
-      markBatchItemResult(batch.id, item, wrapped);
+      await markBatchItemResult(batch.id, item, wrapped);
       state.results.push(wrapped);
       applyItemResult(state, response.status, responseBody);
       prevHeaders = response.headers;
@@ -424,25 +429,25 @@ async function processBatchItems(batch: BatchRecord, items: BatchRequestItem[]):
     } catch (exception) {
       // Track processing-level errors separately (items that failed to be processed)
       const error = { custom_id: item.customId ?? null, error: String(exception) };
-      markBatchItemError(batch.id, item, error);
+      await markBatchItemError(batch.id, item, error);
       state.errors.push(error);
       state.failed++;
       prevHeaders = null;
       prevHeadersTimestamp = 0;
     }
 
-    maybePersistProgress(batch.id, state);
+    await maybePersistProgress(batch.id, state);
   }
 
   return finalizeBatch(batch.id, state.results, state.errors);
 }
 
-function applyRecoveredCheckpoint(
+async function applyRecoveredCheckpoint(
   batchId: string,
   item: BatchRequestItem,
   checkpoint: BatchItemCheckpoint,
   state: ReturnType<typeof createBatchState>
-): boolean {
+): Promise<boolean> {
   if (checkpoint.status === "completed" && checkpoint.result) {
     state.results.push(checkpoint.result);
     applyItemResult(
@@ -465,7 +470,7 @@ function applyRecoveredCheckpoint(
       error:
         "Batch item was interrupted before its provider response was recorded; it was not replayed to avoid duplicate provider work.",
     };
-    markBatchItemError(batchId, item, error);
+    await markBatchItemError(batchId, item, error);
     state.errors.push(error);
     state.failed++;
     return true;
@@ -474,8 +479,8 @@ function applyRecoveredCheckpoint(
   return false;
 }
 
-function isBatchCancelled(batchId: string): boolean {
-  const current = getBatch(batchId);
+async function isBatchCancelled(batchId: string): Promise<boolean> {
+  const current = await getBatch(batchId);
 
   return !current || current.status === "cancelling" || current.status === "cancelled";
 }
@@ -710,11 +715,11 @@ function applyItemResult(state: any, statusCode: number, body: any): void {
   }
 }
 
-function maybePersistProgress(batchId: string, state: any): void {
+async function maybePersistProgress(batchId: string, state: any): Promise<void> {
   // Persist basic progress (completed/failed counts + model) on every item so
   // the UI can show up-to-date progress even for small batches.
   try {
-    updateBatch(batchId, {
+    await updateBatch(batchId, {
       requestCountsCompleted: state.completed,
       requestCountsFailed: state.failed,
       model: state.model,
@@ -728,7 +733,7 @@ function maybePersistProgress(batchId: string, state: any): void {
   if (total % 50 !== 0) return;
 
   try {
-    updateBatch(batchId, {
+    await updateBatch(batchId, {
       requestCountsCompleted: state.completed,
       requestCountsFailed: state.failed,
       model: state.model,
@@ -750,12 +755,12 @@ async function finalizeBatch(
   results: any[],
   itemsWithErrors: any[]
 ): Promise<void> {
-  const current = getBatch(batchId);
+  const current = await getBatch(batchId);
 
-  if (handleCancellation(batchId, current)) return;
+  if (await handleCancellation(batchId, current)) return;
 
   // Mark as finalizing first
-  markFinalizing(batchId);
+  await markFinalizing(batchId);
 
   // Compute counts from results
   const successes = results.filter(
@@ -800,7 +805,7 @@ async function finalizeBatch(
 
   // Persist final counts and (approximate) usage so UI shows correct numbers
   try {
-    updateBatch(batchId, {
+    await updateBatch(batchId, {
       requestCountsTotal: totalCount,
       requestCountsCompleted: completedCount,
       requestCountsFailed: failedCount,
@@ -820,19 +825,19 @@ async function finalizeBatch(
   }
 
   // Re-read the batch (with completedAt set) so file creation sees a completion timestamp
-  const batchForFiles = getBatch(batchId);
+  const batchForFiles = await getBatch(batchId);
 
-  const outputFileId = createSuccessFile(batchId, batchForFiles, results);
-  const errorFileId = createErrorFile(batchId, batchForFiles, results, itemsWithErrors);
+  const outputFileId = await createSuccessFile(batchId, batchForFiles, results);
+  const errorFileId = await createErrorFile(batchId, batchForFiles, results, itemsWithErrors);
 
-  completeBatch(batchId, outputFileId, errorFileId);
+  await completeBatch(batchId, outputFileId, errorFileId);
 }
 
-function handleCancellation(batchId: string, current: any): boolean {
+async function handleCancellation(batchId: string, current: any): Promise<boolean> {
   if (!current) return true;
 
   if (current.status === "cancelling") {
-    updateBatch(batchId, {
+    await updateBatch(batchId, {
       status: "cancelled",
       cancelledAt: now(),
     });
@@ -842,26 +847,26 @@ function handleCancellation(batchId: string, current: any): boolean {
   return current.status === "cancelled";
 }
 
-function markFinalizing(batchId: string): void {
-  updateBatch(batchId, {
+async function markFinalizing(batchId: string): Promise<void> {
+  await updateBatch(batchId, {
     status: "finalizing",
     finalizingAt: now(),
   });
 }
 
-function completeBatch(
+async function completeBatch(
   batchId: string,
   outputFileId: string | null,
   errorFileId: string | null
-): void {
-  updateBatch(batchId, {
+): Promise<void> {
+  await updateBatch(batchId, {
     status: "completed",
     completedAt: now(),
     outputFileId,
     errorFileId,
   });
 
-  const b = getBatch(batchId);
+  const b = await getBatch(batchId);
   const total = b?.requestCountsTotal ?? "?";
   console.log(`[BATCH] Completed batch ${batchId} (${total} items)`);
 }
@@ -870,14 +875,18 @@ function now(): number {
   return Math.floor(Date.now() / 1_000);
 }
 
-function createSuccessFile(batchId: string, current: any, results: any[]): string | null {
+async function createSuccessFile(
+  batchId: string,
+  current: any,
+  results: any[]
+): Promise<string | null> {
   const successes = results.filter((r) => r.response.status_code < 400 && !r.response.body?.error);
 
   if (successes.length === 0) return null;
 
   const content = toJsonl(successes);
 
-  const file = createFile({
+  const file = await createFile({
     bytes: Buffer.byteLength(content),
     filename: `batch_${batchId}_output.jsonl`,
     purpose: "batch_output",
@@ -889,12 +898,12 @@ function createSuccessFile(batchId: string, current: any, results: any[]): strin
   return file.id;
 }
 
-function createErrorFile(
+async function createErrorFile(
   batchId: string,
   current: any,
   results: any[],
   itemsWithErrors: any[]
-): string | null {
+): Promise<string | null> {
   const failures = results.filter((r) => r.response.status_code >= 400 || r.response.body?.error);
 
   const processErrors = itemsWithErrors.map((e) => ({
@@ -910,7 +919,7 @@ function createErrorFile(
 
   const content = toJsonl(allFailures);
 
-  const file = createFile({
+  const file = await createFile({
     bytes: Buffer.byteLength(content),
     filename: `batch_${batchId}_error.jsonl`,
     purpose: "batch_output",
@@ -927,15 +936,15 @@ function toJsonl(items: any[]): string {
 }
 
 async function cancelBatch(batch: any): Promise<void> {
-  updateBatch(batch.id, {
+  await updateBatch(batch.id, {
     status: "cancelled",
     cancelledAt: Math.floor(Date.now() / 1000),
   });
   console.log(`[BATCH] Cancelled batch ${batch.id}`);
 }
 
-function failBatch(batchId: string, reason: string): void {
-  updateBatch(batchId, {
+async function failBatch(batchId: string, reason: string): Promise<void> {
+  await updateBatch(batchId, {
     status: "failed",
     failedAt: Math.floor(Date.now() / 1000),
     errors: [{ message: reason }],

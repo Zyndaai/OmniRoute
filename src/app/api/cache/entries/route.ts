@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     const sortBy = searchParams.get("sortBy") || "created_at";
     const sortOrder = searchParams.get("sortOrder") || "desc";
 
-    const { entries, total } = listSemanticCacheEntries({
+    const { entries, total } = await listSemanticCacheEntries({
       page,
       limit,
       search,
@@ -61,12 +61,12 @@ export async function DELETE(req: NextRequest) {
     const model = searchParams.get("model");
 
     if (signature) {
-      const { deleted } = deleteSemanticCacheBySignature(signature);
+      const { deleted } = await deleteSemanticCacheBySignature(signature);
       return NextResponse.json({ ok: true, deleted });
     }
 
     if (model) {
-      const { deleted } = deleteSemanticCacheByModel(model);
+      const { deleted } = await deleteSemanticCacheByModel(model);
       return NextResponse.json({ ok: true, deleted });
     }
 

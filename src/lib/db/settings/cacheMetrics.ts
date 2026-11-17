@@ -2,92 +2,80 @@
  * db/settings/cacheMetrics.ts — Cache control metrics (computed from usage_history on-the-fly).
  */
 
-import { getDbInstance } from "../core";
+import { db } from "@/lib/db/pg";
 
 export async function getCacheMetrics() {
-  const db = getDbInstance();
-
   try {
     // Aggregate totals from usage_history
-    const totalsRow = db
-      .prepare(
-        `
+    const totalsRow = await db().queryOne<{
+      totalRequests: number;
+      totalInputTokens: number | null;
+      totalCachedTokens: number | null;
+      totalCacheCreationTokens: number | null;
+    }>(
+      `
       SELECT
-        COUNT(*) as totalRequests,
-        SUM(tokens_input) as totalInputTokens,
-        SUM(tokens_cache_read) as totalCachedTokens,
-        SUM(tokens_cache_creation) as totalCacheCreationTokens
+        COUNT(*) as "totalRequests",
+        SUM(tokens_input) as "totalInputTokens",
+        SUM(tokens_cache_read) as "totalCachedTokens",
+        SUM(tokens_cache_creation) as "totalCacheCreationTokens"
       FROM usage_history
       WHERE tokens_cache_read > 0 OR tokens_cache_creation > 0
     `
-      )
-      .get() as
-      | {
-          totalRequests: number;
-          totalInputTokens: number | null;
-          totalCachedTokens: number | null;
-          totalCacheCreationTokens: number | null;
-        }
-      | undefined;
+    );
 
     // Get all requests count (including those without cache activity)
-    const allRequestsRow = db
-      .prepare(
-        `
-      SELECT COUNT(*) as totalRequests
+    const allRequestsRow = await db().queryOne<{ totalRequests: number }>(
+      `
+      SELECT COUNT(*) as "totalRequests"
       FROM usage_history
     `
-      )
-      .get() as { totalRequests: number } | undefined;
+    );
 
     // Aggregate by provider
-    const byProviderRows = db
-      .prepare(
-        `
-      SELECT
-        provider,
-        COUNT(*) as totalRequests,
-        SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN 1 ELSE 0 END) as cachedRequests,
-        SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN tokens_input ELSE 0 END) as inputTokens,
-        SUM(tokens_cache_read) as cachedTokens,
-        SUM(tokens_cache_creation) as cacheCreationTokens
-      FROM usage_history
-      WHERE provider IS NOT NULL
-      GROUP BY provider
-      HAVING cachedRequests > 0
-    `
-      )
-      .all() as Array<{
+    const byProviderRows = await db().query<{
       provider: string;
       totalRequests: number;
       cachedRequests: number;
       inputTokens: number | null;
       cachedTokens: number | null;
       cacheCreationTokens: number | null;
-    }>;
+    }>(
+      `
+      SELECT
+        provider,
+        COUNT(*) as "totalRequests",
+        SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN 1 ELSE 0 END) as "cachedRequests",
+        SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN tokens_input ELSE 0 END) as "inputTokens",
+        SUM(tokens_cache_read) as "cachedTokens",
+        SUM(tokens_cache_creation) as "cacheCreationTokens"
+      FROM usage_history
+      WHERE provider IS NOT NULL
+      GROUP BY provider
+      HAVING SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN 1 ELSE 0 END) > 0
+    `
+    );
 
     // Aggregate by combo strategy (direct requests stored as 'direct')
-    const byStrategyRows = db
-      .prepare(
-        `
-      SELECT
-        COALESCE(combo_strategy, 'direct') as strategy,
-        COUNT(*) as requests,
-        SUM(tokens_input) as inputTokens,
-        SUM(tokens_cache_read) as cachedTokens,
-        SUM(tokens_cache_creation) as cacheCreationTokens
-      FROM usage_history
-      WHERE (tokens_cache_read > 0 OR tokens_cache_creation > 0)
-      GROUP BY combo_strategy
-    `
-      )
-      .all() as Array<{
+    const byStrategyRows = await db().query<{
       strategy: string;
       requests: number;
       inputTokens: number | null;
       cachedTokens: number | null;
       cacheCreationTokens: number | null;
-    }>;
+    }>(
+      `
+      SELECT
+        COALESCE(combo_strategy, 'direct') as strategy,
+        COUNT(*) as requests,
+        SUM(tokens_input) as "inputTokens",
+        SUM(tokens_cache_read) as "cachedTokens",
+        SUM(tokens_cache_creation) as "cacheCreationTokens"
+      FROM usage_history
+      WHERE (tokens_cache_read > 0 OR tokens_cache_creation > 0)
+      GROUP BY COALESCE(combo_strategy, 'direct')
+    `
+    );
 
     const tokensSaved = totalsRow?.totalCachedTokens || 0;
 
@@ -184,33 +172,31 @@ export interface CacheTrendPoint {
 }
 
 export async function getCacheTrend(hours = 24): Promise<CacheTrendPoint[]> {
-  const db = getDbInstance();
-
   try {
-    const rows = db
-      .prepare(
-        `
-        SELECT
-          strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour,
-          COUNT(*) as requests,
-          SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN 1 ELSE 0 END) as cachedRequests,
-          SUM(tokens_input) as inputTokens,
-          SUM(tokens_cache_read) as cachedTokens,
-          SUM(tokens_cache_creation) as cacheCreationTokens
-        FROM usage_history
-        WHERE timestamp >= datetime('now', ?)
-        GROUP BY hour
-        ORDER BY hour ASC
-      `
-      )
-      .all(`-${hours} hours`) as Array<{
+    const since = new Date(Date.now() - hours * 3600_000).toISOString();
+    const rows = await db().query<{
       hour: string;
       requests: number;
       cachedRequests: number;
       inputTokens: number | null;
       cachedTokens: number | null;
       cacheCreationTokens: number | null;
-    }>;
+    }>(
+      `
+        SELECT
+          to_char(date_trunc('hour', "timestamp" AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:00:00"Z"') as hour,
+          COUNT(*) as requests,
+          SUM(CASE WHEN tokens_cache_read > 0 OR tokens_cache_creation > 0 THEN 1 ELSE 0 END) as "cachedRequests",
+          SUM(tokens_input) as "inputTokens",
+          SUM(tokens_cache_read) as "cachedTokens",
+          SUM(tokens_cache_creation) as "cacheCreationTokens"
+        FROM usage_history
+        WHERE "timestamp" >= $1
+        GROUP BY hour
+        ORDER BY hour ASC
+      `,
+      [since]
+    );
 
     return rows.map((r) => ({
       timestamp: r.hour,

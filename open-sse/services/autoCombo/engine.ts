@@ -17,7 +17,7 @@ import {
   type ProviderCandidate,
   type ScoredProvider,
 } from "./scoring";
-import { getTaskFitness } from "./taskFitness";
+import { loadTaskFitnessLookup } from "./fitnessLookup.ts";
 import { getModePack } from "./modePacks";
 import { getSelfHealingManager } from "./selfHealing";
 import { classifyPromptIntent } from "../intentClassifier";
@@ -218,12 +218,12 @@ function getRotator(comboName: string): ScoreTierRotator {
  *   to infer the intent from `promptMessages` using multilingual classification.
  * @param promptMessages - Optional raw messages for intent classification
  */
-export function selectProvider(
+export async function selectProvider(
   config: AutoComboConfig,
   candidates: ProviderCandidate[],
   taskType: string = "default",
   promptMessages?: Array<{ role: string; content: unknown }>
-): SelectionResult {
+): Promise<SelectionResult> {
   const healer = getSelfHealingManager();
 
   // ── Intent classification (ClawRouter Feature #10/11) ────────────────────
@@ -289,7 +289,11 @@ export function selectProvider(
   }
 
   // Score all providers (using classified intent if available)
-  const scored = scorePool(pool, effectiveTaskType, weights, getTaskFitness, config.manifestHint);
+  const taskFitness = await loadTaskFitnessLookup(
+    pool.map((c) => c.model),
+    effectiveTaskType
+  );
+  const scored = scorePool(pool, effectiveTaskType, weights, taskFitness, config.manifestHint);
 
   // Apply self-healing re-evaluation with actual scores
   const finalCandidates = scored.filter((s) => {

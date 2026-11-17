@@ -161,18 +161,18 @@ export function _setOpencodeFreeModelsForTests(ids: readonly string[] | null): v
 }
 
 /** The free ids the synced catalog implies, or `null` when nothing has been synced. */
-function deriveFreeIdsFromCatalog(): Set<string> | null {
+async function deriveFreeIdsFromCatalog(): Promise<Set<string> | null> {
   try {
-    const available = readSyncedOpencodeFamilyModelIds();
+    const available = await readSyncedOpencodeFamilyModelIds();
     if (available.size === 0) return null;
     const free = new Set<string>();
-    const pricing = getModelsDevPricing();
+    const pricing = await getModelsDevPricing();
     const byProvider =
       pricing[OPENCODE_CATALOG_PROVIDER_IDS[0]] ?? pricing[OPENCODE_CATALOG_PROVIDER_IDS[1]];
     for (const id of available) {
       const cost = byProvider?.[id];
       if (!cost || cost.input !== 0 || cost.output !== 0) continue;
-      const status = getSyncedCapability(OPENCODE_CATALOG_PROVIDER_IDS[0], id)?.status;
+      const status = (await getSyncedCapability(OPENCODE_CATALOG_PROVIDER_IDS[0], id))?.status;
       if (status === "deprecated") continue;
       free.add(id);
     }
@@ -183,16 +183,37 @@ function deriveFreeIdsFromCatalog(): Set<string> | null {
   }
 }
 
-/** Build (or reuse) the free-model snapshot for the current catalog version. */
+let freeCatalogRefresh: Promise<void> | null = null;
+
+/**
+ * Rebuild the free-model snapshot when the catalog version moved. The database read is
+ * asynchronous, so the synchronous gate (`isPremiumOpencodeModel` and friends) only reads the
+ * last snapshot; the executor awaits this once before it consults the gate. Until a snapshot
+ * exists the gate uses the legacy heuristic.
+ */
+export async function refreshOpencodeFreeCatalog(): Promise<void> {
+  if (testFreeModelsOverride) return;
+  const version = getModelCatalogCacheVersion();
+  if (freeCatalogCache && freeCatalogCache.version === version) return;
+  if (!freeCatalogRefresh) {
+    freeCatalogRefresh = (async () => {
+      const free = await deriveFreeIdsFromCatalog();
+      freeCatalogCache = { version, free };
+    })().finally(() => {
+      freeCatalogRefresh = null;
+    });
+  }
+  await freeCatalogRefresh;
+}
+
+/** The last free-model snapshot (the legacy heuristic applies until one is built). */
 function opencodeFreeModelCatalog(): ReadonlySet<string> | null {
   if (testFreeModelsOverride) return testFreeModelsOverride;
-
-  const version = getModelCatalogCacheVersion();
-  if (freeCatalogCache && freeCatalogCache.version === version) return freeCatalogCache.free;
-
-  const free = deriveFreeIdsFromCatalog();
-  freeCatalogCache = { version, free };
-  return free;
+  // Stale-while-revalidate: a moved catalog version starts a background rebuild.
+  if (!freeCatalogCache || freeCatalogCache.version !== getModelCatalogCacheVersion()) {
+    void refreshOpencodeFreeCatalog().catch(() => {});
+  }
+  return freeCatalogCache ? freeCatalogCache.free : null;
 }
 
 /**

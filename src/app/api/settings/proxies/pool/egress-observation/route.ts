@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }
     const { scope, scopeId } = validation.data;
     return Response.json(
-      readPoolEgressObservation(scope, scope === "global" ? null : (scopeId ?? null))
+      await readPoolEgressObservation(scope, scope === "global" ? null : (scopeId ?? null))
     );
   } catch {
     return errorResponse(500, "Failed to load pool egress observation");

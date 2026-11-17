@@ -8,17 +8,12 @@
  * advertised forms miss the stored pair. Match the stored row against all
  * three forms before Vision Bridge substitutes a fallback VLM.
  */
-import type { SqliteAdapter } from "../adapters/types";
-import { getDbInstance } from "../core";
-import { getKeyValue } from "./shared";
+import { readAllCatalogColumn, readCatalogColumn } from "./catalogRow";
 
 /** Nested provider → model map of explicit custom-model vision overrides. */
 export type CustomModelVisionOverrideMap = ReadonlyMap<string, ReadonlyMap<string, boolean>>;
-export type CustomModelVisionDatabase = Pick<SqliteAdapter, "prepare">;
 
 export interface CustomModelVisionOverrideReadOptions {
-  /** Narrow test seam; production uses the canonical DB singleton. */
-  getDatabase?: () => CustomModelVisionDatabase;
   /**
    * Raw model string from the request (`vllm/orcarouter/Qwen...`, the bare
    * path, or `providerId/modelPath`). Used when the parsed provider/model pair
@@ -58,10 +53,9 @@ export function customModelIdMatchesRequest(
   return false;
 }
 
-function readVisionOverrideFromModels(value: string | null, modelId: string): boolean | null {
-  if (!value) return null;
+function readVisionOverrideFromModels(models: unknown, modelId: string): boolean | null {
+  if (!models) return null;
   try {
-    const models = JSON.parse(value) as unknown;
     if (!Array.isArray(models)) return null;
     const entry = models.find(
       (candidate): candidate is { id: string; supportsVision?: boolean } =>
@@ -85,16 +79,16 @@ function readVisionOverrideFromModels(value: string | null, modelId: string): bo
  *
  * null means no owned explicit evidence, not a non-vision verdict.
  */
-export function getExactCustomModelVisionOverride(
+export async function getExactCustomModelVisionOverride(
   providerId: string,
   modelId: string
-): boolean | null {
+): Promise<boolean | null> {
   if (!providerId || !modelId) return null;
   try {
-    const row = getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace = 'customModels' AND key = ?")
-      .get(providerId);
-    return readVisionOverrideFromModels(getKeyValue(row).value, modelId);
+    return readVisionOverrideFromModels(
+      await readCatalogColumn("custom_models", providerId),
+      modelId
+    );
   } catch {
     return null;
   }
@@ -136,14 +130,14 @@ function pickMatchingOverride(
 
 /**
  * Resolve one explicit custom-model vision override. A supplied bulk map avoids
- * SQLite reads for request/build-local capability resolution.
+ * database reads for request/build-local capability resolution.
  */
-export function getCustomModelVisionOverride(
+export async function getCustomModelVisionOverride(
   providerId: string,
   modelId: string,
   bulk?: CustomModelVisionOverrideMap | null,
   options: CustomModelVisionOverrideReadOptions = {}
-): boolean | null {
+): Promise<boolean | null> {
   try {
     const lookupKey = options.lookupKey;
     const canScan = isPathShaped(modelId) || isPathShaped(lookupKey);
@@ -155,17 +149,16 @@ export function getCustomModelVisionOverride(
       }
       return pickMatchingOverride(collectOverrideHits(bulk), providerId, modelId, lookupKey);
     }
-    const db = options.getDatabase?.() ?? getDbInstance();
     if (providerId) {
-      const row = db
-        .prepare("SELECT value FROM key_value WHERE namespace = 'customModels' AND key = ?")
-        .get(providerId);
-      const exact = readVisionOverrideFromModels(getKeyValue(row).value, modelId);
+      const exact = readVisionOverrideFromModels(
+        await readCatalogColumn("custom_models", providerId),
+        modelId
+      );
       if (exact !== null) return exact;
     }
     if (!canScan) return null;
     return pickMatchingOverride(
-      collectOverrideHits(listCustomModelVisionOverrides({ getDatabase: () => db })),
+      collectOverrideHits(await listCustomModelVisionOverrides()),
       providerId,
       modelId,
       lookupKey
@@ -179,31 +172,18 @@ export function getCustomModelVisionOverride(
 export type CustomModelsByProvider = Readonly<Record<string, unknown>>;
 
 /**
- * Bulk-load every provider's `customModels` row with one SQLite query.
+ * Bulk-load every provider's custom models with one query.
  *
  * One request-level snapshot shares this single read between the vision
  * overrides and the #16929 operator endpoint overlay of the live listing, so
- * `/api/models` never re-reads the namespace per consumer. Malformed rows are
- * skipped individually; a failing read yields an empty map (fail open).
+ * `/api/models` never re-reads the table per consumer. A failing read yields an
+ * empty map (fail open).
  */
-export function readCustomModelsByProvider(
-  options: CustomModelVisionOverrideReadOptions = {}
-): CustomModelsByProvider {
+export async function readCustomModelsByProvider(): Promise<CustomModelsByProvider> {
   try {
-    const db = options.getDatabase?.() ?? getDbInstance();
-    const rows = db
-      .prepare("SELECT key, value FROM key_value WHERE namespace = 'customModels'")
-      .all();
+    const rows = await readAllCatalogColumn("custom_models");
     const result: Record<string, unknown> = {};
-    for (const row of rows) {
-      const { key, value } = getKeyValue(row);
-      if (!key || !value) continue;
-      try {
-        result[key] = JSON.parse(value) as unknown;
-      } catch {
-        // Malformed custom-model rows do not participate in capability resolution.
-      }
-    }
+    for (const { provider, value } of rows) result[provider] = value;
     return result;
   } catch {
     return {};
@@ -233,9 +213,7 @@ export function buildCustomModelVisionOverrides(
   return result;
 }
 
-/** Bulk-load explicit custom-model vision overrides with one SQLite query. */
-export function listCustomModelVisionOverrides(
-  options: CustomModelVisionOverrideReadOptions = {}
-): CustomModelVisionOverrideMap {
-  return buildCustomModelVisionOverrides(readCustomModelsByProvider(options));
+/** Bulk-load explicit custom-model vision overrides with one query. */
+export async function listCustomModelVisionOverrides(): Promise<CustomModelVisionOverrideMap> {
+  return buildCustomModelVisionOverrides(await readCustomModelsByProvider());
 }

@@ -82,9 +82,9 @@ export interface ReferralsSyncDeps {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   getFlag?: (key: string) => boolean;
-  getSettings?: () => RadarSettingsSnapshot;
-  getCache?: () => RadarReferralsCacheEntry | null;
-  setCache?: (entry: RadarReferralsCacheEntry) => void;
+  getSettings?: () => RadarSettingsSnapshot | Promise<RadarSettingsSnapshot>;
+  getCache?: () => RadarReferralsCacheEntry | null | Promise<RadarReferralsCacheEntry | null>;
+  setCache?: (entry: RadarReferralsCacheEntry) => void | Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,10 +171,10 @@ export async function syncRadarReferrals(
     // Step 2: Opt-in gate
     let settings: RadarSettingsSnapshot;
     if (getSettingsFn) {
-      settings = getSettingsFn();
+      settings = await getSettingsFn();
     } else {
       const mod = await import("@/lib/db/radar");
-      settings = mod.getRadarSettings();
+      settings = await mod.getRadarSettings();
     }
     if (!settings.optIn) {
       return { status: "opt_out" };
@@ -264,10 +264,10 @@ export async function syncRadarReferrals(
     // timestamps are accepted because entitlement variants share generatedAt.
     let existingCache: RadarReferralsCacheEntry | null = null;
     if (getCacheFn) {
-      existingCache = getCacheFn();
+      existingCache = await getCacheFn();
     } else {
       const mod = await import("@/lib/db/radar");
-      existingCache = mod.getRadarReferralsCache();
+      existingCache = await mod.getRadarReferralsCache();
     }
 
     if (existingCache) {
@@ -294,10 +294,10 @@ export async function syncRadarReferrals(
     };
 
     if (setCacheFn) {
-      setCacheFn(cacheEntry);
+      await setCacheFn(cacheEntry);
     } else {
       const mod = await import("@/lib/db/radar");
-      mod.setRadarReferralsCache(cacheEntry);
+      await mod.setRadarReferralsCache(cacheEntry);
     }
 
     return { status: "updated", generatedAt: feed.generatedAt, tier: servedTier };

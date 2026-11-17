@@ -49,7 +49,7 @@ export function normalizeEvalTarget(target?: EvalTargetInput | null): EvalTarget
 }
 
 export async function buildEvalTargetOptions(): Promise<EvalTargetOption[]> {
-  const [suites, combos] = await Promise.all([Promise.resolve(listSuites()), getCombos()]);
+  const [suites, combos] = await Promise.all([listSuites(), getCombos()]);
   const models = [
     ...new Set(
       suites
@@ -284,7 +284,7 @@ export async function runEvalSuiteAgainstTarget(input: {
   apiKeyId?: string;
   runGroupId?: string | null;
 }): Promise<PersistedEvalRun> {
-  const suite = getSuite(input.suiteId);
+  const suite = await getSuite(input.suiteId);
   if (!suite) {
     throw new Error(`Suite not found: ${input.suiteId}`);
   }
@@ -320,8 +320,8 @@ export async function runEvalSuiteAgainstTarget(input: {
     };
   }
 
-  const evaluated = runSuite(input.suiteId, outputs, caseMetrics);
-  return saveEvalRun({
+  const evaluated = await runSuite(input.suiteId, outputs, caseMetrics);
+  return await saveEvalRun({
     runGroupId: input.runGroupId || null,
     suiteId: evaluated.suiteId,
     suiteName: evaluated.suiteName,

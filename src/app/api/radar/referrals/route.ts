@@ -65,13 +65,13 @@ export async function GET(request: Request) {
     // this is safe to await unconditionally — a disabled/opted-out operator
     // just gets an instant no-op here and falls through to serving whatever
     // (possibly empty) cache already exists.
-    const existingCache = getRadarReferralsCache();
+    const existingCache = await getRadarReferralsCache();
     if (shouldSyncReferralsOnRead(existingCache?.fetchedAt ?? null, Date.now())) {
       await syncRadarReferrals();
     }
 
-    const { fixed, campaigns } = getRadarReferrals();
-    const cache = getRadarReferralsCache();
+    const { fixed, campaigns } = await getRadarReferrals();
+    const cache = await getRadarReferralsCache();
     return NextResponse.json(
       { fixed, campaigns, tier: cache?.tier ?? null },
       { headers: { ...CORS_HEADERS, "Cache-Control": "no-store" } },

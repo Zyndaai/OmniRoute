@@ -291,13 +291,13 @@ function isExactModelMatch(rule: ReasoningRoutingRule, model: string): boolean {
   );
 }
 
-function capabilityFor(
+async function capabilityFor(
   model: string,
   targetEffort: ReasoningEffort | null,
   requiresReasoning = Boolean(targetEffort && targetEffort !== "none")
 ) {
   if (!requiresReasoning || targetEffort === "none") return "supported" as const;
-  const capabilities = getResolvedModelCapabilities(model);
+  const capabilities = await getResolvedModelCapabilities(model);
   if (capabilities.supportsThinking === false) return "unsupported" as const;
   if (targetEffort === "max" || targetEffort === "ultra") {
     // The gate must agree with what the dispatch-time sanitizer
@@ -436,29 +436,31 @@ function resolveTargetEffort(
     : input.sourceEffort;
 }
 
-function resolveCapability(
+async function resolveCapability(
   targetCombo: JsonRecord | null,
   targetModel: string,
   targetEffort: ReasoningEffort | null,
   requiresReasoning: boolean
-): { capability: ReasoningRuleDecision["capability"]; warnings: string[] } {
+): Promise<{ capability: ReasoningRuleDecision["capability"]; warnings: string[] }> {
   if (!targetCombo) {
     return {
-      capability: capabilityFor(targetModel, targetEffort, requiresReasoning),
+      capability: await capabilityFor(targetModel, targetEffort, requiresReasoning),
       warnings: [],
     };
   }
   const models = Array.isArray(targetCombo.models) ? targetCombo.models : [];
-  const statuses = models.map((entry) => {
-    const record = asRecord(entry);
-    const model =
-      typeof entry === "string"
-        ? entry
-        : typeof record.model === "string"
-          ? String(record.model)
-          : null;
-    return model ? capabilityFor(model, targetEffort, requiresReasoning) : "unknown";
-  });
+  const statuses = await Promise.all(
+    models.map(async (entry) => {
+      const record = asRecord(entry);
+      const model =
+        typeof entry === "string"
+          ? entry
+          : typeof record.model === "string"
+            ? String(record.model)
+            : null;
+      return model ? await capabilityFor(model, targetEffort, requiresReasoning) : "unknown";
+    })
+  );
   const capability =
     statuses.length > 0 && statuses.every((status) => status === "unsupported")
       ? "unsupported"
@@ -489,7 +491,7 @@ export async function resolveReasoningRoutingRule(
     (Boolean(targetEffort) ||
       budgetAction === "set" ||
       (budgetAction === "preserve" && input.hasThinkingBudget === true));
-  const capabilityResult = resolveCapability(
+  const capabilityResult = await resolveCapability(
     targetCombo,
     input.capabilityModel || targetModel,
     targetEffort,
@@ -651,23 +653,34 @@ export function applyReasoningRuleDirective(
   return body;
 }
 
-export function filterComboForReasoningDecision(
+export async function filterComboForReasoningDecision(
   comboInput: unknown,
   decision: ReasoningRuleDecision
-): { combo: JsonRecord | null; removed: string[] } {
+): Promise<{ combo: JsonRecord | null; removed: string[] }> {
   const combo = { ...asRecord(comboInput) };
   if (!Array.isArray(combo.models) || !decision.requiresReasoning) return { combo, removed: [] };
   const removed: string[] = [];
-  combo.models = combo.models.filter((entry) => {
-    const model =
-      typeof entry === "string"
-        ? entry
-        : typeof asRecord(entry).model === "string"
-          ? String(asRecord(entry).model)
-          : null;
-    if (!model) return true;
-    if (capabilityFor(model, decision.targetEffort, true) !== "unsupported") return true;
-    removed.push(model);
+  const entries = combo.models as unknown[];
+  // Resolve capabilities first (async), then filter synchronously in order.
+  const verdicts = await Promise.all(
+    entries.map(async (entry) => {
+      const model =
+        typeof entry === "string"
+          ? entry
+          : typeof asRecord(entry).model === "string"
+            ? String(asRecord(entry).model)
+            : null;
+      if (!model) return { model, keep: true };
+      return {
+        model,
+        keep: (await capabilityFor(model, decision.targetEffort, true)) !== "unsupported",
+      };
+    })
+  );
+  combo.models = entries.filter((_entry, index) => {
+    const { model, keep } = verdicts[index];
+    if (keep) return true;
+    if (model) removed.push(model);
     return false;
   });
   return { combo: (combo.models as unknown[]).length > 0 ? combo : null, removed };

@@ -10,9 +10,9 @@
  * Opt-in via PRICING_SYNC_ENABLED=true (default: false).
  */
 
-import { getDbInstance } from "./db/core";
+import { db, jsonb } from "./db/pg";
+import { clearPricingSource, readPricingSource, replacePricingSource } from "./db/modelPricing";
 import { invalidateDbCache, getModelCatalogCacheVersion } from "./db/readCache";
-import { backupDbFile } from "./db/backup";
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -262,60 +262,31 @@ let pricingMemoVersion = -1; // -1: never equals a real cacheVersion (starts at 
 /**
  * Read synced pricing from `pricing_synced` namespace.
  */
-export function getSyncedPricing(): PricingByProvider {
+export async function getSyncedPricing(): Promise<PricingByProvider> {
   const currentVersion = getModelCatalogCacheVersion();
   if (pricingMemo !== null && pricingMemoVersion === currentVersion) {
     return pricingMemo;
   }
 
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = 'pricing_synced'")
-    .all();
-  const synced: PricingByProvider = {};
-  for (const row of rows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-    try {
-      synced[key] = JSON.parse(rawValue) as PricingModels;
-    } catch {
-      console.warn(`[PRICING_SYNC] Corrupted data for provider "${key}", skipping`);
-    }
-  }
+  const synced = (await readPricingSource("litellm")) as PricingByProvider;
   pricingMemo = synced;
   pricingMemoVersion = currentVersion;
   return synced;
 }
 
 /**
- * Save synced pricing to `pricing_synced` namespace (full replace).
+ * Save synced pricing (`model_pricing` rows of source `litellm`, full replace).
  */
-export function saveSyncedPricing(data: PricingByProvider): void {
-  const db = getDbInstance();
-  const del = db.prepare("DELETE FROM key_value WHERE namespace = 'pricing_synced'");
-  const insert = db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES ('pricing_synced', ?, ?)"
-  );
-  const tx = db.transaction(() => {
-    del.run();
-    for (const [provider, models] of Object.entries(data)) {
-      insert.run(provider, JSON.stringify(models));
-    }
-  });
-  tx();
-  backupDbFile("pre-write");
+export async function saveSyncedPricing(data: PricingByProvider): Promise<void> {
+  await replacePricingSource("litellm", data);
   invalidateDbCache("pricing");
 }
 
 /**
  * Clear all synced pricing data.
  */
-export function clearSyncedPricing(): void {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM key_value WHERE namespace = 'pricing_synced'").run();
-  backupDbFile("pre-write");
+export async function clearSyncedPricing(): Promise<void> {
+  await clearPricingSource("litellm");
   invalidateDbCache("pricing");
 }
 
@@ -328,39 +299,29 @@ export function clearSyncedPricing(): void {
 // `lastSyncModelCount`) are therefore invisible across those instances;
 // persisting them to the DB lets any instance read the real status.
 
-const SYNC_STATUS_NAMESPACE = "pricing_sync_status";
-const SYNC_STATUS_KEY = "last_sync";
+const SYNC_STATUS_KEY = "pricing_sync_status.last_sync";
 
-function readPersistedSyncStatus(): { lastSyncTime: string; lastSyncModelCount: number } | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(SYNC_STATUS_NAMESPACE, SYNC_STATUS_KEY);
-  const record = toRecord(row);
-  const rawValue = typeof record.value === "string" ? record.value : null;
-  if (!rawValue) return null;
-  try {
-    const parsed = JSON.parse(rawValue) as { lastSyncTime?: string; lastSyncModelCount?: number };
-    if (typeof parsed.lastSyncTime !== "string") return null;
-    return {
-      lastSyncTime: parsed.lastSyncTime,
-      lastSyncModelCount:
-        typeof parsed.lastSyncModelCount === "number" ? parsed.lastSyncModelCount : 0,
-    };
-  } catch {
-    return null;
-  }
+async function readPersistedSyncStatus(): Promise<{
+  lastSyncTime: string;
+  lastSyncModelCount: number;
+} | null> {
+  const row = await db().queryOne<{ value: unknown }>(
+    "SELECT value FROM config_entries WHERE namespace = 'job_state' AND key = $1",
+    [SYNC_STATUS_KEY]
+  );
+  const parsed = toRecord(row?.value) as { lastSyncTime?: string; lastSyncModelCount?: number };
+  if (typeof parsed.lastSyncTime !== "string") return null;
+  return {
+    lastSyncTime: parsed.lastSyncTime,
+    lastSyncModelCount: typeof parsed.lastSyncModelCount === "number" ? parsed.lastSyncModelCount : 0,
+  };
 }
 
-function writePersistedSyncStatus(lastSync: string, modelCount: number): void {
-  const db = getDbInstance();
-  db.prepare(
-    "INSERT INTO key_value (namespace, key, value) VALUES (?, ?, ?) " +
-      "ON CONFLICT(namespace, key) DO UPDATE SET value = excluded.value"
-  ).run(
-    SYNC_STATUS_NAMESPACE,
-    SYNC_STATUS_KEY,
-    JSON.stringify({ lastSyncTime: lastSync, lastSyncModelCount: modelCount })
+async function writePersistedSyncStatus(lastSync: string, modelCount: number): Promise<void> {
+  await db().execute(
+    `INSERT INTO config_entries (namespace, key, value) VALUES ('job_state', $1, $2::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [SYNC_STATUS_KEY, jsonb({ lastSyncTime: lastSync, lastSyncModelCount: modelCount })]
   );
 }
 
@@ -417,10 +378,10 @@ export async function syncPricingFromSources(opts?: {
     const providerCount = Object.keys(aggregated).length;
 
     if (!dryRun) {
-      saveSyncedPricing(aggregated);
+      await saveSyncedPricing(aggregated);
       lastSyncTime = new Date().toISOString();
       lastSyncModelCount = modelCount;
-      writePersistedSyncStatus(lastSyncTime, modelCount);
+      await writePersistedSyncStatus(lastSyncTime, modelCount);
     }
 
     return {
@@ -507,13 +468,13 @@ export function stopPeriodicSync(): void {
 /**
  * Get current sync status.
  */
-export function getSyncStatus(): SyncStatus {
+export async function getSyncStatus(): Promise<SyncStatus> {
   const enabled = process.env.PRICING_SYNC_ENABLED === "true";
   // `lastSyncTime`/`lastSyncModelCount` are only reliably populated on the
   // module instance that performed the sync (see note above
   // writePersistedSyncStatus) — fall back to the persisted DB record so
   // status reads from a different module instance still see it.
-  const persisted = lastSyncTime === null ? readPersistedSyncStatus() : null;
+  const persisted = lastSyncTime === null ? await readPersistedSyncStatus() : null;
   const effectiveLastSync = lastSyncTime ?? persisted?.lastSyncTime ?? null;
   const effectiveModelCount =
     lastSyncTime !== null ? lastSyncModelCount : (persisted?.lastSyncModelCount ?? 0);

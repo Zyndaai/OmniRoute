@@ -1,6 +1,7 @@
-import { backupDbFile } from "../backup";
-import { getDbInstance, rowToCamel } from "../core";
+import { db } from "../pg";
+import { rowToCamel } from "../caseMapping";
 import { invalidateDbCache } from "../readCache";
+import { jsonValueParam } from "../pgJsonText";
 import { toRecord } from "./columns";
 
 type RecordValue = Record<string, unknown>;
@@ -24,10 +25,15 @@ export async function clearCodexAccountCooldown(id: string, scope: Scope = "code
   return mutate(id, (data) => clearScope(data, scope));
 }
 
-function mutate(id: string, apply: (data: RecordValue) => void): RecordValue | null {
-  const db = getDbInstance();
-  const result = db.transaction(() => {
-    const row = db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(id);
+async function mutate(
+  id: string,
+  apply: (data: RecordValue) => void
+): Promise<RecordValue | null> {
+  const result = await db().transaction(async (tx) => {
+    const row = await tx.queryOne(
+      "SELECT provider, provider_specific_data FROM provider_connections WHERE id = $1 FOR UPDATE",
+      [id]
+    );
     if (!row) return null;
     const connection = toRecord(rowToCamel(row));
     if (connection.provider !== "codex") return null;
@@ -35,12 +41,12 @@ function mutate(id: string, apply: (data: RecordValue) => void): RecordValue | n
     const previous = JSON.stringify(data);
     apply(data);
     if (JSON.stringify(data) === previous) return data;
-    backupDbFile("pre-write");
-    db.prepare(
-      "UPDATE provider_connections SET provider_specific_data = ?, updated_at = ? WHERE id = ?"
-    ).run(JSON.stringify(data), new Date().toISOString(), id);
+    await tx.execute(
+      "UPDATE provider_connections SET provider_specific_data = $1, updated_at = $2 WHERE id = $3",
+      [jsonValueParam(data), new Date().toISOString(), id]
+    );
     return data;
-  })();
+  });
   // #13389: codex quota/cooldown observations are routing/health-only writes;
   // the model catalog never reads them, so don't bust the /v1/models cache.
   if (result) invalidateDbCache("connections", undefined, { skipModelCatalog: true });

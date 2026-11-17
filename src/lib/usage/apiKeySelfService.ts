@@ -1,3 +1,4 @@
+import { db, type DbExecutor } from "@/lib/db/pg";
 import { hasSelfAccountQuotaScope, hasSelfUsageScope } from "@/shared/constants/selfServiceScopes";
 import { supportsProviderQuota } from "@/shared/utils/providerQuotaVisibility";
 
@@ -9,14 +10,6 @@ interface ApiKeySelfServiceMetadata {
   name: string;
   scopes: string[];
   allowedConnections: string[];
-}
-
-interface StatementLike {
-  get: (...params: unknown[]) => unknown;
-}
-
-interface DbLike {
-  prepare: (sql: string) => StatementLike;
 }
 
 interface CostSummaryLike {
@@ -31,9 +24,9 @@ interface CostSummaryLike {
   warningThreshold: number | null;
 }
 
-type GetCostSummaryFn = (apiKeyId: string) => CostSummaryLike;
+type GetCostSummaryFn = (apiKeyId: string) => CostSummaryLike | Promise<CostSummaryLike>;
 type CheckBudgetFn = (apiKeyId: string) => unknown;
-type GetDbInstanceFn = () => DbLike;
+type GetDbInstanceFn = () => DbExecutor;
 type GetProviderConnectionByIdFn = (connectionId: string) => Promise<unknown>;
 type GetProviderConnectionsFn = (filters?: Record<string, unknown>) => Promise<unknown[]>;
 type FetchAndPersistProviderLimitsFn = (
@@ -143,22 +136,25 @@ function buildCostStatus(summary: CostSummaryLike, now: number) {
   };
 }
 
-function aggregateTokens(db: DbLike, apiKeyId: string, periodStartAt: string): TokenTotals {
-  const row = db
-    .prepare(
-      `
-      SELECT
-        COALESCE(SUM(tokens_input), 0) AS inputTokens,
-        COALESCE(SUM(tokens_output), 0) AS outputTokens,
-        COALESCE(SUM(tokens_cache_read), 0) AS cacheReadTokens,
-        COALESCE(SUM(tokens_cache_creation), 0) AS cacheCreationTokens,
-        COALESCE(SUM(tokens_reasoning), 0) AS reasoningTokens
-      FROM usage_history
-      WHERE api_key_id = ?
-        AND timestamp >= ?
+async function aggregateTokens(
+  executor: DbExecutor,
+  apiKeyId: string,
+  periodStartAt: string
+): Promise<TokenTotals> {
+  const row = await executor.queryOne<JsonRecord>(
     `
-    )
-    .get(apiKeyId, periodStartAt) as JsonRecord | undefined;
+      SELECT
+        COALESCE(SUM(tokens_input), 0) AS "inputTokens",
+        COALESCE(SUM(tokens_output), 0) AS "outputTokens",
+        COALESCE(SUM(tokens_cache_read), 0) AS "cacheReadTokens",
+        COALESCE(SUM(tokens_cache_creation), 0) AS "cacheCreationTokens",
+        COALESCE(SUM(tokens_reasoning), 0) AS "reasoningTokens"
+      FROM usage_history
+      WHERE api_key_id = $1
+        AND "timestamp" >= $2
+    `,
+    [apiKeyId, periodStartAt]
+  );
 
   const inputTokens = toNumber(row?.inputTokens);
   const outputTokens = toNumber(row?.outputTokens);
@@ -364,7 +360,6 @@ type RequiredDeps = Required<ApiKeySelfServiceDeps>;
 async function normalizeDeps(deps: ApiKeySelfServiceDeps): Promise<RequiredDeps> {
   const costRules =
     deps.getCostSummary && deps.checkBudget ? null : await import("@/domain/costRules");
-  const dbCore = deps.getDbInstance ? null : await import("@/lib/db/core");
   const localDb =
     deps.getProviderConnectionById && deps.getProviderConnections
       ? null
@@ -377,7 +372,7 @@ async function normalizeDeps(deps: ApiKeySelfServiceDeps): Promise<RequiredDeps>
     now: deps.now ?? Date.now,
     getCostSummary: deps.getCostSummary ?? costRules!.getCostSummary,
     checkBudget: deps.checkBudget ?? costRules!.checkBudget,
-    getDbInstance: deps.getDbInstance ?? dbCore!.getDbInstance,
+    getDbInstance: deps.getDbInstance ?? db,
     getProviderConnectionById: deps.getProviderConnectionById ?? localDb!.getProviderConnectionById,
     getProviderConnections: deps.getProviderConnections ?? localDb!.getProviderConnections,
     fetchAndPersistProviderLimits:
@@ -394,12 +389,12 @@ export async function buildApiKeySelfServiceStatus(
   }
 
   const resolvedDeps = await normalizeDeps(deps);
-  const summary = resolvedDeps.getCostSummary(metadata.id);
-  resolvedDeps.checkBudget(metadata.id);
+  const summary = await resolvedDeps.getCostSummary(metadata.id);
+  await resolvedDeps.checkBudget(metadata.id);
 
   const cost = buildCostStatus(summary, resolvedDeps.now());
-  const tokens = aggregateTokens(
-    resolvedDeps.getDbInstance() as DbLike,
+  const tokens = await aggregateTokens(
+    resolvedDeps.getDbInstance(),
     metadata.id,
     cost.periodStartAt ??
       new Date(getCurrentMonthWindow(resolvedDeps.now()).periodStartAt).toISOString()

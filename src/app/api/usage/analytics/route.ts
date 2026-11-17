@@ -4,7 +4,7 @@ import { getProviderById } from "@/shared/constants/providers";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { serveAnalyticsCached } from "@/lib/usage/analyticsResponseCache";
 import { getApiKeys } from "@/lib/db/apiKeys";
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
+import { getRetentionSettings } from "@/lib/db/retentionSettings";
 import {
   buildUnifiedSource,
   buildPresetUnifiedSource,
@@ -547,8 +547,8 @@ async function computeAnalyticsResponse(
 
     // Raw-data cutoff: must match cleanupUsageHistory's rollup/delete boundary —
     // retention.usageHistory (src/lib/db/cleanup.ts), NOT aggregation.rawDataRetentionDays.
-    const dbSettings = getUserDatabaseSettings();
-    const rawRetentionDays = dbSettings.retention?.usageHistory ?? 30;
+    const retention = await getRetentionSettings();
+    const rawRetentionDays = retention.usageHistory ?? 30;
     const rawCutoff = new Date();
     rawCutoff.setDate(rawCutoff.getDate() - rawRetentionDays);
     const rawCutoffIso = rawCutoff.toISOString();
@@ -624,7 +624,7 @@ async function computeAnalyticsResponse(
     // whose queries hold the event loop for seconds on large usage_history tables.
     if (searchParams.get("view") === "apiKeys") {
       const byApiKey = buildApiKeyTotals(
-        getApiKeyTotalsRows(apiKeyWhereClause, params),
+        await getApiKeyTotalsRows(apiKeyWhereClause, params),
         apiKeys,
         (row) =>
           computeUsageRowCost(
@@ -640,10 +640,10 @@ async function computeAnalyticsResponse(
       return NextResponse.json({ byApiKey });
     }
 
-    const summaryRow = asUsageRow(getUsageSummary(unifiedSource, unifiedParams));
+    const summaryRow = asUsageRow(await getUsageSummary(unifiedSource, unifiedParams));
 
-    const dailyRows = asUsageRows(getDailyUsage(unifiedSource, unifiedParams));
-    const dailyCostRows = asUsageRows(getDailyCostRows(unifiedSource, unifiedParams));
+    const dailyRows = asUsageRows(await getDailyUsage(unifiedSource, unifiedParams));
+    const dailyCostRows = asUsageRows(await getDailyCostRows(unifiedSource, unifiedParams));
 
     const heatmapStart = new Date();
     heatmapStart.setUTCDate(heatmapStart.getUTCDate() - 364);
@@ -665,26 +665,28 @@ async function computeAnalyticsResponse(
       });
     }
 
-    const heatmapRows = asUsageRows(getHeatmapRows(heatmapConditions, heatmapParams));
+    const heatmapRows = asUsageRows(await getHeatmapRows(heatmapConditions, heatmapParams));
 
-    const modelRows = asUsageRows(getModelUsageRows(unifiedSource, unifiedParams));
+    const modelRows = asUsageRows(await getModelUsageRows(unifiedSource, unifiedParams));
 
-    const providerCostRows = asUsageRows(getProviderCostRows(unifiedSource, unifiedParams));
+    const providerCostRows = asUsageRows(await getProviderCostRows(unifiedSource, unifiedParams));
 
-    const providerRows = asUsageRows(getProviderUsageRows(unifiedSource, unifiedParams));
+    const providerRows = asUsageRows(await getProviderUsageRows(unifiedSource, unifiedParams));
 
     const accountCostWhereClause = whereClause
       .replace(/timestamp/g, "usage_history.timestamp")
       .replace(/api_key_/g, "usage_history.api_key_");
-    const accountCostRows = asUsageRows(getAccountCostRows(accountCostWhereClause, params));
+    const accountCostRows = asUsageRows(await getAccountCostRows(accountCostWhereClause, params));
 
-    const accountRows = asUsageRows(getAccountUsageRows(accountCostWhereClause, params));
+    const accountRows = asUsageRows(await getAccountUsageRows(accountCostWhereClause, params));
 
-    const apiKeyRows = asUsageRows(getApiKeyUsageRows(apiKeyWhereClause, params));
+    const apiKeyRows = asUsageRows(await getApiKeyUsageRows(apiKeyWhereClause, params));
 
-    const serviceTierRows = asUsageRows(getServiceTierUsageRows(unifiedSource, unifiedParams));
+    const serviceTierRows = asUsageRows(
+      await getServiceTierUsageRows(unifiedSource, unifiedParams)
+    );
 
-    const apiKeyMetadataRows = asUsageRows(getApiKeyMetadataRows(apiKeyWhereClause, params));
+    const apiKeyMetadataRows = asUsageRows(await getApiKeyMetadataRows(apiKeyWhereClause, params));
 
     const apiKeyMetadata = new Map<string, { latestName: string; aliases: Set<string> }>();
     for (const row of apiKeyMetadataRows) {
@@ -701,10 +703,10 @@ async function computeAnalyticsResponse(
       apiKeyMetadata.set(groupKey, existing);
     }
 
-    const weeklyRows = asUsageRows(getWeeklyPatternRows(unifiedSource, unifiedParams));
+    const weeklyRows = asUsageRows(await getWeeklyPatternRows(unifiedSource, unifiedParams));
 
-    const fallbackRow = asUsageRow(getFallbackStats(whereClause, params));
-    const errorBreakdown = getErrorTypeBreakdown(whereClause, params);
+    const fallbackRow = asUsageRow(await getFallbackStats(whereClause, params));
+    const errorBreakdown = await getErrorTypeBreakdown(whereClause, params);
 
     const summary = {
       totalRequests: Number(summaryRow?.totalRequests || 0),
@@ -1142,7 +1144,7 @@ async function computeAnalyticsResponse(
           apiKeyParams: apiKeyParamEntries,
         });
 
-        const presetModelRows = asUsageRows(getPresetCostModelRows(pSrc, pParams));
+        const presetModelRows = asUsageRows(await getPresetCostModelRows(pSrc, pParams));
 
         let presetTotalCost = 0;
         for (const row of presetModelRows) {

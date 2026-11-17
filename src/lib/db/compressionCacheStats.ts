@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
 export interface CacheStatsEntry {
   provider: string;
@@ -18,80 +18,63 @@ export interface CacheStatsSummary {
   byProvider: Record<string, { count: number; avgNetSavings: number; cacheHitRate: number }>;
 }
 
-export function recordCacheStats(entry: CacheStatsEntry): void {
-  const db = getDbInstance();
-
-  const sql = `INSERT INTO compression_cache_stats (
-    provider, 
-    model, 
-    compression_mode, 
-    cache_control_present, 
-    estimated_cache_hit, 
-    tokens_saved_compression, 
-    tokens_saved_caching, 
+export async function recordCacheStats(entry: CacheStatsEntry): Promise<void> {
+  await db().execute(
+    `INSERT INTO compression_cache_stats (
+    provider,
+    model,
+    compression_mode,
+    cache_control_present,
+    estimated_cache_hit,
+    tokens_saved_compression,
+    tokens_saved_caching,
     net_savings
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-
-  db.prepare(sql).run(
-    entry.provider,
-    entry.model ?? "",
-    entry.compressionMode,
-    entry.cacheControlPresent ? 1 : 0,
-    entry.estimatedCacheHit ? 1 : 0,
-    entry.tokensSavedCompression,
-    entry.tokensSavedCaching,
-    entry.netSavings
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      entry.provider,
+      entry.model ?? "",
+      entry.compressionMode,
+      Boolean(entry.cacheControlPresent),
+      Boolean(entry.estimatedCacheHit),
+      Math.round(entry.tokensSavedCompression),
+      Math.round(entry.tokensSavedCaching),
+      Math.round(entry.netSavings),
+    ]
   );
 }
 
-export function getCacheStatsSummary(since?: Date): CacheStatsSummary {
-  const db = getDbInstance();
-  const whereClause = since ? "WHERE created_at >= ?" : "";
+export async function getCacheStatsSummary(since?: Date): Promise<CacheStatsSummary> {
+  const whereClause = since ? "WHERE created_at >= $1" : "";
   const params = since ? [since.toISOString()] : [];
 
   // Global aggregates
-  const globalRow = since
-    ? (db
-        .prepare(
-          `SELECT COUNT(*) as totalRequests, AVG(net_savings) as avgNetSavings, SUM(estimated_cache_hit) * 1.0 / COUNT(*) as cacheHitRate FROM compression_cache_stats WHERE created_at >= ?`
-        )
-        .get(since.toISOString()) as
-        | { totalRequests: number; avgNetSavings: number; cacheHitRate: number }
-        | undefined)
-    : (db
-        .prepare(
-          `SELECT COUNT(*) as totalRequests, AVG(net_savings) as avgNetSavings, SUM(estimated_cache_hit) * 1.0 / COUNT(*) as cacheHitRate FROM compression_cache_stats`
-        )
-        .get() as
-        | { totalRequests: number; avgNetSavings: number; cacheHitRate: number }
-        | undefined);
+  const globalRow = await db().queryOne<{
+    totalRequests: number;
+    avgNetSavings: number | null;
+    cacheHitRate: number | null;
+  }>(
+    `SELECT COUNT(*) AS "totalRequests", AVG(net_savings) AS "avgNetSavings",
+            SUM(estimated_cache_hit::int)::float8 / NULLIF(COUNT(*), 0) AS "cacheHitRate"
+       FROM compression_cache_stats ${whereClause}`,
+    params
+  );
 
   if (!globalRow || globalRow.totalRequests === 0) {
     return { totalRequests: 0, avgNetSavings: 0, cacheHitRate: 0, byProvider: {} };
   }
 
   // Per-provider aggregates
-  const providerRows = since
-    ? (db
-        .prepare(
-          `SELECT provider, COUNT(*) as count, AVG(net_savings) as avgNetSavings, SUM(estimated_cache_hit) * 1.0 / COUNT(*) as cacheHitRate FROM compression_cache_stats WHERE created_at >= ? GROUP BY provider`
-        )
-        .all(since.toISOString()) as Array<{
-        provider: string;
-        count: number;
-        avgNetSavings: number;
-        cacheHitRate: number;
-      }>)
-    : (db
-        .prepare(
-          `SELECT provider, COUNT(*) as count, AVG(net_savings) as avgNetSavings, SUM(estimated_cache_hit) * 1.0 / COUNT(*) as cacheHitRate FROM compression_cache_stats GROUP BY provider`
-        )
-        .all() as Array<{
-        provider: string;
-        count: number;
-        avgNetSavings: number;
-        cacheHitRate: number;
-      }>);
+  const providerRows = await db().query<{
+    provider: string;
+    count: number;
+    avgNetSavings: number;
+    cacheHitRate: number;
+  }>(
+    `SELECT provider, COUNT(*) AS count, AVG(net_savings) AS "avgNetSavings",
+            SUM(estimated_cache_hit::int)::float8 / NULLIF(COUNT(*), 0) AS "cacheHitRate"
+       FROM compression_cache_stats ${whereClause} GROUP BY provider`,
+    params
+  );
 
   const byProvider: Record<string, { count: number; avgNetSavings: number; cacheHitRate: number }> =
     {};

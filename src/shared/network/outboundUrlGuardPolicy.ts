@@ -1,6 +1,5 @@
-import { getFeatureFlagOverride } from "@/lib/db/featureFlags";
 import { parseEnvBoolean } from "@/shared/utils/envBoolean";
-import { resolveFeatureFlag } from "@/shared/utils/featureFlags";
+import { peekFeatureFlagOverride, resolveFeatureFlag } from "@/shared/utils/featureFlags";
 import {
   OutboundUrlGuardError,
   PROVIDER_URL_BLOCKED_MESSAGE,
@@ -39,7 +38,7 @@ export function arePrivateProviderUrlsAllowed() {
   //    too: an override of "false" must not be re-enabled by the env opt-in below.
   let dbValue: string | undefined;
   try {
-    dbValue = getFeatureFlagOverride(PRIVATE_PROVIDER_URLS_ENV);
+    dbValue = peekFeatureFlagOverride(PRIVATE_PROVIDER_URLS_ENV);
   } catch {
     // DB not initialized yet — fall through to env-only check.
   }
@@ -56,7 +55,7 @@ export function arePrivateProviderUrlsAllowed() {
   //    DB override set there comes first, then env, as in step 1.
   let legacyValue: string | undefined;
   try {
-    legacyValue = getFeatureFlagOverride(SSRF_GUARD_FLAG);
+    legacyValue = peekFeatureFlagOverride(SSRF_GUARD_FLAG);
   } catch {
     // DB not initialized yet — fall through to env-only check.
   }

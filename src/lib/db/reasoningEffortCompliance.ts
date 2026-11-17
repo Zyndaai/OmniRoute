@@ -1,7 +1,7 @@
 // Bounded call_logs reader: whether reasoning_effort=none was honored,
 // per model, over a trailing window. The health route projects this onto
 // each item; unknown is a legitimate state when the sample is empty.
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "./pg";
 
 export type NoneHonoredEntry = { honored: boolean | null; sampleSize: number };
 
@@ -35,33 +35,32 @@ type ComplianceRow = { model_key: string | null; n: number; violated: number };
 
 let cached: { at: number; snapshot: NoneHonoredSnapshot } | null = null;
 
-function queryCompliance(db: ReturnType<typeof getDbInstance>, sinceIso: string): ComplianceRow[] {
-  return db
-    .prepare(
-      `SELECT COALESCE(NULLIF(TRIM(requested_model), ''), TRIM(model)) AS model_key,
+async function queryCompliance(executor: DbExecutor, sinceIso: string): Promise<ComplianceRow[]> {
+  return executor.query<ComplianceRow>(
+    `SELECT COALESCE(NULLIF(TRIM(requested_model), ''), TRIM(model)) AS model_key,
               COUNT(*) AS n,
               SUM(CASE WHEN COALESCE(tokens_reasoning, 0) > 0
-                        OR reasoning_encrypted = 1
+                        OR reasoning_encrypted IS TRUE
                         OR COALESCE(reasoning_chars, 0) > 0
                        THEN 1 ELSE 0 END) AS violated
        FROM call_logs
-       WHERE timestamp >= ?
+       WHERE "timestamp" >= $1
          AND TRIM(LOWER(reasoning_effort_requested)) = 'none'
-       GROUP BY model_key`
-    )
-    .all(sinceIso) as ComplianceRow[];
+       GROUP BY 1`,
+    [sinceIso]
+  );
 }
 
-export function getNoneHonoredSnapshot(
-  db: ReturnType<typeof getDbInstance> = getDbInstance(),
+export async function getNoneHonoredSnapshot(
+  executor: DbExecutor = db(),
   now: number = Date.now()
-): NoneHonoredSnapshot {
+): Promise<NoneHonoredSnapshot> {
   const { windowHours, cacheTtlMs, minSample } = readSettings();
   if (cached && now - cached.at < cacheTtlMs) return cached.snapshot;
 
   const sinceIso = new Date(now - windowHours * 3_600_000).toISOString();
   const entries = new Map<string, NoneHonoredEntry>();
-  for (const row of queryCompliance(db, sinceIso)) {
+  for (const row of await queryCompliance(executor, sinceIso)) {
     const key = typeof row.model_key === "string" ? row.model_key.trim() : "";
     if (key.length === 0) continue;
     const sampleSize = Number(row.n) || 0;

@@ -24,7 +24,11 @@ export type ManagedLeaseFenceSubject = {
 };
 
 export function createManagedLeaseFence(managedLease: ManagedLeaseFenceSubject | null) {
-  const assertManagedLeaseFence = (attemptConnectionId: string | null | undefined) => {
+  // Async: the lease row is read from the database. Every dispatch site must `await` it; a call
+  // left un-awaited turns a rejected fence (409) into an unhandled rejection and lets the dispatch go on.
+  const assertManagedLeaseFence = async (
+    attemptConnectionId: string | null | undefined
+  ): Promise<void> => {
     if (!managedLease) return;
     if (!attemptConnectionId) {
       throw Object.assign(new Error("Managed lease connection is unavailable"), {
@@ -32,7 +36,7 @@ export function createManagedLeaseFence(managedLease: ManagedLeaseFenceSubject |
         status: 409,
       });
     }
-    const fence = assertExclusiveConnectionLeaseFence({
+    const fence = await assertExclusiveConnectionLeaseFence({
       leaseOwnerId: managedLease.context.leaseOwnerId,
       generation: managedLease.context.generation,
       apiKeyId: managedLease.apiKeyId,

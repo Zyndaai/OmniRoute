@@ -1,4 +1,5 @@
-import { getExistingDbInstance } from "./singleton";
+import { isBuildPhase } from "./core";
+import { db } from "./pg";
 
 export interface RootLayoutSettings {
   instanceName: string;
@@ -7,10 +8,6 @@ export interface RootLayoutSettings {
 }
 
 type RootLayoutSettingKey = keyof RootLayoutSettings;
-type SettingsRow = {
-  key?: unknown;
-  value?: unknown;
-};
 
 const ROOT_LAYOUT_SETTING_KEYS = [
   "instanceName",
@@ -26,35 +23,25 @@ const DEFAULT_ROOT_LAYOUT_SETTINGS: RootLayoutSettings = {
   customFaviconBase64: "",
 };
 
-function parseStoredString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Read only the settings needed while compiling and rendering the root layout. */
 export async function getRootLayoutSettings(): Promise<RootLayoutSettings> {
-  const db = getExistingDbInstance();
-  if (!db) return { ...DEFAULT_ROOT_LAYOUT_SETTINGS };
-
-  const rows = db
-    .prepare(
-      `SELECT key, value FROM key_value
-       WHERE namespace = 'settings' AND key IN (?, ?, ?)`
-    )
-    .all(...ROOT_LAYOUT_SETTING_KEYS) as SettingsRow[];
   const settings = { ...DEFAULT_ROOT_LAYOUT_SETTINGS };
+  // `next build` renders the layout without a database; never open a connection for it.
+  if (isBuildPhase) return settings;
+
+  let rows: Array<{ key: string; value: unknown }>;
+  try {
+    rows = await db().query<{ key: string; value: unknown }>(
+      "SELECT key, value FROM config_entries WHERE namespace = 'settings' AND key = ANY($1::text[])",
+      [[...ROOT_LAYOUT_SETTING_KEYS]]
+    );
+  } catch {
+    return settings;
+  }
 
   for (const row of rows) {
-    if (typeof row.key !== "string" || !ROOT_LAYOUT_SETTING_KEY_SET.has(row.key)) continue;
-    const value = parseStoredString(row.value);
-    if (value === null) continue;
-    settings[row.key as RootLayoutSettingKey] = value;
+    if (!ROOT_LAYOUT_SETTING_KEY_SET.has(row.key) || typeof row.value !== "string") continue;
+    settings[row.key as RootLayoutSettingKey] = row.value;
   }
 
   if (!settings.instanceName) settings.instanceName = DEFAULT_ROOT_LAYOUT_SETTINGS.instanceName;

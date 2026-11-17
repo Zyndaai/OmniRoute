@@ -1,4 +1,4 @@
-import { getDbInstance } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import {
   advanceTeamBudgetWindow,
   getActiveBillingTeamForApiKey,
@@ -91,29 +91,27 @@ async function getCommittedTeamEstimatedListCostUsd(
   windowStartIso: string,
   resetAtIso: string
 ): Promise<{ estimatedListCostUsd: number; hasUnpricedUsage: boolean }> {
-  const db = getDbInstance();
-  const rawRows = db
-    .prepare(
-      `SELECT
-         COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') as provider,
-         COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') as model,
-         COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
-         COALESCE(SUM(tokens_input), 0) as inputTokens,
-         COALESCE(SUM(tokens_output), 0) as outputTokens,
-         COALESCE(SUM(tokens_cache_read), 0) as cacheReadTokens,
-         COALESCE(SUM(tokens_cache_creation), 0) as cacheCreationTokens,
-         COALESCE(SUM(tokens_reasoning), 0) as reasoningTokens,
-         COUNT(*) as requests,
-         NULL as tokenShapesJson
-       FROM usage_history
-       WHERE billing_team_id = @teamId
-         AND team_rollup_processed_at IS NULL
-         AND timestamp >= @windowStartIso AND timestamp < @resetAtIso
-         AND success = 1
-       GROUP BY LOWER(provider), LOWER(model), serviceTier,
-         tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning`
-    )
-    .all({ teamId, windowStartIso, resetAtIso }) as CostRow[];
+  const rawRows = await db().query<CostRow>(
+    `SELECT
+       COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') AS provider,
+       COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') AS model,
+       COALESCE(NULLIF(service_tier, ''), 'standard') AS "serviceTier",
+       COALESCE(SUM(tokens_input), 0) AS "inputTokens",
+       COALESCE(SUM(tokens_output), 0) AS "outputTokens",
+       COALESCE(SUM(tokens_cache_read), 0) AS "cacheReadTokens",
+       COALESCE(SUM(tokens_cache_creation), 0) AS "cacheCreationTokens",
+       COALESCE(SUM(tokens_reasoning), 0) AS "reasoningTokens",
+       COUNT(*) AS requests,
+       NULL::text AS "tokenShapesJson"
+     FROM usage_history
+     WHERE billing_team_id = $1
+       AND team_rollup_processed_at IS NULL
+       AND "timestamp" >= $2 AND "timestamp" < $3
+       AND success
+     GROUP BY LOWER(provider), LOWER(model), COALESCE(NULLIF(service_tier, ''), 'standard'),
+       tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation, tokens_reasoning`,
+    [teamId, windowStartIso, resetAtIso]
+  );
 
   // Team budgets are rolling 1d/7d/30d windows. The durable rollup stores one
   // aggregate per UTC day, so a non-midnight boundary cannot be reconstructed
@@ -122,37 +120,36 @@ async function getCommittedTeamEstimatedListCostUsd(
   // from outside the configured window. This keeps phase-1 soft enforcement honest.
   const windowStartDate = windowStartIso.slice(0, 10);
   const resetDate = resetAtIso.slice(0, 10);
-  const summaryRows = db
-    .prepare(
-      `SELECT
-         COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') as provider,
-         COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') as model,
-         COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
-         COALESCE(SUM(successful_input_tokens), 0) as inputTokens,
-         COALESCE(SUM(successful_output_tokens), 0) as outputTokens,
-         COALESCE(SUM(successful_cache_read_tokens), 0) as cacheReadTokens,
-         COALESCE(SUM(successful_cache_creation_tokens), 0) as cacheCreationTokens,
-         COALESCE(SUM(successful_reasoning_tokens), 0) as reasoningTokens,
-         SUM(successful_requests) as requests,
-         MAX(successful_token_shapes_json) as tokenShapesJson,
-         1 as retained
-       FROM daily_team_usage_summary
-       WHERE team_id = @teamId
-         AND date >= @completeSummaryStartDate
-         AND date < @completeSummaryEndDateExclusive
-         AND successful_requests > 0
-       GROUP BY api_key_id, LOWER(provider), LOWER(model), serviceTier, date`
-    )
-    .all({
+  const summaryRows = await db().query<CostRow>(
+    `SELECT
+       COALESCE(NULLIF(LOWER(provider), ''), '__unknown_provider__') AS provider,
+       COALESCE(NULLIF(LOWER(model), ''), '__unknown_model__') AS model,
+       COALESCE(NULLIF(service_tier, ''), 'standard') AS "serviceTier",
+       COALESCE(SUM(successful_input_tokens), 0) AS "inputTokens",
+       COALESCE(SUM(successful_output_tokens), 0) AS "outputTokens",
+       COALESCE(SUM(successful_cache_read_tokens), 0) AS "cacheReadTokens",
+       COALESCE(SUM(successful_cache_creation_tokens), 0) AS "cacheCreationTokens",
+       COALESCE(SUM(successful_reasoning_tokens), 0) AS "reasoningTokens",
+       SUM(successful_requests) AS requests,
+       MAX(successful_token_shapes::text) AS "tokenShapesJson",
+       1 AS retained
+     FROM daily_team_usage_summary
+     WHERE team_id = $1
+       AND date >= $2::date
+       AND date < $3::date
+       AND successful_requests > 0
+     GROUP BY api_key_id, LOWER(provider), LOWER(model),
+       COALESCE(NULLIF(service_tier, ''), 'standard'), date`,
+    [
       teamId,
-      completeSummaryStartDate:
-        windowStartIso === `${windowStartDate}T00:00:00.000Z`
-          ? windowStartDate
-          : new Date(Date.parse(`${windowStartDate}T00:00:00.000Z`) + 86_400_000)
-              .toISOString()
-              .slice(0, 10),
-      completeSummaryEndDateExclusive: resetDate,
-    }) as CostRow[];
+      windowStartIso === `${windowStartDate}T00:00:00.000Z`
+        ? windowStartDate
+        : new Date(Date.parse(`${windowStartDate}T00:00:00.000Z`) + 86_400_000)
+            .toISOString()
+            .slice(0, 10),
+      resetDate,
+    ]
+  );
 
   const raw = await calculateRows(rawRows);
   const retained = await calculateRows(summaryRows);
@@ -166,7 +163,7 @@ export async function getTeamUsageLimitStatusForApiKey(
   apiKeyId: string,
   nowMs = Date.now()
 ): Promise<TeamUsageLimitStatus | null> {
-  const team = getActiveBillingTeamForApiKey(apiKeyId);
+  const team = await getActiveBillingTeamForApiKey(apiKeyId);
   return team ? getTeamUsageLimitStatusForTeam(team.id, nowMs) : null;
 }
 
@@ -174,10 +171,10 @@ export async function getTeamUsageLimitStatusForTeam(
   teamId: string,
   nowMs = Date.now()
 ): Promise<TeamUsageLimitStatus | null> {
-  let team = getTeam(teamId);
+  let team = await getTeam(teamId);
   if (team?.status !== "active") return null;
   if (!team?.maxBudgetUsd || !team.budgetDuration || !team.budgetResetAt) return null;
-  team = advanceTeamBudgetWindow(team, nowMs);
+  team = await advanceTeamBudgetWindow(team, nowMs);
   // Reassigning `team` drops the null-narrowing of the guard above, so read the budget
   // fields from the advanced row and re-check them (same condition, no behaviour change).
   const { maxBudgetUsd, budgetDuration } = team;

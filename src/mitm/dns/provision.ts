@@ -57,7 +57,7 @@ async function provisionAgentDns(
   deps: ResolvedDnsProvisionDeps
 ): Promise<void> {
   try {
-    const agentStates = deps.getAgentStates();
+    const agentStates = await deps.getAgentStates();
     const agentHostsToAdd: string[] = [];
     for (const state of agentStates) {
       if (!state.dns_enabled) continue;
@@ -81,7 +81,7 @@ async function provisionCustomHostsDns(
   deps: ResolvedDnsProvisionDeps
 ): Promise<void> {
   try {
-    const customHosts = deps.listEnabledCustomHosts();
+    const customHosts = await deps.listEnabledCustomHosts();
     const customHostNames = customHosts.map((h) => h.host);
     if (customHostNames.length > 0) {
       deps.logger.info({ count: customHostNames.length }, "Adding DNS for custom host(s)...");

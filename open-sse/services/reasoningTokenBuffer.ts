@@ -41,20 +41,20 @@ export function toPositiveInteger(value: unknown): number | null {
   return normalized > 0 ? normalized : null;
 }
 
-export function resolveReasoningBufferedMaxTokens(
+export async function resolveReasoningBufferedMaxTokens(
   modelStr: string,
   currentMaxTokens: unknown,
   options: { enabled?: boolean } = {}
-): number | null {
+): Promise<number | null> {
   if (options.enabled === false) return null;
 
   const current = toPositiveInteger(currentMaxTokens);
   if (current === null) return null;
 
-  const capabilities = getResolvedModelCapabilities(modelStr);
+  const capabilities = await getResolvedModelCapabilities(modelStr);
   if (capabilities.supportsThinking !== true) return null;
 
-  const maxOutputTokens = toPositiveInteger(getExplicitModelOutputCap(modelStr));
+  const maxOutputTokens = toPositiveInteger(await getExplicitModelOutputCap(modelStr));
   if (maxOutputTokens === null) return null;
   if (current > maxOutputTokens) return maxOutputTokens;
 
@@ -91,11 +91,14 @@ export function resolveReasoningBufferedMaxTokens(
  * non-streaming probe with an HTTP 5xx (`"empty response content"`) instead of
  * a truncated 200. See #10281.
  */
-export function isTinyBudgetReasoningProbe(opts: { model: string; body: unknown }): boolean {
+export async function isTinyBudgetReasoningProbe(opts: {
+  model: string;
+  body: unknown;
+}): Promise<boolean> {
   const body = (opts.body ?? {}) as Record<string, unknown>;
   const maxTokens = toPositiveInteger(body.max_tokens ?? body.max_completion_tokens);
   if (maxTokens === null || maxTokens >= REASONING_BUFFER_MIN_TRIGGER) return false;
-  const capabilities = getResolvedModelCapabilities(opts.model);
+  const capabilities = await getResolvedModelCapabilities(opts.model);
   return capabilities.supportsThinking === true;
 }
 

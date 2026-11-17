@@ -613,25 +613,6 @@ export default function SystemStorageTab() {
     reader.readAsText(file);
   };
 
-  const handleExport = async () => {
-    setExportLoading(true);
-    try {
-      await fetchAndDownload(
-        "/api/db-backups/export",
-        `omniroute-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`,
-        t("exportFailed")
-      );
-    } catch (err) {
-      console.error("Export failed:", err);
-      setImportStatus({
-        type: "error",
-        message: t("exportFailedWithError", { error: (err as Error).message }),
-      });
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -1238,15 +1219,6 @@ export default function SystemStorageTab() {
           <p className="font-medium">{t("export")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            icon="download"
-            variant="outline"
-            size="sm"
-            onClick={handleExport}
-            loading={exportLoading}
-          >
-            {t("exportDatabase")}
-          </Button>
           <Button
             icon="folder_zip"
             variant="outline"

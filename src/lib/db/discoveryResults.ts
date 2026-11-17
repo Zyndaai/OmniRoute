@@ -2,14 +2,12 @@
  * Database module: Discovery Results
  *
  * CRUD for the automated provider-discovery tool (opt-in, default off). Rows
- * live in the `discovery_results` table (migration 074). The Discovery service
+ * live in the `discovery_results` table. The Discovery service
  * (`src/lib/discovery/`) writes findings here via {@link upsertDiscoveryResult};
  * the `/api/discovery/*` routes read/verify/delete them.
- *
- * See `_tasks/features-v3.8.42/gaps/DISCOVERY_TOOL_DESIGN.md` for the design.
  */
 
-import { getDbInstance } from "./core";
+import { db, jsonb } from "./pg";
 
 export type DiscoveryMethod =
   | "free_tier"
@@ -43,7 +41,7 @@ interface DiscoveryRow {
   method: string;
   endpoint: string | null;
   auth_type: string | null;
-  models: string | null;
+  models: unknown;
   rate_limit: string | null;
   feasibility: number | null;
   risk_level: string | null;
@@ -55,16 +53,17 @@ interface DiscoveryRow {
 
 function rowToResult(row: DiscoveryRow): DiscoveryResult {
   let models: string[] | undefined;
-  if (row.models) {
+  let parsed: unknown = row.models;
+  if (typeof parsed === "string") {
     try {
-      const parsed = JSON.parse(row.models);
-      if (Array.isArray(parsed)) models = parsed.map(String);
+      parsed = JSON.parse(parsed);
     } catch {
-      models = undefined;
+      parsed = undefined;
     }
   }
+  if (Array.isArray(parsed)) models = parsed.map(String);
   return {
-    id: row.id,
+    id: Number(row.id),
     providerId: row.provider_id,
     method: row.method as DiscoveryMethod,
     endpoint: row.endpoint,
@@ -82,45 +81,41 @@ function rowToResult(row: DiscoveryRow): DiscoveryResult {
 
 /**
  * Insert or update a discovery finding. Uniqueness is keyed on
- * `(provider_id, method, endpoint)` (the table's UNIQUE constraint), so
- * re-discovering the same endpoint updates the existing row rather than
- * duplicating it. Returns the persisted row (with its id).
+ * `(provider_id, method, endpoint)` (NULLS NOT DISTINCT), so re-discovering the same
+ * endpoint updates the existing row rather than duplicating it. Returns the persisted
+ * row (with its id).
  */
-export function upsertDiscoveryResult(result: DiscoveryResult): DiscoveryResult {
-  const db = getDbInstance();
-  const models = result.models ? JSON.stringify(result.models) : null;
-  db.prepare(
+export async function upsertDiscoveryResult(result: DiscoveryResult): Promise<DiscoveryResult> {
+  const feasibility =
+    Number.isFinite(result.feasibility) && result.feasibility >= 1 && result.feasibility <= 5
+      ? Math.round(result.feasibility)
+      : null;
+  const row = await db().queryOne<DiscoveryRow>(
     `INSERT INTO discovery_results
        (provider_id, method, endpoint, auth_type, models, rate_limit, feasibility, risk_level, status, notes)
-     VALUES (@provider_id, @method, @endpoint, @auth_type, @models, @rate_limit, @feasibility, @risk_level, @status, @notes)
-     ON CONFLICT(provider_id, method, endpoint) DO UPDATE SET
-       auth_type = excluded.auth_type,
-       models = excluded.models,
-       rate_limit = excluded.rate_limit,
-       feasibility = excluded.feasibility,
-       risk_level = excluded.risk_level,
-       status = excluded.status,
-       notes = excluded.notes`
-  ).run({
-    provider_id: result.providerId,
-    method: result.method,
-    endpoint: result.endpoint ?? null,
-    auth_type: result.authType,
-    models,
-    rate_limit: result.rateLimit ?? null,
-    feasibility: result.feasibility,
-    risk_level: result.riskLevel,
-    status: result.status,
-    notes: result.notes ?? null,
-  });
-
-  const row = db
-    .prepare(
-      `SELECT * FROM discovery_results
-       WHERE provider_id = ? AND method = ? AND ifnull(endpoint, '') = ifnull(?, '')`
-    )
-    .get(result.providerId, result.method, result.endpoint ?? null) as DiscoveryRow | undefined;
-  // The row was just written, so it must exist.
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+     ON CONFLICT (provider_id, method, endpoint) DO UPDATE SET
+       auth_type = EXCLUDED.auth_type,
+       models = EXCLUDED.models,
+       rate_limit = EXCLUDED.rate_limit,
+       feasibility = EXCLUDED.feasibility,
+       risk_level = EXCLUDED.risk_level,
+       status = EXCLUDED.status,
+       notes = EXCLUDED.notes
+     RETURNING *`,
+    [
+      result.providerId,
+      result.method,
+      result.endpoint ?? null,
+      result.authType,
+      result.models ? jsonb(result.models) : null,
+      result.rateLimit ?? null,
+      feasibility,
+      result.riskLevel,
+      result.status,
+      result.notes ?? null,
+    ]
+  );
   return rowToResult(row!);
 }
 
@@ -128,25 +123,23 @@ export function upsertDiscoveryResult(result: DiscoveryResult): DiscoveryResult 
  * List discovery results, optionally filtered to a single provider. Newest
  * findings first.
  */
-export function getDiscoveryResults(providerId?: string): DiscoveryResult[] {
-  const db = getDbInstance();
+export async function getDiscoveryResults(providerId?: string): Promise<DiscoveryResult[]> {
   const rows = providerId
-    ? (db
-        .prepare(
-          "SELECT * FROM discovery_results WHERE provider_id = ? ORDER BY discovered_at DESC, id DESC"
-        )
-        .all(providerId) as DiscoveryRow[])
-    : (db
-        .prepare("SELECT * FROM discovery_results ORDER BY discovered_at DESC, id DESC")
-        .all() as DiscoveryRow[]);
+    ? await db().query<DiscoveryRow>(
+        `SELECT * FROM discovery_results WHERE provider_id = $1 ORDER BY discovered_at DESC, id DESC`,
+        [providerId]
+      )
+    : await db().query<DiscoveryRow>(
+        `SELECT * FROM discovery_results ORDER BY discovered_at DESC, id DESC`
+      );
   return rows.map(rowToResult);
 }
 
-export function getDiscoveryResultById(id: number): DiscoveryResult | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM discovery_results WHERE id = ?").get(id) as
-    | DiscoveryRow
-    | undefined;
+export async function getDiscoveryResultById(id: number): Promise<DiscoveryResult | null> {
+  if (!Number.isSafeInteger(id)) return null;
+  const row = await db().queryOne<DiscoveryRow>(`SELECT * FROM discovery_results WHERE id = $1`, [
+    id,
+  ]);
   return row ? rowToResult(row) : null;
 }
 
@@ -154,23 +147,21 @@ export function getDiscoveryResultById(id: number): DiscoveryResult | null {
  * Mark a finding as verified, stamping `verified_at`. Returns the updated row,
  * or null if no row with that id exists.
  */
-export function markVerified(id: number): DiscoveryResult | null {
-  const db = getDbInstance();
-  const info = db
-    .prepare(
-      "UPDATE discovery_results SET status = 'verified', verified_at = datetime('now') WHERE id = ?"
-    )
-    .run(id);
-  if (info.changes === 0) return null;
-  return getDiscoveryResultById(id);
+export async function markVerified(id: number): Promise<DiscoveryResult | null> {
+  if (!Number.isSafeInteger(id)) return null;
+  const row = await db().queryOne<DiscoveryRow>(
+    `UPDATE discovery_results SET status = 'verified', verified_at = now() WHERE id = $1 RETURNING *`,
+    [id]
+  );
+  return row ? rowToResult(row) : null;
 }
 
 /**
  * Delete a finding. Returns true if a row was removed, false if the id was not
  * found.
  */
-export function deleteDiscoveryResult(id: number): boolean {
-  const db = getDbInstance();
-  const info = db.prepare("DELETE FROM discovery_results WHERE id = ?").run(id);
+export async function deleteDiscoveryResult(id: number): Promise<boolean> {
+  if (!Number.isSafeInteger(id)) return false;
+  const info = await db().execute(`DELETE FROM discovery_results WHERE id = $1`, [id]);
   return info.changes > 0;
 }

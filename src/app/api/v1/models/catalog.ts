@@ -4,7 +4,6 @@ import { NOAUTH_PROVIDERS } from "@/shared/constants/providers";
 import { getCombos } from "@/lib/db/combos";
 import { createHiddenModelLookup } from "@/lib/hiddenModelLookup";
 import { getSettings } from "@/lib/db/settings";
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
 import { createLazyConnectionView } from "@/lib/db/providers/lazyConnectionView";
 import { extractAliasBackedModels } from "./aliasBackedModels";
 import {
@@ -72,7 +71,6 @@ import {
 import { createModelCapabilityResolutionSnapshot } from "@/lib/modelCapabilityResolutionSnapshot";
 import {
   getModelsDevPricing,
-  getSyncedCapability,
   peekCachedReasoningEfforts,
   upsertSyncedCapabilities,
 } from "@/lib/modelsDevSync";
@@ -250,7 +248,7 @@ export async function getUnifiedModelsResponse(
   // hit from a Claude Code client, cache hit or not. Never blocks/slows the
   // request (incrementCcDiscoveryHitCount already swallows its own errors).
   if (isCcDiscoveryModelCatalogClient(request)) {
-    incrementCcDiscoveryHitCount();
+    void incrementCcDiscoveryHitCount().catch(() => {});
   }
 
   const buildFlags: CatalogBuildFlags = {
@@ -299,18 +297,9 @@ async function buildCatalogPayload(
   built.headers.forEach((value, key) => {
     headers[key] = value;
   });
-  // Read the configurable cache TTL from database settings.
-  // Falls back to the hardcoded default if not set or on error.
-  let cacheTTL = CATALOG_CACHE_TTL_MS_DEFAULT;
-  try {
-    // Only the persisted cache section is needed here. The full database-settings
-    // view also calculates dbstat, WAL and schema, which are synchronous and can
-    // pin the event loop after an otherwise cooperative build.
-    const dbSettings = getUserDatabaseSettings();
-    cacheTTL = dbSettings.cache?.modelCatalogCacheTtlMs ?? CATALOG_CACHE_TTL_MS_DEFAULT;
-  } catch {
-    // Swallow — use default TTL on DB error
-  }
+  // The database-settings module (configurable TTL) was removed with the SQLite
+  // maintenance layer; the catalog cache always uses the default TTL.
+  const cacheTTL = CATALOG_CACHE_TTL_MS_DEFAULT;
   return { body, headers, status: built.status, cacheTTL };
 }
 
@@ -342,11 +331,32 @@ async function buildUnifiedModelsResponseCore(
     // literal model id and must be hideable independently (#12172). Deliberately kept
     // INSIDE this try block: the builder's catch below sanitizes a build-time failure
     // into a 500 instead of a rejected promise.
+    const hiddenModalities = [
+      "chat",
+      "embeddings",
+      "images",
+      "rerank",
+      "audio",
+      "moderation",
+      "videos",
+      "music",
+    ];
+    const hiddenModelRowsByModality = new Map(
+      await Promise.all(
+        hiddenModalities.map(
+          async (modality) => [modality, await getHiddenModelsByProvider(modality)] as const
+        )
+      )
+    );
     const hiddenModelsByModality = new Map<string, ReturnType<typeof createHiddenModelLookup>>();
     const getHiddenModelsForModality = (modality: string) => {
       let m = hiddenModelsByModality.get(modality);
       if (!m) {
-        m = createHiddenModelLookup(getHiddenModelsByProvider(modality), providerNodes, modality);
+        m = createHiddenModelLookup(
+          hiddenModelRowsByModality.get(modality) ?? new Map(),
+          providerNodes,
+          modality
+        );
         hiddenModelsByModality.set(modality, m);
       }
       return m;
@@ -365,7 +375,7 @@ async function buildUnifiedModelsResponseCore(
     // #9147: yield after auth check before DB initialization prologue
     await yieldCatalogBuildTurn();
 
-    const capabilityResolutionSnapshot = createModelCapabilityResolutionSnapshot();
+    const capabilityResolutionSnapshot = await createModelCapabilityResolutionSnapshot();
     const { aliasToProviderId, providerIdToAlias } = buildAliasMaps();
     const _qp = new URL(request.url).searchParams.get("prefix");
     const prefixMode =
@@ -636,13 +646,13 @@ async function buildUnifiedModelsResponseCore(
       })
     );
 
-    const getComboTargetCatalogMetadata = (
+    const getComboTargetCatalogMetadata = async (
       target: ComboCatalogTarget
-    ): ComboTargetCatalogMetadata | null => {
+    ): Promise<ComboTargetCatalogMetadata | null> => {
       const targetModel = getComboTargetModelId(target);
       if (!targetModel) return null;
 
-      const canonical = getCanonicalModelMetadata({
+      const canonical = await getCanonicalModelMetadata({
         provider: targetModel.providerId,
         model: targetModel.modelId,
         snapshot: capabilityResolutionSnapshot,
@@ -701,13 +711,19 @@ async function buildUnifiedModelsResponseCore(
           : null;
       }
 
-      const synced = getSyncedCapability(providerId, modelId);
+      // Sync lookup over the build snapshot (getSyncedCapability is async now); keep the
+      // same alias fallback it applies.
+      const syncedByProvider = capabilityResolutionSnapshot.synced;
+      const synced =
+        syncedByProvider[providerId]?.[modelId] ??
+        (providerId === "opencode-go" ? syncedByProvider["opencode-zen"]?.[modelId] : undefined) ??
+        null;
       const spec = getModelSpec(modelId);
       const registryModel = getRegistryModel(providerId, modelId);
       const syncedInputModalities = parseJsonStringArray(synced?.modalities_input);
       const syncedOutputModalities = parseJsonStringArray(synced?.modalities_output);
 
-      const contextLength = getSourcedTokenLimit(
+      const contextLength = await getSourcedTokenLimit(
         providerId,
         modelId,
         canonical.limits.contextWindow
@@ -813,7 +829,7 @@ async function buildUnifiedModelsResponseCore(
       };
     };
 
-    const buildComboCatalogMetadata = (
+    const buildComboCatalogMetadata = async (
       combo: Parameters<typeof resolveNestedComboTargets>[0],
       targets: ComboCatalogTarget[]
     ) => {
@@ -826,7 +842,9 @@ async function buildUnifiedModelsResponseCore(
         : {};
       if (targets.length === 0) return baseMetadata;
 
-      const targetMetadata = targets.map((target) => getComboTargetCatalogMetadata(target));
+      const targetMetadata = await Promise.all(
+        targets.map((target) => getComboTargetCatalogMetadata(target))
+      );
 
       const knownMetadata = targetMetadata.filter(
         (metadata): metadata is ComboTargetCatalogMetadata => metadata !== null
@@ -866,6 +884,18 @@ async function buildUnifiedModelsResponseCore(
         ...visionDerivedModalities(capabilities, inputModalities, outputModalities), // #12798
         ...(Object.keys(capabilities).length > 0 ? { capabilities } : {}),
       };
+    };
+
+    // buildQuotaExclusiveModels reads metadata synchronously, so resolve the quota
+    // combos' metadata up front (only those it will list).
+    const buildQuotaMetadataLookup = async (combosList: typeof combos) => {
+      const { isQuotaModelName } = await import("@/lib/quota/quotaModelNaming");
+      const byCombo = new Map<unknown, Record<string, unknown>>();
+      for (const combo of combosList) {
+        if (typeof combo.name !== "string" || !isQuotaModelName(combo.name)) continue;
+        byCombo.set(combo, await buildComboCatalogMetadata(combo, combosList));
+      }
+      return (combo: unknown): Record<string, unknown> => byCombo.get(combo) ?? {};
     };
 
     // Collect models from active providers (or all if none active)
@@ -919,7 +949,7 @@ async function buildUnifiedModelsResponseCore(
         earlyKeyMeta.allowedQuotas,
         combos,
         timestamp,
-        (c) => buildComboCatalogMetadata(c, combos)
+        await buildQuotaMetadataLookup(combos)
       );
       const quotaFinal = await applyCatalogPostFilters(request, quotaModels, postFilterContext);
       return finalizeCatalogResponse(request, quotaFinal, () => undefined, {
@@ -987,7 +1017,8 @@ async function buildUnifiedModelsResponseCore(
           connectionId: m.connectionId,
           ...(m.allowedConnectionIds ? { allowedConnectionIds: m.allowedConnectionIds } : {}),
         }));
-        const autoTargetMetadata = await autoMeta(autoTargets); // #9147: once per build
+        // #9147: once per build (the memo stores each target's pending lookup)
+        const autoTargetMetadata = await Promise.all(await autoMeta(autoTargets));
         const knownAutoMeta = autoTargetMetadata.filter(
           (m): m is ComboTargetCatalogMetadata => m !== null
         );
@@ -1046,7 +1077,7 @@ async function buildUnifiedModelsResponseCore(
       });
       if (visibleTargets.length === 0) continue;
 
-      const comboMetadata = buildComboCatalogMetadata(combo, visibleTargets);
+      const comboMetadata = await buildComboCatalogMetadata(combo, visibleTargets);
 
       listedIds.add(combo.name);
       // #13670 follow-up: advertise the combo's own description. Claude Code's
@@ -1531,7 +1562,7 @@ async function buildUnifiedModelsResponseCore(
           );
           if (capEntry) openRouterCaps[openRouterModel.id] = capEntry;
         }
-        upsertSyncedCapabilities("openrouter", openRouterCaps);
+        await upsertSyncedCapabilities("openrouter", openRouterCaps);
       } catch (err) {
         console.error("[catalog] Error loading OpenRouter catalog:", err);
       }
@@ -2102,7 +2133,7 @@ async function buildUnifiedModelsResponseCore(
           keyMeta.allowedQuotas,
           combos,
           timestamp,
-          (c) => buildComboCatalogMetadata(c, combos)
+          await buildQuotaMetadataLookup(combos)
         );
       } else if (!keyMeta) {
         // #6406: A valid apiKey without a DB metadata row is an env-var master key
@@ -2125,30 +2156,55 @@ async function buildUnifiedModelsResponseCore(
     // ?configuredOnly — hide models that have no eligible DB connection.
     finalModels = await applyCatalogPostFilters(request, finalModels, postFilterContext);
 
-    const getDefaultContextFallback = (model: any): number | undefined => {
-      if (typeof model.context_length === "number") return undefined;
-      if (model.owned_by === "combo") return undefined;
-      if (model.type && model.type !== "chat") return undefined;
+    // getTokenLimit is async now, but finalizeCatalogResponse takes a sync fallback:
+    // resolve every distinct (provider, model) once up front, then look it up synchronously.
+    const resolveFallbackTarget = (
+      model: any
+    ): { canonicalId: string; modelId: string | null; registryFallback?: number } | null => {
+      if (typeof model.context_length === "number") return null;
+      if (model.owned_by === "combo") return null;
+      if (model.type && model.type !== "chat") return null;
 
       const provider = typeof model.owned_by === "string" ? model.owned_by : null;
-      if (!provider) return undefined;
+      if (!provider) return null;
       const canonicalId = aliasToProviderId[provider] || provider;
 
       const registryFallback = REGISTRY[canonicalId]?.defaultContextLength;
-      if (registryFallback) return registryFallback;
+      if (registryFallback) return { canonicalId, modelId: null, registryFallback };
 
       const modelId =
         model.root || (typeof model.id === "string" ? model.id.split("/").pop() : undefined);
-      return modelId
-        ? getTokenLimit(canonicalId, modelId, capabilityResolutionSnapshot)
-        : getTokenLimit(canonicalId, null, capabilityResolutionSnapshot);
+      return { canonicalId, modelId: modelId || null };
+    };
+    const tokenLimitFallbacks = new Map<string, number | undefined>();
+    const tokenLimitKey = (canonicalId: string, modelId: string | null) =>
+      `${canonicalId}\u0000${modelId ?? ""}`;
+    {
+      const pending = new Map<string, { canonicalId: string; modelId: string | null }>();
+      for (const model of finalModels) {
+        const target = resolveFallbackTarget(model);
+        if (!target || target.registryFallback) continue;
+        pending.set(tokenLimitKey(target.canonicalId, target.modelId), target);
+      }
+      for (const [key, target] of pending) {
+        tokenLimitFallbacks.set(
+          key,
+          await getTokenLimit(target.canonicalId, target.modelId, capabilityResolutionSnapshot)
+        );
+      }
+    }
+    const getDefaultContextFallback = (model: any): number | undefined => {
+      const target = resolveFallbackTarget(model);
+      if (!target) return undefined;
+      if (target.registryFallback) return target.registryFallback;
+      return tokenLimitFallbacks.get(tokenLimitKey(target.canonicalId, target.modelId));
     };
 
     let enrichmentSnapshot: CatalogEnrichmentSnapshot | undefined;
     if (finalModels.some((model) => model.owned_by !== "combo")) {
-      let modelsDevPricing: ReturnType<typeof getModelsDevPricing> | null = null;
+      let modelsDevPricing: Awaited<ReturnType<typeof getModelsDevPricing>> | null = null;
       try {
-        modelsDevPricing = getModelsDevPricing();
+        modelsDevPricing = await getModelsDevPricing();
       } catch {
         // Pricing lookup is optional; hardcoded defaults still enrich the response.
       }

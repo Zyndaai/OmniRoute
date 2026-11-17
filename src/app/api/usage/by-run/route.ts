@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const rows = getCostBySessionTag(parsed.data.run_id);
+    const rows = await getCostBySessionTag(parsed.data.run_id);
     return NextResponse.json({ runId: parsed.data.run_id, rows });
   } catch (error) {
     console.error("[API] GET /api/usage/by-run error:", error);

@@ -59,7 +59,7 @@ export async function executeSpeechCombo(
   }
 
   const allCombos = await getCombos();
-  const resolvedTargets = resolveComboTargets(combo as never, allCombos as never);
+  const resolvedTargets = await resolveComboTargets(combo as never, allCombos as never);
   if (!resolvedTargets || resolvedTargets.length === 0) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, `Combo "${comboName}" has no usable targets`);
   }

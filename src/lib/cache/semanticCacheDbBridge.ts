@@ -1,23 +1,31 @@
-import { getUserDatabaseSettings } from "@/lib/db/databaseSettings";
-import { getDbInstance } from "@/lib/db/core";
+import { getDatabaseSettingsSection } from "@/lib/db/databaseSettingsSections";
+import { db } from "@/lib/db/pg";
 import { decryptConnectionFields } from "@/lib/db/encryption";
-import { registerSemanticCacheConfigResolver } from "@omniroute/open-sse/config/semanticCacheConfig.ts";
+import {
+  registerSemanticCacheConfigResolver,
+  type SemanticCacheConfig,
+} from "@omniroute/open-sse/config/semanticCacheConfig.ts";
 import { resolveEmbeddingCredentials } from "@omniroute/open-sse/services/cache/embeddingEndpoint";
 
 let registered = false;
 
-export function resolveProviderConnectionDetails(provider: string): {
+/** The resolver is synchronous (it runs inside constructors), so it reads this snapshot. */
+let snapshot: Partial<SemanticCacheConfig> | null = null;
+let snapshotAt = 0;
+let refreshing: Promise<void> | null = null;
+let firstRefresh: Promise<void> = Promise.resolve();
+const SNAPSHOT_TTL_MS = 5_000;
+
+export async function resolveProviderConnectionDetails(provider: string): Promise<{
   baseUrl?: string;
   apiKey?: string;
-} {
+}> {
   if (!provider) return {};
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare(
-        "SELECT * FROM provider_connections WHERE provider = ? AND is_active != 0 ORDER BY priority ASC, id ASC LIMIT 1"
-      )
-      .get(provider) as Record<string, unknown> | undefined;
+    const row = await db().queryOne<Record<string, unknown>>(
+      "SELECT * FROM provider_connections WHERE provider = $1 AND is_active ORDER BY priority ASC, id ASC LIMIT 1",
+      [provider]
+    );
 
     if (!row) return {};
     const decrypted = decryptConnectionFields(row);
@@ -43,44 +51,78 @@ export function resolveProviderConnectionDetails(provider: string): {
   }
 }
 
-export function ensureSemanticCacheDbBridge(): void {
-  if (registered) return;
+async function loadSemanticCacheConfig(): Promise<Partial<SemanticCacheConfig> | null | undefined> {
+  try {
+    // Configuration reads touch only the cache settings section, never table statistics.
+    const s = await getDatabaseSettingsSection("cache");
+    if (!s) return undefined;
+
+    const conn = s.semanticCacheEmbeddingProvider
+      ? await resolveProviderConnectionDetails(s.semanticCacheEmbeddingProvider)
+      : {};
+
+    const { baseUrl: embeddingBaseUrl, apiKey: embeddingApiKey } = resolveEmbeddingCredentials(
+      { baseUrl: s.semanticCacheEmbeddingBaseUrl, apiKey: s.semanticCacheEmbeddingApiKey },
+      conn
+    );
+
+    return {
+      // The vector layer is opt-in (#14159): it only runs when the operator turned
+      // on BOTH the master semantic-cache toggle and the vector-layer toggle. With
+      // it off, chatCore behaves exactly like the legacy exact-match cache.
+      enabled: s.semanticCacheEnabled !== false && s.semanticCacheVectorEnabled === true,
+      backend: s.semanticCacheBackend,
+      similarityThreshold: s.semanticCacheThreshold,
+      ttlMs: s.semanticCacheTTL,
+      maxEntries: s.semanticCacheMaxSize,
+      embeddingProvider: s.semanticCacheEmbeddingProvider,
+      embeddingModel: s.semanticCacheEmbeddingModel,
+      embeddingDimension: s.semanticCacheEmbeddingDimension,
+      embeddingBaseUrl,
+      embeddingApiKey,
+      redisUrl: s.semanticCacheRedisUrl,
+      redisPrefix: s.semanticCacheRedisPrefix,
+      requireZeroTemperature: s.semanticCacheRequireZeroTemp,
+    };
+  } catch {
+    // undefined (not null) = the read failed; the caller keeps the last good snapshot.
+    return undefined;
+  }
+}
+
+/**
+ * Re-reads the cache settings into the snapshot the synchronous config resolver serves.
+ * Concurrent calls share one read. Await it after changing the cache settings to make
+ * the change visible to the next `resolveSemanticCacheConfig()` call. A failed read keeps
+ * the last good snapshot.
+ */
+export function refreshSemanticCacheDbBridge(): Promise<void> {
+  if (!refreshing) {
+    refreshing = loadSemanticCacheConfig()
+      .then((config) => {
+        if (config === undefined) return;
+        snapshot = config;
+        snapshotAt = Date.now();
+      })
+      .finally(() => {
+        refreshing = null;
+      });
+  }
+  return refreshing;
+}
+
+/**
+ * Registers the resolver once. Returns the first snapshot read: await it before the first
+ * SemanticCacheManager is built, because the manager reads its config once in its constructor.
+ */
+export function ensureSemanticCacheDbBridge(): Promise<void> {
+  if (registered) return firstRefresh;
   registered = true;
+  firstRefresh = refreshSemanticCacheDbBridge();
   registerSemanticCacheConfigResolver(() => {
-    try {
-      // Configuration reads must not run full DB statistics or integrity checks.
-      const s = getUserDatabaseSettings().cache;
-      if (!s) return null;
-
-      const conn = s.semanticCacheEmbeddingProvider
-        ? resolveProviderConnectionDetails(s.semanticCacheEmbeddingProvider)
-        : {};
-
-      const { baseUrl: embeddingBaseUrl, apiKey: embeddingApiKey } = resolveEmbeddingCredentials(
-        { baseUrl: s.semanticCacheEmbeddingBaseUrl, apiKey: s.semanticCacheEmbeddingApiKey },
-        conn
-      );
-
-      return {
-        // The vector layer is opt-in (#14159): it only runs when the operator turned
-        // on BOTH the master semantic-cache toggle and the vector-layer toggle. With
-        // it off, chatCore behaves exactly like the legacy SQLite exact-match cache.
-        enabled: s.semanticCacheEnabled !== false && s.semanticCacheVectorEnabled === true,
-        backend: s.semanticCacheBackend,
-        similarityThreshold: s.semanticCacheThreshold,
-        ttlMs: s.semanticCacheTTL,
-        maxEntries: s.semanticCacheMaxSize,
-        embeddingProvider: s.semanticCacheEmbeddingProvider,
-        embeddingModel: s.semanticCacheEmbeddingModel,
-        embeddingDimension: s.semanticCacheEmbeddingDimension,
-        embeddingBaseUrl,
-        embeddingApiKey,
-        redisUrl: s.semanticCacheRedisUrl,
-        redisPrefix: s.semanticCacheRedisPrefix,
-        requireZeroTemperature: s.semanticCacheRequireZeroTemp,
-      };
-    } catch {
-      return null;
-    }
+    // Stale-while-revalidate: serve the last snapshot, refresh in the background.
+    if (Date.now() - snapshotAt > SNAPSHOT_TTL_MS) void refreshSemanticCacheDbBridge();
+    return snapshot;
   });
+  return firstRefresh;
 }

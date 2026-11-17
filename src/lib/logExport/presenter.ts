@@ -31,7 +31,9 @@ export interface LogExportDestinationView {
   updatedAt: string;
 }
 
-export function toDestinationView(row: LogExportDestinationRow): LogExportDestinationView {
+export async function toDestinationView(
+  row: LogExportDestinationRow
+): Promise<LogExportDestinationView> {
   const type = getLogExportDestinationType(row.type);
   return {
     id: row.id,
@@ -47,7 +49,7 @@ export function toDestinationView(row: LogExportDestinationRow): LogExportDestin
     maxRowsPerRun: row.maxRowsPerRun,
     cursorRowId: row.cursorRowId,
     exportedTotal: row.exportedTotal,
-    pending: countCallLogsAfterRowId(row.cursorRowId),
+    pending: await countCallLogsAfterRowId(row.cursorRowId),
     lastRunAt: row.lastRunAt,
     lastStatus: row.lastStatus,
     lastError: row.lastError,

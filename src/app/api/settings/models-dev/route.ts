@@ -31,8 +31,7 @@ export async function GET(request: NextRequest) {
 
   if (action === "status") {
     const status = getSyncStatus();
-    const pricing = getModelsDevPricing();
-    const caps = getSyncedCapabilities();
+    const [pricing, caps] = await Promise.all([getModelsDevPricing(), getSyncedCapabilities()]);
 
     const providerCount = Object.keys(pricing).length;
     const modelCount = Object.values(pricing).reduce(

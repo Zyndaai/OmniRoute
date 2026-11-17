@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { getDbInstance, rowToCamel } from "./core";
+import { db, type DbExecutor } from "./pg";
 
 export const LEASE_OWNER_PATTERN = /^vlo_[A-Za-z0-9_-]{43}$/;
 const DEFAULT_EXCLUSIVE_LEASE_TTL_MS = 120_000;
@@ -33,12 +33,17 @@ export type ExclusiveConnectionLease = {
 };
 type LeaseRow = {
   id: number;
+  lease_owner_hash: string;
   api_key_id: string;
   provider: string;
   connection_id: string;
   generation: number;
   state: ExclusiveLeaseState;
+  acquired_at: string;
+  renewed_at: string;
   expires_at: string;
+  ended_at: string | null;
+  end_reason: string | null;
 };
 type LeaseStatusRow = LeaseRow & {
   connection_provider: string;
@@ -57,27 +62,28 @@ type LeaseConflict =
 type LeaseUpdateResult<T extends string> =
   { kind: T; lease: ExclusiveConnectionLease } | { kind: "STALE" };
 
-const database = () => getDbInstance();
+// The partial unique indexes on (connection_id) and (lease_owner_hash) WHERE state = 'ACTIVE'
+// give mutual exclusion across processes. An insert that loses the race returns no row
+// (ON CONFLICT DO NOTHING) and raises this signal, which rolls the transaction back.
+class LeaseConflictSignal extends Error {}
+
 const ACTIVE_SQL = "SELECT * FROM exclusive_connection_leases WHERE state = 'ACTIVE' AND ";
 // Projection, not a cast: joined SELECTs (the status query) carry connection_*
 // identity columns (email/display name) that must never escape on the lease object.
-const lease = (row: LeaseRow): ExclusiveConnectionLease => {
-  const camel = rowToCamel(row) as ExclusiveConnectionLease;
-  return {
-    id: camel.id,
-    leaseOwnerHash: camel.leaseOwnerHash,
-    apiKeyId: camel.apiKeyId,
-    provider: camel.provider,
-    connectionId: camel.connectionId,
-    generation: camel.generation,
-    state: camel.state,
-    acquiredAt: camel.acquiredAt,
-    renewedAt: camel.renewedAt,
-    expiresAt: camel.expiresAt,
-    endedAt: camel.endedAt,
-    endReason: camel.endReason,
-  };
-};
+const lease = (row: LeaseRow): ExclusiveConnectionLease => ({
+  id: Number(row.id),
+  leaseOwnerHash: row.lease_owner_hash,
+  apiKeyId: row.api_key_id,
+  provider: row.provider,
+  connectionId: row.connection_id,
+  generation: row.generation,
+  state: row.state,
+  acquiredAt: row.acquired_at,
+  renewedAt: row.renewed_at,
+  expiresAt: row.expires_at,
+  endedAt: row.ended_at ?? null,
+  endReason: row.end_reason ?? null,
+});
 function timestamp(value?: string): string {
   const parsed = Date.parse(value ?? new Date().toISOString());
   if (!Number.isFinite(parsed)) throw new Error("now must be a valid ISO timestamp");
@@ -97,24 +103,26 @@ export function hashLeaseOwnerId(leaseOwnerId: string): string {
   return createHash("sha256").update(leaseOwnerId).digest("hex");
 }
 
-function immediate<T>(operation: () => T): T {
-  let result: T | undefined;
-  database().immediate(() => (result = operation()));
-  if (result === undefined) throw new Error("lease transaction did not produce a result");
-  return result;
-}
-
-function expire(now: string): number {
-  return database()
-    .prepare(
+async function expire(tx: DbExecutor, now: string): Promise<number> {
+  return (
+    await tx.execute(
       `UPDATE exclusive_connection_leases
-       SET state = 'EXPIRED', ended_at = ?, end_reason = 'TTL_EXPIRED'
-       WHERE state = 'ACTIVE' AND expires_at <= ?`
+       SET state = 'EXPIRED', ended_at = $1, end_reason = 'TTL_EXPIRED'
+       WHERE state = 'ACTIVE' AND expires_at <= $1`,
+      [now]
     )
-    .run(now, now).changes;
+  ).changes;
 }
-function active(column: "lease_owner_hash" | "connection_id", value: string) {
-  return database().prepare(`${ACTIVE_SQL}${column} = ?`).get(value) as LeaseRow | undefined;
+// `lock` takes the row FOR UPDATE: a concurrent release/invalidate/transition of the same owner
+// waits, and Postgres re-checks state = 'ACTIVE' afterwards, so a lease ended meanwhile reads as
+// absent instead of being acted on stale.
+function active(
+  tx: DbExecutor,
+  column: "lease_owner_hash" | "connection_id",
+  value: string,
+  lock = false
+) {
+  return tx.queryOne<LeaseRow>(`${ACTIVE_SQL}${column} = $1${lock ? " FOR UPDATE" : ""}`, [value]);
 }
 
 function configuredConnectionName(row: LeaseStatusRow): string | null {
@@ -132,81 +140,69 @@ function configuredConnectionName(row: LeaseStatusRow): string | null {
   return name;
 }
 
-function historical(ownerHash: string, generation: number) {
-  return database()
-    .prepare(
-      `SELECT * FROM exclusive_connection_leases
-       WHERE lease_owner_hash = ? AND generation = ? ORDER BY id DESC LIMIT 1`
-    )
-    .get(ownerHash, generation) as LeaseRow | undefined;
+function historical(tx: DbExecutor, ownerHash: string, generation: number) {
+  return tx.queryOne<LeaseRow>(
+    `SELECT * FROM exclusive_connection_leases
+     WHERE lease_owner_hash = $1 AND generation = $2 ORDER BY id DESC LIMIT 1`,
+    [ownerHash, generation]
+  );
 }
 
-function nextGeneration(ownerHash: string): number {
-  const row = database()
-    .prepare(
-      "SELECT COALESCE(MAX(generation), 0) AS generation FROM exclusive_connection_leases WHERE lease_owner_hash = ?"
-    )
-    .get(ownerHash) as { generation: number };
-  const generation = Number(row.generation) + 1;
+async function nextGeneration(tx: DbExecutor, ownerHash: string): Promise<number> {
+  const row = await tx.queryOne<{ generation: number }>(
+    "SELECT COALESCE(MAX(generation), 0) AS generation FROM exclusive_connection_leases WHERE lease_owner_hash = $1",
+    [ownerHash]
+  );
+  const generation = Number(row?.generation ?? 0) + 1;
   if (!Number.isSafeInteger(generation) || generation <= 0)
     throw new Error("lease generation exhausted");
   return generation;
 }
 
-function insert(input: {
-  ownerHash: string;
-  apiKeyId: string;
-  provider: string;
-  connectionId: string;
-  generation: number;
-  now: string;
-  ttlMs?: number;
-}): ExclusiveConnectionLease {
-  const result = database()
-    .prepare(
-      `INSERT INTO exclusive_connection_leases
-       (lease_owner_hash, api_key_id, provider, connection_id, generation, state,
-        acquired_at, renewed_at, expires_at)
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`
-    )
-    .run(
+async function insert(
+  tx: DbExecutor,
+  input: {
+    ownerHash: string;
+    apiKeyId: string;
+    provider: string;
+    connectionId: string;
+    generation: number;
+    now: string;
+    ttlMs?: number;
+  }
+): Promise<ExclusiveConnectionLease> {
+  const row = await tx.queryOne<LeaseRow>(
+    `INSERT INTO exclusive_connection_leases
+     (lease_owner_hash, api_key_id, provider, connection_id, generation, state,
+      acquired_at, renewed_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, 'ACTIVE', $6, $6, $7)
+     ON CONFLICT DO NOTHING
+     RETURNING *`,
+    [
       input.ownerHash,
       input.apiKeyId,
       input.provider,
       input.connectionId,
       input.generation,
       input.now,
-      input.now,
-      expiry(input.now, input.ttlMs)
-    );
-  return lease(
-    database()
-      .prepare("SELECT * FROM exclusive_connection_leases WHERE id = ?")
-      .get(result.lastInsertRowid) as LeaseRow
+      expiry(input.now, input.ttlMs),
+    ]
   );
+  if (!row) throw new LeaseConflictSignal();
+  return lease(row);
 }
 
-function isLeaseConflict(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (/UNIQUE constraint failed: exclusive_connection_leases\.(connection_id|lease_owner_hash)/i.test(
-      error.message
-    ) ||
-      /idx_exclusive_lease_active_(connection|owner)/i.test(error.message))
-  );
-}
-
-function conflict(ownerHash: string, connectionId: string): LeaseConflict {
-  const owner = active("lease_owner_hash", ownerHash);
+async function conflict(ownerHash: string, connectionId: string): Promise<LeaseConflict> {
+  const owner = await active(db(), "lease_owner_hash", ownerHash);
   return owner
     ? { kind: "OWNER_ALREADY_ACTIVE", lease: lease(owner) }
     : {
         kind: "CONNECTION_BUSY",
-        retryAfter: active("connection_id", connectionId)?.expires_at ?? null,
+        retryAfter: (await active(db(), "connection_id", connectionId))?.expires_at ?? null,
       };
 }
 
-function update<T extends string>(input: {
+async function update<T extends string>(input: {
   ownerHash: string;
   generation: number;
   now: string;
@@ -214,52 +210,48 @@ function update<T extends string>(input: {
   sql: string;
   args: unknown[];
   accept?: (row: LeaseRow | undefined) => boolean;
-}): LeaseUpdateResult<T> {
-  return immediate(() => {
-    expire(input.now);
-    const changed =
-      database()
-        .prepare(input.sql)
-        .run(...input.args).changes === 1;
-    const row = historical(input.ownerHash, input.generation);
+}): Promise<LeaseUpdateResult<T>> {
+  return db().transaction(async (tx) => {
+    await expire(tx, input.now);
+    const changed = (await tx.execute(input.sql, input.args)).changes === 1;
+    const row = await historical(tx, input.ownerHash, input.generation);
     return changed || input.accept?.(row)
       ? { kind: input.kind, lease: lease(row!) }
-      : { kind: "STALE" };
+      : { kind: "STALE" as const };
   });
 }
 
-export function reconcileExpiredExclusiveConnectionLeases(now?: string): number {
-  return immediate(() => expire(timestamp(now)));
+export async function reconcileExpiredExclusiveConnectionLeases(now?: string): Promise<number> {
+  return expire(db(), timestamp(now));
 }
 
-export function getExclusiveConnectionLeaseStatus(input: {
+export async function getExclusiveConnectionLeaseStatus(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
   now?: string;
-}): {
+}): Promise<{
   lease: ExclusiveConnectionLease;
   provider: string;
   connectionName: string | null;
-} | null {
+} | null> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
-  return immediate(() => {
-    expire(now);
-    const row = database()
-      .prepare(
-        `SELECT leases.*, connections.provider AS connection_provider,
-                connections.auth_type AS connection_auth_type,
-                connections.name AS connection_name,
-                connections.email AS connection_email,
-                connections.display_name AS connection_display_name
-         FROM exclusive_connection_leases leases
-         INNER JOIN provider_connections connections ON connections.id = leases.connection_id
-         WHERE leases.lease_owner_hash = ? AND leases.api_key_id = ?
-           AND leases.generation = ? AND leases.state = 'ACTIVE' AND leases.expires_at > ?
-         LIMIT 1`
-      )
-      .get(ownerHash, input.apiKeyId, input.generation, now) as LeaseStatusRow | undefined;
+  return db().transaction(async (tx) => {
+    await expire(tx, now);
+    const row = await tx.queryOne<LeaseStatusRow>(
+      `SELECT leases.*, connections.provider AS connection_provider,
+              connections.auth_type AS connection_auth_type,
+              connections.name AS connection_name,
+              connections.email AS connection_email,
+              connections.display_name AS connection_display_name
+       FROM exclusive_connection_leases leases
+       INNER JOIN provider_connections connections ON connections.id = leases.connection_id
+       WHERE leases.lease_owner_hash = $1 AND leases.api_key_id = $2
+         AND leases.generation = $3 AND leases.state = 'ACTIVE' AND leases.expires_at > $4
+       LIMIT 1`,
+      [ownerHash, input.apiKeyId, input.generation, now]
+    );
     return row
       ? {
           lease: lease(row),
@@ -270,51 +262,51 @@ export function getExclusiveConnectionLeaseStatus(input: {
   });
 }
 
-export function acquireExclusiveConnectionLease(input: {
+export async function acquireExclusiveConnectionLease(input: {
   leaseOwnerId: string;
   apiKeyId: string;
   provider: string;
   connectionId: string;
   now?: string;
   ttlMs?: number;
-}): LeaseSuccess | LeaseConflict {
+}): Promise<LeaseSuccess | LeaseConflict> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
   try {
-    return immediate(() => {
-      expire(now);
-      const owner = active("lease_owner_hash", ownerHash);
+    return await db().transaction<LeaseSuccess | LeaseConflict>(async (tx) => {
+      await expire(tx, now);
+      const owner = await active(tx, "lease_owner_hash", ownerHash, true);
       if (owner) {
         if (owner.api_key_id !== input.apiKeyId || owner.connection_id !== input.connectionId) {
           return { kind: "OWNER_ALREADY_ACTIVE", lease: lease(owner) };
         }
-        database()
-          .prepare(
-            `UPDATE exclusive_connection_leases SET renewed_at = ?, expires_at = ?,
-             provider = ? WHERE id = ? AND state = 'ACTIVE' AND api_key_id = ?`
-          )
-          .run(now, expiry(now, input.ttlMs), input.provider, owner.id, input.apiKeyId);
-        return { kind: "REUSED", lease: lease(active("lease_owner_hash", ownerHash)!) };
+        const renewed = await tx.queryOne<LeaseRow>(
+          `UPDATE exclusive_connection_leases SET renewed_at = $1, expires_at = $2,
+           provider = $3 WHERE id = $4 AND state = 'ACTIVE' AND api_key_id = $5
+           RETURNING *`,
+          [now, expiry(now, input.ttlMs), input.provider, owner.id, input.apiKeyId]
+        );
+        return { kind: "REUSED", lease: lease(renewed!) };
       }
-      const occupied = active("connection_id", input.connectionId);
+      const occupied = await active(tx, "connection_id", input.connectionId);
       if (occupied) return { kind: "CONNECTION_BUSY", retryAfter: occupied.expires_at };
       return {
         kind: "ACQUIRED",
-        lease: insert({
+        lease: await insert(tx, {
           ...input,
           ownerHash,
-          generation: nextGeneration(ownerHash),
+          generation: await nextGeneration(tx, ownerHash),
           now,
         }),
       };
     });
   } catch (error) {
-    if (!isLeaseConflict(error)) throw error;
+    if (!(error instanceof LeaseConflictSignal)) throw error;
     return conflict(ownerHash, input.connectionId);
   }
 }
 
-export function transitionExclusiveConnectionLease(input: {
+export async function transitionExclusiveConnectionLease(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
@@ -323,41 +315,50 @@ export function transitionExclusiveConnectionLease(input: {
   reason: ExclusiveLeaseEndReason;
   now?: string;
   ttlMs?: number;
-}): LeaseSuccess | LeaseConflict | { kind: "STALE" } {
+}): Promise<LeaseSuccess | LeaseConflict | { kind: "STALE" }> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
   try {
-    return immediate(() => {
-      expire(now);
-      const owner = active("lease_owner_hash", ownerHash);
-      if (!owner || owner.generation !== input.generation || owner.api_key_id !== input.apiKeyId)
-        return { kind: "STALE" };
-      if (owner.connection_id === input.connectionId) {
-        return { kind: "REUSED", lease: lease(owner) };
-      }
-      const occupied = active("connection_id", input.connectionId);
-      if (occupied) return { kind: "CONNECTION_BUSY", retryAfter: occupied.expires_at };
-      database()
-        .prepare(
-          `UPDATE exclusive_connection_leases SET state = 'INVALIDATED', ended_at = ?,
-           end_reason = ? WHERE id = ? AND state = 'ACTIVE'`
+    return await db().transaction<LeaseSuccess | LeaseConflict | { kind: "STALE" }>(
+      async (tx) => {
+        await expire(tx, now);
+        const owner = await active(tx, "lease_owner_hash", ownerHash, true);
+        if (
+          !owner ||
+          owner.generation !== input.generation ||
+          owner.api_key_id !== input.apiKeyId
         )
-        .run(now, input.reason, owner.id);
-      return { kind: "TRANSITIONED", lease: insert({ ...input, ownerHash, now }) };
-    });
+          return { kind: "STALE" };
+        if (owner.connection_id === input.connectionId) {
+          return { kind: "REUSED", lease: lease(owner) };
+        }
+        const occupied = await active(tx, "connection_id", input.connectionId);
+        if (occupied) return { kind: "CONNECTION_BUSY", retryAfter: occupied.expires_at };
+        const ended = await tx.execute(
+          `UPDATE exclusive_connection_leases SET state = 'INVALIDATED', ended_at = $1,
+           end_reason = $2 WHERE id = $3 AND state = 'ACTIVE'`,
+          [now, input.reason, owner.id]
+        );
+        if (ended.changes !== 1) return { kind: "STALE" };
+        return {
+          kind: "TRANSITIONED",
+          lease: await insert(tx, { ...input, ownerHash, now }),
+        };
+      }
+    );
   } catch (error) {
-    if (!isLeaseConflict(error)) throw error;
+    if (!(error instanceof LeaseConflictSignal)) throw error;
     return conflict(ownerHash, input.connectionId);
   }
 }
 
-export function invalidateExclusiveConnectionLease(input: {
+export async function invalidateExclusiveConnectionLease(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
   reason: ExclusiveLeaseEndReason;
   now?: string;
-}): LeaseUpdateResult<"INVALIDATED"> {
+}): Promise<LeaseUpdateResult<"INVALIDATED">> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
   return update({
@@ -365,20 +366,20 @@ export function invalidateExclusiveConnectionLease(input: {
     generation: input.generation,
     now,
     kind: "INVALIDATED",
-    sql: `UPDATE exclusive_connection_leases SET state = 'INVALIDATED', ended_at = ?, end_reason = ?
-          WHERE lease_owner_hash = ? AND generation = ? AND api_key_id = ?
-          AND state = 'ACTIVE' AND expires_at > ?`,
-    args: [now, input.reason, ownerHash, input.generation, input.apiKeyId, now],
+    sql: `UPDATE exclusive_connection_leases SET state = 'INVALIDATED', ended_at = $1, end_reason = $2
+          WHERE lease_owner_hash = $3 AND generation = $4 AND api_key_id = $5
+          AND state = 'ACTIVE' AND expires_at > $1`,
+    args: [now, input.reason, ownerHash, input.generation, input.apiKeyId],
   });
 }
 
-export function renewExclusiveConnectionLease(input: {
+export async function renewExclusiveConnectionLease(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
   now?: string;
   ttlMs?: number;
-}): LeaseUpdateResult<"RENEWED"> {
+}): Promise<LeaseUpdateResult<"RENEWED">> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
   return update({
@@ -386,20 +387,20 @@ export function renewExclusiveConnectionLease(input: {
     generation: input.generation,
     now,
     kind: "RENEWED",
-    sql: `UPDATE exclusive_connection_leases SET renewed_at = ?, expires_at = ?
-          WHERE lease_owner_hash = ? AND generation = ? AND api_key_id = ?
-          AND state = 'ACTIVE' AND expires_at > ?`,
-    args: [now, expiry(now, input.ttlMs), ownerHash, input.generation, input.apiKeyId, now],
+    sql: `UPDATE exclusive_connection_leases SET renewed_at = $1, expires_at = $2
+          WHERE lease_owner_hash = $3 AND generation = $4 AND api_key_id = $5
+          AND state = 'ACTIVE' AND expires_at > $1`,
+    args: [now, expiry(now, input.ttlMs), ownerHash, input.generation, input.apiKeyId],
   });
 }
 
-export function releaseExclusiveConnectionLease(input: {
+export async function releaseExclusiveConnectionLease(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
   reason?: "OWNER_EXIT" | "CLIENT_CANCELLED";
   now?: string;
-}): LeaseUpdateResult<"RELEASED"> {
+}): Promise<LeaseUpdateResult<"RELEASED">> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
   const now = timestamp(input.now);
   return update({
@@ -407,27 +408,28 @@ export function releaseExclusiveConnectionLease(input: {
     generation: input.generation,
     now,
     kind: "RELEASED",
-    sql: `UPDATE exclusive_connection_leases SET state = 'RELEASED', ended_at = ?, end_reason = ?
-          WHERE lease_owner_hash = ? AND generation = ? AND api_key_id = ?
-          AND state = 'ACTIVE' AND expires_at > ?`,
-    args: [now, input.reason ?? "OWNER_EXIT", ownerHash, input.generation, input.apiKeyId, now],
+    sql: `UPDATE exclusive_connection_leases SET state = 'RELEASED', ended_at = $1, end_reason = $2
+          WHERE lease_owner_hash = $3 AND generation = $4 AND api_key_id = $5
+          AND state = 'ACTIVE' AND expires_at > $1`,
+    args: [now, input.reason ?? "OWNER_EXIT", ownerHash, input.generation, input.apiKeyId],
     accept: (row) => row?.state === "RELEASED" && row.api_key_id === input.apiKeyId,
   });
 }
 
-export function assertExclusiveConnectionLeaseFence(input: {
+export async function assertExclusiveConnectionLeaseFence(input: {
   leaseOwnerId: string;
   generation: number;
   apiKeyId: string;
   connectionId: string;
   now?: string;
-}):
+}): Promise<
   | { kind: "VALID"; lease: ExclusiveConnectionLease }
   | { kind: "AUTHORIZATION_MISMATCH" | "CONNECTION_MISMATCH"; lease: ExclusiveConnectionLease }
-  | { kind: "REQUIRED" | "STALE" } {
+  | { kind: "REQUIRED" | "STALE" }
+> {
   const ownerHash = hashLeaseOwnerId(input.leaseOwnerId);
-  reconcileExpiredExclusiveConnectionLeases(input.now);
-  const row = active("lease_owner_hash", ownerHash);
+  await reconcileExpiredExclusiveConnectionLeases(input.now);
+  const row = await active(db(), "lease_owner_hash", ownerHash);
   if (!row) return { kind: "REQUIRED" };
   if (row.generation !== input.generation) return { kind: "STALE" };
   const current = lease(row);
@@ -437,26 +439,25 @@ export function assertExclusiveConnectionLeaseFence(input: {
     : { kind: "CONNECTION_MISMATCH", lease: current };
 }
 
-export function getActiveExclusiveConnectionLease(leaseOwnerId: string, now?: string) {
+export async function getActiveExclusiveConnectionLease(leaseOwnerId: string, now?: string) {
   const ownerHash = hashLeaseOwnerId(leaseOwnerId);
-  reconcileExpiredExclusiveConnectionLeases(now);
-  const row = active("lease_owner_hash", ownerHash);
+  await reconcileExpiredExclusiveConnectionLeases(now);
+  const row = await active(db(), "lease_owner_hash", ownerHash);
   return row ? lease(row) : null;
 }
 
-export function getExclusiveLeaseOccupancy(connectionIds: readonly string[], now?: string) {
-  reconcileExpiredExclusiveConnectionLeases(now);
+export async function getExclusiveLeaseOccupancy(connectionIds: readonly string[], now?: string) {
+  await reconcileExpiredExclusiveConnectionLeases(now);
   if (connectionIds.length === 0) return new Map();
-  const rows = database()
-    .prepare(
-      `SELECT connection_id, lease_owner_hash, expires_at FROM exclusive_connection_leases
-       WHERE state = 'ACTIVE' AND connection_id IN (${connectionIds.map(() => "?").join(", ")})`
-    )
-    .all(...connectionIds) as Array<{
+  const rows = await db().query<{
     connection_id: string;
     lease_owner_hash: string;
     expires_at: string;
-  }>;
+  }>(
+    `SELECT connection_id, lease_owner_hash, expires_at FROM exclusive_connection_leases
+     WHERE state = 'ACTIVE' AND connection_id = ANY($1::text[])`,
+    [[...connectionIds]]
+  );
   return new Map(
     rows.map((row) => [
       row.connection_id,
@@ -465,8 +466,11 @@ export function getExclusiveLeaseOccupancy(connectionIds: readonly string[], now
   );
 }
 
-export function isExclusiveConnectionActivelyLeased(connectionId: string, now?: string): boolean {
+export async function isExclusiveConnectionActivelyLeased(
+  connectionId: string,
+  now?: string
+): Promise<boolean> {
   if (!connectionId) return false;
-  reconcileExpiredExclusiveConnectionLeases(now);
-  return active("connection_id", connectionId) !== undefined;
+  await reconcileExpiredExclusiveConnectionLeases(now);
+  return (await active(db(), "connection_id", connectionId)) !== undefined;
 }

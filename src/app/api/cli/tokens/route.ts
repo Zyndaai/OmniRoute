@@ -25,7 +25,7 @@ const MACHINE_CREDENTIAL_MINT_CEILING: AccessScope = "write";
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json({ tokens: listAccessTokens() });
+  return NextResponse.json({ tokens: await listAccessTokens() });
 }
 
 const createSchema = z.object({
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
       ? new Date(Date.now() + expiresInDays * 86_400_000).toISOString()
       : null;
 
-  const { record, secret } = createAccessToken({ name, scope: requestedScope, expiresAt });
+  const { record, secret } = await createAccessToken({ name, scope: requestedScope, expiresAt });
 
   // `token` (the plaintext secret) is returned ONCE here and never again.
   return NextResponse.json({

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { buildUnifiedSource, getProviderDailyUsageRows } from "@/lib/db/usageAnalytics";
+import { getDatabaseSettingsSection } from "@/lib/db/databaseSettingsSections";
 
 /**
  * GET /api/usage/requests-by-provider-date — #4009
@@ -75,9 +76,8 @@ function resolveDateWindow(searchParams: URLSearchParams, range: string): DateWi
 }
 
 async function resolveRawCutoffDate(): Promise<string> {
-  const { getUserDatabaseSettings } = await import("@/lib/db/databaseSettings");
-  const dbSettings = getUserDatabaseSettings();
-  const rawRetentionDays = dbSettings.aggregation?.rawDataRetentionDays ?? 30;
+  const aggregation = await getDatabaseSettingsSection("aggregation");
+  const rawRetentionDays = aggregation.rawDataRetentionDays ?? 30;
   const rawCutoff = new Date();
   rawCutoff.setDate(rawCutoff.getDate() - rawRetentionDays);
   return rawCutoff.toISOString().split("T")[0];
@@ -112,7 +112,7 @@ export async function GET(request: Request) {
       apiKeyParams: {},
     });
 
-    const rows = getProviderDailyUsageRows(unifiedSource, unifiedParams);
+    const rows = await getProviderDailyUsageRows(unifiedSource, unifiedParams);
 
     return NextResponse.json({ rows, range, date: singleDate ?? null });
   } catch (error) {

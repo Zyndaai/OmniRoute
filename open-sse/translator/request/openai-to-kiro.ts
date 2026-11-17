@@ -878,7 +878,7 @@ function thinkingLengthForEffort(effort: string): number {
 /**
  * Build Kiro payload from OpenAI format
  */
-export function buildKiroPayload(model, body, stream, credentials) {
+export async function buildKiroPayload(model, body, stream, credentials) {
   // Reject the Anthropic-only `[1m]` context beta before it reaches Bedrock —
   // Kiro cannot honor it and a forwarded `kr/*[1m]` id is malformed upstream.
   if (hasUnsupportedKiroContextSuffix(model)) {
@@ -1095,7 +1095,7 @@ export function buildKiroPayload(model, body, stream, credentials) {
       // `<thinking_mode>` / `<max_thinking_length>` are Kiro/CodeWhisperer prompt
       // conventions (NOT Anthropic API params); the length is a soft hint (the hard
       // enable signal is `<thinking_mode>`), clamped to the model's thinking cap.
-      const thinkingLength = capThinkingBudget(
+      const thinkingLength = await capThinkingBudget(
         normalizedModel,
         thinkingLengthForEffort(kiroEffort)
       );
@@ -1108,7 +1108,7 @@ export function buildKiroPayload(model, body, stream, credentials) {
     // Forward max_tokens only when the client set one, clamped to the model's
     // output window (floor 1024) — matches pi-kiro and avoids an over-budget reject.
     if (usesAdaptiveThinking && maxTokens > 0) {
-      const capped = capMaxOutputTokens(normalizedModel, maxTokens) ?? maxTokens;
+      const capped = (await capMaxOutputTokens(normalizedModel, maxTokens)) ?? maxTokens;
       fields.max_tokens = Math.max(Math.floor(capped), 1024);
     }
     payload.additionalModelRequestFields = fields;

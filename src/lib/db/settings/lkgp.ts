@@ -1,35 +1,26 @@
 /**
- * db/settings/lkgp.ts — Last Known Good Provider (LKGP) persistence.
+ * db/settings/lkgp.ts — Last Known Good Provider (LKGP) persistence (table `lkgp_pins`).
  */
 
-import { getDbInstance } from "../core";
+import { db } from "../pg";
 
 /**
- * Escape SQLite `LIKE` wildcards so a combo name containing `%` or `_` cannot
+ * Escape `LIKE` wildcards so a combo name containing `%` or `_` cannot
  * widen the prefix match into unrelated combos' pins.
  */
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
-export function deleteLKGPRowsByComboName(comboName: string): string[] {
+export async function deleteLKGPRowsByComboName(comboName: string): Promise<string[]> {
   if (!comboName) return [];
 
-  const db = getDbInstance();
   const prefix = `${comboName}:`;
-  const rows = db
-    .prepare("SELECT key FROM key_value WHERE namespace = 'lkgp' AND key LIKE ? ESCAPE '\\'")
-    .all(`${escapeLikePattern(prefix)}%`) as Array<{ key?: string }>;
-
-  const staleKeys = rows.map((row) => row?.key).filter((key): key is string => Boolean(key));
-  if (staleKeys.length === 0) return [];
-
-  const deleteStatement = db.prepare("DELETE FROM key_value WHERE namespace = 'lkgp' AND key = ?");
-  for (const key of staleKeys) {
-    deleteStatement.run(key);
-  }
-
-  return staleKeys;
+  const rows = await db().query<{ pin_key: string }>(
+    "DELETE FROM lkgp_pins WHERE pin_key LIKE $1 ESCAPE '\\' RETURNING pin_key",
+    [`${escapeLikePattern(prefix)}%`]
+  );
+  return rows.map((row) => row.pin_key);
 }
 
 export interface LKGPRecord {
@@ -38,21 +29,14 @@ export interface LKGPRecord {
 }
 
 export async function getLKGP(comboName: string, modelId: string): Promise<LKGPRecord | null> {
-  const db = getDbInstance();
-  const key = `${comboName}:${modelId}`;
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'lkgp' AND key = ?")
-    .get(key) as { value?: string } | undefined;
-  if (!row?.value) return null;
-  try {
-    const parsed = JSON.parse(row.value);
-    if (typeof parsed === "object" && parsed !== null && "provider" in parsed) {
-      return parsed as LKGPRecord;
-    }
-    return { provider: String(parsed) };
-  } catch {
-    return { provider: row.value };
-  }
+  const row = await db().queryOne<{ provider: string; connection_id: string | null }>(
+    "SELECT provider, connection_id FROM lkgp_pins WHERE pin_key = $1",
+    [`${comboName}:${modelId}`]
+  );
+  if (!row) return null;
+  const record: LKGPRecord = { provider: row.provider };
+  if (row.connection_id) record.connectionId = row.connection_id;
+  return record;
 }
 
 export async function setLKGP(
@@ -61,19 +45,16 @@ export async function setLKGP(
   providerId: string,
   connectionId?: string
 ) {
-  const db = getDbInstance();
-  const key = `${comboName}:${modelId}`;
-  const value: LKGPRecord = { provider: providerId };
-  if (connectionId) value.connectionId = connectionId;
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('lkgp', ?, ?)").run(
-    key,
-    JSON.stringify(value)
+  await db().execute(
+    `INSERT INTO lkgp_pins (pin_key, provider, connection_id) VALUES ($1, $2, $3)
+     ON CONFLICT (pin_key) DO UPDATE
+       SET provider = EXCLUDED.provider, connection_id = EXCLUDED.connection_id, updated_at = now()`,
+    [`${comboName}:${modelId}`, providerId, connectionId || null]
   );
 }
 
-export function clearAllLKGP(): void {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM key_value WHERE namespace = 'lkgp'").run();
+export async function clearAllLKGP(): Promise<void> {
+  await db().execute("DELETE FROM lkgp_pins");
 }
 
 /**
@@ -88,9 +69,8 @@ export function clearAllLKGP(): void {
  * else clears the stale pin.
  */
 export async function clearLKGP(comboName: string, modelId: string): Promise<void> {
-  const db = getDbInstance();
   const key = `${comboName}:${modelId}`;
-  db.prepare("DELETE FROM key_value WHERE namespace = 'lkgp' AND key = ?").run(key);
+  await db().execute("DELETE FROM lkgp_pins WHERE pin_key = $1", [key]);
   const { invalidateCachedLKGP } = await import("../readCache");
   invalidateCachedLKGP(key);
 }
@@ -104,7 +84,7 @@ export async function clearLKGP(comboName: string, modelId: string): Promise<voi
  * unreachable rows.
  */
 export async function deleteLKGPByComboName(comboName: string): Promise<number> {
-  const staleKeys = deleteLKGPRowsByComboName(comboName);
+  const staleKeys = await deleteLKGPRowsByComboName(comboName);
 
   if (staleKeys.length === 0) return 0;
 
@@ -122,50 +102,24 @@ export async function deleteLKGPByComboName(comboName: string): Promise<number> 
  * was learned from, so deleting that connection leaves the pin pointing at a
  * row that no longer exists; provider-connection delete paths call this so
  * the pin dies with its connection instead of becoming unbounded stale state.
- * Provider-level pins and legacy/unparseable values are preserved.
+ * Provider-level pins (no connection) are preserved.
  */
 export async function deleteLKGPByConnectionIds(connectionIds: string[]): Promise<number> {
   if (connectionIds.length === 0) return 0;
 
-  const deletedConnectionIds = new Set(connectionIds.filter(Boolean));
-  if (deletedConnectionIds.size === 0) return 0;
+  const deletedConnectionIds = [...new Set(connectionIds.filter(Boolean))];
+  if (deletedConnectionIds.length === 0) return 0;
 
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = 'lkgp'")
-    .all() as Array<{ key?: string; value?: string }>;
-
-  const staleKeys: string[] = [];
-
-  for (const row of rows) {
-    if (!row?.key || !row.value) continue;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(row.value);
-    } catch {
-      continue;
-    }
-
-    if (typeof parsed !== "object" || parsed === null) continue;
-
-    const connectionId = (parsed as LKGPRecord).connectionId;
-    if (typeof connectionId === "string" && deletedConnectionIds.has(connectionId)) {
-      staleKeys.push(row.key);
-    }
-  }
-
-  if (staleKeys.length === 0) return 0;
-
-  const deleteStatement = db.prepare("DELETE FROM key_value WHERE namespace = 'lkgp' AND key = ?");
-  for (const key of staleKeys) {
-    deleteStatement.run(key);
-  }
+  const rows = await db().query<{ pin_key: string }>(
+    "DELETE FROM lkgp_pins WHERE connection_id = ANY($1::text[]) RETURNING pin_key",
+    [deletedConnectionIds]
+  );
+  if (rows.length === 0) return 0;
 
   const { invalidateCachedLKGP } = await import("../readCache");
-  for (const key of staleKeys) {
-    invalidateCachedLKGP(key);
+  for (const row of rows) {
+    invalidateCachedLKGP(row.pin_key);
   }
 
-  return staleKeys.length;
+  return rows.length;
 }

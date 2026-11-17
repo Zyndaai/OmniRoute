@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       return errorResponse(400, formatValidationMessage(validation.error));
     }
     const { provider, hours } = validation.data;
-    return Response.json(readUniformEgressRegime(provider, hours));
+    return Response.json(await readUniformEgressRegime(provider, hours));
   } catch {
     return errorResponse(500, "Failed to load uniform egress regime");
   }

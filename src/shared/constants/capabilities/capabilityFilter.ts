@@ -16,7 +16,7 @@
  */
 
 import { getResolvedModelCapabilities } from "@/lib/modelCapabilities";
-import { evaluateContextLimit } from "@omniroute/open-sse/services/combo/contextOverrideGate";
+import { evaluateCatalogContextLimit } from "@omniroute/open-sse/services/combo/contextOverrideGate";
 import { isRecord } from "@omniroute/open-sse/services/combo/comboData";
 import {
   hasEstimableContent,
@@ -92,7 +92,7 @@ function isContextOverflow(
   requirements: { requiredContextTokens: number }
 ): boolean {
   return (
-    evaluateContextLimit(
+    evaluateCatalogContextLimit(
       { maxInputTokens: capabilities.maxInputTokens, contextWindow: capabilities.contextWindow },
       {
         estimatedInputTokens: requirements.requiredContextTokens,

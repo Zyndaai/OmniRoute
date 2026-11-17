@@ -60,11 +60,11 @@ async function applyAutoLearnRecovery(
     record[autoLearned] !== undefined
   ) {
     try {
-      const config = getParamFilterConfig(provider);
-      const shouldAutoLearn = isAutoLearnGloballyEnabled() || config?.autoLearn === true;
+      const config = await getParamFilterConfig(provider);
+      const shouldAutoLearn = (await isAutoLearnGloballyEnabled()) || config?.autoLearn === true;
       if (shouldAutoLearn) {
         strippedFields.add(autoLearned);
-        addParamToBlocklist(provider, autoLearned, model);
+        await addParamToBlocklist(provider, autoLearned, model);
         delete record[autoLearned];
         const retryBody = await serializeBody(body);
         log?.info?.(

@@ -566,9 +566,9 @@ interface EndpointVerdict {
   providers: string[];
 }
 
-function readPassiveVerdicts(
+async function readPassiveVerdicts(
   proxies: Array<{ host: string; port: number }>
-): Map<string, EndpointVerdict> {
+): Promise<Map<string, EndpointVerdict>> {
   const verdicts = new Map<string, EndpointVerdict>();
   const windowMs = resolvePassiveWindowMs();
   const now = Date.now();
@@ -577,7 +577,7 @@ function readPassiveVerdicts(
   try {
     // Bounded by the short window via idx_pl_timestamp; never let a DB
     // hiccup fail the sweep — fall back to live probes (no skip anywhere).
-    rows = exportProxyLogsSince(since);
+    rows = await exportProxyLogsSince(since);
   } catch (error) {
     console.error(`${LOG_PREFIX} Passive verdicts skipped:`, error);
     return verdicts;
@@ -663,7 +663,7 @@ async function sweep(): Promise<void> {
   // streak, the cross-proxy evidence, the promotion tally, or the sweep
   // verdict display.
   const passiveEnabled = isPassiveSweepSkipEnabled();
-  const passiveVerdicts = passiveEnabled ? readPassiveVerdicts(proxies) : new Map();
+  const passiveVerdicts = passiveEnabled ? await readPassiveVerdicts(proxies) : new Map();
   const failureMap = getFailureMap();
   const removeAfter = getRemoveAfter();
   const autoRemove = isAutoRemoveEnabled();

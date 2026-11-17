@@ -1,13 +1,18 @@
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 
-export function loadCatalogOverrides(namespace: string): {
+/**
+ * Reads a catalog on/off override namespace (`ccDiscoveryAliases`,
+ * `functionalGatewayMirrors`) from `config_entries`. Values are stored as JSON strings
+ * ("on" / "off"); anything else is ignored.
+ */
+export async function loadCatalogOverrides(namespace: string): Promise<{
   providers: Map<string, "on" | "off">;
   models: Map<string, "on" | "off">;
-} {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-    .all(namespace) as Array<{ key: string; value: string }>;
+}> {
+  const rows = await db().query<{ key: string; value: string | null }>(
+    "SELECT key, value #>> '{}' AS value FROM config_entries WHERE namespace = $1",
+    [namespace]
+  );
 
   const providers = new Map<string, "on" | "off">();
   const models = new Map<string, "on" | "off">();

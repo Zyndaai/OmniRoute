@@ -16,7 +16,7 @@ import { CORS_HEADERS } from "@/shared/utils/cors";
  * Create a prompt injection guard middleware.
  *
  * @param {PromptInjectionGuardrailOptions} [options={}]
- * @returns {(req: Request) => { blocked: boolean, result: Object }|null}
+ * @returns {(body: object) => Promise<{ blocked: boolean, result: Object }>}
  */
 export function createInjectionGuard(options: PromptInjectionGuardrailOptions = {}) {
   /**
@@ -25,12 +25,12 @@ export function createInjectionGuard(options: PromptInjectionGuardrailOptions = 
    * @param {Object} body - The parsed request body
    * @returns {{ blocked: boolean, result: Object }}
    */
-  return function guardRequest(body: any) {
+  return async function guardRequest(body: any) {
     if (!body || typeof body !== "object") {
       return { blocked: false, result: { flagged: false, detections: [], piiDetections: [] } };
     }
 
-    const decision = evaluatePromptInjection(body, options, {
+    const decision = await evaluatePromptInjection(body, options, {
       // Mandatory injection block mode intentionally ignores all caller-
       // controlled disabledGuardrails. Registry-managed guardrails use those
       // channels independently; never pass them into this middleware.
@@ -73,7 +73,7 @@ export function withInjectionGuard(handler: any, options: any = {}) {
       parsedBody = await cloned.json().catch(() => null);
 
       if (parsedBody) {
-        const { blocked, result }: any = guard(parsedBody);
+        const { blocked, result }: any = await guard(parsedBody);
 
         if (blocked) {
           return new Response(

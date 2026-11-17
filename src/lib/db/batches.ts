@@ -1,31 +1,39 @@
-import { getDbInstance, rowToCamel, objToSnake } from "./core";
+import { db, ts, type DbExecutor } from "./pg";
+import { jsonTextParam, jsonValueParam, stripNul } from "./pgJsonText";
 import { deleteFile, deleteFileOwnedBy } from "./files";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../../../open-sse/utils/logger.ts";
 
 const log = logger("DB_BATCHES");
 
+/** Epoch-seconds projection of a timestamptz column (the public shape stays numeric). */
+const epoch = (column: string, alias: string) =>
+  `floor(extract(epoch FROM ${column}))::bigint AS "${alias}"`;
+
+const BATCH_SELECT = `SELECT id, endpoint, completion_window AS "completionWindow", status,
+  input_file_id AS "inputFileId", output_file_id AS "outputFileId", error_file_id AS "errorFileId",
+  api_key_id AS "apiKeyId", model,
+  request_counts_total AS "requestCountsTotal",
+  request_counts_completed AS "requestCountsCompleted",
+  request_counts_failed AS "requestCountsFailed",
+  metadata, errors, usage,
+  output_expires_after_seconds AS "outputExpiresAfterSeconds",
+  output_expires_after_anchor AS "outputExpiresAfterAnchor",
+  ${epoch("created_at", "createdAt")}, ${epoch("in_progress_at", "inProgressAt")},
+  ${epoch("finalizing_at", "finalizingAt")}, ${epoch("completed_at", "completedAt")},
+  ${epoch("failed_at", "failedAt")}, ${epoch("expired_at", "expiredAt")},
+  ${epoch("cancelling_at", "cancellingAt")}, ${epoch("cancelled_at", "cancelledAt")}
+  FROM batches`;
+
 function parseBatchRow(row: any): BatchRecord {
-  const camel = rowToCamel(row) as any;
-  if (camel.metadata && typeof camel.metadata === "string") {
-    try {
-      camel.metadata = JSON.parse(camel.metadata);
-    } catch {
-      camel.metadata = null;
-    }
-  }
-  if (camel.errors && typeof camel.errors === "string") {
-    try {
-      camel.errors = JSON.parse(camel.errors);
-    } catch {
-      camel.errors = null;
-    }
-  }
-  if (camel.usage && typeof camel.usage === "string") {
-    try {
-      camel.usage = JSON.parse(camel.usage);
-    } catch {
-      camel.usage = null;
+  const camel = { ...row } as any;
+  for (const key of ["metadata", "errors", "usage"] as const) {
+    if (typeof camel[key] === "string") {
+      try {
+        camel[key] = JSON.parse(camel[key]);
+      } catch {
+        camel[key] = null;
+      }
     }
   }
   // Normalize numeric date fields to ensure they are valid numbers
@@ -38,7 +46,8 @@ function parseBatchRow(row: any): BatchRecord {
 
   camel.createdAt = coerceNum(camel.createdAt) ?? 0;
   camel.inProgressAt = coerceNum(camel.inProgressAt);
-  camel.expiresAt = coerceNum(camel.expiresAt);
+  // `expires_at` was never written and is gone; the field stays for the public shape.
+  camel.expiresAt = null;
   camel.finalizingAt = coerceNum(camel.finalizingAt);
   camel.completedAt = coerceNum(camel.completedAt);
   camel.failedAt = coerceNum(camel.failedAt);
@@ -99,14 +108,11 @@ export interface BatchItemCheckpoint {
 }
 
 function parseJsonColumn(value: unknown): any | null {
-  if (value == null) return null;
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
+  // jsonb arrives already parsed; a top-level string is a real value, not JSON text.
+  return value ?? null;
 }
+
+const safeCustomId = (id: string | null) => (id == null ? null : stripNul(id));
 
 function parseBatchItemCheckpoint(row: any): BatchItemCheckpoint {
   return {
@@ -114,14 +120,74 @@ function parseBatchItemCheckpoint(row: any): BatchItemCheckpoint {
     lineNumber: Number(row.line_number),
     customId: row.custom_id ?? null,
     status: row.status,
-    result: parseJsonColumn(row.result_json),
-    error: parseJsonColumn(row.error_json),
+    result: parseJsonColumn(row.result),
+    error: parseJsonColumn(row.error),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
 }
 
-export function createBatch(
+type ColumnWriter = { column: string; value: (v: any) => unknown; cast?: string };
+
+const timestampWriter = (column: string): ColumnWriter => ({ column, value: (v) => ts(v) });
+const jsonWriter = (column: string): ColumnWriter => ({
+  column,
+  cast: "::jsonb",
+  value: (v) => (v ? (typeof v === "string" ? jsonTextParam(v) : jsonValueParam(v)) : null),
+});
+
+/** BatchRecord field -> column. Fields not listed here (e.g. `expiresAt`) have no column. */
+const BATCH_COLUMNS: Record<string, ColumnWriter> = {
+  id: { column: "id", value: (v) => v },
+  endpoint: { column: "endpoint", value: (v) => v },
+  completionWindow: { column: "completion_window", value: (v) => v },
+  status: { column: "status", value: (v) => v },
+  inputFileId: { column: "input_file_id", value: (v) => v },
+  outputFileId: { column: "output_file_id", value: (v) => v ?? null },
+  errorFileId: { column: "error_file_id", value: (v) => v ?? null },
+  apiKeyId: { column: "api_key_id", value: (v) => v ?? null },
+  model: { column: "model", value: (v) => v ?? null },
+  requestCountsTotal: {
+    column: "request_counts_total",
+    value: (v) => Math.max(0, Math.round(Number(v) || 0)),
+  },
+  requestCountsCompleted: {
+    column: "request_counts_completed",
+    value: (v) => Math.max(0, Math.round(Number(v) || 0)),
+  },
+  requestCountsFailed: {
+    column: "request_counts_failed",
+    value: (v) => Math.max(0, Math.round(Number(v) || 0)),
+  },
+  metadata: jsonWriter("metadata"),
+  errors: jsonWriter("errors"),
+  usage: jsonWriter("usage"),
+  outputExpiresAfterSeconds: {
+    column: "output_expires_after_seconds",
+    value: (v) => (v == null ? null : Math.round(Number(v))),
+  },
+  outputExpiresAfterAnchor: { column: "output_expires_after_anchor", value: (v) => v ?? null },
+  createdAt: timestampWriter("created_at"),
+  inProgressAt: timestampWriter("in_progress_at"),
+  finalizingAt: timestampWriter("finalizing_at"),
+  completedAt: timestampWriter("completed_at"),
+  failedAt: timestampWriter("failed_at"),
+  expiredAt: timestampWriter("expired_at"),
+  cancellingAt: timestampWriter("cancelling_at"),
+  cancelledAt: timestampWriter("cancelled_at"),
+};
+
+function writableEntries(record: Record<string, unknown>) {
+  const entries: Array<{ writer: ColumnWriter; value: unknown }> = [];
+  for (const [key, raw] of Object.entries(record)) {
+    const writer = BATCH_COLUMNS[key];
+    if (!writer || raw === undefined) continue;
+    entries.push({ writer, value: writer.value(raw) });
+  }
+  return entries;
+}
+
+export async function createBatch(
   batch: Omit<
     BatchRecord,
     | "id"
@@ -131,8 +197,7 @@ export function createBatch(
     | "requestCountsFailed"
     | "status"
   > & { status?: BatchRecord["status"] }
-): BatchRecord {
-  const db = getDbInstance();
+): Promise<BatchRecord> {
   const id = "batch_" + uuidv4().replaceAll("-", "").substring(0, 24);
   const createdAt = Math.floor(Date.now() / 1000);
   const record: BatchRecord = {
@@ -150,176 +215,143 @@ export function createBatch(
     outputExpiresAfterAnchor: batch.outputExpiresAfterAnchor || null,
   };
 
-  const snakeRecord = objToSnake({
-    ...record,
-    metadata: record.metadata ? JSON.stringify(record.metadata) : null,
-    errors: record.errors ? JSON.stringify(record.errors) : null,
-    usage: record.usage ? JSON.stringify(record.usage) : null,
-  }) as any;
-  const keys = Object.keys(snakeRecord);
-  const values = Object.values(snakeRecord);
-  const placeholders = keys.map(() => "?").join(", ");
+  const entries = writableEntries(record as unknown as Record<string, unknown>);
+  const columns = entries.map((e) => e.writer.column);
+  const placeholders = entries.map((e, i) => `$${i + 1}${e.writer.cast ?? ""}`);
 
-  db.prepare(`INSERT INTO batches (${keys.join(", ")}) VALUES (${placeholders})`).run(...values);
+  await db().execute(
+    `INSERT INTO batches (${columns.join(", ")}) VALUES (${placeholders.join(", ")})`,
+    entries.map((e) => e.value)
+  );
 
   return record;
 }
 
-export function getBatch(id: string): BatchRecord | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM batches WHERE id = ?").get(id);
+export async function getBatch(id: string): Promise<BatchRecord | null> {
+  const row = await db().queryOne(`${BATCH_SELECT} WHERE id = $1`, [id]);
   if (!row) return null;
   return parseBatchRow(row);
 }
 
-export function updateBatch(id: string, updates: Partial<BatchRecord>): boolean {
-  const db = getDbInstance();
-  const snakeUpdates = objToSnake(updates) as any;
-  if (snakeUpdates.metadata && typeof snakeUpdates.metadata !== "string") {
-    snakeUpdates.metadata = JSON.stringify(snakeUpdates.metadata);
-  }
-  if (snakeUpdates.errors && typeof snakeUpdates.errors !== "string") {
-    snakeUpdates.errors = JSON.stringify(snakeUpdates.errors);
-  }
-  if (snakeUpdates.usage && typeof snakeUpdates.usage !== "string") {
-    snakeUpdates.usage = JSON.stringify(snakeUpdates.usage);
-  }
+export async function updateBatch(id: string, updates: Partial<BatchRecord>): Promise<boolean> {
+  const entries = writableEntries(updates as Record<string, unknown>);
+  if (entries.length === 0) return false;
 
-  const keys = Object.keys(snakeUpdates);
-  if (keys.length === 0) return false;
-
-  const setClause = keys.map((k) => `${k} = ?`).join(", ");
-  const values = Object.values(snakeUpdates);
-
-  const result = db.prepare(`UPDATE batches SET ${setClause} WHERE id = ?`).run(...values, id);
+  const setClause = entries.map((e, i) => `${e.writer.column} = $${i + 1}${e.writer.cast ?? ""}`);
+  const result = await db().execute(
+    `UPDATE batches SET ${setClause.join(", ")} WHERE id = $${entries.length + 1}`,
+    [...entries.map((e) => e.value), id]
+  );
   return result.changes > 0;
 }
 
-export function ensureBatchItemCheckpoints(
+const CHECKPOINT_INSERT_CHUNK = 5000;
+
+export async function ensureBatchItemCheckpoints(
   batchId: string,
   items: Array<{ lineNumber: number; customId: string | null }>
-): void {
+): Promise<void> {
   if (items.length === 0) return;
 
-  const db = getDbInstance();
-  const now = Math.floor(Date.now() / 1000);
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO batch_item_checkpoints (
-      batch_id,
-      line_number,
-      custom_id,
-      status,
-      result_json,
-      error_json,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, 'pending', NULL, NULL, ?, ?)
-  `);
-
-  const tx = db.transaction(() => {
-    for (const item of items) {
-      insert.run(batchId, item.lineNumber, item.customId, now, now);
+  const now = ts(Math.floor(Date.now() / 1000));
+  await db().transaction(async (tx) => {
+    for (let i = 0; i < items.length; i += CHECKPOINT_INSERT_CHUNK) {
+      const chunk = items.slice(i, i + CHECKPOINT_INSERT_CHUNK);
+      await tx.execute(
+        `INSERT INTO batch_item_checkpoints (batch_id, line_number, custom_id, status, created_at, updated_at)
+         SELECT $1, t.line_number, t.custom_id, 'pending', $4::timestamptz, $4::timestamptz
+           FROM unnest($2::int[], $3::text[]) AS t(line_number, custom_id)
+         ON CONFLICT (batch_id, line_number) DO NOTHING`,
+        [batchId, chunk.map((c) => c.lineNumber), chunk.map((c) => safeCustomId(c.customId)), now]
+      );
     }
   });
-  tx();
 }
 
-export function countBatchItemCheckpoints(batchId: string): number {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT COUNT(*) AS c FROM batch_item_checkpoints WHERE batch_id = ?")
-    .get(batchId) as { c: number } | undefined;
+export async function countBatchItemCheckpoints(batchId: string): Promise<number> {
+  const row = await db().queryOne<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM batch_item_checkpoints WHERE batch_id = $1`,
+    [batchId]
+  );
   return row ? Number(row.c) : 0;
 }
 
-export function listBatchItemCheckpoints(batchId: string): BatchItemCheckpoint[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `
-      SELECT batch_id, line_number, custom_id, status, result_json, error_json, created_at, updated_at
-      FROM batch_item_checkpoints
-      WHERE batch_id = ?
-      ORDER BY line_number ASC
-    `
-    )
-    .all(batchId);
+export async function listBatchItemCheckpoints(batchId: string): Promise<BatchItemCheckpoint[]> {
+  const rows = await db().query(
+    `SELECT batch_id, line_number, custom_id, status, result, error,
+            floor(extract(epoch FROM created_at))::bigint AS created_at,
+            floor(extract(epoch FROM updated_at))::bigint AS updated_at
+       FROM batch_item_checkpoints
+      WHERE batch_id = $1
+      ORDER BY line_number ASC`,
+    [batchId]
+  );
   return rows.map((row) => parseBatchItemCheckpoint(row));
 }
 
-export function markBatchItemProcessing(
+export async function markBatchItemProcessing(
   batchId: string,
   item: { lineNumber: number; customId: string | null }
-): void {
-  const db = getDbInstance();
-  const now = Math.floor(Date.now() / 1000);
-  db.prepare(
-    `
-    INSERT INTO batch_item_checkpoints (
-      batch_id,
-      line_number,
-      custom_id,
-      status,
-      result_json,
-      error_json,
-      created_at,
-      updated_at
-    )
-    VALUES (?, ?, ?, 'processing', NULL, NULL, ?, ?)
-    ON CONFLICT(batch_id, line_number) DO UPDATE SET
-      custom_id = excluded.custom_id,
-      status = 'processing',
-      result_json = NULL,
-      error_json = NULL,
-      updated_at = excluded.updated_at
-  `
-  ).run(batchId, item.lineNumber, item.customId, now, now);
+): Promise<void> {
+  const now = ts(Math.floor(Date.now() / 1000));
+  await db().execute(
+    `INSERT INTO batch_item_checkpoints (
+       batch_id, line_number, custom_id, status, result, error, created_at, updated_at
+     ) VALUES ($1, $2, $3, 'processing', NULL, NULL, $4, $4)
+     ON CONFLICT (batch_id, line_number) DO UPDATE SET
+       custom_id = EXCLUDED.custom_id,
+       status = 'processing',
+       result = NULL,
+       error = NULL,
+       updated_at = EXCLUDED.updated_at`,
+    [batchId, item.lineNumber, safeCustomId(item.customId), now]
+  );
 }
 
-export function markBatchItemResult(
+export async function markBatchItemResult(
   batchId: string,
   item: { lineNumber: number; customId: string | null },
   result: any
-): void {
-  const db = getDbInstance();
-  const now = Math.floor(Date.now() / 1000);
-  db.prepare(
-    `
-    UPDATE batch_item_checkpoints
-    SET custom_id = ?,
-        status = 'completed',
-        result_json = ?,
-        error_json = NULL,
-        updated_at = ?
-    WHERE batch_id = ? AND line_number = ?
-  `
-  ).run(item.customId, JSON.stringify(result), now, batchId, item.lineNumber);
+): Promise<void> {
+  await db().execute(
+    `UPDATE batch_item_checkpoints
+        SET custom_id = $1, status = 'completed', result = $2::jsonb, error = NULL, updated_at = $3
+      WHERE batch_id = $4 AND line_number = $5`,
+    [
+      safeCustomId(item.customId),
+      jsonValueParam(result),
+      ts(Math.floor(Date.now() / 1000)),
+      batchId,
+      item.lineNumber,
+    ]
+  );
 }
 
-export function markBatchItemError(
+export async function markBatchItemError(
   batchId: string,
   item: { lineNumber: number; customId: string | null },
   error: any
-): void {
-  const db = getDbInstance();
-  const now = Math.floor(Date.now() / 1000);
-  db.prepare(
-    `
-    UPDATE batch_item_checkpoints
-    SET custom_id = ?,
-        status = 'errored',
-        result_json = NULL,
-        error_json = ?,
-        updated_at = ?
-    WHERE batch_id = ? AND line_number = ?
-  `
-  ).run(item.customId, JSON.stringify(error), now, batchId, item.lineNumber);
+): Promise<void> {
+  await db().execute(
+    `UPDATE batch_item_checkpoints
+        SET custom_id = $1, status = 'errored', result = NULL, error = $2::jsonb, updated_at = $3
+      WHERE batch_id = $4 AND line_number = $5`,
+    [
+      safeCustomId(item.customId),
+      jsonValueParam(error),
+      ts(Math.floor(Date.now() / 1000)),
+      batchId,
+      item.lineNumber,
+    ]
+  );
 }
 
-export function listBatches(apiKeyId?: string, limit: number = 20, after?: string): BatchRecord[] {
-  const db = getDbInstance();
-  const resolvedAfterBatch = after ? getBatch(after) : null;
+export async function listBatches(
+  apiKeyId?: string,
+  limit: number = 20,
+  after?: string
+): Promise<BatchRecord[]> {
+  const resolvedAfterBatch = after ? await getBatch(after) : null;
   // #14481 item 5/LEDGER-20: `getBatch()` applies no owner filter, so an
   // `after` cursor belonging to a DIFFERENT tenant used to still resolve and
   // its `created_at` was used as the pagination bound — an existence +
@@ -330,101 +362,85 @@ export function listBatches(apiKeyId?: string, limit: number = 20, after?: strin
     apiKeyId && resolvedAfterBatch && resolvedAfterBatch.apiKeyId !== apiKeyId
       ? null
       : resolvedAfterBatch;
-  let rows: any[];
-  if (apiKeyId) {
-    if (afterBatch) {
-      rows = db
-        .prepare(
-          "SELECT * FROM batches WHERE api_key_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?"
-        )
-        .all(apiKeyId, afterBatch.createdAt, afterBatch.createdAt, after, limit);
-    } else {
-      rows = db
-        .prepare(
-          "SELECT * FROM batches WHERE api_key_id = ? ORDER BY created_at DESC, id DESC LIMIT ?"
-        )
-        .all(apiKeyId, limit);
-    }
-  } else if (afterBatch) {
-    rows = db
-      .prepare(
-        "SELECT * FROM batches WHERE (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT ?"
-      )
-      .all(afterBatch.createdAt, afterBatch.createdAt, after, limit);
-  } else {
-    rows = db.prepare("SELECT * FROM batches ORDER BY created_at DESC, id DESC LIMIT ?").all(limit);
+
+  const params: unknown[] = [];
+  const add = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+  const clauses: string[] = [];
+  if (apiKeyId) clauses.push(`api_key_id = ${add(apiKeyId)}`);
+  if (afterBatch) {
+    const at = add(ts(afterBatch.createdAt));
+    clauses.push(`(created_at < ${at} OR (created_at = ${at} AND id < ${add(after)}))`);
   }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await db().query(
+    `${BATCH_SELECT} ${where} ORDER BY created_at DESC, id DESC LIMIT ${add(limit)}`,
+    params
+  );
   return rows.map((row) => parseBatchRow(row));
 }
 
-export function countBatches(apiKeyId?: string): number {
-  const db = getDbInstance();
-  if (apiKeyId) {
-    const row = db
-      .prepare("SELECT COUNT(*) as c FROM batches WHERE api_key_id = ?")
-      .get(apiKeyId) as { c: number } | undefined;
-    return row ? Number(row.c) : 0;
-  } else {
-    const row = db.prepare("SELECT COUNT(*) as c FROM batches").get() as { c: number } | undefined;
-    return row ? Number(row.c) : 0;
-  }
+export async function countBatches(apiKeyId?: string): Promise<number> {
+  const row = apiKeyId
+    ? await db().queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM batches WHERE api_key_id = $1`, [
+        apiKeyId,
+      ])
+    : await db().queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM batches`);
+  return row ? Number(row.c) : 0;
 }
 
-export function getPendingBatches(): BatchRecord[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      "SELECT * FROM batches WHERE status IN ('validating', 'in_progress', 'finalizing', 'cancelling')"
-    )
-    .all();
+export async function getPendingBatches(): Promise<BatchRecord[]> {
+  const rows = await db().query(
+    `${BATCH_SELECT} WHERE status IN ('validating', 'in_progress', 'finalizing', 'cancelling')`
+  );
   return rows.map((row) => parseBatchRow(row));
 }
 
-export function getTerminalBatches(): BatchRecord[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      "SELECT * FROM batches WHERE status IN ('completed', 'failed', 'cancelled', 'expired') ORDER BY created_at ASC"
-    )
-    .all();
+export async function getTerminalBatches(): Promise<BatchRecord[]> {
+  const rows = await db().query(
+    `${BATCH_SELECT} WHERE status IN ('completed', 'failed', 'cancelled', 'expired') ORDER BY created_at ASC`
+  );
   return rows.map((row) => parseBatchRow(row));
 }
 
-export function deleteBatch(id: string): boolean {
-  const db = getDbInstance();
-  const batch = getBatch(id);
-  if (!batch) return false;
+export async function deleteBatch(id: string): Promise<boolean> {
+  return db().transaction(async (tx) => {
+    // Lock the row so two concurrent deletes of one batch cannot both pass the check.
+    const batch = await tx.queryOne<{
+      inputFileId: string | null;
+      outputFileId: string | null;
+      errorFileId: string | null;
+    }>(
+      `SELECT input_file_id AS "inputFileId", output_file_id AS "outputFileId",
+              error_file_id AS "errorFileId"
+         FROM batches WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (!batch) return false;
 
-  db.prepare("DELETE FROM batch_item_checkpoints WHERE batch_id = ?").run(id);
+    await tx.execute(`DELETE FROM batch_item_checkpoints WHERE batch_id = $1`, [id]);
 
-  // Soft-delete associated files (input, output, error) — but only when no
-  // OTHER batch still references the same file id (#13681). A file shared
-  // across batches (e.g. one input file reused for several batch submissions)
-  // must survive as long as any sibling batch still points at it.
-  if (batch.inputFileId && !isFileReferencedByOtherBatch(batch.inputFileId, [id])) {
-    try {
-      deleteFile(batch.inputFileId);
-    } catch {
-      /* ignore */
-    }
-  }
-  if (batch.outputFileId && !isFileReferencedByOtherBatch(batch.outputFileId, [id])) {
-    try {
-      deleteFile(batch.outputFileId);
-    } catch {
-      /* ignore */
-    }
-  }
-  if (batch.errorFileId && !isFileReferencedByOtherBatch(batch.errorFileId, [id])) {
-    try {
-      deleteFile(batch.errorFileId);
-    } catch {
-      /* ignore */
-    }
-  }
+    // The batch row goes first so the file references below no longer see it.
+    const result = await tx.execute(`DELETE FROM batches WHERE id = $1`, [id]);
 
-  const result = db.prepare("DELETE FROM batches WHERE id = ?").run(id);
-  return result.changes > 0;
+    // Soft-delete associated files (input, output, error) — but only when no
+    // OTHER batch still references the same file id (#13681). A file shared
+    // across batches (e.g. one input file reused for several batch submissions)
+    // must survive as long as any sibling batch still points at it.
+    for (const fileId of [batch.inputFileId, batch.outputFileId, batch.errorFileId]) {
+      if (!fileId) continue;
+      if (await isFileReferencedByOtherBatch(fileId, [id], tx)) continue;
+      try {
+        await deleteFile(fileId, tx);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return result.changes > 0;
+  });
 }
 
 /**
@@ -439,42 +455,31 @@ export const INSTANCE_SWEEP_CHUNK = 200;
 
 /**
  * Upper bound on the number of `INSTANCE_SWEEP_CHUNK`-sized chunks a single
- * `deleteCompletedBatches` call may run (#13680). `sweepLoop` is a synchronous
- * `for (;;)` over `better-sqlite3` — with no cap, one request could hold the
- * Node.js event loop for as long as it takes to sweep every completed batch on
- * the instance. 25 × 200 = 5000 batches/request is a judgment call, not a hard
- * constraint; any caller with more to sweep gets `hasMore: true` back and
- * resumes by calling again — resumption falls out naturally from rowid
- * ordering plus delete-as-you-go (already-swept rows are gone, so the next
- * SELECT picks up the next-lowest surviving rowid on its own; no cursor field
- * needed).
+ * `deleteCompletedBatches` call may run (#13680). 25 × 200 = 5000 batches/request
+ * is a judgment call, not a hard constraint; any caller with more to sweep gets
+ * `hasMore: true` back and resumes by calling again — already-swept rows are gone,
+ * so the next SELECT picks up the next surviving rows on its own.
  */
 export const MAX_CHUNKS_PER_REQUEST = 25;
 
 /**
  * True when some batch OTHER than one of `excludeBatchIds` still references
  * `fileId` as its input/output/error file (#13681). Used before soft-deleting
- * a file to avoid nulling content a surviving batch still needs. Binds
- * `fileId` three times; when `excludeBatchIds` is empty the `NOT IN (...)`
- * clause is dropped entirely rather than emitted empty (`NOT IN ()` is invalid
- * SQL, and getting the guard wrong there would silently match everything).
+ * a file to avoid nulling content a surviving batch still needs. `executor`
+ * lets a caller run the check inside its own transaction.
  */
-export function isFileReferencedByOtherBatch(fileId: string, excludeBatchIds: string[]): boolean {
-  const db = getDbInstance();
-  if (excludeBatchIds.length === 0) {
-    const row = db
-      .prepare(
-        "SELECT 1 FROM batches WHERE input_file_id = ? OR output_file_id = ? OR error_file_id = ? LIMIT 1"
-      )
-      .get(fileId, fileId, fileId);
-    return !!row;
-  }
-  const marks = excludeBatchIds.map(() => "?").join(",");
-  const row = db
-    .prepare(
-      `SELECT 1 FROM batches WHERE (input_file_id = ? OR output_file_id = ? OR error_file_id = ?) AND id NOT IN (${marks}) LIMIT 1`
-    )
-    .get(fileId, fileId, fileId, ...excludeBatchIds);
+export async function isFileReferencedByOtherBatch(
+  fileId: string,
+  excludeBatchIds: string[],
+  executor: DbExecutor = db()
+): Promise<boolean> {
+  const row = await executor.queryOne(
+    `SELECT 1 AS found FROM batches
+      WHERE (input_file_id = $1 OR output_file_id = $1 OR error_file_id = $1)
+        AND NOT (id = ANY($2::text[]))
+      LIMIT 1`,
+    [fileId, excludeBatchIds]
+  );
   return !!row;
 }
 
@@ -484,83 +489,40 @@ export function isFileReferencedByOtherBatch(fileId: string, excludeBatchIds: st
  * DELETE /api/v1/batches/delete-completed route -- exact contract preserved:
  * only `status = 'completed'`, no age filter) and
  * `deleteTerminalBatchesOlderThan()` (the automatic cleanup sweep -- every
- * terminal status, gated by age). Keeping the
- * collect-ids / soft-delete-files / delete-checkpoints / delete-batches
- * sequence in one place means both call sites stay in sync with the batches
- * schema and with the ownership rules below.
+ * terminal status, gated by age). `whereSql` references its `params` as
+ * `$1..$n`.
  *
  * `{ apiKeyId }` additionally restricts the match to that key's own batches,
  * exactly like `listBatches`/`countBatches`. `{ allTenants: true }` covers
  * every matching row regardless of owner and is reserved for an authenticated
- * dashboard session or an internal cron sweep with no untrusted caller — an
- * ordinary inference key that reached this without its own id would otherwise
- * delete every tenant's batches and null out their file contents
+ * dashboard session or an internal cron sweep with no untrusted caller
  * (GHSA-wvxc-jp3v-5mg5). A missing/empty `apiKeyId` without `allTenants`
  * throws instead of silently widening the sweep, and a scope carrying BOTH
  * `apiKeyId` and `allTenants` is rejected rather than widened.
  *
- * Batches whose `api_key_id` IS NULL are intentionally OUT of a key-scoped sweep:
- * a bulk destructive sweep must never reach records the key does not own, so
- * unowned batches are only swept by `{ allTenants: true }`. The single-item routes
- * apply the same rule through `canAccessOwnedRecord` in
- * `src/app/api/v1/_helpers/apiKeyScope.ts` (a null owner is denied to every
- * non-session caller — GHSA-2jm2-mpx8-6523).
- *
+ * Batches whose `api_key_id` IS NULL are intentionally OUT of a key-scoped sweep.
  * In key mode the file half is owner-scoped too: only files whose api_key_id
  * is the caller's are soft-deleted; a referenced file another tenant owns (or
  * an unowned one) is left intact and is not counted in deletedFiles.
  *
  * The file soft-deletes, the checkpoint DELETE and the batches DELETE for a
- * set of batch ids run in one transaction, so a mid-sweep failure rolls that
- * set back — within a chunk, no batch row is left pointing at a file whose
- * content was already nulled. BOTH modes walk the matching batches in chunks
- * of `INSTANCE_SWEEP_CHUNK` ids and commit that unit once per chunk
- * (SEC-D; key mode since the omni-code-sec proof run, LEDGER-4/20/21): the
- * SQLite write lock is held for one chunk at a time and never across chunks,
- * so the lowest-privilege caller — any valid API key — cannot hold the
- * instance's single writer for the length of its whole sweep. Each chunk stays
- * atomic: a failure inside chunk N leaves chunks < N committed, chunk N fully
- * rolled back, and rethrows. Each chunk's file soft-deletes now check whether
- * some batch OUTSIDE that chunk still references the file
- * (`isFileReferencedByOtherBatch`, #13681) — a file shared with a
- * non-completed sibling batch, or with a completed batch a LATER chunk hasn't
- * reached yet, survives this chunk. The only case that check cannot see is
- * pure timing: chunk 1 commits and nulls a file, then — before chunk 2 runs —
- * a NEW batch is created reusing that same file id. That race is inherent to
- * per-chunk commits and stays a known, accepted edge case; everything else
- * (a concurrently existing sibling, in any status, in any chunk) is now
- * guarded. The returned totals sum the chunks.
- *
- * A single call commits at most `MAX_CHUNKS_PER_REQUEST` chunks (#13680):
- * `better-sqlite3` is synchronous, so an unbounded loop would hold the event
- * loop for as long as it takes to sweep the whole key's/instance's backlog.
- * When the cap is hit with more rows still pending, the call returns
- * `hasMore: true` instead of continuing; the caller simply calls again (the
- * DELETE route on its next request, the cleanup job on its next scheduled
- * run). Resumption needs no cursor: swept rows are gone, `rowid` only
- * increases, so the next call's `ORDER BY rowid LIMIT ?` picks up exactly
- * where the previous call left off.
+ * set of batch ids run in one transaction per chunk of `INSTANCE_SWEEP_CHUNK`
+ * ids, so a failure inside chunk N leaves chunks < N committed, chunk N fully
+ * rolled back, and rethrows. A single call commits at most
+ * `MAX_CHUNKS_PER_REQUEST` chunks (#13680); beyond that it returns `hasMore: true`.
  *
  * The loop must make progress: it remembers the first id of the previous chunk
- * and throws if the next chunk starts with the same id — the DELETE removed
- * nothing (e.g. a trigger ignored it), and re-selecting the same rows would
- * spin forever (LEDGER-22). Rows vanishing under a concurrent deleter are fine:
- * the next chunk then starts with a different id or is empty.
- *
- * The ids of a unit are bound as `IN (?, …)` placeholders. No statement ever
- * binds more than `INSTANCE_SWEEP_CHUNK` ids in either mode, so a tenant or
- * instance with tens of thousands of matching batches never hits SQLite's
- * default SQLITE_MAX_VARIABLE_NUMBER (32766 since 3.32).
+ * and throws if the next chunk starts with the same id (LEDGER-22).
  */
-function deleteBatchesMatching(
+async function deleteBatchesMatching(
   whereSql: string,
   params: unknown[],
   scope: DeleteCompletedBatchesScope
-): {
+): Promise<{
   deletedBatches: number;
   deletedFiles: number;
   hasMore: boolean;
-} {
+}> {
   const scopeObj = scope && typeof scope === "object" ? scope : {};
   const allTenants = "allTenants" in scopeObj && scopeObj.allTenants === true;
   const apiKeyId = "apiKeyId" in scopeObj ? scopeObj.apiKeyId : undefined;
@@ -573,142 +535,122 @@ function deleteBatchesMatching(
     throw new Error("deleteBatchesMatching: apiKeyId and allTenants are mutually exclusive");
   }
 
-  const db = getDbInstance();
-
   // One consistent unit: file soft-deletes → checkpoints → batch rows for a
-  // given set of batch ids. Both modes run — and commit — it once per chunk of
-  // INSTANCE_SWEEP_CHUNK ids, so a large sweep never holds one write lock for
-  // the whole table (SEC-D, LEDGER-4) while each chunk stays atomic.
-  const sweepIds = db.transaction((ids: string[]) => {
-    if (ids.length === 0) return { deletedBatches: 0, deletedFiles: 0 };
-    const marks = ids.map(() => "?").join(",");
-    const rows = db
-      .prepare(
-        `SELECT input_file_id, output_file_id, error_file_id FROM batches WHERE id IN (${marks})`
-      )
-      .all(...ids) as Array<{
-      input_file_id: string | null;
-      output_file_id: string | null;
-      error_file_id: string | null;
-    }>;
+  // given set of batch ids, committed once per chunk.
+  const sweepIds = (ids: string[]) =>
+    db().transaction(async (tx) => {
+      if (ids.length === 0) return { deletedBatches: 0, deletedFiles: 0 };
+      const rows = await tx.query<{
+        input_file_id: string | null;
+        output_file_id: string | null;
+        error_file_id: string | null;
+      }>(
+        `SELECT input_file_id, output_file_id, error_file_id FROM batches
+          WHERE id = ANY($1::text[]) FOR UPDATE`,
+        [ids]
+      );
 
-    const fileIds = new Set<string>();
-    for (const row of rows) {
-      if (row.input_file_id) fileIds.add(row.input_file_id);
-      if (row.output_file_id) fileIds.add(row.output_file_id);
-      if (row.error_file_id) fileIds.add(row.error_file_id);
-    }
-
-    let deletedFiles = 0;
-    for (const fid of fileIds) {
-      // #13681: a file referenced by a batch outside this chunk (a matching
-      // batch a later chunk has not reached yet, or any batch the WHERE does
-      // not match — non-terminal, or too young for the age-gated sweep) must
-      // survive this chunk's sweep. Applies to BOTH callers of
-      // deleteBatchesMatching: the DELETE route and the automatic cleanup.
-      if (isFileReferencedByOtherBatch(fid, ids)) continue;
-      try {
-        // Key mode: only the key's OWN files. A batch may reference a file
-        // another tenant (or nobody) owns; a bulk destructive sweep must not
-        // reach it (SEC-C). Instance mode keeps the unconditional soft delete.
-        const removed = allTenants ? deleteFile(fid) : deleteFileOwnedBy(fid, apiKeyId as string);
-        if (removed) deletedFiles++;
-      } catch (err) {
-        log.warn("deleteCompletedBatches: file soft-delete failed", {
-          fid,
-          err: err instanceof Error ? err.message : String(err),
-        });
+      const fileIds = new Set<string>();
+      for (const row of rows) {
+        if (row.input_file_id) fileIds.add(row.input_file_id);
+        if (row.output_file_id) fileIds.add(row.output_file_id);
+        if (row.error_file_id) fileIds.add(row.error_file_id);
       }
-    }
 
-    db.prepare(`DELETE FROM batch_item_checkpoints WHERE batch_id IN (${marks})`).run(...ids);
-    const result = db.prepare(`DELETE FROM batches WHERE id IN (${marks})`).run(...ids);
-    return { deletedBatches: result.changes, deletedFiles };
-  });
+      let deletedFiles = 0;
+      for (const fid of fileIds) {
+        // #13681: a file referenced by a batch outside this chunk must survive this chunk.
+        if (await isFileReferencedByOtherBatch(fid, ids, tx)) continue;
+        try {
+          // Key mode: only the key's OWN files (SEC-C). Instance mode keeps the
+          // unconditional soft delete.
+          const removed = allTenants
+            ? await deleteFile(fid, tx)
+            : await deleteFileOwnedBy(fid, apiKeyId as string, tx);
+          if (removed) deletedFiles++;
+        } catch (err) {
+          log.warn("deleteCompletedBatches: file soft-delete failed", {
+            fid,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
-  // The one chunk loop both modes share: select the next chunk of ids, sweep
-  // it in its own committed transaction, sum. The only difference between the
-  // modes is the SELECT that produces the next chunk. No outer transaction —
-  // the write lock is released between chunks (LEDGER-4/20/21).
-  const sweepLoop = (nextIds: () => string[]) => {
-    const totals = { deletedBatches: 0, deletedFiles: 0, hasMore: false };
-    let previousFirstId: string | null = null;
-    let chunkCount = 0;
-    for (;;) {
-      const ids = nextIds();
-      if (ids.length === 0) break;
-      // Chunk cap (#13680): a single request commits at most
-      // MAX_CHUNKS_PER_REQUEST chunks. This peek doesn't delete or count
-      // anything — it only tells the caller whether more work remains so it
-      // can call again (resumption is natural: already-swept rows are gone).
-      if (chunkCount >= MAX_CHUNKS_PER_REQUEST) {
-        totals.hasMore = true;
-        break;
-      }
-      // Forward-progress guard (LEDGER-22): the chunk is re-selected from the
-      // table after each commit, so a repeated first id means the previous
-      // DELETE removed nothing and the loop would spin forever. A concurrent
-      // deleter only makes rows vanish, which yields a different first id.
-      if (ids[0] === previousFirstId) {
-        throw new Error(`deleteBatchesMatching: no progress — chunk repeated (id ${ids[0]})`);
-      }
-      previousFirstId = ids[0];
-      const part = sweepIds(ids);
-      totals.deletedBatches += part.deletedBatches;
-      totals.deletedFiles += part.deletedFiles;
-      chunkCount++;
-    }
-    return totals;
+      await tx.execute(`DELETE FROM batch_item_checkpoints WHERE batch_id = ANY($1::text[])`, [
+        ids,
+      ]);
+      const result = await tx.execute(`DELETE FROM batches WHERE id = ANY($1::text[])`, [ids]);
+      return { deletedBatches: result.changes, deletedFiles };
+    });
+
+  const nextIds = async (): Promise<string[]> => {
+    const rows = allTenants
+      ? await db().query<{ id: string }>(
+          `SELECT id FROM batches WHERE ${whereSql} ORDER BY created_at, id LIMIT $${params.length + 1}`,
+          [...params, INSTANCE_SWEEP_CHUNK]
+        )
+      : await db().query<{ id: string }>(
+          `SELECT id FROM batches WHERE ${whereSql} AND api_key_id = $${params.length + 1}
+            ORDER BY created_at, id LIMIT $${params.length + 2}`,
+          [...params, apiKeyId, INSTANCE_SWEEP_CHUNK]
+        );
+    return rows.map((r) => r.id);
   };
 
-  const toIds = (rows: unknown[]) => (rows as Array<{ id: string }>).map((r) => r.id);
-
-  if (!allTenants) {
-    const keyChunk = db.prepare(
-      `SELECT id FROM batches WHERE ${whereSql} AND api_key_id = ? ORDER BY rowid LIMIT ?`
-    );
-    return sweepLoop(() => toIds(keyChunk.all(...params, apiKeyId, INSTANCE_SWEEP_CHUNK)));
+  const totals = { deletedBatches: 0, deletedFiles: 0, hasMore: false };
+  let previousFirstId: string | null = null;
+  let chunkCount = 0;
+  for (;;) {
+    const ids = await nextIds();
+    if (ids.length === 0) break;
+    // Chunk cap (#13680): peek only tells the caller whether more work remains.
+    if (chunkCount >= MAX_CHUNKS_PER_REQUEST) {
+      totals.hasMore = true;
+      break;
+    }
+    // Forward-progress guard (LEDGER-22): a repeated first id means the previous
+    // DELETE removed nothing and the loop would spin forever.
+    if (ids[0] === previousFirstId) {
+      throw new Error(`deleteBatchesMatching: no progress — chunk repeated (id ${ids[0]})`);
+    }
+    previousFirstId = ids[0];
+    const part = await sweepIds(ids);
+    totals.deletedBatches += part.deletedBatches;
+    totals.deletedFiles += part.deletedFiles;
+    chunkCount++;
   }
-
-  const nextChunk = db.prepare(`SELECT id FROM batches WHERE ${whereSql} ORDER BY rowid LIMIT ?`);
-  return sweepLoop(() => toIds(nextChunk.all(...params, INSTANCE_SWEEP_CHUNK)));
+  return totals;
 }
 
-export function deleteCompletedBatches(scope: DeleteCompletedBatchesScope): {
+export async function deleteCompletedBatches(scope: DeleteCompletedBatchesScope): Promise<{
   deletedBatches: number;
   deletedFiles: number;
   hasMore: boolean;
-} {
+}> {
   return deleteBatchesMatching("status = 'completed'", [], scope);
 }
 
 /**
  * Automatic sweep for the daily cleanup job (see lib/db/cleanup.ts): unlike
- * deleteCompletedBatches() above, this covers every terminal status -- a
- * failed, cancelled, or expired batch's checkpoints are just as done as a
- * completed one's, but had no cleanup path at all before this. Gated by age
+ * deleteCompletedBatches() above, this covers every terminal status. Gated by age
  * so a batch's results stay retrievable for a while after finishing, matching
  * OpenAI's own Batch API retention behavior.
- *
- * Observed live: batch_item_checkpoints had grown to 182K rows / 5.25 GB with
- * no batch ever explicitly deleted by an operator -- the manual
- * delete-completed route existed, but nothing ever called it automatically,
- * and it does not cover failed/cancelled/expired batches either.
  *
  * Always instance-wide: called only by the internal cron sweep, never by an
  * untrusted API-key-authenticated caller, so it always uses the allTenants
  * path rather than taking a scope of its own.
  */
-export function deleteTerminalBatchesOlderThan(days: number): {
+export async function deleteTerminalBatchesOlderThan(days: number): Promise<{
   deletedBatches: number;
   deletedFiles: number;
   hasMore: boolean;
-} {
-  const cutoffEpochSeconds = Math.floor(Date.now() / 1000) - days * 24 * 60 * 60;
+}> {
+  if (!Number.isFinite(days)) return { deletedBatches: 0, deletedFiles: 0, hasMore: false };
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   return deleteBatchesMatching(
     `status IN ('completed', 'failed', 'cancelled', 'expired')
-       AND COALESCE(completed_at, failed_at, cancelled_at, expired_at, created_at) < ?`,
-    [cutoffEpochSeconds],
+       AND COALESCE(completed_at, failed_at, cancelled_at, expired_at, created_at) < $1`,
+    [cutoff],
     { allTenants: true }
   );
 }

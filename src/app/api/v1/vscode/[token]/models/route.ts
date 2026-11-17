@@ -1,5 +1,9 @@
 import { getUnifiedModelsResponse } from "@/app/api/v1/models/catalog";
-import { getResolvedModelCapabilities } from "@/lib/modelCapabilities";
+import {
+  createModelCapabilityResolutionSnapshot,
+  getResolvedModelCapabilities,
+  type ModelCapabilityResolutionSnapshot,
+} from "@/lib/modelCapabilities";
 import { getCanonicalModelMetadata } from "@/lib/modelMetadataRegistry";
 import {
   buildReasoningConfigSchema,
@@ -72,6 +76,8 @@ const VSCODE_CATALOG_CACHE_HEADERS = {
 
 type EnrichModelForVscodeOptions = {
   preserveNativeId?: boolean;
+  /** Shared per-request capability snapshot so a catalog pass loads synced data once. */
+  capabilitySnapshot?: ModelCapabilityResolutionSnapshot | null;
 };
 
 function usesResponsesApi(model: CatalogModelEntry) {
@@ -117,17 +123,19 @@ function getVscodeImportFamily(model: CatalogModelEntry, canonicalFamily?: strin
     : undefined;
 }
 
-export function getVscodeRawModelDisplayName(model: CatalogModelEntry) {
+export async function getVscodeRawModelDisplayName(model: CatalogModelEntry): Promise<string> {
   const actualModelId = (model.id || model.name || model.root || "").trim();
-  const canonicalMetadata = resolveVscodeModelMetadata(model);
+  const canonicalMetadata = await resolveVscodeModelMetadata(model);
   const { baseModelId } = parseVscodeServiceTierVariantModelId(actualModelId);
   const displayBaseModelId = getReasoningVariantBaseModelId(baseModelId);
-  const baseDisplayName = getVscodeModelDisplayName({
-    ...model,
-    id: displayBaseModelId,
-    name: displayBaseModelId,
-    root: displayBaseModelId,
-  }).replace(/\s+\(Default\)$/u, "");
+  const baseDisplayName = (
+    await getVscodeModelDisplayName({
+      ...model,
+      id: displayBaseModelId,
+      name: displayBaseModelId,
+      root: displayBaseModelId,
+    })
+  ).replace(/\s+\(Default\)$/u, "");
   const providerKey = canonicalMetadata?.providerAlias || canonicalMetadata?.provider || "";
   const providerPrefix =
     providerKey === "codex" || providerKey === "cx"
@@ -164,22 +172,27 @@ export function getVscodeRawModelDisplayName(model: CatalogModelEntry) {
   return `${prefixedDisplayName} (${first}) ${rest.map((suffix) => `(${suffix})`).join(" ")}`;
 }
 
-export function enrichModelForVscode(
+export async function enrichModelForVscode(
   model: CatalogModelEntry,
   request: Request,
   options: EnrichModelForVscodeOptions = {}
-): VscodeImportModel {
+): Promise<VscodeImportModel> {
   if (!isUsableChatModel(model)) return model;
 
   const requestUrl = new URL(request.url);
   const tokenBasePath = requestUrl.pathname.replace(/\/models(?:\/raw)?\/?$/, "");
   const tokenBaseUrl = `${requestUrl.origin}${tokenBasePath}`;
-  const canonicalMetadata = getCanonicalModelMetadata({
+  const canonicalMetadata = await getCanonicalModelMetadata({
     provider: model.owned_by || null,
     model: model.root || model.id || model.name || null,
+    snapshot: options.capabilitySnapshot ?? null,
   });
   const family = getVscodeImportFamily(model, canonicalMetadata?.metadata.family || null);
-  const resolvedCapabilities = getResolvedModelCapabilities(model.id || model.name || "");
+  const resolvedCapabilities = await getResolvedModelCapabilities(
+    model.id || model.name || "",
+    undefined,
+    options.capabilitySnapshot ?? null
+  );
   const reasoningEffortValues =
     resolvedCapabilities.reasoning === true
       ? getReasoningEffortValues(model as VscodeCatalogModel)
@@ -213,15 +226,15 @@ export function enrichModelForVscode(
   if (options.preserveNativeId) {
     return {
       ...presentationModel,
-      name: getVscodeRawModelDisplayName(presentationModel),
+      name: await getVscodeRawModelDisplayName(presentationModel),
     };
   }
 
   return {
     ...presentationModel,
     name: options.preserveNativeId
-      ? getVscodeRawModelDisplayName(presentationModel)
-      : getVscodeModelDisplayName(presentationModel),
+      ? await getVscodeRawModelDisplayName(presentationModel)
+      : await getVscodeModelDisplayName(presentationModel),
     url:
       reasoningEffortValues || usesResponsesApi(model)
         ? `${tokenBaseUrl}/responses#models.ai.azure.com`
@@ -367,8 +380,9 @@ export async function GET(
     });
   }
 
+  const capabilitySnapshot = await createModelCapabilityResolutionSnapshot();
   return Response.json(
-    (() => {
+    await (async () => {
       const expandedModels = expandVscodeServiceTierModels(body.data);
       const allModelIds = new Set(
         expandedModels
@@ -393,10 +407,10 @@ export async function GET(
 
         const groupKey = tierParsedModel.serviceTier
           ? canonicalModelId
-          : getVscodeModelGroupingKey({
+          : (await getVscodeModelGroupingKey({
               ...model,
               ...(canonicalModelId ? { id: canonicalModelId } : {}),
-            }) || canonicalModelId;
+            })) || canonicalModelId;
         const current = groupedModels.get(groupKey);
         if (!current) {
           groupedModels.set(groupKey, model);
@@ -410,12 +424,18 @@ export async function GET(
         }
       }
 
+      const groupedList = orderedGroupKeys
+        .map((groupKey) => groupedModels.get(groupKey))
+        .filter(Boolean);
       return {
         ...body,
-        data: orderedGroupKeys
-          .map((groupKey) => groupedModels.get(groupKey))
-          .filter(Boolean)
-          .map((model) => enrichModelForVscode(model as CatalogModelEntry, authorizedRequest)),
+        data: await Promise.all(
+          groupedList.map((model) =>
+            enrichModelForVscode(model as CatalogModelEntry, authorizedRequest, {
+              capabilitySnapshot,
+            })
+          )
+        ),
       };
     })(),
     {

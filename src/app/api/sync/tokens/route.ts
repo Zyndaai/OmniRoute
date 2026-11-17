@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       updatedAt: issued.record.updatedAt,
     };
 
-    logAuditEvent({
+    await logAuditEvent({
       action: "sync.token.created",
       actor: "admin",
       target: issued.record.name,

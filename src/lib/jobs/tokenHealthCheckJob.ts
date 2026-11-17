@@ -15,9 +15,9 @@ import type { JobRegistry } from "@/lib/jobRegistry/registry";
 
 const TOKEN_HEALTH_CHECK_INTERVAL_MS = 60_000;
 
-export function registerTokenHealthCheck(registry: JobRegistry): void {
+export async function registerTokenHealthCheck(registry: JobRegistry): Promise<void> {
   const now = new Date().toISOString();
-  registry.register({
+  await registry.register({
     id: "token_health_check",
     type: "interval",
     cron: null,

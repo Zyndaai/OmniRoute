@@ -45,7 +45,7 @@ export const pluginTools = [
         .describe("Filter by plugin status"),
     }),
     handler: async (args: { status?: string }) => {
-      const plugins = listPlugins(args.status as any);
+      const plugins = await listPlugins(args.status as any);
       return {
         plugins: plugins.map((p) => ({
           name: p.name,
@@ -149,7 +149,7 @@ export const pluginTools = [
         .describe("New config values to merge (omit to just read current config)"),
     }),
     handler: async (args: { name: string; config?: Record<string, unknown> }) => {
-      const plugin = getPluginByName(args.name);
+      const plugin = await getPluginByName(args.name);
       if (!plugin) return { success: false, error: `Plugin '${args.name}' not found` };
 
       if (args.config) {
@@ -169,7 +169,7 @@ export const pluginTools = [
           }
         }
 
-        updatePluginConfig(args.name, merged);
+        await updatePluginConfig(args.name, merged);
         return { success: true, config: merged };
       }
 
@@ -182,24 +182,15 @@ export const pluginTools = [
 
   {
     name: "plugin_executions",
-    description: "View plugin execution metrics (from plugin_analytics table).",
+    description:
+      "View plugin execution metrics. Execution analytics are no longer recorded, so this returns an empty list.",
     scopes: ["read:plugins"],
     inputSchema: z.object({
       name: z.string().optional().describe("Filter by plugin name"),
       limit: z.number().min(1).max(100).default(20).describe("Max results to return"),
     }),
-    handler: async (args: { name?: string; limit?: number }) => {
-      const { getPluginAnalytics, getPluginAnalyticsSummary } =
-        await import("../../../src/lib/db/plugins");
-      const limit = args.limit || 20;
-      if (args.name) {
-        const rows = getPluginAnalytics(args.name).slice(0, limit);
-        return { metrics: rows };
-      }
-      // No name filter: return all plugins' summaries
-      const allPlugins = listPlugins();
-      const metrics = allPlugins.slice(0, limit).map((p) => getPluginAnalyticsSummary(p.name));
-      return { metrics };
+    handler: async (_args: { name?: string; limit?: number }) => {
+      return { metrics: [] as unknown[] };
     },
   },
 

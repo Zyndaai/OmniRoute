@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     if (!apiKeyId) {
       return NextResponse.json({ error: "apiKeyId query param is required" }, { status: 400 });
     }
-    const status = getKeyQuotaStatus(apiKeyId);
+    const status = await getKeyQuotaStatus(apiKeyId);
     return NextResponse.json(status);
   } catch (error) {
     console.error("Error fetching key quota:", error);
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
     const { apiKeyId, tpmLimit, rpmLimit, monthlyAmountUsd } = validation.data;
-    const limits = upsertKeyQuotaLimits(apiKeyId, { tpmLimit, rpmLimit, monthlyAmountUsd });
+    const limits = await upsertKeyQuotaLimits(apiKeyId, { tpmLimit, rpmLimit, monthlyAmountUsd });
     return NextResponse.json({ success: true, apiKeyId, limits });
   } catch (error) {
     console.error("Error setting key quota:", error);
@@ -79,7 +79,7 @@ export async function DELETE(request: Request) {
     if (!apiKeyId) {
       return NextResponse.json({ error: "apiKeyId query param is required" }, { status: 400 });
     }
-    clearKeyQuotaLimits(apiKeyId);
+    await clearKeyQuotaLimits(apiKeyId);
     return NextResponse.json({ success: true, apiKeyId });
   } catch (error) {
     console.error("Error clearing key quota:", error);

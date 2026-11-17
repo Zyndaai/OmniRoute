@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db, ts } from "./pg";
 
 export type ComboForecastUsageRow = {
   comboName: string;
@@ -48,51 +48,51 @@ function toString(value: unknown, fallback = "unknown"): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-export function getComboForecastUsageRows(opts: {
+export async function getComboForecastUsageRows(opts: {
   since: string;
   until?: string;
   comboName?: string;
-}): ComboForecastUsageRow[] {
-  const db = getDbInstance();
-  const conditions = ["combo_name IS NOT NULL", "combo_name != ''", "timestamp >= @since"];
-  const params: Record<string, unknown> = { since: opts.since };
+}): Promise<ComboForecastUsageRow[]> {
+  const params: unknown[] = [ts(opts.since)];
+  const conditions = ["combo_name IS NOT NULL", "combo_name != ''", `"timestamp" >= $1`];
 
   if (opts.until) {
-    conditions.push("timestamp <= @until");
-    params.until = opts.until;
+    params.push(ts(opts.until));
+    conditions.push(`"timestamp" <= $${params.length}`);
   }
 
   if (opts.comboName) {
-    conditions.push("combo_name = @comboName");
-    params.comboName = opts.comboName;
+    params.push(opts.comboName);
+    conditions.push(`combo_name = $${params.length}`);
   }
 
-  const rows = db
-    .prepare(
-      `SELECT
-         combo_name as comboName,
-         COALESCE(NULLIF(combo_execution_key, ''), NULLIF(combo_step_id, '')) as executionKey,
-         combo_step_id as stepId,
+  const rows = await db().query<ComboForecastUsageSqlRow>(
+    `SELECT
+         combo_name AS "comboName",
+         COALESCE(NULLIF(combo_execution_key, ''), NULLIF(combo_step_id, '')) AS "executionKey",
+         combo_step_id AS "stepId",
          provider,
          model,
-         requested_model as requestedModel,
-         connection_id as connectionId,
-         COUNT(*) as requests,
-         SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) as successCount,
-         COALESCE(SUM(tokens_in), 0) as inputTokens,
-         COALESCE(SUM(tokens_out), 0) as outputTokens,
-         COALESCE(SUM(tokens_cache_read), 0) as cacheReadTokens,
-         COALESCE(SUM(tokens_cache_creation), 0) as cacheCreationTokens,
-         COALESCE(SUM(tokens_reasoning), 0) as reasoningTokens,
-         COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0) as totalTokens,
-         COALESCE(AVG(duration), 0) as avgLatencyMs,
-         MAX(timestamp) as lastUsedAt
+         requested_model AS "requestedModel",
+         connection_id AS "connectionId",
+         COUNT(*) AS requests,
+         SUM(CASE WHEN status >= 200 AND status < 400 THEN 1 ELSE 0 END) AS "successCount",
+         COALESCE(SUM(tokens_in), 0) AS "inputTokens",
+         COALESCE(SUM(tokens_out), 0) AS "outputTokens",
+         COALESCE(SUM(tokens_cache_read), 0) AS "cacheReadTokens",
+         COALESCE(SUM(tokens_cache_creation), 0) AS "cacheCreationTokens",
+         COALESCE(SUM(tokens_reasoning), 0) AS "reasoningTokens",
+         COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0) AS "totalTokens",
+         COALESCE(AVG(duration), 0) AS "avgLatencyMs",
+         MAX("timestamp") AS "lastUsedAt"
        FROM call_logs
        WHERE ${conditions.join(" AND ")}
-       GROUP BY combo_name, executionKey, combo_step_id, provider, model, requested_model, connection_id
-       ORDER BY combo_name ASC, requests DESC`
-    )
-    .all(params) as ComboForecastUsageSqlRow[];
+       GROUP BY combo_name,
+                COALESCE(NULLIF(combo_execution_key, ''), NULLIF(combo_step_id, '')),
+                combo_step_id, provider, model, requested_model, connection_id
+       ORDER BY combo_name ASC, requests DESC`,
+    params
+  );
 
   return rows.map((row) => ({
     comboName: toString(row.comboName),

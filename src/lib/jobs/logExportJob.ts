@@ -42,8 +42,8 @@ export async function run(): Promise<{
 }
 
 /** Wire the log_export job into a JobRegistry (idempotent — call at boot). */
-export function registerLogExportJob(registry: JobRegistry): void {
-  registry.register({
+export async function registerLogExportJob(registry: JobRegistry): Promise<void> {
+  await registry.register({
     id: LOG_EXPORT_JOB_ID,
     type: "cron",
     cron: getCron(),

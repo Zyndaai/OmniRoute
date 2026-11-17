@@ -13,9 +13,13 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const includeArchived = new URL(request.url).searchParams.get("includeArchived") === "true";
     const includeKeyOptions = new URL(request.url).searchParams.get("includeKeyOptions") === "true";
+    const [teams, keyOptions] = await Promise.all([
+      listTeams({ includeArchived }),
+      includeKeyOptions ? listTeamKeyOptions() : undefined,
+    ]);
     return NextResponse.json({
-      teams: listTeams({ includeArchived }),
-      ...(includeKeyOptions ? { keyOptions: listTeamKeyOptions() } : {}),
+      teams,
+      ...(includeKeyOptions ? { keyOptions } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list teams";
@@ -31,9 +35,9 @@ export async function POST(request: Request): Promise<Response> {
     if (!parsed.success) {
       return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
-    const team = createTeam(parsed.data);
+    const team = await createTeam(parsed.data);
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "team.create",
       target: team.id,
       resourceType: "team",

@@ -1,6 +1,6 @@
-import { backupDbFile } from "./backup";
 import { getDefaultCompressionCombo } from "./compressionCombos";
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "./pg";
+import { configJson, getConfigEntries, getConfigValue, setConfigValue } from "./configEntries";
 import { invalidateDbCache } from "./readCache";
 import {
   ENGINE_IDS,
@@ -62,20 +62,10 @@ type JsonRecord = Record<string, unknown>;
 let compressionSettingsCache: {
   value: CompressionConfig;
   expiresAt: number;
-  dbRef: WeakRef<object>;
 } | null = null;
 
 function toRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" ? (value as JsonRecord) : {};
-}
-
-function parseJsonSafe(raw: string | null): unknown {
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
 }
 
 function normalizeCavemanConfig(value: unknown): CavemanConfig {
@@ -516,19 +506,12 @@ function sanitizeEnginesForWrite(value: unknown): Record<string, EngineToggle> {
 // Partial engines writes replace the whole JSON row, and the read path turns every id missing
 // from a stored row off. Merge each written entry over the stored entry, field by field. While
 // no usable row exists, merge over `current`, the map the read path derives from legacy settings.
-function mergeEnginesForWrite(
-  db: ReturnType<typeof getDbInstance>,
+async function mergeEnginesForWrite(
+  ex: DbExecutor,
   value: unknown,
   current: Record<string, EngineToggle>
-): Record<string, EngineToggle> {
-  const existingRow = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, "engines") as { value: unknown } | undefined;
-  // getCompressionSettings skips non-text (BLOB) rows, so treat them as absent here too.
-  const stored =
-    typeof existingRow?.value === "string"
-      ? parseStoredEnginesMap(parseJsonSafe(existingRow.value))
-      : null;
+): Promise<Record<string, EngineToggle>> {
+  const stored = parseStoredEnginesMap(await getConfigValue(NAMESPACE, "engines", ex));
   const base = stored ?? current;
   const incoming = toRecord(value);
   const merged: JsonRecord = {};
@@ -542,15 +525,12 @@ function mergeEnginesForWrite(
 
 // Partial lite writes replace the whole JSON row. Keep a stored cap unless the
 // caller sends maxToolLength: null (clear) or a new in-range integer.
-function mergeLiteSettingsForWrite(
-  db: ReturnType<typeof getDbInstance>,
+async function mergeLiteSettingsForWrite(
+  ex: DbExecutor,
   value: unknown
-): { compressToolResults: boolean; maxToolLength?: number } {
+): Promise<{ compressToolResults: boolean; maxToolLength?: number }> {
   const incoming = toRecord(value);
-  const existingRow = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, "lite") as { value: string } | undefined;
-  const existing = toRecord(parseJsonSafe(existingRow?.value ?? null));
+  const existing = toRecord(await getConfigValue(NAMESPACE, "lite", ex));
   const existingCap = usableLiteMaxToolLength(existing.maxToolLength);
   const compressToolResults =
     typeof incoming.compressToolResults === "boolean"
@@ -577,16 +557,12 @@ function mergeLiteSettingsForWrite(
 
 // Partial cavemanOutputMode writes replace the whole JSON row, and the read path fills
 // missing fields with defaults. Take each missing or invalid field from the stored row instead.
-function mergeCavemanOutputModeForWrite(
-  db: ReturnType<typeof getDbInstance>,
+async function mergeCavemanOutputModeForWrite(
+  ex: DbExecutor,
   value: unknown
-): CavemanOutputModeConfig {
-  const existingRow = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, "cavemanOutputMode") as { value: unknown } | undefined;
-  // getCompressionSettings skips non-text (BLOB) rows, so treat them as absent here too.
+): Promise<CavemanOutputModeConfig> {
   const existing = normalizeCavemanOutputModeConfig(
-    typeof existingRow?.value === "string" ? parseJsonSafe(existingRow.value) : undefined
+    await getConfigValue(NAMESPACE, "cavemanOutputMode", ex)
   );
   return normalizeCavemanOutputModeConfig(value, existing);
 }
@@ -614,10 +590,10 @@ function parseStoredEnginesMap(value: unknown): Record<string, EngineToggle> | n
 // turns on via the `defaultMode` fallback below. Structural engines (lite/headroom/
 // session-dedup/ccr) come from the default-combo pipeline. `defaultMode` is a last-resort
 // signal that turns on its single-mode engine when nothing else already did.
-function deriveEnginesMap(config: CompressionConfig): Record<string, EngineToggle> {
+async function deriveEnginesMap(config: CompressionConfig): Promise<Record<string, EngineToggle>> {
   let defaultComboEngines = new Set<string>();
   try {
-    const combo = getDefaultCompressionCombo();
+    const combo = await getDefaultCompressionCombo();
     if (combo) {
       defaultComboEngines = new Set(combo.pipeline.map((step) => step.engine));
     }
@@ -670,26 +646,18 @@ function deriveEnginesMap(config: CompressionConfig): Record<string, EngineToggl
 }
 
 export async function getCompressionSettings(): Promise<CompressionConfig> {
-  const db = getDbInstance();
-  if (
-    compressionSettingsCache &&
-    Date.now() < compressionSettingsCache.expiresAt &&
-    compressionSettingsCache.dbRef.deref() === db
-  ) {
+  if (compressionSettingsCache && Date.now() < compressionSettingsCache.expiresAt) {
     return compressionSettingsCache.value;
   }
   compressionSettingsCache = null;
 
-  const rows = db.prepare("SELECT key, value FROM key_value WHERE namespace = ?").all(NAMESPACE);
+  const rows = await getConfigEntries(NAMESPACE);
 
   // Legacy per-engine rows (aggressiveConfig/ultraConfig/headroomConfig) share their read case
   // with the current keys. When both rows exist the current key must win, regardless of the
   // order the storage engine happens to return them in. Presence, not usability: a corrupt
-  // current row (BLOB/unparseable JSON) also suppresses the legacy row — the engine resets to
-  // defaults and the corruption warn below is the operator's signal to re-save.
-  const rowKeys = new Set(
-    rows.map((row) => toRecord(row).key).filter((key): key is string => typeof key === "string")
-  );
+  // current row also suppresses the legacy row — the engine resets to defaults.
+  const rowKeys = new Set(rows.map((row) => row.key));
 
   const config: CompressionConfig = {
     ...DEFAULT_COMPRESSION_CONFIG,
@@ -724,30 +692,8 @@ export async function getCompressionSettings(): Promise<CompressionConfig> {
   let sawPreserveSystemPromptModeRow = false;
 
   for (const row of rows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) {
-      // #13456: non-string values (BLOB from backup/restore/migration tooling) are
-      // silently ignored — log so operators can diagnose config drift.
-      if (key && typeof record.value !== "string" && record.value !== null) {
-        console.warn(
-          `[COMPRESSION] Settings row '${key}' has non-string value type ` +
-            `(${typeof record.value}); skipping. This may indicate a backup/restore ` +
-            `issue — re-save the setting from the Storage panel to fix.`
-        );
-      }
-      continue;
-    }
-    const parsed = parseJsonSafe(rawValue);
-    if (parsed === undefined) {
-      // #13456: invalid JSON is also silently ignored — log it.
-      console.warn(
-        `[COMPRESSION] Settings row '${key}' has unparseable JSON value; skipping. ` +
-          `Re-save the setting from the Storage panel to fix.`
-      );
-      continue;
-    }
+    const key = row.key;
+    const parsed = row.value;
 
     switch (key) {
       case "enabled":
@@ -910,7 +856,7 @@ export async function getCompressionSettings(): Promise<CompressionConfig> {
   // Engines map: prefer the stored row; otherwise derive from the legacy fields (migration 102
   // backfill on the read path). Always fill EVERY id in ENGINE_IDS so the shape matches
   // DEFAULT_COMPRESSION_CONFIG.
-  const derived = storedEngines ?? deriveEnginesMap(config);
+  const derived = storedEngines ?? (await deriveEnginesMap(config));
   const engines: Record<string, EngineToggle> = {};
   for (const id of ENGINE_IDS) {
     engines[id] = derived[id] ?? { enabled: false };
@@ -925,7 +871,6 @@ export async function getCompressionSettings(): Promise<CompressionConfig> {
   compressionSettingsCache = {
     value: config,
     expiresAt: Date.now() + 5000,
-    dbRef: new WeakRef(db),
   };
 
   return config;
@@ -934,38 +879,30 @@ export async function getCompressionSettings(): Promise<CompressionConfig> {
 export async function updateCompressionSettings(
   updates: Partial<CompressionConfig>
 ): Promise<CompressionConfig> {
-  const db = getDbInstance();
-  const insert = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)"
-  );
   // The engines map the read path returns now: the merge base for an engines write while no
   // engines row exists yet.
   const currentEngines: Record<string, EngineToggle> =
     updates.engines === undefined ? {} : (await getCompressionSettings()).engines;
 
-  const tx = db.transaction(() => {
+  const upsertSql = `INSERT INTO config_entries (namespace, key, value) VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
+  await db().transaction(async (tx) => {
+    // The partial-write merges below read the stored rows first; the lock serialises writers.
+    await tx.execute("SELECT pg_advisory_xact_lock(hashtext('compression:settings'))");
     for (const [key, value] of Object.entries(updates)) {
       if (value === undefined) continue;
       // Persist the engines map as ONE sanitized JSON row so the read path always gets
       // well-formed { enabled, level? } toggles for known engine ids.
-      if (key === "engines") {
-        insert.run(NAMESPACE, key, JSON.stringify(mergeEnginesForWrite(db, value, currentEngines)));
-        continue;
+      let toStore: unknown = value;
+      if (key === "engines") toStore = await mergeEnginesForWrite(tx, value, currentEngines);
+      else if (key === "lite") toStore = await mergeLiteSettingsForWrite(tx, value);
+      else if (key === "cavemanOutputMode") {
+        toStore = await mergeCavemanOutputModeForWrite(tx, value);
       }
-      if (key === "lite") {
-        insert.run(NAMESPACE, key, JSON.stringify(mergeLiteSettingsForWrite(db, value)));
-        continue;
-      }
-      if (key === "cavemanOutputMode") {
-        insert.run(NAMESPACE, key, JSON.stringify(mergeCavemanOutputModeForWrite(db, value)));
-        continue;
-      }
-      insert.run(NAMESPACE, key, JSON.stringify(value));
+      await tx.execute(upsertSql, [NAMESPACE, key, configJson(toStore)]);
     }
   });
 
-  tx();
-  backupDbFile("pre-write");
   compressionSettingsCache = null;
   invalidateDbCache();
   return getCompressionSettings();
@@ -979,23 +916,14 @@ function normalizeMcpAccessibilityConfig(value: unknown): McpAccessibilityConfig
 }
 
 export async function getMcpAccessibilityConfig(): Promise<McpAccessibilityConfig> {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, "mcpAccessibility") as { value: string } | undefined;
-  return normalizeMcpAccessibilityConfig(parseJsonSafe(row?.value ?? null));
+  return normalizeMcpAccessibilityConfig(await getConfigValue(NAMESPACE, "mcpAccessibility"));
 }
 
 export async function setMcpAccessibilityConfig(
   value: Partial<McpAccessibilityConfig>
 ): Promise<void> {
   const next = normalizeMcpAccessibilityConfig({ ...DEFAULT_MCP_ACCESSIBILITY_CONFIG, ...value });
-  const db = getDbInstance();
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    NAMESPACE,
-    "mcpAccessibility",
-    JSON.stringify(next)
-  );
+  await setConfigValue(NAMESPACE, "mcpAccessibility", next);
   compressionSettingsCache = null;
   invalidateDbCache();
 }
@@ -1006,19 +934,18 @@ export async function setMcpAccessibilityConfig(
 // chatCore.ts. That left operators no way to move compression relative to a
 // client's own compaction point — e.g. Codex Desktop self-compacts at ~0.85 of
 // its window, so a 0.7 proxy threshold always preempts the client's (correct)
-// compaction with the proxy's (lossier) one. Stored in key_value (namespace
+// compaction with the proxy's (lossier) one. Stored in config_entries (namespace
 // 'compression', key 'proactiveConfig', JSON {"thresholdRatio": 0.7}). Lives
 // here (not in the handler) per Hard Rule #5 — no raw SQL outside src/lib/db/.
-// better-sqlite3 is synchronous so the read stays in the sync hot path. 30s
-// TTL cache keeps per-request overhead at zero while still letting a plain
-// sqlite UPDATE take effect without a restart.
+// 30s TTL cache keeps per-request overhead at zero while still letting a plain
+// SQL UPDATE take effect without a restart.
 const PROACTIVE_COMPRESSION_DEFAULT_RATIO = 0.7;
 const PROACTIVE_COMPRESSION_RATIO_MIN = 0.1;
 const PROACTIVE_COMPRESSION_RATIO_MAX = 0.99;
 const PROACTIVE_COMPRESSION_CACHE_TTL_MS = 30_000;
 let proactiveRatioCache: { value: number; readAt: number } | null = null;
 
-export function getProactiveCompressionRatio(): number {
+export async function getProactiveCompressionRatio(): Promise<number> {
   const now = Date.now();
   if (
     proactiveRatioCache &&
@@ -1028,11 +955,11 @@ export function getProactiveCompressionRatio(): number {
   }
   let ratio = PROACTIVE_COMPRESSION_DEFAULT_RATIO;
   try {
-    const row = getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get(NAMESPACE, "proactiveConfig") as { value?: string } | undefined;
-    if (row?.value) {
-      const parsed = JSON.parse(row.value) as { thresholdRatio?: unknown };
+    const parsed = await getConfigValue<{ thresholdRatio?: unknown } | null>(
+      NAMESPACE,
+      "proactiveConfig"
+    );
+    if (parsed) {
       const candidate = Number(parsed?.thresholdRatio);
       if (
         Number.isFinite(candidate) &&

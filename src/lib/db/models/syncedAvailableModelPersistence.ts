@@ -1,9 +1,9 @@
 /** Canonical comparison and write helpers for connection-scoped synced model catalogs. */
 
-import { backupDbFile } from "../backup";
-import { getDbInstance } from "../core";
+import { isDeepStrictEqual } from "node:util";
+import { db } from "../pg";
+import { jsonValueParam } from "../pgJsonText";
 import { invalidateModelCatalogCache } from "../readCache";
-import { getKeyValue } from "./shared";
 
 type ModelNormalizer<T> = (models: unknown) => T[];
 
@@ -75,8 +75,34 @@ function windowSignature(models: unknown[] | null): string {
 }
 
 export function finishSyncedAvailableModelsWrite(): void {
-  backupDbFile("pre-write");
   invalidateModelCatalogCache();
+}
+
+/**
+ * A `connection_model_sync` row also carries the discovery verdict, so clearing a model list
+ * empties `models` instead of deleting the row. Rows left with no models and no verdict are
+ * dropped here.
+ */
+export async function deleteEmptySyncRows(providerId: string): Promise<void> {
+  await db().execute(
+    `DELETE FROM connection_model_sync
+     WHERE provider = $1 AND models = '[]'::jsonb AND discovery_status IS NULL`,
+    [providerId]
+  );
+}
+
+/** Empty one connection's synced model list. Returns 1 when a non-empty list was cleared. */
+export async function clearConnectionSyncedModels(
+  providerId: string,
+  connectionId: string
+): Promise<number> {
+  const cleared = await db().execute(
+    `UPDATE connection_model_sync SET models = '[]'::jsonb, updated_at = now()
+     WHERE connection_id = $1 AND provider = $2 AND models <> '[]'::jsonb`,
+    [connectionId, providerId]
+  );
+  if (cleared.changes > 0) await deleteEmptySyncRows(providerId);
+  return cleared.changes;
 }
 
 /**
@@ -84,57 +110,85 @@ export function finishSyncedAvailableModelsWrite(): void {
  * Returns the number of connection-scoped synced model lists removed.
  */
 export async function deleteSyncedAvailableModelsForProvider(providerId: string): Promise<number> {
-  const db = getDbInstance();
-  const keyPrefix = `${providerId}:`;
-  const result = db
-    .prepare(
-      "DELETE FROM key_value WHERE namespace = 'syncedAvailableModels' AND substr(key, 1, ?) = ?"
-    )
-    .run(keyPrefix.length, keyPrefix);
-  const changes = Number(result.changes || 0);
-  if (changes > 0) finishSyncedAvailableModelsWrite();
-  return changes;
+  const cleared = await db().execute(
+    `UPDATE connection_model_sync SET models = '[]'::jsonb, updated_at = now()
+     WHERE provider = $1 AND models <> '[]'::jsonb`,
+    [providerId]
+  );
+  if (cleared.changes > 0) {
+    await deleteEmptySyncRows(providerId);
+    finishSyncedAvailableModelsWrite();
+  }
+  return cleared.changes;
 }
 
-export function persistCanonicalSyncedAvailableModels<T>(
+/**
+ * Write one connection's canonical model list. `key` is `<providerId>:<connectionId>`
+ * (split at the first colon). Returns false when the stored list already equals it.
+ */
+export async function persistCanonicalSyncedAvailableModels<T>(
   key: string,
   normalizedModels: T[],
   normalizeModels: ModelNormalizer<T>
-): boolean {
-  const db = getDbInstance();
-  const existingRow = db
-    .prepare("SELECT value FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?")
-    .get(key);
-  const existingValue = getKeyValue(existingRow).value;
-  let existingModels: T[] | null = null;
-  if (existingValue !== null) {
-    try {
-      existingModels = normalizeModels(JSON.parse(existingValue));
-    } catch {
-      existingModels = null;
-    }
-  }
+): Promise<boolean> {
+  const sep = key.indexOf(":");
+  const providerId = sep < 0 ? key : key.slice(0, sep);
+  const connectionId = sep < 0 ? "" : key.slice(sep + 1);
 
-  const unchanged =
-    (normalizedModels.length > 0 &&
-      existingModels !== null &&
-      JSON.stringify(existingModels) === JSON.stringify(normalizedModels)) ||
-    (normalizedModels.length === 0 && existingValue === null);
-  if (unchanged) return false;
-
-  if (normalizedModels.length === 0) {
-    db.prepare("DELETE FROM key_value WHERE namespace = 'syncedAvailableModels' AND key = ?").run(
-      key
+  const outcome = await db().transaction(async (tx) => {
+    const row = await tx.queryOne<{ models: unknown }>(
+      "SELECT models FROM connection_model_sync WHERE connection_id = $1 FOR UPDATE",
+      [connectionId]
     );
-  } else {
-    db.prepare(
-      "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('syncedAvailableModels', ?, ?)"
-    ).run(key, JSON.stringify(normalizedModels));
-  }
+    const hasStored = row !== undefined && !(Array.isArray(row.models) && row.models.length === 0);
+    let existingModels: T[] | null = null;
+    if (hasStored) {
+      try {
+        existingModels = normalizeModels(row!.models);
+      } catch {
+        existingModels = null;
+      }
+    }
+
+    const unchanged =
+      (normalizedModels.length > 0 &&
+        existingModels !== null &&
+        // jsonb does not keep key order: compare structurally, not by serialized text.
+        isDeepStrictEqual(existingModels, JSON.parse(JSON.stringify(normalizedModels)))) ||
+      (normalizedModels.length === 0 && !hasStored);
+    if (unchanged) return null;
+
+    if (normalizedModels.length === 0) {
+      await tx.execute(
+        `UPDATE connection_model_sync SET models = '[]'::jsonb, updated_at = now()
+         WHERE connection_id = $1`,
+        [connectionId]
+      );
+      await tx.execute(
+        `DELETE FROM connection_model_sync
+         WHERE connection_id = $1 AND models = '[]'::jsonb AND discovery_status IS NULL`,
+        [connectionId]
+      );
+    } else {
+      // The row has a foreign key to its connection: a sync that finishes after its
+      // connection was deleted has nowhere to land and is dropped instead of failing.
+      await tx.execute(
+        `INSERT INTO connection_model_sync (connection_id, provider, models)
+         SELECT $1::text, $2::text, $3::jsonb
+         WHERE EXISTS (SELECT 1 FROM provider_connections WHERE id = $1)
+         ON CONFLICT (connection_id)
+         DO UPDATE SET provider = EXCLUDED.provider, models = EXCLUDED.models, updated_at = now()`,
+        [connectionId, providerId, jsonValueParam(normalizedModels)]
+      );
+    }
+    return { existingModels };
+  });
+  if (!outcome) return false;
+
   finishSyncedAvailableModelsWrite();
   // Skip when no declared window changed: the reconcile would only re-scan for nothing.
-  if (windowSignature(existingModels) !== windowSignature(normalizedModels)) {
-    scheduleReconcileAfterSyncWrite(key.split(":")[0]);
+  if (windowSignature(outcome.existingModels) !== windowSignature(normalizedModels)) {
+    scheduleReconcileAfterSyncWrite(providerId);
   }
   return true;
 }

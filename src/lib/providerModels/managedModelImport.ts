@@ -250,13 +250,13 @@ function getCompatPatchFromCustomModel(model: JsonRecord): ModelCompatPatch | nu
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
-function preserveRemovedCustomModelCompat(providerId: string, removedModels: JsonRecord[]) {
+async function preserveRemovedCustomModelCompat(providerId: string, removedModels: JsonRecord[]) {
   for (const model of removedModels) {
     const modelId = getModelId(model);
     if (!modelId) continue;
     const patch = getCompatPatchFromCustomModel(model);
     if (!patch) continue;
-    mergeModelCompatOverride(providerId, modelId, patch);
+    await mergeModelCompatOverride(providerId, modelId, patch);
   }
 }
 
@@ -348,7 +348,7 @@ export async function importManagedModels({
     }>,
     { allowEmpty: true }
   )) as JsonRecord[];
-  preserveRemovedCustomModelCompat(providerId, removedCustomModels);
+  await preserveRemovedCustomModelCompat(providerId, removedCustomModels);
 
   let syncedAvailableModels: SyncedAvailableModel[] = previousSyncedAvailableModels;
   if (discoveredModels.length > 0) {
@@ -452,11 +452,13 @@ export async function importManagedModels({
     // — otherwise auto-sync silently re-enables routing for a model the operator hid.
     // Exclude `isHidden` ids from the alias assignment. `pruneMissing` (sync mode)
     // then drops any stale alias an eye-hidden model previously held.
-    const aliasSync = await syncManagedAvailableModelAliases(
-      providerId,
-      aliasModelIds.map((model) => model.id).filter((id) => !getModelIsHidden(providerId, id)),
-      { pruneMissing: mode === "sync" }
-    );
+    const visibleAliasModelIds: string[] = [];
+    for (const model of aliasModelIds) {
+      if (!(await getModelIsHidden(providerId, model.id))) visibleAliasModelIds.push(model.id);
+    }
+    const aliasSync = await syncManagedAvailableModelAliases(providerId, visibleAliasModelIds, {
+      pruneMissing: mode === "sync",
+    });
     syncedAliases = aliasSync.assignedAliases.length;
   }
 

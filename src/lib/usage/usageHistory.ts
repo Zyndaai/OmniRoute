@@ -7,7 +7,7 @@
  * @module lib/usage/usageHistory
  */
 
-import { getDbInstance } from "../db/core";
+import { db, ts } from "@/lib/db/pg";
 import { normalizePayloadForLog, protectPayloadForLog } from "../logPayloads";
 import {
   redactUrlQuerySecrets,
@@ -33,7 +33,6 @@ import {
   storeCompletedDetail,
   getCompletedDetails,
 } from "./completedRequestDetails";
-import { shouldPersistToDisk } from "./migrations";
 import { attemptWrite, isWriteLockError, scheduleWriteRetry } from "./usageWriteRetry";
 import { getCallLogApiKeyContext } from "./callLogApiKeyContext";
 
@@ -856,6 +855,11 @@ export function clearPendingRequests() {
 
 const MAX_ROWS = 10000;
 
+/** `mapUsageHistoryRow` reads `success` as 0/1; Postgres returns a real boolean. */
+function mapUsageHistoryRowFromPg(row: Record<string, unknown>) {
+  return mapUsageHistoryRow({ ...row, success: row.success === false ? 0 : row.success ? 1 : 0 });
+}
+
 /**
  * Returns an object compatible with the old LowDB interface.
  * Only `api/usage/analytics/route.js` uses this — it reads `db.data.history`.
@@ -865,33 +869,36 @@ const MAX_ROWS = 10000;
  * @param cursor - Timestamp cursor for pagination (exclusive, for next page)
  */
 export async function getUsageDb(sinceIso?: string | null, limit?: number, cursor?: string | null) {
-  const db = getDbInstance();
   const maxRows = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : MAX_ROWS;
 
-  let rows;
+  let rows: Array<Record<string, unknown>>;
   if (cursor) {
     // Cursor-based pagination (next page after cursor)
     // Use > cursor to get rows after the last timestamp of previous page (ASC order)
     rows = sinceIso
-      ? db
-          .prepare(
-            `SELECT * FROM usage_history WHERE timestamp >= ? AND timestamp > ? ORDER BY timestamp ASC LIMIT ?`
-          )
-          .all(sinceIso, cursor, maxRows)
-      : db
-          .prepare(`SELECT * FROM usage_history WHERE timestamp > ? ORDER BY timestamp ASC LIMIT ?`)
-          .all(cursor, maxRows);
+      ? await db().query(
+          `SELECT * FROM usage_history WHERE "timestamp" >= $1 AND "timestamp" > $2 ORDER BY "timestamp" ASC, id ASC LIMIT $3`,
+          [ts(sinceIso), ts(cursor), maxRows]
+        )
+      : await db().query(
+          `SELECT * FROM usage_history WHERE "timestamp" > $1 ORDER BY "timestamp" ASC, id ASC LIMIT $2`,
+          [ts(cursor), maxRows]
+        );
   } else if (sinceIso) {
     // Initial query with date filter
-    rows = db
-      .prepare(`SELECT * FROM usage_history WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?`)
-      .all(sinceIso, maxRows);
+    rows = await db().query(
+      `SELECT * FROM usage_history WHERE "timestamp" >= $1 ORDER BY "timestamp" ASC, id ASC LIMIT $2`,
+      [ts(sinceIso), maxRows]
+    );
   } else {
     // No filter - get all (with limit)
-    rows = db.prepare(`SELECT * FROM usage_history ORDER BY timestamp ASC LIMIT ?`).all(maxRows);
+    rows = await db().query(
+      `SELECT * FROM usage_history ORDER BY "timestamp" ASC, id ASC LIMIT $1`,
+      [maxRows]
+    );
   }
 
-  const history = rows.map(mapUsageHistoryRow);
+  const history = rows.map(mapUsageHistoryRowFromPg);
   await attachCpaAccountLabels(history);
 
   // Provide next cursor if we hit the limit (more rows exist)
@@ -961,8 +968,6 @@ export interface SaveRequestUsageOptions {
  * Save request usage entry to SQLite.
  */
 export async function saveRequestUsage(entry: UsageEntry, options: SaveRequestUsageOptions = {}) {
-  if (!shouldPersistToDisk) return;
-
   // Freeze the timestamp on the first attempt so the deferred retry replays
   // the same value and the dedup guard keys both attempts identically.
   // Fall back to the request-scoped api-key context, exactly as saveCallLogOperation
@@ -981,7 +986,7 @@ export async function saveRequestUsage(entry: UsageEntry, options: SaveRequestUs
   };
 
   try {
-    attemptWrite(frozenEntry, options);
+    await attemptWrite(frozenEntry, options);
   } catch (error) {
     if (!isWriteLockError(error)) {
       console.error("Failed to save usage stats:", error);
@@ -1004,35 +1009,34 @@ export interface UsageHistoryFilter {
  * Get usage history with optional filters.
  */
 export async function getUsageHistory(filter: UsageHistoryFilter = {}) {
-  const db = getDbInstance();
   let sql = "SELECT * FROM usage_history";
   const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
+  const params: unknown[] = [];
 
   if (filter.provider) {
-    conditions.push("provider = @provider");
-    params.provider = filter.provider;
+    params.push(filter.provider);
+    conditions.push(`provider = $${params.length}`);
   }
   if (filter.model) {
-    conditions.push("model = @model");
-    params.model = filter.model;
+    params.push(filter.model);
+    conditions.push(`model = $${params.length}`);
   }
   if (filter.startDate) {
-    conditions.push("timestamp >= @startDate");
-    params.startDate = new Date(filter.startDate).toISOString();
+    params.push(new Date(filter.startDate).toISOString());
+    conditions.push(`"timestamp" >= $${params.length}`);
   }
   if (filter.endDate) {
-    conditions.push("timestamp <= @endDate");
-    params.endDate = new Date(filter.endDate).toISOString();
+    params.push(new Date(filter.endDate).toISOString());
+    conditions.push(`"timestamp" <= $${params.length}`);
   }
 
   if (conditions.length > 0) {
     sql += " WHERE " + conditions.join(" AND ");
   }
-  sql += " ORDER BY timestamp ASC";
+  sql += ' ORDER BY "timestamp" ASC, id ASC';
 
-  const rows = db.prepare(sql).all(params);
-  const history = rows.map(mapUsageHistoryRow);
+  const rows = await db().query<Record<string, unknown>>(sql, params);
+  const history = rows.map(mapUsageHistoryRowFromPg);
   await attachCpaAccountLabels(history);
   return history;
 }
@@ -1074,41 +1078,40 @@ export async function getModelLatencyStats(
   const minSamples = resolvePositiveOption(options.minSamples, 1);
   const maxRows = resolvePositiveOption(options.maxRows, 10000);
 
-  const db = getDbInstance();
   const sinceIso = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
   type LatencyRow = {
     provider: string | null;
     model: string | null;
-    success: number | null;
+    success: boolean | null;
     latency_ms: number | null;
     ttft_ms: number | null;
     tokens_output: number | null;
     tokens_reasoning: number | null;
   };
 
-  const conditions = ["timestamp >= @sinceIso", "provider IS NOT NULL", "model IS NOT NULL"];
-  const queryParams: Record<string, unknown> = { sinceIso, maxRows };
+  const queryParams: unknown[] = [sinceIso];
+  const conditions = ['"timestamp" >= $1', "provider IS NOT NULL", "model IS NOT NULL"];
   if (options.provider) {
-    conditions.push("provider = @provider");
-    queryParams.provider = options.provider;
+    queryParams.push(options.provider);
+    conditions.push(`provider = $${queryParams.length}`);
   }
   if (options.model) {
-    conditions.push("model = @model");
-    queryParams.model = options.model;
+    queryParams.push(options.model);
+    conditions.push(`model = $${queryParams.length}`);
   }
+  queryParams.push(maxRows);
 
-  const rows = db
-    .prepare(
-      `
+  const rows = await db().query<LatencyRow>(
+    `
       SELECT provider, model, success, latency_ms, ttft_ms, tokens_output, tokens_reasoning
       FROM usage_history
       WHERE ${conditions.join(" AND ")}
-      ORDER BY timestamp DESC
-      LIMIT @maxRows
-    `
-    )
-    .all(queryParams) as LatencyRow[];
+      ORDER BY "timestamp" DESC
+      LIMIT $${queryParams.length}
+    `,
+    queryParams
+  );
 
   const grouped = new Map<string, ReturnType<typeof createLatencyBucket>>();
 
@@ -1123,7 +1126,7 @@ export async function getModelLatencyStats(
     if (!bucket) continue;
 
     bucket.totalRequests += 1;
-    const isSuccess = toNumber(row.success) !== 0;
+    const isSuccess = row.success !== false;
     if (isSuccess) bucket.successfulRequests += 1;
 
     accumulateLatencySample(
@@ -1172,17 +1175,15 @@ export async function appendRequestLog({
  */
 export async function getRecentLogs(limit = 200) {
   try {
-    const db = getDbInstance();
-    const rows = db
-      .prepare(
-        `
-        SELECT timestamp, model, provider, account, tokens_in, tokens_out, status
-        FROM call_logs
-        ORDER BY timestamp DESC
-        LIMIT ?
+    const rows = await db().query<Record<string, unknown>>(
       `
-      )
-      .all(limit) as Array<Record<string, unknown>>;
+        SELECT "timestamp", model, provider, account, tokens_in, tokens_out, status
+        FROM call_logs
+        ORDER BY "timestamp" DESC
+        LIMIT $1
+      `,
+      [limit]
+    );
 
     return rows.map((row) => {
       const timestamp =

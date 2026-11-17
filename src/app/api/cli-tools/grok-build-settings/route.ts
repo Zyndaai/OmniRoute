@@ -95,20 +95,20 @@ const normalizeBaseUrl = (baseUrl: string): string => {
   return url.toString().replace(/\/$/, "");
 };
 
-const resolveContextWindow = (value: number | undefined, model: string): number => {
+const resolveContextWindow = async (value: number | undefined, model: string): Promise<number> => {
   if (value !== undefined) return value;
-  return getResolvedModelCapabilities(model).contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  return (await getResolvedModelCapabilities(model)).contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 };
 
-const normalizeApplyOptions = (
+const normalizeApplyOptions = async (
   data: z.infer<typeof grokBuildConfigSchema>,
   apiKey: string
-): GrokBuildApplyOptions => {
+): Promise<GrokBuildApplyOptions> => {
   const options: GrokBuildApplyOptions = {
     baseUrl: normalizeBaseUrl(data.baseUrl),
     apiKey,
     model: data.model,
-    contextWindow: resolveContextWindow(data.contextWindow, data.model),
+    contextWindow: await resolveContextWindow(data.contextWindow, data.model),
   };
   if (data.subagentModels !== undefined) {
     options.subagentModels = {};
@@ -117,7 +117,7 @@ const normalizeApplyOptions = (
       if (!selected) continue;
       options.subagentModels[type] = {
         model: selected.model,
-        contextWindow: resolveContextWindow(selected.contextWindow, selected.model),
+        contextWindow: await resolveContextWindow(selected.contextWindow, selected.model),
       };
     }
   }
@@ -208,14 +208,14 @@ export async function POST(request: Request): Promise<Response> {
     const apiKey = await resolveApiKey(validation.data.keyId, validation.data.apiKey);
     const toml = applyGrokBuildConfig(
       await readConfigToml(configPath),
-      normalizeApplyOptions(validation.data, apiKey)
+      await normalizeApplyOptions(validation.data, apiKey)
     );
 
     await fs.mkdir(path.dirname(configPath), { recursive: true });
     await createBackup(TOOL_ID, configPath);
     await writeAtomic(configPath, toml);
     try {
-      saveCliToolLastConfigured(TOOL_ID);
+      await saveCliToolLastConfigured(TOOL_ID);
     } catch {
       logger.warn("Failed to record Grok Build config time");
     }
@@ -253,7 +253,7 @@ export async function DELETE(request: Request): Promise<Response> {
     await createBackup(TOOL_ID, configPath);
     await writeAtomic(configPath, resetGrokBuildConfig(current));
     try {
-      deleteCliToolLastConfigured(TOOL_ID);
+      await deleteCliToolLastConfigured(TOOL_ID);
     } catch {
       logger.warn("Failed to clear Grok Build config time");
     }

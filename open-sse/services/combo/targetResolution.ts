@@ -267,7 +267,7 @@ async function collectWeightedEligibility(
 }> {
   const weightedEligibleKeys = new Set<string>();
   const exclusions: PreDispatchExclusion[] = [];
-  const stepGroups = resolveWeightedStepGroups(
+  const stepGroups = await resolveWeightedStepGroups(
     expandedCombo,
     expandedAllCombos,
     hiddenModelsByProvider
@@ -567,7 +567,7 @@ async function applyContinuityFilters(
       );
   let orderedTargets = sticky.targets;
   if (!cacheStrategyAffinityApplied) {
-    orderedTargets = orderTargetsByEvalScores(orderedTargets, config.evalRouting, log);
+    orderedTargets = await orderTargetsByEvalScores(orderedTargets, config.evalRouting, log);
   }
   // #8488 / #8494: fail closed when hard capability filters empty the pool.
   // Opt-in escape hatch: combo.config.compatFilterFailOpen OR settings.compatFilterFailOpen.
@@ -580,20 +580,26 @@ async function applyContinuityFilters(
     (settings as { outputLimitAdvisory?: unknown } | null | undefined)?.outputLimitAdvisory ===
       true;
   const preCompatTargets = orderedTargets;
-  orderedTargets = filterTargetsByRequestCompatibility(orderedTargets, body, log, undefined, {
-    failOpen: compatFilterFailOpen,
-    outputLimitAdvisory,
-  });
+  orderedTargets = await filterTargetsByRequestCompatibility(
+    orderedTargets,
+    body,
+    log,
+    undefined,
+    {
+      failOpen: compatFilterFailOpen,
+      outputLimitAdvisory,
+    }
+  );
   // #6238: keep the targets the compat pre-filter rejected so the dispatch loop
   // can probe them as a last-resort fallback tier when every compat-kept target
   // later turns out runtime-unavailable (mirrors the round-robin path).
-  const compatRejectedTargets = computeCompatRejectedTargets(
+  const compatRejectedTargets = await computeCompatRejectedTargets(
     preCompatTargets,
     orderedTargets,
     body
   );
   if (orderedTargets.length === 0 && preCompatTargets.length > 0) {
-    const exhaustion = describeCapabilityFilterExhaustion(preCompatTargets, body, combo.name);
+    const exhaustion = await describeCapabilityFilterExhaustion(preCompatTargets, body, combo.name);
     if (exhaustion) {
       // Match handleComboChat: only track failures under context-cache protection pins.
       const effectiveSessionId: string | null = combo.context_cache_protection
@@ -620,7 +626,7 @@ async function applyContinuityFilters(
   // #8786: capture pre-filter pool so a strict/minContextWindow wipe can
   // surface context_requirements_exhausted instead of a generic 404.
   const preContextTargets = orderedTargets;
-  orderedTargets = applyContextRequirements(orderedTargets, config.contextRequirements, log);
+  orderedTargets = await applyContextRequirements(orderedTargets, config.contextRequirements, log);
   if (orderedTargets.length === 0 && preContextTargets.length > 0) {
     const effectiveSessionId: string | null = combo.context_cache_protection
       ? (relayOptions?.sessionId ?? null)
@@ -645,16 +651,16 @@ async function applyContinuityFilters(
  * ["smart","task","task-aware","task_aware","auto"]. Additive — does not affect any
  * of the other 15 strategies.
  */
-function applyTaskAwareOrdering(
+async function applyTaskAwareOrdering(
   deps: ResolveComboTargetPipelineDeps,
   orderedTargets: ResolvedComboTarget[],
   autoUsedExplicitRouter: boolean
-): ResolvedComboTarget[] {
+): Promise<ResolvedComboTarget[]> {
   const { strategy, body, log } = deps;
   if (!isTaskRoutingStrategy(strategy)) return orderedTargets;
   const task = classifyTask(body);
   const conversationCacheKey = getConversationCacheKey(body);
-  const taskReordered = reorderByTaskWeight(orderedTargets, task);
+  const taskReordered = await reorderByTaskWeight(orderedTargets, task);
   // #4945 regression guard: when an explicit auto router (lkgp/cost/…) pinned
   // orderedTargets[0], keep that primary choice and let task-aware refine only
   // the fallback tail — otherwise task weighting silently defeats the operator's
@@ -856,7 +862,7 @@ export async function resolveComboTargetPipeline(
   if (weightedExhaustion) return { earlyResponse: weightedExhaustion };
   let orderedTargets = traits.weightedSteps
     ? weightedResolution?.orderedTargets || []
-    : resolveComboTargets(
+    : await resolveComboTargets(
         expandedCombo,
         expandedAllCombos,
         clampComboDepth(config.maxComboDepth),
@@ -916,7 +922,11 @@ export async function resolveComboTargetPipeline(
     quotaShareRelease?.();
     return continuity;
   }
-  orderedTargets = applyTaskAwareOrdering(deps, continuity.orderedTargets, autoUsedExplicitRouter);
+  orderedTargets = await applyTaskAwareOrdering(
+    deps,
+    continuity.orderedTargets,
+    autoUsedExplicitRouter
+  );
   orderedTargets = await applyPromptCacheStage(
     deps,
     orderedTargets,

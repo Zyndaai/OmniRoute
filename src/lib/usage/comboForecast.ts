@@ -301,7 +301,7 @@ async function buildComboForecast(
     let quotaSnapshots: QuotaSnapshotRow[] = [];
     let scope: ComboForecastTarget["quota"]["scope"] = "none";
     if (target.connectionId) {
-      quotaSnapshots = getQuotaSnapshots({
+      quotaSnapshots = await getQuotaSnapshots({
         provider: target.provider,
         connectionId: target.connectionId,
         since,
@@ -309,7 +309,7 @@ async function buildComboForecast(
       if (quotaSnapshots.length > 0) scope = "connection";
     }
     if (quotaSnapshots.length === 0) {
-      quotaSnapshots = getQuotaSnapshots({ provider: target.provider, since });
+      quotaSnapshots = await getQuotaSnapshots({ provider: target.provider, since });
       if (quotaSnapshots.length > 0) scope = "provider";
     }
     const quota = buildQuotaForecast(quotaSnapshots, rangeDays, horizonDays);
@@ -421,7 +421,7 @@ export async function buildComboForecastResponse(opts: {
   );
   const onlyComboName = comboNames.size === 1 ? Array.from(comboNames)[0] : undefined;
   const usageRows = await attachCosts(
-    getComboForecastUsageRows({ since, comboName: onlyComboName })
+    await getComboForecastUsageRows({ since, comboName: onlyComboName })
   );
   const rowsByCombo = new Map<string, CostedUsageRow[]>();
   for (const row of usageRows) {

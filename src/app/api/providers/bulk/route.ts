@@ -179,7 +179,7 @@ export async function POST(request: Request) {
       }
       created.push(safe);
 
-      logAuditEvent({
+      await logAuditEvent({
         action: "provider.credentials.created",
         actor: "admin",
         target: getProviderAuditTarget(newConnection),
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
     await syncToCloudIfEnabled();
   }
 
-  logAuditEvent({
+  await logAuditEvent({
     action: "provider.credentials.bulk_created",
     actor: "admin",
     resourceType: "provider_credentials",

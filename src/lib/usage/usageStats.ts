@@ -7,7 +7,7 @@
  * @module lib/usage/usageStats
  */
 
-import { getDbInstance } from "../db/core";
+import { db } from "@/lib/db/pg";
 import { getApiKeys } from "../db/apiKeys";
 import { getPendingRequests } from "./usageHistory";
 import { getAccountDisplayName } from "@/lib/display/names";
@@ -105,13 +105,14 @@ const RAW_COST_COLUMNS = `
         CASE WHEN provider_cost_usd IS NULL THEN COALESCE(tokens_reasoning, 0) ELSE 0 END as cost_tokens_reasoning,
         COALESCE(provider_cost_usd, 0.0) as stored_cost`;
 
+/** With aggregation on, `$1` is the raw-data cutoff day (`YYYY-MM-DD`, UTC). */
 function buildUsageSourceSql(aggregationEnabled: boolean) {
   if (!aggregationEnabled) {
     return `
       SELECT
         provider,
         model,
-        timestamp,
+        "timestamp",
         connection_id,
         api_key_id,
         api_key_name,
@@ -131,7 +132,7 @@ function buildUsageSourceSql(aggregationEnabled: boolean) {
     SELECT
       provider,
       model,
-      timestamp,
+      "timestamp",
       connection_id,
       api_key_id,
       api_key_name,
@@ -144,17 +145,17 @@ function buildUsageSourceSql(aggregationEnabled: boolean) {
       COALESCE(service_tier, 'standard') as service_tier,
       1 as request_count
     FROM usage_history
-    WHERE DATE(timestamp) >= ?
+    WHERE "timestamp" >= ($1::date::timestamp AT TIME ZONE 'UTC')
 
     UNION ALL
 
     SELECT
       provider,
       model,
-      date || 'T12:00:00.000Z' as timestamp,
-      NULL as connection_id,
-      NULL as api_key_id,
-      NULL as api_key_name,
+      ((date + time '12:00') AT TIME ZONE 'UTC') as "timestamp",
+      NULL::text as connection_id,
+      NULL::text as api_key_id,
+      NULL::text as api_key_name,
       COALESCE(total_input_tokens, 0) as tokens_input,
       COALESCE(total_output_tokens, 0) as tokens_output,
       0 as tokens_cache_read,
@@ -169,7 +170,7 @@ function buildUsageSourceSql(aggregationEnabled: boolean) {
       'standard' as service_tier,
       COALESCE(total_requests, 0) as request_count
     FROM daily_usage_summary
-    WHERE date < ?
+    WHERE date < $1::date
   `;
 }
 
@@ -186,7 +187,7 @@ const AGGREGATE_FIELDS = `
   COALESCE(SUM(cost_tokens_cache_creation), 0) as cost_tokens_cache_creation,
   COALESCE(SUM(cost_tokens_reasoning), 0) as cost_tokens_reasoning,
   COALESCE(SUM(stored_cost), 0.0) as stored_cost,
-  MAX(timestamp) as last_used
+  MAX("timestamp") as last_used
 `;
 
 async function calculateAggregateCost(row: JsonRecord): Promise<number> {
@@ -236,27 +237,25 @@ function getApiKeyStatsKey(apiKeyId: string | null, apiKeyName: string | null): 
  * counts the tokens it routed and compares against the known monthly limit.
  * Only reflects traffic that went THROUGH OmniRoute (not the provider's panel).
  */
-export function getMonthlyProviderTokensForConnection(
+export async function getMonthlyProviderTokensForConnection(
   provider: string,
   connectionId: string
-): number {
+): Promise<number> {
   if (!provider || !connectionId) return 0;
-  const db = getDbInstance();
   const now = new Date();
   const monthStartIso = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
   ).toISOString();
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(tokens_input), 0)
+  const row = await db().queryOne<{ total?: number }>(
+    `SELECT COALESCE(SUM(tokens_input), 0)
             + COALESCE(SUM(tokens_output), 0)
             + COALESCE(SUM(tokens_cache_read), 0)
             + COALESCE(SUM(tokens_cache_creation), 0)
             + COALESCE(SUM(tokens_reasoning), 0) AS total
        FROM usage_history
-       WHERE provider = ? AND connection_id = ? AND timestamp >= ?`
-    )
-    .get(provider, connectionId, monthStartIso) as { total?: number } | undefined;
+       WHERE provider = $1 AND connection_id = $2 AND "timestamp" >= $3`,
+    [provider, connectionId, monthStartIso]
+  );
   return Math.max(0, Number(row?.total ?? 0));
 }
 
@@ -277,22 +276,7 @@ export async function getConnectionSpendUsdSinceAdded(
 ): Promise<{ costUsd: number; requests: number }> {
   if (!provider || !connectionId) return { costUsd: 0, requests: 0 };
 
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT model,
-          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_input ELSE 0 END), 0) AS input,
-          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_output ELSE 0 END), 0) AS output,
-          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_read ELSE 0 END), 0) AS cacheRead,
-          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_creation ELSE 0 END), 0) AS cacheCreation,
-          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_reasoning ELSE 0 END), 0) AS reasoning,
-          COALESCE(SUM(provider_cost_usd), 0) AS storedCost,
-          COUNT(*) AS requests
-       FROM usage_history
-       WHERE connection_id = ? AND provider = ? AND success = 1
-       GROUP BY model`
-    )
-    .all(connectionId, provider) as Array<{
+  const rows = await db().query<{
     storedCost?: number;
     model?: string;
     input?: number;
@@ -301,7 +285,20 @@ export async function getConnectionSpendUsdSinceAdded(
     cacheCreation?: number;
     reasoning?: number;
     requests?: number;
-  }>;
+  }>(
+    `SELECT model,
+          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_input ELSE 0 END), 0) AS input,
+          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_output ELSE 0 END), 0) AS output,
+          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_read ELSE 0 END), 0) AS "cacheRead",
+          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_cache_creation ELSE 0 END), 0) AS "cacheCreation",
+          COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_reasoning ELSE 0 END), 0) AS reasoning,
+          COALESCE(SUM(provider_cost_usd), 0) AS "storedCost",
+          COUNT(*) AS requests
+       FROM usage_history
+       WHERE connection_id = $1 AND provider = $2 AND success
+       GROUP BY model`,
+    [connectionId, provider]
+  );
 
   let costUsd = 0;
   let requests = 0;
@@ -331,11 +328,12 @@ export async function getConnectionSpendUsdSinceAdded(
  * Uses UNION of recent raw data and older aggregated data when aggregation is enabled.
  */
 export async function getUsageStats() {
-  const db = getDbInstance();
   const aggregationEnabled = await isAggregationEnabled();
   const cutoffDate = aggregationEnabled ? await getRawDataCutoffDate() : null;
-  const sourceSql = buildUsageSourceSql(aggregationEnabled);
-  const sourceParams = aggregationEnabled && cutoffDate ? [cutoffDate, cutoffDate] : [];
+  // Without a cutoff day the aggregated leg cannot be bounded, so read raw rows only.
+  const useAggregates = aggregationEnabled && Boolean(cutoffDate);
+  const sourceSql = buildUsageSourceSql(useAggregates);
+  const sourceParams: unknown[] = useAggregates ? [cutoffDate] : [];
 
   const { getProviderConnections } = await import("@/lib/db/providers");
   let allConnections: unknown[] = [];
@@ -409,16 +407,15 @@ export async function getUsageStats() {
 
   const tenMinutesAgo = new Date(currentMinuteStart.getTime() - 9 * 60 * 1000);
 
-  const modelRows = db
-    .prepare(
-      `
+  const modelRows = await db().query<unknown>(
+    `
         WITH usage_source AS (${sourceSql})
         SELECT provider, model, service_tier, ${AGGREGATE_FIELDS}
         FROM usage_source
         GROUP BY provider, model, service_tier
-      `
-    )
-    .all(...sourceParams) as unknown[];
+      `,
+    sourceParams
+  );
 
   for (const rowRaw of modelRows) {
     const row = asRecord(rowRaw);
@@ -465,17 +462,16 @@ export async function getUsageStats() {
     }
   }
 
-  const accountRows = db
-    .prepare(
-      `
+  const accountRows = await db().query<unknown>(
+    `
         WITH usage_source AS (${sourceSql})
         SELECT provider, model, connection_id, service_tier, ${AGGREGATE_FIELDS}
         FROM usage_source
         WHERE connection_id IS NOT NULL AND connection_id != ''
         GROUP BY provider, model, connection_id, service_tier
-      `
-    )
-    .all(...sourceParams) as unknown[];
+      `,
+    sourceParams
+  );
 
   for (const rowRaw of accountRows) {
     const row = asRecord(rowRaw);
@@ -518,18 +514,17 @@ export async function getUsageStats() {
     }
   }
 
-  const apiKeyRows = db
-    .prepare(
-      `
+  const apiKeyRows = await db().query<unknown>(
+    `
         WITH usage_source AS (${sourceSql})
         SELECT provider, model, api_key_id, api_key_name, service_tier, ${AGGREGATE_FIELDS}
         FROM usage_source
         WHERE (api_key_id IS NOT NULL AND api_key_id != '')
            OR (api_key_name IS NOT NULL AND api_key_name != '')
         GROUP BY provider, model, api_key_id, api_key_name, service_tier
-      `
-    )
-    .all(...sourceParams) as unknown[];
+      `,
+    sourceParams
+  );
 
   for (const rowRaw of apiKeyRows) {
     const row = asRecord(rowRaw);
@@ -572,11 +567,10 @@ export async function getUsageStats() {
     }
   }
 
-  const recentRows = db
-    .prepare(
-      `
+  const recentRows = await db().query<unknown>(
+    `
         SELECT
-          strftime('%Y-%m-%dT%H:%M:00.000Z', timestamp) as minute,
+          to_char(date_trunc('minute', "timestamp" AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:00.000"Z"') as minute,
           provider,
           model,
           COALESCE(service_tier, 'standard') as service_tier,
@@ -593,11 +587,11 @@ export async function getUsageStats() {
           COALESCE(SUM(CASE WHEN provider_cost_usd IS NULL THEN tokens_reasoning ELSE 0 END), 0) as cost_tokens_reasoning,
           COALESCE(SUM(provider_cost_usd), 0.0) as stored_cost
         FROM usage_history
-        WHERE timestamp >= ? AND timestamp <= ?
-        GROUP BY minute, provider, model, service_tier
-      `
-    )
-    .all(tenMinutesAgo.toISOString(), now.toISOString()) as unknown[];
+        WHERE "timestamp" >= $1 AND "timestamp" <= $2
+        GROUP BY minute, provider, model, COALESCE(service_tier, 'standard')
+      `,
+    [tenMinutesAgo.toISOString(), now.toISOString()]
+  );
 
   for (const rowRaw of recentRows) {
     const row = asRecord(rowRaw);

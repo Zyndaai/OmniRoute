@@ -50,9 +50,9 @@ export interface CcDiscoveryResolveDeps {
   customProviderPrefixes: Set<string>;
   /** Combo row by name (or null). Only called for `claude/combo/<name>` ids. */
   getCombo(name: string): Promise<{ models?: unknown[] } | null>;
-  gateGlobal(): boolean;
-  gateProvider(providerId: string): CcAliasSetting;
-  gateModel(providerId: string, modelId: string): CcAliasSetting;
+  gateGlobal(): boolean | Promise<boolean>;
+  gateProvider(providerId: string): CcAliasSetting | Promise<CcAliasSetting>;
+  gateModel(providerId: string, modelId: string): CcAliasSetting | Promise<CcAliasSetting>;
 }
 
 type CcAliasTarget = {
@@ -86,18 +86,22 @@ function parseCcAliasTarget(rest: string): CcAliasTarget {
 }
 
 /** Resolve the three-level gate (model > provider > global) for a parsed alias target. */
-function resolveGateFor(target: CcAliasTarget, deps: CcDiscoveryResolveDeps): boolean {
+async function resolveGateFor(
+  target: CcAliasTarget,
+  deps: CcDiscoveryResolveDeps
+): Promise<boolean> {
   const gateProviderId = target.isComboAlias
     ? CC_DISCOVERY_COMBO_PROVIDER_KEY
     : target.providerPrefix;
   if (!gateProviderId) return deps.gateGlobal();
 
   const modelKey = target.isComboAlias ? target.comboName : target.modelPart;
-  return resolveCcAliasEnabled({
-    model: deps.gateModel(gateProviderId, modelKey as string),
-    provider: deps.gateProvider(gateProviderId),
-    global: deps.gateGlobal(),
-  });
+  const [model, provider, global] = await Promise.all([
+    deps.gateModel(gateProviderId, modelKey as string),
+    deps.gateProvider(gateProviderId),
+    deps.gateGlobal(),
+  ]);
+  return resolveCcAliasEnabled({ model, provider, global });
 }
 
 /**
@@ -122,7 +126,7 @@ export async function resolveCcDiscoveryAliasStripWith(
   const target = parseCcAliasTarget(rest);
   const combo = target.comboName ? await deps.getCombo(target.comboName) : null;
   const comboExists = combo !== null && Array.isArray(combo?.models) && combo.models.length > 0;
-  const gateEnabled = resolveGateFor(target, deps);
+  const gateEnabled = await resolveGateFor(target, deps);
 
   // NOTE: no DB side effects here — this injectable core stays pure so its unit
   // tests open no SQLite handle. The usage metric is recorded by the production
@@ -183,7 +187,7 @@ export async function resolveCcDiscoveryAliasStrip(
     // built-in registry providers still resolve.
   }
 
-  const { enabled: globalEnabled } = getCcAliasGlobalState();
+  const { enabled: globalEnabled } = await getCcAliasGlobalState();
 
   const result = await resolveCcDiscoveryAliasStripWith(modelStr, {
     claudeModelIds,
@@ -210,7 +214,7 @@ export async function resolveCcDiscoveryAliasStrip(
   // production wrapper (not the injectable core) so the core's unit tests stay
   // DB-free.
   if (result.stripped) {
-    incrementCcAliasRequestCount(result.model);
+    void incrementCcAliasRequestCount(result.model).catch(() => {});
   }
 
   return result;

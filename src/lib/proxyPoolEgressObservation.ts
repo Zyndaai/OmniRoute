@@ -145,11 +145,11 @@ function writeUniformRegimeCache(
  * observations. Read-only and never on the routing path: a disabled flag or a
  * failed read returns null so it cannot break the pool screen.
  */
-export function readUniformEgressRegime(
+export async function readUniformEgressRegime(
   provider: string,
   windowHours = 1,
   nowMs: number = Date.now()
-): UniformEgressRegime | null {
+): Promise<UniformEgressRegime | null> {
   if (!isPoolEgressObservationEnabled()) return null;
   const name = provider.trim();
   if (!name) return null;
@@ -160,9 +160,9 @@ export function readUniformEgressRegime(
 
   let value: UniformEgressRegime | null;
   try {
-    flushProxyLogsSync();
+    await flushProxyLogsSync();
     const since = new Date(nowMs - hours * 60 * 60 * 1000).toISOString();
-    const summaries = getProviderUpstreamSummary(since);
+    const summaries = await getProviderUpstreamSummary(since);
     const summary = summaries.find((entry) => entry.provider === name);
     if (!summary) {
       value = null;
@@ -251,17 +251,17 @@ function operatorMember(
   };
 }
 
-function mergedMemberEntry(
+async function mergedMemberEntry(
   host: string,
   port: number,
   observed: { egressIp: string; at: string } | null,
   nowMs: number
-): PoolMemberEgress {
+): Promise<PoolMemberEgress> {
   if (observed?.egressIp == null) return nullMember(host, port);
   if (!isOperatorEgressEnabled()) return journalMember(host, port, observed);
   // The operator rows are the freshest dated observation when newer than the
   // journal: serve them as operator-provided, else the journal read.
-  const merged = readEgressKeysForMember({ host, port }, nowMs);
+  const merged = await readEgressKeysForMember({ host, port }, nowMs);
   if (merged.freshest === null) return journalMember(host, port, observed);
   return operatorMember(host, port, merged.freshest, Date.parse(observed.at));
 }
@@ -274,8 +274,8 @@ async function collectMemberEgressEntries(
   for (const assignment of assignments) {
     const proxy = await getProxyById(assignment.proxyId);
     if (!proxy || typeof proxy.host !== "string" || !Number.isInteger(proxy.port)) continue;
-    const observed = getRecentEgressIpForProxy(proxy.host, proxy.port);
-    members.push(mergedMemberEntry(proxy.host, proxy.port, observed, nowMs));
+    const observed = await getRecentEgressIpForProxy(proxy.host, proxy.port);
+    members.push(await mergedMemberEntry(proxy.host, proxy.port, observed, nowMs));
   }
   return members;
 }
@@ -303,7 +303,7 @@ export async function readPoolMemberEgressObservation(
 
   let value: PoolMemberEgressObservation;
   try {
-    flushProxyLogsSync();
+    await flushProxyLogsSync();
     const assignments = await getScopeProxyPool(normalizedScope, normalizedScopeId);
     const members = await collectMemberEgressEntries(assignments, nowMs);
     value = { windowHours: EGRESS_IP_LOOKUP_WINDOW_MS / (60 * 60 * 1000), members };
@@ -325,11 +325,11 @@ const CACHE_MAX_ENTRIES = 200;
 
 const cache = new Map<string, { at: number; value: PoolEgressObservation }>();
 
-export function readPoolEgressObservation(
+export async function readPoolEgressObservation(
   scope: string,
   scopeId: string | null,
   nowMs: number = Date.now()
-): PoolEgressObservation | null {
+): Promise<PoolEgressObservation | null> {
   if (!isPoolEgressObservationEnabled()) return null;
   const normalizedScope = normalizeScope(scope);
   const normalizedScopeId = normalizeAssignmentScopeId(normalizedScope, scopeId);
@@ -340,10 +340,10 @@ export function readPoolEgressObservation(
 
   let value: PoolEgressObservation;
   try {
-    flushProxyLogsSync();
+    await flushProxyLogsSync();
     const since = new Date(nowMs - EGRESS_IP_LOOKUP_WINDOW_MS).toISOString();
     value = {
-      ...getPoolEgressObservation(normalizedScope, normalizedScopeId, since),
+      ...(await getPoolEgressObservation(normalizedScope, normalizedScopeId, since)),
       windowHours: EGRESS_IP_LOOKUP_WINDOW_MS / (60 * 60 * 1000),
     };
   } catch {

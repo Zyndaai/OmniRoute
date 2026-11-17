@@ -7,7 +7,7 @@ import {
 
 /** One DB visibility snapshot, shared by nested combos and their target filters. */
 export async function getHiddenChatModels(): Promise<Map<string, Set<string>>> {
-  const hidden = getHiddenModelsByProvider("chat");
+  const hidden = await getHiddenModelsByProvider("chat");
   if (hidden.size === 0) return hidden;
   const nodes = (await getCachedProviderNodes()).flatMap((node) => {
     if (!node || typeof node.id !== "string" || typeof node.type !== "string") return [];

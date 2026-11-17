@@ -3,11 +3,8 @@ import { PROVIDER_TIER } from "./tierTypes";
 import { getModelPricing } from "./providerCostData";
 import { isExplicitlyFree } from "./providerCostData";
 import { mergeTierConfig, DEFAULT_TIER_CONFIG } from "./tierConfig";
-import { createRequire } from "node:module";
 import { PROVIDER_ID_TO_ALIAS } from "../config/providerModels.ts";
 import { getDefaultPricing } from "@/shared/constants/pricing";
-
-const lazyRequire = createRequire(import.meta.url);
 
 const tierCache = new Map<string, TierAssignment>();
 let currentConfig: TierConfig = DEFAULT_TIER_CONFIG;
@@ -16,49 +13,58 @@ type DbPrice = { input: number; output: number };
 const tierPricingSnapshot = new Map<string, DbPrice>();
 let snapshotPinned = false;
 let snapshotWarmed = false;
+let snapshotLoad: Promise<void> | null = null;
+let snapshotDirty = false;
 
 function snapshotKey(provider: string, model: string): string {
   return `${provider.toLowerCase()}::${model.toLowerCase()}`;
 }
 
-function refreshTierPricingSnapshot(): void {
+/**
+ * Loads the stored price layers into the in-memory snapshot `classifyTier` reads. The
+ * classification itself stays synchronous (it runs inside routing loops), so the load is
+ * fire-and-forget at the call sites that cannot wait; the cached assignments are dropped
+ * once the new snapshot is in, so nothing classified from the fallback table outlives it.
+ */
+function refreshTierPricingSnapshot(afterWrite = false): Promise<void> {
   // An injected snapshot (see setTierPricingSnapshot) is authoritative
   // until released: never let a refresh clobber it.
-  if (snapshotPinned) return;
-  let getDbInstance: (() => unknown) | undefined;
-  try {
-    // Lazy require: mirrors setTierConfig below; no new static edge,
-    // no src/lib/db <-> open-sse/services cycle (settings/pricing already
-    // imports this module dynamically). The defaults layer comes from a
-    // static import (same module the hardcoded table already depends on).
-    // createRequire (not the bare require global) so this also resolves
-    // under native ESM, where require is undefined.
-    getDbInstance = lazyRequire("../../src/lib/db/core").getDbInstance;
-  } catch {
-    return; // fail-open: keep the previous snapshot
+  if (snapshotPinned) return Promise.resolve();
+  if (snapshotLoad) {
+    // A write that lands mid-read may be missed by that read: load once more afterwards.
+    if (afterWrite) snapshotDirty = true;
+    return snapshotLoad;
   }
+  snapshotLoad = (async () => {
+    try {
+      do {
+        snapshotDirty = false;
+        await loadTierPricingSnapshot();
+      } while (snapshotDirty);
+    } finally {
+      snapshotLoad = null;
+    }
+  })();
+  return snapshotLoad;
+}
+
+async function loadTierPricingSnapshot(): Promise<void> {
   try {
-    const db = (
-      getDbInstance as () => {
-        prepare(s: string): { all(...a: unknown[]): Array<{ key: string; value: string }> };
-      }
-    )();
+    // Dynamic import: no static edge, no src/lib/db <-> open-sse/services cycle
+    // (settings/pricing already imports this module dynamically). The defaults layer comes
+    // from a static import (same module the hardcoded table already depends on).
+    const { readPricingSource } = await import("@/lib/db/modelPricing");
     const merged: Record<string, Record<string, unknown>> = {
       ...(getDefaultPricing() as Record<string, Record<string, unknown>>),
     };
     // Layer order mirrors getPricingLayers: user rows win over synced layers.
-    for (const ns of ["pricing_synced", "models_dev_pricing", "pricing"]) {
-      for (const row of db
-        .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-        .all(ns)) {
-        try {
-          const models = JSON.parse(row.value) as Record<string, unknown>;
-          merged[row.key] = { ...(merged[row.key] || {}), ...models };
-        } catch {
-          // Corrupted row: skip, lower layers survive.
-        }
+    for (const source of ["litellm", "models_dev", "user"] as const) {
+      const layer = await readPricingSource(source);
+      for (const [provider, models] of Object.entries(layer)) {
+        merged[provider] = { ...(merged[provider] || {}), ...models };
       }
     }
+    if (snapshotPinned) return;
     const next = new Map<string, DbPrice>();
     for (const [provider, models] of Object.entries(merged)) {
       for (const [model, raw] of Object.entries(models)) {
@@ -76,6 +82,7 @@ function refreshTierPricingSnapshot(): void {
     }
     tierPricingSnapshot.clear();
     for (const [k, v] of next) tierPricingSnapshot.set(k, v);
+    tierCache.clear();
   } catch {
     // Fail-open: the previous snapshot stays authoritative.
   }
@@ -222,9 +229,9 @@ export function classifyTier(provider: string, model: string): TierAssignment {
 
   // Below the overrides: the DB snapshot wins over the hardcoded table,
   // so a fresher stored price reclassifies without a restart. Warmed once
-  // per process on First use, so a fresh boot serves stored prices without
-  // waiting for the First pricing write.
-  if (!snapshotWarmed && !snapshotPinned) refreshTierPricingSnapshot();
+  // per process on First use (in the background: until it lands this call
+  // classifies from the hardcoded table and the cache is dropped afterwards).
+  if (!snapshotWarmed && !snapshotPinned) void refreshTierPricingSnapshot();
   const dbPrice = lookupSnapshot(provider, model);
   const fallbackPricing = getModelPricing(provider, model);
   const pricing = dbPrice
@@ -267,11 +274,15 @@ export function classifyTier(provider: string, model: string): TierAssignment {
   return assignment;
 }
 
-export function setTierConfig(config?: Partial<TierConfig> | null): void {
+/**
+ * An explicit config applies synchronously (the assignment cache is cleared before this
+ * returns); `null`/`undefined` reloads the stored config, so await it in that case.
+ */
+export async function setTierConfig(config?: Partial<TierConfig> | null): Promise<void> {
   if (config === null || config === undefined) {
     try {
-      const { loadTierConfig } = require("../../src/lib/db/tierConfig");
-      currentConfig = loadTierConfig();
+      const { loadTierConfig } = await import("@/lib/db/tierConfig");
+      currentConfig = await loadTierConfig();
     } catch {
       currentConfig = DEFAULT_TIER_CONFIG;
     }
@@ -285,11 +296,12 @@ export function getTierConfig(): TierConfig {
   return { ...currentConfig };
 }
 
-export function clearTierCache(): void {
+export function clearTierCache(): Promise<void> {
   tierCache.clear();
-  // setTierConfig below clears the assignment cache on config edits without
-  // touching pricing: only this entry point refreshes the pricing snapshot.
-  refreshTierPricingSnapshot();
+  // setTierConfig above clears the assignment cache on config edits without
+  // touching pricing: only this entry point refreshes the pricing snapshot. The returned
+  // promise settles when the new snapshot is in; callers that do not care may drop it.
+  return refreshTierPricingSnapshot(true);
 }
 
 export function classifyTiers(

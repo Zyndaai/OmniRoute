@@ -93,7 +93,7 @@ export async function PUT(request: Request): Promise<Response> {
     resetQuotaStoreSingleton();
 
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "quota.store.driver_changed",
       metadata: {
         driver,

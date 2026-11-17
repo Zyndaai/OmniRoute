@@ -2,8 +2,14 @@
  * db/settings/pricing.ts — Pricing data CRUD (user overrides, LiteLLM sync, models.dev sync).
  */
 
-import { getDbInstance } from "../core";
-import { backupDbFile } from "../backup";
+import { db, jsonb } from "../pg";
+import {
+  clearPricingSource,
+  deletePricingProvider,
+  readPricingSource,
+  writePricingProvider,
+  type PricingSourceName,
+} from "../modelPricing";
 import { getCachedPricing, invalidateDbCache } from "../readCache";
 import { PROVIDER_ID_TO_ALIAS } from "@omniroute/open-sse/config/providerModels.ts";
 import { invalidateUserPricingMemo } from "@/lib/catalogUserPricing";
@@ -19,33 +25,14 @@ async function touchPricing(): Promise<void> {
   invalidateUserPricingMemo();
   try {
     const { clearTierCache } = await import("@omniroute/open-sse/services/tierResolver");
-    clearTierCache();
+    await clearTierCache();
   } catch {
     // fail-open: a missed tier invalidation must never break a price write
   }
 }
 
-function readPricingNamespace(
-  db: ReturnType<typeof getDbInstance>,
-  namespace: string
-): PricingByProvider {
-  const rows = db.prepare("SELECT key, value FROM key_value WHERE namespace = ?").all(namespace);
-  const pricing: PricingByProvider = {};
-
-  for (const row of rows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-
-    try {
-      pricing[key] = toRecord(JSON.parse(rawValue)) as PricingModels;
-    } catch {
-      // Corrupted data — skip silently, fallback to lower layers
-    }
-  }
-
-  return pricing;
+async function readPricingNamespace(source: PricingSourceName): Promise<PricingByProvider> {
+  return (await readPricingSource(source)) as PricingByProvider;
 }
 
 function mergePricingLayers(layers: PricingByProvider[]): PricingByProvider {
@@ -103,16 +90,14 @@ function buildPricingSourceMap(layers: {
 }
 
 async function getPricingLayers() {
-  const db = getDbInstance();
-
   // Layer 1: Hardcoded defaults (lowest priority)
   const { getDefaultPricing } = await import("@/shared/constants/pricing");
-  return {
-    defaults: getDefaultPricing(),
-    litellm: readPricingNamespace(db, "pricing_synced"),
-    modelsDev: readPricingNamespace(db, "models_dev_pricing"),
-    user: readPricingNamespace(db, "pricing"),
-  };
+  const [litellm, modelsDev, user] = await Promise.all([
+    readPricingNamespace("litellm"),
+    readPricingNamespace("models_dev"),
+    readPricingNamespace("user"),
+  ]);
+  return { defaults: getDefaultPricing(), litellm, modelsDev, user };
 }
 
 export async function getPricing() {
@@ -206,84 +191,45 @@ export async function getPricingForModel(provider: string, model: string) {
 }
 
 export async function updatePricing(pricingData: PricingByProvider) {
-  const db = getDbInstance();
-  const insert = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('pricing', ?, ?)"
-  );
-
-  const rows = db.prepare("SELECT key, value FROM key_value WHERE namespace = 'pricing'").all();
-  const existing: PricingByProvider = {};
-  for (const row of rows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-    existing[key] = toRecord(JSON.parse(rawValue)) as PricingModels;
-  }
-
-  const tx = db.transaction(() => {
+  // The upsert merges per provider in SQL (`||` keeps the stored models and overwrites the
+  // ones in `pricingData`), so two concurrent updates cannot drop each other's models.
+  await db().transaction(async (tx) => {
     for (const [provider, models] of Object.entries(pricingData)) {
-      insert.run(provider, JSON.stringify({ ...(existing[provider] || {}), ...models }));
+      await tx.execute(
+        `INSERT INTO model_pricing (source, provider, models) VALUES ('user', $1, $2::jsonb)
+         ON CONFLICT (source, provider)
+         DO UPDATE SET models = model_pricing.models || EXCLUDED.models, updated_at = now()`,
+        [provider, jsonb(models)]
+      );
     }
   });
-  tx();
-  backupDbFile("pre-write");
   await touchPricing();
-  const updated: PricingByProvider = {};
-  const allRows = db.prepare("SELECT key, value FROM key_value WHERE namespace = 'pricing'").all();
-  for (const row of allRows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-    updated[key] = toRecord(JSON.parse(rawValue)) as PricingModels;
-  }
-  return updated;
+  return readPricingNamespace("user");
 }
 
 export async function resetPricing(provider: string, model?: string) {
-  const db = getDbInstance();
-
   if (model) {
-    const row = db
-      .prepare("SELECT value FROM key_value WHERE namespace = 'pricing' AND key = ?")
-      .get(provider);
-    if (row) {
-      const rowRecord = toRecord(row);
-      const value = typeof rowRecord.value === "string" ? rowRecord.value : "{}";
-      const models = toRecord(JSON.parse(value));
-      delete models[model];
-      if (Object.keys(models).length === 0) {
-        db.prepare("DELETE FROM key_value WHERE namespace = 'pricing' AND key = ?").run(provider);
-      } else {
-        db.prepare("UPDATE key_value SET value = ? WHERE namespace = 'pricing' AND key = ?").run(
-          JSON.stringify(models),
-          provider
-        );
-      }
-    }
+    await db().transaction(async (tx) => {
+      const models = await tx.queryOne<{ models: unknown }>(
+        "SELECT models FROM model_pricing WHERE source = 'user' AND provider = $1 FOR UPDATE",
+        [provider]
+      );
+      if (!models) return;
+      const next = { ...toRecord(models.models) };
+      delete next[model];
+      if (Object.keys(next).length === 0) await deletePricingProvider("user", provider, tx);
+      else await writePricingProvider("user", provider, next, tx);
+    });
   } else {
-    db.prepare("DELETE FROM key_value WHERE namespace = 'pricing' AND key = ?").run(provider);
+    await deletePricingProvider("user", provider);
   }
 
-  backupDbFile("pre-write");
   await touchPricing();
-  const allRows = db.prepare("SELECT key, value FROM key_value WHERE namespace = 'pricing'").all();
-  const result: Record<string, unknown> = {};
-  for (const row of allRows) {
-    const record = toRecord(row);
-    const key = typeof record.key === "string" ? record.key : null;
-    const rawValue = typeof record.value === "string" ? record.value : null;
-    if (!key || rawValue === null) continue;
-    result[key] = JSON.parse(rawValue);
-  }
-  return result;
+  return readPricingNamespace("user") as Promise<Record<string, unknown>>;
 }
 
 export async function resetAllPricing() {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM key_value WHERE namespace = 'pricing'").run();
-  backupDbFile("pre-write");
+  await clearPricingSource("user");
   await touchPricing();
   return {};
 }

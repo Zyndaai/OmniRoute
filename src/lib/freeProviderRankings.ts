@@ -517,7 +517,7 @@ export async function computeFreeProviderRankings(
   opts: FreeProviderRankingFilterOptions = {}
 ): Promise<FreeProviderRanking[]> {
   const freeProviders = getFreeProviders();
-  const intelligenceEntries = listModelIntelligence({
+  const intelligenceEntries = await listModelIntelligence({
     source: "arena_elo",
     category: category || undefined,
   });
@@ -605,7 +605,7 @@ export async function computeFreeProviderRankings(
       const since = new Date(Date.now() - windowMs).toISOString();
       filtered = attachProviderUsage(
         filtered,
-        getProviderUsageSince(since),
+        await getProviderUsageSince(since),
         windowMs / (60 * 60 * 1000)
       );
     }

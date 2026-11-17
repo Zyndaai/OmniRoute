@@ -129,12 +129,12 @@ async function buildGatewayLiveCatalogCheck(
  * The `claude/<id>` discovery-mirror pass, gated 3 levels deep (global > provider >
  * model). The per-key `allowCcDiscoveryAliases` gate is applied by the caller.
  */
-function appendCcMirrorsWhenEnabled(
+async function appendCcMirrorsWhenEnabled(
   models: Array<Record<string, any>>,
   mirrorRefinements: boolean
-): Array<Record<string, any>> {
-  const ccAliasGlobal = isCcAliasGlobalEnabled();
-  const ccAliasSettings = getCcAliasSettingsBulk();
+): Promise<Array<Record<string, any>>> {
+  const ccAliasGlobal = await isCcAliasGlobalEnabled();
+  const ccAliasSettings = await getCcAliasSettingsBulk();
   if (!ccAliasGlobal && ccAliasSettings.providers.size === 0 && ccAliasSettings.models.size === 0) {
     return models;
   }
@@ -248,7 +248,7 @@ export async function applyCatalogPostFilters(
   // mirrors that cannot resolve, and checks gateways against what they will receive.
   const mirrorRefinements = isCatalogMirrorRefinementsEnabled();
   if (ctx.allowCcDiscoveryAliases !== false) {
-    finalModels = appendCcMirrorsWhenEnabled(finalModels, mirrorRefinements);
+    finalModels = await appendCcMirrorsWhenEnabled(finalModels, mirrorRefinements);
   }
 
   // Advertise `<gateway-alias>/<id>` functional-gateway mirrors so discovery
@@ -259,8 +259,8 @@ export async function applyCatalogPostFilters(
   // and default-off. Only emits a mirror when the canonical owner has no
   // eligible connection for the model AND a passthrough gateway with an active
   // credential covers it.
-  const fgGlobal = isFunctionalGatewayGlobalEnabled();
-  const fgSettings = getFunctionalGatewaySettingsBulk();
+  const fgGlobal = await isFunctionalGatewayGlobalEnabled();
+  const fgSettings = await getFunctionalGatewaySettingsBulk();
   if (fgGlobal || fgSettings.providers.size > 0 || fgSettings.models.size > 0) {
     const gatewayProviderIds = mirrorRefinements
       ? [...getPassthroughProviders()].filter(
@@ -381,7 +381,8 @@ export async function finalizeCatalogResponse(
   const yieldTurn = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
   await yieldTurn();
   const capabilityResolutionSnapshot =
-    enrichmentSnapshot?.capabilityResolutionSnapshot ?? createModelCapabilityResolutionSnapshot();
+    enrichmentSnapshot?.capabilityResolutionSnapshot ??
+    (await createModelCapabilityResolutionSnapshot());
   const enriched: Array<Record<string, unknown>> = [];
   const catYIELD_EVERY = 5;
   let catEnrichCount = 0;
@@ -390,7 +391,7 @@ export async function finalizeCatalogResponse(
     if (model.owned_by === "combo") {
       listedModel = maybeOmitCatalogModelName(model, includeModelNames);
     } else {
-      const entry = enrichCatalogModelEntry(model, undefined, {
+      const entry = await enrichCatalogModelEntry(model, undefined, {
         ...enrichmentSnapshot,
         capabilityResolutionSnapshot,
       });

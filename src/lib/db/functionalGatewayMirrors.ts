@@ -1,14 +1,18 @@
 /**
  * db/functionalGatewayMirrors.ts — functional-gateway mirror gate.
  *
- * Storage: `key_value` table, namespace `functionalGatewayMirrors`, following the
- * ccDiscoveryAliases pattern. Global flag `EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS`
- * (env "1"|"true" > DB flag > default false). Provider/model overrides stored as
- * `provider:<id>` and `model:<provider>/<model>` keys with value "on"/"off".
+ * Storage: `config_entries`, namespace `functionalGatewayMirrors`, following the
+ * ccDiscoveryAliases pattern (raw "on"/"off" kept as JSON strings). Global flag
+ * `EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS` (env "1"|"true" > DB flag > default false).
+ * Provider/model overrides stored as `provider:<id>` and `model:<provider>/<model>` keys.
  */
 import { getFeatureFlagOverride } from "./featureFlags";
-import { getDbInstance } from "./core";
-import { loadCatalogOverrides } from "./catalogOverrides";
+import {
+  deleteConfigValue,
+  getConfigText,
+  loadCatalogOverrideMaps,
+  setConfigText,
+} from "./configEntries";
 
 const NAMESPACE = "functionalGatewayMirrors";
 const FLAG_KEY = "EXPOSE_FUNCTIONAL_GATEWAY_MIRRORS";
@@ -28,58 +32,39 @@ function modelKey(modelId: string): string {
   return `model:${modelId}`;
 }
 
-export function getFunctionalGatewayProviderSetting(providerId: string): FunctionalGatewaySetting {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, providerKey(providerId)) as { value: string } | undefined;
-  return parseSetting(row?.value);
+async function writeSetting(key: string, v: FunctionalGatewaySetting): Promise<void> {
+  if (v === null) await deleteConfigValue(NAMESPACE, key);
+  else await setConfigText(NAMESPACE, key, v);
 }
 
-export function setFunctionalGatewayProviderSetting(
+export async function getFunctionalGatewayProviderSetting(
+  providerId: string
+): Promise<FunctionalGatewaySetting> {
+  return parseSetting(await getConfigText(NAMESPACE, providerKey(providerId)));
+}
+
+export async function setFunctionalGatewayProviderSetting(
   providerId: string,
   v: FunctionalGatewaySetting
-): void {
-  const db = getDbInstance();
-  const key = providerKey(providerId);
-  if (v === null) {
-    db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(NAMESPACE, key);
-    return;
-  }
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    NAMESPACE,
-    key,
-    v
-  );
+): Promise<void> {
+  await writeSetting(providerKey(providerId), v);
 }
 
-export function getFunctionalGatewayModelSetting(modelId: string): FunctionalGatewaySetting {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-    .get(NAMESPACE, modelKey(modelId)) as { value: string } | undefined;
-  return parseSetting(row?.value);
+export async function getFunctionalGatewayModelSetting(
+  modelId: string
+): Promise<FunctionalGatewaySetting> {
+  return parseSetting(await getConfigText(NAMESPACE, modelKey(modelId)));
 }
 
-export function setFunctionalGatewayModelSetting(
+export async function setFunctionalGatewayModelSetting(
   modelId: string,
   v: FunctionalGatewaySetting
-): void {
-  const db = getDbInstance();
-  const key = modelKey(modelId);
-  if (v === null) {
-    db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?").run(NAMESPACE, key);
-    return;
-  }
-  db.prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)").run(
-    NAMESPACE,
-    key,
-    v
-  );
+): Promise<void> {
+  await writeSetting(modelKey(modelId), v);
 }
 
-export function getFunctionalGatewaySettingsBulk() {
-  return loadCatalogOverrides(NAMESPACE);
+export async function getFunctionalGatewaySettingsBulk() {
+  return loadCatalogOverrideMaps(NAMESPACE);
 }
 
 function envForcesGlobalOn(): boolean {
@@ -87,15 +72,15 @@ function envForcesGlobalOn(): boolean {
   return raw === "1" || raw === "true";
 }
 
-export function getFunctionalGatewayGlobalState(): {
+export async function getFunctionalGatewayGlobalState(): Promise<{
   enabled: boolean;
   source: "env" | "db" | "default";
-} {
+}> {
   if (envForcesGlobalOn()) {
     return { enabled: true, source: "env" };
   }
 
-  const dbOverride = getFeatureFlagOverride(FLAG_KEY);
+  const dbOverride = await getFeatureFlagOverride(FLAG_KEY);
   if (dbOverride !== undefined) {
     return { enabled: dbOverride === "true" || dbOverride === "1", source: "db" };
   }
@@ -103,6 +88,6 @@ export function getFunctionalGatewayGlobalState(): {
   return { enabled: false, source: "default" };
 }
 
-export function isFunctionalGatewayGlobalEnabled(): boolean {
-  return getFunctionalGatewayGlobalState().enabled;
+export async function isFunctionalGatewayGlobalEnabled(): Promise<boolean> {
+  return (await getFunctionalGatewayGlobalState()).enabled;
 }

@@ -4,10 +4,10 @@
  * Persists per-model intelligence from arena ELO, models.dev tier rankings,
  * and user overrides. Resolution chain: user_override → arena_elo → models_dev_tier.
  *
- * @see Migration 097_model_intelligence.sql
+ * Table: `model_intelligence`, primary key (model, source, category).
  */
 
-import { getDbInstance, rowToCamel } from "./core";
+import { db, ts, type DbExecutor } from "./pg";
 import { bumpModelIntelligenceWriteGeneration } from "./modelIntelligenceGeneration";
 
 // ──────────────── Types ────────────────
@@ -25,178 +25,193 @@ export interface ModelIntelligenceEntry {
   rank?: number;
 }
 
+type NewEntry = Omit<ModelIntelligenceEntry, "syncedAt">;
+
+interface IntelligenceRow {
+  model: string;
+  source: string;
+  category: string;
+  score: number;
+  elo_raw: number | null;
+  confidence: string | null;
+  synced_at: string | null;
+  expires_at: string | null;
+}
+
 // ──────────────── Helpers ────────────────
 
-function rowToEntry(row: Record<string, unknown>): ModelIntelligenceEntry {
-  const camel = rowToCamel(row) ?? {};
+function rowToEntry(row: IntelligenceRow): ModelIntelligenceEntry {
   return {
-    model: String(camel.model ?? ""),
-    source: String(camel.source ?? ""),
-    category: String(camel.category ?? ""),
-    score: typeof camel.score === "number" ? camel.score : 0,
-    eloRaw: typeof camel.eloRaw === "number" ? camel.eloRaw : null,
-    confidence: typeof camel.confidence === "string" ? camel.confidence : null,
-    syncedAt: String(camel.syncedAt ?? ""),
-    expiresAt: typeof camel.expiresAt === "string" ? camel.expiresAt : null,
+    model: String(row.model ?? ""),
+    source: String(row.source ?? ""),
+    category: String(row.category ?? ""),
+    score: typeof row.score === "number" ? row.score : 0,
+    eloRaw: typeof row.elo_raw === "number" ? row.elo_raw : null,
+    confidence: typeof row.confidence === "string" ? row.confidence : null,
+    syncedAt: String(row.synced_at ?? ""),
+    expiresAt: typeof row.expires_at === "string" ? row.expires_at : null,
   };
+}
+
+const COLUMNS = "model, source, category, score, elo_raw, confidence, synced_at, expires_at";
+
+/** Multi-row upsert; later duplicates of one (model, source, category) win, as they did row by row. */
+async function upsertEntries(ex: DbExecutor, entries: NewEntry[]): Promise<number> {
+  if (entries.length === 0) return 0;
+  const unique = new Map<string, NewEntry>();
+  for (const entry of entries) {
+    // A NaN/Infinity score would fail the CHECK and abort the whole batch: skip that row.
+    if (!Number.isFinite(entry.score)) continue;
+    unique.set(`${entry.model}\u0000${entry.source}\u0000${entry.category}`, entry);
+  }
+  const rows = [...unique.values()];
+  if (rows.length === 0) return 0;
+  await ex.execute(
+    `INSERT INTO model_intelligence (model, source, category, score, elo_raw, confidence, synced_at, expires_at)
+     SELECT t.model, t.source, t.category, t.score, t.elo_raw, t.confidence, now(), t.expires_at
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::float8[], $5::int[], $6::text[], $7::timestamptz[])
+       AS t(model, source, category, score, elo_raw, confidence, expires_at)
+     ON CONFLICT (model, source, category) DO UPDATE SET
+       score = EXCLUDED.score, elo_raw = EXCLUDED.elo_raw, confidence = EXCLUDED.confidence,
+       synced_at = EXCLUDED.synced_at, expires_at = EXCLUDED.expires_at`,
+    [
+      rows.map((e) => e.model),
+      rows.map((e) => e.source),
+      rows.map((e) => e.category),
+      // The table CHECKs 0..1; the scorers already stay inside it, this only guards drift.
+      rows.map((e) => Math.min(1, Math.max(0, e.score))),
+      rows.map((e) => (typeof e.eloRaw === "number" ? Math.round(e.eloRaw) : null)),
+      rows.map((e) => e.confidence ?? null),
+      rows.map((e) => ts(e.expiresAt)),
+    ]
+  );
+  return entries.length;
 }
 
 // ──────────────── CRUD ────────────────
 
-export function getModelIntelligence(
+export async function getModelIntelligence(
   model: string,
   category: string
-): ModelIntelligenceEntry | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT * FROM model_intelligence
-       WHERE model = ? AND category = ?
-         AND source IN ('user_override', 'arena_elo', 'models_dev_tier')
-         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
-       ORDER BY CASE source
-         WHEN 'user_override' THEN 1
-         WHEN 'arena_elo' THEN 2
-         WHEN 'models_dev_tier' THEN 3
-       END
-       LIMIT 1`
-    )
-    .get(model, category) as Record<string, unknown> | undefined;
-
+): Promise<ModelIntelligenceEntry | null> {
+  const row = await db().queryOne<IntelligenceRow>(
+    `SELECT ${COLUMNS} FROM model_intelligence
+     WHERE model = $1 AND category = $2
+       AND source IN ('user_override', 'arena_elo', 'models_dev_tier')
+       AND (expires_at IS NULL OR expires_at > now())
+     ORDER BY CASE source
+       WHEN 'user_override' THEN 1
+       WHEN 'arena_elo' THEN 2
+       WHEN 'models_dev_tier' THEN 3
+     END
+     LIMIT 1`,
+    [model, category]
+  );
   return row ? rowToEntry(row) : null;
 }
 
-export function getModelIntelligenceBySource(
+export async function getModelIntelligenceBySource(
   model: string,
   source: string,
   category: string
-): ModelIntelligenceEntry | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT * FROM model_intelligence
-       WHERE model = ? AND source = ? AND category = ?
-         AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`
-    )
-    .get(model, source, category) as Record<string, unknown> | undefined;
-
+): Promise<ModelIntelligenceEntry | null> {
+  const row = await db().queryOne<IntelligenceRow>(
+    `SELECT ${COLUMNS} FROM model_intelligence
+     WHERE model = $1 AND source = $2 AND category = $3
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [model, source, category]
+  );
   return row ? rowToEntry(row) : null;
 }
 
-export function upsertModelIntelligence(entry: Omit<ModelIntelligenceEntry, "syncedAt">): void {
+// Every write bumps the generation before the statement (so readers drop their memo) and
+// again after it commits (a reader that cached between the two would otherwise keep the
+// pre-write value for the new generation).
+async function withWriteGeneration<T>(write: () => Promise<T>): Promise<T> {
   bumpModelIntelligenceWriteGeneration();
-  const db = getDbInstance();
-
-  db.prepare(
-    `INSERT OR REPLACE INTO model_intelligence
-       (model, source, category, score, elo_raw, confidence, synced_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
-  ).run(
-    entry.model,
-    entry.source,
-    entry.category,
-    entry.score,
-    entry.eloRaw ?? null,
-    entry.confidence ?? null,
-    entry.expiresAt ?? null
-  );
-}
-
-export function deleteModelIntelligence(model: string, source: string, category: string): boolean {
-  bumpModelIntelligenceWriteGeneration();
-  const db = getDbInstance();
-  const result = db
-    .prepare(
-      `DELETE FROM model_intelligence
-       WHERE model = ? AND source = ? AND category = ?`
-    )
-    .run(model, source, category);
-  return (result.changes ?? 0) > 0;
-}
-
-export function deleteExpiredIntelligence(source?: string): number {
-  bumpModelIntelligenceWriteGeneration();
-  const db = getDbInstance();
-  const conditions = ["expires_at IS NOT NULL", "datetime(expires_at) < datetime('now')"];
-  const params: unknown[] = [];
-
-  if (source) {
-    conditions.push("source = ?");
-    params.push(source);
+  try {
+    return await write();
+  } finally {
+    bumpModelIntelligenceWriteGeneration();
   }
-
-  const where = conditions.join(" AND ");
-  const result = db.prepare(`DELETE FROM model_intelligence WHERE ${where}`).run(...params);
-  return result.changes ?? 0;
 }
 
-export function deleteModelIntelligenceBySource(source: string): number {
-  bumpModelIntelligenceWriteGeneration();
-  const db = getDbInstance();
-  const result = db.prepare(`DELETE FROM model_intelligence WHERE source = ?`).run(source);
-  return result.changes ?? 0;
+export async function upsertModelIntelligence(entry: NewEntry): Promise<void> {
+  await withWriteGeneration(() => upsertEntries(db(), [entry]));
 }
 
-export function listModelIntelligence(filters?: {
+export async function deleteModelIntelligence(
+  model: string,
+  source: string,
+  category: string
+): Promise<boolean> {
+  const result = await withWriteGeneration(() =>
+    db().execute(
+      "DELETE FROM model_intelligence WHERE model = $1 AND source = $2 AND category = $3",
+      [model, source, category]
+    )
+  );
+  return result.changes > 0;
+}
+
+export async function deleteExpiredIntelligence(source?: string): Promise<number> {
+  const result = await withWriteGeneration(() =>
+    source
+      ? db().execute(
+          "DELETE FROM model_intelligence WHERE expires_at IS NOT NULL AND expires_at < now() AND source = $1",
+          [source]
+        )
+      : db().execute(
+          "DELETE FROM model_intelligence WHERE expires_at IS NOT NULL AND expires_at < now()"
+        )
+  );
+  return result.changes;
+}
+
+export async function deleteModelIntelligenceBySource(source: string): Promise<number> {
+  const result = await withWriteGeneration(() =>
+    db().execute("DELETE FROM model_intelligence WHERE source = $1", [source])
+  );
+  return result.changes;
+}
+
+export async function listModelIntelligence(filters?: {
   source?: string;
   category?: string;
-}): ModelIntelligenceEntry[] {
-  const db = getDbInstance();
-
+}): Promise<ModelIntelligenceEntry[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
   if (filters?.source) {
-    conditions.push("source = ?");
     params.push(filters.source);
+    conditions.push(`source = $${params.length}`);
   }
   if (filters?.category) {
-    conditions.push("category = ?");
     params.push(filters.category);
+    conditions.push(`category = $${params.length}`);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const sql = `SELECT * FROM model_intelligence ${where} ORDER BY model ASC, source ASC, category ASC`;
-
-  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
+  const rows = await db().query<IntelligenceRow>(
+    `SELECT ${COLUMNS} FROM model_intelligence ${where} ORDER BY model ASC, source ASC, category ASC`,
+    params
+  );
   return rows.map(rowToEntry);
 }
 
-export function bulkUpsertModelIntelligence(
-  entries: Array<Omit<ModelIntelligenceEntry, "syncedAt">>
-): number {
-  bumpModelIntelligenceWriteGeneration();
-  if (entries.length === 0) return 0;
-
-  const db = getDbInstance();
-  const stmt = db.prepare(
-    `INSERT OR REPLACE INTO model_intelligence
-       (model, source, category, score, elo_raw, confidence, synced_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
-  );
-
-  const upsertAll = db.transaction(() => {
-    let count = 0;
-    for (const entry of entries) {
-      stmt.run(
-        entry.model,
-        entry.source,
-        entry.category,
-        entry.score,
-        entry.eloRaw ?? null,
-        entry.confidence ?? null,
-        entry.expiresAt ?? null
-      );
-      count++;
-    }
-    return count;
-  });
-
-  return upsertAll();
+export async function bulkUpsertModelIntelligence(entries: NewEntry[]): Promise<number> {
+  if (entries.length === 0) {
+    bumpModelIntelligenceWriteGeneration();
+    return 0;
+  }
+  return withWriteGeneration(() => db().transaction((tx) => upsertEntries(tx, entries)));
 }
 
-export function getResolvedTaskFitness(model: string, category: string): number | null {
-  const entry = getModelIntelligence(model, category);
+export async function getResolvedTaskFitness(
+  model: string,
+  category: string
+): Promise<number | null> {
+  const entry = await getModelIntelligence(model, category);
   return entry ? entry.score : null;
 }
 
@@ -205,11 +220,11 @@ export function getResolvedTaskFitness(model: string, category: string): number 
  * has no rows). Backs the arenaEloSync freshness guard: a non-empty dataset
  * synced within the sync interval does not need re-fetching.
  */
-export function getLatestSyncedAt(source: string): string | null {
-  const db = getDbInstance();
-  const row = db
-    .prepare(`SELECT MAX(synced_at) as latest FROM model_intelligence WHERE source = ?`)
-    .get(source) as { latest: string | null } | undefined;
+export async function getLatestSyncedAt(source: string): Promise<string | null> {
+  const row = await db().queryOne<{ latest: string | null }>(
+    "SELECT max(synced_at) AS latest FROM model_intelligence WHERE source = $1",
+    [source]
+  );
   return row?.latest ?? null;
 }
 
@@ -221,47 +236,24 @@ export function getLatestSyncedAt(source: string): string | null {
  * This is the safe replacement for the old delete-expired-then-upsert flow,
  * which lost data when a fetch failed after the delete (remediation 2026-09-12).
  */
-export function applyArenaEloRefresh(
-  entries: Array<Omit<ModelIntelligenceEntry, "syncedAt">>,
+export async function applyArenaEloRefresh(
+  entries: NewEntry[],
   source = "arena_elo"
-): { upserted: number; pruned: number } {
-  const db = getDbInstance();
-  const upsertStmt = db.prepare(
-    `INSERT OR REPLACE INTO model_intelligence
-       (model, source, category, score, elo_raw, confidence, synced_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`
-  );
-
-  const refresh = db.transaction(() => {
-    bumpModelIntelligenceWriteGeneration();
-    let upserted = 0;
-    for (const entry of entries) {
-      upsertStmt.run(
-        entry.model,
-        entry.source,
-        entry.category,
-        entry.score,
-        entry.eloRaw ?? null,
-        entry.confidence ?? null,
-        entry.expiresAt ?? null
+): Promise<{ upserted: number; pruned: number }> {
+  return withWriteGeneration(() =>
+    db().transaction(async (tx) => {
+      const upserted = await upsertEntries(tx, entries);
+      // Prune on (model, category) pairs: correct for composite keys (a plain NOT IN over
+      // model names is not).
+      const pruned = await tx.execute(
+        `DELETE FROM model_intelligence
+         WHERE source = $1
+           AND (model, category) NOT IN (SELECT m, c FROM unnest($2::text[], $3::text[]) AS t(m, c))`,
+        [source, entries.map((e) => e.model), entries.map((e) => e.category)]
       );
-      upserted++;
-    }
-    // Membership prune via a JSON array of "model\0category" pair keys:
-    // correct for composite keys (a plain NOT IN over model names is not).
-    const refreshedPairs = JSON.stringify(entries.map((e) => `${e.model}\u0000${e.category}`));
-    const pruneByPair = db.prepare(
-      `DELETE FROM model_intelligence
-       WHERE source = ?
-         AND model || char(0) || category NOT IN (
-           SELECT value FROM json_each(?)
-         )`
-    );
-    const pruneResult = pruneByPair.run(source, refreshedPairs);
-    return { upserted, pruned: pruneResult.changes ?? 0 };
-  });
-
-  return refresh();
+      return { upserted, pruned: pruned.changes };
+    })
+  );
 }
 
 /**
@@ -272,8 +264,12 @@ export function applyArenaEloRefresh(
  * @param category - Task category
  * @param score - Fitness score [0..1]
  */
-export function setUserFitnessOverrideEntry(model: string, category: string, score: number): void {
-  upsertModelIntelligence({
+export async function setUserFitnessOverrideEntry(
+  model: string,
+  category: string,
+  score: number
+): Promise<void> {
+  await upsertModelIntelligence({
     model: model.toLowerCase(),
     source: "user_override",
     category: category.toLowerCase(),
@@ -291,6 +287,9 @@ export function setUserFitnessOverrideEntry(model: string, category: string, sco
  * @param category - Task category
  * @returns true if an entry was deleted
  */
-export function deleteUserFitnessOverrideEntry(model: string, category: string): boolean {
+export async function deleteUserFitnessOverrideEntry(
+  model: string,
+  category: string
+): Promise<boolean> {
   return deleteModelIntelligence(model.toLowerCase(), "user_override", category.toLowerCase());
 }

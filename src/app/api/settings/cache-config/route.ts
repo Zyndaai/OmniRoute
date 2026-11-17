@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getUserDatabaseSettings,
-  updateDatabaseSettings,
-  type UserDatabaseSettings,
-} from "@/lib/db/databaseSettings";
+import { getDatabaseSettingsSection } from "@/lib/db/databaseSettingsSections";
+import { setConfigValue } from "@/lib/db/configEntries";
+import { invalidateDbCache } from "@/lib/db/readCache";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { ensureSemanticCacheDbBridge } from "@/lib/cache/semanticCacheDbBridge";
@@ -11,11 +9,31 @@ import { resetSemanticCacheManager } from "@omniroute/open-sse/services/cache/se
 import { getEmbeddingOptions } from "./embeddingOptions";
 import { z } from "zod";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
-import { redactCacheSecrets, CacheCredentialEndpointError } from "@/lib/db/cacheSecrets";
+import {
+  CACHE_SECRET_MASK,
+  CacheCredentialEndpointError,
+  assertCacheCredentialEndpoint,
+  encryptCacheValue,
+  isCacheSecret,
+  redactCacheSecrets,
+} from "@/lib/db/cacheSecrets";
 import { validateEmbeddingEndpoint } from "@omniroute/open-sse/services/cache/embeddingEndpoint";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
+import type { DatabaseSettings } from "@/types/databaseSettings";
 
-ensureSemanticCacheDbBridge();
+type CacheSettingsUpdate = Partial<DatabaseSettings["cache"]>;
+
+async function saveCacheSettings(updates: CacheSettingsUpdate): Promise<void> {
+  assertCacheCredentialEndpoint(
+    (await getDatabaseSettingsSection("cache")) as unknown as Record<string, unknown>,
+    updates as Record<string, unknown>
+  );
+  for (const [key, value] of Object.entries(updates)) {
+    if (isCacheSecret(key) && value === CACHE_SECRET_MASK) continue;
+    await setConfigValue("databaseSettings", `cache.${key}`, encryptCacheValue(key, value));
+  }
+  invalidateDbCache("settings");
+}
 
 const cacheConfigUpdateSchema = z.object({
   semanticCacheEnabled: z.boolean().optional(),
@@ -91,12 +109,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const dbSettings = getUserDatabaseSettings();
-    const cache = dbSettings.cache ?? {};
+    await ensureSemanticCacheDbBridge();
     // idempotencyWindowMs is not part of the databaseSettings "cache" section —
     // it lives in the flat general settings (src/lib/db/settings.ts), which is
     // where src/lib/idempotencyLayer.ts actually reads it from.
-    const [flatSettings, embeddingOptions] = await Promise.all([
+    const [cache, flatSettings, embeddingOptions] = await Promise.all([
+      getDatabaseSettingsSection("cache"),
       getSettings(),
       getEmbeddingOptions(),
     ]);
@@ -137,7 +155,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
-    const updates: Partial<UserDatabaseSettings["cache"]> = {};
+    await ensureSemanticCacheDbBridge();
+    const updates: CacheSettingsUpdate = {};
     const body = validation.data;
     if (body.semanticCacheEmbeddingBaseUrl) {
       try {
@@ -202,11 +221,10 @@ export async function PUT(request: NextRequest) {
       updates.modelCatalogCacheTtlMs = body.modelCatalogCacheTtlMs;
     }
 
-    // updateDatabaseSettings() calls invalidateDbCache("settings") internally,
-    // which bumps the model-catalog cache version so in-flight responses pick
-    // up the fresh TTL — no separate version bump needed here.
+    // saveCacheSettings() calls invalidateDbCache("settings"), which bumps the
+    // model-catalog cache version so in-flight responses pick up the fresh TTL.
     if (Object.keys(updates).length > 0) {
-      updateDatabaseSettings({ cache: updates as UserDatabaseSettings["cache"] });
+      await saveCacheSettings(updates);
       // Drop the in-memory semantic cache manager so the next request rebuilds it
       // from the freshly-persisted databaseSettings (dual-layer cache work).
       resetSemanticCacheManager();

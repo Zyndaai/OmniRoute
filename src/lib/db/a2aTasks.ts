@@ -1,13 +1,15 @@
 /**
- * db/a2aTasks.ts — A2A task history writer/reader over the tables created by migration
- * `002_mcp_a2a_tables.sql` (`a2a_tasks`, `a2a_task_events`). No new migration: this module only
- * adds the write/read surface those tables never had (Orchestration Canvas Fase 2, Task C1).
+ * db/a2aTasks.ts — A2A task history writer/reader over `a2a_tasks` and `a2a_task_events`.
  *
  * Owner visibility mirrors `A2ATaskManager.isVisibleTo` (src/lib/a2a/taskManager.ts): with an
  * `owner` given, a row is visible when `api_key_id IS NULL OR api_key_id = owner`; without one,
  * every row is visible.
+ *
+ * The `input` / `output` / `data` columns are jsonb; the row types keep the legacy
+ * `*_json` fields as JSON text so callers do not change.
  */
-import { getDbInstance } from "./core.ts";
+import { db, ts } from "./pg";
+import { jsonTextParam } from "./pgJsonText";
 
 export interface A2ATaskHistoryRow {
   id: string;
@@ -53,32 +55,23 @@ export interface UpsertA2ATaskInput {
 }
 
 const HISTORY_COLUMNS =
-  "id, state, skill_id, input_json, output_json, api_key_id, created_at, updated_at, completed_at";
+  "id, state, skill_id, input::text AS input_json, output::text AS output_json, api_key_id, created_at, updated_at, completed_at";
 
 /** Builds the shared WHERE clause (+ params) for filter/owner conditions used by list/count. */
 function buildHistoryWhere(f: Pick<A2AHistoryFilter, "from" | "to" | "skill" | "state" | "owner">) {
   const clauses: string[] = [];
-  const params: Record<string, unknown> = {};
+  const params: unknown[] = [];
+  const add = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
 
-  if (f.from !== undefined) {
-    clauses.push("created_at >= @from");
-    params.from = f.from;
-  }
-  if (f.to !== undefined) {
-    clauses.push("created_at <= @to");
-    params.to = f.to;
-  }
-  if (f.skill !== undefined) {
-    clauses.push("skill_id = @skill");
-    params.skill = f.skill;
-  }
-  if (f.state !== undefined) {
-    clauses.push("state = @state");
-    params.state = f.state;
-  }
+  if (f.from !== undefined) clauses.push(`created_at >= ${add(ts(f.from))}`);
+  if (f.to !== undefined) clauses.push(`created_at <= ${add(ts(f.to))}`);
+  if (f.skill !== undefined) clauses.push(`skill_id = ${add(f.skill)}`);
+  if (f.state !== undefined) clauses.push(`state = ${add(f.state)}`);
   if (f.owner !== undefined) {
-    clauses.push("(api_key_id IS NULL OR api_key_id = @owner)");
-    params.owner = f.owner;
+    clauses.push(`(api_key_id IS NULL OR api_key_id = ${add(f.owner)})`);
   }
 
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -88,135 +81,111 @@ function buildHistoryWhere(f: Pick<A2AHistoryFilter, "from" | "to" | "skill" | "
 /**
  * Insert a new task history row, or update the mutable fields of an existing one keyed by `id`.
  */
-export function upsertA2ATask(row: UpsertA2ATaskInput): void {
-  const db = getDbInstance();
-  db.prepare(
-    `
-    INSERT INTO a2a_tasks (
-      id, state, skill_id, input_json, output_json, api_key_id,
-      created_at, updated_at, completed_at
-    ) VALUES (
-      @id, @state, @skillId, @inputJson, @outputJson, @apiKeyId,
-      @createdAt, @updatedAt, @completedAt
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      state = excluded.state,
-      output_json = excluded.output_json,
-      updated_at = excluded.updated_at,
-      completed_at = excluded.completed_at
-  `
-  ).run(row);
+export async function upsertA2ATask(row: UpsertA2ATaskInput): Promise<void> {
+  await db().execute(
+    `INSERT INTO a2a_tasks (
+       id, state, skill_id, input, output, api_key_id, created_at, updated_at, completed_at
+     ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9)
+     ON CONFLICT (id) DO UPDATE SET
+       state = EXCLUDED.state,
+       output = EXCLUDED.output,
+       updated_at = EXCLUDED.updated_at,
+       completed_at = EXCLUDED.completed_at`,
+    [
+      row.id,
+      row.state,
+      row.skillId,
+      jsonTextParam(row.inputJson),
+      jsonTextParam(row.outputJson),
+      row.apiKeyId,
+      ts(row.createdAt) ?? new Date().toISOString(),
+      ts(row.updatedAt) ?? new Date().toISOString(),
+      ts(row.completedAt),
+    ]
+  );
 }
 
 /** Append an event to a task's event log. */
-export function appendA2ATaskEvent(taskId: string, eventType: string, dataJson?: string): void {
-  const db = getDbInstance();
-  db.prepare(
-    `
-    INSERT INTO a2a_task_events (task_id, event_type, data_json)
-    VALUES (@taskId, @eventType, @dataJson)
-  `
-  ).run({ taskId, eventType, dataJson: dataJson ?? null });
+export async function appendA2ATaskEvent(
+  taskId: string,
+  eventType: string,
+  dataJson?: string
+): Promise<void> {
+  await db().execute(
+    `INSERT INTO a2a_task_events (task_id, event_type, data) VALUES ($1, $2, $3::jsonb)`,
+    [taskId, eventType, jsonTextParam(dataJson ?? null)]
+  );
 }
 
 /** List a task's events in insertion order (oldest first). */
-export function listA2ATaskEvents(taskId: string): A2ATaskHistoryEventRow[] {
-  const db = getDbInstance();
-  return db
-    .prepare(
-      `
-      SELECT event_type, data_json, created_at
-      FROM a2a_task_events
-      WHERE task_id = @taskId
-      ORDER BY id ASC
-    `
-    )
-    .all({ taskId }) as A2ATaskHistoryEventRow[];
+export async function listA2ATaskEvents(taskId: string): Promise<A2ATaskHistoryEventRow[]> {
+  return db().query<A2ATaskHistoryEventRow>(
+    `SELECT event_type, data::text AS data_json, created_at
+       FROM a2a_task_events
+      WHERE task_id = $1
+      ORDER BY id ASC`,
+    [taskId]
+  );
 }
 
 /** List finished/in-flight task history, newest first, filtered and paginated. */
-export function listA2ATaskHistory(f: A2AHistoryFilter): {
+export async function listA2ATaskHistory(f: A2AHistoryFilter): Promise<{
   rows: A2ATaskHistoryRow[];
   total: number;
-} {
-  const db = getDbInstance();
+}> {
   const { where, params } = buildHistoryWhere(f);
 
-  const total = db
-    .prepare(`SELECT COUNT(*) AS count FROM a2a_tasks ${where}`)
-    .get(params) as { count: number };
+  const total = await db().queryOne<{ count: number }>(
+    `SELECT COUNT(*)::int AS count FROM a2a_tasks ${where}`,
+    params
+  );
 
-  const rows = db
-    .prepare(
-      `
-      SELECT ${HISTORY_COLUMNS}
-      FROM a2a_tasks
-      ${where}
+  const rows = await db().query<A2ATaskHistoryRow>(
+    `SELECT ${HISTORY_COLUMNS}
+       FROM a2a_tasks
+       ${where}
       ORDER BY created_at DESC
-      LIMIT @limit OFFSET @offset
-    `
-    )
-    .all({ ...params, limit: f.limit, offset: f.offset }) as A2ATaskHistoryRow[];
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, f.limit, f.offset]
+  );
 
-  return { rows, total: total.count };
+  return { rows, total: Number(total?.count ?? 0) };
 }
 
 /**
  * Fetch a single task history row by id, applying the same owner rule as `listA2ATaskHistory`.
  * Returns `null` when the row does not exist or is not visible to `owner`.
  */
-export function getA2ATaskHistoryById(id: string, owner?: string): A2ATaskHistoryRow | null {
-  const db = getDbInstance();
+export async function getA2ATaskHistoryById(
+  id: string,
+  owner?: string
+): Promise<A2ATaskHistoryRow | null> {
   const { where, params } = buildHistoryWhere({ owner });
-  const clause = where ? `${where} AND id = @id` : "WHERE id = @id";
+  const idParam = `$${params.length + 1}`;
+  const clause = where ? `${where} AND id = ${idParam}` : `WHERE id = ${idParam}`;
 
-  const row = db
-    .prepare(
-      `
-      SELECT ${HISTORY_COLUMNS}
-      FROM a2a_tasks
-      ${clause}
-    `
-    )
-    .get({ ...params, id }) as A2ATaskHistoryRow | undefined;
-
+  const row = await db().queryOne<A2ATaskHistoryRow>(
+    `SELECT ${HISTORY_COLUMNS} FROM a2a_tasks ${clause}`,
+    [...params, id]
+  );
   return row ?? null;
 }
 
 /**
- * Delete task history rows older than `retentionDays`, along with their events. Does NOT rely
- * on the `ON DELETE CASCADE` foreign key declared on `a2a_task_events.task_id` (migration 002):
- * `better-sqlite3` runs with foreign keys enabled, but the other drivers under
- * `src/lib/db/adapters/` never issue `PRAGMA foreign_keys = ON`, and migrations 072/073/126
- * already document that this project does not depend on cascade behavior. On a
- * non-better-sqlite3 driver, a cascade-reliant purge would silently leave that task's
- * `a2a_task_events` rows behind forever — this module's only unbounded-growth path. Both
- * deletes run inside one transaction so a crash between them cannot leave orphaned events.
+ * Delete task history rows older than `retentionDays`, along with their events. There is no
+ * foreign key between the tables, so both deletes run inside one transaction.
  * Returns the number of `a2a_tasks` rows deleted.
  */
-export function purgeA2AHistory(retentionDays: number): number {
-  const db = getDbInstance();
-  const purge = db.transaction((days: number) => {
-    db.prepare(
-      `
-      DELETE FROM a2a_task_events
-      WHERE task_id IN (
-        SELECT id FROM a2a_tasks WHERE created_at < datetime('now', '-' || @days || ' days')
-      )
-    `
-    ).run({ days });
-
-    const result = db
-      .prepare(
-        `
-        DELETE FROM a2a_tasks
-        WHERE created_at < datetime('now', '-' || @days || ' days')
-      `
-      )
-      .run({ days });
-
+export async function purgeA2AHistory(retentionDays: number): Promise<number> {
+  if (!Number.isFinite(retentionDays)) return 0;
+  const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+  return db().transaction(async (tx) => {
+    await tx.execute(
+      `DELETE FROM a2a_task_events
+        WHERE task_id IN (SELECT id FROM a2a_tasks WHERE created_at < $1)`,
+      [cutoff]
+    );
+    const result = await tx.execute(`DELETE FROM a2a_tasks WHERE created_at < $1`, [cutoff]);
     return result.changes;
   });
-
-  return purge(retentionDays);
 }

@@ -213,21 +213,27 @@ function warnDurableError(operation: string, error: unknown): void {
 }
 
 /**
- * Writes are deferred off the request path. Measured on this repo, a synchronous
- * `persistCcrBlock` costs 0.032 ms at the 600-char minimum block but 1.77 ms at 500 KB,
- * past the 1 ms this engine declares in its metadata, and roughly 7x the sha256 it
- * already pays over the same bytes. The block is in the map before the defer runs, so an
- * in-process retrieve never waits for the disk; only a crash inside that tick loses the
- * durable copy, and the client's next request re-stores it under the same hash.
+ * Writes are deferred off the request path. The block is in the map before the defer
+ * runs, so an in-process retrieve never waits for the database; only a crash before the
+ * write lands loses the durable copy, and the client's next request re-stores it under
+ * the same hash.
  *
- * Persist and delete share this queue so they cannot reorder: `setImmediate` is FIFO, and
- * a delete that overtook its own persist would resurrect the block it just removed.
+ * Persist and delete share one promise chain so they cannot reorder: a delete that
+ * overtook its own persist would resurrect the block it just removed.
  */
 const MAX_PENDING_DURABLE_WRITES = 1_000;
 let pendingDurableWrites = 0;
 let droppedDurableWrites = 0;
 
-function deferDurable(operation: string, work: () => void, droppable = false): void {
+// Durable writes run one after another on this chain, so an async persist can never be
+// overtaken by the delete that follows it.
+let durableTail: Promise<void> = Promise.resolve();
+
+function deferDurable(
+  operation: string,
+  work: () => void | Promise<unknown>,
+  droppable = false
+): void {
   // Backpressure. A burst faster than SQLite drains would otherwise queue without bound
   // and hold every block's content live in the closure. Dropping a persist is safe: the
   // block is still in the map, and the client re-stores it under the same hash on its
@@ -237,10 +243,10 @@ function deferDurable(operation: string, work: () => void, droppable = false): v
     return;
   }
   pendingDurableWrites++;
-  setImmediate(() => {
+  durableTail = durableTail.then(async () => {
     pendingDurableWrites--;
     try {
-      work();
+      await work();
     } catch (error) {
       warnDurableError(operation, error);
     }
@@ -264,11 +270,15 @@ function forgetEntry(hash: string, principalId: string): void {
  * accounting keeps working from there. Returns null when there is no durable row, which
  * is also what a missing database looks like.
  */
-function rehydrateEntry(hash: string, principalId: string, now: number): CcrEntry | null {
+async function rehydrateEntry(
+  hash: string,
+  principalId: string,
+  now: number
+): Promise<CcrEntry | null> {
   if (!durableTierEnabled()) return null;
-  let row: ReturnType<typeof loadCcrBlock>;
+  let row: Awaited<ReturnType<typeof loadCcrBlock>>;
   try {
-    row = loadCcrBlock(principalId, hash, now);
+    row = await loadCcrBlock(principalId, hash, now);
   } catch (error) {
     warnDurableError("load", error);
     return null;
@@ -302,7 +312,7 @@ function rehydrateEntry(hash: string, principalId: string, now: number): CcrEntr
   }
 
   try {
-    touchCcrBlock(entry.principalId, hash, now);
+    await touchCcrBlock(entry.principalId, hash, now);
   } catch (error) {
     warnDurableError("touch", error);
   }
@@ -528,13 +538,17 @@ export function storeBlock(
  * Retrieve the verbatim block for a given hash and principal.
  * Returns null if not found or if the principal does not match the stored key.
  */
-export function retrieveBlock(hash: string, principalId?: string, now = Date.now()): string | null {
+export async function retrieveBlock(
+  hash: string,
+  principalId?: string,
+  now = Date.now()
+): Promise<string | null> {
   const key = buildStoreKey(hash, principalId);
   const entry = getActiveEntry(key, now);
   if (!entry) {
     // Miss in the hot cache is not proof the block is gone (#9061): LRU eviction, the TTL
     // sweep, a restart, or another instance all land here while the row is still on disk.
-    const restored = rehydrateEntry(hash, principalId ?? ANON, now);
+    const restored = await rehydrateEntry(hash, principalId ?? ANON, now);
     return restored ? restored.content : null;
   }
   entry.lastAccessedAt = now;
@@ -606,7 +620,7 @@ export function resetCcrStore(): void {
 
 /** Resolves once the deferred durable writes queued so far have run. */
 export function flushCcrDurableWrites(): Promise<void> {
-  return new Promise((resolve) => setImmediate(resolve));
+  return durableTail;
 }
 
 export function inspectCcrBlock(
@@ -680,15 +694,15 @@ export function getCcrStoreStats(principalId?: string, now = Date.now()): CcrSto
  *
  * Returns the verbatim block for the given hash, or an error object.
  */
-export function handleCcrRetrieve(
+export async function handleCcrRetrieve(
   args: { hash: string } & CcrQuery,
   callerId?: string
-): { content: string } | { error: string } {
+): Promise<{ content: string } | { error: string }> {
   if (!args.hash || typeof args.hash !== "string") {
     return { error: "hash parameter is required and must be a string" };
   }
 
-  const block = retrieveBlock(args.hash, callerId);
+  const block = await retrieveBlock(args.hash, callerId);
   if (block === null) {
     return {
       error: `CCR block not found for hash=${args.hash}. The block may have expired or the hash is invalid.`,

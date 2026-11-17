@@ -3,7 +3,12 @@ import { homedir } from "os";
 import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import type { SqliteAdapter } from "@/lib/db/adapters/types";
+
+/** The slice of a better-sqlite3 handle this module uses on Cursor's own state.vscdb. */
+interface CursorStateDb {
+  prepare(sql: string): { all(...params: unknown[]): unknown[] };
+  close(): void;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -310,26 +315,29 @@ export async function tryIdeAuth(options?: { timeoutMs?: number }): Promise<{
     dbPath = candidates[0];
   }
 
-  let db: SqliteAdapter | null;
+  // Cursor's own state.vscdb is a SQLite file of another tool, not OmniRoute's database,
+  // so it is opened with better-sqlite3 directly.
+  let Database: typeof import("better-sqlite3");
   try {
-    const { tryOpenSync } = await import("@/lib/db/adapters/driverFactory");
-    // Bounded busy-timeout: tryIdeAuth() is now also called from an unattended
-    // sweep tick (src/lib/cursor/renewal.ts::renewCursorConnection()) on every
-    // near-expiry cycle, not just the explicit auto-import modal action, so a
-    // WAL-lock collision with a running Cursor IDE needs a retry window on
-    // every driver path (see driverFactory.ts::toNodeSqliteOptions()). The
-    // sweep path overrides `timeoutMs` to a much shorter value (see the
-    // options.timeoutMs doc comment above).
-    db = tryOpenSync(dbPath, { readonly: true, fileMustExist: true, timeout: timeoutMs });
-    if (!db) {
-      if (platform === "darwin") {
-        return {
-          found: false,
-          error: `Found Cursor database at ${dbPath} but could not open it (driver unavailable)`,
-        };
-      }
-      return { found: false, error: "Cursor IDE database driver unavailable" };
+    Database = (await import("better-sqlite3")).default;
+  } catch {
+    if (platform === "darwin") {
+      return {
+        found: false,
+        error: `Found Cursor database at ${dbPath} but could not open it (driver unavailable)`,
+      };
     }
+    return { found: false, error: "Cursor IDE database driver unavailable" };
+  }
+
+  let db: CursorStateDb;
+  try {
+    // Bounded busy-timeout: tryIdeAuth() is also called from an unattended sweep tick
+    // (src/lib/cursor/renewal.ts::renewCursorConnection()) on every near-expiry cycle,
+    // not just the explicit auto-import modal action, so a WAL-lock collision with a
+    // running Cursor IDE needs a retry window. The sweep path overrides `timeoutMs` to a
+    // much shorter value (see the options.timeoutMs doc comment above).
+    db = new Database(dbPath, { readonly: true, fileMustExist: true, timeout: timeoutMs });
   } catch (error) {
     if (platform === "darwin") {
       const message = error instanceof Error ? error.message : String(error);
@@ -378,7 +386,7 @@ export async function tryIdeAuth(options?: { timeoutMs?: number }): Promise<{
       source: "cursor-ide",
     };
   } catch (error) {
-    db?.close();
+    db.close();
     console.error("Failed to read Cursor IDE database:", error);
     return { found: false, error: "Failed to read database" };
   }

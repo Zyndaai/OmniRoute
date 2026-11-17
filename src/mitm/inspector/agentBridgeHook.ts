@@ -56,7 +56,7 @@ export async function recordRequestStart(
   // If the host resolves as a custom-host entry, source="custom-host" and
   // agent is left undefined so the "Custom" profile filter matches correctly.
   const host = opts.req.headers.host ?? "";
-  const customHost = isCustomHost(host);
+  const customHost = await isCustomHost(host);
 
   const intercepted: InterceptedRequest = {
     id: randomUUID(),

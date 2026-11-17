@@ -484,7 +484,7 @@ export async function isPinnedTargetModelScopedUnusable(args: {
     process.env.OMNIROUTE_QUOTA_AWARE_ROUTING === "1" &&
     provider &&
     connectionId &&
-    !canAffordRequest(connectionId, target.modelStr, body).affordable
+    !(await canAffordRequest(connectionId, target.modelStr, body)).affordable
   ) {
     return true;
   }

@@ -295,9 +295,9 @@ export async function executeTargetAttempt(
       deps.relayOptions?.sessionId &&
       !(deps.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
     ) {
-      const lastModel = getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
+      const lastModel = await getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
       if (lastModel && lastModel !== modelStr) {
-        const existingHandoff = getHandoff(deps.relayOptions.sessionId, deps.combo.name);
+        const existingHandoff = await getHandoff(deps.relayOptions.sessionId, deps.combo.name);
         attemptBody = injectUniversalHandoffBody(
           attemptBody, // Use the cloned body to maintain isolation
           lastModel,
@@ -316,9 +316,13 @@ export async function executeTargetAttempt(
     {
       const bodyRecord = attemptBody as Record<string, unknown>;
       const currentMaxTokens = toPositiveInteger(bodyRecord.max_tokens);
-      const bufferedMaxTokens = resolveReasoningBufferedMaxTokens(modelStr, bodyRecord.max_tokens, {
-        enabled: deps.reasoningTokenBufferEnabled !== false,
-      });
+      const bufferedMaxTokens = await resolveReasoningBufferedMaxTokens(
+        modelStr,
+        bodyRecord.max_tokens,
+        {
+          enabled: deps.reasoningTokenBufferEnabled !== false,
+        }
+      );
       if (currentMaxTokens !== null && bufferedMaxTokens !== null) {
         bodyRecord.max_tokens = bufferedMaxTokens;
         if (bufferedMaxTokens !== currentMaxTokens) {
@@ -618,7 +622,7 @@ export async function executeTargetAttempt(
         deps.effectiveSessionId &&
         !(deps.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
       ) {
-        recordSessionModelUsage(
+        await recordSessionModelUsage(
           deps.effectiveSessionId,
           deps.combo.name,
           modelStr,
@@ -633,8 +637,8 @@ export async function executeTargetAttempt(
         deps.relayOptions?.sessionId &&
         !(deps.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
       ) {
-        const prevModel = getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
-        recordSessionModelUsage(
+        const prevModel = await getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
+        await recordSessionModelUsage(
           deps.relayOptions.sessionId,
           deps.combo.name,
           modelStr,
@@ -667,7 +671,7 @@ export async function executeTargetAttempt(
           });
         }
 
-        recordSessionModelUsage(
+        await recordSessionModelUsage(
           deps.relayOptions.sessionId,
           deps.combo.name,
           modelStr,
@@ -721,7 +725,7 @@ export async function executeTargetAttempt(
         recordStickyBinding(deps.sticky.messageHash, target.connectionId); // LKGP (#919):
       if (provider) {
         const connId = effectiveConnectionId || undefined;
-        recordLkgpPin({
+        void recordLkgpPin({
           comboName: deps.combo.name,
           executionKey: target.executionKey,
           comboId: deps.combo.id,

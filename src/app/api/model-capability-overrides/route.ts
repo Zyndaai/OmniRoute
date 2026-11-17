@@ -59,8 +59,8 @@ async function listPublicOverrides(
   eligibleNodeIds: Set<string>,
   compatibleNodeIds: Set<string>
 ): Promise<PublicOverride[]> {
-  const capabilityOverrides = listModelCapabilityOverrides() as PublicOverride[];
-  const contextOverrides = listModelContextOverrides().map((override): PublicOverride => ({
+  const capabilityOverrides = (await listModelCapabilityOverrides()) as PublicOverride[];
+  const contextOverrides = (await listModelContextOverrides()).map((override): PublicOverride => ({
     provider: override.provider,
     modelId: override.modelId,
     target: `${override.provider}/${override.modelId}`,
@@ -209,8 +209,8 @@ export async function PATCH(request: Request) {
   const targetParts = canonical.target.split(/\/(.*)/s);
   const written =
     parsed.data.key === "context_length"
-      ? setModelContextOverride(targetParts[0], targetParts[1], parsed.data.value, "manual")
-      : setModelCapabilityOverride(
+      ? await setModelContextOverride(targetParts[0], targetParts[1], parsed.data.value, "manual")
+      : await setModelCapabilityOverride(
           canonical.target,
           parsed.data.key as ModelCapabilityOverrideKey,
           parsed.data.value
@@ -251,9 +251,9 @@ export async function DELETE(request: Request) {
 
   if (parsedKey.data === "context_length") {
     const targetParts = canonical.target.split(/\/(.*)/s);
-    removeModelContextOverride(targetParts[0], targetParts[1]);
+    await removeModelContextOverride(targetParts[0], targetParts[1]);
   } else {
-    removeModelCapabilityOverride(canonical.target, parsedKey.data as ModelCapabilityOverrideKey);
+    await removeModelCapabilityOverride(canonical.target, parsedKey.data as ModelCapabilityOverrideKey);
   }
   return NextResponse.json({
     overrides: await listPublicOverrides(nodeToPrefix, eligibleNodeIds, compatibleNodeIds),

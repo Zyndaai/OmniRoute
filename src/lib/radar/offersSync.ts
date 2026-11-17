@@ -37,9 +37,9 @@ export interface OffersSyncDeps {
   fetch?: typeof globalThis.fetch;
   now?: () => Date;
   getFlag?: (key: string) => boolean;
-  getSettings?: () => RadarSettingsSnapshot;
-  getCache?: () => RadarOffersCacheEntry | null;
-  setCache?: (entry: RadarOffersCacheEntry) => void;
+  getSettings?: () => RadarSettingsSnapshot | Promise<RadarSettingsSnapshot>;
+  getCache?: () => RadarOffersCacheEntry | null | Promise<RadarOffersCacheEntry | null>;
+  setCache?: (entry: RadarOffersCacheEntry) => void | Promise<unknown>;
 }
 
 export async function syncRadarOffers(deps: OffersSyncDeps = {}): Promise<OffersSyncStatus> {
@@ -56,8 +56,8 @@ export async function syncRadarOffers(deps: OffersSyncDeps = {}): Promise<Offers
     if (!getFlag("RADAR_ENABLED")) return { status: "disabled" };
 
     const settings = getSettingsFn
-      ? getSettingsFn()
-      : (await import("@/lib/db/radar")).getRadarSettings();
+      ? await getSettingsFn()
+      : await (await import("@/lib/db/radar")).getRadarSettings();
     if (!settings.optIn) return { status: "opt_out" };
     if (!settings.supporterKey) return { status: "no_key" };
 
@@ -92,8 +92,8 @@ export async function syncRadarOffers(deps: OffersSyncDeps = {}): Promise<Offers
     }
 
     const existing = getCacheFn
-      ? getCacheFn()
-      : (await import("@/lib/db/radar")).getRadarOffersCache();
+      ? await getCacheFn()
+      : await (await import("@/lib/db/radar")).getRadarOffersCache();
     if (existing && compareVersions(feed.version, existing.version) <= 0) {
       return { status: "stale" };
     }
@@ -106,9 +106,9 @@ export async function syncRadarOffers(deps: OffersSyncDeps = {}): Promise<Offers
       fetchedAt: now().toISOString(),
     };
     if (setCacheFn) {
-      setCacheFn(cacheEntry);
+      await setCacheFn(cacheEntry);
     } else {
-      (await import("@/lib/db/radar")).setRadarOffersCache(cacheEntry);
+      await (await import("@/lib/db/radar")).setRadarOffersCache(cacheEntry);
     }
 
     return { status: "updated", version: feed.version };

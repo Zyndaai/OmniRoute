@@ -21,8 +21,8 @@
  */
 import { randomUUID } from "crypto";
 import fs from "node:fs";
-import { getDbInstance } from "../db/core";
-import { backupDbFile } from "../db/backup";
+import { db, jsonb, type DbExecutor } from "@/lib/db/pg";
+import { stripNul, stripNulDeep } from "@/lib/db/proxies/sanitize";
 import { encrypt } from "../db/encryption";
 import { clearCoreReloadState, resolveRecordReloadMode } from "./coreConfig/reload";
 import {
@@ -53,7 +53,6 @@ import { redactedNodeSummary, type ParsedSubscription } from "./parse";
 import { coerceMirrorUrls, parseMirrorUrls, restoreRedactedMirrors } from "./mirrorUrls";
 import { insertSubscriptionRow, updateSubscriptionRow } from "./subscriptionRows";
 import { fetchSubscriptionFeeds, type SubscriptionFeed } from "./multiSource";
-import { subscriptionColumns } from "./subscriptionColumns";
 import { upsertUnionPool } from "./unionPool";
 
 export type ProxySubscriptionMode = "global" | "rule";
@@ -130,6 +129,9 @@ export interface SyncResult {
 
 const SUBSCRIPTION_FETCH_TIMEOUT_MS = 15_000;
 
+const SUBSCRIPTION_COLUMNS =
+  "id, name, url, mirror_urls, enabled, mode, rule_providers, local_core_endpoint, update_interval_minutes, control_url, core_config_path, control_secret_enc, selector_min_gap_seconds, selector_last_switch_at, selector_last_switch_result, selector_last_switch_member, selector_last_switch_kind, selector_last_switch_by_selector, last_fetched_at, status, error, last_nodes, last_error_at, consecutive_failures, created_at, updated_at";
+
 // ───────────────────────────── Row mapping ─────────────────────────────
 
 function readSelectorBase(r: Record<string, unknown>): {
@@ -165,9 +167,10 @@ function asSelectorLastSwitchEntry(tag: string, entry: unknown): SelectorLastSwi
 export function parseSelectorLastSwitchBySelector(
   value: unknown
 ): Record<string, SelectorLastSwitchEntry> | null {
-  if (typeof value !== "string" || !value.trim()) return null;
+  // jsonb arrives parsed; a legacy JSON string is still accepted.
+  if (typeof value === "string" && !value.trim()) return null;
   try {
-    const parsed: unknown = JSON.parse(value);
+    const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const out: Record<string, SelectorLastSwitchEntry> = {};
     for (const [tag, entry] of Object.entries(parsed as Record<string, unknown>)) {
@@ -226,16 +229,9 @@ function readControlMeta(r: Record<string, unknown>): {
 
 function mapSubscriptionRow(row: unknown): ProxySubscriptionRecord {
   const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
-  const parseList = (v: unknown): string[] | null => {
-    if (typeof v !== "string" || !v.trim()) return null;
-    try {
-      const arr = JSON.parse(v);
-      return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : null;
-    } catch {
-      return null;
-    }
-  };
-  const parseNodes = (v: unknown): unknown[] | null => {
+  // jsonb arrives parsed; a legacy JSON string is still accepted.
+  const asArray = (v: unknown): unknown[] | null => {
+    if (Array.isArray(v)) return v;
     if (typeof v !== "string" || !v.trim()) return null;
     try {
       const arr = JSON.parse(v);
@@ -244,6 +240,11 @@ function mapSubscriptionRow(row: unknown): ProxySubscriptionRecord {
       return null;
     }
   };
+  const parseList = (v: unknown): string[] | null => {
+    const arr = asArray(v);
+    return arr ? arr.filter((x): x is string => typeof x === "string") : null;
+  };
+  const parseNodes = (v: unknown): unknown[] | null => asArray(v);
   return {
     ...readSelectorBase(r),
     ...readControlMeta(r),
@@ -267,20 +268,17 @@ function mapSubscriptionRow(row: unknown): ProxySubscriptionRecord {
 // ───────────────────────────── CRUD ─────────────────────────────
 
 export async function listSubscriptions(): Promise<ProxySubscriptionRecord[]> {
-  const db = getDbInstance();
-  const columns = subscriptionColumns(db);
-  const rows = db
-    .prepare(
-      `SELECT ${columns} FROM proxy_subscriptions ORDER BY datetime(updated_at) DESC, name ASC`
-    )
-    .all();
+  const rows = await db().query(
+    `SELECT ${SUBSCRIPTION_COLUMNS} FROM proxy_subscriptions ORDER BY updated_at DESC, name ASC`
+  );
   return rows.map(mapSubscriptionRow);
 }
 
 export async function getSubscriptionById(id: string): Promise<ProxySubscriptionRecord | null> {
-  const db = getDbInstance();
-  const columns = subscriptionColumns(db);
-  const row = db.prepare(`SELECT ${columns} FROM proxy_subscriptions WHERE id = ?`).get(id);
+  const row = await db().queryOne(
+    `SELECT ${SUBSCRIPTION_COLUMNS} FROM proxy_subscriptions WHERE id = $1`,
+    [id]
+  );
   return row ? mapSubscriptionRow(row) : null;
 }
 
@@ -289,14 +287,13 @@ export async function createSubscription(
 ): Promise<ProxySubscriptionRecord> {
   const id = randomUUID();
   const now = new Date().toISOString();
-  const enabled = payload.enabled === true ? 1 : 0;
-  const db = getDbInstance();
+  const enabled = payload.enabled === true;
   const controlUrl = payload.controlUrl ?? null;
   throwIfFeedlessWithoutControl(payload.url, controlUrl);
   const coreConfigPath = payload.coreConfigPath ?? null;
   const controlSecretEnc = encryptSecretField(payload.controlSecret) ?? null;
   const gapSeconds = clampSelectorGapSeconds(payload.selectorMinGapSeconds ?? 60);
-  insertSubscriptionRow(db, {
+  await insertSubscriptionRow(db(), {
     id,
     name: payload.name,
     url: payload.url,
@@ -338,8 +335,8 @@ function encryptSecretField(secret: string | null | undefined): string | null | 
   return secret != null && secret.length > 0 ? ((encrypt(secret) ?? null) as string | null) : null;
 }
 
-function persistSubscriptionRow(
-  db: Parameters<typeof updateSubscriptionRow>[0],
+async function persistSubscriptionRow(
+  executor: DbExecutor,
   args: {
     id: string;
     existing: ProxySubscriptionRecord;
@@ -348,10 +345,9 @@ function persistSubscriptionRow(
     gapSeconds: number;
     now: string;
   }
-): void {
+): Promise<void> {
   const { existing, payload } = args;
-  const enabled =
-    payload.enabled !== undefined ? (payload.enabled ? 1 : 0) : existing.enabled ? 1 : 0;
+  const enabled = payload.enabled !== undefined ? payload.enabled : existing.enabled;
   // The SET lists ONLY the columns this writer owns plus the three
   // selector-control columns, the opt-in core-config path and the opt-in
   // mirror feed list — every other column is untouched (byte-identical off
@@ -359,7 +355,7 @@ function persistSubscriptionRow(
   // control_secret_enc when present (encrypt at rest); absent leaves it.
   // Mirrors coerce against the effective primary URL; absent leaves them.
   const nextUrl = payload.url ?? existing.url;
-  updateSubscriptionRow(db, {
+  await updateSubscriptionRow(executor, {
     id: args.id,
     name: payload.name ?? existing.name,
     url: nextUrl,
@@ -422,12 +418,11 @@ export async function updateSubscription(
 ): Promise<ProxySubscriptionRecord | null> {
   const existing = await getSubscriptionById(id);
   if (!existing) return null;
-  const db = getDbInstance();
   const { controlUrl, gapSeconds } = readControlFields(payload, existing);
   const now = new Date().toISOString();
   throwIfFeedlessUpdate(payload, existing);
   const enabledChanged = payload.enabled !== undefined && payload.enabled !== existing.enabled;
-  persistSubscriptionRow(db, {
+  await persistSubscriptionRow(db(), {
     id,
     existing,
     payload,
@@ -453,13 +448,14 @@ export async function setSubscriptionEnabled(
 export async function deleteSubscription(id: string): Promise<boolean> {
   await unapplySubscription(id);
   // Remove subscription-sourced proxy rows (force-clears their assignments).
-  const db = getDbInstance();
-  const doomed = db
-    .prepare("SELECT core_config_path FROM proxy_subscriptions WHERE id = ?")
-    .get(id) as { core_config_path?: unknown } | undefined;
-  const rows = db
-    .prepare("SELECT id, source FROM proxy_registry WHERE subscription_id = ?")
-    .all(id) as Array<{ id: string; source: string }>;
+  const doomed = await db().queryOne<{ core_config_path?: unknown }>(
+    "SELECT core_config_path FROM proxy_subscriptions WHERE id = $1",
+    [id]
+  );
+  const rows = await db().query<{ id: string; source: string }>(
+    "SELECT id, source FROM proxy_registry WHERE subscription_id = $1",
+    [id]
+  );
   for (const r of rows) {
     try {
       await detachOrDeleteSubscriptionRow(r);
@@ -468,7 +464,7 @@ export async function deleteSubscription(id: string): Promise<boolean> {
     }
   }
   clearCoreReloadState(id);
-  const res = db.prepare("DELETE FROM proxy_subscriptions WHERE id = ?").run(id);
+  const res = await db().execute("DELETE FROM proxy_subscriptions WHERE id = $1", [id]);
   // Best-effort: remove the side files this subscription owned. A missing
   // or locked file must not fail the delete (row already gone).
   if (typeof doomed?.core_config_path === "string") {
@@ -631,13 +627,11 @@ interface UnionWrites {
 }
 
 // The upsert loop + stale-removal are the multi-write section. upsertProxy /
-// deleteProxyById each run their own internal db.transaction, so each write
-// is atomic, and a re-sync is idempotent (self-heals partial state). A single
-// outer db.transaction around `await` calls would NOT be atomic under
-// better-sqlite3, so instead we guard against an unexpected DB error so a
-// half-completed sync can never be left flagged "ok".
+// deleteProxyById each run their own transaction, so each write is atomic, and
+// a re-sync is idempotent (self-heals partial state). We guard against an
+// unexpected DB error so a half-completed sync can never be left flagged "ok".
 async function syncUnionWrites(
-  db: ReturnType<typeof getDbInstance>,
+  executor: DbExecutor,
   id: string,
   sub: ProxySubscriptionRecord,
   parsed: ParsedSubscription,
@@ -657,7 +651,7 @@ async function syncUnionWrites(
     // unavailable feeds keep their last nodes until every feed answers again,
     // so a mirror that drops out for one cycle doesn't churn its rows.
     if (sub.enabled && !partial) {
-      await removeStaleSubscriptionNodes(db, id, outcome.keptIds);
+      await removeStaleSubscriptionNodes(executor, id, outcome.keptIds);
     } else if (sub.enabled) {
       console.warn(`[ProxySubscription] stale removal deferred for ${id}: some feeds unavailable`);
     }
@@ -734,7 +728,7 @@ async function syncSubscriptionUnsafe(id: string): Promise<SyncResult> {
     format: healthy[0].parsed.format,
   };
   const outcome = await syncUnionWrites(
-    getDbInstance(),
+    db(),
     id,
     sub,
     parsed,
@@ -763,7 +757,7 @@ async function syncSubscriptionUnsafe(id: string): Promise<SyncResult> {
   // rides on `status = "ok"` with an `error` code. Rows with no bound pool
   // (`keptIds` empty) resolve to a sync error below; the switch columns still
   // feed the UI, and the standing warning is preserved through it.
-  const switchWarning = readStaleSwitchWarning(id);
+  const switchWarning = await readStaleSwitchWarning(id);
   if (!warning && switchWarning) warning = switchWarning;
 
   // Determine status. A standing switch warning never flips the status:
@@ -867,13 +861,13 @@ export async function syncSubscription(id: string): Promise<SyncResult> {
 /** Read the standing switch-failure warning for a subscription, if any.
  * Returns a `SELECTOR_SWITCH_FAILED` error code while the last recorded
  * switch result is a failure, null otherwise (no record, or last was "ok").
- * Never throws (missing columns on old DBs → null). */
-export function readStaleSwitchWarning(subscriptionId: string): string | null {
+ * Never throws (a read failure → null). */
+export async function readStaleSwitchWarning(subscriptionId: string): Promise<string | null> {
   try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT selector_last_switch_result FROM proxy_subscriptions WHERE id = ?")
-      .get(subscriptionId) as { selector_last_switch_result?: unknown } | undefined;
+    const row = await db().queryOne<{ selector_last_switch_result?: unknown }>(
+      "SELECT selector_last_switch_result FROM proxy_subscriptions WHERE id = $1",
+      [subscriptionId]
+    );
     const result =
       typeof row?.selector_last_switch_result === "string" ? row.selector_last_switch_result : null;
     if (!result || result === "ok" || result === "throttled") return null;
@@ -918,57 +912,58 @@ export async function recordSelectorSwitchOutcome(args: {
   kind?: string | null;
 }): Promise<void> {
   try {
-    const db = getDbInstance();
     const now = new Date().toISOString();
-    // Merge the per-selector entry into the stored map, bounded to the
-    // subscription's current line tags: a tag removed from the lines drops
-    // out on the next write, so the map never grows past the declared lines.
-    let merged: string | null = null;
-    try {
-      const current = db
-        .prepare(
-          "SELECT selector_last_switch_by_selector, local_core_endpoint FROM proxy_subscriptions WHERE id = ?"
-        )
-        .get(args.subscriptionId) as
-        { selector_last_switch_by_selector?: unknown; local_core_endpoint?: unknown } | undefined;
-      if (current) {
-        const stored = parseSelectorLastSwitchBySelector(current.selector_last_switch_by_selector);
-        const tags = new Set(
-          selectorTagsForEndpoint(
-            typeof current.local_core_endpoint === "string" ? current.local_core_endpoint : null
-          )
+    // One transaction with a row lock: the per-selector map is a whole-document
+    // read-modify-write, so concurrent outcomes for two selectors of the same
+    // subscription must not lose each other's entry.
+    await db().transaction(async (tx) => {
+      // Merge the per-selector entry into the stored map, bounded to the
+      // subscription's current line tags: a tag removed from the lines drops
+      // out on the next write, so the map never grows past the declared lines.
+      let merged: string | null = null;
+      try {
+        const current = await tx.queryOne<{
+          selector_last_switch_by_selector?: unknown;
+          local_core_endpoint?: unknown;
+        }>(
+          "SELECT selector_last_switch_by_selector, local_core_endpoint FROM proxy_subscriptions WHERE id = $1 FOR UPDATE",
+          [args.subscriptionId]
         );
-        tags.add(args.selector);
-        merged = mergeSelectorSwitchEntry(stored, tags, args.selector, {
-          at: now,
-          result: args.result,
-          member: args.member ?? null,
-          kind: args.kind ?? null,
-        });
+        if (current) {
+          const stored = parseSelectorLastSwitchBySelector(
+            current.selector_last_switch_by_selector
+          );
+          const tags = new Set(
+            selectorTagsForEndpoint(
+              typeof current.local_core_endpoint === "string" ? current.local_core_endpoint : null
+            )
+          );
+          tags.add(args.selector);
+          merged = mergeSelectorSwitchEntry(stored, tags, args.selector, {
+            at: now,
+            result: args.result,
+            member: args.member ?? null,
+            kind: args.kind ?? null,
+          });
+        }
+      } catch {
+        merged = null;
       }
-    } catch {
-      merged = null;
-    }
-    db.prepare(
-      `UPDATE proxy_subscriptions
-          SET selector_last_switch_at = ?, selector_last_switch_result = ?,
-              selector_last_switch_member = ?, selector_last_switch_kind = ?,
-              selector_last_switch_by_selector = ?, updated_at = ?
-        WHERE id = ?`
-    ).run(
-      now,
-      args.result,
-      args.member ?? null,
-      args.kind ?? null,
-      merged,
-      now,
-      args.subscriptionId
-    );
-    if (args.result !== "ok" && args.result !== "throttled") {
-      db.prepare(
-        `UPDATE proxy_subscriptions SET error = ?, updated_at = ? WHERE id = ? AND status = 'ok'`
-      ).run(subscriptionErrorCode("SELECTOR_SWITCH_FAILED", args.result), now, args.subscriptionId);
-    }
+      await tx.execute(
+        `UPDATE proxy_subscriptions
+            SET selector_last_switch_at = $1, selector_last_switch_result = $2,
+                selector_last_switch_member = $3, selector_last_switch_kind = $4,
+                selector_last_switch_by_selector = $5::jsonb, updated_at = $1
+          WHERE id = $6`,
+        [now, args.result, args.member ?? null, args.kind ?? null, merged, args.subscriptionId]
+      );
+      if (args.result !== "ok" && args.result !== "throttled") {
+        await tx.execute(
+          `UPDATE proxy_subscriptions SET error = $1, updated_at = $2 WHERE id = $3 AND status = 'ok'`,
+          [subscriptionErrorCode("SELECTOR_SWITCH_FAILED", args.result), now, args.subscriptionId]
+        );
+      }
+    });
   } catch {
     // best-effort: the switch outcome must never break the request path
   }
@@ -982,19 +977,10 @@ async function updateSubscriptionStatus(
   lastErrorAt: string | null,
   consecutiveFailures: number
 ): Promise<void> {
-  const db = getDbInstance();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE proxy_subscriptions SET status = ?, error = ?, last_nodes = ?, last_fetched_at = ?, last_error_at = ?, consecutive_failures = ?, updated_at = ? WHERE id = ?`
-  ).run(
-    status,
-    error,
-    lastNodes ? JSON.stringify(lastNodes) : null,
-    now,
-    lastErrorAt,
-    consecutiveFailures,
-    now,
-    id
+  await db().execute(
+    `UPDATE proxy_subscriptions SET status = $1, error = $2, last_nodes = $3::jsonb, last_fetched_at = $4, last_error_at = $5, consecutive_failures = $6, updated_at = $4 WHERE id = $7`,
+    [status, stripNul(error), jsonb(stripNulDeep(lastNodes)), now, lastErrorAt, consecutiveFailures, id]
   );
 }
 
@@ -1003,10 +989,10 @@ export async function applySubscription(id: string): Promise<void> {
   const sub = await getSubscriptionById(id);
   if (!sub || !sub.enabled) return;
 
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ? AND status != 'error'")
-    .all(id) as Array<{ id: string }>;
+  const rows = await db().query<{ id: string }>(
+    "SELECT id FROM proxy_registry WHERE subscription_id = $1 AND status != 'error'",
+    [id]
+  );
   const ids = rows.map((r) => r.id);
   if (ids.length === 0) return;
 
@@ -1022,26 +1008,18 @@ export async function applySubscription(id: string): Promise<void> {
 
 /** Remove the subscription's proxies from their bound scope(s). */
 export async function unapplySubscription(id: string): Promise<void> {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT id FROM proxy_registry WHERE subscription_id = ? AND source = 'subscription'")
-    .all(id) as Array<{ id: string }>;
-
   // Detach every subscription proxy from ALL scopes in one batched delete.
   // Replaces the previous per-proxy getProxyWhereUsed + removeProxyFromScopePool
   // loop (N+1 queries) — the subscription's proxies must leave every pool they
   // were added to, regardless of which scope resolved them.
-  const ids = rows.map((r) => r.id);
-  if (ids.length > 0) {
-    const placeholders = ids.map(() => "?").join(",");
-    const res = db
-      .prepare(`DELETE FROM proxy_assignments WHERE proxy_id IN (${placeholders})`)
-      .run(...ids);
-    if (res.changes > 0) {
-      backupDbFile("pre-write");
-      bumpProxyRegistryGeneration();
-    }
-  }
+  const res = await db().execute(
+    `DELETE FROM proxy_assignments
+      WHERE proxy_id IN (
+        SELECT id FROM proxy_registry WHERE subscription_id = $1 AND source = 'subscription'
+      )`,
+    [id]
+  );
+  if (res.changes > 0) bumpProxyRegistryGeneration();
 
   await recomputeProxyEnabled();
 }
@@ -1049,41 +1027,37 @@ export async function unapplySubscription(id: string): Promise<void> {
 // ───────────────────────────── proxyEnabled flag ─────────────────────────────
 
 async function hasNonSubscriptionGlobalProxy(): Promise<boolean> {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      "SELECT 1 FROM proxy_assignments a JOIN proxy_registry p ON p.id = a.proxy_id WHERE a.scope = 'global' AND (p.subscription_id IS NULL OR p.subscription_id = '') LIMIT 1"
-    )
-    .get();
+  const row = await db().queryOne(
+    "SELECT 1 FROM proxy_assignments a JOIN proxy_registry p ON p.id = a.proxy_id WHERE a.scope = 'global' AND (p.subscription_id IS NULL OR p.subscription_id = '') LIMIT 1"
+  );
   return !!row;
 }
 
 async function recomputeProxyEnabled(): Promise<void> {
-  const db = getDbInstance();
   // Must check for an ACTUALLY BOUND subscription proxy, not just an enabled
   // subscription row: unapplySubscription() detaches proxy_assignments without
   // touching `enabled`, so a bare `enabled = 1` check would leave the flag
   // permanently stuck on `true` after an unapply/disable cycle even though
   // nothing is bound anymore (resolveProxyForConnectionFromRegistry correctly
   // returns null, but the operator-facing proxyEnabled flag would lie).
-  const enabledSubWithBoundProxy = db
-    .prepare(
-      `SELECT 1 FROM proxy_subscriptions s
-       JOIN proxy_registry p ON p.subscription_id = s.id
-       JOIN proxy_assignments a ON a.proxy_id = p.id
-       WHERE s.enabled = 1
-       LIMIT 1`
-    )
-    .get();
+  const enabledSubWithBoundProxy = await db().queryOne(
+    `SELECT 1 FROM proxy_subscriptions s
+     JOIN proxy_registry p ON p.subscription_id = s.id
+     JOIN proxy_assignments a ON a.proxy_id = p.id
+     WHERE s.enabled = true
+     LIMIT 1`
+  );
   const shouldEnable = !!enabledSubWithBoundProxy || (await hasNonSubscriptionGlobalProxy());
   await setProxyEnabledFlag(shouldEnable);
 }
 
 async function setProxyEnabledFlag(value: boolean): Promise<void> {
-  const db = getDbInstance();
-  db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES ('settings', 'proxyEnabled', ?)"
-  ).run(JSON.stringify(value));
+  await db().execute(
+    `INSERT INTO config_entries (namespace, key, value, updated_at)
+     VALUES ('settings', 'proxyEnabled', $1::jsonb, now())
+     ON CONFLICT (namespace, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [JSON.stringify(value)]
+  );
   bumpProxyConfigGeneration();
 }
 

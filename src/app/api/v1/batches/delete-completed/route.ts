@@ -92,9 +92,9 @@ export async function DELETE(request: Request) {
     });
   }
 
-  let result: ReturnType<typeof deleteCompletedBatches>;
+  let result: Awaited<ReturnType<typeof deleteCompletedBatches>>;
   try {
-    result = deleteCompletedBatches(sweepScope);
+    result = await deleteCompletedBatches(sweepScope);
   } catch (err) {
     log.error("BATCHES", "delete-completed sweep failed", {
       route: LOG_ROUTE,

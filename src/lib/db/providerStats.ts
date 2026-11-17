@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 import { NOAUTH_PROVIDERS } from "@/shared/constants/providers";
 import { SEARCH_PROVIDERS } from "@omniroute/open-sse/config/searchRegistry.ts";
 
@@ -29,12 +29,12 @@ export const PROVIDER_STATS_MAX_WINDOW_DAYS = 365;
  * (`NOAUTH_PROVIDERS`) and search providers with `authType: "none"`
  * (`SEARCH_PROVIDERS`), which are served without credentials.
  */
-const KEYLESS_PROVIDER_IDS = JSON.stringify([
+const KEYLESS_PROVIDER_IDS: string[] = [
   ...Object.keys(NOAUTH_PROVIDERS),
   ...Object.values(SEARCH_PROVIDERS)
     .filter((provider) => provider.authType === "none")
     .map((provider) => provider.id),
-]);
+];
 
 /** ISO start of the lookback window ending at `now` (defaults to the current time). */
 export function buildProviderStatsSince(
@@ -67,58 +67,54 @@ export interface ModelCallStat {
  * Predicate shared by both aggregates: a provider is visible while it has a
  * live connection row, or is keyless (no connection row by construction).
  */
-const LIVE_PROVIDER_SQL = `c.provider IN (SELECT value FROM json_each(@keylessProviderIds))
+const LIVE_PROVIDER_SQL = `c.provider = ANY($2::text[])
      OR EXISTS (SELECT 1 FROM provider_connections pc WHERE pc.provider = c.provider)`;
 
 /**
  * Provider aggregate over the call_logs rows of the lookback window.
+ * Parameters: $1 = window start (timestamptz), $2 = keyless provider ids (text[]).
  * Exported so the query plan under test is the one the route serves.
  */
 export const PROVIDER_CALL_STATS_SQL = `SELECT
   c.provider,
-  pn.name AS nodeName,
-  COUNT(*) AS totalRequests,
-  SUM(CASE WHEN c.status >= 200 AND c.status < 400 THEN 1 ELSE 0 END) AS successfulRequests,
-  ROUND(AVG(c.duration)) AS avgLatencyMs,
-  SUM(c.tokens_in) AS totalTokensIn,
-  SUM(c.tokens_out) AS totalTokensOut
+  pn.name AS "nodeName",
+  COUNT(*) AS "totalRequests",
+  SUM(CASE WHEN c.status >= 200 AND c.status < 400 THEN 1 ELSE 0 END) AS "successfulRequests",
+  ROUND(AVG(c.duration)) AS "avgLatencyMs",
+  SUM(c.tokens_in) AS "totalTokensIn",
+  SUM(c.tokens_out) AS "totalTokensOut"
 FROM call_logs c
 LEFT JOIN provider_nodes pn ON pn.id = c.provider
 WHERE c.provider IS NOT NULL AND c.provider != '-'
-  AND c.timestamp >= @since
+  AND c."timestamp" >= $1::timestamptz
   AND (${LIVE_PROVIDER_SQL})
-GROUP BY c.provider
-ORDER BY totalRequests DESC`;
+GROUP BY c.provider, pn.name
+ORDER BY "totalRequests" DESC`;
 
 /**
  * Model aggregate over the call_logs rows of the lookback window.
+ * Parameters: $1 = window start (timestamptz), $2 = keyless provider ids (text[]).
  * Exported so the query plan under test is the one the route serves.
  */
 export const MODEL_CALL_STATS_SQL = `SELECT
   c.provider,
-  pn.name AS nodeName,
+  pn.name AS "nodeName",
   c.model,
   COUNT(*) AS requests,
-  ROUND(AVG(c.duration)) AS avgLatencyMs,
-  SUM(CASE WHEN c.status >= 200 AND c.status < 400 THEN 1 ELSE 0 END) AS successfulRequests
+  ROUND(AVG(c.duration)) AS "avgLatencyMs",
+  SUM(CASE WHEN c.status >= 200 AND c.status < 400 THEN 1 ELSE 0 END) AS "successfulRequests"
 FROM call_logs c
 LEFT JOIN provider_nodes pn ON pn.id = c.provider
 WHERE c.provider IS NOT NULL AND c.model IS NOT NULL
-  AND c.timestamp >= @since
+  AND c."timestamp" >= $1::timestamptz
   AND (${LIVE_PROVIDER_SQL})
-GROUP BY c.provider, c.model
+GROUP BY c.provider, pn.name, c.model
 ORDER BY c.provider, requests DESC`;
 
-export function getProviderCallStats(since: string): ProviderCallStat[] {
-  const db = getDbInstance();
-  return db
-    .prepare(PROVIDER_CALL_STATS_SQL)
-    .all({ since, keylessProviderIds: KEYLESS_PROVIDER_IDS }) as ProviderCallStat[];
+export async function getProviderCallStats(since: string): Promise<ProviderCallStat[]> {
+  return db().query<ProviderCallStat>(PROVIDER_CALL_STATS_SQL, [since, KEYLESS_PROVIDER_IDS]);
 }
 
-export function getModelCallStats(since: string): ModelCallStat[] {
-  const db = getDbInstance();
-  return db
-    .prepare(MODEL_CALL_STATS_SQL)
-    .all({ since, keylessProviderIds: KEYLESS_PROVIDER_IDS }) as ModelCallStat[];
+export async function getModelCallStats(since: string): Promise<ModelCallStat[]> {
+  return db().query<ModelCallStat>(MODEL_CALL_STATS_SQL, [since, KEYLESS_PROVIDER_IDS]);
 }

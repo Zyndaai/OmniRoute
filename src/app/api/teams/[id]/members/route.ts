@@ -18,9 +18,9 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   if (authError) return authError;
   try {
     const { id } = await params;
-    if (!getTeam(id))
+    if (!(await getTeam(id)))
       return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
-    return NextResponse.json({ members: listTeamMembers(id) });
+    return NextResponse.json({ members: await listTeamMembers(id) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list team members";
     return NextResponse.json(buildErrorBody(500, message), { status: 500 });
@@ -32,7 +32,7 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
   if (authError) return authError;
   try {
     const { id } = await params;
-    const team = getTeam(id);
+    const team = await getTeam(id);
     if (!team) return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     if (team.status === "archived") {
       return NextResponse.json(buildErrorBody(409, "Archived teams cannot accept API keys"), {
@@ -43,14 +43,14 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
     if (!parsed.success) {
       return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
-    const assignment = assignApiKeyBillingTeam(
+    const assignment = await assignApiKeyBillingTeam(
       parsed.data.apiKeyId,
       id,
       undefined,
       parsed.data.expectedTeamId
     );
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "team.key.assign",
       target: id,
       resourceType: "team",
@@ -75,21 +75,21 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
   if (authError) return authError;
   try {
     const { id } = await params;
-    if (!getTeam(id))
+    if (!(await getTeam(id)))
       return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const apiKeyId = new URL(request.url).searchParams.get("apiKeyId");
     const parsed = TeamMemberAssignmentSchema.safeParse({ apiKeyId });
     if (!parsed.success) {
       return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
-    const removed = unassignApiKeyBillingTeam(parsed.data.apiKeyId, undefined, id);
+    const removed = await unassignApiKeyBillingTeam(parsed.data.apiKeyId, undefined, id);
     if (!removed) {
       return NextResponse.json(buildErrorBody(404, "Active team assignment not found"), {
         status: 404,
       });
     }
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "team.key.unassign",
       target: id,
       resourceType: "team",

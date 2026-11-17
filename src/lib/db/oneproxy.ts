@@ -1,4 +1,4 @@
-import { getDbInstance } from "./core";
+import { db } from "@/lib/db/pg";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -41,7 +41,7 @@ function mapProxyRow(row: unknown): OneproxyProxyRecord {
     qualityScore: typeof r.quality_score === "number" ? r.quality_score : null,
     latencyMs: typeof r.latency_ms === "number" ? r.latency_ms : null,
     anonymity: typeof r.anonymity === "string" ? r.anonymity : null,
-    googleAccess: r.google_access === 1 || r.google_access === true,
+    googleAccess: r.google_access === true || r.google_access === 1,
     lastValidated: typeof r.last_validated === "string" ? r.last_validated : null,
     countryCode: typeof r.country_code === "string" ? r.country_code : null,
     createdAt: typeof r.created_at === "string" ? r.created_at : "",
@@ -55,31 +55,30 @@ export async function listOneproxyProxies(options?: {
   minQuality?: number;
   limit?: number;
 }): Promise<OneproxyProxyRecord[]> {
-  const db = getDbInstance();
-
   let sql = "SELECT * FROM proxy_registry WHERE source = 'oneproxy' AND status = 'active'";
   const params: unknown[] = [];
 
   if (options?.protocol) {
-    sql += " AND type = ?";
     params.push(options.protocol);
+    sql += ` AND type = $${params.length}`;
   }
   if (options?.countryCode) {
-    sql += " AND country_code = ?";
     params.push(options.countryCode);
+    sql += ` AND country_code = $${params.length}`;
   }
   if (options?.minQuality != null) {
-    sql += " AND quality_score >= ?";
     params.push(options.minQuality);
+    sql += ` AND quality_score >= $${params.length}`;
   }
 
-  sql += " ORDER BY quality_score DESC, last_validated DESC";
+  // NULLS LAST keeps the SQLite ordering (NULL sorted smallest).
+  sql += " ORDER BY quality_score DESC NULLS LAST, last_validated DESC NULLS LAST";
 
   if (options?.limit) {
-    sql += " LIMIT ?";
     params.push(options.limit);
+    sql += ` LIMIT $${params.length}`;
   }
 
-  const rows = db.prepare(sql).all(...params);
+  const rows = await db().query(sql, params);
   return rows.map(mapProxyRow);
 }

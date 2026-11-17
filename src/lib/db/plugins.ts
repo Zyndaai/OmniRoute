@@ -1,10 +1,13 @@
 /**
  * Plugin DB module — CRUD operations for the plugins table.
  *
+ * `enabled` is derived (`status = 'active'`); the JSON columns are jsonb but are
+ * returned as JSON text so `PluginRow` consumers keep parsing them as before.
+ *
  * @module db/plugins
  */
 
-import { getDbInstance } from "./core";
+import { db, jsonb } from "./pg";
 import { logger } from "../../../open-sse/utils/logger.ts";
 
 const log = logger("DB_PLUGINS");
@@ -22,7 +25,7 @@ export interface PluginRow {
   source: string;
   tags: string; // JSON array
   status: "installed" | "active" | "inactive" | "error";
-  enabled: number; // 0 | 1
+  enabled: number; // 0 | 1 (derived: status = 'active')
   manifest: string; // JSON
   config: string; // JSON
   configSchema: string; // JSON
@@ -46,6 +49,7 @@ export interface PluginCreateInput {
   source?: string;
   tags?: string[];
   status?: PluginRow["status"];
+  /** Ignored: `enabled` is derived from `status`. */
   enabled?: boolean;
   manifest: Record<string, unknown>;
   config?: Record<string, unknown>;
@@ -56,6 +60,13 @@ export interface PluginCreateInput {
 }
 
 // ── Helpers ──
+
+const PLUGIN_SELECT = `SELECT id, name, version, description, author, license, main, source,
+  tags::text AS tags, status, (status = 'active')::int AS enabled,
+  manifest::text AS manifest, config::text AS config, config_schema::text AS config_schema,
+  hooks::text AS hooks, permissions::text AS permissions, plugin_dir, error_message,
+  installed_at, updated_at, activated_at
+  FROM plugins`;
 
 function rowToPlugin(row: any): PluginRow {
   return {
@@ -69,7 +80,7 @@ function rowToPlugin(row: any): PluginRow {
     source: row.source,
     tags: row.tags,
     status: row.status,
-    enabled: row.enabled,
+    enabled: Number(row.enabled),
     manifest: row.manifest,
     config: row.config,
     configSchema: row.config_schema,
@@ -85,85 +96,80 @@ function rowToPlugin(row: any): PluginRow {
 
 // ── CRUD ──
 
-export function insertPlugin(input: PluginCreateInput): PluginRow {
-  const db = getDbInstance();
+export async function insertPlugin(input: PluginCreateInput): Promise<PluginRow> {
   const now = new Date().toISOString();
 
-  db.prepare(
+  await db().execute(
     `INSERT INTO plugins (
       id, name, version, description, author, license, main, source, tags,
-      status, enabled, manifest, config, config_schema, hooks, permissions,
+      status, manifest, config, config_schema, hooks, permissions,
       plugin_dir, installed_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    input.id,
-    input.name,
-    input.version,
-    input.description ?? null,
-    input.author ?? null,
-    input.license ?? "MIT",
-    input.main,
-    input.source ?? "local",
-    JSON.stringify(input.tags ?? []),
-    input.status ?? "installed",
-    input.enabled ? 1 : 0,
-    JSON.stringify(input.manifest),
-    JSON.stringify(input.config ?? {}),
-    JSON.stringify(input.configSchema ?? {}),
-    JSON.stringify(input.hooks ?? []),
-    JSON.stringify(input.permissions ?? []),
-    input.pluginDir,
-    now,
-    now
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, $12::jsonb,
+              $13::jsonb, $14::jsonb, $15::jsonb, $16, $17, $18)`,
+    [
+      input.id,
+      input.name,
+      input.version,
+      input.description ?? null,
+      input.author ?? null,
+      input.license ?? "MIT",
+      input.main,
+      input.source ?? "local",
+      jsonb(input.tags ?? []),
+      input.status ?? "installed",
+      jsonb(input.manifest),
+      jsonb(input.config ?? {}),
+      jsonb(input.configSchema ?? {}),
+      jsonb(input.hooks ?? []),
+      jsonb(input.permissions ?? []),
+      input.pluginDir,
+      now,
+      now,
+    ]
   );
 
   log.info("plugin.inserted", { id: input.id, name: input.name });
-  const plugin = getPluginByName(input.name);
+  const plugin = await getPluginByName(input.name);
   if (!plugin) {
     throw new Error(`Failed to retrieve plugin '${input.name}' after insertion`);
   }
   return plugin;
 }
 
-export function getPluginById(id: string): PluginRow | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM plugins WHERE id = ?").get(id);
+export async function getPluginById(id: string): Promise<PluginRow | null> {
+  const row = await db().queryOne(`${PLUGIN_SELECT} WHERE id = $1`, [id]);
   return row ? rowToPlugin(row) : null;
 }
 
-export function getPluginByName(name: string): PluginRow | null {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT * FROM plugins WHERE name = ?").get(name);
+export async function getPluginByName(name: string): Promise<PluginRow | null> {
+  const row = await db().queryOne(`${PLUGIN_SELECT} WHERE name = $1`, [name]);
   return row ? rowToPlugin(row) : null;
 }
 
-export function listPlugins(status?: PluginRow["status"]): PluginRow[] {
-  const db = getDbInstance();
+export async function listPlugins(status?: PluginRow["status"]): Promise<PluginRow[]> {
   const rows = status
-    ? db.prepare("SELECT * FROM plugins WHERE status = ? ORDER BY name").all(status)
-    : db.prepare("SELECT * FROM plugins ORDER BY name").all();
+    ? await db().query(`${PLUGIN_SELECT} WHERE status = $1 ORDER BY name`, [status])
+    : await db().query(`${PLUGIN_SELECT} ORDER BY name`);
   return rows.map(rowToPlugin);
 }
 
-export function updatePluginStatus(
+export async function updatePluginStatus(
   name: string,
   status: PluginRow["status"],
   errorMessage?: string
-): boolean {
-  const db = getDbInstance();
+): Promise<boolean> {
   const now = new Date().toISOString();
   const activatedAt = status === "active" ? now : null;
 
   // `activated_at` records the most-recent activation timestamp and is intentionally
   // preserved on deactivation via COALESCE (activatedAt is null when status != "active").
   // Callers should treat it as "last activated at", not "currently active since".
-  const result = db
-    .prepare(
-      `UPDATE plugins SET status = ?, enabled = ?, error_message = ?,
-       updated_at = ?, activated_at = COALESCE(?, activated_at)
-       WHERE name = ?`
-    )
-    .run(status, status === "active" ? 1 : 0, errorMessage ?? null, now, activatedAt, name);
+  const result = await db().execute(
+    `UPDATE plugins SET status = $1, error_message = $2,
+       updated_at = $3, activated_at = COALESCE($4::timestamptz, activated_at)
+     WHERE name = $5`,
+    [status, errorMessage ?? null, now, activatedAt, name]
+  );
 
   if (result.changes > 0) {
     log.info("plugin.status_updated", { name, status });
@@ -179,17 +185,15 @@ export function updatePluginStatus(
  * (e.g. hooks.onStreamComplete, #11934), activate() re-reads plugin.json from disk
  * and calls this to bring the row up to date without requiring a version-bump upgrade.
  */
-export function updatePluginManifest(
+export async function updatePluginManifest(
   name: string,
   manifest: Record<string, unknown>,
   hooks: string[]
-): boolean {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-
-  const result = db
-    .prepare("UPDATE plugins SET manifest = ?, hooks = ?, updated_at = ? WHERE name = ?")
-    .run(JSON.stringify(manifest), JSON.stringify(hooks), now, name);
+): Promise<boolean> {
+  const result = await db().execute(
+    `UPDATE plugins SET manifest = $1::jsonb, hooks = $2::jsonb, updated_at = now() WHERE name = $3`,
+    [jsonb(manifest), jsonb(hooks), name]
+  );
 
   if (result.changes > 0) {
     log.info("plugin.manifest_updated", { name });
@@ -197,110 +201,26 @@ export function updatePluginManifest(
   return result.changes > 0;
 }
 
-export function updatePluginConfig(name: string, config: Record<string, unknown>): boolean {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-
-  const result = db
-    .prepare("UPDATE plugins SET config = ?, updated_at = ? WHERE name = ?")
-    .run(JSON.stringify(config), now, name);
-
+export async function updatePluginConfig(
+  name: string,
+  config: Record<string, unknown>
+): Promise<boolean> {
+  const result = await db().execute(
+    `UPDATE plugins SET config = $1::jsonb, updated_at = now() WHERE name = $2`,
+    [jsonb(config), name]
+  );
   return result.changes > 0;
 }
 
-export function deletePlugin(name: string): boolean {
-  const db = getDbInstance();
-  const result = db.prepare("DELETE FROM plugins WHERE name = ?").run(name);
+export async function deletePlugin(name: string): Promise<boolean> {
+  const result = await db().execute(`DELETE FROM plugins WHERE name = $1`, [name]);
   if (result.changes > 0) {
     log.info("plugin.deleted", { name });
   }
   return result.changes > 0;
 }
 
-export function pluginExists(name: string): boolean {
-  const db = getDbInstance();
-  const row = db.prepare("SELECT 1 FROM plugins WHERE name = ?").get(name);
+export async function pluginExists(name: string): Promise<boolean> {
+  const row = await db().queryOne(`SELECT 1 AS found FROM plugins WHERE name = $1`, [name]);
   return !!row;
-}
-
-// ── Analytics ──
-
-export interface PluginExecutionRow {
-  pluginName: string;
-  hook: string;
-  durationMs: number;
-  success: boolean;
-  errorMessage: string | null;
-  createdAt: string;
-}
-
-export interface PluginAnalyticsSummary {
-  totalCalls: number;
-  successCount: number;
-  failureCount: number;
-  avgDurationMs: number;
-}
-
-/**
- * Record a single plugin execution in plugin_analytics.
- */
-export function recordPluginExecution(
-  pluginName: string,
-  hook: string,
-  durationMs: number,
-  success: boolean,
-  errorMessage?: string
-): void {
-  const db = getDbInstance();
-  db.prepare(
-    `INSERT INTO plugin_analytics (plugin_name, hook, duration_ms, success, error_message)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(pluginName, hook, durationMs, success ? 1 : 0, errorMessage ?? null);
-}
-
-/**
- * Return execution rows for a given plugin (most recent first).
- */
-export function getPluginAnalytics(pluginName: string): PluginExecutionRow[] {
-  const db = getDbInstance();
-  const rows = db
-    .prepare(
-      `SELECT plugin_name, hook, duration_ms, success, error_message, created_at
-       FROM plugin_analytics
-       WHERE plugin_name = ?
-       ORDER BY created_at DESC`
-    )
-    .all(pluginName) as any[];
-  return rows.map((r) => ({
-    pluginName: r.plugin_name,
-    hook: r.hook,
-    durationMs: r.duration_ms,
-    success: r.success === 1,
-    errorMessage: r.error_message,
-    createdAt: r.created_at,
-  }));
-}
-
-/**
- * Return aggregate stats for a given plugin.
- */
-export function getPluginAnalyticsSummary(pluginName: string): PluginAnalyticsSummary {
-  const db = getDbInstance();
-  const row = db
-    .prepare(
-      `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS successes,
-         SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failures,
-         AVG(duration_ms) AS avg_duration
-       FROM plugin_analytics
-       WHERE plugin_name = ?`
-    )
-    .get(pluginName) as any;
-  return {
-    totalCalls: row?.total ?? 0,
-    successCount: row?.successes ?? 0,
-    failureCount: row?.failures ?? 0,
-    avgDurationMs: row?.avg_duration ?? 0,
-  };
 }

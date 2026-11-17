@@ -1,7 +1,7 @@
 import { finalizeTranslatedRequest } from "./chatCore/translatedRequestFinalize.ts";
 import { isPassiveCodex } from "../services/tokenRefresh/passiveCodex.ts";
 import {
-  injectMemoryAndSkills,
+  injectSkills,
   mergeInjectedFallbackOwnerNames,
 } from "./chatCore/memorySkillsInjection.ts";
 import { resolveChatCoreRequestSetup } from "./chatCore/requestSetup.ts";
@@ -87,10 +87,7 @@ export {
   buildStreamingResponseHeaders,
   stripStaleForwardingHeaders,
 };
-import {
-  resolveRequestMemoryOwnerId,
-  runMemoryExtractionGate,
-} from "./chatCore/memoryExtraction.ts";
+import { resolveRequestMemoryOwnerId } from "./chatCore/memoryExtraction.ts";
 import { checkResourcePressureGuard } from "../utils/resourcePressure.ts";
 import { normalizeHeaders } from "../utils/headers.ts";
 import { resolveChatCoreRequestFormat } from "./chatCore/requestFormat.ts";
@@ -101,7 +98,7 @@ import { normalizeUpstreamRequestParams } from "./chatCore/upstreamRequestParams
 import { injectSystemPromptPreTranslation } from "../services/systemPrompt.ts";
 import { applyCustomSystemPrompt } from "./chatCore/customSystemPrompt.ts";
 import { applyProviderSystemTransforms } from "../services/systemTransforms.ts";
-import { translateRequest } from "../translator/index.ts";
+import { prefetchThoughtSignatures, translateRequest } from "../translator/index.ts";
 import { applyReasoningRuleDirective } from "@/lib/reasoningRouting/policy";
 import { withReasoningRuleContext } from "../utils/reasoningRuleContext.ts";
 import { FORMATS } from "../translator/formats.ts";
@@ -237,6 +234,7 @@ import { applyPostTranslationCompression } from "./chatCore/postTranslationCompr
 import { isJsonRecord } from "./chatCore/nonStreamingResponseParse.ts";
 import { recordNonStreamingUsageStats } from "./chatCore/nonStreamingUsageStats.ts";
 import { getModelNormalizeToolCallId, getModelPreserveOpenAIDeveloperRole } from "@/lib/db/models";
+import { getModelPreserveVideoUrl } from "@/lib/db/models/modelPreserveVideoUrl";
 import { extractSessionAffinityKey } from "@/sse/services/auth";
 import { createManagedLeaseFence } from "./chatCore/managedLeaseFence.ts";
 
@@ -415,9 +413,7 @@ async function handleChatCoreInner({
   // Each combo leg gets its own execution context; nothing is written to shared accounts.
   const reasoningRuleDirective = body?._omnirouteReasoningRule;
   // #12150 P1b: true iff the video-bridge guardrail rendered >=1 transcript
-  // cue into a replaced part of this request. Gates both request- and
-  // response-derived Memory extraction
-  // (chatCore/memoryExtraction.ts::runMemoryExtractionGate).
+  // cue into a replaced part of this request.
   const videoBridgeObserved: boolean =
     (videoBridgeLog as VideoBridgeLogParam | undefined)?.observed === true;
   // resume flag from chat.ts, noted under the attempt store opened above.
@@ -672,7 +668,7 @@ async function handleChatCoreInner({
       body.model = model;
     }
 
-    logAuditEvent({
+    void logAuditEvent({
       action: "routing.background_task_redirect",
       actor: apiKeyInfo?.name || "system",
       target: connectionId || provider || "chat",
@@ -770,7 +766,7 @@ async function handleChatCoreInner({
   // #3384: per-model interception rule (src/lib/db/interceptionRules.ts) overrides the
   // native-bypass defaults below when the operator explicitly configured it for this
   // provider/model pair; undefined falls through to the existing bypass logic.
-  const interceptSearchOverride = resolveInterceptSearch(provider, effectiveModel);
+  const interceptSearchOverride = await resolveInterceptSearch(provider, effectiveModel);
 
   // Capture client tool names BEFORE fallback injection so the owner-provenance
   // merge can distinguish tools the client already declared from synthetic tools
@@ -812,7 +808,7 @@ async function handleChatCoreInner({
   }
   // #7339: interceptFetch (Phase 3-4 of #3384) — same per-model rule + native-bypass
   // pattern as interceptSearch directly above.
-  const interceptFetchOverride = resolveInterceptFetch(provider, effectiveModel);
+  const interceptFetchOverride = await resolveInterceptFetch(provider, effectiveModel);
   const { body: bodyWithWebFetchFallback, fallback: webFetchFallbackPlan } =
     prepareWebFetchFallbackBody(body as Record<string, unknown>, {
       provider,
@@ -969,7 +965,7 @@ async function handleChatCoreInner({
 
   // Upstream extra-header building extracted to chatCore/upstreamExecuteHeaders.ts (#3501); bind the
   // per-request inputs once and delegate so the existing call sites stay byte-identical.
-  const buildUpstreamHeadersForExecute = (modelToCall: string): Record<string, string> =>
+  const buildUpstreamHeadersForExecute = (modelToCall: string): Promise<Record<string, string>> =>
     buildUpstreamHeadersForExecuteFor({
       modelToCall,
       effectiveModel,
@@ -1161,18 +1157,19 @@ async function handleChatCoreInner({
 
   body = sanitizeChatRequestBody(body, sourceFormat, targetFormat);
   // Clients that manage their own context send `x-omniroute-no-memory: true`, and Claude
-  // Code's classifier turns are excluded (a null owner disables both branches in
-  // injectMemoryAndSkills plus extraction). See PRD-2026-06-19-no-memory-header.
-  const memoryOwnerId = resolveRequestMemoryOwnerId({
+  // Code's classifier turns are excluded (a null owner disables skills injection).
+  // See PRD-2026-06-19-no-memory-header.
+  const skillsOwnerId = resolveRequestMemoryOwnerId({
     apiKeyInfo: apiKeyInfo as Record<string, unknown> | null,
     headers: clientRawRequest?.headers ?? null,
     sourceFormat,
     body: body as Record<string, unknown>,
   });
-  const injectionResult = await injectMemoryAndSkills({
+  const skillsEnabled = settings.skillsEnabled !== false;
+  const injectionResult = await injectSkills({
     body,
-    memoryOwnerId,
-    provider,
+    skillsOwnerId,
+    skillsEnabled,
     effectiveModel,
     sourceFormat,
     targetFormat,
@@ -1180,10 +1177,9 @@ async function handleChatCoreInner({
     log,
   });
   body = injectionResult.body;
-  const memorySettings = injectionResult.memorySettings;
 
   // Merge web-search/web-fetch fallback tool names into the builtin owner set.
-  // injectMemoryAndSkills only tracks memory tools; the fallback names were
+  // injectSkills tracks no built-in tools; the fallback names were
   // injected into body.tools by prepareWebSearchFallbackBody/prepareWebFetchFallbackBody
   // above, so they must be carried into the owner provenance chain here.
   const mergedOwnerNames = mergeInjectedFallbackOwnerNames(
@@ -1228,12 +1224,12 @@ async function handleChatCoreInner({
   // combo-resolved override survives to the final enforceOutputTokenBudget() call
   // further down — see #8378 (context limit resolved by the combo was silently
   // discarded because it only existed inside this `if` block).
-  let contextLimit = getTokenLimit(provider, effectiveModel);
+  let contextLimit = await getTokenLimit(provider, effectiveModel);
   const contextWindowChecksDisabled = areContextWindowChecksDisabled();
   const effectiveInputCap = contextWindowChecksDisabled
     ? null
     : toPositiveInteger(
-        resolveInputTokenCapForGate({ provider, model: effectiveModel }, { isCombo })
+        await resolveInputTokenCapForGate({ provider, model: effectiveModel }, { isCombo })
       );
   const getEffectiveCompactionCeiling = (limit: number) =>
     effectiveInputCap != null ? Math.min(limit, effectiveInputCap) : limit;
@@ -1378,10 +1374,16 @@ async function handleChatCoreInner({
           if (routingComboIds.length > 0) {
             const { getCompressionComboForRoutingCombo } =
               await import("../../src/lib/db/compressionCombos.ts");
-            const assignedCompressionCombo =
-              routingComboIds
-                .map((id) => getCompressionComboForRoutingCombo(id))
-                .find((combo) => combo !== null) ?? null;
+            let assignedCompressionCombo: Awaited<
+              ReturnType<typeof getCompressionComboForRoutingCombo>
+            > = null;
+            for (const id of routingComboIds) {
+              const combo = await getCompressionComboForRoutingCombo(id);
+              if (combo !== null) {
+                assignedCompressionCombo = combo;
+                break;
+              }
+            }
             if (
               applyCompressionComboConfig(
                 assignedCompressionCombo as RuntimeCompressionCombo | null,
@@ -1402,7 +1404,7 @@ async function handleChatCoreInner({
       let namedCombos: Record<string, CompressionPipelineStep[]> = {};
       try {
         const { listCompressionCombos } = await import("../../src/lib/db/compressionCombos.ts");
-        namedCombos = buildNamedComboLookup(listCompressionCombos());
+        namedCombos = buildNamedComboLookup(await listCompressionCombos());
       } catch (err) {
         log?.debug?.(
           "COMPRESSION",
@@ -1418,7 +1420,7 @@ async function handleChatCoreInner({
       if (!compressionComboApplied && config.activeComboId && namedCombos[config.activeComboId]) {
         try {
           const { getCompressionCombo } = await import("../../src/lib/db/compressionCombos.ts");
-          const activeCompressionCombo = getCompressionCombo(config.activeComboId);
+          const activeCompressionCombo = await getCompressionCombo(config.activeComboId);
           if (activeCompressionCombo) {
             applyCompressionComboConfig(activeCompressionCombo as RuntimeCompressionCombo);
           }
@@ -1470,7 +1472,7 @@ async function handleChatCoreInner({
           const { getDefaultCompressionCombo } =
             await import("../../src/lib/db/compressionCombos.ts");
           const defaultCompressionCombo = defaultComboForRequest(
-            getDefaultCompressionCombo() as RuntimeCompressionCombo | null,
+            (await getDefaultCompressionCombo()) as RuntimeCompressionCombo | null,
             { config, header: compressionHeader, combos: namedCombos }
           );
           if (applyCompressionComboConfig(defaultCompressionCombo)) {
@@ -1542,7 +1544,7 @@ async function handleChatCoreInner({
       // Adaptive context-budget (Sub-project C): model context window + request max_tokens drive
       // the budget target. getTokenLimit is already imported; provider/effectiveModel resolved above.
       const adaptiveModelContextLimit =
-        provider && effectiveModel ? getTokenLimit(provider, effectiveModel) : null;
+        provider && effectiveModel ? await getTokenLimit(provider, effectiveModel) : null;
       const requestMaxTokens =
         typeof (compressionInputBody as Record<string, unknown>)?.max_tokens === "number"
           ? ((compressionInputBody as Record<string, unknown>).max_tokens as number)
@@ -1619,7 +1621,7 @@ async function handleChatCoreInner({
           // fragment list), and lite.ts's gate (`supportsVision !== false`) treated that
           // false as "strip every image_url block". Resolves to `null` for genuinely unknown
           // models, which is intentionally NOT `false` so the gate still preserves images.
-          supportsVision: getResolvedModelCapabilities({ provider, model: effectiveModel })
+          supportsVision: (await getResolvedModelCapabilities({ provider, model: effectiveModel }))
             .supportsVision,
           // OmniGlyph uses a measured provider/image-fidelity allowlist. Direct HTTP
           // alone is not proof that a route preserves PNG bytes and dimensions.
@@ -1815,16 +1817,18 @@ async function handleChatCoreInner({
         let comboTargetLimits: number[] = [];
         if (comboConfig) {
           const allCombosData = await getCombosCached();
-          const targets = resolveComboTargets(
+          const targets = await resolveComboTargets(
             comboConfig as unknown as { name: string; models: unknown[] },
             allCombosData as unknown as { name: string; models: unknown[] }[]
           );
           // Fall back to ResolvedComboTarget.provider when modelStr lacks a
           // provider/ prefix — parseModel alone returns provider:null (#8716).
-          comboTargetLimits = targets
-            .map((t: { modelStr?: string; provider?: string }) =>
+          const targetLimits = await Promise.all(
+            targets.map((t: { modelStr?: string; provider?: string }) =>
               getComboTargetTokenLimit({ modelStr: t.modelStr, provider: t.provider })
             )
+          );
+          comboTargetLimits = targetLimits
             .filter(
               (limit): limit is number =>
                 typeof limit === "number" && Number.isFinite(limit) && limit > 0
@@ -1846,7 +1850,7 @@ async function handleChatCoreInner({
           rawComboContextLength > 0
             ? rawComboContextLength
             : null;
-        const resolved = resolveComboContextLimit({
+        const resolved = await resolveComboContextLimit({
           provider,
           model: effectiveModel,
           comboTargetLimits,
@@ -1863,7 +1867,7 @@ async function handleChatCoreInner({
     }
 
     const effectiveCompactionCeiling = getEffectiveCompactionCeiling(contextLimit);
-    const COMPRESSION_THRESHOLD = (
+    const COMPRESSION_THRESHOLD = await (
       await import("@/lib/db/compression")
     ).getProactiveCompressionRatio();
     let reservedTokens = 0;
@@ -1904,7 +1908,7 @@ async function handleChatCoreInner({
 
       // Adapt Responses `input[]` → messages so compressContext can run, then restore.
       const ctxAdapter = adaptBodyForCompression(body as Record<string, unknown>);
-      const compressionResult = compressContext(ctxAdapter.body, {
+      const compressionResult = await compressContext(ctxAdapter.body, {
         provider,
         model: effectiveModel,
         maxTokens: threshold,
@@ -1929,7 +1933,7 @@ async function handleChatCoreInner({
           `Context compressed: ${stats.original} → ${stats.final} message tokens${layersInfo}`
         );
 
-        logAuditEvent({
+        void logAuditEvent({
           action: "context.proactive_compression",
           actor: apiKeyInfo?.name || "system",
           target: connectionId || provider || "chat",
@@ -1988,7 +1992,7 @@ async function handleChatCoreInner({
   ) {
     const lastResortTarget = Math.max(1, effectiveCompactionCeiling - toolsReserve - 1);
     const lastResortAdapter = adaptBodyForCompression(body as Record<string, unknown>);
-    const lastResortResult = compressContext(lastResortAdapter.body, {
+    const lastResortResult = await compressContext(lastResortAdapter.body, {
       provider,
       model: effectiveModel,
       maxTokens: lastResortTarget,
@@ -2021,7 +2025,7 @@ async function handleChatCoreInner({
 
   const calibrationEstimatedInputTokens = finalEstimatedInputTokens; // #14931 pairing
   const modelOutputCap = toPositiveInteger(
-    getExplicitModelOutputCap({ provider, model: effectiveModel })
+    await getExplicitModelOutputCap({ provider, model: effectiveModel })
   );
   // enforceOutputTokenBudget against the concrete target + the reject / adjusted-fields logs:
   // extracted to chatCore/finalOutputBudget.ts (chatCore slice 2).
@@ -2172,7 +2176,19 @@ async function handleChatCoreInner({
     } else if (isClaudeCodeCompatible) {
       // Claude Code-compatible bridge body extracted to chatCore/claudeCodeBridgeBody.ts
       // (chatCore slice 2); returns the dispatch body + the resolved bridge session id.
-      ({ translatedBody, ccSessionId } = buildClaudeCodeBridgeBody({
+      // The per-model compat lookups are asynchronous: resolve them here and hand the builder
+      // synchronous accessors over the resolved values.
+      const bridgeNormalizeToolCallId = await getModelNormalizeToolCallId(
+        provider || "",
+        model || "",
+        sourceFormat
+      );
+      const bridgePreserveDeveloperRole = await getModelPreserveOpenAIDeveloperRole(
+        provider || "",
+        model || "",
+        sourceFormat
+      );
+      ({ translatedBody, ccSessionId } = await buildClaudeCodeBridgeBody({
         body,
         sourceFormat,
         targetFormat,
@@ -2190,8 +2206,9 @@ async function handleChatCoreInner({
         videoBridgeObserved,
         normalizeClaudeUpstreamMessages,
         applyReasoningRuleDirective,
-        getModelNormalizeToolCallId,
-        getModelPreserveOpenAIDeveloperRole,
+        getModelNormalizeToolCallId: () => bridgeNormalizeToolCallId,
+        getModelPreserveOpenAIDeveloperRole: () => bridgePreserveDeveloperRole,
+        getModelPreserveVideoUrl,
         log,
       }));
     } else if (isClaudePassthrough) {
@@ -2264,15 +2281,25 @@ async function handleChatCoreInner({
         }
       }
 
-      const normalizeToolCallId = getModelNormalizeToolCallId(
+      const normalizeToolCallId = await getModelNormalizeToolCallId(
         provider || "",
         model || "",
         sourceFormat
       );
-      const preserveDeveloperRole = getModelPreserveOpenAIDeveloperRole(
+      const preserveDeveloperRole = await getModelPreserveOpenAIDeveloperRole(
         provider || "",
         model || "",
         sourceFormat
+      );
+      const preserveVideoUrl = await getModelPreserveVideoUrl(
+        String(provider ?? ""),
+        String(model ?? "")
+      );
+      const thoughtSignatures = await prefetchThoughtSignatures(
+        targetFormat,
+        model,
+        translatedBody,
+        connectionId
       );
       // Carrier-less targets (kiro / antigravity) have no post-translation
       // system carrier for the single pass at ~3068 to write into — inject
@@ -2280,7 +2307,7 @@ async function handleChatCoreInner({
       // relocation paths carry the global prompt (baseline coverage of the
       // removed pre-translation pass). The gate writes ONE carrier only.
       translatedBody = injectSystemPromptPreTranslation(translatedBody, { targetFormat });
-      translatedBody = translateRequest(
+      translatedBody = await translateRequest(
         sourceFormat,
         targetFormat,
         model,
@@ -2292,6 +2319,8 @@ async function handleChatCoreInner({
         {
           normalizeToolCallId,
           preserveDeveloperRole,
+          preserveVideoUrl,
+          thoughtSignatures,
           preserveCacheControl,
           signatureNamespace: connectionId,
           copilotClient: copilotCompatibleReasoning,
@@ -2404,7 +2433,7 @@ async function handleChatCoreInner({
   // Mutates translatedBody in place.
   normalizeUpstreamRequestParams({
     translatedBody,
-    modelSupportsMaxTokens: supportsMaxTokens({ provider, model }),
+    modelSupportsMaxTokens: await supportsMaxTokens({ provider, model }),
     provider,
     model,
     targetFormat,
@@ -2445,7 +2474,7 @@ async function handleChatCoreInner({
   // === /Quota Share enforcement PRE-hook ===
   if (isFeatureFlagEnabled("CAPABILITY_FILTER_ENABLED")) {
     const fit = checkRequestCapabilityFit(
-      getResolvedModelCapabilities({ provider, model: effectiveModel }),
+      await getResolvedModelCapabilities({ provider, model: effectiveModel }),
       deriveRequestCapabilityRequirements(body as Record<string, unknown>),
       provider
     );
@@ -2458,7 +2487,7 @@ async function handleChatCoreInner({
   }
   // Get executor for this provider (with optional upstream proxy routing)
   const executor = await resolveExecutorWithProxy(provider);
-  const getExecutionCredentials = () => {
+  const getExecutionCredentials = async () => {
     const executionCredentials = withApiKeyCodexServiceMode(
       provider,
       withReasoningRuleContext(
@@ -2476,7 +2505,7 @@ async function handleChatCoreInner({
       ),
       apiKeyCodexServiceMode
     );
-    beforeUpstreamAttempt?.(executionCredentials);
+    await beforeUpstreamAttempt?.(executionCredentials);
     return executionCredentials;
   };
 
@@ -2595,7 +2624,7 @@ async function handleChatCoreInner({
   // ── Tier 2: Authoritative per-model/provider token-limit check (provider now resolved) ──
   if (apiKeyInfo?.id) {
     try {
-      const tokenBreach = checkTokenLimits(
+      const tokenBreach = await checkTokenLimits(
         apiKeyInfo.id,
         provider || undefined,
         model || undefined
@@ -3281,8 +3310,6 @@ async function handleChatCoreInner({
       managedLease,
       managedLeaseFenceErrorResult,
       markAccountSemaphoreBlocked,
-      memoryOwnerId,
-      memorySettings,
       model,
       normalizeHeaders,
       normalizeUsage,
@@ -3309,7 +3336,6 @@ async function handleChatCoreInner({
       reqLogger,
       requestToolIdentityMap,
       resolveReportedServiceTier,
-      runMemoryExtractionGate,
       runPluginOnResponseHook,
       sanitizeErrorMessage,
       sanitizeUpstreamDetails,
@@ -3319,6 +3345,8 @@ async function handleChatCoreInner({
       sessionAffinityKey,
       shouldIsolateProbeFailures,
       skillRequestId,
+      skillsEnabled,
+      skillsOwnerId,
       sourceFormat,
       startTime,
       stream,
@@ -3399,8 +3427,6 @@ async function handleChatCoreInner({
     isResponsesEndpoint,
     log,
     managedLease,
-    memoryOwnerId,
-    memorySettings,
     model,
     onRequestSuccess,
     onStreamFailure,

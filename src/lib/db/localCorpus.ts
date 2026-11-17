@@ -1,43 +1,31 @@
-import { getDbInstance } from "./core";
+import { deleteConfigValue, getConfigValue, setConfigValue } from "./configEntries";
 
 const LOCAL_CORPUS_NAMESPACE = "local_corpus";
 const LOCAL_CORPUS_ROOT_KEY = "root_path";
-
-type KeyValueRow = {
-  value?: string;
-};
 
 export interface LocalCorpusConfig {
   rootPath: string | null;
   configured: boolean;
 }
 
-export function getLocalCorpusRoot(): string | null {
+export async function getLocalCorpusRoot(): Promise<string | null> {
   try {
-    const row = getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY) as KeyValueRow | undefined;
-    if (typeof row?.value !== "string") return null;
-    const parsed = JSON.parse(row.value);
-    return typeof parsed === "string" && parsed.trim() ? parsed : null;
+    const value = await getConfigValue(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY);
+    return typeof value === "string" && value.trim() ? value : null;
   } catch {
     return null;
   }
 }
 
-export function setLocalCorpusRoot(rootPath: string): void {
-  getDbInstance()
-    .prepare("INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)")
-    .run(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY, JSON.stringify(rootPath));
+export async function setLocalCorpusRoot(rootPath: string): Promise<void> {
+  await setConfigValue(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY, rootPath);
 }
 
-export function clearLocalCorpusRoot(): void {
-  getDbInstance()
-    .prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?")
-    .run(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY);
+export async function clearLocalCorpusRoot(): Promise<void> {
+  await deleteConfigValue(LOCAL_CORPUS_NAMESPACE, LOCAL_CORPUS_ROOT_KEY);
 }
 
-export function getLocalCorpusConfig(): LocalCorpusConfig {
-  const rootPath = getLocalCorpusRoot();
+export async function getLocalCorpusConfig(): Promise<LocalCorpusConfig> {
+  const rootPath = await getLocalCorpusRoot();
   return { rootPath, configured: rootPath !== null };
 }

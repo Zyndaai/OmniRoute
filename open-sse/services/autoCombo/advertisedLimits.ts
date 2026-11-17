@@ -44,26 +44,28 @@ function isPositiveFiniteNumber(value: unknown): value is number {
 }
 
 /** Resolved context-length limit for one candidate, before the positivity check. */
-function resolveCandidateContextLength(
+async function resolveCandidateContextLength(
   candidate: AdvertisedLimitCandidate,
   snapshot: ModelCapabilityResolutionSnapshot | null
-): number | null | undefined {
+): Promise<number | null | undefined> {
   return candidate.resolvedContextLength !== undefined
     ? candidate.resolvedContextLength
-    : getTokenLimit(candidate.provider, candidate.model, snapshot);
+    : await getTokenLimit(candidate.provider, candidate.model, snapshot);
 }
 
 /** Resolved max-output-tokens limit for one candidate, before the positivity check. */
-function resolveCandidateMaxOutputTokens(
+async function resolveCandidateMaxOutputTokens(
   candidate: AdvertisedLimitCandidate,
   snapshot: ModelCapabilityResolutionSnapshot | null
-): number | null | undefined {
+): Promise<number | null | undefined> {
   return candidate.resolvedMaxOutputTokens !== undefined
     ? candidate.resolvedMaxOutputTokens
-    : getResolvedModelCapabilities(
-        { provider: candidate.provider, model: candidate.model },
-        undefined,
-        snapshot
+    : (
+        await getResolvedModelCapabilities(
+          { provider: candidate.provider, model: candidate.model },
+          undefined,
+          snapshot
+        )
       ).maxOutputTokens;
 }
 
@@ -87,30 +89,30 @@ function needsCapabilityLookup(candidates: AdvertisedLimitCandidate[]): boolean 
  * pre-resolved value, ONE snapshot is built for the whole pool instead of a DB lookup per
  * candidate. Advertised values are unchanged — the snapshot is the same data, bulk-read.
  */
-export function computeAdvertisedLimits(
+export async function computeAdvertisedLimits(
   candidates: AdvertisedLimitCandidate[],
   snapshot?: ModelCapabilityResolutionSnapshot | null
-): {
+): Promise<{
   contextLength: number | null;
   maxOutputTokens: number | null;
-} {
+}> {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return { contextLength: null, maxOutputTokens: null };
   }
 
   const resolutionSnapshot =
     snapshot ??
-    (needsCapabilityLookup(candidates) ? createModelCapabilityResolutionSnapshot() : null);
+    (needsCapabilityLookup(candidates) ? await createModelCapabilityResolutionSnapshot() : null);
   let contextLength: number | null = null;
   let maxOutputTokens: number | null = null;
   for (const candidate of candidates) {
     contextLength = foldIntoMax(
       contextLength,
-      resolveCandidateContextLength(candidate, resolutionSnapshot)
+      await resolveCandidateContextLength(candidate, resolutionSnapshot)
     );
     maxOutputTokens = foldIntoMax(
       maxOutputTokens,
-      resolveCandidateMaxOutputTokens(candidate, resolutionSnapshot)
+      await resolveCandidateMaxOutputTokens(candidate, resolutionSnapshot)
     );
   }
   return {

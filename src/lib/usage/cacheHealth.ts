@@ -17,7 +17,7 @@
  *   - the per-model split, because a healthy model averages away a sick one.
  */
 
-import { getDbInstance } from "@/lib/db/core";
+import { db } from "@/lib/db/pg";
 import type { UtilizationTimeRange } from "@/shared/types/utilization";
 
 /** One `call_logs` row, already narrowed to the cache columns. Both counters are nullable in the schema. */
@@ -244,34 +244,32 @@ export interface CacheHealthResponse extends CacheHealthSummary {
  * to hit. Rows where both counters are NULL are excluded at the SQL level —
  * those pre-date cache accounting and would show up as fake "uncached" calls.
  */
-export function buildCacheHealthResponse(opts: {
+export async function buildCacheHealthResponse(opts: {
   range: UtilizationTimeRange;
   model?: string;
   now?: number;
-}): CacheHealthResponse {
+}): Promise<CacheHealthResponse> {
   const since = new Date((opts.now ?? Date.now()) - RANGE_MS[opts.range]).toISOString();
-  const db = getDbInstance();
 
   const params: (string | number)[] = [since];
   let modelFilter = "";
   if (opts.model) {
-    modelFilter = " AND (model = ? OR requested_model = ?)";
-    params.push(opts.model, opts.model);
+    params.push(opts.model);
+    modelFilter = ` AND (model = $${params.length} OR requested_model = $${params.length})`;
   }
   params.push(MAX_ROWS + 1);
 
-  const rows = db
-    .prepare(
-      `SELECT model, requested_model, tokens_cache_read, tokens_cache_creation, timestamp
+  const rows = await db().query<CacheHealthDbRow>(
+    `SELECT model, requested_model, tokens_cache_read, tokens_cache_creation, "timestamp"
          FROM call_logs
-        WHERE timestamp >= ?
+        WHERE "timestamp" >= $1
           AND status = 200
           AND (tokens_cache_read IS NOT NULL OR tokens_cache_creation IS NOT NULL)
           ${modelFilter}
-        ORDER BY timestamp DESC
-        LIMIT ?`
-    )
-    .all(...params) as CacheHealthDbRow[];
+        ORDER BY "timestamp" DESC
+        LIMIT $${params.length}`,
+    params
+  );
 
   const truncated = rows.length > MAX_ROWS;
   const summary = summarizeCacheHealth(

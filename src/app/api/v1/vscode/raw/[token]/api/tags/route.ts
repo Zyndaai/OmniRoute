@@ -36,7 +36,7 @@ export async function GET(
 
   const usableModels = Array.isArray(body.data) ? body.data.filter(isUsableChatModel) : [];
   const preferredModels = expandVscodeRawModels(await selectPreferredModels(usableModels));
-  const models = preferredModels.map((model) => toOllamaTagModel(model, "raw"));
+  const models = await Promise.all(preferredModels.map((model) => toOllamaTagModel(model, "raw")));
 
   return Response.json(
     {

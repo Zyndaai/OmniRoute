@@ -11,7 +11,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (authError) return authError;
 
   const resolvedParams = await params;
-  const key = getRegisteredKey(resolvedParams.id);
+  const key = await getRegisteredKey(resolvedParams.id);
   if (!key) {
     return NextResponse.json({ error: "Key not found" }, { status: 404 });
   }
@@ -26,7 +26,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (authError) return authError;
 
   const resolvedParams = await params;
-  const revoked = revokeRegisteredKey(resolvedParams.id);
+  const revoked = await revokeRegisteredKey(resolvedParams.id);
   if (!revoked) {
     return NextResponse.json({ error: "Key not found or already revoked" }, { status: 404 });
   }

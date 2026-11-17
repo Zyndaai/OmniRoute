@@ -16,9 +16,12 @@
  * and `noLog` handling.
  */
 
+import { db, type DbExecutor } from "../db/pg";
 import { applyNodePrefix, resolveProviderDisplay } from "./callLogDisplay";
-import type { CallLogReadDb } from "./callLogDetailResolver";
 import type { LogExportRecord, LogExportSourceRow } from "../logExport/types";
+
+/** Read-only surface shared by the server and the isolated export process. */
+export type CallLogReadDb = DbExecutor;
 
 /** Cap applied per payload field when a destination does not set its own. */
 export const DEFAULT_MAX_BODY_BYTES = 262_144;
@@ -57,11 +60,11 @@ type ExportSourceRow = {
   error_summary: string | null;
   error_type: string | null;
   detail_state: string | null;
-  has_request_body: number | null;
-  has_response_body: number | null;
-  has_pipeline_details: number | null;
+  has_request_body: boolean | null;
+  has_response_body: boolean | null;
+  has_pipeline_details: boolean | null;
   correlation_id: string | null;
-  model_pinned: number | null;
+  model_pinned: boolean | null;
   session_tag: string | null;
   provider_node_name: string | null;
   provider_node_prefix: string | null;
@@ -113,11 +116,11 @@ function mapExportRow(row: ExportSourceRow): LogExportRecord {
     errorType: row.error_type ?? null,
     correlationId: row.correlation_id || null,
     sessionTag: row.session_tag || null,
-    modelPinned: toNumberOrNull(row.model_pinned) === 1,
+    modelPinned: row.model_pinned === true,
     detailState: row.detail_state,
-    hasRequestBody: toNumberOrNull(row.has_request_body) === 1,
-    hasResponseBody: toNumberOrNull(row.has_response_body) === 1,
-    hasPipelineDetails: toNumberOrNull(row.has_pipeline_details) === 1,
+    hasRequestBody: row.has_request_body === true,
+    hasResponseBody: row.has_response_body === true,
+    hasPipelineDetails: row.has_pipeline_details === true,
     requestBody: null,
     responseBody: null,
     pipelineRouteDecision: null,
@@ -175,7 +178,8 @@ export async function attachExportBodies(
   rows: LogExportSourceRow[],
   maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES,
   resolveDetail: (
-    id: string
+    id: string,
+    timestamp: string | null
   ) => Promise<{ requestBody: unknown; responseBody: unknown; pipelinePayloads: unknown } | null>
 ): Promise<LogExportSourceRow[]> {
   const cap = Math.max(1024, maxBodyBytes);
@@ -184,7 +188,7 @@ export async function attachExportBodies(
     rows.map(async (row) => {
       let detail: Awaited<ReturnType<typeof resolveDetail>> = null;
       try {
-        detail = await resolveDetail(row.record.id);
+        detail = await resolveDetail(row.record.id, row.record.timestamp);
       } catch {
         return row;
       }
@@ -217,49 +221,60 @@ export async function attachExportBodies(
   );
 }
 
-/** Highest rowid currently in `call_logs`, or 0 when the table is empty. */
-export function getMaxCallLogRowId(db: CallLogReadDb): number {
-  const row = db.prepare("SELECT COALESCE(MAX(rowid), 0) AS max_row_id FROM call_logs").get() as {
-    max_row_id: number;
-  };
+/** Highest `seq` currently in `call_logs`, or 0 when the table is empty. */
+export async function getMaxCallLogRowId(executor: CallLogReadDb = db()): Promise<number> {
+  const row = await executor.queryOne<{ max_row_id: number }>(
+    "SELECT COALESCE(MAX(seq), 0) AS max_row_id FROM call_logs"
+  );
   return Number(row?.max_row_id ?? 0);
 }
 
 /** Rows still waiting to be exported past `afterRowId`. */
-export function countCallLogsAfterRowId(db: CallLogReadDb, afterRowId: number): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS pending FROM call_logs WHERE rowid > ?")
-    .get(afterRowId) as { pending: number };
+export async function countCallLogsAfterRowId(
+  executor: CallLogReadDb,
+  afterRowId: number
+): Promise<number> {
+  const row = await executor.queryOne<{ pending: number }>(
+    "SELECT COUNT(*) AS pending FROM call_logs WHERE seq > $1",
+    [afterRowId]
+  );
   return Number(row?.pending ?? 0);
 }
 
-/** One batch of exportable rows, oldest first, paired with their cursor value. */
-export function getCallLogsForExport(
-  db: CallLogReadDb,
+/** Export reads lag behind the newest writes so an identity value that commits late is not skipped. */
+const EXPORT_READ_LAG_MS = 60_000;
+
+/** One batch of exportable rows, oldest first, paired with their cursor value (`seq`). */
+export async function getCallLogsForExport(
+  executor: CallLogReadDb,
   afterRowId: number,
   limit: number,
   throughRowId: number = Number.MAX_SAFE_INTEGER,
   options: { includeBodies?: boolean } = {}
-): LogExportSourceRow[] {
-  const rows = db
-    .prepare(
-      `SELECT cl.rowid AS row_id, cl.*,
+): Promise<LogExportSourceRow[]> {
+  const lagCutoffMs = Date.now() - EXPORT_READ_LAG_MS;
+  const rows = await executor.query<ExportSourceRow>(
+    `SELECT cl.seq AS row_id, cl.*,
               pn.name AS provider_node_name,
               pn.prefix AS provider_node_prefix,
               ${RESOLVED_ACCOUNT_SQL} AS resolved_account
          FROM call_logs cl
          LEFT JOIN provider_nodes pn ON pn.id = cl.provider
          LEFT JOIN provider_connections pc ON pc.id = cl.connection_id
-        WHERE cl.rowid > @afterRowId AND cl.rowid <= @throughRowId
-        ORDER BY cl.rowid ASC
-        LIMIT @limit`
-    )
-    .all({ afterRowId, limit, throughRowId }) as ExportSourceRow[];
+        WHERE cl.seq > $1 AND cl.seq <= $2
+        ORDER BY cl.seq ASC
+        LIMIT $3`,
+    [afterRowId, Math.min(throughRowId, Number.MAX_SAFE_INTEGER), limit]
+  );
 
-  // Never advance a body-export cursor past a write that can still publish payloads.
-  const pendingIndex = options.includeBodies
-    ? rows.findIndex((row) => row.detail_state === "pending")
-    : -1;
-  const exportable = pendingIndex < 0 ? rows : rows.slice(0, pendingIndex);
+  // The cursor is `seq`, so the exported range must stay contiguous: cut the batch at the
+  // first row still inside the lag window (its timestamp can be older than a later seq's),
+  // or, for body exports, at the first write that can still publish payloads.
+  const cutIndex = rows.findIndex(
+    (row) =>
+      (row.timestamp !== null && Date.parse(row.timestamp) >= lagCutoffMs) ||
+      (options.includeBodies && row.detail_state === "pending")
+  );
+  const exportable = cutIndex < 0 ? rows : rows.slice(0, cutIndex);
   return exportable.map((row) => ({ rowId: Number(row.row_id), record: mapExportRow(row) }));
 }

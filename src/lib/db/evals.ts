@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { getDbInstance, rowToCamel } from "./core";
+import { rowToCamel } from "./caseMapping";
+import { db } from "./pg";
+import { jsonValueParam } from "./pgJsonText";
 
 export type EvalTargetType = "suite-default" | "model" | "combo";
 export type EvalCaseStrategy = "contains" | "exact" | "regex" | "custom";
@@ -75,93 +77,6 @@ export interface EvalRoutingRunQuery {
 }
 
 type JsonRecord = Record<string, unknown>;
-
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-}
-
-function hasColumn(db: DbLike, table: string, column: string): boolean {
-  const rows = db.prepare<{ name?: string }>(`PRAGMA table_info(${table})`).all();
-  return rows.some((row) => row && typeof row.name === "string" && row.name === column);
-}
-
-function ensureEvalSuiteTables(db: DbLike) {
-  db.prepare(
-    `CREATE TABLE IF NOT EXISTS eval_suites (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`
-  ).run();
-
-  if (!hasColumn(db, "eval_suites", "description")) {
-    db.prepare("ALTER TABLE eval_suites ADD COLUMN description TEXT").run();
-  }
-  if (!hasColumn(db, "eval_suites", "created_at")) {
-    db.prepare("ALTER TABLE eval_suites ADD COLUMN created_at TEXT NOT NULL DEFAULT ''").run();
-  }
-  if (!hasColumn(db, "eval_suites", "updated_at")) {
-    db.prepare("ALTER TABLE eval_suites ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''").run();
-  }
-
-  db.prepare(
-    `CREATE TABLE IF NOT EXISTS eval_cases (
-      id TEXT PRIMARY KEY,
-      suite_id TEXT NOT NULL,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      name TEXT NOT NULL,
-      model TEXT,
-      input_json TEXT NOT NULL,
-      expected_strategy TEXT NOT NULL,
-      expected_value TEXT,
-      tags_json TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`
-  ).run();
-
-  if (!hasColumn(db, "eval_cases", "sort_order")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0").run();
-  }
-  if (!hasColumn(db, "eval_cases", "model")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN model TEXT").run();
-  }
-  if (!hasColumn(db, "eval_cases", "input_json")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN input_json TEXT NOT NULL DEFAULT '{}'").run();
-  }
-  if (!hasColumn(db, "eval_cases", "expected_strategy")) {
-    db.prepare(
-      "ALTER TABLE eval_cases ADD COLUMN expected_strategy TEXT NOT NULL DEFAULT 'contains'"
-    ).run();
-  }
-  if (!hasColumn(db, "eval_cases", "expected_value")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN expected_value TEXT").run();
-  }
-  if (!hasColumn(db, "eval_cases", "tags_json")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN tags_json TEXT").run();
-  }
-  if (!hasColumn(db, "eval_cases", "created_at")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN created_at TEXT NOT NULL DEFAULT ''").run();
-  }
-  if (!hasColumn(db, "eval_cases", "updated_at")) {
-    db.prepare("ALTER TABLE eval_cases ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''").run();
-  }
-
-  db.prepare(
-    "CREATE INDEX IF NOT EXISTS idx_eval_suites_updated_at ON eval_suites(updated_at DESC)"
-  ).run();
-  db.prepare(
-    "CREATE INDEX IF NOT EXISTS idx_eval_cases_suite_order ON eval_cases(suite_id, sort_order ASC, created_at ASC)"
-  ).run();
-}
 
 function parseJsonRecord(value: unknown): JsonRecord {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -425,7 +340,7 @@ function toEvalSuiteRecord(row: unknown, cases: EvalCaseRecord[]): EvalSuiteReco
   };
 }
 
-export function saveEvalRun(input: {
+export async function saveEvalRun(input: {
   runGroupId?: string | null;
   suiteId: string;
   suiteName: string;
@@ -436,8 +351,7 @@ export function saveEvalRun(input: {
   results: Array<Record<string, unknown>>;
   outputs?: Record<string, string>;
   createdAt?: string;
-}): PersistedEvalRun {
-  const db = getDbInstance() as unknown as DbLike;
+}): Promise<PersistedEvalRun> {
   const createdAt = input.createdAt || new Date().toISOString();
   const id = randomUUID();
   const targetId =
@@ -448,29 +362,26 @@ export function saveEvalRun(input: {
     ? Math.max(0, Math.round(Number(input.avgLatencyMs)))
     : 0;
 
-  db.prepare(
+  await db().execute(
     `INSERT INTO eval_runs
       (id, run_group_id, suite_id, suite_name, target_type, target_id, target_label, api_key_id,
-       pass_rate, total, passed, failed, avg_latency_ms, summary_json, results_json, outputs_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    input.runGroupId || null,
-    input.suiteId,
-    input.suiteName,
-    input.target.type,
-    targetId,
-    input.target.label,
-    input.apiKeyId || null,
-    input.summary.passRate,
-    input.summary.total,
-    input.summary.passed,
-    input.summary.failed,
-    avgLatencyMs,
-    JSON.stringify(input.summary),
-    JSON.stringify(input.results || []),
-    JSON.stringify(input.outputs || {}),
-    createdAt
+       avg_latency_ms, summary, results, outputs, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13)`,
+    [
+      id,
+      input.runGroupId || null,
+      input.suiteId,
+      input.suiteName,
+      input.target.type,
+      targetId,
+      input.target.label,
+      input.apiKeyId || null,
+      avgLatencyMs,
+      jsonValueParam(input.summary),
+      jsonValueParam(input.results || []),
+      jsonValueParam(input.outputs || {}),
+      createdAt,
+    ]
   );
 
   return {
@@ -493,25 +404,24 @@ export function saveEvalRun(input: {
   };
 }
 
-export function listEvalRuns(
+export async function listEvalRuns(
   options: {
     suiteId?: string;
     runGroupId?: string;
     limit?: number;
   } = {}
-): PersistedEvalRun[] {
-  const db = getDbInstance() as unknown as DbLike;
+): Promise<PersistedEvalRun[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
   if (options.suiteId) {
-    conditions.push("suite_id = ?");
     params.push(options.suiteId);
+    conditions.push(`suite_id = $${params.length}`);
   }
 
   if (options.runGroupId) {
-    conditions.push("run_group_id = ?");
     params.push(options.runGroupId);
+    conditions.push(`run_group_id = $${params.length}`);
   }
 
   const limit = Number.isFinite(Number(options.limit))
@@ -523,14 +433,16 @@ export function listEvalRuns(
     FROM eval_runs
     ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
     ORDER BY created_at DESC
-    LIMIT ?`;
-  const rows = db.prepare(sql).all(...params);
+    LIMIT $${params.length}`;
+  const rows = await db().query(sql, params);
   return rows
     .map((row) => toPersistedEvalRun(row))
     .filter((row): row is PersistedEvalRun => row !== null);
 }
 
-export function listModelEvalRunsForRouting(options: EvalRoutingRunQuery): PersistedEvalRun[] {
+export async function listModelEvalRunsForRouting(
+  options: EvalRoutingRunQuery
+): Promise<PersistedEvalRun[]> {
   const targetIds = [...new Set(options.targetIds.map((id) => id.trim()).filter(Boolean))].slice(
     0,
     200
@@ -540,22 +452,21 @@ export function listModelEvalRunsForRouting(options: EvalRoutingRunQuery): Persi
   const suiteIds = Array.isArray(options.suiteIds)
     ? [...new Set(options.suiteIds.map((id) => id.trim()).filter(Boolean))].slice(0, 50)
     : [];
-  const db = getDbInstance() as unknown as DbLike;
   const conditions: string[] = ["target_type = 'model'"];
   const params: unknown[] = [];
 
-  conditions.push(`target_id IN (${targetIds.map(() => "?").join(", ")})`);
-  params.push(...targetIds);
+  params.push(targetIds);
+  conditions.push(`target_id = ANY($${params.length}::text[])`);
 
   if (suiteIds.length > 0) {
-    conditions.push(`suite_id IN (${suiteIds.map(() => "?").join(", ")})`);
-    params.push(...suiteIds);
+    params.push(suiteIds);
+    conditions.push(`suite_id = ANY($${params.length}::text[])`);
   }
 
   const maxAgeHours = Number(options.maxAgeHours);
   if (Number.isFinite(maxAgeHours) && maxAgeHours > 0) {
-    conditions.push("created_at >= ?");
     params.push(new Date(Date.now() - maxAgeHours * 60 * 60 * 1000).toISOString());
+    conditions.push(`created_at >= $${params.length}`);
   }
 
   const limit = Number.isFinite(Number(options.limit))
@@ -563,28 +474,27 @@ export function listModelEvalRunsForRouting(options: EvalRoutingRunQuery): Persi
     : Math.min(1000, Math.max(50, targetIds.length * Math.max(3, suiteIds.length || 5) * 2));
   params.push(limit);
 
-  const rows = db
-    .prepare(
-      `SELECT *
+  const rows = await db().query(
+    `SELECT *
        FROM eval_runs
        WHERE ${conditions.join(" AND ")}
        ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(...params);
+       LIMIT $${params.length}`,
+    params
+  );
 
   return rows
     .map((row) => toPersistedEvalRun(row))
     .filter((row): row is PersistedEvalRun => row !== null);
 }
 
-export function getEvalScorecard(
+export async function getEvalScorecard(
   options: {
     suiteId?: string;
     limit?: number;
   } = {}
 ) {
-  const runs = listEvalRuns({ suiteId: options.suiteId, limit: options.limit || 50 });
+  const runs = await listEvalRuns({ suiteId: options.suiteId, limit: options.limit || 50 });
   if (runs.length === 0) return null;
 
   const latestByScope = new Map<string, PersistedEvalRun>();
@@ -605,17 +515,13 @@ export function getEvalScorecard(
   );
 }
 
-export function listCustomEvalSuites(): EvalSuiteRecord[] {
-  const db = getDbInstance() as unknown as DbLike;
-  ensureEvalSuiteTables(db);
-  const suiteRows = db
-    .prepare("SELECT * FROM eval_suites ORDER BY updated_at DESC, created_at DESC")
-    .all();
-  const caseRows = db
-    .prepare(
-      "SELECT * FROM eval_cases ORDER BY suite_id ASC, sort_order ASC, created_at ASC, id ASC"
-    )
-    .all();
+export async function listCustomEvalSuites(): Promise<EvalSuiteRecord[]> {
+  const suiteRows = await db().query(
+    `SELECT * FROM eval_suites ORDER BY updated_at DESC, created_at DESC`
+  );
+  const caseRows = await db().query(
+    `SELECT * FROM eval_cases ORDER BY suite_id ASC, sort_order ASC, created_at ASC, id ASC`
+  );
 
   const casesBySuite = new Map<string, EvalCaseRecord[]>();
   for (const row of caseRows) {
@@ -635,13 +541,24 @@ export function listCustomEvalSuites(): EvalSuiteRecord[] {
     .filter((suite): suite is EvalSuiteRecord => suite !== null);
 }
 
-export function getCustomEvalSuite(suiteId: string): EvalSuiteRecord | null {
+export async function getCustomEvalSuite(suiteId: string): Promise<EvalSuiteRecord | null> {
   const normalizedSuiteId = suiteId.trim();
   if (!normalizedSuiteId) return null;
-  return listCustomEvalSuites().find((suite) => suite.id === normalizedSuiteId) || null;
+  const suiteRow = await db().queryOne(`SELECT * FROM eval_suites WHERE id = $1`, [
+    normalizedSuiteId,
+  ]);
+  if (!suiteRow) return null;
+  const caseRows = await db().query(
+    `SELECT * FROM eval_cases WHERE suite_id = $1 ORDER BY sort_order ASC, created_at ASC, id ASC`,
+    [normalizedSuiteId]
+  );
+  const cases = caseRows
+    .map((row) => toEvalCaseRecord(row))
+    .filter((parsed): parsed is EvalCaseRecord => parsed !== null && !!parsed.suiteId);
+  return toEvalSuiteRecord(suiteRow, cases);
 }
 
-export function saveCustomEvalSuite(input: {
+export async function saveCustomEvalSuite(input: {
   id?: string;
   name: string;
   description?: string;
@@ -659,9 +576,7 @@ export function saveCustomEvalSuite(input: {
     };
     tags?: string[];
   }>;
-}): EvalSuiteRecord {
-  const db = getDbInstance() as unknown as DbLike;
-  ensureEvalSuiteTables(db);
+}): Promise<EvalSuiteRecord> {
   const now = new Date().toISOString();
   const suiteId =
     typeof input.id === "string" && input.id.trim().length > 0 ? input.id.trim() : randomUUID();
@@ -679,28 +594,19 @@ export function saveCustomEvalSuite(input: {
     throw new Error("At least one eval case is required");
   }
 
-  db.prepare("BEGIN").run();
-  try {
-    const existing = db
-      .prepare<{ id: string }>("SELECT id FROM eval_suites WHERE id = ?")
-      .get(suiteId);
+  await db().transaction(async (tx) => {
+    // The upsert row-locks an existing suite, so concurrent saves of one suite serialise.
+    await tx.execute(
+      `INSERT INTO eval_suites (id, name, description, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $4)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name, description = EXCLUDED.description, updated_at = EXCLUDED.updated_at`,
+      [suiteId, name, description, now]
+    );
 
-    if (existing) {
-      db.prepare(
-        `UPDATE eval_suites
-         SET name = ?, description = ?, updated_at = ?
-         WHERE id = ?`
-      ).run(name, description, now, suiteId);
-    } else {
-      db.prepare(
-        `INSERT INTO eval_suites (id, name, description, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`
-      ).run(suiteId, name, description, now, now);
-    }
+    await tx.execute(`DELETE FROM eval_cases WHERE suite_id = $1`, [suiteId]);
 
-    db.prepare("DELETE FROM eval_cases WHERE suite_id = ?").run(suiteId);
-
-    input.cases.forEach((rawCase, index) => {
+    for (const [index, rawCase] of input.cases.entries()) {
       const caseId =
         typeof rawCase.id === "string" && rawCase.id.trim().length > 0
           ? rawCase.id.trim()
@@ -733,33 +639,28 @@ export function saveCustomEvalSuite(input: {
         throw new Error(`Case ${index + 1} must include an expected value`);
       }
 
-      db.prepare(
+      await tx.execute(
         `INSERT INTO eval_cases
-          (id, suite_id, sort_order, name, model, input_json, expected_strategy, expected_value,
-           tags_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        caseId,
-        suiteId,
-        index,
-        caseName,
-        model,
-        JSON.stringify(sanitizedInput),
-        sanitizedExpected.strategy,
-        sanitizedExpected.value || null,
-        JSON.stringify(tags),
-        now,
-        now
+          (id, suite_id, sort_order, name, model, input, expected_strategy, expected_value,
+           tags, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9::jsonb, $10, $10)`,
+        [
+          caseId,
+          suiteId,
+          index,
+          caseName,
+          model,
+          jsonValueParam(sanitizedInput),
+          sanitizedExpected.strategy,
+          sanitizedExpected.value || null,
+          jsonValueParam(tags),
+          now,
+        ]
       );
-    });
+    }
+  });
 
-    db.prepare("COMMIT").run();
-  } catch (error) {
-    db.prepare("ROLLBACK").run();
-    throw error;
-  }
-
-  const saved = getCustomEvalSuite(suiteId);
+  const saved = await getCustomEvalSuite(suiteId);
   if (!saved) {
     throw new Error("Failed to persist eval suite");
   }
@@ -767,20 +668,13 @@ export function saveCustomEvalSuite(input: {
   return saved;
 }
 
-export function deleteCustomEvalSuite(suiteId: string): boolean {
-  const db = getDbInstance() as unknown as DbLike;
-  ensureEvalSuiteTables(db);
+export async function deleteCustomEvalSuite(suiteId: string): Promise<boolean> {
   const normalizedSuiteId = suiteId.trim();
   if (!normalizedSuiteId) return false;
 
-  db.prepare("BEGIN").run();
-  try {
-    db.prepare("DELETE FROM eval_cases WHERE suite_id = ?").run(normalizedSuiteId);
-    const result = db.prepare("DELETE FROM eval_suites WHERE id = ?").run(normalizedSuiteId);
-    db.prepare("COMMIT").run();
+  return db().transaction(async (tx) => {
+    await tx.execute(`DELETE FROM eval_cases WHERE suite_id = $1`, [normalizedSuiteId]);
+    const result = await tx.execute(`DELETE FROM eval_suites WHERE id = $1`, [normalizedSuiteId]);
     return result.changes > 0;
-  } catch (error) {
-    db.prepare("ROLLBACK").run();
-    throw error;
-  }
+  });
 }

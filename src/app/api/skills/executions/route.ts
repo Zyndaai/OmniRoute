@@ -14,12 +14,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const params = parsePaginationParams(url.searchParams);
     const apiKeyId = url.searchParams.get("apiKeyId") || undefined;
-    const total = skillExecutor.countExecutions(apiKeyId);
-    const executions = skillExecutor.listExecutions(
-      apiKeyId,
-      params.limit,
-      (params.page - 1) * params.limit
-    );
+    const [total, executions] = await Promise.all([
+      skillExecutor.countExecutions(apiKeyId),
+      skillExecutor.listExecutions(apiKeyId, params.limit, (params.page - 1) * params.limit),
+    ]);
     return NextResponse.json(buildPaginatedResponse(executions, total, params));
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));

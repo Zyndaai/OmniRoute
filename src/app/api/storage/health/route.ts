@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import path from "path";
-import { readdir, stat } from "fs/promises";
 import { resolveDataDir } from "@/lib/dataPaths";
 import {
   getAppLogRetentionDays,
@@ -8,57 +6,32 @@ import {
   getCallLogsTableMaxRows,
   getProxyLogsTableMaxRows,
 } from "@/lib/logEnv";
-import { getDbBackupMaxFiles, getDbBackupRetentionDays } from "@/lib/db/backup";
+import { db } from "@/lib/db/pg";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 /**
  * GET /api/storage/health — Return database storage information.
- * Provides: driver, dbPath, sizeBytes, lastBackupAt, retentionDays
+ * Provides: driver, database size, retention windows and table row caps.
  */
 export async function GET() {
   try {
     const dataDir = resolveDataDir({});
-    const dbFilePath = path.join(dataDir, "storage.sqlite");
-    const backupsDir = path.join(dataDir, "db_backups");
 
-    // Get DB file size
     let sizeBytes = 0;
     try {
-      const fileStat = await stat(dbFilePath);
-      sizeBytes = fileStat.size;
+      const row = await db().queryOne<{ size: string | number }>(
+        "SELECT pg_database_size(current_database()) AS size"
+      );
+      sizeBytes = Number(row?.size ?? 0);
     } catch {
       /* ignore */
     }
 
-    // Get last backup info
-    let lastBackupAt = null;
-    let backupCount = 0;
-    try {
-      const files = (await readdir(backupsDir))
-        .filter((f) => f.startsWith("db_") && f.endsWith(".sqlite"))
-        .sort()
-        .reverse();
-      backupCount = files.length;
-      if (files.length > 0) {
-        const latestStat = await stat(path.join(backupsDir, files[0]));
-        lastBackupAt = latestStat.mtime.toISOString();
-      }
-    } catch {
-      /* ignore */
-    }
-
-    // Get the display path (abbreviated with ~)
     const homeDir = process.env.HOME || process.env.USERPROFILE || "";
-    const displayPath = dbFilePath.startsWith(homeDir)
-      ? "~" + dbFilePath.slice(homeDir.length)
-      : dbFilePath;
 
     return NextResponse.json({
-      driver: "sqlite",
-      dbPath: displayPath,
+      driver: "postgres",
       sizeBytes,
-      lastBackupAt,
-      backupCount,
       retentionDays: {
         app: getAppLogRetentionDays(),
         call: getCallLogRetentionDays(),
@@ -67,11 +40,7 @@ export async function GET() {
         callLogs: getCallLogsTableMaxRows(),
         proxyLogs: getProxyLogsTableMaxRows(),
       },
-      backupRetention: {
-        maxFiles: getDbBackupMaxFiles(),
-        days: getDbBackupRetentionDays(),
-      },
-      dataDir: dataDir.startsWith(homeDir) ? "~" + dataDir.slice(homeDir.length) : dataDir,
+      dataDir: homeDir && dataDir.startsWith(homeDir) ? "~" + dataDir.slice(homeDir.length) : dataDir,
     });
   } catch (error) {
     console.error("[API] Error getting storage health:", error);

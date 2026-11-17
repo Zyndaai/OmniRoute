@@ -159,7 +159,7 @@ describe("omniroute_web_search handler (via MCP dispatch)", () => {
     mockFetch.mockReset();
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);
@@ -304,7 +304,7 @@ describe("omniroute_x_search handler (via MCP dispatch)", () => {
     mockFetch.mockReset();
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);
@@ -405,7 +405,7 @@ describe("omniroute_get_health handler (via MCP dispatch)", () => {
     mockFetch.mockReset();
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createMcpServer();
+    const server = await createMcpServer();
     await server.connect(serverTransport);
     client = new Client({ name: "test-client", version: "1.0.0" });
     await client.connect(clientTransport);

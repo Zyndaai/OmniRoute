@@ -5,14 +5,13 @@
  * specific model, a specific provider, or globally. Complements the USD cost
  * budgets in domainState.ts / src/domain/costRules.ts.
  *
- * Tables (migration 073): api_key_token_limits, api_key_token_counters,
- *                         api_key_token_limit_reset_logs.
+ * Tables: api_key_token_limits, api_key_token_counters,
+ *         api_key_token_limit_reset_logs.
  *
  * @module lib/db/tokenLimits
  */
 
-import { randomUUID } from "crypto";
-import { getDbInstance } from "./core";
+import { db, ts, type DbExecutor } from "./pg";
 import { getBudgetWindow, type BudgetResetInterval } from "@/domain/costRules";
 
 export type TokenLimitScopeType = "model" | "provider" | "global";
@@ -50,7 +49,8 @@ export interface TokenWindowState {
 
 type JsonRecord = Record<string, unknown>;
 
-let _schemaChecked = false;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -75,43 +75,15 @@ function normalizeResetInterval(value: unknown): BudgetResetInterval {
   return "monthly";
 }
 
-function ensureSchema() {
-  if (_schemaChecked) return;
-  const db = getDbInstance();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS api_key_token_limits (
-      id              TEXT PRIMARY KEY,
-      api_key_id      TEXT NOT NULL,
-      scope_type      TEXT NOT NULL CHECK (scope_type IN ('model', 'provider', 'global')),
-      scope_value     TEXT NOT NULL DEFAULT '',
-      token_limit     INTEGER NOT NULL CHECK (token_limit > 0),
-      reset_interval  TEXT NOT NULL DEFAULT 'monthly' CHECK (reset_interval IN ('daily', 'weekly', 'monthly')),
-      reset_time      TEXT,
-      enabled         INTEGER NOT NULL DEFAULT 1,
-      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (api_key_id, scope_type, scope_value, reset_interval)
-    );
-    CREATE INDEX IF NOT EXISTS idx_aktl_api_key_id ON api_key_token_limits (api_key_id);
-    CREATE TABLE IF NOT EXISTS api_key_token_counters (
-      limit_id      TEXT NOT NULL,
-      window_start  TEXT NOT NULL,
-      tokens_used   INTEGER NOT NULL DEFAULT 0,
-      updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (limit_id, window_start),
-      FOREIGN KEY (limit_id) REFERENCES api_key_token_limits (id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS api_key_token_limit_reset_logs (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      limit_id      TEXT NOT NULL,
-      reset_at      TEXT NOT NULL DEFAULT (datetime('now')),
-      prev_tokens   INTEGER NOT NULL DEFAULT 0,
-      window_start  TEXT NOT NULL,
-      FOREIGN KEY (limit_id) REFERENCES api_key_token_limits (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_aktlrl_limit_id ON api_key_token_limit_reset_logs (limit_id);
-  `);
-  _schemaChecked = true;
+/** `windowStart` is epoch ms as a string; ts() would read small values as seconds. */
+function windowIso(windowStart: string): string | null {
+  const ms = Number(windowStart);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : ts(windowStart);
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: unknown; kind?: unknown } | null;
+  return e?.code === "23505" || e?.kind === "unique_violation";
 }
 
 function rowToTokenLimit(row: unknown): TokenLimit {
@@ -123,8 +95,9 @@ function rowToTokenLimit(row: unknown): TokenLimit {
     scopeValue: typeof r.scope_value === "string" ? r.scope_value : "",
     tokenLimit: toNumber(r.token_limit),
     resetInterval: normalizeResetInterval(r.reset_interval),
-    resetTime: typeof r.reset_time === "string" && r.reset_time ? r.reset_time : "00:00",
-    enabled: toNumber(r.enabled, 1) !== 0,
+    // `time` columns arrive as 'HH:MM:SS'; the API has always exposed 'HH:MM'.
+    resetTime: typeof r.reset_time === "string" && r.reset_time ? r.reset_time.slice(0, 5) : "00:00",
+    enabled: r.enabled !== false,
     createdAt: typeof r.created_at === "string" ? r.created_at : "",
     updatedAt: typeof r.updated_at === "string" ? r.updated_at : "",
   };
@@ -150,59 +123,74 @@ export class TokenLimitNotFoundError extends Error {
 
 function normalizeUpsertInput(input: UpsertTokenLimitInput) {
   const scopeType = normalizeScopeType(input.scopeType);
+  const rawTime = typeof input.resetTime === "string" ? input.resetTime.trim() : "";
   return {
     apiKeyId: input.apiKeyId,
     scopeType,
     scopeValue: scopeType === "global" ? "" : (input.scopeValue ?? "").trim(),
     resetInterval: normalizeResetInterval(input.resetInterval),
-    resetTime: typeof input.resetTime === "string" && input.resetTime ? input.resetTime : "00:00",
-    enabled: input.enabled === false ? 0 : 1,
+    resetTime: TIME_RE.test(rawTime) ? rawTime : "00:00",
+    enabled: input.enabled !== false,
     tokenLimit: Math.floor(toNumber(input.tokenLimit)),
   };
 }
 
-function updateTokenLimitById(id: string, row: ReturnType<typeof normalizeUpsertInput>): void {
-  const db = getDbInstance();
-  const clash = db
-    .prepare(
-      `SELECT id FROM api_key_token_limits
-       WHERE api_key_id = @apiKeyId AND scope_type = @scopeType AND scope_value = @scopeValue
-         AND reset_interval = @resetInterval AND id != @id`
-    )
-    .get({ ...row, id });
-  if (clash) throw new TokenLimitConflictError(row.scopeType, row.resetInterval);
-  const result = db
-    .prepare(
+async function updateTokenLimitById(
+  id: string,
+  row: ReturnType<typeof normalizeUpsertInput>
+): Promise<TokenLimit> {
+  if (!UUID_RE.test(id)) throw new TokenLimitNotFoundError();
+  try {
+    const written = await db().queryOne(
       `UPDATE api_key_token_limits
-       SET scope_type = @scopeType, scope_value = @scopeValue, token_limit = @tokenLimit,
-           reset_interval = @resetInterval, reset_time = @resetTime, enabled = @enabled,
-           updated_at = datetime('now')
-       WHERE id = @id AND api_key_id = @apiKeyId`
-    )
-    .run({ ...row, id });
-  if (result.changes === 0) throw new TokenLimitNotFoundError();
+       SET scope_type = $1, scope_value = $2, token_limit = $3,
+           reset_interval = $4, reset_time = $5::time, enabled = $6, updated_at = now()
+       WHERE id = $7 AND api_key_id = $8
+       RETURNING *`,
+      [
+        row.scopeType,
+        row.scopeValue,
+        row.tokenLimit,
+        row.resetInterval,
+        row.resetTime,
+        row.enabled,
+        id,
+        row.apiKeyId,
+      ]
+    );
+    if (!written) throw new TokenLimitNotFoundError();
+    return rowToTokenLimit(written);
+  } catch (err) {
+    if (isUniqueViolation(err)) throw new TokenLimitConflictError(row.scopeType, row.resetInterval);
+    throw err;
+  }
 }
 
 /** Insert, or update the key's existing limit for the same scope AND reset interval. */
-function insertOrMergeTokenLimit(row: ReturnType<typeof normalizeUpsertInput>): string {
-  const db = getDbInstance();
-  db.prepare(
+async function insertOrMergeTokenLimit(
+  row: ReturnType<typeof normalizeUpsertInput>
+): Promise<TokenLimit> {
+  const written = await db().queryOne(
     `INSERT INTO api_key_token_limits
-       (id, api_key_id, scope_type, scope_value, token_limit, reset_interval, reset_time, enabled, created_at, updated_at)
-     VALUES (@id, @apiKeyId, @scopeType, @scopeValue, @tokenLimit, @resetInterval, @resetTime, @enabled, datetime('now'), datetime('now'))
-     ON CONFLICT(api_key_id, scope_type, scope_value, reset_interval)
-     DO UPDATE SET token_limit = excluded.token_limit,
-                   reset_time  = excluded.reset_time,
-                   enabled     = excluded.enabled,
-                   updated_at  = datetime('now')`
-  ).run({ ...row, id: randomUUID() });
-  const written = db
-    .prepare(
-      `SELECT id FROM api_key_token_limits
-       WHERE api_key_id = ? AND scope_type = ? AND scope_value = ? AND reset_interval = ?`
-    )
-    .get(row.apiKeyId, row.scopeType, row.scopeValue, row.resetInterval) as { id: string };
-  return written.id;
+       (api_key_id, scope_type, scope_value, token_limit, reset_interval, reset_time, enabled)
+     VALUES ($1, $2, $3, $4, $5, $6::time, $7)
+     ON CONFLICT (api_key_id, scope_type, scope_value, reset_interval)
+     DO UPDATE SET token_limit = EXCLUDED.token_limit,
+                   reset_time  = EXCLUDED.reset_time,
+                   enabled     = EXCLUDED.enabled,
+                   updated_at  = now()
+     RETURNING *`,
+    [
+      row.apiKeyId,
+      row.scopeType,
+      row.scopeValue,
+      row.tokenLimit,
+      row.resetInterval,
+      row.resetTime,
+      row.enabled,
+    ]
+  );
+  return rowToTokenLimit(written);
 }
 
 /**
@@ -212,35 +200,21 @@ function insertOrMergeTokenLimit(row: ReturnType<typeof normalizeUpsertInput>): 
  * the limit with the same scope and reset interval, never a limit of another window.
  * Returns the persisted row.
  */
-export function upsertTokenLimit(input: UpsertTokenLimitInput): TokenLimit {
-  ensureSchema();
+export async function upsertTokenLimit(input: UpsertTokenLimitInput): Promise<TokenLimit> {
   const row = normalizeUpsertInput(input);
   const requestedId = input.id?.trim();
-  let id: string;
-  if (requestedId) {
-    updateTokenLimitById(requestedId, row);
-    id = requestedId;
-  } else {
-    id = insertOrMergeTokenLimit(row);
-  }
-  const written = getDbInstance()
-    .prepare("SELECT * FROM api_key_token_limits WHERE id = ?")
-    .get(id);
-  return rowToTokenLimit(written);
+  return requestedId ? updateTokenLimitById(requestedId, row) : insertOrMergeTokenLimit(row);
 }
 
 /** List all token limits for an API key (ordered most-specific first: model, provider, global). */
-export function listTokenLimits(apiKeyId: string): TokenLimit[] {
-  ensureSchema();
-  const db = getDbInstance();
-  return db
-    .prepare(
-      `SELECT * FROM api_key_token_limits
-       WHERE api_key_id = ?
-       ORDER BY CASE scope_type WHEN 'model' THEN 0 WHEN 'provider' THEN 1 ELSE 2 END, scope_value`
-    )
-    .all(apiKeyId)
-    .map(rowToTokenLimit);
+export async function listTokenLimits(apiKeyId: string): Promise<TokenLimit[]> {
+  const rows = await db().query(
+    `SELECT * FROM api_key_token_limits
+     WHERE api_key_id = $1
+     ORDER BY CASE scope_type WHEN 'model' THEN 0 WHEN 'provider' THEN 1 ELSE 2 END, scope_value`,
+    [apiKeyId]
+  );
+  return rows.map(rowToTokenLimit);
 }
 
 /**
@@ -248,45 +222,39 @@ export function listTokenLimits(apiKeyId: string): TokenLimit[] {
  * (scope_value === model), the provider-scoped row (scope_value === provider),
  * and the global row. Used by the enforcement read.
  */
-export function getTokenLimitsForRequest(
+export async function getTokenLimitsForRequest(
   apiKeyId: string,
   provider: string,
   model: string
-): TokenLimit[] {
-  ensureSchema();
-  const db = getDbInstance();
-  return db
-    .prepare(
-      `SELECT * FROM api_key_token_limits
-       WHERE api_key_id = @apiKeyId
-         AND enabled = 1
-         AND (
-           (scope_type = 'global')
-           OR (scope_type = 'model' AND scope_value = @model)
-           OR (scope_type = 'provider' AND scope_value = @provider)
-         )`
-    )
-    .all({ apiKeyId, model: model || "", provider: provider || "" } as JsonRecord)
-    .map(rowToTokenLimit);
+): Promise<TokenLimit[]> {
+  const rows = await db().query(
+    `SELECT * FROM api_key_token_limits
+     WHERE api_key_id = $1
+       AND enabled
+       AND (
+         (scope_type = 'global')
+         OR (scope_type = 'model' AND scope_value = $2)
+         OR (scope_type = 'provider' AND scope_value = $3)
+       )`,
+    [apiKeyId, model || "", provider || ""]
+  );
+  return rows.map(rowToTokenLimit);
 }
 
-/** Delete a token limit by id (counters + reset logs cascade in app code below). */
-export function deleteTokenLimit(id: string): boolean {
-  ensureSchema();
-  const db = getDbInstance();
-  // FK pragma is OFF in this build; delete dependents explicitly.
-  db.prepare("DELETE FROM api_key_token_counters WHERE limit_id = ?").run(id);
-  db.prepare("DELETE FROM api_key_token_limit_reset_logs WHERE limit_id = ?").run(id);
-  const info = db.prepare("DELETE FROM api_key_token_limits WHERE id = ?").run(id);
+/** Delete a token limit by id (counters and reset logs go with it through their FKs). */
+export async function deleteTokenLimit(id: string): Promise<boolean> {
+  if (!UUID_RE.test(id)) return false;
+  const info = await db().execute("DELETE FROM api_key_token_limits WHERE id = $1", [id]);
   return info.changes > 0;
 }
 
-// ──────────────── Counters (concurrency-safe under WAL) ────────────────
+// ──────────────── Counters (atomic upserts) ────────────────
 
 /**
  * Pure boundary calculator. Resolves the active window for a limit at `now`
  * and reports whether the window has rolled since the limit's last-known window.
  * No DB writes. Window math reused from costRules.getBudgetWindow.
+ * `windowStart` is the window start in epoch ms, as a string.
  */
 export function resetWindowIfElapsed(limit: TokenLimit, now = Date.now()): TokenWindowState {
   const window = getBudgetWindow(limit.resetInterval, limit.resetTime, now);
@@ -303,50 +271,94 @@ export function resetWindowIfElapsed(limit: TokenLimit, now = Date.now()): Token
  * Read-only point-read of the current window's usage for a limit.
  * Returns 0 if no counter row exists yet (cold window). DB-authoritative.
  */
-export function getWindowUsage(limit: TokenLimit, now = Date.now()): number {
-  ensureSchema();
-  const db = getDbInstance();
+export async function getWindowUsage(limit: TokenLimit, now = Date.now()): Promise<number> {
+  if (!UUID_RE.test(limit.id)) return 0;
   const { windowStart } = resetWindowIfElapsed(limit, now);
-  const row = db
-    .prepare(
-      "SELECT tokens_used FROM api_key_token_counters WHERE limit_id = ? AND window_start = ?"
-    )
-    .get(limit.id, windowStart);
+  const row = await db().queryOne(
+    "SELECT tokens_used FROM api_key_token_counters WHERE limit_id = $1 AND window_start = $2",
+    [limit.id, windowIso(windowStart)]
+  );
   return toNumber(asRecord(row).tokens_used);
 }
 
 /**
  * Atomically add `tokens` to the counter for (limitId, windowStart) and return
  * the new running total. Uses UPSERT (no read-then-write) so concurrent
- * increments under WAL cannot lose updates.
+ * increments from any process cannot lose updates.
  */
-export function incrementWindowTokens(
+export async function incrementWindowTokens(
   limitId: string,
   windowStart: string,
-  tokens: number
-): number {
-  ensureSchema();
-  const db = getDbInstance();
+  tokens: number,
+  executor: DbExecutor = db()
+): Promise<number> {
   const delta = Math.max(0, Math.floor(toNumber(tokens)));
-  const row = db
-    .prepare(
-      `INSERT INTO api_key_token_counters (limit_id, window_start, tokens_used, updated_at)
-       VALUES (@limitId, @windowStart, @tokens, datetime('now'))
-       ON CONFLICT(limit_id, window_start)
-       DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used,
-                     updated_at  = datetime('now')
-       RETURNING tokens_used`
-    )
-    .get({ limitId, windowStart, tokens: delta });
+  if (!UUID_RE.test(limitId)) return 0;
+  const row = await executor.queryOne(
+    `INSERT INTO api_key_token_counters (limit_id, window_start, tokens_used, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (limit_id, window_start)
+     DO UPDATE SET tokens_used = api_key_token_counters.tokens_used + EXCLUDED.tokens_used,
+                   updated_at  = now()
+     RETURNING tokens_used`,
+    [limitId, windowIso(windowStart), delta]
+  );
   return toNumber(asRecord(row).tokens_used);
 }
 
-/** Append a window-reset audit log row. */
-export function logTokenLimitReset(limitId: string, prevTokens: number, windowStart: string): void {
-  ensureSchema();
-  const db = getDbInstance();
-  db.prepare(
+/**
+ * Create the counter row for a window at `seed` unless it already exists.
+ * Returns true when this call created it (the caller is then the first writer
+ * of the window and owns rollover logging and seeding).
+ */
+export async function createWindowCounterIfMissing(
+  limitId: string,
+  windowStart: string,
+  seed: number,
+  executor: DbExecutor = db()
+): Promise<boolean> {
+  if (!UUID_RE.test(limitId)) return false;
+  const row = await executor.queryOne(
+    `INSERT INTO api_key_token_counters (limit_id, window_start, tokens_used)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (limit_id, window_start) DO NOTHING
+     RETURNING tokens_used`,
+    [limitId, windowIso(windowStart), Math.max(0, Math.floor(toNumber(seed)))]
+  );
+  return row !== undefined;
+}
+
+/** The newest counter row older than `windowStart` for a limit: its tokens, or 0 when none. */
+export async function getPriorWindowTokens(
+  limitId: string,
+  windowStart: string,
+  executor: DbExecutor = db()
+): Promise<number> {
+  if (!UUID_RE.test(limitId)) return 0;
+  const row = await executor.queryOne(
+    `SELECT tokens_used FROM api_key_token_counters
+     WHERE limit_id = $1 AND window_start < $2
+     ORDER BY window_start DESC LIMIT 1`,
+    [limitId, windowIso(windowStart)]
+  );
+  return toNumber(asRecord(row).tokens_used);
+}
+
+/**
+ * Append a window-reset audit log row. One row per rolled window: a second
+ * writer for the same (limit, window) is a no-op.
+ */
+export async function logTokenLimitReset(
+  limitId: string,
+  prevTokens: number,
+  windowStart: string,
+  executor: DbExecutor = db()
+): Promise<void> {
+  if (!UUID_RE.test(limitId)) return;
+  await executor.execute(
     `INSERT INTO api_key_token_limit_reset_logs (limit_id, reset_at, prev_tokens, window_start)
-     VALUES (?, datetime('now'), ?, ?)`
-  ).run(limitId, Math.max(0, Math.floor(toNumber(prevTokens))), windowStart);
+     VALUES ($1, now(), $2, $3)
+     ON CONFLICT (limit_id, window_start) DO NOTHING`,
+    [limitId, Math.max(0, Math.floor(toNumber(prevTokens))), windowIso(windowStart)]
+  );
 }

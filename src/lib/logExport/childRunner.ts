@@ -103,7 +103,7 @@ interface ReplyContext {
   start: ExportChildStart;
   child: ChildProcess;
   fixture: TestOptions | null;
-  onBatch: (cursor: number, count: number) => void;
+  onBatch: (cursor: number, count: number) => void | Promise<void>;
   stop: (error?: unknown) => void;
 }
 
@@ -162,7 +162,7 @@ async function acknowledgeBatch(
   try {
     await ctx.fixture?.beforeAck?.();
     if (state.finishing) return;
-    ctx.onBatch(reply.cursorRowId, reply.count);
+    await ctx.onBatch(reply.cursorRowId, reply.count);
     state.cursor = reply.cursorRowId;
     state.exported += reply.count;
     state.processing = false;
@@ -226,7 +226,7 @@ function childExitError(
 /** Resolves/rejects only once the child has closed, including after TERM → KILL escalation. */
 export function runExportChild(
   start: ExportChildStart,
-  onBatch: (cursor: number, count: number) => void,
+  onBatch: (cursor: number, count: number) => void | Promise<void>,
   secretValues: readonly string[]
 ): Promise<void> {
   const fixture = testOptions;

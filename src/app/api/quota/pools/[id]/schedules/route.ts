@@ -31,10 +31,10 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
 
   try {
     const { id } = await params;
-    if (!getPool(id)) {
+    if (!(await getPool(id))) {
       return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
-    return NextResponse.json({ schedules: listSchedules(id) });
+    return NextResponse.json({ schedules: await listSchedules(id) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list schedules";
     return NextResponse.json(buildErrorBody(500, message), { status: 500 });
@@ -47,7 +47,7 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
 
   try {
     const { id } = await params;
-    if (!getPool(id)) {
+    if (!(await getPool(id))) {
       return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
 
@@ -57,10 +57,10 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
       return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
-    const schedules = replaceSchedules(id, parsed.data.schedules);
+    const schedules = await replaceSchedules(id, parsed.data.schedules);
 
     const ctx = getAuditRequestContext(request);
-    logAuditEvent({
+    await logAuditEvent({
       action: "quota.schedules.updated",
       target: id,
       metadata: { count: schedules.length },

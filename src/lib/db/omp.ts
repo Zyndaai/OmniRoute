@@ -1,22 +1,25 @@
 import os from "os";
 import path from "path";
-import { runtimeRequire as _require } from "./adapters/runtimeRequire";
+import { createRequire } from "node:module";
+
+// oh-my-pi keeps its credentials in its own SQLite file (~/.omp/agent/agent.db), not in
+// OmniRoute's database, so it is opened with better-sqlite3 directly. The synchronous
+// callers need a synchronous load; Reflect keeps the request dynamic so bundlers leave the
+// native package external.
+const runtimeRequire = createRequire(process.argv[1] || process.cwd());
 
 type DatabaseConstructor = typeof import("better-sqlite3");
 
 function getDatabaseClass(): DatabaseConstructor | null {
   try {
-    if (process.versions.bun) {
-      return (_require("bun:sqlite") as { Database: DatabaseConstructor }).Database;
-    }
-    return _require("better-sqlite3") as DatabaseConstructor;
+    return Reflect.apply(runtimeRequire, undefined, ["better-sqlite3"]) as DatabaseConstructor;
   } catch {
     return null;
   }
 }
 
 function databaseOptions(readonly = false) {
-  return readonly ? { readonly: true } : { readwrite: true, create: true };
+  return readonly ? { readonly: true } : {};
 }
 
 const getOmpDir = () => path.join(os.homedir(), ".omp", "agent");

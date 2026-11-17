@@ -9,8 +9,8 @@
  *      hosts are untouched — DNS is per-agent, see #8466).
  *   2. Best-effort flushes the Windows DNS resolver cache (hosts-file entries
  *      are cached there and don't disappear just because the file changed).
- *   3. Clears this agent's saved model mappings (both agent_bridge_mappings
- *      and the mitmAlias key_value mirror the proxy reads at request time).
+ *   3. Clears this agent's saved model mappings (agent_bridge_mappings, which
+ *      the proxy reads at request time).
  *   4. Resets dns_enabled/setup_completed in agent_bridge_state.
  *
  * Deliberately does NOT touch the shared MITM server or root CA — those are
@@ -21,7 +21,7 @@
 import { AgentBridgeResetBodySchema } from "@/shared/schemas/agentBridge";
 import { checkDNSEntryForAgent, flushWindowsDnsCache, removeDNSEntry } from "@/mitm/dns/dnsConfig";
 import { getAllAgentBridgeStates, upsertAgentBridgeState } from "@/lib/db/agentBridgeState";
-import { setMappings, syncAgentBridgeMappingsToMitmAlias } from "@/lib/db/agentBridgeMappings";
+import { setMappings } from "@/lib/db/agentBridgeMappings";
 import { getCachedPassword, setCachedPassword } from "@/mitm/manager";
 import {
   isMitmSudoPasswordRequired,
@@ -70,10 +70,9 @@ export async function POST(request: Request, { params }: Params): Promise<Respon
     await removeDNSEntry(sudoPassword, id);
     flushWindowsDnsCache();
 
-    setMappings(id, []);
-    syncAgentBridgeMappingsToMitmAlias(id);
+    await setMappings(id, []);
 
-    upsertAgentBridgeState({ agent_id: id, dns_enabled: false, setup_completed: false });
+    await upsertAgentBridgeState({ agent_id: id, dns_enabled: false, setup_completed: false });
 
     const suppliedPassword = normalizeMitmSudoPasswordInput(parsed.data.sudoPassword);
     if (process.platform !== "win32" && suppliedPassword) {
@@ -81,7 +80,7 @@ export async function POST(request: Request, { params }: Params): Promise<Respon
     }
 
     const verified = !checkDNSEntryForAgent(id);
-    const otherAgentsStillActive = getAllAgentBridgeStates().some(
+    const otherAgentsStillActive = (await getAllAgentBridgeStates()).some(
       (s) => s.agent_id !== id && s.dns_enabled
     );
 

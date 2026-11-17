@@ -4,11 +4,10 @@
  * Quota groups are first-class entities that pool multiple quota pools
  * under a shared namespace. Pools reference groups via quota_pools.group_id.
  *
- * All SQL goes through prepared statements — never raw string interpolation.
- * Import getDbInstance from ./core (Hard Rule #5).
+ * All SQL goes through parameterised statements — never raw string interpolation.
  */
 
-import { getDbInstance } from "./core";
+import { db } from "./pg";
 import { invalidateModelCatalogCache } from "./readCache";
 
 // ---------------------------------------------------------------------------
@@ -24,20 +23,6 @@ export interface QuotaGroup {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-interface StatementLike<TRow = unknown> {
-  all: (...params: unknown[]) => TRow[];
-  get: (...params: unknown[]) => TRow | undefined;
-  run: (...params: unknown[]) => { changes: number };
-}
-
-interface DbLike {
-  prepare: <TRow = unknown>(sql: string) => StatementLike<TRow>;
-}
-
-function getDb(): DbLike {
-  return getDbInstance() as unknown as DbLike;
-}
 
 interface GroupRow {
   id: string;
@@ -65,46 +50,45 @@ function makeId(): string {
  * Create a new quota group with the given name.
  * Returns the newly created QuotaGroup row.
  */
-export function createGroup(name: string): QuotaGroup {
+export async function createGroup(name: string): Promise<QuotaGroup> {
   const id = makeId();
-  const now = new Date().toISOString();
-
-  getDb()
-    .prepare("INSERT INTO quota_groups (id, name, created_at) VALUES (?, ?, ?)")
-    .run(id, name, now);
-
-  return { id, name, createdAt: now };
+  const row = await db().queryOne<GroupRow>(
+    "INSERT INTO quota_groups (id, name) VALUES ($1, $2) RETURNING id, name, created_at",
+    [id, name]
+  );
+  return row ? rowToGroup(row) : { id, name, createdAt: new Date().toISOString() };
 }
 
 /**
  * Get a single quota group by id.
  * Returns null if not found.
  */
-export function getGroup(id: string): QuotaGroup | null {
-  const row = getDb()
-    .prepare<GroupRow>("SELECT id, name, created_at FROM quota_groups WHERE id = ?")
-    .get(id);
-  if (!row) return null;
-  return rowToGroup(row);
+export async function getGroup(id: string): Promise<QuotaGroup | null> {
+  const row = await db().queryOne<GroupRow>(
+    "SELECT id, name, created_at FROM quota_groups WHERE id = $1",
+    [id]
+  );
+  return row ? rowToGroup(row) : null;
 }
 
 /**
  * Convenience helper — returns just the group name, or null if not found.
  */
-export function getGroupName(id: string): string | null {
-  const row = getDb()
-    .prepare<{ name: string }>("SELECT name FROM quota_groups WHERE id = ?")
-    .get(id);
+export async function getGroupName(id: string): Promise<string | null> {
+  const row = await db().queryOne<{ name: string }>(
+    "SELECT name FROM quota_groups WHERE id = $1",
+    [id]
+  );
   return row ? row.name : null;
 }
 
 /**
  * List all quota groups, ordered by created_at ascending.
  */
-export function listGroups(): QuotaGroup[] {
-  const rows = getDb()
-    .prepare<GroupRow>("SELECT id, name, created_at FROM quota_groups ORDER BY created_at ASC")
-    .all();
+export async function listGroups(): Promise<QuotaGroup[]> {
+  const rows = await db().query<GroupRow>(
+    "SELECT id, name, created_at FROM quota_groups ORDER BY created_at ASC, id ASC"
+  );
   return rows.map(rowToGroup);
 }
 
@@ -112,8 +96,8 @@ export function listGroups(): QuotaGroup[] {
  * Rename an existing group.
  * Returns true if the row was updated, false if the group was not found.
  */
-export function renameGroup(id: string, name: string): boolean {
-  const result = getDb().prepare("UPDATE quota_groups SET name = ? WHERE id = ?").run(name, id);
+export async function renameGroup(id: string, name: string): Promise<boolean> {
+  const result = await db().execute("UPDATE quota_groups SET name = $1 WHERE id = $2", [name, id]);
   if (result.changes > 0) {
     invalidateModelCatalogCache();
     return true;
@@ -131,22 +115,23 @@ export function renameGroup(id: string, name: string): boolean {
  *
  * Returns true if a row was deleted, false if the group was not found.
  */
-export function deleteGroup(id: string): boolean {
+export async function deleteGroup(id: string): Promise<boolean> {
   // Protect the seed group.
   if (id === "group-demo") {
     throw new Error(
-      "Cannot delete the protected seed group 'group-demo'. Reassign its pools to another group first.",
+      "Cannot delete the protected seed group 'group-demo'. Reassign its pools to another group first."
     );
   }
 
   // Guard: refuse deletion when pools still reference this group.
-  const refRow = getDb()
-    .prepare<{ cnt: number }>("SELECT COUNT(*) AS cnt FROM quota_pools WHERE group_id = ?")
-    .get(id);
+  const refRow = await db().queryOne<{ cnt: number }>(
+    "SELECT COUNT(*) AS cnt FROM quota_pools WHERE group_id = $1",
+    [id]
+  );
   if (refRow && refRow.cnt > 0) {
     throw new Error(`Group '${id}' has pools; reassign or delete them first.`);
   }
 
-  const result = getDb().prepare("DELETE FROM quota_groups WHERE id = ?").run(id);
+  const result = await db().execute("DELETE FROM quota_groups WHERE id = $1", [id]);
   return result.changes > 0;
 }

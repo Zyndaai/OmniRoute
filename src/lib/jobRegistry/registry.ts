@@ -33,27 +33,30 @@ export class JobRegistry {
   private cronFailCount = new Map<string, number>();
   private static readonly MAX_CRON_PARSE_FAILURES = 5;
   private cronGetters = new Map<string, () => string>();
-  register(def: JobDefinition): void {
+  async register(def: JobDefinition): Promise<void> {
     // Never clobber enabled toggle or created_at on re-register.
     // the original created_at. Pass enabled=true for new jobs (seed default).
-    upsertJob({
+    const existing = await getJob(def.id);
+    await upsertJob({
       id: def.id,
       type: def.type,
       cron: def.cron,
       intervalMs: def.intervalMs,
-      enabled: getJob(def.id)?.enabled ?? def.enabled ?? true,
+      enabled: existing?.enabled ?? def.enabled ?? true,
       envFlag: def.envFlag,
       config: def.config,
-      createdAt: getJob(def.id)?.createdAt ?? new Date().toISOString(),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     this.handlers.set(def.id, def.handler);
     if (def.cronGetter) this.cronGetters.set(def.id, def.cronGetter);
   }
 
-  start(jobId: string): void {
+  async start(jobId: string): Promise<void> {
     if (this.timers.has(jobId)) return;
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
+    // Another start() may have armed the job while the DB read was in flight.
+    if (this.timers.has(jobId)) return;
     const handler = this.handlers.get(jobId);
     if (!job || !handler) {
       console.warn(`[JobRegistry] Skip ${jobId}: no ${job ? "handler" : "job"} registered`);
@@ -91,18 +94,16 @@ export class JobRegistry {
       throw new Error("[JobRegistry] No handlers registered. Call register() before startAll().");
     }
     await cleanupOrphanedRuns();
-    const jobs = getAllJobs().filter((j) => j.enabled);
-    // start() is synchronous and can throw (getJob reads the DB), so each call
-    // needs its own try/catch. Collecting them with Promise.allSettled would not
-    // work: the callback returns void, every entry settles as fulfilled, and a
-    // synchronous throw escapes the map before allSettled is ever reached.
+    const jobs = (await getAllJobs()).filter((j) => j.enabled);
+    // start() can throw (getJob reads the DB), so each call needs its own try/catch
+    // to keep one failing job from blocking the rest.
     for (const job of jobs) {
       if (!this.handlers.has(job.id)) {
         console.warn(`[JobRegistry] Skip ${job.id}: no handler registered`);
         continue;
       }
       try {
-        this.start(job.id);
+        await this.start(job.id);
       } catch (err) {
         console.error(`[JobRegistry] Failed to start ${job.id}:`, errMessage(err));
       }
@@ -119,7 +120,7 @@ export class JobRegistry {
   }
 
   async runNow(jobId: string): Promise<{ started: boolean; reason?: string }> {
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job) return { started: false, reason: "not_found" };
     if (!job.enabled) return { started: false, reason: "disabled" };
     const handler = this.handlers.get(jobId);
@@ -148,29 +149,29 @@ export class JobRegistry {
     return { started: true };
   }
 
-  setEnabled(jobId: string, enabled: boolean): void {
-    updateJobEnabled(jobId, enabled);
+  async setEnabled(jobId: string, enabled: boolean): Promise<void> {
+    await updateJobEnabled(jobId, enabled);
     if (enabled) {
       this.stop(jobId);
-      this.start(jobId);
+      await this.start(jobId);
     } else {
       this.stop(jobId);
     }
   }
 
-  getRuns(jobId: string, limit = 20): JobRun[] {
+  getRuns(jobId: string, limit = 20): Promise<JobRun[]> {
     return dbGetRuns(jobId, limit);
   }
 
-  listJobs(): JobDefinition[] {
-    return getAllJobs().map((job) => ({
+  async listJobs(): Promise<JobDefinition[]> {
+    return (await getAllJobs()).map((job) => ({
       ...job,
       handler: this.handlers.get(job.id) ?? (() => Promise.resolve({ success: true })),
     }));
   }
 
-  private getJobConfig(jobId: string): Record<string, unknown> | null {
-    return getJob(jobId)?.config ?? null;
+  private async getJobConfig(jobId: string): Promise<Record<string, unknown> | null> {
+    return (await getJob(jobId))?.config ?? null;
   }
 
   /** Core execution wrapper: re-entrancy guard + timing + recording + prune. */
@@ -271,13 +272,19 @@ export class JobRegistry {
         }
       }
       this.scheduleNextCron(jobId, freshCron, tz, envFlag);
-      if (this.running.has(jobId)) return;
-      const jobConfig = this.getJobConfig(jobId);
-      if (envFlag && !isEnvEnabled(envFlag, jobConfig?.envDefault === false ? false : true)) return;
-      const handler = this.handlers.get(jobId);
-      if (handler) void this.safeRun(jobId, handler);
+      void this.fireCron(jobId, envFlag).catch((err) => {
+        console.error(`[JobRegistry] Cron dispatch for ${jobId} failed:`, errMessage(err));
+      });
     }, delay);
     timer.unref?.();
     this.timers.set(jobId, timer);
+  }
+
+  private async fireCron(jobId: string, envFlag?: string | null): Promise<void> {
+    if (this.running.has(jobId)) return;
+    const jobConfig = await this.getJobConfig(jobId);
+    if (envFlag && !isEnvEnabled(envFlag, jobConfig?.envDefault === false ? false : true)) return;
+    const handler = this.handlers.get(jobId);
+    if (handler) await this.safeRun(jobId, handler);
   }
 }

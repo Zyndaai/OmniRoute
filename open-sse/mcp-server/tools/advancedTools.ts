@@ -884,8 +884,17 @@ export async function handleDbHealthCheck(args: { autoRepair?: boolean }) {
   const autoRepair = args.autoRepair === true;
 
   try {
-    const { runManagedDbHealthCheck } = await import("../../../src/lib/db/core.ts");
-    const result = await runManagedDbHealthCheck({ autoRepair });
+    // PostgreSQL has nothing to auto-repair: `autoRepair` is accepted for compatibility only.
+    const { pingDb, getSchemaVersion } = await import("../../../src/lib/db/core.ts");
+    const isHealthy = await pingDb();
+    const result = {
+      isHealthy,
+      issues: isHealthy ? [] : [{ message: "Database did not answer SELECT 1" }],
+      repairedCount: 0,
+      backupCreated: false,
+      schemaVersion: isHealthy ? await getSchemaVersion() : null,
+      autoRepairRequested: autoRepair,
+    };
 
     await logToolCall(
       "omniroute_db_health_check",

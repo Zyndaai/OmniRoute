@@ -12,7 +12,7 @@
 // (3) past 2000 total rows, evict the oldest rows first. Surplus rows are counted
 // in `rejected` with `reason: "cap-evicted"` — a push is a dated observation,
 // never a batch error.
-import { getDbInstance } from "./core";
+import { db, ts, type DbExecutor } from "@/lib/db/pg";
 import { normalizeProxyHostForLog } from "../proxyLogHost";
 import { normalizeEgressAddress } from "@/shared/network/egressAddress";
 
@@ -95,14 +95,18 @@ export function readOperatorEgressWindowHours(): number {
  * the fallback accepts any syntactically usable couple absent from the
  * registry — callers count those rows `ignored`, never a batch error.
  */
-export function isKnownProxyMember(host: string, port: number): boolean {
+export async function isKnownProxyMember(
+  host: string,
+  port: number,
+  executor: DbExecutor = db()
+): Promise<boolean> {
   try {
-    const db = getDbInstance();
     const normalized = normalizeProxyHostForLog(host);
     if (!normalized || !Number.isInteger(port) || port < 1 || port > 65535) return false;
-    const row = db
-      .prepare("SELECT id FROM proxy_registry WHERE host = ? AND port = ? LIMIT 1")
-      .get(normalized, port) as { id?: string } | undefined;
+    const row = await executor.queryOne(
+      "SELECT id FROM proxy_registry WHERE host = $1 AND port = $2 LIMIT 1",
+      [normalized, port]
+    );
     return !!row;
   } catch {
     return false;
@@ -113,36 +117,36 @@ export function isKnownProxyMember(host: string, port: number): boolean {
  * Store one batch of operator observations. All addresses in a batch share the
  * batch `observedAt`; the freshest timestamp wins per address through an atomic
  * upsert (no read-then-write, safe under concurrent pushes). One atomic
- * statement per row, one transaction per call.
+ * statement per row, one transaction per call. A transaction-scoped advisory
+ * lock serialises concurrent pushes, so the eviction caps below see a stable
+ * table and two batches cannot deadlock on each other's rows.
  */
-export function upsertOperatorEgress(rows: OperatorEgressPushRow[]): OperatorEgressUpsertResult {
+export async function upsertOperatorEgress(
+  rows: OperatorEgressPushRow[]
+): Promise<OperatorEgressUpsertResult> {
   const result: OperatorEgressUpsertResult = { stored: 0, ignored: 0, rejected: [] };
   if (rows.length === 0) return result;
-  const db = getDbInstance();
   const nowIso = new Date().toISOString();
-  const upsert = db.prepare(
-    `INSERT INTO proxy_operator_egress (host, port, address, observed_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (host, port, address)
-     DO UPDATE SET observed_at = max(observed_at, excluded.observed_at)`
-  );
   const touched = new Set<string>();
-  const write = db.transaction(() => {
+  await db().transaction(async (tx) => {
+    await tx.query("SELECT pg_advisory_xact_lock(hashtext('proxy_operator_egress'))");
     for (const row of rows) {
       const normalizedHost = normalizeProxyHostForLog(row.host);
       const port = Number(row.port);
-      if (
-        !normalizedHost ||
-        !Number.isInteger(port) ||
-        port < 1 ||
-        port > 65535 ||
-        typeof row.observedAt !== "string" ||
-        !row.observedAt
-      ) {
+      const observedAt = typeof row.observedAt === "string" ? ts(row.observedAt) : null;
+      if (!normalizedHost || !Number.isInteger(port) || port < 1 || port > 65535) {
         result.rejected.push({ member: `${row.host}:${row.port}`, reason: "invalid-member" });
         continue;
       }
-      if (!isKnownProxyMember(row.host, port)) result.ignored += row.addresses.length;
+      if (observedAt === null) {
+        // A string that is not a parseable date used to be stored as given; timestamptz cannot.
+        result.rejected.push({
+          member: `${normalizedHost}:${port}`,
+          reason: "invalid-observed-at",
+        });
+        continue;
+      }
+      if (!(await isKnownProxyMember(row.host, port, tx))) result.ignored += row.addresses.length;
       for (const rawAddress of row.addresses) {
         const normalized = normalizeEgressAddress(rawAddress);
         if (normalized === null) {
@@ -153,79 +157,70 @@ export function upsertOperatorEgress(rows: OperatorEgressPushRow[]): OperatorEgr
           });
           continue;
         }
-        upsert.run(normalizedHost, port, normalized, row.observedAt);
+        await tx.execute(
+          `INSERT INTO proxy_operator_egress (host, port, address, observed_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (host, port, address)
+           DO UPDATE SET observed_at = GREATEST(proxy_operator_egress.observed_at, EXCLUDED.observed_at)`,
+          [normalizedHost, port, normalized, observedAt]
+        );
         result.stored++;
         touched.add(`${normalizedHost}:${port}`);
       }
     }
-    evictOperatorEgressLocked(db, touched, nowIso, result.rejected);
+    await evictOperatorEgressLocked(tx, touched, nowIso, result.rejected);
   });
-  write();
   return result;
 }
 
-function evictOperatorEgressLocked(
-  db: ReturnType<typeof getDbInstance>,
+async function evictOperatorEgressLocked(
+  tx: DbExecutor,
   touched: Set<string>,
   nowIso: string,
   rejected: OperatorEgressRejection[]
-): void {
+): Promise<void> {
   const windowMs = readOperatorEgressWindowHours() * 60 * 60_000;
   const cutoff = new Date(Date.parse(nowIso) - windowMs).toISOString();
   // (1) Purge stale rows.
-  db.prepare("DELETE FROM proxy_operator_egress WHERE observed_at < ?").run(cutoff);
+  await tx.execute("DELETE FROM proxy_operator_egress WHERE observed_at < $1", [cutoff]);
   // (2) Per-member cap: keep the 10 newest rows per touched member. Evicted
-  // rows are counted, newest submission order wins the tie.
-  const perMember = db.prepare(
-    `DELETE FROM proxy_operator_egress
-     WHERE host = ? AND port = ?
-       AND rowid NOT IN (
-         SELECT rowid FROM proxy_operator_egress
-         WHERE host = ? AND port = ?
-         ORDER BY observed_at DESC, rowid DESC LIMIT ?
-       )`
-  );
+  // rows are counted; `address` breaks observed_at ties deterministically.
   for (const key of touched) {
     const separator = key.lastIndexOf(":");
     const host = key.slice(0, separator);
     const port = Number(key.slice(separator + 1));
-    const evicted = db
-      .prepare(
-        `SELECT address FROM proxy_operator_egress
-       WHERE host = ? AND port = ?
-         AND rowid NOT IN (
-           SELECT rowid FROM proxy_operator_egress
-           WHERE host = ? AND port = ?
-           ORDER BY observed_at DESC, rowid DESC LIMIT ?
-         )`
-      )
-      .all(host, port, host, port, OPERATOR_EGRESS_MAX_ADDRESSES_PER_MEMBER) as Array<{
-      address: string;
-    }>;
-    perMember.run(host, port, host, port, OPERATOR_EGRESS_MAX_ADDRESSES_PER_MEMBER);
+    const evicted = await tx.query<{ address: string }>(
+      `DELETE FROM proxy_operator_egress
+       WHERE host = $1 AND port = $2
+         AND address IN (
+           SELECT address FROM proxy_operator_egress
+           WHERE host = $1 AND port = $2
+           ORDER BY observed_at DESC, address DESC
+           OFFSET $3
+         )
+       RETURNING address`,
+      [host, port, OPERATOR_EGRESS_MAX_ADDRESSES_PER_MEMBER]
+    );
     for (const row of evicted) {
       rejected.push({ member: key, address: row.address, reason: "cap-evicted" });
     }
   }
   // (3) Total cap: past 2000 rows, evict the oldest rows first.
-  const total = (
-    db.prepare("SELECT COUNT(*) AS n FROM proxy_operator_egress").get() as { n: number }
-  ).n;
+  const total = Number(
+    (await tx.queryOne<{ n: number }>("SELECT COUNT(*) AS n FROM proxy_operator_egress"))?.n ?? 0
+  );
   if (total > OPERATOR_EGRESS_MAX_ROWS_TOTAL) {
     const overflow = total - OPERATOR_EGRESS_MAX_ROWS_TOTAL;
-    const evicted = db
-      .prepare(
-        `SELECT host, port, address FROM proxy_operator_egress
-         ORDER BY observed_at ASC, rowid ASC LIMIT ?`
-      )
-      .all(overflow) as Array<{ host: string; port: number; address: string }>;
-    db.prepare(
-      `DELETE FROM proxy_operator_egress
-       WHERE rowid IN (
-         SELECT rowid FROM proxy_operator_egress
-         ORDER BY observed_at ASC, rowid ASC LIMIT ?
-       )`
-    ).run(overflow);
+    const evicted = await tx.query<{ host: string; port: number; address: string }>(
+      `DELETE FROM proxy_operator_egress t
+       USING (
+         SELECT host, port, address FROM proxy_operator_egress
+         ORDER BY observed_at ASC, address ASC LIMIT $1
+       ) old
+       WHERE t.host = old.host AND t.port = old.port AND t.address = old.address
+       RETURNING t.host, t.port, t.address`,
+      [overflow]
+    );
     for (const row of evicted) {
       rejected.push({
         member: `${row.host}:${row.port}`,
@@ -243,25 +238,23 @@ function evictOperatorEgressLocked(
  * a push accepted at the edge stays visible. Every address is re-normalized
  * through the shared normalizer.
  */
-export function readOperatorEgressForMember(
+export async function readOperatorEgressForMember(
   host: string,
   port: number,
   nowMs: number = Date.now()
-): OperatorEgressRead {
+): Promise<OperatorEgressRead> {
   const empty: OperatorEgressRead = { addresses: new Set(), freshest: null };
   try {
     const normalizedHost = normalizeProxyHostForLog(host);
     if (!normalizedHost || !Number.isInteger(port) || port < 1 || port > 65535) return empty;
     const windowMs = readOperatorEgressWindowHours() * 60 * 60_000;
     const cutoff = new Date(nowMs - windowMs).toISOString();
-    const db = getDbInstance();
-    const rows = db
-      .prepare(
-        `SELECT address, observed_at FROM proxy_operator_egress
-         WHERE host = ? AND port = ? AND observed_at >= ?
-         ORDER BY observed_at DESC`
-      )
-      .all(normalizedHost, port, cutoff) as Array<{ address: string; observed_at: string }>;
+    const rows = await db().query<{ address: string; observed_at: string }>(
+      `SELECT address, observed_at FROM proxy_operator_egress
+       WHERE host = $1 AND port = $2 AND observed_at >= $3
+       ORDER BY observed_at DESC, address ASC`,
+      [normalizedHost, port, cutoff]
+    );
     for (const row of rows) {
       const normalized = normalizeEgressAddress(row.address);
       if (normalized === null) continue;

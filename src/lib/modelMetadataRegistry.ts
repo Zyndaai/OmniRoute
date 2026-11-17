@@ -215,15 +215,15 @@ export function getCatalogDiagnosticsHeaders(
   };
 }
 
-export function getCanonicalModelMetadata(input: {
+export async function getCanonicalModelMetadata(input: {
   provider?: string | null;
   model?: string | null;
   snapshot?: ModelCapabilityResolutionSnapshot | null;
-}): CanonicalModelMetadata | null {
+}): Promise<CanonicalModelMetadata | null> {
   const modelId = asNonEmptyString(input.model);
   if (!modelId) return null;
 
-  const resolved = getResolvedModelCapabilities(
+  const resolved = await getResolvedModelCapabilities(
     {
       provider: input.provider || null,
       model: modelId,
@@ -237,7 +237,7 @@ export function getCanonicalModelMetadata(input: {
   const staticSpec = getModelSpec(resolved.model || modelId);
   const syncedCapability =
     provider && resolved.model
-      ? getSyncedCapability(provider, resolved.model, input.snapshot?.synced ?? null)
+      ? await getSyncedCapability(provider, resolved.model, input.snapshot?.synced ?? null)
       : null;
   const canonicalStaticAlias = resolveStaticModelAlias(resolved.model || modelId);
   const modalities = buildModalities(
@@ -358,16 +358,16 @@ export function findInsensitive<T>(
   return index.get(key.toLowerCase()) as T | undefined;
 }
 
-function resolveCatalogPricing(
+async function resolveCatalogPricing(
   provider: string | null,
   model: string | null,
   snapshot?: CatalogEnrichmentSnapshot
-): Record<string, number> | null {
+): Promise<Record<string, number> | null> {
   if (!provider || !model) return null;
-  const base = resolveBaseCatalogPricing(provider, model, snapshot);
+  const base = await resolveBaseCatalogPricing(provider, model, snapshot);
   // #15528: user overrides win per-field over models.dev / LiteLLM / defaults.
   const user = lookupUserCatalogPricing(
-    snapshot?.userPricing !== undefined ? snapshot.userPricing : readUserPricingMemoized(),
+    snapshot?.userPricing !== undefined ? snapshot.userPricing : await readUserPricingMemoized(),
     provider,
     model,
     findInsensitive
@@ -408,15 +408,15 @@ function lookupCatalogPricing(
   return null;
 }
 
-function resolveBaseCatalogPricing(
+async function resolveBaseCatalogPricing(
   provider: string,
   model: string,
   snapshot?: CatalogEnrichmentSnapshot
-): Record<string, number> | null {
+): Promise<Record<string, number> | null> {
   // Prefer models.dev synced pricing when present; fall back to hardcoded defaults.
   try {
     const modelsDev = (
-      snapshot ? snapshot.modelsDevPricing || {} : getModelsDevPricing()
+      snapshot ? snapshot.modelsDevPricing || {} : await getModelsDevPricing()
     ) as Record<string, Record<string, Record<string, number>>>;
     const pricing = lookupCatalogPricing(modelsDev, provider, model);
     if (pricing) return pricing;
@@ -429,7 +429,7 @@ function resolveBaseCatalogPricing(
   // Consulted only when models.dev returned nothing, matching the order
   // already implemented in db/settings/pricing.ts::getPricing().
   try {
-    const litellm = getSyncedPricing() as unknown as Record<
+    const litellm = (await getSyncedPricing()) as unknown as Record<
       string,
       Record<string, Record<string, number>>
     >;
@@ -450,11 +450,11 @@ function resolveBaseCatalogPricing(
   return null;
 }
 
-export function enrichCatalogModelEntry<T extends JsonRecord>(
+export async function enrichCatalogModelEntry<T extends JsonRecord>(
   entry: T,
   input?: { provider?: string | null; model?: string | null },
   snapshot?: CatalogEnrichmentSnapshot
-): T {
+): Promise<T> {
   const publicProvider =
     input?.provider ||
     (typeof entry.owned_by === "string" && entry.owned_by !== "combo" ? entry.owned_by : null);
@@ -470,7 +470,7 @@ export function enrichCatalogModelEntry<T extends JsonRecord>(
       return id;
     })();
 
-  const metadata = getCanonicalModelMetadata({
+  const metadata = await getCanonicalModelMetadata({
     provider,
     model,
     snapshot: snapshot?.capabilityResolutionSnapshot ?? null,
@@ -487,7 +487,7 @@ export function enrichCatalogModelEntry<T extends JsonRecord>(
     getAuthoritativeContextWindow(model);
   const specialtySurface = isNonChatCatalogSurface(entry.type);
   const capabilitySnapshot = snapshot?.capabilityResolutionSnapshot ?? null;
-  const persistedContextWindow = getResolvedModelContextOverride(
+  const persistedContextWindow = await getResolvedModelContextOverride(
     { provider, model },
     capabilitySnapshot
   );
@@ -602,30 +602,30 @@ export function enrichCatalogModelEntry<T extends JsonRecord>(
   }
 
   const persistedOutputLimit =
-    getModelCapabilityOverride(
+    (await getModelCapabilityOverride(
       provider,
       model,
       "max_output_tokens",
       capabilitySnapshot?.maxTokenOverrides
-    ) ??
-    getModelCapabilityOverride(
+    )) ??
+    (await getModelCapabilityOverride(
       provider,
       model,
       "max_token",
       capabilitySnapshot?.maxTokenOverrides
-    ) ??
-    getModelCapabilityOverride(
+    )) ??
+    (await getModelCapabilityOverride(
       publicProvider,
       model,
       "max_output_tokens",
       capabilitySnapshot?.maxTokenOverrides
-    ) ??
-    getModelCapabilityOverride(
+    )) ??
+    (await getModelCapabilityOverride(
       publicProvider,
       model,
       "max_token",
       capabilitySnapshot?.maxTokenOverrides
-    );
+    ));
   if (persistedOutputLimit !== null) {
     nextEntry.max_output_tokens = persistedOutputLimit;
   } else if (
@@ -665,7 +665,7 @@ export function enrichCatalogModelEntry<T extends JsonRecord>(
   }
 
   if (nextEntry.pricing == null) {
-    const pricing = resolveCatalogPricing(provider, model, snapshot);
+    const pricing = await resolveCatalogPricing(provider, model, snapshot);
     if (pricing) nextEntry.pricing = pricing;
   }
 
@@ -748,10 +748,10 @@ export async function resolveModelAliasLookup(
         providerAlias,
         model: modelInfo.model,
         target: explicitTarget,
-        metadata: getCanonicalModelMetadata({
+        metadata: (await getCanonicalModelMetadata({
           provider: modelInfo.provider,
           model: modelInfo.model,
-        })!,
+        }))!,
       },
     };
   }
@@ -781,10 +781,10 @@ export async function resolveModelAliasLookup(
         providerAlias,
         model: modelInfo.model,
         target: `${providerAlias}/${modelInfo.model}`,
-        metadata: getCanonicalModelMetadata({
+        metadata: (await getCanonicalModelMetadata({
           provider: modelInfo.provider,
           model: modelInfo.model,
-        })!,
+        }))!,
       },
     };
   }
@@ -814,7 +814,7 @@ export async function resolveModelAliasLookup(
   }
 
   const match = candidates[0];
-  const metadata = getCanonicalModelMetadata({
+  const metadata = await getCanonicalModelMetadata({
     provider: match.provider,
     model: match.model,
   });

@@ -69,7 +69,7 @@ export function createComboContextResolution(
  * model's window is remembered for the life of the object. Without it the
  * tables are built for the single call, exactly as before.
  */
-export function computeComboContextLength(
+export async function computeComboContextLength(
   combo: {
     models?: unknown[];
     context_length?: number;
@@ -77,7 +77,7 @@ export function computeComboContextLength(
   },
   allCombos: Array<{ models?: unknown[]; name?: string }>,
   resolution?: ComboContextResolution
-): number | undefined {
+): Promise<number | undefined> {
   // 1. Explicit context_length wins (user can override with a manual value).
   if (isPositiveFiniteNumber(combo.context_length)) {
     return combo.context_length;
@@ -113,7 +113,7 @@ export function computeComboContextLength(
     //     known data source (provider registry, static spec, synced capability).
     //     This matches the catalog's filter that excludes unregistered models
     //     from combo calculations.
-    const canonicalMeta = getCanonicalModelMetadata({
+    const canonicalMeta = await getCanonicalModelMetadata({
       provider: resolvedTarget.providerId,
       model: resolvedTarget.modelId,
     });
@@ -134,7 +134,11 @@ export function computeComboContextLength(
       continue;
     }
 
-    const targetCtx = getSourcedTokenLimit(providerId, modelId, canonicalMeta.limits.contextWindow);
+    const targetCtx = await getSourcedTokenLimit(
+      providerId,
+      modelId,
+      canonicalMeta.limits.contextWindow
+    );
 
     if (isPositiveFiniteNumber(targetCtx)) {
       resolution?.resolvedWindows.set(cacheKey, targetCtx);

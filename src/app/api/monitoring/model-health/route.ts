@@ -274,7 +274,7 @@ function buildConnectionHealth(
 async function buildProviderHealth(
   provider: string,
   connections: ProviderConnectionRow[],
-  breakerStatuses: ReturnType<typeof getAllCircuitBreakerStatuses>,
+  breakerStatuses: Awaited<ReturnType<typeof getAllCircuitBreakerStatuses>>,
   filters: HealthFilters,
   summary: HealthSummary
 ): Promise<ProviderHealth> {
@@ -323,7 +323,7 @@ export async function GET(request: Request) {
 
   try {
     const timestamp = new Date().toISOString();
-    const breakerStatuses = getAllCircuitBreakerStatuses();
+    const breakerStatuses = await getAllCircuitBreakerStatuses();
     const allRows = (await getCachedProviderConnections())
       .map(asProviderConnectionRow)
       .filter((row): row is ProviderConnectionRow => row !== null);

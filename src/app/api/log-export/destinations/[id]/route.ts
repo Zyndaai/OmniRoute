@@ -40,11 +40,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { id } = await params;
-    const destination = getLogExportDestination(id);
+    const destination = await getLogExportDestination(id);
     if (!destination) {
       return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ destination: toDestinationView(destination) });
+    return NextResponse.json({ destination: await toDestinationView(destination) });
   } catch (error: any) {
     return NextResponse.json(
       { error: sanitizeErrorMessage(error) || "Failed to read log export destination" },
@@ -59,7 +59,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   try {
     const { id } = await params;
-    const existing = getLogExportDestination(id);
+    const existing = await getLogExportDestination(id);
     if (!existing) {
       return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
     }
@@ -119,7 +119,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       );
     }
 
-    const updated = updateLogExportDestination(id, {
+    const updated = await updateLogExportDestination(id, {
       name: data.name,
       enabled: data.enabled,
       config: nextConfig,
@@ -131,7 +131,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!updated) {
       return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ destination: toDestinationView(updated) });
+    return NextResponse.json({ destination: await toDestinationView(updated) });
   } catch (error: any) {
     return NextResponse.json(
       { error: sanitizeErrorMessage(error) || "Failed to update log export destination" },
@@ -146,7 +146,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   try {
     const { id } = await params;
-    if (!deleteLogExportDestination(id)) {
+    if (!(await deleteLogExportDestination(id))) {
       return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
     }
     return NextResponse.json({ deleted: true });

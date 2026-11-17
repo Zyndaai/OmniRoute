@@ -10,7 +10,7 @@ export async function GET(request: Request): Promise<Response> {
   if (authError) return authError;
 
   try {
-    const report = getWebSessionPoolHealth();
+    const report = await getWebSessionPoolHealth();
     return NextResponse.json(report);
   } catch (err) {
     return NextResponse.json(

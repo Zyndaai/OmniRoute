@@ -29,7 +29,7 @@ export type AdaptiveVirtualLanesFlagState = {
 
 export type AdaptiveVirtualLanesFlagDeps = {
   env?: NodeJS.ProcessEnv;
-  getOverride?: (key: string) => string | undefined;
+  getOverride?: (key: string) => string | undefined | Promise<string | undefined>;
 };
 
 const ENV_ON = new Set(["1", "true"]);
@@ -39,9 +39,9 @@ const ENV_ON = new Set(["1", "true"]);
  * came from. Env wins over the DB override (env-wins), matching the runtime
  * gate's own env-only read.
  */
-export function resolveAdaptiveVirtualLanesFlag(
+export async function resolveAdaptiveVirtualLanesFlag(
   deps: AdaptiveVirtualLanesFlagDeps = {}
-): AdaptiveVirtualLanesFlagState {
+): Promise<AdaptiveVirtualLanesFlagState> {
   const env = deps.env ?? process.env;
   const envValue = env[ADAPTIVE_VIRTUAL_LANES_FLAG_KEY];
   if (envValue !== undefined && envValue !== "") {
@@ -49,7 +49,7 @@ export function resolveAdaptiveVirtualLanesFlag(
   }
 
   const getOverride = deps.getOverride ?? getFeatureFlagOverride;
-  const dbOverride = getOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
+  const dbOverride = await getOverride(ADAPTIVE_VIRTUAL_LANES_FLAG_KEY);
   if (dbOverride !== undefined) {
     const enabled = dbOverride === "true" || dbOverride === "1" || dbOverride === "yes";
     return { enabled, source: "db" };
@@ -59,7 +59,9 @@ export function resolveAdaptiveVirtualLanesFlag(
 }
 
 export type AdaptiveVirtualLanesWarmDeps = {
-  resolve?: (deps?: AdaptiveVirtualLanesFlagDeps) => AdaptiveVirtualLanesFlagState;
+  resolve?: (
+    deps?: AdaptiveVirtualLanesFlagDeps
+  ) => AdaptiveVirtualLanesFlagState | Promise<AdaptiveVirtualLanesFlagState>;
   reload?: (options: { env?: NodeJS.ProcessEnv }) => unknown;
 };
 
@@ -74,7 +76,7 @@ export async function warmAdaptiveVirtualLanesIntoRuntime(
   deps: AdaptiveVirtualLanesWarmDeps = {}
 ): Promise<boolean> {
   const resolve = deps.resolve ?? resolveAdaptiveVirtualLanesFlag;
-  const state = resolve();
+  const state = await resolve();
   if (state.source !== "db") return false;
 
   const reload =

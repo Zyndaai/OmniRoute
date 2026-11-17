@@ -7,7 +7,7 @@
  * Part of: Quota-aware provider scheduling (Phase 2).
  */
 
-import { getDbInstance } from "@/lib/db/core";
+import { db, toMs } from "@/lib/db/pg";
 import { createLogger } from "@/shared/utils/logger";
 
 const log = createLogger("quota:analytics");
@@ -34,17 +34,16 @@ export interface QuotaAnalyticsSummary {
 /**
  * Compute real-time quota analytics across all provider connections.
  */
-export function getQuotaAnalyticsSummary(): QuotaAnalyticsSummary {
+export async function getQuotaAnalyticsSummary(): Promise<QuotaAnalyticsSummary> {
   try {
-    const db = getDbInstance();
-    const rows = db.prepare("SELECT * FROM provider_quota_state").all() as Array<{
+    const rows = await db().query<{
       connection_id: string;
       model: string;
       tokens_used: number;
       token_limit: number;
-      window_start: number;
-      window_reset: number;
-    }>;
+      window_start: string;
+      window_reset: string;
+    }>("SELECT * FROM provider_quota_state ORDER BY connection_id, model");
 
     const now = Date.now();
     let totalTokensUsed = 0;
@@ -56,7 +55,7 @@ export function getQuotaAnalyticsSummary(): QuotaAnalyticsSummary {
     const connections = rows.map((r) => {
       const tokensUsed = Number(r.tokens_used ?? 0);
       const tokenLimit = Number(r.token_limit ?? 0);
-      const windowReset = Number(r.window_reset ?? 0);
+      const windowReset = toMs(r.window_reset) ?? 0;
       const isExpired = windowReset > 0 && now > windowReset;
 
       const effectiveUsed = isExpired ? 0 : tokensUsed;

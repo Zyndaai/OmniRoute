@@ -1,11 +1,17 @@
 /**
  * db/paramFilters.ts — Provider/Model parameter filter configuration.
  *
- * CRUD against the key_value table under namespace "provider_param_filters".
- * Follows the established key_value pattern from databaseSettings.ts.
+ * CRUD against `config_entries` under namespace "provider_param_filters" (one row per provider,
+ * plus `__global__` for the global auto-learn flag).
  */
 
-import { getDbInstance } from "./core";
+import { db, type DbExecutor } from "./pg";
+import {
+  deleteConfigValue,
+  getConfigEntries,
+  getConfigValue,
+  setConfigValue,
+} from "./configEntries";
 
 const NAMESPACE = "provider_param_filters";
 
@@ -29,7 +35,11 @@ export interface ProviderParamFilter {
 
 // ── Cache ───────────────────────────────────────────────────────────────────
 
+// The TTL bounds staleness when another instance sharing the database writes.
+const CACHE_TTL_MS = 5_000;
+
 let filterCache: Map<string, ProviderParamFilter> | null = null;
+let filterCacheLoadedAt = 0;
 let cacheGeneration = 0;
 
 function bumpCacheGeneration(): void {
@@ -41,15 +51,6 @@ function bumpCacheGeneration(): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function parseStoredValue(raw: unknown): unknown {
-  if (typeof raw !== "string") return raw;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }
 
 function toNormalizedString(value: unknown): string | null {
@@ -92,26 +93,12 @@ function toProviderParamFilter(raw: unknown): ProviderParamFilter | null {
 
 // ── Read ────────────────────────────────────────────────────────────────────
 
-function readNamespace(namespace: string): Record<string, unknown> {
-  const db = getDbInstance();
-  const rows = db
-    .prepare("SELECT key, value FROM key_value WHERE namespace = ?")
-    .all(namespace) as Array<{ key: string; value: string }>;
-
-  const values: Record<string, unknown> = {};
-  for (const row of rows) {
-    values[row.key] = parseStoredValue(row.value);
-  }
-  return values;
-}
-
-function loadAllConfigs(): Map<string, ProviderParamFilter> {
-  const raw = readNamespace(NAMESPACE);
+async function loadAllConfigs(): Promise<Map<string, ProviderParamFilter>> {
   const map = new Map<string, ProviderParamFilter>();
-  for (const [key, value] of Object.entries(raw)) {
-    const parsed = toProviderParamFilter(value);
+  for (const row of await getConfigEntries(NAMESPACE)) {
+    const parsed = toProviderParamFilter(row.value);
     if (parsed) {
-      map.set(key, parsed);
+      map.set(row.key, parsed);
     }
   }
   return map;
@@ -120,12 +107,18 @@ function loadAllConfigs(): Map<string, ProviderParamFilter> {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Warm the cache on module load so the first call to getParamFilterConfig
- * does not hit the DB. Idempotent — subsequent calls return the cached map.
+ * Warm the cache so the first call to getParamFilterConfig does not hit the DB.
+ * Idempotent — subsequent calls return the cached map.
  */
-export function loadParamFilterConfigs(): Map<string, ProviderParamFilter> {
+export async function loadParamFilterConfigs(): Promise<Map<string, ProviderParamFilter>> {
+  if (filterCache !== null && Date.now() - filterCacheLoadedAt > CACHE_TTL_MS) filterCache = null;
   if (filterCache === null) {
-    filterCache = loadAllConfigs();
+    const generation = cacheGeneration;
+    const loaded = await loadAllConfigs();
+    // A write that landed while loading bumped the generation: the loaded map may predate it.
+    if (generation !== cacheGeneration) return loadParamFilterConfigs();
+    filterCache = loaded;
+    filterCacheLoadedAt = Date.now();
   }
   return filterCache;
 }
@@ -134,44 +127,45 @@ export function loadParamFilterConfigs(): Map<string, ProviderParamFilter> {
  * Get the param filter config for a single provider, or null if not configured.
  * Uses an in-memory cache refreshed on write.
  */
-export function getParamFilterConfig(provider: string): ProviderParamFilter | null {
-  return toNormalizedString(provider) ? (loadParamFilterConfigs().get(provider) ?? null) : null;
+export async function getParamFilterConfig(provider: string): Promise<ProviderParamFilter | null> {
+  return toNormalizedString(provider)
+    ? ((await loadParamFilterConfigs()).get(provider) ?? null)
+    : null;
 }
 
-/**
- * Upsert the entire param filter config for a provider.
- * Invalidates the in-memory cache.
- */
-export function setParamFilterConfig(provider: string, config: ProviderParamFilter): void {
-  if (!toNormalizedString(provider)) return;
-
-  const db = getDbInstance();
-  const stmt = db.prepare(
-    "INSERT OR REPLACE INTO key_value (namespace, key, value) VALUES (?, ?, ?)"
-  );
-
-  // Normalize the filter before persisting
-  const normalized: ProviderParamFilter = {
+function normalizeConfig(config: ProviderParamFilter): ProviderParamFilter {
+  return {
     block: config.block ?? [],
     allow: config.allow ?? [],
     autoLearn: config.autoLearn ?? false,
     models: config.models && Object.keys(config.models).length > 0 ? config.models : undefined,
   };
+}
 
-  stmt.run(NAMESPACE, provider, JSON.stringify(normalized));
-  bumpCacheGeneration();
+/**
+ * Upsert the entire param filter config for a provider.
+ * Invalidates the in-memory cache. With a transaction executor the caller invalidates
+ * after it commits (invalidating earlier lets a concurrent reader cache the pre-commit rows).
+ */
+export async function setParamFilterConfig(
+  provider: string,
+  config: ProviderParamFilter,
+  ex?: DbExecutor
+): Promise<void> {
+  if (!toNormalizedString(provider)) return;
+
+  await setConfigValue(NAMESPACE, provider, normalizeConfig(config), ex);
+  if (!ex) bumpCacheGeneration();
 }
 
 /**
  * Delete the param filter config for a provider.
  * Resets to no filtering for that provider.
  */
-export function deleteParamFilterConfig(provider: string): void {
+export async function deleteParamFilterConfig(provider: string): Promise<void> {
   if (!toNormalizedString(provider)) return;
 
-  const db = getDbInstance();
-  const stmt = db.prepare("DELETE FROM key_value WHERE namespace = ? AND key = ?");
-  stmt.run(NAMESPACE, provider);
+  await deleteConfigValue(NAMESPACE, provider);
   bumpCacheGeneration();
 }
 
@@ -185,8 +179,8 @@ const GLOBAL_AUTOLEARN_KEY = "__global__";
  * regardless of their per-provider autoLearn setting.
  * Only fires when this is explicitly configured, else returns false.
  */
-export function isAutoLearnGloballyEnabled(): boolean {
-  const globalCfg = getParamFilterConfig(GLOBAL_AUTOLEARN_KEY);
+export async function isAutoLearnGloballyEnabled(): Promise<boolean> {
+  const globalCfg = await getParamFilterConfig(GLOBAL_AUTOLEARN_KEY);
   return globalCfg?.autoLearn === true;
 }
 
@@ -195,9 +189,9 @@ export function isAutoLearnGloballyEnabled(): boolean {
  * When enabled, the per-provider autoLearn flag is still honored after
  * the global check (either being on is sufficient to trigger auto-learn).
  */
-export function setGlobalAutoLearnEnabled(enabled: boolean): void {
-  const existing = getParamFilterConfig(GLOBAL_AUTOLEARN_KEY);
-  setParamFilterConfig(GLOBAL_AUTOLEARN_KEY, {
+export async function setGlobalAutoLearnEnabled(enabled: boolean): Promise<void> {
+  const existing = await getParamFilterConfig(GLOBAL_AUTOLEARN_KEY);
+  await setParamFilterConfig(GLOBAL_AUTOLEARN_KEY, {
     block: existing?.block ?? [],
     allow: existing?.allow ?? [],
     autoLearn: enabled,
@@ -208,31 +202,48 @@ export function setGlobalAutoLearnEnabled(enabled: boolean): void {
  * Auto-learn helper: add a single parameter to a provider's block list.
  * If the field is already in the block list (or the config does not exist),
  * this is a no-op. Optionally scoped to a specific model.
+ *
+ * The stored document is read and rewritten whole, so the read runs inside a transaction
+ * holding a per-provider advisory lock: two upstream 400s learning different params at once
+ * both land.
  */
-export function addParamToBlocklist(provider: string, paramName: string, model?: string): void {
+export async function addParamToBlocklist(
+  provider: string,
+  paramName: string,
+  model?: string
+): Promise<void> {
   if (!toNormalizedString(provider) || !toNormalizedString(paramName)) return;
 
-  const existing = getParamFilterConfig(provider) ?? {
-    block: [],
-    allow: [],
-    autoLearn: false,
-  };
+  let written = false;
+  await db().transaction(async (tx) => {
+    await tx.execute("SELECT pg_advisory_xact_lock(hashtext($1))", [
+      `provider_param_filters:${provider}`,
+    ]);
+    const stored = toProviderParamFilter(await getConfigValue(NAMESPACE, provider, tx));
+    const existing: ProviderParamFilter = stored ?? {
+      block: [],
+      allow: [],
+      autoLearn: false,
+    };
 
-  if (model) {
-    // Model-level
-    const models = existing.models ?? {};
-    const modelCfg = models[model] ?? {};
+    if (model) {
+      // Model-level
+      const models = existing.models ?? {};
+      const modelCfg = models[model] ?? {};
 
-    if (Array.isArray(modelCfg.block) && modelCfg.block.includes(paramName)) return;
+      if (Array.isArray(modelCfg.block) && modelCfg.block.includes(paramName)) return;
 
-    const updatedBlock = [...(modelCfg.block ?? []), paramName];
-    models[model] = { ...modelCfg, block: updatedBlock };
-    existing.models = models;
-  } else {
-    // Provider-level
-    if (existing.block.includes(paramName)) return;
-    existing.block = [...existing.block, paramName];
-  }
+      const updatedBlock = [...(modelCfg.block ?? []), paramName];
+      models[model] = { ...modelCfg, block: updatedBlock };
+      existing.models = models;
+    } else {
+      // Provider-level
+      if (existing.block.includes(paramName)) return;
+      existing.block = [...existing.block, paramName];
+    }
 
-  setParamFilterConfig(provider, existing);
+    await setParamFilterConfig(provider, existing, tx);
+    written = true;
+  });
+  if (written) bumpCacheGeneration();
 }

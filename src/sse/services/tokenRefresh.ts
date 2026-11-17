@@ -65,7 +65,7 @@ export async function resolveProxyForCredentials(provider: string, credentials?:
     if (resolved?.proxy) {
       return resolved.proxy;
     }
-    if (hasBlockingProxyAssignment(credentials.connectionId, provider)) {
+    if (await hasBlockingProxyAssignment(credentials.connectionId, provider)) {
       return decideTokenRefreshProxyFailure(
         Object.assign(
           new Error(

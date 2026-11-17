@@ -208,7 +208,7 @@ export async function snapshotMcpDescriptionCompressionStats(): Promise<McpDescr
   const compressedTokens = Math.max(0, originalTokens - delta.estimatedTokensSaved);
   const { insertCompressionAnalyticsRow } =
     await import("../../src/lib/db/compressionAnalytics.ts");
-  insertCompressionAnalyticsRow({
+  await insertCompressionAnalyticsRow({
     timestamp: new Date().toISOString(),
     mode: "mcp-description",
     engine: "mcp-description",

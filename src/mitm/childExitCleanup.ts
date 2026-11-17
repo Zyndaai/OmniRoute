@@ -34,7 +34,7 @@ export async function revertHostsAfterUnexpectedExit(
       return false;
     }
     await deps.removeDNSEntry(sudoPassword);
-    const managed = deps.collectManagedHosts();
+    const managed = await deps.collectManagedHosts();
     if (managed.length > 0) {
       await deps.removeDNSEntries(managed, sudoPassword);
     }

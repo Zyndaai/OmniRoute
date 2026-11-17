@@ -94,7 +94,7 @@ export async function evaluateSsoAuth(token: string): Promise<SsoAuthResult> {
     // Re-read rather than trusting the cached secret: it goes null the moment
     // the shadow key is deactivated, so disabling a user takes effect on the
     // next request instead of after the cache TTL.
-    const secret = getSsoShadowSecret(cached.oid);
+    const secret = await getSsoShadowSecret(cached.oid);
     if (!secret) {
       resolutionCache.delete(cacheKey);
       return {

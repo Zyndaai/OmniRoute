@@ -79,9 +79,9 @@ function getComboFamily(model: ComboCatalogEntry, canonicalFamily?: string | nul
 	return "combo";
 }
 
-function toOllamaTagCombo(combo: ComboCatalogEntry) {
+async function toOllamaTagCombo(combo: ComboCatalogEntry) {
 	const actualModelId = (combo.id || combo.name || combo.root || "unknown").trim();
-	const canonicalMetadata = getCanonicalModelMetadata({
+	const canonicalMetadata = await getCanonicalModelMetadata({
 		provider: combo.owned_by || null,
 		model: combo.root || combo.id || combo.name || null,
 	});
@@ -143,10 +143,10 @@ function toOllamaTagCombo(combo: ComboCatalogEntry) {
 }
 
 
-function buildComboShowPayload(combo: ComboCatalogEntry) {
+async function buildComboShowPayload(combo: ComboCatalogEntry) {
 	const actualModelId = (combo.id || combo.name || combo.root || "unknown").trim();
-	const displayName = getVscodeRawModelDisplayName(combo);
-	const canonicalMetadata = getCanonicalModelMetadata({
+	const displayName = await getVscodeRawModelDisplayName(combo);
+	const canonicalMetadata = await getCanonicalModelMetadata({
 		provider: combo.owned_by || null,
 		model: combo.root || combo.id || combo.name || null,
 	});
@@ -247,7 +247,7 @@ function buildComboShowPayload(combo: ComboCatalogEntry) {
 	};
 }
 
-function enrichComboForVscode(combo: ComboCatalogEntry, request: Request) {
+async function enrichComboForVscode(combo: ComboCatalogEntry, request: Request) {
 	const requestUrl = new URL(request.url);
 	const tokenBasePath = requestUrl.pathname.replace(/\/?$/, "");
 	const tokenBaseUrl = `${requestUrl.origin}${tokenBasePath}`;
@@ -266,7 +266,7 @@ function enrichComboForVscode(combo: ComboCatalogEntry, request: Request) {
 
 	return {
 		...combo,
-		name: getVscodeRawModelDisplayName(combo),
+		name: await getVscodeRawModelDisplayName(combo),
 		url: reasoningEffortValues
 			? `${tokenBaseUrl}/responses#models.ai.azure.com`
 			: `${tokenBaseUrl}/chat/completions#models.ai.azure.com`,
@@ -338,7 +338,7 @@ export async function GET(
 			});
 		}
 		return Response.json(
-			{ models: catalog.data.map(toOllamaTagCombo) },
+			{ models: await Promise.all(catalog.data.map((combo) => toOllamaTagCombo(combo))) },
 			{ headers: { ...CORS_HEADERS } }
 		);
 	}
@@ -352,7 +352,9 @@ export async function GET(
 				headers: catalog.headers,
 			});
 		}
-		const data = catalog.data.map((combo) => enrichComboForVscode(combo, authorizedRequest));
+		const data = await Promise.all(
+			catalog.data.map((combo) => enrichComboForVscode(combo, authorizedRequest))
+		);
 
 		return new Response(JSON.stringify({ object: "list", data }), {
 			headers: {
@@ -415,7 +417,7 @@ export async function POST(
 		);
 	}
 
-	return Response.json(buildComboShowPayload(combo), {
+	return Response.json(await buildComboShowPayload(combo), {
 		headers: { ...CORS_HEADERS },
 	});
 }

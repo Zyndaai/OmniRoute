@@ -87,7 +87,6 @@ import {
 } from "./tools/inferenceTools.ts";
 import { handleWebFetch, handleWebSearch, handleXSearch } from "./tools/webTools.ts";
 import { toRecord } from "./coercions.ts";
-import { memoryTools } from "./tools/memoryTools.ts";
 import { skillTools } from "./tools/skillTools.ts";
 import { agentSkillTools } from "./tools/agentSkillTools.ts";
 import { githubSkillTools } from "./tools/githubSkillTools.ts";
@@ -107,7 +106,8 @@ import {
   clampMcpAccessibilityConfig,
   type McpAccessibilityConfig,
 } from "../services/compression/engines/mcpAccessibility/constants.ts";
-import { getDbInstance, ensureDbInitialized } from "../../src/lib/db/core.ts";
+import { initDbBackend } from "../../src/lib/db/backends/selection.ts";
+import { getConfigValue } from "../../src/lib/db/configEntries.ts";
 import { isMcpScopeEnforcementEnabled } from "../../src/shared/utils/featureFlags.ts";
 import { toSafeMcpErrorMessage } from "./errorMessage.ts";
 import { registerRadarCatalogTool } from "./radarCatalog.ts";
@@ -122,7 +122,6 @@ const MCP_ALLOWED_SCOPES = new Set(
 );
 const TOTAL_MCP_TOOL_COUNT = countUniqueMcpTools({
   MCP_TOOLS,
-  memoryTools,
   skillTools,
   agentSkillTools,
   githubSkillTools,
@@ -134,27 +133,22 @@ const TOTAL_MCP_TOOL_COUNT = countUniqueMcpTools({
   compressionTools,
 });
 
-function readMcpDescriptionCompressionEnabled(): boolean {
+async function readMcpDescriptionCompressionEnabled(): Promise<boolean> {
   try {
-    const row = getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get("compression", "mcpDescriptionCompressionEnabled") as { value?: string } | undefined;
-    if (!row?.value) return true;
-    return JSON.parse(row.value) !== false;
+    const value = await getConfigValue("compression", "mcpDescriptionCompressionEnabled");
+    return value === undefined ? true : value !== false;
   } catch {
     return true;
   }
 }
 
-function readMcpAccessibilityConfig(): McpAccessibilityConfig {
+async function readMcpAccessibilityConfig(): Promise<McpAccessibilityConfig> {
   try {
-    const row = getDbInstance()
-      .prepare("SELECT value FROM key_value WHERE namespace = ? AND key = ?")
-      .get("compression", "mcpAccessibility") as { value?: string } | undefined;
-    if (!row?.value) return { ...DEFAULT_MCP_ACCESSIBILITY_CONFIG };
+    const value = await getConfigValue("compression", "mcpAccessibility");
+    if (value === undefined) return { ...DEFAULT_MCP_ACCESSIBILITY_CONFIG };
     // clampMcpAccessibilityConfig bounds every field (and folds in the non-object guard), so a
     // persisted out-of-range maxTextChars can't make smartFilterText truncate the whole text.
-    return clampMcpAccessibilityConfig(JSON.parse(row.value));
+    return clampMcpAccessibilityConfig(value);
   } catch {
     return { ...DEFAULT_MCP_ACCESSIBILITY_CONFIG };
   }
@@ -229,7 +223,7 @@ export interface CreateMcpServerOptions {
   blockedProviders?: string[] | (() => string[]);
 }
 
-export function createMcpServer(options?: CreateMcpServerOptions): McpServer {
+export async function createMcpServer(options?: CreateMcpServerOptions): Promise<McpServer> {
   const resolveBlockedProviders = (): string[] => {
     if (typeof options?.blockedProviders === "function") {
       return options.blockedProviders();
@@ -247,8 +241,8 @@ export function createMcpServer(options?: CreateMcpServerOptions): McpServer {
     name: "omniroute",
     version: APP_CONFIG.version,
   });
-  const mcpDescriptionCompressionEnabled = readMcpDescriptionCompressionEnabled();
-  const mcpAccessibilityConfig = readMcpAccessibilityConfig();
+  const mcpDescriptionCompressionEnabled = await readMcpDescriptionCompressionEnabled();
+  const mcpAccessibilityConfig = await readMcpAccessibilityConfig();
   // F4.3 tool-cardinality: opt-in tool profile (MCP_TOOL_DENY / MCP_TOOL_ALLOW). null = no filter.
   const toolProfile = readMcpToolProfileFromEnv(process.env);
   const registerTool = server.registerTool.bind(server);
@@ -303,7 +297,6 @@ export function createMcpServer(options?: CreateMcpServerOptions): McpServer {
 
   const RESERVED_MCP_NAMES = new Set([
     ...MCP_TOOLS.map((t) => t.name),
-    ...Object.keys(memoryTools),
     ...Object.keys(skillTools),
     ...Object.keys(compressionTools),
     ...Object.keys(poolTools),
@@ -658,33 +651,6 @@ export function createMcpServer(options?: CreateMcpServerOptions): McpServer {
 
   registerToolSearchTool(server, withScopeEnforcement);
 
-  // ── Memory Tools ──────────────────────────────
-  Object.values(memoryTools).forEach((toolDef: any) => {
-    server.registerTool(
-      toolDef.name,
-      {
-        description: toolDef.description,
-        // @ts-ignore: dynamic zod access
-        inputSchema: toolDef.inputSchema,
-      },
-      withScopeEnforcement(
-        toolDef.name,
-        async (args, extra) => {
-          try {
-            const parsedArgs = toolDef.inputSchema.parse(args ?? {});
-            // @ts-ignore - handler type lost through dynamic Object.values() access
-            const result = await toolDef.handler(parsedArgs, extra);
-            return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-          } catch (err) {
-            const msg = toSafeMcpErrorMessage(err, "Memory tool execution failed");
-            return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
-          }
-        },
-        toolDef.scopes
-      )
-    );
-  });
-
   // ── Skill Tools ──────────────────────────────
   Object.values(skillTools).forEach((toolDef: any) => {
     server.registerTool(
@@ -998,11 +964,11 @@ export function createMcpServer(options?: CreateMcpServerOptions): McpServer {
  * Called when `omniroute --mcp` is used.
  */
 export async function startMcpStdio(): Promise<void> {
-  await ensureDbInitialized();
+  await initDbBackend();
   // Stdout is reserved for JSON-RPC — bin/mcpStdioConsoleGuard.mjs is preloaded via
   // `node --import` (see bin/mcp-server.mjs) so console.log/warn already redirect to
   // stderr before this module's own imports evaluate.
-  const server = createMcpServer();
+  const server = await createMcpServer();
   const transport = new StdioServerTransport();
   const version = APP_CONFIG.version;
   const stopHeartbeat = startMcpHeartbeat({

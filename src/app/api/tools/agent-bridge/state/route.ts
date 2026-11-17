@@ -34,7 +34,7 @@ export async function GET(): Promise<Response> {
     // Load mappings for all registered agents
     const mappingsEntries = await Promise.all(
       ALL_TARGETS.map(async (t) => {
-        const mappings = getMappingsForAgent(t.id);
+        const mappings = await getMappingsForAgent(t.id);
         return [
           t.id,
           mappings.map((m) => ({ source: m.source_model, target: m.target_model })),

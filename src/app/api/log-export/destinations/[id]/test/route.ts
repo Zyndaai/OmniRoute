@@ -15,7 +15,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   try {
     const { id } = await params;
-    const destination = getLogExportDestination(id);
+    const destination = await getLogExportDestination(id);
     if (!destination) {
       return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
     }

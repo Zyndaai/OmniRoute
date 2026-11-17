@@ -3,86 +3,77 @@
  * CRUD operations for inspector_custom_hosts table.
  */
 
-import { getDbInstance } from "./core.ts";
+import { db } from "./pg";
 import type { InspectorCustomHostRow } from "./_rowTypes.ts";
 
-// SQLite stores booleans as integers
 interface InspectorCustomHostDbRow {
   host: string;
-  enabled: number;
+  enabled: boolean;
   label: string | null;
   kind: string;
   added_at: string;
-  last_seen_at: string | null;
 }
 
 function mapRow(row: InspectorCustomHostDbRow): InspectorCustomHostRow {
   return {
     host: row.host,
-    enabled: row.enabled === 1,
+    enabled: row.enabled === true,
     label: row.label,
     kind: row.kind as "llm" | "app" | "custom",
     added_at: row.added_at,
-    last_seen_at: row.last_seen_at,
+    // The column was dropped (never read); the row type still carries the field.
+    last_seen_at: null,
   };
 }
 
-export function listCustomHosts(opts?: { enabledOnly?: boolean }): InspectorCustomHostRow[] {
-  const db = getDbInstance();
+export async function listCustomHosts(opts?: {
+  enabledOnly?: boolean;
+}): Promise<InspectorCustomHostRow[]> {
   const enabledOnly = opts?.enabledOnly === true;
-
-  const rows = enabledOnly
-    ? (db
-        .prepare("SELECT * FROM inspector_custom_hosts WHERE enabled = 1 ORDER BY host ASC")
-        .all() as InspectorCustomHostDbRow[])
-    : (db
-        .prepare("SELECT * FROM inspector_custom_hosts ORDER BY host ASC")
-        .all() as InspectorCustomHostDbRow[]);
-
+  const rows = await db().query<InspectorCustomHostDbRow>(
+    enabledOnly
+      ? `SELECT host, enabled, label, kind, added_at FROM inspector_custom_hosts WHERE enabled ORDER BY host ASC`
+      : `SELECT host, enabled, label, kind, added_at FROM inspector_custom_hosts ORDER BY host ASC`
+  );
   return rows.map(mapRow);
 }
 
-export function addCustomHost(
+export async function addCustomHost(
   host: string,
   kind: "llm" | "app" | "custom" = "custom",
   label?: string
-): void {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT OR IGNORE INTO inspector_custom_hosts (host, enabled, label, kind, added_at)
-     VALUES (?, 1, ?, ?, ?)`
-  ).run(host, label ?? null, kind, now);
-}
-
-export function removeCustomHost(host: string): void {
-  const db = getDbInstance();
-  db.prepare("DELETE FROM inspector_custom_hosts WHERE host = ?").run(host);
-}
-
-export function toggleCustomHost(host: string, enabled: boolean): void {
-  const db = getDbInstance();
-  db.prepare("UPDATE inspector_custom_hosts SET enabled = ? WHERE host = ?").run(
-    enabled ? 1 : 0,
-    host
+): Promise<void> {
+  await db().execute(
+    `INSERT INTO inspector_custom_hosts (host, enabled, label, kind, added_at)
+     VALUES ($1, true, $2, $3, now())
+     ON CONFLICT (host) DO NOTHING`,
+    [host, label ?? null, kind]
   );
 }
 
-export function touchLastSeen(host: string): void {
-  const db = getDbInstance();
-  const now = new Date().toISOString();
-  db.prepare("UPDATE inspector_custom_hosts SET last_seen_at = ? WHERE host = ?").run(now, host);
+export async function removeCustomHost(host: string): Promise<void> {
+  await db().execute(`DELETE FROM inspector_custom_hosts WHERE host = $1`, [host]);
 }
 
+export async function toggleCustomHost(host: string, enabled: boolean): Promise<void> {
+  await db().execute(`UPDATE inspector_custom_hosts SET enabled = $1 WHERE host = $2`, [
+    enabled,
+    host,
+  ]);
+}
+
+/** The `last_seen_at` column is gone (nothing read it); kept so callers need no change. */
+export async function touchLastSeen(_host: string): Promise<void> {}
+
 /**
- * Returns true when `host` is present in inspector_custom_hosts with enabled=1.
+ * Returns true when `host` is present in inspector_custom_hosts with enabled=true.
  * Used by agentBridgeHook to distinguish custom-host intercepts from agent-bridge
  * intercepts so that Mode 2 (Custom Hosts) entries appear in the "Custom" profile.
  */
-export function isCustomHost(host: string): boolean {
-  const db = getDbInstance();
-  const row = db
-    .prepare("SELECT 1 AS found FROM inspector_custom_hosts WHERE host = ? AND enabled = 1")
-    .get(host) as { found: number } | undefined;
+export async function isCustomHost(host: string): Promise<boolean> {
+  const row = await db().queryOne<{ found: number }>(
+    `SELECT 1 AS found FROM inspector_custom_hosts WHERE host = $1 AND enabled`,
+    [host]
+  );
   return row !== undefined;
 }
