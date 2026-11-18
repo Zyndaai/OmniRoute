@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, join, relative } from "node:path";
@@ -171,7 +172,33 @@ const referenceRoots = readdirSync(root, { withFileTypes: true })
       !SKIPPED_ROOT_DIRECTORY_NAMES.has(entry.name)
   )
   .map((entry) => entry.name);
-const AUDITED_REFERENCE_FILES = [
+// Tracked files only (what the audit is about): walking the checkout also read untracked
+// build output such as `.build/next`, which took minutes. The directory walk stays as the
+// fallback when git is unavailable.
+function trackedTextFiles() {
+  try {
+    const listing = execFileSync("git", ["ls-files", "-z"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return listing
+      .split("\0")
+      .filter(
+        (file) =>
+          file &&
+          !file.startsWith("public/providers/") &&
+          !file.split("/").some((part) => SKIPPED_DIRECTORY_NAMES.has(part)) &&
+          TEXT_EXTENSIONS.has(extname(file))
+      )
+      .map((file) => join(root, file))
+      .filter((file) => existsSync(file));
+  } catch {
+    return null;
+  }
+}
+
+const AUDITED_REFERENCE_FILES = trackedTextFiles() ?? [
   ...rootTextFiles,
   ...referenceRoots.flatMap((directory) => collectTextFiles(join(root, directory))),
 ];

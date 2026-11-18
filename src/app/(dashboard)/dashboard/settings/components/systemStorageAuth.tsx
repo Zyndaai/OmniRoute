@@ -1,7 +1,7 @@
 "use client";
 
 // #12709: database-settings requests are ALWAYS_PROTECTED (routeGuard.ts) — a guest/anonymous
-// session correctly gets a 401 AUTH_001 from /api/settings/database and /api/settings/import-json
+// session correctly gets a 401 AUTH_001 from /api/settings/database
 // (GHSA-mghq-58h3-qcqj, GHSA-v7g9-7f55-5g46). Do NOT loosen that gate; this module only makes the
 // client surface the failure instead of silently rendering a blank section.
 import Link from "next/link";

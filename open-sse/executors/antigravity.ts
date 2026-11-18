@@ -729,7 +729,7 @@ export class AntigravityExecutor extends BaseExecutor {
     }
 
     if (!projectId) {
-      markAntigravityMissingCloudCodeProject(credentials?.connectionId);
+      await markAntigravityMissingCloudCodeProject(credentials?.connectionId);
       if (requiresManualProject) {
         // Google no longer auto-creates GCP projects for standard-tier
         // accounts (tracked in #8491): fail fast with a clear instruction

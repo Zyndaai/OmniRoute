@@ -158,6 +158,9 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     "open-sse/services/tokenRefresh.ts": 1,
     // Read-only adoption for the already-selected connection; it never selects an account.
     "open-sse/services/tokenRefresh/passiveCodex.ts": 1,
+    // Same read-only adoption, generalized to every rotating provider on a cluster worker
+    // (the leader refreshes; the worker re-reads the row it was already routed to).
+    "open-sse/services/tokenRefresh/passiveRefresh.ts": 1,
     // #15138: per-account test message config/send — reads the row for its stored test model
     // and active flag; dispatch goes through runSingleModelTest, which refuses managed-lease
     // connections itself (class C).

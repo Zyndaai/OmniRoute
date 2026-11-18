@@ -137,7 +137,7 @@ describe("issue #7746 — CCR must not reduce the sole user prompt to a bare, un
     });
   }
 
-  it("MCP-capable caller (tools[] advertises omniroute_ccr_retrieve): replacement still runs and stays retrievable", () => {
+  it("MCP-capable caller (tools[] advertises omniroute_ccr_retrieve): replacement still runs and stays retrievable", async () => {
     resetCcrStore();
     const body = {
       ...makeOpenCodeStyleRequestBody(),
@@ -163,7 +163,7 @@ describe("issue #7746 — CCR must not reduce the sole user prompt to a bare, un
     const match = compressedContent.match(/\[CCR retrieve hash=([0-9a-f]{24}) chars=\d+\]/);
     assert.ok(match, "compressed content must contain a resolvable CCR marker");
     assert.equal(
-      retrieveBlock(match![1]),
+      await retrieveBlock(match![1]),
       REPORTER_PROMPT,
       "original prompt must be stored verbatim and retrievable"
     );

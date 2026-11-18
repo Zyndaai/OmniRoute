@@ -1,0 +1,136 @@
+# OmniRoute as a cluster: one leader, one worker, PostgreSQL and Redis on one host.
+# Design: docs/architecture/persistence-shared-state.md. NOT the live file yet: the cut-over runbook
+# (docs/ops/POSTGRES_CUTOVER.md) copies it over /opt/omniroute/docker-compose.yml.
+#
+#   omniroute-1  OMNIROUTE_ROLE=leader  migrations, background jobs, dashboard, the ONLY process
+#                                       that refreshes single-use OAuth tokens  127.0.0.1:20128
+#   omniroute-2  OMNIROUTE_ROLE=worker  /v1 requests only                       127.0.0.1:20129
+#   postgres     all durable state (no published port; back up with `compose exec postgres pg_dump`)
+#   redis        leader fence, cache-invalidation bus, per-account rate limiter (no published port).
+#                Coordination falls back to PostgreSQL when REDIS_URL is unset; here it is set.
+#
+# Host Caddy: management plane (/dashboard*, /home*, /api/* except /api/v1/*, /live-ws*) -> 20128 only;
+# inference (/v1/*, /api/v1/*) -> 20128 and 20129 (docs/ops/CADDY_CLUSTER.md).
+#
+# Start order matters: never `up` both app containers at once after changing roles. The leader
+# migrates first; the worker waits for it to be healthy, then waits for the migration head itself.
+#
+# /opt/omniroute/.env must hold (shared by every app container; a worker never generates them):
+#   JWT_SECRET, API_KEY_SECRET, STORAGE_ENCRYPTION_KEY, STORAGE_ENCRYPTION_KEY_VERSION, MACHINE_ID_SALT,
+#   OMNIROUTE_WS_BRIDGE_SECRET, INITIAL_PASSWORD, POSTGRES_PASSWORD, OMNIROUTE_TAG, and the public URL /
+#   cookie / log settings listed in docker-compose.vps.yml. Never change STORAGE_ENCRYPTION_KEY.
+
+name: omniroute
+
+x-omniroute: &omniroute
+  image: ghcr.io/zyndaai/omniroute:${OMNIROUTE_TAG:?set OMNIROUTE_TAG in .env to the commit sha to deploy}
+  restart: always
+  # The rehearsal points this at its own env file (docker-compose.rehearsal.yml).
+  env_file: ${OMNIROUTE_ENV_FILE:-.env}
+  environment: &omniroute-env
+    OMNIROUTE_POSTGRES_URL: postgres://omniroute:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/omniroute
+    REDIS_URL: redis://redis:6379
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+  # Healthcheck comes from the image (node healthcheck.mjs, 30s interval).
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: omniroute-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: omniroute
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: omniroute
+      # The schema requires the C collation (0001_init.sql guard): set it when the cluster is created.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    volumes:
+      - omniroute-pg:/var/lib/postgresql
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omniroute -d omniroute"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: omniroute-redis
+    restart: always
+    # Coordination state only (leases, limiter counters, pub/sub): nothing here must survive a
+    # restart, so no persistence. noeviction: evicting a limiter or fence key would break limits.
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  omniroute-1:
+    <<: *omniroute
+    container_name: omniroute-1
+    environment:
+      <<: *omniroute-env
+      OMNIROUTE_ROLE: leader
+      OMNIROUTE_INSTANCE_ID: omniroute-1
+    ports:
+      # Loopback only: Docker-published ports bypass UFW.
+      - "127.0.0.1:20128:20128"
+    volumes:
+      - omniroute-data:/app/data
+      - omniroute-call-logs:/app/data/call_logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  omniroute-2:
+    <<: *omniroute
+    container_name: omniroute-2
+    environment:
+      <<: *omniroute-env
+      OMNIROUTE_ROLE: worker
+      OMNIROUTE_INSTANCE_ID: omniroute-2
+    ports:
+      - "127.0.0.1:20129:20128"
+    volumes:
+      - omniroute-data-2:/app/data
+      - omniroute-call-logs:/app/data/call_logs
+    depends_on:
+      omniroute-1:
+        condition: service_healthy
+
+volumes:
+  # The live single-container volume (holds the SQLite file the transfer reads, kept for rollback).
+  # External, or compose would create an empty `omniroute_omniroute-data` volume.
+  omniroute-data:
+    external: true
+  omniroute-data-2:
+  # Call-log bodies are files under DATA_DIR/call_logs, written by whichever process served the
+  # request and read by the dashboard on the leader: one volume shared by every app container.
+  omniroute-call-logs:
+  omniroute-pg:

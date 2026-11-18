@@ -11,8 +11,8 @@
 // src/lib/db/backends/postgres/migrationRunner.ts (version `pg-NNNN`); it is part of the hash,
 // and tests/unit/db/backends/test-db-isolation.test.ts asserts the ledger rows.
 //
-// CLI: `node scripts/db/test-db.mjs ensure | clean | drop <name>`; admin URL from
-// OMNIROUTE_TEST_POSTGRES_URL (never printed).
+// CLI: `node scripts/db/test-db.mjs ensure | clean | tune | drop <name>`; admin URL from
+// OMNIROUTE_TEST_POSTGRES_URL (never printed). Run `tune` once per new test container.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -141,7 +141,8 @@ async function dropStaleTemplates(admin, keep) {
 // Caller holds the lock.
 async function ensureTemplateLocked(admin, adminUrl) {
   const migrations = readMigrations(migrationsDir());
-  if (migrations.length === 0) throw new Error(`test template: no migrations in ${migrationsDir()}`);
+  if (migrations.length === 0)
+    throw new Error(`test template: no migrations in ${migrationsDir()}`);
   const name = templateNameFor(migrations);
   const { rows } = await admin.query("SELECT datistemplate FROM pg_database WHERE datname = $1", [
     name,
@@ -189,6 +190,21 @@ export async function cleanTestDatabases(adminUrl) {
   });
 }
 
+/**
+ * Turns off crash safety on the throwaway TEST server: every test file clones and drops a
+ * database, and on Docker for Windows each disk sync is slow. Persisted with ALTER SYSTEM
+ * (postgresql.auto.conf), so it survives restarts; rerun after recreating the container.
+ * Never point this at a server that holds real data.
+ */
+export async function tuneTestServer(adminUrl) {
+  return withAdmin(adminUrl, async (admin) => {
+    for (const setting of ["fsync = off", "synchronous_commit = off", "full_page_writes = off"]) {
+      await admin.query(`ALTER SYSTEM SET ${setting}`);
+    }
+    await admin.query("SELECT pg_reload_conf()");
+  });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const adminUrl = process.env.OMNIROUTE_TEST_POSTGRES_URL?.trim();
   const [cmd, arg] = process.argv.slice(2);
@@ -198,10 +214,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   try {
     if (cmd === "ensure") console.log(await ensureTemplate(adminUrl));
-    else if (cmd === "clean") console.log(`dropped ${await cleanTestDatabases(adminUrl)} database(s)`);
+    else if (cmd === "clean")
+      console.log(`dropped ${await cleanTestDatabases(adminUrl)} database(s)`);
     else if (cmd === "drop" && arg) await dropDatabase(adminUrl, arg);
-    else {
-      console.error("usage: test-db.mjs ensure | clean | drop <omni_t_name>");
+    else if (cmd === "tune") {
+      await tuneTestServer(adminUrl);
+      console.log("test server: fsync, synchronous_commit and full_page_writes off");
+    } else {
+      console.error("usage: test-db.mjs ensure | clean | tune | drop <omni_t_name>");
       process.exit(2);
     }
   } catch (err) {

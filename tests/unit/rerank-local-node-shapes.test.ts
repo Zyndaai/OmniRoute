@@ -178,7 +178,7 @@ test.describe("POST /v1/rerank against a TEI-shaped local node", () => {
     await createProviderNode({
       id: "openai-compatible-rerank-tei",
       name: "tei",
-      type: "openai",
+      type: "openai-compatible",
       prefix: "tei",
       baseUrl: "http://127.0.0.1:8081/v1",
       apiType: "rerank",

@@ -13,7 +13,8 @@ const auth = await import("../../src/sse/services/auth.ts");
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

@@ -26,8 +26,13 @@ const WORKER_SRC = join(ROOT, "open-sse", "services", "compression", "compressio
 
 // Packages the worker imports that also reach the standalone tree through the
 // Next.js server trace, because the app itself imports them on its main path.
+// `pg` (src/lib/db/backends/postgres/pool.ts) and `better-sqlite3` (Cursor's local token
+// store reader, src/lib/cursor/tokenExtractor.ts) are serverExternalPackages in
+// next.config.mjs that server code imports statically, so the trace ships them.
 const TRACED_BY_NEXT_SERVER = new Set([
+  "better-sqlite3",
   "bcryptjs",
+  "pg",
   "pino",
   "playwright",
   "sharp",

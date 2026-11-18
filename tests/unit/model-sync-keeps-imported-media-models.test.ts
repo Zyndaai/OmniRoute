@@ -97,9 +97,18 @@ test("sync still replaces imported chat rows with the discovered catalog", async
     ["audio-transcriptions"]
   );
 
+  // Synced rows reference a real connection (foreign key), so create one.
+  const connection = await providersDb.createProviderConnection({
+    provider: "openai",
+    authType: "apikey",
+    name: "OpenAI media sync",
+    apiKey: "openai-test-key",
+  });
+  const connectionId = String(connection.id);
+
   await importManagedModels({
     providerId: "openai",
-    connectionId: "openai-media-sync-conn",
+    connectionId,
     mode: "sync",
     fetchedModels: [{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol" }],
   });
@@ -110,7 +119,7 @@ test("sync still replaces imported chat rows with the discovered catalog", async
     ["whisper-imported"]
   );
   assert.deepEqual(
-    (await modelsDb.getSyncedAvailableModelsForConnection("openai", "openai-media-sync-conn")).map(
+    (await modelsDb.getSyncedAvailableModelsForConnection("openai", connectionId)).map(
       (model) => model.id
     ),
     ["gpt-5.6-sol"]

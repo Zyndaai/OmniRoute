@@ -38,7 +38,8 @@ const ANTHROPIC_TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
 const CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {

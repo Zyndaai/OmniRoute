@@ -160,31 +160,31 @@ test("radar sync scheduler", async (t) => {
     }
   );
 
-  await t.test("init: flag off => never arms (flag-off boot stays timer-free)", () => {
+  await t.test("init: flag off => never arms (flag-off boot stays timer-free)", async () => {
     const { d, timers } = deps({ getFlag: () => false });
-    assert.equal(initRadarSyncScheduler(d), false);
+    assert.equal(await initRadarSyncScheduler(d), false);
     assert.equal(timers.registered.length, 0);
   });
 
-  await t.test("init: opt-in off => never arms", () => {
+  await t.test("init: opt-in off => never arms", async () => {
     const { d, timers } = deps({ getSettings: () => ({ optIn: false }) });
-    assert.equal(initRadarSyncScheduler(d), false);
+    assert.equal(await initRadarSyncScheduler(d), false);
     assert.equal(timers.registered.length, 0);
   });
 
-  await t.test("init: flag + opt-in on => arms the timer", () => {
+  await t.test("init: flag + opt-in on => arms the timer", async () => {
     const { d, timers } = deps();
-    assert.equal(initRadarSyncScheduler(d), true);
+    assert.equal(await initRadarSyncScheduler(d), true);
     assert.equal(timers.registered.length, 1);
   });
 
-  await t.test("init: settings reader throwing => false, never throws out", () => {
+  await t.test("init: settings reader throwing => false, never throws out", async () => {
     const { d, timers } = deps({
       getSettings: () => {
         throw new Error("db unavailable");
       },
     });
-    assert.equal(initRadarSyncScheduler(d), false);
+    assert.equal(await initRadarSyncScheduler(d), false);
     assert.equal(timers.registered.length, 0);
   });
 

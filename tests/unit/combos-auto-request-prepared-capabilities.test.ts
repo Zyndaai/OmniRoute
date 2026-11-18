@@ -220,7 +220,9 @@ test("flag on/off: the auto-routing wrapper honors the flag", async () => {
 });
 
 test("default path: no connected candidate keeps the existing 503", async () => {
-  core.resetDbInstance();
+  // An empty database (resetDbInstance alone only closes the pool; rows survive).
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   seeded = false;

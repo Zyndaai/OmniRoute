@@ -139,10 +139,10 @@ test("post-call runs only on the non-streaming branch of handleChatCore", () => 
 
 // ─── 4. Ordering inside nonStreamingResponse.ts ──────────────────────────────
 
-test("non-streaming order: memory extraction → tool execution → post-call → block exit → cache store", () => {
+// The memory-extraction step that used to come first went with the memory engine.
+test("non-streaming order: tool execution → post-call → block exit → cache store", () => {
   const leaf = read("open-sse/handlers/chatCore/nonStreamingResponse.ts");
-  const memory = indexOrFail(leaf, "runMemoryExtractionGate({");
-  const tools = indexOrFail(leaf, "translatedResponse = await handleToolCallExecution(", memory);
+  const tools = indexOrFail(leaf, "translatedResponse = await handleToolCallExecution(");
   const context = indexOrFail(leaf, "buildPostCallGuardrailContext({", tools);
   const postCall = indexOrFail(leaf, "guardrailRegistry.runPostCallHooks(", context);
   const apply = indexOrFail(leaf, "translatedResponse = postCallGuardrails.response;", postCall);
@@ -154,19 +154,15 @@ test("non-streaming order: memory extraction → tool execution → post-call �
   );
   const cacheStore = indexOrFail(leaf, "storeSemanticCacheResponse({", blockedExit);
   const idempotency = indexOrFail(leaf, "await saveIdempotency(", cacheStore);
-  assert.ok(memory < tools && tools < postCall && postCall < blocked);
+  assert.ok(tools < postCall && postCall < blocked);
   assert.ok(blocked < blockedExit && blockedExit < cacheStore && cacheStore < idempotency);
   // Each anchor appears once, so the order above is unambiguous.
-  for (const anchor of [
-    "runMemoryExtractionGate({",
-    "guardrailRegistry.runPostCallHooks(",
-    "storeSemanticCacheResponse({",
-  ]) {
+  for (const anchor of ["guardrailRegistry.runPostCallHooks(", "storeSemanticCacheResponse({"]) {
     assert.equal(leaf.split(anchor).length - 1, 1, anchor);
   }
-  // characterization: memory extraction and tool execution see the response BEFORE the
-  // post-call guardrails, so a response later blocked (or rewritten) by a post-call
-  // guardrail has already been offered to memory extraction / built-in tool execution.
+  // characterization: tool execution sees the response BEFORE the post-call guardrails, so a
+  // response later blocked (or rewritten) by a post-call guardrail has already been offered
+  // to built-in tool execution.
 });
 
 test("the post-call verdict is applied to what is cached, and the cache write is keyed per API key", () => {

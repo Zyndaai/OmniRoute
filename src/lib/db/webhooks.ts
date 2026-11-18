@@ -4,7 +4,7 @@
  */
 
 import crypto from "crypto";
-import { db, jsonb } from "./pg";
+import { db, jsonb, sqlLimit, sqlOffset } from "./pg";
 import { decrypt, encrypt } from "./encryption";
 
 export type WebhookKind = "slack" | "telegram" | "discord" | "custom";
@@ -72,7 +72,7 @@ export async function getWebhooks(options?: { limit?: number; offset?: number })
   const params: unknown[] = [];
   if (limit !== undefined) {
     sql += " LIMIT $1 OFFSET $2";
-    params.push(limit, offset);
+    params.push(sqlLimit(limit), sqlOffset(offset));
   }
   const rows = await db().query<WebhookRow>(sql, params);
   const totalRow = await db().queryOne<{ cnt: number }>("SELECT count(*) AS cnt FROM webhooks");

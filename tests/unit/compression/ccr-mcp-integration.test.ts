@@ -83,14 +83,14 @@ describe("CCR in-memory store contract", () => {
     assert.equal(ccr.getCcrStoreStats("tenant-a", 61_000).lifecycle.expiredEvictions, 1);
   });
 
-  it("expires only the requested entry on hot-path reads", () => {
+  it("expires only the requested entry on hot-path reads", async () => {
     const expired = ccr.tryStoreBlock("expired", "tenant-a", { ttlSeconds: 60, now: 1_000 });
     const active = ccr.tryStoreBlock("active", "tenant-b", { ttlSeconds: 120, now: 1_000 });
     assert.equal(expired.stored, true);
     assert.equal(active.stored, true);
     if (!expired.stored || !active.stored) return;
 
-    assert.equal(ccr.retrieveBlock(active.hash, "tenant-b", 61_000), "active");
+    assert.equal(await ccr.retrieveBlock(active.hash, "tenant-b", 61_000), "active");
     assert.equal(ccr.getCcrStoreStats("tenant-a", 60_999).lifecycle.expiredEvictions, 0);
     assert.equal(ccr.inspectCcrBlock(expired.hash, "tenant-a", 61_000), null);
     assert.equal(ccr.getCcrStoreStats("tenant-a", 61_000).lifecycle.expiredEvictions, 1);
@@ -129,11 +129,11 @@ describe("CCR in-memory store contract", () => {
     assert.equal(ccr.getCcrStoreStats("tenant-a", 1).bytes, 0);
   });
 
-  it("keeps all read, list, inspect, delete, and stats operations principal-isolated", () => {
+  it("keeps all read, list, inspect, delete, and stats operations principal-isolated", async () => {
     const result = ccr.tryStoreBlock("tenant-a secret", "tenant-a", { source: "mcp" });
     assert.equal(result.stored, true);
     if (!result.stored) return;
-    assert.equal(ccr.retrieveBlock(result.hash, "tenant-b"), null);
+    assert.equal(await ccr.retrieveBlock(result.hash, "tenant-b"), null);
     assert.equal(ccr.inspectCcrBlock(result.hash, "tenant-b"), null);
     assert.equal(ccr.listCcrBlocks("tenant-b").total, 0);
     assert.equal(ccr.deleteCcrBlock(result.hash, "tenant-b"), false);
@@ -143,7 +143,7 @@ describe("CCR in-memory store contract", () => {
       capacityEvictions: 0,
       rejectedStores: 0,
     });
-    assert.equal(ccr.retrieveBlock(result.hash, "tenant-a"), "tenant-a secret");
+    assert.equal(await ccr.retrieveBlock(result.hash, "tenant-a"), "tenant-a secret");
   });
 });
 

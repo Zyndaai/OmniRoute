@@ -169,12 +169,24 @@ describe("acquireBrowserContext proxy lookup failure", () => {
     const originalPoolFlag = process.env.OMNIROUTE_BROWSER_POOL;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-browser-pool-proxy-"));
     let newContextCalls = 0;
-    // A regular file used as a directory: the DB layer's module-level DATA_DIR calls
-    // mkdirSync on first proxy lookup and fails with ENOTDIR, which resolveWritableDataDir
-    // propagates. That failed module evaluation stays cached for the whole process, so no
-    // test after this one in this file may touch the DB.
-    fs.writeFileSync(path.join(root, "not-a-directory"), "");
-    process.env.DATA_DIR = path.join(root, "not-a-directory", "data");
+    // Make the proxy lookup fail: swap the process database backend for one whose every
+    // query throws (the lookup reads the proxy registry from PostgreSQL), restored below.
+    const backendHolder = globalThis as { __omnirouteDbBackend?: unknown };
+    const originalBackend = backendHolder.__omnirouteDbBackend;
+    const unavailable = async () => {
+      throw new Error("database unavailable (test)");
+    };
+    backendHolder.__omnirouteDbBackend = {
+      kind: "postgres",
+      query: unavailable,
+      queryOne: unavailable,
+      execute: unavailable,
+      transaction: unavailable,
+      health: async () => ({ ok: false }),
+      close: async () => undefined,
+    };
+    const { invalidateDbCache } = await import("../../src/lib/db/readCache.ts");
+    invalidateDbCache();
     process.env.OMNIROUTE_BROWSER_POOL = "on";
     playwright.chromium.launch = (async () => ({
       isConnected: () => true,
@@ -198,6 +210,7 @@ describe("acquireBrowserContext proxy lookup failure", () => {
       assert.equal(getBrowserPoolStatus().contexts, 0);
       assert.equal(getBrowserPoolMetrics().metrics.contextCreateFailures, 2);
     } finally {
+      backendHolder.__omnirouteDbBackend = originalBackend;
       playwright.chromium.launch = originalLaunch;
       if (originalDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = originalDataDir;

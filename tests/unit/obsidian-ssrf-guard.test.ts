@@ -94,7 +94,7 @@ test("POST /api/settings/obsidian rejects a metadata baseUrl before any fetch or
   globalThis.fetch = recordingFetch(calls);
   const { POST } = await import("../../src/app/api/settings/obsidian/route.ts");
   const { getObsidianBaseUrl } = await import("../../src/lib/db/obsidian.ts");
-  const before = getObsidianBaseUrl();
+  const before = await getObsidianBaseUrl();
 
   const request = await makeManagementSessionRequest("http://localhost/api/settings/obsidian", {
     method: "POST",
@@ -107,5 +107,5 @@ test("POST /api/settings/obsidian rejects a metadata baseUrl before any fetch or
   assert.match(String(body.error), /metadata|blocked/i);
   assert.ok(!String(body.error).includes("at /"), "no stack trace in the error body");
   assert.deepEqual(calls, []);
-  assert.equal(getObsidianBaseUrl(), before, "a blocked baseUrl must not be persisted");
+  assert.equal(await getObsidianBaseUrl(), before, "a blocked baseUrl must not be persisted");
 });

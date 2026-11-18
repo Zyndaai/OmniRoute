@@ -35,17 +35,33 @@ test.after(() => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-test("recordComboFailure clears only the failing session's pin, leaving other sessions on the same combo untouched", () => {
+// recordComboFailure clears the pin fire-and-forget (an async DB delete): wait until it lands.
+async function waitForPinCleared(sessionId: string, comboName: string): Promise<unknown> {
+  const deadline = Date.now() + 5_000;
+  let pin = await handoffDb.getLastSessionModel(sessionId, comboName);
+  while (pin !== null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    pin = await handoffDb.getLastSessionModel(sessionId, comboName);
+  }
+  return pin;
+}
+
+test("recordComboFailure clears only the failing session's pin, leaving other sessions on the same combo untouched", async () => {
   failureTracker.__resetComboFailureTrackerForTests();
   const comboName = "combo-session-isolation-probe";
 
   // Seed pins for two different sessions sharing the SAME combo.
-  handoffDb.recordSessionModelUsage("sessA-probe", comboName, "openai/gpt-4o", "openai");
-  handoffDb.recordSessionModelUsage("sessB-probe", comboName, "anthropic/claude", "anthropic");
+  await handoffDb.recordSessionModelUsage("sessA-probe", comboName, "openai/gpt-4o", "openai");
+  await handoffDb.recordSessionModelUsage(
+    "sessB-probe",
+    comboName,
+    "anthropic/claude",
+    "anthropic"
+  );
 
   // Sanity: both pins exist before any failure is recorded.
-  assert.equal(handoffDb.getLastSessionModel("sessA-probe", comboName), "openai/gpt-4o");
-  assert.equal(handoffDb.getLastSessionModel("sessB-probe", comboName), "anthropic/claude");
+  assert.equal(await handoffDb.getLastSessionModel("sessA-probe", comboName), "openai/gpt-4o");
+  assert.equal(await handoffDb.getLastSessionModel("sessB-probe", comboName), "anthropic/claude");
 
   // Only session A crosses the consecutive-failure threshold.
   let lastResult = { count: 0, pinClearedNow: false };
@@ -57,33 +73,38 @@ test("recordComboFailure clears only the failing session's pin, leaving other se
 
   // The failing session's pin is cleared...
   assert.equal(
-    handoffDb.getLastSessionModel("sessA-probe", comboName),
+    await waitForPinCleared("sessA-probe", comboName),
     null,
     "the failing session's own pin should be cleared"
   );
   // ...but the healthy, unrelated session's pin on the SAME combo survives.
   assert.equal(
-    handoffDb.getLastSessionModel("sessB-probe", comboName),
+    await handoffDb.getLastSessionModel("sessB-probe", comboName),
     "anthropic/claude",
     "an unrelated session's pin on the same combo must NOT be dropped"
   );
 });
 
-test("recordComboFailure does not disturb an unrelated combo's pin for the SAME failing session", () => {
+test("recordComboFailure does not disturb an unrelated combo's pin for the SAME failing session", async () => {
   failureTracker.__resetComboFailureTrackerForTests();
   const failingCombo = "combo-session-isolation-failing";
   const otherCombo = "combo-session-isolation-other";
 
-  handoffDb.recordSessionModelUsage("sessC-probe", failingCombo, "openai/gpt-4o", "openai");
-  handoffDb.recordSessionModelUsage("sessC-probe", otherCombo, "anthropic/claude", "anthropic");
+  await handoffDb.recordSessionModelUsage("sessC-probe", failingCombo, "openai/gpt-4o", "openai");
+  await handoffDb.recordSessionModelUsage(
+    "sessC-probe",
+    otherCombo,
+    "anthropic/claude",
+    "anthropic"
+  );
 
   for (let i = 0; i < failureTracker.COMBO_FAILURE_THRESHOLD; i++) {
     failureTracker.recordComboFailure("sessC-probe", failingCombo);
   }
 
-  assert.equal(handoffDb.getLastSessionModel("sessC-probe", failingCombo), null);
+  assert.equal(await waitForPinCleared("sessC-probe", failingCombo), null);
   assert.equal(
-    handoffDb.getLastSessionModel("sessC-probe", otherCombo),
+    await handoffDb.getLastSessionModel("sessC-probe", otherCombo),
     "anthropic/claude",
     "the same session's pin on a DIFFERENT combo must not be cleared"
   );

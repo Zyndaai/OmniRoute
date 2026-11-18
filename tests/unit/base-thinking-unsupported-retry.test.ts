@@ -132,7 +132,7 @@ test("#13868: a thinking-unsupported 400 with NO reasoning field on the body fal
   // had no `else`, so an upstream 400 matching BOTH signals (thinking-unsupported wording
   // AND a literal "Unsupported parameter" name) would still fall into the dead-end `if`
   // and never reach the auto-learn detector below it, even though auto-learn is enabled.
-  setGlobalAutoLearnEnabled(true);
+  await setGlobalAutoLearnEnabled(true);
   const { bodies, callCount, restore } = mockFetchErrorThenOk(
     400,
     "model does not support thinking; Unsupported parameter: generationConfig"
@@ -151,10 +151,10 @@ test("#13868: a thinking-unsupported 400 with NO reasoning field on the body fal
     });
   } finally {
     restore();
-    setGlobalAutoLearnEnabled(false);
+    await setGlobalAutoLearnEnabled(false);
     // Auto-learn persists "generationConfig" to this provider's blocklist; drop it so a
     // re-run against the same DATA_DIR does not pre-strip the field and skip the retry.
-    deleteParamFilterConfig("anthropic-compatible-cc-myrelay");
+    await deleteParamFilterConfig("anthropic-compatible-cc-myrelay");
   }
   assert.equal(
     callCount(),

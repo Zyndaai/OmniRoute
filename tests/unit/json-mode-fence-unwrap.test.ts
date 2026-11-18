@@ -181,16 +181,16 @@ test("unfenceJsonOutput leaves Claude-shaped bodies alone", () => {
 
 /* ── prompt instruction ──────────────────────────────────────────────────── */
 
-test("openai→claude JSON-mode instructions forbid markdown code fences", () => {
+test("openai→claude JSON-mode instructions forbid markdown code fences", async () => {
   for (const response_format of [
     { type: "json_object" },
     { type: "json_schema", json_schema: { name: "Facts", schema: SCHEMA } },
   ]) {
-    const out = openaiToClaudeRequest(
+    const out = (await openaiToClaudeRequest(
       "claude-sonnet-4-20250514",
       { messages: [{ role: "user", content: "facts?" }], response_format },
       false
-    ) as { system?: Array<{ text: string }> };
+    )) as { system?: Array<{ text: string }> };
     const systemText = (out.system || []).map((p) => p.text).join("\n");
     assert.match(systemText, /no markdown code fences/, response_format.type);
   }

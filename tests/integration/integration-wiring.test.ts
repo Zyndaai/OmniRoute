@@ -496,8 +496,8 @@ describe("Page Integration — logs page wiring", () => {
 
 describe("Page Integration — settings page wiring", () => {
   const src = readProjectFile("src/app/(dashboard)/dashboard/settings/resilience/page.tsx");
-  const memorySkillsTab = readProjectFile(
-    "src/app/(dashboard)/dashboard/settings/components/MemorySkillsTab.tsx"
+  const skillsSettingsTab = readProjectFile(
+    "src/app/(dashboard)/dashboard/settings/components/SkillsSettingsTab.tsx"
   );
 
   it("should include resilience tab in advanced settings", () => {
@@ -506,8 +506,8 @@ describe("Page Integration — settings page wiring", () => {
   });
 
   it("should not label the active skills settings card as a placeholder", () => {
-    assert.ok(memorySkillsTab, "MemorySkillsTab should exist");
-    assert.doesNotMatch(memorySkillsTab, /Skills Settings \(placeholder\)/);
+    assert.ok(skillsSettingsTab, "SkillsSettingsTab should exist");
+    assert.doesNotMatch(skillsSettingsTab, /Skills Settings \(placeholder\)/);
   });
 });
 

@@ -152,7 +152,7 @@ test("Muse fresh sessions neither reuse cached opaque output nor store their own
   const staleOutput = {
     output: [{ type: "reasoning", encrypted_content: "another-account-opaque" }],
   };
-  setCachedResponse(signature, model, staleOutput, 0);
+  await setCachedResponse(signature, model, staleOutput, 0);
 
   const served: unknown[] = [];
   for (const sessionId of ["fresh-account-a", "fresh-account-b"]) {
@@ -179,7 +179,11 @@ test("Muse fresh sessions neither reuse cached opaque output nor store their own
       translatedResponse: upstreamOutput,
     });
     served.push(upstreamOutput);
-    assert.deepEqual(getCachedResponse(signature), staleOutput, "Muse must not overwrite cache");
+    assert.deepEqual(
+      await getCachedResponse(signature),
+      staleOutput,
+      "Muse must not overwrite cache"
+    );
   }
   assert.notDeepEqual(served[0], served[1]);
 
@@ -194,7 +198,11 @@ test("Muse fresh sessions neither reuse cached opaque output nor store their own
     headers: {},
     translatedResponse: served[0],
   });
-  assert.equal(getCachedResponse(uncachedSignature), null, "Muse must not create cache entries");
+  assert.equal(
+    await getCachedResponse(uncachedSignature),
+    null,
+    "Muse must not create cache entries"
+  );
 });
 
 // ─── HIT path ────────────────────────────────────────────────────────────────
@@ -247,7 +255,7 @@ function makeHitArgs(overrides: Record<string, unknown> = {}) {
 }
 
 // Seed the cache under the EXACT signature checkSemanticCache rebuilds for `args`.
-function seedHit(args: ReturnType<typeof makeHitArgs>["args"], response: unknown) {
+async function seedHit(args: ReturnType<typeof makeHitArgs>["args"], response: unknown) {
   const body = args.body as Record<string, unknown>;
   const signature = generateSignature(
     args.model,
@@ -257,12 +265,12 @@ function seedHit(args: ReturnType<typeof makeHitArgs>["args"], response: unknown
     args.apiKeyId ?? undefined,
     { toolChoice: body.tool_choice, tools: body.tools, responseFormat: body.response_format }
   );
-  setCachedResponse(signature, args.model, response);
+  await setCachedResponse(signature, args.model, response);
   return signature;
 }
 
 test("transcript-observed requests bypass existing semantic-cache hits", async () => {
-  clearCache();
+  await clearCache();
   const { args, persistCalls, convertedCalls } = makeHitArgs({
     semanticCacheEnabled: true,
     body: {
@@ -272,7 +280,7 @@ test("transcript-observed requests bypass existing semantic-cache hits", async (
     },
     videoTranscriptSensitive: true,
   });
-  seedHit(args, { choices: [{ message: { content: "PRIVATE_VIDEO_CACHE_SENTINEL" } }] });
+  await seedHit(args, { choices: [{ message: { content: "PRIVATE_VIDEO_CACHE_SENTINEL" } }] });
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
   assert.equal(result, null);
   assert.equal(persistCalls.length, 0);
@@ -280,7 +288,7 @@ test("transcript-observed requests bypass existing semantic-cache hits", async (
 });
 
 test("checkSemanticCache returns a non-streaming JSON HIT with cache headers + logging side effects", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-cached-1",
     choices: [
@@ -296,7 +304,7 @@ test("checkSemanticCache returns a non-streaming JSON HIT with cache headers + l
     },
     stream: false,
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -333,7 +341,7 @@ test("checkSemanticCache returns a non-streaming JSON HIT with cache headers + l
 });
 
 test("checkSemanticCache returns a streaming SSE HIT (text/event-stream) when stream=true", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-cached-stream",
     choices: [
@@ -353,7 +361,7 @@ test("checkSemanticCache returns a streaming SSE HIT (text/event-stream) when st
     },
     stream: true,
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -374,7 +382,7 @@ test("checkSemanticCache returns a streaming SSE HIT (text/event-stream) when st
 });
 
 test("checkSemanticCache HITs even when the cached body has no usage (cost falls back to 0)", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-cached-no-usage",
     choices: [
@@ -393,7 +401,7 @@ test("checkSemanticCache HITs even when the cached body has no usage (cost falls
     },
     stream: false,
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -417,7 +425,7 @@ test("checkSemanticCache HITs even when the cached body has no usage (cost falls
 // for cache hits), while the original cost is surfaced via X-OmniRoute-Cost-Saved.
 
 test("checkSemanticCache HIT bills 0 incremental cost and reports the original cost in X-OmniRoute-Cost-Saved", async () => {
-  clearCache();
+  await clearCache();
   const usage = { prompt_tokens: 1000, completion_tokens: 1000, total_tokens: 2000 };
   const cached = {
     id: "chatcmpl-cached-cost-saved",
@@ -434,7 +442,7 @@ test("checkSemanticCache HIT bills 0 incremental cost and reports the original c
     },
     stream: false,
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   // The original (would-have-been) cost — computed with the SAME calculator the handler
   // uses, against the same fresh DATA_DIR, so the values match deterministically.
@@ -467,7 +475,7 @@ test("checkSemanticCache HIT bills 0 incremental cost and reports the original c
 });
 
 test("checkSemanticCache replays the full prompt total of an OpenAI answer cached for a Claude client", async () => {
-  clearCache();
+  await clearCache();
   // A non-streaming Claude client served by an OpenAI provider: the cache stores the
   // client-format body, where responseTranslator split prompt_tokens into
   // input_tokens (fresh only) + cache_read/cache_creation counters.
@@ -497,7 +505,7 @@ test("checkSemanticCache replays the full prompt total of an OpenAI answer cache
     },
     stream: false,
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const expectedSaved = formatOmniRouteCost(
     await calculateCost(
@@ -521,7 +529,7 @@ test("checkSemanticCache replays the full prompt total of an OpenAI answer cache
 });
 
 test("checkSemanticCache isolates HITs per apiKeyId (no cross-key cache sharing) [#3740 edge]", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-cached-isolation",
     choices: [
@@ -537,7 +545,7 @@ test("checkSemanticCache isolates HITs per apiKeyId (no cross-key cache sharing)
 
   // Seed the cache under apiKeyId "keyA".
   const { args: argsA } = makeHitArgs({ body: sharedBody(), apiKeyId: "keyA" });
-  seedHit(argsA, cached);
+  await seedHit(argsA, cached);
 
   // A different key with an IDENTICAL body must NOT see keyA's entry (namespaced signature).
   const { args: argsB } = makeHitArgs({ body: sharedBody(), apiKeyId: "keyB" });
@@ -553,7 +561,7 @@ test("checkSemanticCache isolates HITs per apiKeyId (no cross-key cache sharing)
 // ─── cacheDefaultMode: per-key bypass (W3 fix) ──────────────────────────────
 
 test("checkSemanticCache returns null when cacheDefaultMode is 'bypass' (even with cacheable body)", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-bypass",
     choices: [
@@ -570,7 +578,7 @@ test("checkSemanticCache returns null when cacheDefaultMode is 'bypass' (even wi
     },
     cacheDefaultMode: "bypass",
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -578,7 +586,7 @@ test("checkSemanticCache returns null when cacheDefaultMode is 'bypass' (even wi
 });
 
 test("checkSemanticCache returns a HIT when cacheDefaultMode is 'legacy' (default behavior preserved)", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-legacy",
     choices: [
@@ -595,7 +603,7 @@ test("checkSemanticCache returns a HIT when cacheDefaultMode is 'legacy' (defaul
     },
     cacheDefaultMode: "legacy",
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -606,7 +614,7 @@ test("checkSemanticCache returns a HIT when cacheDefaultMode is 'legacy' (defaul
 // ─── cacheLatency marker header (W3 fix) ─────────────────────────────────────
 
 test("checkSemanticCache HIT includes X-OmniRoute-Cache-Latency: synthetic header", async () => {
-  clearCache();
+  await clearCache();
   const cached = {
     id: "chatcmpl-latency",
     choices: [
@@ -622,7 +630,7 @@ test("checkSemanticCache HIT includes X-OmniRoute-Cache-Latency: synthetic heade
       temperature: 0,
     },
   });
-  seedHit(args, cached);
+  await seedHit(args, cached);
 
   const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
 
@@ -636,7 +644,7 @@ test("checkSemanticCache HIT includes X-OmniRoute-Cache-Latency: synthetic heade
 });
 
 test("checkSemanticCache HIT finalizes the exact pending request by id", async () => {
-  clearCache();
+  await clearCache();
   const { clearPendingRequests, getPendingById, trackPendingRequest } =
     await import("../../src/lib/usage/usageHistory.ts");
   const { getCompletedDetails } = await import("../../src/lib/usage/completedRequestDetails.ts");
@@ -668,7 +676,7 @@ test("checkSemanticCache HIT finalizes the exact pending request by id", async (
         connectionId: "account-a",
       },
     });
-    seedHit(args, cached);
+    await seedHit(args, cached);
 
     const result = await checkSemanticCache(args as Parameters<typeof checkSemanticCache>[0]);
     assert.ok(result);
@@ -685,7 +693,7 @@ test("checkSemanticCache HIT finalizes the exact pending request by id", async (
 // ─── tool_choice / tools / response_format must be part of the signature (#12734) ────────────
 
 test("#12734: cached tool_calls response must NOT be replayed for tool_choice: 'none'", async () => {
-  clearCache();
+  await clearCache();
   const messages = [{ role: "user", content: "what is 2+2?" }];
   const toolCallResponse = {
     id: "chatcmpl-tool-calls",
@@ -712,7 +720,7 @@ test("#12734: cached tool_calls response must NOT be replayed for tool_choice: '
   // runs before memory/skill tool injection, so the signature it stores under never saw
   // tool_choice at all).
   const { args: storeArgs } = makeHitArgs({ body: { model: "gpt-4o", messages, temperature: 0 } });
-  seedHit(storeArgs, toolCallResponse);
+  await seedHit(storeArgs, toolCallResponse);
 
   const { args: forbidArgs } = makeHitArgs({
     body: { model: "gpt-4o", messages, temperature: 0, tool_choice: "none" },
@@ -727,7 +735,7 @@ test("#12734: cached tool_calls response must NOT be replayed for tool_choice: '
 });
 
 test("#12734: identical tool_choice/tools/response_format across requests still HITs", async () => {
-  clearCache();
+  await clearCache();
   const messages = [{ role: "user", content: "what is the weather?" }];
   const tools = [
     {
@@ -755,7 +763,7 @@ test("#12734: identical tool_choice/tools/response_format across requests still 
     response_format: { type: "json_object" },
   };
   const { args: storeArgs } = makeHitArgs({ body });
-  seedHit(storeArgs, cached);
+  await seedHit(storeArgs, cached);
 
   const { args: readArgs } = makeHitArgs({ body: { ...body } });
   const result = await checkSemanticCache(readArgs as Parameters<typeof checkSemanticCache>[0]);
@@ -770,7 +778,7 @@ test("Muse successful streaming completions never create or overwrite cache entr
     const input = [{ role: "user", content: `stream muse ${seeded}` }];
     const signature = generateSignature("muse-spark", input, 0, undefined, "stream-client");
     const old = { choices: [{ message: { content: "old opaque output" }, finish_reason: "stop" }] };
-    if (seeded) setCachedResponse(signature, "muse-spark", old, 1);
+    if (seeded) await setCachedResponse(signature, "muse-spark", old, 1);
     storeStreamingSemanticCacheResponse({
       enabled: true,
       provider: "muse-code",
@@ -783,7 +791,7 @@ test("Muse successful streaming completions never create or overwrite cache entr
         choices: [{ message: { content: "new opaque output" }, finish_reason: "stop" }],
       },
     });
-    assert.deepEqual(getCachedResponse(signature), seeded ? old : null);
+    assert.deepEqual(await getCachedResponse(signature), seeded ? old : null);
   }
 });
 
@@ -793,7 +801,7 @@ test("read path isolates response controls written by either cache store", async
   const { storeStreamingSemanticCacheResponse } =
     await import("../../open-sse/handlers/chatCore/streamingSemanticCacheStore.ts");
   for (const streaming of [false, true]) {
-    clearCache();
+    await clearCache();
     const body = {
       messages: [{ role: "user", content: "Synthetic cache identity check." }],
       temperature: 0,

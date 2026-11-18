@@ -21,7 +21,8 @@ for (const status of ["banned", "expired"])
       const connection = data.connections.find((c: { id: string }) => c.id === created.id);
       assert.equal(connection.testStatus, status);
       assert.equal(connection.isActive, false);
-      assert.equal(connection.rateLimitedUntil, "2099-01-01T00:00:00Z");
+      // timestamptz comes back as a normalized ISO string ("…T00:00:00.000Z"): compare instants.
+      assert.equal(Date.parse(connection.rateLimitedUntil), Date.parse("2099-01-01T00:00:00Z"));
       assert.ok(Date.parse(connection.runtimeObservedAt) >= before);
       assert.ok(Date.parse(connection.runtimeObservedAt) <= Date.now());
       assert.notEqual(connection.apiKey, "synthetic-key");

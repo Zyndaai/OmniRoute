@@ -19,8 +19,8 @@ function collectToolResults(translated) {
   return out;
 }
 
-test("openaiToClaudeRequest: role=tool message emits is_error:false", () => {
-  const translated = openaiToClaudeRequest(
+test("openaiToClaudeRequest: role=tool message emits is_error:false", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-5-5",
     {
       messages: [
@@ -42,8 +42,8 @@ test("openaiToClaudeRequest: role=tool message emits is_error:false", () => {
   assert.equal(results[0].is_error, false);
 });
 
-test("openaiToClaudeRequest: user tool_result part without is_error defaults to false", () => {
-  const translated = openaiToClaudeRequest(
+test("openaiToClaudeRequest: user tool_result part without is_error defaults to false", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-5-5",
     {
       messages: [
@@ -67,8 +67,8 @@ test("openaiToClaudeRequest: user tool_result part without is_error defaults to 
   assert.equal(results[0].is_error, false);
 });
 
-test("openaiToClaudeRequest: explicit is_error:true is preserved", () => {
-  const translated = openaiToClaudeRequest(
+test("openaiToClaudeRequest: explicit is_error:true is preserved", async () => {
+  const translated = await openaiToClaudeRequest(
     "claude-sonnet-5-5",
     {
       messages: [

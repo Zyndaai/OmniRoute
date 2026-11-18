@@ -26,7 +26,8 @@ const IN_TEN_MINUTES = () => new Date(Date.now() + 10 * 60_000).toISOString();
 
 async function resetStorage() {
   accountFallback.clearAllModelLockouts();
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   delete process.env.INITIAL_PASSWORD;

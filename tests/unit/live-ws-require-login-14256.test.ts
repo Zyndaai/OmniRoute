@@ -98,7 +98,8 @@ function connectAndWait(
 describe("LiveWS authorizeConnection — requireLogin=false bypass (#14256)", () => {
   before(async () => {
     // Fresh DB for each describe block.
-    resetDbInstance();
+    await resetDbInstance();
+    await (await import("../helpers/postgres.ts")).resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
   });
@@ -142,7 +143,8 @@ describe("LiveWS authorizeConnection — requireLogin=false bypass (#14256)", ()
 
   test("anonymous connection is rejected when requireLogin=true and no credentials", async () => {
     // Reset the DB with a password set, so auth IS required.
-    resetDbInstance();
+    await resetDbInstance();
+    await (await import("../helpers/postgres.ts")).resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
@@ -163,7 +165,8 @@ describe("LiveWS authorizeConnection — requireLogin=false bypass (#14256)", ()
     // Fresh install: no password, no OIDC, no INITIAL_PASSWORD, setup not
     // complete, loopback bind. The pre-setup anonymous window must keep
     // working for real local dashboard clients (control for the proxy test).
-    resetDbInstance();
+    await resetDbInstance();
+    await (await import("../helpers/postgres.ts")).resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
@@ -184,7 +187,8 @@ describe("LiveWS authorizeConnection — requireLogin=false bypass (#14256)", ()
     // x-real-ip — the signature of a reverse proxy or tunnel hop. The peer is
     // not the local dashboard user, so the pre-setup anonymous window must
     // NOT open (same discipline as isLoopbackRequest on the HTTP routes).
-    resetDbInstance();
+    await resetDbInstance();
+    await (await import("../helpers/postgres.ts")).resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 
@@ -207,7 +211,8 @@ describe("LiveWS authorizeConnection — requireLogin=false bypass (#14256)", ()
   test("fresh-install bypass is refused for a proxy that sets only X-Forwarded-Proto/Host", async () => {
     // The proxy example in docs/security/CORS.md sets these and no address header. The peer is
     // the proxy on this host, so the window must stay shut for its callers too.
-    resetDbInstance();
+    await resetDbInstance();
+    await (await import("../helpers/postgres.ts")).resetTestDb();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 

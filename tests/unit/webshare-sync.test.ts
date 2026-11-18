@@ -20,7 +20,8 @@ const { getProvider } = await import("../../src/lib/freeProxyProviders/index.ts"
 const freeProxiesDb = await import("../../src/lib/db/freeProxies.ts");
 
 async function reset() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -267,7 +268,15 @@ test("WebshareProvider.sync never tombstones proxies already promoted to the poo
     await p.sync();
     const [item] = await freeProxiesDb.listFreeProxies({ sources: ["webshare"] });
     assert.ok(item);
-    await freeProxiesDb.markFreeProxyInPool(item.id, "some-registry-id");
+    // pool_proxy_id references the proxy registry (foreign key): use a real entry.
+    const proxiesDb = await import("../../src/lib/db/proxies.ts");
+    const registered = await proxiesDb.upsertProxy({
+      name: "webshare-pool",
+      type: "http",
+      host: "45.10.20.1",
+      port: 6001,
+    });
+    await freeProxiesDb.markFreeProxyInPool(item.id, registered.proxy!.id);
 
     // Next sync returns an empty list — if pruning ignored `in_pool`, this row
     // would be deleted even though it's actively in use by the proxy pool.

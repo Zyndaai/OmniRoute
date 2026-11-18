@@ -46,8 +46,8 @@ test("generateSessionId ignores a null entry in input and in messages", () => {
   assert.equal(typeof fromMessages, "string");
 });
 
-test("OpenAI to Claude drops a null entry in tools and keeps the valid tool", () => {
-  const out = openaiToClaudeRequest(
+test("OpenAI to Claude drops a null entry in tools and keeps the valid tool", async () => {
+  const out = (await openaiToClaudeRequest(
     "claude-sonnet-4-5",
     {
       messages: MESSAGES,
@@ -60,7 +60,7 @@ test("OpenAI to Claude drops a null entry in tools and keeps the valid tool", ()
       ],
     },
     false
-  ) as { tools?: Array<{ name: string }> };
+  )) as { tools?: Array<{ name: string }> };
   // The Claude OAuth path prefixes tool names, so match the suffix.
   assert.equal(out.tools?.length, 1);
   assert.match(out.tools?.[0]?.name ?? "", /read_file$/);

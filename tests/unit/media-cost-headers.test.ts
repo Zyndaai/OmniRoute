@@ -18,8 +18,13 @@ const musicRoute = await import("../../src/app/api/v1/music/generations/route.ts
 const originalFetch = globalThis.fetch;
 const originalSetTimeout = globalThis.setTimeout;
 
-// Skip the ComfyUI polling delays — invoke the callback synchronously.
-function immediateTimeout(callback: (...a: unknown[]) => void, _ms?: number, ...args: unknown[]) {
+// Skip the ComfyUI polling delays (2.5–5 s) — invoke the callback synchronously. Longer timers
+// keep their real behaviour: the PostgreSQL pool's 10 s idle-client timer must not fire at once,
+// or it closes a connection that is still in use.
+function immediateTimeout(callback: (...a: unknown[]) => void, ms?: number, ...args: unknown[]) {
+  if (typeof ms === "number" && ms >= 10_000) {
+    return originalSetTimeout(callback, ms, ...args);
+  }
   if (typeof callback === "function") callback(...args);
   return 0 as unknown as ReturnType<typeof setTimeout>;
 }

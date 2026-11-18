@@ -343,18 +343,11 @@ async function buildUnifiedModelsResponseCore(
     ];
     const hiddenModelRowsByModality = new Map(
       await Promise.all(
-        hiddenModalities.map(async (modality) => {
-          // A listing degrades instead of failing: hidden flags live in the same
-          // provider_model_catalog documents as custom models, whose read below is
-          // also tolerated. Routing reads them through its own path and still fails
-          // on a broken database.
-          try {
-            return [modality, await getHiddenModelsByProvider(modality)] as const;
-          } catch (e) {
-            console.log("[catalog] Could not read hidden-model flags:", e);
-            return [modality, new Map<string, Set<string>>()] as const;
-          }
-        })
+        // Fail closed: if the hidden-model flags cannot be read, the endpoint answers 500
+        // instead of listing models the operator hid (tests/unit/models-catalog-route.test.ts).
+        hiddenModalities.map(
+          async (modality) => [modality, await getHiddenModelsByProvider(modality)] as const
+        )
       )
     );
     const hiddenModelsByModality = new Map<string, ReturnType<typeof createHiddenModelLookup>>();

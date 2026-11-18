@@ -4,17 +4,17 @@ import { getResolvedModelCapabilities } from "../../src/lib/modelCapabilities.ts
 import { MODELS_DEV_PROVIDER_MAP } from "../../src/lib/modelsDevSync/transform.ts";
 
 describe("reverseModelsDevProviders memoization (#8697-adjacent)", () => {
-  it("stays correct across repeated calls for the same provider", () => {
+  it("stays correct across repeated calls for the same provider", async () => {
     // codex/claude only list their alias (cx/cc) in MODELS_DEV_PROVIDER_MAP — exercises
     // the reverse-lookup fallback this function builds (#8429).
-    const first = getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
-    const second = getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
+    const first = await getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
+    const second = await getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
     assert.deepEqual(first, second, "memoized reverse-provider lookup must not change results");
   });
 
-  it("does not rescan MODELS_DEV_PROVIDER_MAP per call (regression guard for O(n) scans)", () => {
+  it("does not rescan MODELS_DEV_PROVIDER_MAP per call (regression guard for O(n) scans)", async () => {
     // Warm up outside the measured window.
-    getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
+    await getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
 
     // getResolvedModelCapabilities' wider call chain legitimately calls Object.entries()
     // on unrelated objects (e.g. once per call, elsewhere in the chain) — count only calls
@@ -28,8 +28,10 @@ describe("reverseModelsDevProviders memoization (#8697-adjacent)", () => {
     } as typeof Object.entries;
 
     try {
+      // Awaited: the lookup is async, so an un-awaited loop would restore Object.entries
+      // before any of the 300 calls ran and the guard would pass vacuously.
       for (let i = 0; i < 300; i++) {
-        getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
+        await getResolvedModelCapabilities({ provider: "codex", model: "gpt-5.6" });
       }
     } finally {
       Object.entries = originalEntries;

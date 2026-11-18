@@ -151,13 +151,17 @@ test("analytics route serves the cached payload for repeated identical requests"
   setEnv("60000", "0");
   core.resetDbInstance();
   usageHistory.clearPendingRequests();
-  const url = "http://localhost/api/usage/analytics?startDate=2026-01-01T00:00:00.000Z";
+  // Relative dates: raw usage rows older than the retention window (30 days by default)
+  // are not read back, so fixed calendar dates stop counting once they age out.
+  const DAY = 24 * 60 * 60 * 1000;
+  const startDate = new Date(Date.now() - 2 * DAY).toISOString();
+  const url = `http://localhost/api/usage/analytics?startDate=${startDate}`;
 
   await usageHistory.saveRequestUsage({
     provider: "openai",
     model: "gpt-4o-mini",
     tokens: { input: 100, output: 50 },
-    timestamp: "2026-01-02T00:00:00.000Z",
+    timestamp: new Date(Date.now() - DAY).toISOString(),
   });
   const first = await analyticsRoute.GET(new Request(url));
   assert.equal(first.status, 200);
@@ -168,7 +172,7 @@ test("analytics route serves the cached payload for repeated identical requests"
     provider: "openai",
     model: "gpt-4o-mini",
     tokens: { input: 100, output: 50 },
-    timestamp: "2026-01-03T00:00:00.000Z",
+    timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
   });
   const second = await analyticsRoute.GET(new Request(url));
   assert.equal(second.headers.get("x-analytics-cache"), "hit");

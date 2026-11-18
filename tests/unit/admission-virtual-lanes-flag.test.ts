@@ -23,56 +23,56 @@ const emptyEnv = {};
 const noOverride = (): string | undefined => undefined;
 
 describe("resolveAdaptiveVirtualLanesFlag", () => {
-  it('env "1" enables and reports env, winning over a DB override', () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it('env "1" enables and reports env, winning over a DB override', async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: { [ADAPTIVE_VIRTUAL_LANES_FLAG_KEY]: "1" },
       getOverride: () => "false",
     });
     assert.deepEqual(state, { enabled: true, source: "env" });
   });
 
-  it('env "true" enables (runtime-compatible truthiness)', () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it('env "true" enables (runtime-compatible truthiness)', async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: { [ADAPTIVE_VIRTUAL_LANES_FLAG_KEY]: "true" },
       getOverride: noOverride,
     });
     assert.deepEqual(state, { enabled: true, source: "env" });
   });
 
-  it('env "0" is an explicit off that still wins over the DB', () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it('env "0" is an explicit off that still wins over the DB', async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: { [ADAPTIVE_VIRTUAL_LANES_FLAG_KEY]: "0" },
       getOverride: () => "true",
     });
     assert.deepEqual(state, { enabled: false, source: "env" });
   });
 
-  it("DB override enables when env is absent", () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it("DB override enables when env is absent", async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: emptyEnv,
       getOverride: () => "true",
     });
     assert.deepEqual(state, { enabled: true, source: "db" });
   });
 
-  it('DB override "1" enables when env is absent', () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it('DB override "1" enables when env is absent', async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: emptyEnv,
       getOverride: () => "1",
     });
     assert.deepEqual(state, { enabled: true, source: "db" });
   });
 
-  it("DB override disables when env is absent", () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it("DB override disables when env is absent", async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: emptyEnv,
       getOverride: () => "false",
     });
     assert.deepEqual(state, { enabled: false, source: "db" });
   });
 
-  it("defaults to disabled when neither env nor DB is set", () => {
-    const state = resolveAdaptiveVirtualLanesFlag({
+  it("defaults to disabled when neither env nor DB is set", async () => {
+    const state = await resolveAdaptiveVirtualLanesFlag({
       env: emptyEnv,
       getOverride: noOverride,
     });

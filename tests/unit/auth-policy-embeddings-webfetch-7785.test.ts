@@ -69,7 +69,8 @@ test("#7785 embeddings: REQUIRE_API_KEY=false + invalid key → not 401", async 
   process.env.REQUIRE_API_KEY = "false";
 
   await createProviderNode({
-    type: "openai-compatible-embeddings",
+    // The embeddings modality is apiType, not the node type (openai-/anthropic-compatible only).
+    type: "openai-compatible",
     name: "LAN Embed 7785",
     prefix: "lanembed7785",
     apiType: "embeddings",

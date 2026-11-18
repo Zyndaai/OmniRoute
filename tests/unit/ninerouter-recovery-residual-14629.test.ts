@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { guardSocketsExceptTestDb } from "../helpers/socketGuard.ts";
 
 const testRoot = mkdtempSync(join(tmpdir(), "omniroute-ninerouter-residual-14629-"));
 const originalEnv = { ...process.env };
@@ -21,10 +21,11 @@ process.env.DISABLE_SQLITE_AUTO_BACKUP = "true";
 process.env.OMNIROUTE_SKIP_SYSTEM_TRUST = "1";
 process.env.OMNIROUTE_REASONING_EFFORT_PROBE_PROVIDERS = "";
 
-// Deny every socket, including explicit dispatchers that bypass the global MockAgent.
-const socketGuard = mock.method(Socket.prototype, "connect", () => {
-  throw new Error("Unexpected network access in NineRouter recovery regression");
-});
+// Deny every socket except the test database, including explicit dispatchers that bypass the
+// global MockAgent.
+const socketGuard = guardSocketsExceptTestDb(
+  "Unexpected network access in NineRouter recovery regression"
+);
 const originalDispatcher = getGlobalDispatcher();
 const mockAgent = new MockAgent();
 mockAgent.disableNetConnect();

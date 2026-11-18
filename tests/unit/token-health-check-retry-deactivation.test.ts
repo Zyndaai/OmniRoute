@@ -34,7 +34,8 @@ const { PROVIDERS } = await import("../../open-sse/config/constants.ts");
 const tokenHealthCheck = await import("../../src/lib/tokenHealthCheck.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {

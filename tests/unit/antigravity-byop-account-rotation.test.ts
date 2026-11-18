@@ -11,6 +11,13 @@ import { createChatPipelineHarness } from "../integration/_chatPipelineHarness.t
 // is excluded so selection prefers any other account.
 const harness = await createChatPipelineHarness("antigravity-byop-rotation");
 const { BaseExecutor, buildRequest, handleChat, resetStorage, settingsDb } = harness;
+
+/** rateLimitedUntil is a timestamptz (ISO string) since the PostgreSQL port; 0 when unset. */
+function untilMs(value: unknown): number {
+  if (value === null || value === undefined || value === "") return 0;
+  const ms = typeof value === "number" ? value : Date.parse(String(value));
+  return Number.isFinite(ms) ? ms : 0;
+}
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { clearAntigravityProjectCache } =
   await import("../../open-sse/services/antigravityProjectBootstrap.ts");
@@ -169,15 +176,15 @@ test("Antigravity BYOP 422 rotates to a sibling account and the request succeeds
     // Account A is excluded (rateLimitedUntil set in the future).
     const updatedA = await providersDb.getProviderConnectionById(byopAccount.id);
     assert.ok(
-      updatedA && Number(updatedA.rateLimitedUntil) > Date.now(),
+      updatedA && untilMs(updatedA.rateLimitedUntil) > Date.now(),
       "BYOP account should be excluded from selection"
     );
     // Account B must NOT be excluded.
     const updatedB = await providersDb.getProviderConnectionById(healthyAccount.id);
     assert.ok(
       !updatedB ||
-        !Number(updatedB.rateLimitedUntil) ||
-        Number(updatedB.rateLimitedUntil) <= Date.now(),
+        !untilMs(updatedB.rateLimitedUntil) ||
+        untilMs(updatedB.rateLimitedUntil) <= Date.now(),
       "healthy sibling account must not be excluded"
     );
   } finally {
@@ -281,14 +288,14 @@ test("streaming Antigravity BYOP 422 still rotates — execute must not cancel t
     assert.equal(onboardCallsForA, 1);
     const updatedA = await providersDb.getProviderConnectionById(byopAccount.id);
     assert.ok(
-      updatedA && Number(updatedA.rateLimitedUntil) > Date.now(),
+      updatedA && untilMs(updatedA.rateLimitedUntil) > Date.now(),
       "BYOP account should be excluded from selection"
     );
     const updatedB = await providersDb.getProviderConnectionById(healthyAccount.id);
     assert.ok(
       !updatedB ||
-        !Number(updatedB.rateLimitedUntil) ||
-        Number(updatedB.rateLimitedUntil) <= Date.now(),
+        !untilMs(updatedB.rateLimitedUntil) ||
+        untilMs(updatedB.rateLimitedUntil) <= Date.now(),
       "healthy sibling account must not be excluded"
     );
   } finally {
@@ -354,7 +361,7 @@ test("Antigravity BYOP with no sibling account surfaces the actionable 422 and e
     // No sibling exists, so the connection is excluded for future requests.
     const updated = await providersDb.getProviderConnectionById(byopAccount.id);
     assert.ok(
-      updated && Number(updated.rateLimitedUntil) > Date.now(),
+      updated && untilMs(updated.rateLimitedUntil) > Date.now(),
       "BYOP account should be excluded from selection"
     );
   } finally {

@@ -22,7 +22,8 @@ function connectionId(connection: unknown): string {
 }
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
@@ -154,7 +155,9 @@ test("API-key ordered preference wins among eligible Antigravity accounts and fa
     "gemini-3-pro",
     { preferredConnectionIds: [primaryId, fallbackId] }
   );
-  assert.ok(selectedPrimary && !("allRateLimited" in selectedPrimary && selectedPrimary.allRateLimited));
+  assert.ok(
+    selectedPrimary && !("allRateLimited" in selectedPrimary && selectedPrimary.allRateLimited)
+  );
   assert.equal(selectedPrimary.connectionId, primaryId);
 
   // The retry loop excludes a failed/cooling connection. Preference must not
@@ -169,10 +172,11 @@ test("API-key ordered preference wins among eligible Antigravity accounts and fa
       excludeConnectionIds: [primaryId],
     }
   );
-  assert.ok(selectedFallback && !("allRateLimited" in selectedFallback && selectedFallback.allRateLimited));
+  assert.ok(
+    selectedFallback && !("allRateLimited" in selectedFallback && selectedFallback.allRateLimited)
+  );
   assert.equal(selectedFallback.connectionId, fallbackId);
 });
-
 
 test("Antigravity 429 rate-limited locks only the exact model so siblings stay eligible", async () => {
   await resetStorage();

@@ -169,7 +169,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "RERANK_REMOTE_PROVIDER_NODES",
     label: "Remote Rerank Provider Nodes",
     description:
-      "Allow POST /v1/rerank (and the memory engine's rerank step, which calls it over loopback) to use OpenAI-compatible provider nodes hosted outside localhost — a LAN box or Tailscale peer running TEI, Infinity, vLLM, etc. Off by default — routing to a remote host changes egress identity and must be an explicit operator decision. Loopback nodes are always allowed and unaffected. Remote nodes must also pass the provider outbound URL policy.",
+      "Allow POST /v1/rerank to use OpenAI-compatible provider nodes hosted outside localhost — a LAN box or Tailscale peer running TEI, Infinity, vLLM, etc. Off by default — routing to a remote host changes egress identity and must be an explicit operator decision. Loopback nodes are always allowed and unaffected. Remote nodes must also pass the provider outbound URL policy.",
     descriptionI18nKey: "settings.featureFlags.rerankRemoteProviderNodes",
     category: "network",
     defaultValue: "false",
@@ -1242,18 +1242,6 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
       "On plain anthropic-compatible-* relays (claude → claude passthrough), keep mid-conversation role:system turns inside messages[] instead of hoisting them into the top-level system parameter, so the cached prompt prefix stays stable across turns. Applies only when the client itself sent the mid-conversation-system-2026-04-07 anthropic-beta (forwarded upstream as-is). Off by default: every system turn is hoisted exactly as before, because relays that do not support the beta reject role:system messages with 400.",
     descriptionI18nKey: "featureFlagAnthropicCompatibleMidConversationSystemDescription",
     category: "runtime",
-    defaultValue: "false",
-    type: "boolean",
-    requiresRestart: false,
-    warningLevel: "caution",
-  },
-  {
-    key: "DB_HEALTHCHECK_STARTUP_DEFERRED_ENABLED",
-    label: "DB Health Check: Defer Startup Scan",
-    description:
-      "Run the startup DB integrity/health check after the server starts accepting requests (via setImmediate) instead of blocking startup until it completes. Off by default: startup blocks on the check exactly like before #13717, so a corrupt database is still caught before the first request is served. On: startup returns immediately and the check (now bounded/paged and, for a real file-backed DB, isolated in a cancellable child process) runs right after.",
-    descriptionI18nKey: "featureFlagDbHealthcheckStartupDeferredEnabledDescription",
-    category: "health",
     defaultValue: "false",
     type: "boolean",
     requiresRestart: false,

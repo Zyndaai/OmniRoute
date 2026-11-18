@@ -21,7 +21,8 @@ const SUBSCRIPTION_403 =
   "this model requires a subscription, upgrade for access: https://ollama.com/upgrade";
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

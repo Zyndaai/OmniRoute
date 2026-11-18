@@ -32,7 +32,8 @@ const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {
@@ -96,6 +97,9 @@ test("sweep() respects HEALTHCHECK_BATCH_SIZE instead of a hardcoded 20", async 
     delay?: number,
     ...args: unknown[]
   ) => {
+    // The PostgreSQL pool arms a 10 s idle-client timer per released connection: leave those
+    // real (firing at once would close a connection in use) and out of the stagger count.
+    if ((delay ?? 0) >= 10_000) return originalSetTimeout(fn, delay, ...args);
     scheduledDelays.push(delay ?? 0);
     return originalSetTimeout(fn, 0, ...args);
   }) as typeof setTimeout;

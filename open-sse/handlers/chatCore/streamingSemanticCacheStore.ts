@@ -81,7 +81,11 @@ function writeStreamingCacheEntry(
       outputContractOf(args.body)
     );
     const tokensSaved = streamTokensSaved(args.streamUsage);
-    deps.setCachedResponse(sig, args.model, cleanBody, tokensSaved);
+    // The write is async (PostgreSQL): the try/catch below cannot see its rejection, so it
+    // gets its own fail-open catch instead of becoming an unhandled rejection.
+    void Promise.resolve(deps.setCachedResponse(sig, args.model, cleanBody, tokensSaved)).catch(
+      () => {}
+    );
     args.log?.debug?.(
       "CACHE",
       `Stored streaming response for ${args.model} (${tokensSaved} tokens)`

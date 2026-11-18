@@ -78,7 +78,6 @@ const MIGRATED_FILES = [
   "open-sse/services/combo/promptCacheAffinity.ts",
   "src/lib/db/apiKeys.ts",
   "src/lib/db/registeredKeys.ts",
-  "src/lib/db/jsonMigration/apiKeysImport.ts",
   "src/sse/services/credentialSelectionDiagnostics.ts",
   "open-sse/services/tokenRefresh/passiveCodex.ts",
   "src/sse/services/museSessionOwnership.ts",

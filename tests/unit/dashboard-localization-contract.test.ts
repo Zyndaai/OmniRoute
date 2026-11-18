@@ -159,10 +159,9 @@ test("production audit regressions stay localized and provider icons stay bounde
   assert.match(costs, /formatWeekdayLabel\(row\.day, locale\)/);
   assert.equal(costs.includes("} tokens`"), false);
 
-  const storage = [
-    readSource("src/app/(dashboard)/dashboard/settings/components/SystemStorageTab.tsx"),
-    readSource("src/app/(dashboard)/dashboard/settings/components/DatabaseBackupRetentionCard.tsx"),
-  ].join("\n");
+  const storage = readSource(
+    "src/app/(dashboard)/dashboard/settings/components/SystemStorageTab.tsx"
+  );
   for (const rawText of [
     ">Database Statistics<",
     "Automatic SQLite backups are stored",

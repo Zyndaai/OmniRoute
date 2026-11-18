@@ -81,22 +81,6 @@ function main() {
     return;
   }
 
-  const healthWorkerDest = join(STANDALONE, "src/lib/db/healthCheckWorker.js");
-  mkdirSync(dirname(healthWorkerDest), { recursive: true });
-  runBuildTool(
-    "esbuild",
-    "esbuild",
-    [
-      join(ROOT, "src/lib/db/healthCheckWorker.ts"),
-      "--bundle",
-      "--platform=node",
-      "--packages=external",
-      "--format=esm",
-      `--outfile=${healthWorkerDest}`,
-    ],
-    { stdio: "inherit" }
-  );
-
   const callLogWorkerDest = join(STANDALONE, CALL_LOG_WORKER_REL);
   mkdirSync(dirname(callLogWorkerDest), { recursive: true });
   // Never spawn `node_modules/.bin/esbuild` directly: that extensionless path is
@@ -152,7 +136,6 @@ function main() {
   console.log("[colocate-standalone] ✅ compression worker bundled");
 
   const workerDirs = [
-    dirname(healthWorkerDest),
     dirname(callLogWorkerDest),
     dirname(exportChildDest),
     dirname(compressionWorkerDest),

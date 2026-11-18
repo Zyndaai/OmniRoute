@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { Socket } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test, { mock } from "node:test";
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from "undici";
+import { guardSocketsExceptTestDb } from "../helpers/socketGuard.ts";
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-mid-system-16127-"));
 const previousEnv = {
@@ -24,9 +24,7 @@ const originalDispatcher = getGlobalDispatcher();
 const mockAgent = new MockAgent();
 mockAgent.disableNetConnect();
 setGlobalDispatcher(mockAgent);
-mock.method(Socket.prototype, "connect", () => {
-  throw new Error("Unexpected socket connection in #16127 regression");
-});
+guardSocketsExceptTestDb("Unexpected socket connection in #16127 regression");
 globalThis.fetch = async () => {
   throw new Error("Unexpected fetch before #16127 transport fixture");
 };

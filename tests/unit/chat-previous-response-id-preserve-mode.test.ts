@@ -58,9 +58,13 @@ test("mode=auto: ChatGPT Web Codex defers previous_response_id resolution to its
   );
 
   assert.notEqual(payload.error?.code, "previous_response_not_found");
+  // Reaching provider routing is the point. A known provider without an account answers
+  // 503 provider_not_configured (chatHelpers.ts, "Issue #2"); 401/404 are other routing ends.
   assert.ok(
-    status === 401 || status === 404,
-    `expected provider routing after deferring continuation resolution, got ${status}`
+    status === 401 ||
+      status === 404 ||
+      (status === 503 && payload.error?.code === "provider_not_configured"),
+    `expected provider routing after deferring continuation resolution, got ${status}: ${JSON.stringify(payload)}`
   );
 });
 

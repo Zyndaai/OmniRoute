@@ -135,8 +135,14 @@ const PROVIDER_LIMITS_AUTO_SYNC_SETTING_KEY = "provider_limits_auto_sync_last_ru
 const DEFAULT_PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS = 5_000;
 const pendingPostUsageRefreshes = new Set<string>();
 
-function getProviderLimitsPostUsageRefreshDelayMs(): number {
-  const raw = Number(process.env.PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS ?? "");
+export function getProviderLimitsPostUsageRefreshDelayMs(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): number {
+  // Unset/blank must mean the default: Number("") is 0, which used to make every
+  // Antigravity request trigger an immediate quota refresh (~8 upstream calls).
+  const rawEnv = env.PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS?.trim();
+  if (!rawEnv) return DEFAULT_PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS;
+  const raw = Number(rawEnv);
   return Number.isFinite(raw) && raw >= 0
     ? raw
     : DEFAULT_PROVIDER_LIMITS_POST_USAGE_REFRESH_DELAY_MS;

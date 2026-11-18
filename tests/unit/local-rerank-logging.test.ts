@@ -46,7 +46,7 @@ test.describe("Local rerank provider logging and fallback", () => {
     await createProviderNode({
       id: "vram",
       name: "vram",
-      type: "openai",
+      type: "openai-compatible",
       prefix: "vram",
       baseUrl: "http://127.0.0.1:8000/v1",
       createdAt: now,
@@ -129,7 +129,7 @@ test.describe("Local rerank provider logging and fallback", () => {
     await createProviderNode({
       id: "infinity",
       name: "infinity",
-      type: "openai",
+      type: "openai-compatible",
       prefix: "infinity",
       baseUrl: "http://127.0.0.1:7997",
       createdAt: now,

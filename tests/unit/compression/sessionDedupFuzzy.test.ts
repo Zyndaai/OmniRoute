@@ -10,7 +10,7 @@ import {
 const A = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho";
 const Aprime = A + " sigma"; // ≥0.85 similar, not identical
 
-test("fuzzy enabled: a near-duplicate message becomes a recoverable CCR marker", () => {
+test("fuzzy enabled: a near-duplicate message becomes a recoverable CCR marker", async () => {
   resetCcrStore();
   const body = {
     messages: [
@@ -29,7 +29,7 @@ test("fuzzy enabled: a near-duplicate message becomes a recoverable CCR marker",
   assert.equal(msgs[0].content, A); // first occurrence intact
   assert.match(msgs[1].content, /^\[CCR retrieve hash=[0-9a-f]{24} chars=\d+\]$/);
   const hash = msgs[1].content.match(/hash=([0-9a-f]{24})/)![1];
-  assert.equal(retrieveBlock(hash, "p1"), Aprime); // recoverable
+  assert.equal(await retrieveBlock(hash, "p1"), Aprime); // recoverable
 });
 
 test("fuzzy ABSENT: byte-identical legacy (near-dup untouched, only exact dedup runs)", () => {

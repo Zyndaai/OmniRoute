@@ -21,15 +21,15 @@ import { enrichCatalogModelEntry } from "@/lib/modelMetadataRegistry";
 
 type Warn = (...args: unknown[]) => void;
 
-/** Runs `fn` with console.warn captured; returns the warning lines. */
-function captureWarnings(fn: () => void): string[] {
+/** Runs `fn` (awaited: enrichCatalogModelEntry is async) with console.warn captured. */
+async function captureWarnings(fn: () => unknown): Promise<string[]> {
   const lines: string[] = [];
   const original: Warn = console.warn;
   console.warn = (...args: unknown[]) => {
     lines.push(args.map(String).join(" "));
   };
   try {
-    fn();
+    await fn();
   } finally {
     console.warn = original;
   }
@@ -57,14 +57,14 @@ function pricingWithCollisions(count: number): Record<string, unknown> {
   return pricing;
 }
 
-test("findInsensitive emits ONE aggregated warning per index build, not one per collision", () => {
-  const warnings = captureWarnings(() => {
+test("findInsensitive emits ONE aggregated warning per index build, not one per collision", async () => {
+  const warnings = await captureWarnings(() =>
     enrichCatalogModelEntry(
       { id: "gpt-4o", owned_by: "openai" },
       { provider: "openai", model: "gpt-4o" },
       { modelsDevPricing: pricingWithCollisions(3) } as never
-    );
-  });
+    )
+  );
 
   assert.equal(
     warnings.length,
@@ -74,40 +74,40 @@ test("findInsensitive emits ONE aggregated warning per index build, not one per 
   assert.match(warnings[0], /3 case-insensitive key collision/);
 });
 
-test("the aggregated warning still names colliding keys so the signal survives", () => {
-  const warnings = captureWarnings(() => {
+test("the aggregated warning still names colliding keys so the signal survives", async () => {
+  const warnings = await captureWarnings(() =>
     enrichCatalogModelEntry(
       { id: "gpt-4o", owned_by: "openai" },
       { provider: "openai", model: "gpt-4o" },
       { modelsDevPricing: pricingWithCollisions(2) } as never
-    );
-  });
+    )
+  );
 
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /dup0provider/);
 });
 
-test("warning count stays at one as collisions scale", () => {
-  const warnings = captureWarnings(() => {
+test("warning count stays at one as collisions scale", async () => {
+  const warnings = await captureWarnings(() =>
     enrichCatalogModelEntry(
       { id: "gpt-4o", owned_by: "openai" },
       { provider: "openai", model: "gpt-4o" },
       { modelsDevPricing: pricingWithCollisions(50) } as never
-    );
-  });
+    )
+  );
 
   assert.equal(warnings.length, 1, "50 collisions must still produce exactly one line");
   assert.match(warnings[0], /50 case-insensitive key collision/);
 });
 
-test("no collisions means no warning at all", () => {
-  const warnings = captureWarnings(() => {
+test("no collisions means no warning at all", async () => {
+  const warnings = await captureWarnings(() =>
     enrichCatalogModelEntry(
       { id: "gpt-4o", owned_by: "openai" },
       { provider: "openai", model: "gpt-4o" },
       { modelsDevPricing: { OpenAI: { "gpt-4o": { input: 1, output: 2 } } } } as never
-    );
-  });
+    )
+  );
 
   assert.deepEqual(warnings, []);
 });

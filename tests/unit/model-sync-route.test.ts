@@ -34,7 +34,8 @@ async function resetStorage() {
   // subsequent test, causing the route to use in-process fallback instead
   // of the test's mocked self-fetch.
   modelSyncRoute.__resetLoopbackReadinessForTests();
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });

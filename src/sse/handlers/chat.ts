@@ -2322,7 +2322,7 @@ async function handleSingleModelChat(
       // Preserve the typed fail-closed 422; marking it unavailable would trigger cooldown
       // redispatch and repeat bootstrap within the same logical request.
       if (isAntigravityMissingProjectError(provider, result)) {
-        markAntigravityMissingCloudCodeProject(credentials.connectionId);
+        await markAntigravityMissingCloudCodeProject(credentials.connectionId);
         return withSelectedConnectionHeader(result.response, credentials.connectionId);
       }
 

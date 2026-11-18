@@ -90,7 +90,7 @@ test("intentional non-default custom routing metadata still overrides static med
 });
 
 test("a video-only visibility override hides the matching Combo Builder media option", async () => {
-  modelsDb.setModelIsHidden("openrouter", "google/veo-3.1", true, "videos");
+  await modelsDb.setModelIsHidden("openrouter", "google/veo-3.1", true, "videos");
 
   const payload = await getComboBuilderOptions();
   const provider = payload.providers.find((entry) => entry.providerId === "openrouter");

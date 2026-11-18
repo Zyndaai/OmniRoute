@@ -249,6 +249,12 @@ export class CircuitBreaker {
   maxTransitionHistory: number;
   /** Settles once the persisted state has been applied (never rejects). */
   _restored: Promise<void>;
+  /**
+   * True once `_restored` has settled. `execute` awaits only before that: an `await` on an
+   * already-settled promise still yields, so the half-open probe slot would be claimed a
+   * microtask late and a same-tick `canExecute()` would see it free.
+   */
+  _restoreDone = false;
   /** Serializes writes so an older snapshot can never land after a newer one. */
   _persistChain: Promise<void> = Promise.resolve();
 
@@ -285,6 +291,14 @@ export class CircuitBreaker {
   }
 
   async _restoreFromDb(): Promise<void> {
+    try {
+      await this._loadPersistedState();
+    } finally {
+      this._restoreDone = true;
+    }
+  }
+
+  async _loadPersistedState(): Promise<void> {
     try {
       const saved = await loadCircuitBreakerState(this.name);
       // Local activity during the load is newer than the stored row.
@@ -363,7 +377,7 @@ export class CircuitBreaker {
   }
 
   async execute<T>(fn: () => Promise<T>, options?: CircuitBreakerExecuteOptions<T>): Promise<T> {
-    await this._restored;
+    if (!this._restoreDone) await this._restored;
     this._refreshOpenState();
 
     if (this.state === STATE.OPEN) {

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { MockAgent, fetch as mockableFetch } from "undici";
+import { guardSocketsExceptTestDb } from "../helpers/socketGuard.ts";
 
 const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), "commandcode-cli-14629-"));
 for (const [key, directory] of Object.entries({
@@ -25,12 +25,11 @@ process.env.INITIAL_PASSWORD = "synthetic-unused-password-14629";
 delete process.env.OMNIROUTE_REASONING_EFFORT_PROBE_PROVIDERS;
 
 const originalFetch = globalThis.fetch;
-const originalConnect = net.Socket.prototype.connect;
 let socketAttempts = 0;
-net.Socket.prototype.connect = function () {
+// Every socket is refused (and counted) except the test database's.
+const socketGuard = guardSocketsExceptTestDb("CommandCode fixture forbids real sockets", () => {
   socketAttempts++;
-  throw new Error("CommandCode fixture forbids real sockets");
-};
+});
 globalThis.fetch = async () => {
   throw new Error("CommandCode fixture requires an explicit mocked transport");
 };
@@ -114,7 +113,7 @@ test.after(() => {
   __test_resetLearnedReasoningEffortCaps();
   resetDbInstance();
   globalThis.fetch = originalFetch;
-  net.Socket.prototype.connect = originalConnect;
+  socketGuard.mock.restore();
   fs.rmSync(isolatedRoot, { recursive: true, force: true });
   assert.equal(socketAttempts, 0, "all dispatches must remain inside MockAgent");
 });

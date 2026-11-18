@@ -47,6 +47,8 @@ test("externally observed probe success does not close an occupied provider prob
   t.mock.timers.enable({ apis: ["Date"], now: 1_000 });
   const provider = uniqueProvider("owned-probe");
   const breaker = getCircuitBreaker(provider, { failureThreshold: 1, resetTimeout: 30_000 });
+  // A new breaker loads persisted state from the database; settle it first.
+  await breaker._restored;
   breaker._onFailure();
   t.mock.timers.tick(30_000);
   let finish!: (success: boolean) => void;

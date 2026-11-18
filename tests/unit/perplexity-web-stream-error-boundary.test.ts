@@ -34,6 +34,9 @@ function runIsolatedFixture(testRoot: string): Promise<FixtureResult> {
     API_KEY_SECRET: "perplexity-stream-boundary-test-secret-00000000000000000000000000000000",
     DATA_DIR: dataDir,
     OMNIROUTE_PLUGINS_DIR: pluginsDir,
+    // The app stores everything in PostgreSQL: hand the child this file's test database
+    // (the parent only waits while the child runs).
+    OMNIROUTE_POSTGRES_URL: process.env.OMNIROUTE_POSTGRES_URL,
   };
   delete childEnv.NODE_TEST_CONTEXT;
 

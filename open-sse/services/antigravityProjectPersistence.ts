@@ -77,9 +77,9 @@ export function persistDiscoveredAntigravityProjectId(
     });
 }
 
-export function markAntigravityMissingCloudCodeProject(
+export async function markAntigravityMissingCloudCodeProject(
   connectionId: string | null | undefined
-): void {
+): Promise<void> {
   if (!connectionId) return;
 
   // #11284: a CONFIRMED missing Cloud Code project is not transient — disable
@@ -87,7 +87,8 @@ export function markAntigravityMissingCloudCodeProject(
   // into the same 422 every request. "unavailable" is deliberately NOT a
   // terminal status: persistDiscoveredAntigravityProjectId() re-enables the
   // account the moment a project shows up at request time.
-  void updateProviderConnection(connectionId, {
+  // Awaited by callers: the next request must already see the row disabled.
+  await updateProviderConnection(connectionId, {
     isActive: false,
     testStatus: "unavailable",
     errorCode: "missing_project_id",

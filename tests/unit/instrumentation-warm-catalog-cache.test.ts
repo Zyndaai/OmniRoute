@@ -44,7 +44,8 @@ const { warmModelCatalogCache, isBackgroundServicesDisabled } =
 const { getUnifiedModelsResponse } = await import("../../src/app/api/v1/models/catalog.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {

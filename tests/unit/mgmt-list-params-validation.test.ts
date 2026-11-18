@@ -54,16 +54,6 @@ const routes: Array<{
     params: [{ name: "limit", valid: "5" }],
   },
   {
-    name: "/api/logs/detail",
-    path: "/api/logs/detail",
-    load: () => import("../../src/app/api/logs/detail/route.ts"),
-    auth: "session",
-    params: [
-      { name: "limit", valid: "5" },
-      { name: "offset", valid: "0" },
-    ],
-  },
-  {
     name: "/api/cache/entries",
     path: "/api/cache/entries",
     load: () => import("../../src/app/api/cache/entries/route.ts"),

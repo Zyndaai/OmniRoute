@@ -39,7 +39,8 @@ const providersDb = await import("../../src/lib/db/providers.ts");
 const { sweep } = await import("../../src/lib/tokenHealthCheck.ts");
 
 async function resetStorage() {
-  core.resetDbInstance();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       if (fs.existsSync(TEST_DATA_DIR)) {

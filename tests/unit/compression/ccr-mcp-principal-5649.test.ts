@@ -84,19 +84,19 @@ test("#5649 end-to-end: a block stored under the api-key id is retrievable by th
   // Retrieval side: resolve the SAME key's headers → "42" → block found.
   const owner = await resolvePrincipalFromHeaders({ Authorization: "Bearer sk-A" }, lookup);
   assert.equal(owner, "42");
-  assert.equal(retrieveBlock(hash, owner), bigText, "owner key must retrieve its own block");
-  const ownerResult = handleCcrRetrieve({ hash }, owner);
+  assert.equal(await retrieveBlock(hash, owner), bigText, "owner key must retrieve its own block");
+  const ownerResult = await handleCcrRetrieve({ hash }, owner);
   assert.ok("content" in ownerResult, "owner retrieve returns content");
 
   // A different tenant's key resolves to a different principal → blocked.
   const other = await resolvePrincipalFromHeaders({ Authorization: "Bearer sk-B" }, lookup);
   assert.equal(other, "77");
   assert.equal(
-    retrieveBlock(hash, other),
+    await retrieveBlock(hash, other),
     null,
     "[HIGH IDOR] other tenant must not retrieve the block"
   );
-  const otherResult = handleCcrRetrieve({ hash }, other);
+  const otherResult = await handleCcrRetrieve({ hash }, other);
   assert.ok("error" in otherResult, "[HIGH IDOR] cross-tenant retrieve returns error");
 });
 

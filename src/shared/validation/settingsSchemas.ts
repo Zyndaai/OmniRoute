@@ -507,6 +507,8 @@ export const updateSettingsSchema = z.object({
   skillsmpApiKey: z.string().max(200).optional(),
   // Active skills provider (single source of truth for skills page)
   skillsProvider: z.enum(["skillsmp", "skillssh"]).optional(),
+  // Skill execution switch, read as `settings.skillsEnabled !== false` (chatCore, skills executor)
+  skillsEnabled: z.boolean().optional(),
   // models.dev sync settings
   modelsDevSyncEnabled: z.boolean().optional(),
   modelsDevSyncInterval: z.number().int().min(3600000).max(604800000).optional(),

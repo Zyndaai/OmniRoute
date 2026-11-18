@@ -40,7 +40,7 @@ test("#12112: checkComboVision respects providerId for namespaced vision models 
   );
 });
 
-test("#12112: isVisionIncompatibleTarget passes providerId to resolve vision capability", () => {
+test("#12112: isVisionIncompatibleTarget passes providerId to resolve vision capability", async () => {
   const target: ResolvedComboTarget = {
     kind: "model",
     stepId: "step-1",
@@ -53,7 +53,7 @@ test("#12112: isVisionIncompatibleTarget passes providerId to resolve vision cap
     label: null,
   };
 
-  const incompatible = isVisionIncompatibleTarget(target, {
+  const incompatible = await isVisionIncompatibleTarget(target, {
     requiresTools: false,
     requiresVision: true,
     requiresStructuredOutput: false,

@@ -48,11 +48,11 @@ test("groq catalog keeps the live GPT-OSS chat models", () => {
   }
 });
 
-test("retired non-reasoning Llama ids stay reasoning-denied after leaving the catalog (#3258)", () => {
+test("retired non-reasoning Llama ids stay reasoning-denied after leaving the catalog (#3258)", async () => {
   // Enterprise keys and live discovery can still reach these ids; dropping the registry
   // declaration must not flip them back to the optimistic reasoning-capable default.
-  assert.equal(supportsReasoning("groq/llama-3.3-70b-versatile"), false);
-  assert.equal(supportsReasoning("groq/meta-llama/llama-4-scout-17b-16e-instruct"), false);
+  assert.equal(await supportsReasoning("groq/llama-3.3-70b-versatile"), false);
+  assert.equal(await supportsReasoning("groq/meta-llama/llama-4-scout-17b-16e-instruct"), false);
   // Reasoning models on Groq are untouched.
-  assert.equal(supportsReasoning("groq/openai/gpt-oss-120b"), true);
+  assert.equal(await supportsReasoning("groq/openai/gpt-oss-120b"), true);
 });

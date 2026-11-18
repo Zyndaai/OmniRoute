@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { CircuitBreaker } from "../../src/shared/utils/circuitBreaker.ts";
 
-test("#13836: an unsettled half-open probe releases its lease", (t) => {
+test("#13836: an unsettled half-open probe releases its lease", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1_000 });
 
   const resetTimeout = 30_000;
@@ -12,6 +12,8 @@ test("#13836: an unsettled half-open probe releases its lease", (t) => {
     resetTimeout,
     halfOpenRequests: 1,
   });
+  // The constructor loads persisted state from the database; settle it first.
+  await breaker._restored;
 
   breaker._onFailure();
   t.mock.timers.tick(resetTimeout);
@@ -36,6 +38,8 @@ test("#13836: an expired probe cannot settle a newer probe generation", async (t
     resetTimeout,
     halfOpenRequests: 1,
   });
+  // The constructor loads persisted state from the database; settle it first.
+  await breaker._restored;
 
   breaker._onFailure();
   t.mock.timers.tick(resetTimeout);
@@ -75,6 +79,7 @@ test("an occupied resolved probe settles once even when ordinary result accounti
     failureThreshold: 1,
     resetTimeout: 30_000,
   });
+  await breaker._restored;
   breaker._onFailure();
   t.mock.timers.tick(30_000);
   let finish!: (value: { success: boolean }) => void;
@@ -106,6 +111,7 @@ test("an expired classified probe cannot settle a newer probe generation", async
     failureThreshold: 1,
     resetTimeout: 30_000,
   });
+  await breaker._restored;
   breaker._onFailure();
   t.mock.timers.tick(30_000);
   let finishOld!: (value: { success: boolean }) => void;
@@ -143,6 +149,8 @@ test("#13836: an expired probe failure cannot fail a newer probe generation", as
     resetTimeout,
     halfOpenRequests: 1,
   });
+  // The constructor loads persisted state from the database; settle it first.
+  await breaker._restored;
 
   breaker._onFailure();
   t.mock.timers.tick(resetTimeout);

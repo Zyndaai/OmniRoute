@@ -712,23 +712,6 @@ export function isServerOwnedToolLoopEnabled(
   }
 }
 
-/**
- * DB startup health check deferral (#13717). Opt-in: off keeps the pre-existing
- * behavior of blocking getDbInstance() on the startup integrity check, so a
- * corrupt database is still caught before the server serves its first request.
- * Fail closed: an unreadable flag store keeps the pre-flag (blocking) behavior.
- */
-export function isDbHealthcheckStartupDeferredEnabled(): boolean {
-  try {
-    return isFeatureFlagEnabled("DB_HEALTHCHECK_STARTUP_DEFERRED_ENABLED");
-  } catch (error) {
-    console.error(
-      "[featureFlags] Failed to resolve DB_HEALTHCHECK_STARTUP_DEFERRED_ENABLED, defaulting to disabled:",
-      error instanceof Error ? error.message : error
-    );
-    return false;
-  }
-}
 
 /**
  * Resolved-capability scoring inputs on the auto/* request path (#16419). Opt-in:

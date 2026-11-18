@@ -10,7 +10,7 @@ import ResponsesStatePolicyTab from "../components/ResponsesStatePolicyTab";
 import CodexFastTierTab from "../components/CodexFastTierTab";
 import CodexAutoPingTab from "../components/CodexAutoPingTab";
 import ClaudeFastModeTab from "../components/ClaudeFastModeTab";
-import MemorySkillsTab from "../components/MemorySkillsTab";
+import SkillsSettingsTab from "../components/SkillsSettingsTab";
 import ModelsDevSyncTab from "../components/ModelsDevSyncTab";
 import UsageTokenBufferTab from "../components/UsageTokenBufferTab";
 import ModelCapabilityOverridesTab from "../components/ModelCapabilityOverridesTab";
@@ -30,7 +30,7 @@ export default function SettingsAiPage() {
       <ConnectionTestSettings />
       <CodexAutoPingTab />
       <ClaudeFastModeTab />
-      <MemorySkillsTab />
+      <SkillsSettingsTab />
       <ModelCapabilityOverridesTab />
       <ModelsDevSyncTab />
     </div>

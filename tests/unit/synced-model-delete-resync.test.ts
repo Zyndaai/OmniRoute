@@ -28,7 +28,15 @@ after(() => {
 
 test("a deleted synced model is restored when upstream advertises it again", async () => {
   const provider = "llama-cpp";
-  const connectionId = "conn-3199";
+  // Synced rows reference a real connection (foreign key), so create one.
+  const { createProviderConnection } = await import("../../src/lib/db/providers.ts");
+  const connection = await createProviderConnection({
+    provider,
+    authType: "apikey",
+    name: "llama-cpp 3199",
+    apiKey: "local-test-key",
+  });
+  const connectionId = String(connection.id);
 
   // Initial sync brings in two models.
   await replaceSyncedAvailableModelsForConnection(provider, connectionId, [

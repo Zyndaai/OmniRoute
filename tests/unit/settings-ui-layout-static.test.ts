@@ -41,13 +41,10 @@ test("Storage settings page uses the requested section order", () => {
   const source = readSrc("src/app/(dashboard)/dashboard/settings/components/SystemStorageTab.tsx");
 
   assertInOrder(source, [
-    't("databasePath")',
-    "{renderDatabaseStatistics()}",
+    't("storageDatabaseSize")',
     't("export")',
     't("maintenance")',
-    't("lastBackup")',
     "{renderRetentionSettings()}",
-    "{renderOptimizationSettings()}",
     "{renderCompressionAggregationSettings()}",
   ]);
   assert.doesNotMatch(source, /debugToggle/);

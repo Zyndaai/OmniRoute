@@ -75,7 +75,7 @@ describe("ccr engine", () => {
     registerBuiltinCompressionEngines();
   });
 
-  it("is registered and retrievable by id", () => {
+  it("is registered and retrievable by id", async () => {
     const engine = getCompressionEngine("ccr");
     assert.ok(engine, "getCompressionEngine('ccr') must return the engine");
     assert.equal(engine.id, "ccr");
@@ -87,7 +87,7 @@ describe("ccr engine", () => {
     assert.ok(typeof engine.stackPriority === "number");
   });
 
-  it("replaces a large block with a CCR marker", () => {
+  it("replaces a large block with a CCR marker", async () => {
     resetCcrStore();
     const body = makeBody([{ role: "user", content: LARGE_TEXT }]);
     const result = ccrEngine.apply(body as Record<string, unknown>);
@@ -117,7 +117,7 @@ describe("ccr engine", () => {
     );
   });
 
-  it("stores and retrieves the verbatim block by hash", () => {
+  it("stores and retrieves the verbatim block by hash", async () => {
     resetCcrStore();
     const body = makeBody([{ role: "user", content: LARGE_TEXT }]);
     const result = ccrEngine.apply(body as Record<string, unknown>);
@@ -131,12 +131,12 @@ describe("ccr engine", () => {
     const hash = match[1];
 
     // Retrieve the block
-    const retrieved = retrieveBlock(hash);
+    const retrieved = await retrieveBlock(hash);
     assert.ok(retrieved !== null, "retrieveBlock must return the stored block");
     assert.equal(retrieved, LARGE_TEXT, "retrieved block must equal the original verbatim text");
   });
 
-  it("does NOT compress small blocks (below minChars threshold)", () => {
+  it("does NOT compress small blocks (below minChars threshold)", async () => {
     resetCcrStore();
     const body = makeBody([{ role: "user", content: SMALL_TEXT }]);
     const result = ccrEngine.apply(body as Record<string, unknown>);
@@ -147,7 +147,7 @@ describe("ccr engine", () => {
     assert.equal(messages[0].content, SMALL_TEXT, "small text must remain unchanged");
   });
 
-  it("does NOT compress system messages", () => {
+  it("does NOT compress system messages", async () => {
     resetCcrStore();
     const body = makeBody([{ role: "system", content: SYSTEM_TEXT + " ".repeat(700) }]);
     const result = ccrEngine.apply(body as Record<string, unknown>);
@@ -161,7 +161,7 @@ describe("ccr engine", () => {
     );
   });
 
-  it("does NOT compress if output would not be shorter", () => {
+  it("does NOT compress if output would not be shorter", async () => {
     resetCcrStore();
     // A text that's just barely at the threshold but the marker is longer than the text
     const shortishText = "X".repeat(601); // just above 600 but marker is ~50 chars
@@ -175,7 +175,7 @@ describe("ccr engine", () => {
     assert.equal(result.compressed, true, "text above minChars should compress");
   });
 
-  it("feedback: shouldSkipCompression returns true after enough retrievals", () => {
+  it("feedback: shouldSkipCompression returns true after enough retrievals", async () => {
     resetCcrStore();
     const body = makeBody([{ role: "user", content: LARGE_TEXT }]);
     const result = ccrEngine.apply(body as Record<string, unknown>);
@@ -202,13 +202,13 @@ describe("ccr engine", () => {
     );
   });
 
-  it("retrieveBlock returns null for unknown hash", () => {
+  it("retrieveBlock returns null for unknown hash", async () => {
     resetCcrStore();
-    const result = retrieveBlock("000000000000000000000000");
+    const result = await retrieveBlock("000000000000000000000000");
     assert.equal(result, null, "unknown hash must return null");
   });
 
-  it("handles multipart content (type:text parts)", () => {
+  it("handles multipart content (type:text parts)", async () => {
     resetCcrStore();
     const body = {
       model: "gpt-4",
@@ -247,7 +247,7 @@ describe("ccr engine", () => {
 });
 
 describe("ccr MCP retrieve handler (pure function)", () => {
-  it("handleCcrRetrieve returns content for known hash", () => {
+  it("handleCcrRetrieve returns content for known hash", async () => {
     resetCcrStore();
 
     const body = makeBody([{ role: "user", content: LARGE_TEXT }]);
@@ -257,14 +257,14 @@ describe("ccr MCP retrieve handler (pure function)", () => {
     assert.ok(match, "marker must be present");
     const hash = match[1];
 
-    const handlerResult = handleCcrRetrieve({ hash });
+    const handlerResult = await handleCcrRetrieve({ hash });
     assert.ok("content" in handlerResult, "handler must return content field");
     assert.equal((handlerResult as { content: string }).content, LARGE_TEXT);
   });
 
-  it("handleCcrRetrieve returns error for unknown hash", () => {
+  it("handleCcrRetrieve returns error for unknown hash", async () => {
     resetCcrStore();
-    const result = handleCcrRetrieve({ hash: "deadbeef000000000000000a" });
+    const result = await handleCcrRetrieve({ hash: "deadbeef000000000000000a" });
     assert.ok("error" in result, "unknown hash must return error field");
     assert.ok(typeof (result as { error: string }).error === "string");
     assert.ok((result as { error: string }).error.length > 0);

@@ -19,19 +19,22 @@ const base = {
   settings: {},
 };
 
-test("no custom UA / non-claude / no fast settings → no UA and no fast-mode header", () => {
-  const h = buildUpstreamHeadersForExecute({ ...base });
+test("no custom UA / non-claude / no fast settings → no UA and no fast-mode header", async () => {
+  const h = await buildUpstreamHeadersForExecute({ ...base });
   assert.equal(h["User-Agent"], undefined);
   assert.equal(h[CPA_FORCE_FAST_MODE_HEADER], undefined);
 });
 
-test("connection custom User-Agent overrides the upstream User-Agent", () => {
-  const h = buildUpstreamHeadersForExecute({ ...base, connectionCustomUserAgent: "MyAgent/1.0" });
+test("connection custom User-Agent overrides the upstream User-Agent", async () => {
+  const h = await buildUpstreamHeadersForExecute({
+    ...base,
+    connectionCustomUserAgent: "MyAgent/1.0",
+  });
   assert.equal(h["User-Agent"], "MyAgent/1.0");
 });
 
-test("claude provider + enabled fast-mode settings + supported model → CPA header set", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("claude provider + enabled fast-mode settings + supported model → CPA header set", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     provider: "claude",
     modelToCall: "claude-fast-x",
@@ -41,8 +44,8 @@ test("claude provider + enabled fast-mode settings + supported model → CPA hea
   assert.equal(h[CPA_FORCE_FAST_MODE_HEADER], "1");
 });
 
-test("fast-mode header is NOT set when the model is not in the supported list", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("fast-mode header is NOT set when the model is not in the supported list", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     provider: "claude",
     modelToCall: "claude-other",
@@ -52,8 +55,8 @@ test("fast-mode header is NOT set when the model is not in the supported list", 
   assert.equal(h[CPA_FORCE_FAST_MODE_HEADER], undefined);
 });
 
-test("fast-mode header is NOT set for non-claude providers even with fast settings", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("fast-mode header is NOT set for non-claude providers even with fast settings", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     provider: "openai",
     modelToCall: "claude-fast-x",
@@ -63,8 +66,12 @@ test("fast-mode header is NOT set for non-claude providers even with fast settin
   assert.equal(h[CPA_FORCE_FAST_MODE_HEADER], undefined);
 });
 
-test("returns a plain object (no per-model extra headers configured for unknown models)", () => {
-  const h = buildUpstreamHeadersForExecute({ ...base, modelToCall: "totally-unknown", effectiveModel: "x" });
+test("returns a plain object (no per-model extra headers configured for unknown models)", async () => {
+  const h = await buildUpstreamHeadersForExecute({
+    ...base,
+    modelToCall: "totally-unknown",
+    effectiveModel: "x",
+  });
   assert.equal(typeof h, "object");
   assert.equal(h[CPA_FORCE_FAST_MODE_HEADER], undefined);
 });

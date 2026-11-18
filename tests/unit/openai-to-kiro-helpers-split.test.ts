@@ -26,7 +26,8 @@ test("host imports the helpers back from the leaf", () => {
   const src = readFileSync(HOST, "utf8");
   assert.match(src, /from "\.\/openai-to-kiro\/messageHelpers\.ts"/);
   // buildKiroPayload stays exported on the host module.
-  assert.match(src, /export function buildKiroPayload\(/);
+  // async since the PostgreSQL port (it reads stored model overrides).
+  assert.match(src, /export (async )?function buildKiroPayload\(/);
 });
 
 test("normalizeKiroToolSchema strips empty required arrays and additionalProperties", async () => {

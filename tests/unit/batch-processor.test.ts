@@ -532,7 +532,15 @@ test("processPendingBatches should respect BATCH_MAX_CONCURRENT (default 1)", as
     });
   }
 
+  // Hold every dispatch open until the statuses are read: processing continues in the
+  // background after processPendingBatches() returns, and an instant reply could finish
+  // batch A (in_progress -> completed) before the assertions run.
+  let releaseDispatch: () => void = () => {};
+  const dispatchGate = new Promise<void>((resolve) => {
+    releaseDispatch = resolve;
+  });
   mock.method(dispatch, "dispatchBatchApiRequest", async () => {
+    await dispatchGate;
     return new Response(
       JSON.stringify({
         id: "chatcmpl-concur",
@@ -565,6 +573,7 @@ test("processPendingBatches should respect BATCH_MAX_CONCURRENT (default 1)", as
   );
   assert.strictEqual(validatingCount, 2, "Two batches should remain validating");
 
+  releaseDispatch();
   await waitForAllBatches();
 });
 

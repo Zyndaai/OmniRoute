@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,14 +34,4 @@ test("no script decides it was run directly from a file:// template of argv[1]",
     [],
     `replace ${NON_PORTABLE_GUARD} with pathToFileURL(process.argv[1] || "").href in: ${offenders.join(", ")}`
   );
-});
-
-test("a direct run reaches main(): mutation-radiography without a report prints its usage", () => {
-  const res = spawnSync(
-    process.execPath,
-    [path.join(SCRIPTS, "quality", "mutation-radiography.mjs")],
-    { cwd: ROOT, encoding: "utf8" }
-  );
-  assert.equal(res.status, 2, `expected exit 2, got ${res.status}\n${res.stdout}${res.stderr}`);
-  assert.match(res.stderr, /usage: mutation-radiography\.mjs/);
 });

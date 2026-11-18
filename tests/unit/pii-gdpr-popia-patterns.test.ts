@@ -179,11 +179,10 @@ test("request masker leaves ordinary identifiers alone", () => {
   }
 });
 
-test("response sanitizer leaves ordinary identifiers alone", () => {
+test("response sanitizer leaves ordinary identifiers alone", async () => {
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
-    setPiiSettings({ enabledTypes: null, customPatterns: [] });
-    clearPiiSettingsCache();
+    await setPiiSettings({ enabledTypes: null, customPatterns: [] });
     for (const input of FALSE_POSITIVE_CORPUS) {
       const { text, detections } = sanitizePII(input);
       for (const label of NEW_LABELS) assert.ok(!text.includes(label), `${label} in: ${text}`);
@@ -207,11 +206,10 @@ test("request masker redacts each valid identifier with its own label", () => {
   }
 });
 
-test("response sanitizer redacts each valid identifier with its own label", () => {
+test("response sanitizer redacts each valid identifier with its own label", async () => {
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
-    setPiiSettings({ enabledTypes: null, customPatterns: [] });
-    clearPiiSettingsCache();
+    await setPiiSettings({ enabledTypes: null, customPatterns: [] });
     for (const entry of VALID) {
       const input = `${entry.context ?? "id: "}${entry.value} end`;
       const { text, detections } = sanitizePII(input);
@@ -227,11 +225,10 @@ test("response sanitizer redacts each valid identifier with its own label", () =
   }
 });
 
-test("invalid checksums are not redacted on either side", () => {
+test("invalid checksums are not redacted on either side", async () => {
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
-    setPiiSettings({ enabledTypes: null, customPatterns: [] });
-    clearPiiSettingsCache();
+    await setPiiSettings({ enabledTypes: null, customPatterns: [] });
     for (const entry of INVALID) {
       const input = `${entry.context ?? "id: "}${entry.value} end`;
       const request = processPII(input, true);
@@ -287,12 +284,12 @@ test("catalog ids all have a label in the English UI messages", () => {
     assert.equal(typeof templates[tpl.id], "string", `template.${tpl.id}`);
 });
 
-test("per-type selection runs only the chosen GDPR/POPIA types", () => {
+test("per-type selection runs only the chosen GDPR/POPIA types", async () => {
   process.env.PII_RESPONSE_SANITIZATION = "true";
   try {
     const text = "IBAN GB29NWBK60161331926819 and BSN 111222333";
-    setPiiSettings({ enabledTypes: ["iban"], customPatterns: [] });
-    clearPiiSettingsCache();
+    // setPiiSettings saves and reloads the cache the synchronous sanitizer reads.
+    await setPiiSettings({ enabledTypes: ["iban"], customPatterns: [] });
     const onlyIban = sanitizePII(text);
     assert.ok(onlyIban.text.includes("[IBAN_REDACTED]"));
     assert.ok(onlyIban.text.includes("111222333"), "deselected nl_bsn is left alone");
@@ -301,7 +298,7 @@ test("per-type selection runs only the chosen GDPR/POPIA types", () => {
     assert.ok(request.text.includes("GB29NWBK60161331926819"));
     assert.ok(request.text.includes("[NL_BSN_REDACTED]"));
   } finally {
-    setPiiSettings({ enabledTypes: null, customPatterns: [] });
+    await setPiiSettings({ enabledTypes: null, customPatterns: [] });
     clearPiiSettingsCache();
     delete process.env.PII_RESPONSE_SANITIZATION;
   }

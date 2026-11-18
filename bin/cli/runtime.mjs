@@ -26,11 +26,8 @@ function makeHttpContext(opts) {
 }
 
 async function importDbModules() {
-  const [combos, recovery] = await Promise.all([
-    import(projectFileUrl("src/lib/db/combos.ts")),
-    import(projectFileUrl("src/lib/db/recovery.ts")),
-  ]);
-  return { combos, recovery };
+  const combos = await import(projectFileUrl("src/lib/db/combos.ts"));
+  return { combos };
 }
 
 async function makeDbContext() {

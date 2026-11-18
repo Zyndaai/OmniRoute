@@ -1,0 +1,50 @@
+# Local live test of the cluster (Stage 7 rehearsal). It is an override of docker-compose.cluster.yml
+# and uses the PUBLISHED image (never `docker build` locally), with separate names, ports and
+# volumes so it can sit next to anything else on the machine. Run from the repository root:
+#
+#   docker compose --env-file _artifacts/rehearsal/.env \
+#     -f docker-compose.cluster.yml -f docker-compose.rehearsal.yml up -d
+#
+# _artifacts/rehearsal/.env (never committed) holds OMNIROUTE_TAG, POSTGRES_PASSWORD,
+# OMNIROUTE_ENV_FILE=_artifacts/rehearsal/.env and the app secrets. Use TEST provider accounts and
+# TEST proxies only: production proxies and production OAuth accounts never run here.
+#
+# Entry point: http://127.0.0.1:21080 (Caddy, routes like the production host Caddy).
+# Direct: leader http://127.0.0.1:21128, worker http://127.0.0.1:21129.
+
+name: omniroute-rehearsal
+
+services:
+  postgres:
+    container_name: omniroute-rehearsal-postgres
+
+  redis:
+    container_name: omniroute-rehearsal-redis
+
+  omniroute-1:
+    container_name: omniroute-rehearsal-1
+    ports: !override
+      - "127.0.0.1:21128:20128"
+
+  omniroute-2:
+    container_name: omniroute-rehearsal-2
+    ports: !override
+      - "127.0.0.1:21129:20128"
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: omniroute-rehearsal-caddy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:21080:80"
+    volumes:
+      - ./scripts/docker/rehearsal/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      omniroute-1:
+        condition: service_healthy
+
+volumes:
+  # A fresh, rehearsal-owned volume instead of the live external one.
+  omniroute-data:
+    external: false
+    name: omniroute-rehearsal-data

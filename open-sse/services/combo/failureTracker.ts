@@ -109,15 +109,12 @@ export function recordComboFailure(
       pinClearedThisStreak: shouldClearNow || pinClearedBefore,
     });
     if (shouldClearNow) {
-      try {
-        // Session-scoped: clears ONLY this session's pin on this combo. Other
-        // sessions sharing the same combo keep their own pin (see
-        // deleteSessionModelHistory's docstring in contextHandoffs.ts).
-        deleteSessionModelHistory(sessionId, comboName);
-      } catch {
-        // Best effort — the counter still records the streak, future clears will
-        // retry on the next threshold-cross.
-      }
+      // Session-scoped: clears ONLY this session's pin on this combo. Other
+      // sessions sharing the same combo keep their own pin (see
+      // deleteSessionModelHistory's docstring in contextHandoffs.ts).
+      // Best effort and async (PostgreSQL): the counter still records the streak, and a
+      // failed delete must never become an unhandled rejection on the failure path.
+      void deleteSessionModelHistory(sessionId, comboName).catch(() => {});
     }
     return { count, pinClearedNow: shouldClearNow };
   } catch {

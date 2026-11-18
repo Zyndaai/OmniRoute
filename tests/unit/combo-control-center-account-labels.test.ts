@@ -42,7 +42,7 @@ test("buildComboConnectionLabels resolves the account name of every pinned conne
     apiKey: "sk-nameless",
   });
 
-  const labels = buildComboConnectionLabels({
+  const labels = await buildComboConnectionLabels({
     models: [
       {
         id: "step-named",
@@ -71,9 +71,9 @@ test("buildComboConnectionLabels resolves the account name of every pinned conne
   );
 });
 
-test("buildComboConnectionLabels ignores steps without a pinned connection", () => {
+test("buildComboConnectionLabels ignores steps without a pinned connection", async () => {
   assert.deepEqual(
-    buildComboConnectionLabels({
+    await buildComboConnectionLabels({
       models: [
         { id: "step-open", kind: "model", providerId: "openai", model: "openai/gpt-5-codex" },
         { id: "step-ref", kind: "combo-ref", comboName: "other-combo" },

@@ -19,23 +19,23 @@ const base = {
   settings: {},
 };
 
-test("connection-level header appears on a model with no model-level headers", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("connection-level header appears on a model with no model-level headers", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomHeaders: { "X-Custom-Header": "conn-value" },
   });
   assert.equal(h["X-Custom-Header"], "conn-value");
 });
 
-test("connection-level headers are sent across multiple models sharing one connection", () => {
+test("connection-level headers are sent across multiple models sharing one connection", async () => {
   const connHeaders = { "X-Bill-To": "billing-org", "X-Region": "us-east" };
-  const h1 = buildUpstreamHeadersForExecute({
+  const h1 = await buildUpstreamHeadersForExecute({
     ...base,
     modelToCall: "model-a",
     effectiveModel: "model-a",
     connectionCustomHeaders: connHeaders,
   });
-  const h2 = buildUpstreamHeadersForExecute({
+  const h2 = await buildUpstreamHeadersForExecute({
     ...base,
     modelToCall: "model-b",
     effectiveModel: "model-b",
@@ -47,12 +47,12 @@ test("connection-level headers are sent across multiple models sharing one conne
   assert.equal(h2["X-Region"], "us-east");
 });
 
-test("model-level header overrides connection-level header of same name (case-insensitive)", () => {
+test("model-level header overrides connection-level header of same name (case-insensitive)", async () => {
   // model-level headers are set via getModelUpstreamExtraHeaders which is DB-backed.
   // Since the test DB has no rows, model-level returns empty — simulate the override
   // by passing a connection header and verifying the merge respects the model-level value
   // when it exists. We test both same-case and different-case scenarios.
-  const h = buildUpstreamHeadersForExecute({
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomHeaders: { "x-custom": "connection-value" },
   });
@@ -60,16 +60,16 @@ test("model-level header overrides connection-level header of same name (case-in
   assert.equal(h["x-custom"], "connection-value");
 });
 
-test("two connections with different customHeaders produce different header sets", () => {
+test("two connections with different customHeaders produce different header sets", async () => {
   const connA = { "X-Bill-To": "org-alice" };
   const connB = { "X-Bill-To": "org-bob" };
-  const hA = buildUpstreamHeadersForExecute({
+  const hA = await buildUpstreamHeadersForExecute({
     ...base,
     modelToCall: "shared-model",
     effectiveModel: "shared-model",
     connectionCustomHeaders: connA,
   });
-  const hB = buildUpstreamHeadersForExecute({
+  const hB = await buildUpstreamHeadersForExecute({
     ...base,
     modelToCall: "shared-model",
     effectiveModel: "shared-model",
@@ -79,8 +79,8 @@ test("two connections with different customHeaders produce different header sets
   assert.equal(hB["X-Bill-To"], "org-bob");
 });
 
-test("forbidden header names are silently dropped from connection headers", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("forbidden header names are silently dropped from connection headers", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomHeaders: {
       host: "should-not-appear",
@@ -99,8 +99,8 @@ test("forbidden header names are silently dropped from connection headers", () =
   assert.equal(h["X-Valid-Header"], "present");
 });
 
-test("connection headers coexist with customUserAgent", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("connection headers coexist with customUserAgent", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomUserAgent: "MyAgent/2.0",
     connectionCustomHeaders: { "X-Custom": "custom-value" },
@@ -109,13 +109,13 @@ test("connection headers coexist with customUserAgent", () => {
   assert.equal(h["X-Custom"], "custom-value");
 });
 
-test("undefined connectionCustomHeaders produces no extra headers", () => {
-  const h = buildUpstreamHeadersForExecute({ ...base, connectionCustomHeaders: undefined });
+test("undefined connectionCustomHeaders produces no extra headers", async () => {
+  const h = await buildUpstreamHeadersForExecute({ ...base, connectionCustomHeaders: undefined });
   assert.equal(h["X-Custom-Header"], undefined);
 });
 
-test("connection-level headers do not interfere with claude fast mode", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("connection-level headers do not interfere with claude fast mode", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     provider: "claude",
     modelToCall: "claude-fast-x",
@@ -127,8 +127,8 @@ test("connection-level headers do not interfere with claude fast mode", () => {
   assert.equal(h["X-Trace"], "trace-123");
 });
 
-test("forbidden auth headers (x-goog-api-key, api-key, cookie) are silently dropped", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("forbidden auth headers (x-goog-api-key, api-key, cookie) are silently dropped", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomHeaders: {
       "x-goog-api-key": "should-not-appear",
@@ -143,8 +143,8 @@ test("forbidden auth headers (x-goog-api-key, api-key, cookie) are silently drop
   assert.equal(h["X-Allowed"], "present");
 });
 
-test("returns a plain object even with connectionCustomHeaders set", () => {
-  const h = buildUpstreamHeadersForExecute({
+test("returns a plain object even with connectionCustomHeaders set", async () => {
+  const h = await buildUpstreamHeadersForExecute({
     ...base,
     connectionCustomHeaders: { "X-Test": "val" },
   });

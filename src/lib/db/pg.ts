@@ -51,6 +51,22 @@ export function ts(value: Date | string | number | null | undefined): string | n
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+/**
+ * A LIMIT parameter from a caller-supplied page size. PostgreSQL rejects a negative LIMIT
+ * (SQLite read it as "no limit"), so a negative or non-finite value becomes NULL, which
+ * PostgreSQL treats as no limit.
+ */
+export function sqlLimit(value: number | null | undefined): number | null {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return null;
+  return Math.floor(value);
+}
+
+/** An OFFSET parameter: PostgreSQL rejects a negative OFFSET (SQLite read it as 0). */
+export function sqlOffset(value: number | null | undefined): number {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+}
+
 /** Epoch milliseconds for a timestamp column value (ISO string), or null. */
 export function toMs(value: string | null | undefined): number | null {
   if (!value) return null;

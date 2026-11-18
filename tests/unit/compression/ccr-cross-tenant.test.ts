@@ -45,15 +45,15 @@ function contentHash(text: string): string {
 describe("ccr security: cross-tenant IDOR isolation", () => {
   beforeEach(() => resetCcrStore());
 
-  it("[HIGH] principal B cannot retrieve a block stored by principal A", () => {
+  it("[HIGH] principal B cannot retrieve a block stored by principal A", async () => {
     const hash = storeBlock(TEXT_A, "principalA");
 
     // Same principal can retrieve
-    const resultA = retrieveBlock(hash, "principalA");
+    const resultA = await retrieveBlock(hash, "principalA");
     assert.equal(resultA, TEXT_A, "principal A must be able to retrieve its own block");
 
     // Different principal is blocked — THE CORE SECURITY ASSERTION
-    const resultB = retrieveBlock(hash, "principalB");
+    const resultB = await retrieveBlock(hash, "principalB");
     assert.equal(
       resultB,
       null,
@@ -61,10 +61,10 @@ describe("ccr security: cross-tenant IDOR isolation", () => {
     );
   });
 
-  it("[HIGH] anonymous principal cannot retrieve a block stored by a named principal", () => {
+  it("[HIGH] anonymous principal cannot retrieve a block stored by a named principal", async () => {
     const hash = storeBlock(TEXT_A, "principalA");
 
-    const resultAnon = retrieveBlock(hash, undefined);
+    const resultAnon = await retrieveBlock(hash, undefined);
     assert.equal(
       resultAnon,
       null,
@@ -72,34 +72,34 @@ describe("ccr security: cross-tenant IDOR isolation", () => {
     );
   });
 
-  it("named principal cannot retrieve a block stored by anonymous", () => {
+  it("named principal cannot retrieve a block stored by anonymous", async () => {
     const hash = storeBlock(TEXT_B, undefined);
 
-    const resultA = retrieveBlock(hash, "principalA");
+    const resultA = await retrieveBlock(hash, "principalA");
     assert.equal(resultA, null, "principal A must NOT retrieve an anonymous block");
 
     // The anonymous store owner can retrieve
-    const resultAnon = retrieveBlock(hash, undefined);
+    const resultAnon = await retrieveBlock(hash, undefined);
     assert.equal(resultAnon, TEXT_B, "anonymous can retrieve its own block");
   });
 
-  it("principal with no stored block cannot retrieve via another principal's hash", () => {
+  it("principal with no stored block cannot retrieve via another principal's hash", async () => {
     // Store TEXT_A only under principalA — principalB never stores anything.
     const hashA = storeBlock(TEXT_A, "principalA");
 
     // principalA can retrieve their own block
-    assert.equal(retrieveBlock(hashA, "principalA"), TEXT_A, "A can retrieve its own block");
+    assert.equal(await retrieveBlock(hashA, "principalA"), TEXT_A, "A can retrieve its own block");
 
     // principalB never stored anything — cannot retrieve even with the correct hash
     assert.equal(
-      retrieveBlock(hashA, "principalB"),
+      await retrieveBlock(hashA, "principalB"),
       null,
       "[HIGH IDOR] B (never stored) cannot retrieve A's block by reusing A's hash"
     );
 
     // anonymous similarly cannot
     assert.equal(
-      retrieveBlock(hashA, undefined),
+      await retrieveBlock(hashA, undefined),
       null,
       "[HIGH IDOR] anonymous cannot retrieve A's block"
     );
@@ -111,16 +111,16 @@ describe("ccr security: cross-tenant IDOR isolation", () => {
 describe("ccr security: handleCcrRetrieve end-to-end isolation", () => {
   beforeEach(() => resetCcrStore());
 
-  it("handleCcrRetrieve with correct callerId returns content", () => {
+  it("handleCcrRetrieve with correct callerId returns content", async () => {
     const hash = storeBlock(TEXT_A, "callerA");
-    const result = handleCcrRetrieve({ hash }, "callerA");
+    const result = await handleCcrRetrieve({ hash }, "callerA");
     assert.ok("content" in result, "same-caller retrieve must return content");
     assert.equal((result as { content: string }).content, TEXT_A);
   });
 
-  it("[HIGH] handleCcrRetrieve with wrong callerId returns not-found error", () => {
+  it("[HIGH] handleCcrRetrieve with wrong callerId returns not-found error", async () => {
     const hash = storeBlock(TEXT_A, "callerA");
-    const result = handleCcrRetrieve({ hash }, "callerB");
+    const result = await handleCcrRetrieve({ hash }, "callerB");
     assert.ok(
       "error" in result,
       "[HIGH IDOR] cross-tenant retrieve via handleCcrRetrieve must return error, not content"
@@ -128,21 +128,21 @@ describe("ccr security: handleCcrRetrieve end-to-end isolation", () => {
     assert.ok(!("content" in result), "[HIGH IDOR] cross-tenant retrieve must NOT return content");
   });
 
-  it("handleCcrRetrieve without callerId cannot access named-principal block", () => {
+  it("handleCcrRetrieve without callerId cannot access named-principal block", async () => {
     const hash = storeBlock(TEXT_A, "callerA");
-    const result = handleCcrRetrieve({ hash }, undefined);
+    const result = await handleCcrRetrieve({ hash }, undefined);
     assert.ok("error" in result, "anonymous retrieve of named-principal block must return error");
   });
 
-  it("handleCcrRetrieve returns error for completely unknown hash", () => {
-    const result = handleCcrRetrieve({ hash: "000000000000000000000000" }, "anyPrincipal");
+  it("handleCcrRetrieve returns error for completely unknown hash", async () => {
+    const result = await handleCcrRetrieve({ hash: "000000000000000000000000" }, "anyPrincipal");
     assert.ok("error" in result, "unknown hash must return error");
     assert.ok(typeof (result as { error: string }).error === "string");
   });
 
-  it("handleCcrRetrieve returns error for missing hash parameter", () => {
+  it("handleCcrRetrieve returns error for missing hash parameter", async () => {
     // @ts-expect-error — intentional wrong call to verify guard
-    const result = handleCcrRetrieve({}, "caller");
+    const result = await handleCcrRetrieve({}, "caller");
     assert.ok("error" in result, "missing hash must return error");
   });
 });
@@ -152,7 +152,7 @@ describe("ccr security: handleCcrRetrieve end-to-end isolation", () => {
 describe("ccr security: [MEDIUM] scoped retrieval feedback (shouldSkipCompression)", () => {
   beforeEach(() => resetCcrStore());
 
-  it("A's retrievals do NOT flip B's shouldSkipCompression", () => {
+  it("A's retrievals do NOT flip B's shouldSkipCompression", async () => {
     const hash = storeBlock(TEXT_A, "principalA");
     storeBlock(TEXT_A, "principalB"); // same content stored under B
 
@@ -176,7 +176,7 @@ describe("ccr security: [MEDIUM] scoped retrieval feedback (shouldSkipCompressio
     );
   });
 
-  it("shouldSkipCompression returns false for a principal with no retrievals", () => {
+  it("shouldSkipCompression returns false for a principal with no retrievals", async () => {
     const hash = storeBlock(TEXT_A, "principalA");
     assert.equal(shouldSkipCompression(hash, "principalA"), false);
     assert.equal(shouldSkipCompression(hash, "principalB"), false);
@@ -189,12 +189,12 @@ describe("ccr security: [MEDIUM] scoped retrieval feedback (shouldSkipCompressio
 describe("ccr security: [MEDIUM] bounded memory (LRU eviction)", () => {
   beforeEach(() => resetCcrStore());
 
-  it("MAX_CCR_ENTRIES is exported and positive", () => {
+  it("MAX_CCR_ENTRIES is exported and positive", async () => {
     assert.ok(typeof MAX_CCR_ENTRIES === "number", "MAX_CCR_ENTRIES must be a number");
     assert.ok(MAX_CCR_ENTRIES > 0, "MAX_CCR_ENTRIES must be positive");
   });
 
-  it("LRU eviction: least-recently-used entry is evicted when cap is reached", () => {
+  it("LRU eviction: least-recently-used entry is evicted when cap is reached", async () => {
     const principal = "evictionTest";
 
     // Fill to exactly cap with unique blocks
@@ -210,7 +210,7 @@ describe("ccr security: [MEDIUM] bounded memory (LRU eviction)", () => {
 
     // Touch the first block so the second one becomes least recently used.
     assert.equal(
-      retrieveBlock(firstHash, principal),
+      await retrieveBlock(firstHash, principal),
       firstText,
       "first block must be present at exactly-cap state"
     );
@@ -220,14 +220,14 @@ describe("ccr security: [MEDIUM] bounded memory (LRU eviction)", () => {
 
     // The untouched second block should now be gone; the recently used first remains.
     assert.equal(
-      retrieveBlock(secondHash, principal),
+      await retrieveBlock(secondHash, principal),
       null,
       "[MEDIUM] LRU eviction: least-recently-used block must be evicted when cap is reached"
     );
-    assert.equal(retrieveBlock(firstHash, principal), firstText);
+    assert.equal(await retrieveBlock(firstHash, principal), firstText);
   });
 
-  it("store does not grow unboundedly beyond MAX_CCR_ENTRIES distinct principals", () => {
+  it("store does not grow unboundedly beyond MAX_CCR_ENTRIES distinct principals", async () => {
     // Insert MAX+5 distinct (principal, content) pairs and verify the overall store
     // did not go unbounded by checking that the first inserted block is evicted.
     const firstText = `overflow test block 0 ${"a".repeat(40)}`;
@@ -240,7 +240,7 @@ describe("ccr security: [MEDIUM] bounded memory (LRU eviction)", () => {
 
     // The first inserted store-key should have been evicted by FIFO
     assert.equal(
-      retrieveBlock(firstHash, firstPrincipal),
+      await retrieveBlock(firstHash, firstPrincipal),
       null,
       "[MEDIUM] unbounded-growth prevented: first inserted entry must be evicted after MAX+5 inserts"
     );
@@ -260,16 +260,20 @@ describe("ccr security: [HIGH] ccrEngine.apply scopes the stored block to the pr
     tools: [{ type: "function", function: { name: "omniroute_ccr_retrieve" } }],
   });
 
-  it("apply with a principalId stores the block retrievable ONLY by that principal", () => {
+  it("apply with a principalId stores the block retrievable ONLY by that principal", async () => {
     const result = ccrEngine.apply(makeBody(), {
       principalId: "principalA",
       stepConfig: { minChars: 100 },
     });
     assert.equal(result.compressed, true, "CCR compresses the large block");
     const hash = contentHash(bigBlock);
-    assert.equal(retrieveBlock(hash, "principalA"), bigBlock, "owner principal A can retrieve");
     assert.equal(
-      retrieveBlock(hash, "principalB"),
+      await retrieveBlock(hash, "principalA"),
+      bigBlock,
+      "owner principal A can retrieve"
+    );
+    assert.equal(
+      await retrieveBlock(hash, "principalB"),
       null,
       "[HIGH IDOR] principal B must NOT retrieve principal A's apply()-stored block"
     );

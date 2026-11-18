@@ -106,10 +106,10 @@ test("all three connection-test entry points pass the caller's locality", () => 
   assert.match(batch, /const allowLocalSpawn = getRequestPeerLocality\(request\) !== "remote";/);
   assert.match(
     batch,
-    /testSingleConnection\(conn\.id, undefined, \{ allowLocalRuntimeProbe, allowLocalSpawn \}\)/
+    /testSingleConnection\(conn\.id( as string)?, undefined, \{ allowLocalRuntimeProbe, allowLocalSpawn \}\)/
   );
   assert.match(
     create,
-    /testSingleConnection\(newConnection\.id, undefined, \{\s*allowLocalRuntimeProbe: getRequestPeerLocality\(request\) !== "remote",/
+    /testSingleConnection\((String\()?newConnection\.id\)?, undefined, \{\s*allowLocalRuntimeProbe: getRequestPeerLocality\(request\) !== "remote",/
   );
 });

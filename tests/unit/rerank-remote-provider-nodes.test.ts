@@ -201,7 +201,7 @@ test.describe("POST /v1/rerank routes to a LAN provider node only when opted in"
     await createProviderNode({
       id: LAN_NODE.id,
       name: "skilled-mini",
-      type: "openai",
+      type: "openai-compatible",
       prefix: LAN_NODE.prefix,
       baseUrl: LAN_NODE.baseUrl,
       apiType: LAN_NODE.apiType,
@@ -220,7 +220,7 @@ test.describe("POST /v1/rerank routes to a LAN provider node only when opted in"
     await createProviderNode({
       id: BACKUP_NODE.id,
       name: "hosted-rerank",
-      type: "openai",
+      type: "openai-compatible",
       prefix: BACKUP_NODE.prefix,
       baseUrl: BACKUP_NODE.baseUrl,
       apiType: BACKUP_NODE.apiType,

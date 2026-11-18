@@ -80,7 +80,11 @@ export function storeSemanticCacheResponse(
     outputContractOf(args.body)
   );
   const tokensSaved = args.usage?.prompt_tokens + args.usage?.completion_tokens || 0;
-  deps.setCachedResponse(signature, args.model, args.translatedResponse, tokensSaved);
+  // Async write (PostgreSQL): fail open like the manager store below, never an unhandled
+  // rejection on the response path.
+  void Promise.resolve(
+    deps.setCachedResponse(signature, args.model, args.translatedResponse, tokensSaved)
+  ).catch(() => {});
   args.log?.debug?.("CACHE", `Stored response for ${args.model} (${tokensSaved} tokens)`);
 
   if (args.translatedResponse && typeof args.translatedResponse === "object") {

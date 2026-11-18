@@ -90,7 +90,7 @@ test("core MCP handlers sanitize upstream bodies before public and audit boundar
   };
 
   try {
-    const handler = getRegisteredHandler(createMcpServer(), "omniroute_list_combos");
+    const handler = getRegisteredHandler(await createMcpServer(), "omniroute_list_combos");
     const result = await handler({ includeMetrics: false });
     const publicText = result.content?.[0]?.text ?? "";
     assert.equal(result.isError, true);
@@ -130,7 +130,7 @@ test("Obsidian and dynamic-skill MCP wrappers sanitize thrown errors", async () 
     mutableObsidianTool.handler = async () => {
       throw hostile;
     };
-    const obsidianHandler = getRegisteredHandler(createMcpServer(), mutableObsidianTool.name);
+    const obsidianHandler = getRegisteredHandler(await createMcpServer(), mutableObsidianTool.name);
     assertPublicMcpError(await obsidianHandler({}, { authInfo: { scopes: ["read:obsidian"] } }));
   } finally {
     mutableObsidianTool.handler = originalObsidianHandler;
@@ -148,7 +148,10 @@ test("Obsidian and dynamic-skill MCP wrappers sanitize thrown errors", async () 
     mutableRegistry.list = () => [
       { name: "mcp_boundary_skill", description: "boundary test", enabled: true },
     ];
-    const dynamicHandler = getRegisteredHandler(createMcpServer(), "skill_mcp_boundary_skill");
+    const dynamicHandler = getRegisteredHandler(
+      await createMcpServer(),
+      "skill_mcp_boundary_skill"
+    );
     mutableExecutor.execute = async () => {
       throw hostile;
     };
@@ -174,7 +177,7 @@ test("skill-tool MCP wrapper uses its own fail-closed fallback for hostile throw
     mutableSkillTool.handler = async () => {
       throw revocable.proxy;
     };
-    const handler = getRegisteredHandler(createMcpServer(), mutableSkillTool.name);
+    const handler = getRegisteredHandler(await createMcpServer(), mutableSkillTool.name);
     const result = await handler({}, { authInfo: { scopes: ["read:skills"] } });
     assert.equal(result.isError, true);
     assert.equal(result.content?.[0]?.text, "Error: Skill tool execution failed");

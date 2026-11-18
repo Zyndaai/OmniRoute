@@ -1,0 +1,28 @@
+# Rehearsal Caddy: the same routing the production host Caddy uses for the cluster
+# (docker-compose.cluster.yml). Plain HTTP on :80 inside the container.
+#
+# Management plane (dashboard, OAuth logins, settings API, live WebSocket) -> leader only.
+# Inference plane (/v1/*, /api/v1/*) -> every app container. A conversation sticks to one
+# process via the x-session-affinity header (Zynda sends it); clients without it stick by IP.
+
+:80 {
+	@inference path /v1/* /api/v1/*
+	handle @inference {
+		reverse_proxy omniroute-1:20128 omniroute-2:20128 {
+			lb_policy header X-Session-Affinity {
+				fallback ip_hash
+			}
+			lb_try_duration 5s
+			health_uri /healthz
+			health_interval 10s
+			fail_duration 30s
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy omniroute-1:20128 {
+			flush_interval -1
+		}
+	}
+}

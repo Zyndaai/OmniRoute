@@ -181,8 +181,6 @@ await withRuntime(async ({ kind, api, db }) => {
 - `kind: "db"` when server is offline. `db` exposes typed module exports:
   - `db.combos` → `src/lib/db/combos.ts` (getCombos, getComboByName, createCombo,
     deleteComboByName, setActiveCombo, …)
-  - `db.recovery` → `src/lib/db/recovery.ts` (countEncryptedCredentials,
-    resetEncryptedColumns)
 - Mutations that require server **must** error with exit code `3` when the
   server is down, never silently fall back.
 - **Never** write raw SQL in commands — always go through `src/lib/db/` modules.

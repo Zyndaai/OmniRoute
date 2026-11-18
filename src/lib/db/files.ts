@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { DEFAULT_BATCH_EXPIRATION_SECONDS } from "@/shared/constants/batch";
-import { db, ts, type DbExecutor } from "./pg";
+import { db, sqlLimit, ts, type DbExecutor } from "./pg";
 
 export interface FileRecord {
   id: string;
@@ -131,7 +131,7 @@ export async function listFiles(
   }
 
   const dir = order === "asc" ? "ASC" : "DESC";
-  query += ` ORDER BY created_at ${dir}, id ${dir} LIMIT ${add(limit)}`;
+  query += ` ORDER BY created_at ${dir}, id ${dir} LIMIT ${add(sqlLimit(limit))}`;
 
   return db().query<FileRecord>(query, params);
 }

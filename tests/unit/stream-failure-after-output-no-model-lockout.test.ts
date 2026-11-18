@@ -22,7 +22,10 @@ const streak = await import("../../open-sse/services/accountFallback/postOutputF
 
 async function resetStorage() {
   streak.resetPostOutputFailureStreaks();
-  core.resetDbInstance();
+  // Model lockouts are process memory; a lockout from the previous case must not leak in.
+  accountFallback.clearAllModelLockouts();
+  await core.resetDbInstance();
+  await (await import("../helpers/postgres.ts")).resetTestDb();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }

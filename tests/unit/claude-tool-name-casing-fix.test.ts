@@ -99,7 +99,7 @@ describe("Claude Code Tool Name Casing Fixes", () => {
     assert.equal(block?.name, "mcp__fs__read");
   });
 
-  it("geminiToClaudeResponse still persists thoughtSignature for follow-up turns (#8979)", () => {
+  it("geminiToClaudeResponse still persists thoughtSignature for follow-up turns (#8979)", async () => {
     const chunk = {
       candidates: [
         {
@@ -116,13 +116,13 @@ describe("Claude Code Tool Name Casing Fixes", () => {
     const block = firstToolUse(geminiToClaudeResponse(chunk, state) as ClaudeEvent[]);
     assert.equal(block?.name, "Read");
     assert.equal(
-      getGeminiThoughtSignature(buildGeminiThoughtSignatureKey("ns-test", "call_sig_1")),
+      await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey("ns-test", "call_sig_1")),
       "sig-abc123"
     );
     assert.equal(state.pendingThoughtSignature, null);
   });
 
-  it("geminiToClaudeResponse persists thoughtSignature for text-extracted tool calls", () => {
+  it("geminiToClaudeResponse persists thoughtSignature for text-extracted tool calls", async () => {
     const chunk = {
       candidates: [
         {
@@ -143,7 +143,7 @@ describe("Claude Code Tool Name Casing Fixes", () => {
     assert.equal(block?.name, "Bash");
     assert.ok(block?.id);
     assert.equal(
-      getGeminiThoughtSignature(buildGeminiThoughtSignatureKey("ns-text", block!.id!)),
+      await getGeminiThoughtSignature(buildGeminiThoughtSignatureKey("ns-text", block!.id!)),
       "sig-text-1"
     );
   });

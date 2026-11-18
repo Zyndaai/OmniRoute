@@ -1035,7 +1035,6 @@
   "featureFlagProxyHealthBlockedResetsStreakDescription": "In the proxy health sweep, let a probe the target refused (401/403/429: the proxy relayed, the destination refused this egress IP) reset the consecutive-failure streak of the proxy, like a served probe. Off by default: a refusal stays neutral and keeps the streak. A 5xx stays inconclusive either way, and a refusal never removes, disables or re-activates a proxy.",
   "featureFlagBatchAndFileAutoCleanupEnabledDescription": "Let the automatic cleanup sweep delete terminal (completed/failed/cancelled/expired) Batch API jobs older than OMNIROUTE_BATCH_RETENTION_DAYS, along with their per-line checkpoints, and clear the BLOB content of uploaded files past their own expires_at. Off by default: every existing install keeps this data exactly as before until an operator opts in. The operator-triggered DELETE /api/v1/batches/delete-completed route is unaffected either way -- it is a separate, unconditional public API contract.",
   "featureFlagXaiOauthLiveModelDiscoveryDescription": "Fetch the live xAI model catalog for xai-oauth connections from https://api.x.ai/v1/models using the OAuth bearer token, instead of the frozen static seed. Off by default: xai-oauth keeps serving the static seed unchanged. On any resolution error, discovery falls back to the seed.",
-  "featureFlagDbHealthcheckStartupDeferredEnabledDescription": "Run the startup database integrity/health check after the server starts accepting requests instead of blocking startup until it completes. Off by default: startup blocks on the check exactly like before this change, so a corrupt database is still caught before the first request is served.",
   "featureFlagCatalogMirrorRefinementsEnabledDescription": "Refine the claude/ discovery and functional-gateway mirrors on /v1/models. Off by default: both mirror passes behave exactly as before. On: claude/ discovery mirrors also cover listed reasoning-effort variants (-low/-medium/-high/-xhigh), skip built-in auto/* ids the request path cannot materialize and skip an alias already listed; functional-gateway mirrors skip combos and OmniRoute-synthesized ids (claude/, no-think/), take the owner from owned_by, never use the owner as its own gateway, skip gateways disabled in blockedProviders and models outside a gateway's authoritative live catalog.",
   "featureFlagOpencodePublishedCatalogRoutingEnabledDescription": "Let OpenCode Zen and OpenCode Go models without an explicit registry endpoint take their request surface (Responses for @ai-sdk/openai, Messages for @ai-sdk/anthropic) from the published models.opencode.ai catalog, read in the background every 6 h. Off by default: the endpoint comes from the registry heuristics exactly as before and the catalog is never fetched.",
   "featureFlagOpencodeV2ClientFingerprintEnabledDescription": "Send the OpenCode v2 CLI client fingerprint on OpenCode Zen/Go requests: the opencode/latest/<2.x>/cli User-Agent and x-opencode-client cli, and on free-tier requests the v2 session headers, the v2 CLI read/shell tool schemas and no tool_choice \"none\". Off by default: every OpenCode request keeps the current identity, headers and body unchanged.",
@@ -1278,7 +1277,7 @@
     "mediaSubtitle": "Cached media files",
     "batchFilesSubtitle": "Batch input/output files",
     "settingsSubtitle": "All settings",
-    "settingsGeneralSubtitle": "Database and backups",
+    "settingsGeneralSubtitle": "Database and retention",
     "settingsAppearanceSubtitle": "Theme and layout",
     "settingsAiSubtitle": "AI behavior defaults",
     "globalRoutingSubtitle": "Global routing rules",
@@ -1673,7 +1672,7 @@
     "auditMcpDescription": "MCP tool invocation audit trail and compliance records",
     "auditA2a": "A2A Audit",
     "auditA2aDescription": "A2A task execution audit trail, state transitions, and skill invocation records",
-    "settingsGeneralDescription": "Storage, database, backups, and retention settings",
+    "settingsGeneralDescription": "Storage, database, and retention settings",
     "settingsAppearanceDescription": "Theme, branding, and visual customization",
     "settingsAiDescription": "AI behaviors, thinking budgets, vision, and memory settings",
     "settingsCacheDescription": "TTL for model catalog cache entries",
@@ -4200,8 +4199,8 @@
     "showingTopCostRows": "Showing {shown} of {total} matching rows (top 50)."
   },
   "endpoint": {
-    "cloudUploadDestination": "Cloud sync destination (not local backups):",
-    "cloudUploadWarning": "Cloud sync is disabled by default on new installations. Enabling it uploads provider API keys, OAuth access/refresh tokens, OmniRoute API keys, and configuration to the destination above, now and during future syncs. This is separate from local Storage backups. Only enable it if you trust that server.",
+    "cloudUploadDestination": "Cloud sync destination:",
+    "cloudUploadWarning": "Cloud sync is disabled by default on new installations. Enabling it uploads provider API keys, OAuth access/refresh tokens, OmniRoute API keys, and configuration to the destination above, now and during future syncs. It is not a database backup. Only enable it if you trust that server.",
     "cloudUploadConsent": "I understand and authorize uploading my credentials to this destination.",
     "title": "API Endpoint",
     "subtitle": "Use the OpenAI-compatible endpoint with most SDKs and tools.",
@@ -7787,8 +7786,10 @@
     "loadingResilience": "Loading resilience status...",
     "retry": "Retry",
     "systemStorage": "Storage",
-    "allDataLocal": "All data stored locally on your machine",
+    "allDataLocal": "All data is stored in your PostgreSQL database",
     "databasePath": "Database Path",
+    "storageDataDirectory": "Data directory (call log files)",
+    "storagePostgresBackupNote": "OmniRoute does not back up the database itself. Back up PostgreSQL with pg_dump or your host's volume snapshots.",
     "export": "Export",
     "exportDatabase": "Export Database",
     "exportAll": "Export All (.tar.gz)",
@@ -11075,7 +11076,7 @@
     "privacySection1Title": "1. Local-First Architecture",
     "privacySection1Text": "OmniRoute is designed as a local-first application. All data processing and storage occurs entirely on your machine. There is no centralized server collecting your information.",
     "privacySection2Title": "2. Data We Store",
-    "privacyDataStoredIn": "The following data is stored locally in",
+    "privacyDataStoredIn": "The following data is stored in your own database,",
     "privacyDataProviderConfigurationsDesc": "connection URLs, provider types, and priority settings",
     "privacyDataApiKeysDesc": "encrypted and stored locally for authenticating with AI providers",
     "privacyDataUsageLogsDesc": "request counts, token usage, model names, timestamps, and response times",
@@ -11103,7 +11104,7 @@
     "termsSection3Title": "3. How It Works",
     "termsSection3Text": "OmniRoute acts as an intermediary proxy. API calls sent to OmniRoute are translated and forwarded to your configured AI providers. OmniRoute does not modify the content of your requests or responses beyond the necessary protocol translation.",
     "termsSection4Title": "4. Data Handling",
-    "termsDataStoredLocally": "All data is stored locally on your machine in a SQLite database.",
+    "termsDataStoredLocally": "All data is stored in a PostgreSQL database that you run.",
     "termsNoTransmission": "OmniRoute does not transmit any data to external servers unless you explicitly enable cloud sync features.",
     "termsDataLocationText": "Usage logs, API keys, and configuration are stored in",
     "termsSection5Title": "5. Disclaimer",
@@ -11322,7 +11323,7 @@
     "memoryEntries": "Memory Entries",
     "memoryEntriesSub": "In-memory LRU",
     "dbEntries": "DB Entries",
-    "dbEntriesSub": "Persisted (SQLite)",
+    "dbEntriesSub": "Persisted (PostgreSQL)",
     "cacheHits": "Cache Hits",
     "cacheHitsSub": "of {total} total",
     "tokensSaved": "Tokens Saved",
@@ -11336,7 +11337,7 @@
     "behavior": "Cache Behavior",
     "behaviorDeterministic": "Only non-streaming requests with temperature=0 are cached.",
     "behaviorBypass": "Bypass with header {header}.",
-    "behaviorTwoTier": "Two-tier storage: in-memory LRU (fast) + SQLite (persistent across restarts).",
+    "behaviorTwoTier": "Two-tier storage: in-memory LRU (fast) + PostgreSQL (persistent across restarts).",
     "behaviorTtl": "Default TTL: 30 minutes. Configure via {envVar}.",
     "idempotency": "Idempotency Layer",
     "activeDedupKeys": "Active Dedup Keys",
@@ -11392,7 +11393,7 @@
     "performanceTitle": "Performance",
     "semanticCacheSectionDesc": "OmniRoute's own deterministic response cache. When enabled, repeated non-streaming temperature=0 requests can be served locally without hitting the upstream provider.",
     "semanticCacheDisabledDesc": "Semantic cache is disabled. OmniRoute will skip local response reuse until you turn it back on in Settings.",
-    "semanticEntriesDesc": "Persisted semantic cache records currently stored in SQLite. Provider-side prompt cache activity is not listed here.",
+    "semanticEntriesDesc": "Persisted semantic cache records currently stored in PostgreSQL. Provider-side prompt cache activity is not listed here.",
     "searchEntries": "Search entries...",
     "search": "Search",
     "loading": "Loading...",
@@ -11428,7 +11429,7 @@
     "reasoningBehavior": "Behavior",
     "reasoningBehaviorCapture": "Captures reasoning_content from streaming responses",
     "reasoningBehaviorReplay": "Re-injects on next turn when client omits it",
-    "reasoningBehaviorFallback": "Memory-first with SQLite fallback for crash recovery",
+    "reasoningBehaviorFallback": "Memory-first with PostgreSQL fallback for crash recovery",
     "reasoningBehaviorTtl": "TTL: 2 hours | Max entries: 2,000 (memory)",
     "reasoningBehaviorModels": "Supported: DeepSeek, Kimi, Qwen-Thinking, GLM",
     "reasoningClearAll": "Clear Reasoning Cache",
@@ -13473,7 +13474,7 @@
         "storage": {
           "label": "Storage",
           "agent": "Dynamic catalog (/api/agent-skills) → SKILL.md on GitHub",
-          "omni": "SQLite (SkillsMP / skills.sh / local)"
+          "omni": "PostgreSQL (SkillsMP / skills.sh / local)"
         },
         "tagline": {
           "label": "Tagline",
@@ -13855,7 +13856,7 @@
       },
       "RERANK_REMOTE_PROVIDER_NODES": {
         "label": "Remote Rerank Provider Nodes",
-        "description": "Allow POST /v1/rerank (and the memory engine's rerank step, which calls it over loopback) to use OpenAI-compatible provider nodes hosted outside localhost — a LAN box or Tailscale peer running TEI, Infinity, vLLM, etc. Off by default — routing to a remote host changes egress identity and must be an explicit operator decision. Loopback nodes are always allowed and unaffected. Remote nodes must also pass the provider outbound URL policy."
+        "description": "Allow POST /v1/rerank to use OpenAI-compatible provider nodes hosted outside localhost — a LAN box or Tailscale peer running TEI, Infinity, vLLM, etc. Off by default — routing to a remote host changes egress identity and must be an explicit operator decision. Loopback nodes are always allowed and unaffected. Remote nodes must also pass the provider outbound URL policy."
       },
       "NETWORK_ROTATION_SHARED_EGRESS_GUARD": {
         "label": "Network Rotation Shared-Egress Guard",
@@ -14064,10 +14065,6 @@
       "ANTHROPIC_COMPATIBLE_MID_CONVERSATION_SYSTEM": {
         "label": "Anthropic-Compatible Mid-Conversation System Turns",
         "description": "On plain anthropic-compatible-* relays (claude → claude passthrough), keep mid-conversation role:system turns inside messages[] instead of hoisting them into the top-level system parameter, so the cached prompt prefix stays stable across turns. Applies only when the client itself sent the mid-conversation-system-2026-04-07 anthropic-beta (forwarded upstream as-is). Off by default: every system turn is hoisted exactly as before, because relays that do not support the beta reject role:system messages with 400."
-      },
-      "DB_HEALTHCHECK_STARTUP_DEFERRED_ENABLED": {
-        "label": "DB Health Check: Defer Startup Scan",
-        "description": "Run the startup DB integrity/health check after the server starts accepting requests (via setImmediate) instead of blocking startup until it completes. Off by default: startup blocks on the check exactly like before #13717, so a corrupt database is still caught before the first request is served. On: startup returns immediately and the check (now bounded/paged and, for a real file-backed DB, isolated in a cancellable child process) runs right after."
       },
       "OPENCODE_PUBLISHED_CATALOG_ROUTING_ENABLED": {
         "label": "OpenCode Published Catalog Routing",

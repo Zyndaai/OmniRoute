@@ -5,74 +5,50 @@
  * on almost every install. Selecting any dashboard key then dropped every MCP
  * bar. The stamp must come from resolveMcpCallerApiKeyId (HTTP headers first,
  * env-key lookup for stdio).
+ *
+ * The audit log lives in PostgreSQL (mcp_tool_audit); each case reads the row back.
  */
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-const RUN_ARG_INDEX = 4;
+const audit = await import("../../open-sse/mcp-server/audit.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
-function installMockDb(run: (...args: unknown[]) => unknown) {
-  globalThis.__omnirouteMcpAuditDb = {
-    prepare: () => ({ run, get: () => undefined, all: () => [] }),
-    pragma: () => undefined,
-    close: () => undefined,
-    open: true,
-  };
+beforeEach(async () => {
+  await resetTestDb();
+});
+
+async function onlyAuditRowApiKeyId(): Promise<unknown> {
+  const { entries, total } = await audit.queryAuditEntries({});
+  assert.equal(total, 1, "exactly one audit row");
+  return entries[0].apiKeyId;
 }
 
 test("logToolCall stamps the resolved caller id, not OMNIROUTE_API_KEY_ID", async (t) => {
   process.env.OMNIROUTE_API_KEY_ID = "env-stale-id";
-  const bound: unknown[][] = [];
-  installMockDb((...args: unknown[]) => {
-    bound.push(args);
-  });
   t.after(() => {
     delete process.env.OMNIROUTE_API_KEY_ID;
-    globalThis.__omnirouteMcpAuditDb = undefined;
   });
-
-  const audit = await import("../../open-sse/mcp-server/audit.ts");
   audit.__setAuditCallerIdResolverForTests(async () => "key-from-header");
   t.after(() => audit.__setAuditCallerIdResolverForTests(null));
 
   await audit.logToolCall("omniroute_get_health", {}, {}, 3, true);
-  assert.equal(bound.length, 1);
-  assert.equal(bound[0][RUN_ARG_INDEX], "key-from-header");
+  assert.equal(await onlyAuditRowApiKeyId(), "key-from-header");
 });
 
 test("logToolCall writes null when no caller id resolves and the env id is unset", async (t) => {
   delete process.env.OMNIROUTE_API_KEY_ID;
-  const bound: unknown[][] = [];
-  installMockDb((...args: unknown[]) => {
-    bound.push(args);
-  });
-  t.after(() => {
-    globalThis.__omnirouteMcpAuditDb = undefined;
-  });
-
-  const audit = await import("../../open-sse/mcp-server/audit.ts");
   audit.__setAuditCallerIdResolverForTests(async () => undefined);
   t.after(() => audit.__setAuditCallerIdResolverForTests(null));
 
   await audit.logToolCall("omniroute_get_health", {}, {}, 3, true);
-  assert.equal(bound.length, 1);
-  assert.equal(bound[0][RUN_ARG_INDEX], null);
+  assert.equal(await onlyAuditRowApiKeyId(), null);
 });
 
 test("logToolCall writes null when the resolver returns an empty string", async (t) => {
-  const bound: unknown[][] = [];
-  installMockDb((...args: unknown[]) => {
-    bound.push(args);
-  });
-  t.after(() => {
-    globalThis.__omnirouteMcpAuditDb = undefined;
-  });
-
-  const audit = await import("../../open-sse/mcp-server/audit.ts");
   audit.__setAuditCallerIdResolverForTests(async () => "");
   t.after(() => audit.__setAuditCallerIdResolverForTests(null));
 
   await audit.logToolCall("omniroute_get_health", {}, {}, 3, true);
-  assert.equal(bound.length, 1);
-  assert.equal(bound[0][RUN_ARG_INDEX], null);
+  assert.equal(await onlyAuditRowApiKeyId(), null);
 });

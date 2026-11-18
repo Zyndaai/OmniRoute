@@ -41,7 +41,7 @@ export default function PrivacyPage() {
             <h2 className="ci-heading text-lg mb-3">{t("privacySection2Title")}</h2>
             <p className="mb-3">
               {t("privacyDataStoredIn")}{" "}
-              <code className="font-mono text-sm text-text-main">~/.omniroute/storage.sqlite</code>:
+              <span className="text-text-main">PostgreSQL</span>:
             </p>
             <ul className="list-disc pl-6 space-y-2">
               <li>

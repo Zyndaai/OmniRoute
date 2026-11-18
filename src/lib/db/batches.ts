@@ -1,4 +1,4 @@
-import { db, ts, type DbExecutor } from "./pg";
+import { db, sqlLimit, ts, type DbExecutor } from "./pg";
 import { jsonTextParam, jsonValueParam, stripNul } from "./pgJsonText";
 import { deleteFile, deleteFileOwnedBy } from "./files";
 import { v4 as uuidv4 } from "uuid";
@@ -376,7 +376,7 @@ export async function listBatches(
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await db().query(
-    `${BATCH_SELECT} ${where} ORDER BY created_at DESC, id DESC LIMIT ${add(limit)}`,
+    `${BATCH_SELECT} ${where} ORDER BY created_at DESC, id DESC LIMIT ${add(sqlLimit(limit))}`,
     params
   );
   return rows.map((row) => parseBatchRow(row));
