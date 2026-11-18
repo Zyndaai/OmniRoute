@@ -20,6 +20,17 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import { isPassiveRefresh } from "./tokenRefresh/passiveRefresh.ts";
+
+/** Thrown when a refresh reaches the serializer on a process that must not refresh. */
+export class PassiveRefreshBlockedError extends Error {
+  readonly code = "refresh_disabled";
+  constructor(provider: string) {
+    super(`Token refresh for ${provider} is disabled on this process (cluster worker).`);
+    this.name = "PassiveRefreshBlockedError";
+  }
+}
+
 // Providers mapped to the same string share one serialized lane. Codex and the
 // raw `openai` provider use the same Auth0 backend, so they MUST share a lane.
 export const ROTATION_LOCK_GROUP: Record<string, string> = {
@@ -110,6 +121,11 @@ export async function serializeRefresh<T>(
   fn: () => Promise<T>,
   log?: { warn?: (...args: unknown[]) => void; error?: (...args: unknown[]) => void } | null
 ): Promise<T> {
+  // Backstop: every refresh POST of a passive provider is refused here even if a caller
+  // skipped the passive check (a cluster worker must never refresh; see passiveRefresh.ts).
+  if (isPassiveRefresh(provider)) {
+    throw new PassiveRefreshBlockedError(provider);
+  }
   const group = rotationGroupFor(provider);
   if (!group) return fn();
 

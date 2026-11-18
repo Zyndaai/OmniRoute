@@ -5,6 +5,7 @@ import { PROVIDERS } from "../../../config/constants.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
 import { buildExternalIdpRefreshParams, isExternalIdpAuthMethod } from "../../kiroExternalIdp.ts";
 import { safeAwsRegion } from "../../kiroRegion.ts";
+import { isPassiveRefresh } from "../passiveRefresh.ts";
 
 /**
  * Specialized refresh for Kiro (AWS CodeWhisperer) tokens
@@ -16,6 +17,9 @@ export async function refreshKiroToken(
   log,
   proxyConfig: unknown = null
 ) {
+  // Kiro rotates its refresh token, and the Kiro executor calls this directly (not through
+  // getAccessToken), so the worker guard has to live here as well.
+  if (isPassiveRefresh("kiro")) return { error: "refresh_disabled" };
   try {
     const authMethod = providerSpecificData?.authMethod;
     const clientId = providerSpecificData?.clientId;

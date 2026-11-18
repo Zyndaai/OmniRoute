@@ -108,7 +108,7 @@ test("markConnectionQuotaExhausted persists 24h cooldown; isConnectionRateLimite
     "should start as not rate-limited"
   );
 
-  markConnectionQuotaExhausted(connId, FULL_QUOTA_COOLDOWN_MS);
+  await markConnectionQuotaExhausted(connId, FULL_QUOTA_COOLDOWN_MS);
 
   assert.equal(
     await providersDb.isConnectionRateLimited(connId),

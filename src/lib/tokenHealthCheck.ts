@@ -575,7 +575,7 @@ export async function checkConnection(conn) {
   // Determine interval (0 = disabled)
   const intervalMin = conn.healthCheckInterval ?? DEFAULT_HEALTH_CHECK_INTERVAL_MIN;
   if (intervalMin <= 0) return;
-  if (tokenRefresh.isPassiveCodex(conn.provider)) {
+  if (tokenRefresh.isPassiveRefresh(conn.provider)) {
     await tokenRefresh.getAccessToken(conn.provider, { ...conn, connectionId: conn.id });
     return;
   }

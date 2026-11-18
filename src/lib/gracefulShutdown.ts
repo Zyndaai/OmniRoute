@@ -130,6 +130,13 @@ async function cleanup(): Promise<void> {
     if (closeAuditDb()) {
       console.log("[Shutdown] MCP audit database checkpointed and closed.");
     }
+    // Release the leader fence first, so a restarted process can take it at once.
+    try {
+      const { stopClusterRuntime } = await import("@/lib/cluster/runtime");
+      await stopClusterRuntime();
+    } catch (error) {
+      console.error("[Shutdown] Cluster runtime cleanup failed:", (error as Error).message);
+    }
     try {
       if (await shutdownDbInstance()) {
         console.log("[Shutdown] PostgreSQL connection pool closed.");

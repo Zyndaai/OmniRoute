@@ -1,6 +1,6 @@
 // Re-export from open-sse with local logger
 import * as log from "../utils/logger";
-import * as passive from "@omniroute/open-sse/services/tokenRefresh/passiveCodex.ts";
+import * as passive from "@omniroute/open-sse/services/tokenRefresh/passiveRefresh.ts";
 import { registerCredentialRefresher } from "@omniroute/open-sse/utils/registeredCredentialRefresher.ts";
 import { updateProviderConnection } from "@/lib/db/providers";
 import { parseTokenExpiryMs } from "@/lib/tokenHealthCheckExpiry";
@@ -85,7 +85,7 @@ export const refreshAccessToken = async (
   refreshToken: string,
   credentials: any
 ) => {
-  const proxy = passive.isPassiveCodex(provider)
+  const proxy = passive.isPassiveRefresh(provider)
     ? null
     : await resolveProxyForCredentials(provider, credentials);
   return _refreshAccessToken(provider, refreshToken, credentials, log, proxy);
@@ -108,7 +108,7 @@ export const refreshGoogleToken = async (
 };
 
 export const refreshCodexToken = async (refreshToken: string, credentials?: any) => {
-  if (passive.isPassiveCodex("codex")) return passive.resolvePassiveCodex(credentials);
+  if (passive.isPassiveRefresh("codex")) return passive.resolvePassiveTokens(credentials);
   const proxy = await resolveProxyForCredentials("codex", credentials);
   return _refreshCodexToken(refreshToken, log, proxy);
 };
@@ -156,14 +156,14 @@ export const getAccessToken = async (
   credentials: any,
   onPersist?: (result: any) => Promise<void>
 ) => {
-  const proxy = passive.isPassiveCodex(provider)
+  const proxy = passive.isPassiveRefresh(provider)
     ? null
     : await resolveProxyForCredentials(provider, credentials);
   return _getAccessToken(provider, credentials, log, proxy, onPersist);
 };
 
 export const refreshTokenByProvider = async (provider: string, credentials: any) => {
-  const proxy = passive.isPassiveCodex(provider)
+  const proxy = passive.isPassiveRefresh(provider)
     ? null
     : await resolveProxyForCredentials(provider, credentials);
   return _refreshTokenByProvider(provider, credentials, log, proxy);
@@ -300,7 +300,7 @@ export async function checkAndRefreshToken(provider: string, credentials: any) {
 
         updatedCredentials = {
           ...updatedCredentials,
-          ...(passive.isPassiveCodex(provider) ? newCredentials : {}),
+          ...(passive.isPassiveRefresh(provider) ? newCredentials : {}),
           accessToken: newCredentials.accessToken,
           refreshToken: newCredentials.refreshToken || updatedCredentials.refreshToken,
           expiresAt: newCredentials.expiresAt

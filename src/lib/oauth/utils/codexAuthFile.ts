@@ -10,7 +10,7 @@ import {
 } from "@/sse/services/tokenRefresh";
 import { isUnrecoverableRefreshError } from "@omniroute/open-sse/services/tokenRefresh.ts";
 import { toRecord, toNonEmptyString, decodeJwtPayload } from "./codexAuthValues";
-import * as passive from "@omniroute/open-sse/services/tokenRefresh/passiveCodex.ts";
+import * as passiveRefresh from "@omniroute/open-sse/services/tokenRefresh/passiveRefresh.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -196,7 +196,8 @@ async function resolveFreshCodexConnection(connectionId: string): Promise<CodexC
   if (!shouldRefreshCodexConnection(connection)) {
     return connection;
   }
-  if (passive.isPassiveCodex("codex")) return passive.adoptPassiveCodex(connection);
+  if (passiveRefresh.isPassiveRefresh("codex"))
+    return passiveRefresh.adoptPassiveTokens(connection);
 
   const refreshToken = toNonEmptyString(connection.refreshToken);
   if (!refreshToken) {

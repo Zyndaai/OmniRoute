@@ -86,6 +86,11 @@ export async function acquirePgLeaderFence(options: PgLeaderFenceOptions): Promi
   // The fence session must never be closed for idling, and the lock call must not wait.
   await client.query("SET idle_session_timeout = 0");
   await client.query("SET statement_timeout = 10000");
+  // The server keeps an advisory lock until it notices the session is dead. With default TCP
+  // keepalives a cut network can hold the fence for hours; these make it ~25 s.
+  await client.query("SET tcp_keepalives_idle = 10");
+  await client.query("SET tcp_keepalives_interval = 5");
+  await client.query("SET tcp_keepalives_count = 3");
   const { rows } = await client.query("SELECT pg_try_advisory_lock($1, $2) AS ok", [
     FENCE_LOCK_CLASS,
     FENCE_LOCK_OBJECT,

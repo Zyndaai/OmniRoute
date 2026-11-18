@@ -275,6 +275,12 @@ ENV NODE_OPTIONS="--max-old-space-size=${OMNIROUTE_MEMORY_MB}"
 ENV DATA_DIR=/app/data
 RUN mkdir -p /app/data && chown node:node /app /app/data
 
+# PM2 runs a leader plus N workers in this one container when compose sets
+# `command: ["pm2-runtime", "ecosystem.config.cjs"]` (docker-compose.cluster.yml). Not traced
+# into the standalone bundle (the app never imports it), so it is installed globally, pinned.
+# The default CMD below still starts a single standalone process.
+RUN npm install -g pm2@7.1.2 && npm cache clean --force
+
 # #13679: default the PUBLISHED image to requiring an API key. A bare
 # `docker run -p 20128:20128 … diegosouzapw/omniroute` (README/QUICK-START
 # one-liners) does not pass `--env-file .env`, so without this default the
@@ -313,6 +319,8 @@ ENV OMNIROUTE_MIGRATIONS_DIR=/app/migrations
 # Docker healthcheck script — not traced by Next.js standalone output, so copy
 # it explicitly. The HEALTHCHECK CMD references it as `node healthcheck.mjs`.
 COPY --chown=node:node --from=builder /app/scripts/dev/healthcheck.mjs ./healthcheck.mjs
+# PM2 process file (leader + workers, one port each). Used only when compose runs pm2-runtime.
+COPY --chown=node:node --from=builder /app/ecosystem.config.cjs ./ecosystem.config.cjs
 
 # Every COPY above hands its files to the baked-in `node` non-root user
 # (UID/GID 1000) at copy time. Do NOT add a `RUN chown -R node:node /app`

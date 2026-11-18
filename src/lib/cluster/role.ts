@@ -108,6 +108,23 @@ export function resolveBootPlan(env: EnvLike = process.env): BootPlan {
 }
 
 /**
+ * A worker runs no background work. Several modules start their own timers on import or on
+ * a settings reload and only honour `OMNIROUTE_DISABLE_BACKGROUND_SERVICES` (proxy health,
+ * free-proxy sync, connection recovery, cloud sync, the models.dev sync in
+ * applyRuntimeSettings). Setting it once at boot covers every one of them, including any a
+ * request path imports later. Returns true when the switch was set here.
+ */
+export function enforceWorkerBackgroundSwitch(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (getRole(env) !== "worker" || flag(env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES)) return false;
+  // "true", not "1": the startup env validation (src/lib/env/runtimeEnv.ts) accepts only
+  // "true" | "false" for this variable and refuses to boot otherwise.
+  env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES = "true";
+  return true;
+}
+
+/**
  * Configuration errors that must stop the boot. Empty in standalone mode.
  * Cluster mode needs a valid instance id and secrets shared through env: a worker that
  * generated its own JWT secret would reject every leader-issued session.

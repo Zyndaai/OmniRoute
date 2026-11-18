@@ -7,11 +7,14 @@
  */
 
 import { isNextBuildPhase } from "../buildPhase";
+import { isWorker } from "../cluster/role";
 import { resolveWritableDataDir } from "../dataPaths";
 import {
+  getBundledPostgresMigrationHead,
   getPostgresMigrationHead,
   runPostgresMigrations,
 } from "./backends/postgres/migrationRunner";
+import type { DbBackend } from "./backends/types";
 import { getDbBackend, initDbBackend, resetDbBackendForTests } from "./backends/selection";
 import { invalidateDbCache } from "./readCache";
 import { resetAllDbModuleState } from "./stateReset";
@@ -34,8 +37,76 @@ export const DATA_DIR = resolveWritableDataDir({ isCloud });
 
 let initPromise: Promise<void> | null = null;
 
+const DEFAULT_WORKER_MIGRATION_WAIT_MS = 10 * 60_000;
+const WORKER_MIGRATION_POLL_MS = 2_000;
+
+/** `pg-0003` → 3 (null for anything else). */
+function migrationNumber(version: string | null): number | null {
+  const match = /^pg-(\d+)$/.exec(version ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * A worker never migrates (the leader does, under the schema lock). It waits until the
+ * database reaches the migration head bundled in its own image, then serves.
+ * Exported for tests: `deps` replaces the clock and the head lookups.
+ */
+export async function waitForMigrationHead(
+  backend: DbBackend,
+  deps: {
+    bundledHead?: string | null;
+    readHead?: () => Promise<string | null>;
+    timeoutMs?: number;
+    pollMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+    log?: (line: string) => void;
+  } = {}
+): Promise<string | null> {
+  const bundled =
+    deps.bundledHead !== undefined ? deps.bundledHead : getBundledPostgresMigrationHead();
+  const readHead = deps.readHead ?? (() => getPostgresMigrationHead(backend));
+  const timeoutMs =
+    deps.timeoutMs ??
+    (Number(process.env.OMNIROUTE_WORKER_MIGRATION_WAIT_MS) || DEFAULT_WORKER_MIGRATION_WAIT_MS);
+  const pollMs = deps.pollMs ?? WORKER_MIGRATION_POLL_MS;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const now = deps.now ?? Date.now;
+  const log = deps.log ?? ((line: string) => console.log(line));
+
+  const want = migrationNumber(bundled);
+  if (want === null) return readHead();
+  const deadline = now() + timeoutMs;
+  let announced = false;
+  for (;;) {
+    const head = await readHead();
+    const have = migrationNumber(head);
+    if (have !== null && have > want) {
+      throw new Error(
+        `[DB] The database is at migration ${head}, newer than this image (${bundled}). ` +
+          "This worker runs an older release than the leader; deploy the same image to both."
+      );
+    }
+    if (have === want) return head;
+    if (now() >= deadline) {
+      throw new Error(
+        `[DB] Timed out after ${Math.round(timeoutMs / 1000)} s waiting for the leader to migrate ` +
+          `the database to ${bundled} (it is at ${head ?? "nothing"}). Is the leader running?`
+      );
+    }
+    if (!announced) {
+      log(
+        `[DB] Worker waiting for the leader to migrate the database to ${bundled} (now ${head ?? "empty"})`
+      );
+      announced = true;
+    }
+    await sleep(pollMs);
+  }
+}
+
 /**
  * Connects to PostgreSQL, applies pending migrations and creates the log partitions.
+ * A worker only connects and waits for the leader's migrations (`waitForMigrationHead`).
  * Fails startup when the database is unreachable (there is no fallback store).
  * Idempotent per process.
  */
@@ -43,6 +114,10 @@ export function ensureDbInitialized(): Promise<void> {
   if (isBuildPhase) return Promise.resolve();
   initPromise ??= (async () => {
     const backend = await initDbBackend();
+    if (isWorker()) {
+      await waitForMigrationHead(backend);
+      return;
+    }
     const { applied, head } = await runPostgresMigrations(backend, {
       logger: { info: (m) => console.log(m) },
     });

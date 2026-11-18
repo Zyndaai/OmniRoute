@@ -10,7 +10,8 @@
 # TEST proxies only: production proxies and production OAuth accounts never run here.
 #
 # Entry point: http://127.0.0.1:21080 (Caddy, routes like the production host Caddy).
-# Direct: leader http://127.0.0.1:21128, worker http://127.0.0.1:21129.
+# Direct: leader http://127.0.0.1:21128, workers http://127.0.0.1:21200 and :21201.
+# Processes: docker exec omniroute-rehearsal pm2 ls (and pm2 logs).
 
 name: omniroute-rehearsal
 
@@ -21,15 +22,12 @@ services:
   redis:
     container_name: omniroute-rehearsal-redis
 
-  omniroute-1:
-    container_name: omniroute-rehearsal-1
+  omniroute:
+    container_name: omniroute-rehearsal
     ports: !override
       - "127.0.0.1:21128:20128"
-
-  omniroute-2:
-    container_name: omniroute-rehearsal-2
-    ports: !override
-      - "127.0.0.1:21129:20128"
+      - "127.0.0.1:21200:20200"
+      - "127.0.0.1:21201:20201"
 
   caddy:
     image: caddy:2.10-alpine
@@ -40,7 +38,7 @@ services:
     volumes:
       - ./scripts/docker/rehearsal/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
-      omniroute-1:
+      omniroute:
         condition: service_healthy
 
 volumes:

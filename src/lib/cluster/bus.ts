@@ -29,20 +29,47 @@ export interface BusSubscriber {
 
 export type InvalidationData = Record<string, string | number | boolean>;
 type InvalidationHandler = (id: string | undefined, data: InvalidationData | undefined) => void;
-type RefreshRequestHandler = (connectionId: string) => void;
+/**
+ * Why a worker asks for a refresh: its copy expired, or upstream rejected a token that has
+ * not expired yet (revoked). Only "rejected" lets the leader refresh an unexpired token.
+ */
+export type RefreshReason = "expired" | "rejected";
+type RefreshRequestHandler = (connectionId: string, reason: RefreshReason) => void;
 
-const invalidationHandlers = new Map<string, Set<InvalidationHandler>>();
-const refreshRequestHandlers = new Set<RefreshRequestHandler>();
+/**
+ * Process-wide registry on globalThis. Next.js compiles the boot code (instrumentation) and
+ * the route handlers into separate bundles, each with its own copy of this module: the bus
+ * installed at boot and the handlers registered by route-side modules (readCache, apiKeys)
+ * must be the same objects in every copy, or a route's publish finds no bus and a received
+ * message reaches only the boot bundle's caches. Same reason as globalThis.__omnirouteDbBackend.
+ */
+interface BusRegistry {
+  activeBus: ClusterBus | null;
+  invalidationHandlers: Map<string, Set<InvalidationHandler>>;
+  refreshRequestHandlers: Set<RefreshRequestHandler>;
+  resyncHandlers: Set<() => void>;
+}
+
+const REGISTRY_KEY = Symbol.for("omniroute.cluster.bus");
+
+function registry(): BusRegistry {
+  const store = globalThis as unknown as Record<symbol, BusRegistry | undefined>;
+  return (store[REGISTRY_KEY] ??= {
+    activeBus: null,
+    invalidationHandlers: new Map(),
+    refreshRequestHandlers: new Set(),
+    resyncHandlers: new Set(),
+  });
+}
 
 /** Registers a local-only invalidator for `scope`. Returns an unregister function. */
 export function onInvalidation(scope: string, handler: InvalidationHandler): () => void {
+  const { invalidationHandlers } = registry();
   let set = invalidationHandlers.get(scope);
   if (!set) invalidationHandlers.set(scope, (set = new Set()));
   set.add(handler);
   return () => set?.delete(handler);
 }
-
-const resyncHandlers = new Set<() => void>();
 
 /**
  * Registers a "drop everything local" handler. Transports call `runBusResync()` after a
@@ -50,12 +77,13 @@ const resyncHandlers = new Set<() => void>();
  * relies on the bus must be dropped and re-read.
  */
 export function onBusResync(handler: () => void): () => void {
+  const { resyncHandlers } = registry();
   resyncHandlers.add(handler);
   return () => resyncHandlers.delete(handler);
 }
 
 export function runBusResync(warn: (line: string, error?: unknown) => void = console.warn): void {
-  for (const handler of resyncHandlers) {
+  for (const handler of registry().resyncHandlers) {
     try {
       handler();
     } catch (error) {
@@ -66,6 +94,7 @@ export function runBusResync(warn: (line: string, error?: unknown) => void = con
 
 /** Registers the leader's refresh-request handler. Returns an unregister function. */
 export function onRefreshRequest(handler: RefreshRequestHandler): () => void {
+  const { refreshRequestHandlers } = registry();
   refreshRequestHandlers.add(handler);
   return () => refreshRequestHandlers.delete(handler);
 }
@@ -74,7 +103,7 @@ export interface ClusterBus {
   readonly instanceId: string;
   start(): Promise<void>;
   publishInvalidation(scope: string, id?: string, data?: InvalidationData): void;
-  publishRefreshRequest(connectionId: string): void;
+  publishRefreshRequest(connectionId: string, reason?: RefreshReason): void;
   /** Handles one raw message as the subscriber delivers it (exported for tests). */
   dispatch(channel: string, raw: string): void;
 }
@@ -111,7 +140,7 @@ export function createClusterBus(options: ClusterBusOptions): ClusterBus {
         message.data && typeof message.data === "object" && !Array.isArray(message.data)
           ? (message.data as InvalidationData)
           : undefined;
-      for (const handler of invalidationHandlers.get(message.scope) ?? []) {
+      for (const handler of registry().invalidationHandlers.get(message.scope) ?? []) {
         try {
           handler(id, data);
         } catch (error) {
@@ -119,9 +148,10 @@ export function createClusterBus(options: ClusterBusOptions): ClusterBus {
         }
       }
     } else if (channel === REFRESH_REQUEST_CHANNEL && typeof message.connectionId === "string") {
-      for (const handler of refreshRequestHandlers) {
+      const reason: RefreshReason = message.reason === "rejected" ? "rejected" : "expired";
+      for (const handler of registry().refreshRequestHandlers) {
         try {
-          handler(message.connectionId);
+          handler(message.connectionId, reason);
         } catch (error) {
           warn("[CLUSTER] refresh-request handler failed", error);
         }
@@ -142,8 +172,8 @@ export function createClusterBus(options: ClusterBusOptions): ClusterBus {
         ...(data === undefined ? {} : { data }),
       });
     },
-    publishRefreshRequest(connectionId) {
-      send(REFRESH_REQUEST_CHANNEL, { connectionId });
+    publishRefreshRequest(connectionId, reason = "expired") {
+      send(REFRESH_REQUEST_CHANNEL, { connectionId, reason });
     },
     dispatch,
   };
@@ -151,22 +181,23 @@ export function createClusterBus(options: ClusterBusOptions): ClusterBus {
 
 // ── Process-wide bus (installed at boot in cluster mode) ─────────────────────────────
 
-let activeBus: ClusterBus | null = null;
-
 export function setClusterBus(bus: ClusterBus | null): void {
-  activeBus = bus;
+  registry().activeBus = bus;
 }
 
 export function getClusterBus(): ClusterBus | null {
-  return activeBus;
+  return registry().activeBus;
 }
 
 /** Tells the other processes to drop `scope`. No-op in standalone mode. */
 export function publishInvalidation(scope: string, id?: string, data?: InvalidationData): void {
-  activeBus?.publishInvalidation(scope, id, data);
+  registry().activeBus?.publishInvalidation(scope, id, data);
 }
 
 /** Asks the leader to refresh a rotating token. No-op in standalone mode. */
-export function publishRefreshRequest(connectionId: string): void {
-  activeBus?.publishRefreshRequest(connectionId);
+export function publishRefreshRequest(
+  connectionId: string,
+  reason: RefreshReason = "expired"
+): void {
+  registry().activeBus?.publishRefreshRequest(connectionId, reason);
 }

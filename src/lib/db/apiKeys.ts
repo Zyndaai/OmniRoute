@@ -16,6 +16,7 @@ import { checkKeyModelAccess } from "./apiKeyGroups";
 import { deleteOverridesForApiKey } from "./autoCandidateOverrides";
 import { SYNTHETIC_ENV_API_KEY_ID } from "@/shared/constants/apiKeyIdentities";
 import { timingSafeCompare } from "@/shared/utils/timingSafeCompare";
+import { onBusResync, onInvalidation, publishInvalidation } from "@/lib/cluster/bus";
 import {
   appendUsageLimitUpdates,
   hasUsageLimitUpdate,
@@ -253,7 +254,9 @@ interface ApiKeyView extends JsonRecord {
 const _keyValidationCache = new Map<string, { valid: boolean; timestamp: number }>();
 const _keyMetadataCache = new Map<string, CacheEntry<ApiKeyMetadata>>();
 const _lastUsedUpdateCache = new Map<string, number>();
-const CACHE_TTL = 60 * 1000; // 1 minute TTL
+// Writes clear these caches at once in every process (cluster bus, scope "api-keys"); the
+// TTL only bounds how long a revoked key survives if a bus message is lost.
+const CACHE_TTL = 30 * 1000;
 const LAST_USED_UPDATE_TTL = 5 * 60 * 1000;
 const MAX_CACHE_SIZE = 1000;
 const EXCLUSIVE_LEASE_SCOPE = "lease:exclusive";
@@ -296,14 +299,29 @@ function asJsonText(value: unknown): string | null {
 }
 
 /**
- * Clear all caches (called on key create/update/delete)
+ * Clear all caches (called on key create/update/delete), here and in every other cluster
+ * process: a revoked or deleted key must stop working everywhere, not after a cache TTL.
  */
 function invalidateCaches() {
+  invalidateCachesLocal();
+  publishInvalidation(API_KEYS_BUS_SCOPE);
+}
+
+function invalidateCachesLocal() {
   _keyValidationCache.clear();
   _keyMetadataCache.clear();
   clearModelPermissionCache();
   _lastUsedUpdateCache.clear();
 }
+
+// Received from another process: local twin only (never republished). Cleared again after
+// a second in case the writer published before its transaction committed.
+const API_KEYS_BUS_SCOPE = "api-keys";
+onInvalidation(API_KEYS_BUS_SCOPE, () => {
+  invalidateCachesLocal();
+  setTimeout(invalidateCachesLocal, 1_000).unref?.();
+});
+onBusResync(invalidateCachesLocal);
 
 function toRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" ? (value as JsonRecord) : {};

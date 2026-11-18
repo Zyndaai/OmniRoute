@@ -32,7 +32,7 @@ describe("MCP Dynamic Runtime Schema Plumbing", () => {
   });
 
   it("createMcpServer with blockedProviders option registers dynamic tool schema", async () => {
-    const server = createMcpServer({ blockedProviders: ["serper", "brave"] });
+    const server = await createMcpServer({ blockedProviders: ["serper", "brave"] });
     expect(server).toBeTruthy();
 
     const registeredTools = (

@@ -1,19 +1,23 @@
-# OmniRoute as a cluster: one leader, one worker, PostgreSQL and Redis on one host.
-# Design: docs/architecture/persistence-shared-state.md. NOT the live file yet: the cut-over runbook
-# (docs/ops/POSTGRES_CUTOVER.md) copies it over /opt/omniroute/docker-compose.yml.
+# OmniRoute as a cluster on one host: ONE app container running a leader plus N workers under
+# PM2 (ecosystem.config.cjs, fork mode, one port per process), PostgreSQL and Redis.
+# NOT the live file yet: the cut-over runbook copies it over /opt/omniroute/docker-compose.yml.
 #
-#   omniroute-1  OMNIROUTE_ROLE=leader  migrations, background jobs, dashboard, the ONLY process
-#                                       that refreshes single-use OAuth tokens  127.0.0.1:20128
-#   omniroute-2  OMNIROUTE_ROLE=worker  /v1 requests only                       127.0.0.1:20129
-#   postgres     all durable state (no published port; back up with `compose exec postgres pg_dump`)
-#   redis        leader fence, cache-invalidation bus, per-account rate limiter (no published port).
-#                Coordination falls back to PostgreSQL when REDIS_URL is unset; here it is set.
+#   omniroute   PM2 inside one container:
+#                 leader     OMNIROUTE_ROLE=leader  migrations, background jobs, dashboard, the ONLY
+#                            process that refreshes single-use OAuth tokens      127.0.0.1:20128
+#                 worker-i   OMNIROUTE_ROLE=worker  serves requests               127.0.0.1:20200+i
+#   postgres    all durable state (no published port; back up with `compose exec postgres pg_dump`)
+#   redis       leader fence, cache-invalidation bus, per-account rate limiter (no published port).
+#               Coordination falls back to PostgreSQL when REDIS_URL is unset; here it is set.
 #
-# Host Caddy: management plane (/dashboard*, /home*, /api/* except /api/v1/*, /live-ws*) -> 20128 only;
-# inference (/v1/*, /api/v1/*) -> 20128 and 20129 (docs/ops/CADDY_CLUSTER.md).
+# Host Caddy: management plane (/dashboard*, /home*, /api/* except /api/v1/*, /live-ws*) -> 20128
+# only; inference (/v1/*, /api/v1/*) -> 20128 and every worker port, with x-session-affinity.
 #
-# Start order matters: never `up` both app containers at once after changing roles. The leader
-# migrates first; the worker waits for it to be healthy, then waits for the migration head itself.
+# Order inside the container sorts itself out: the leader takes the fence and migrates; each
+# worker waits until the database reaches its image's migration head. Operations:
+#   docker exec omniroute pm2 ls | pm2 logs worker-0 | pm2 restart leader (never `pm2 reload leader`)
+# The image HEALTHCHECK probes the leader (20128); PM2 restarts a dead worker and Caddy's
+# per-upstream health checks take a stuck one out of rotation.
 #
 # /opt/omniroute/.env must hold (shared by every app container; a worker never generates them):
 #   JWT_SECRET, API_KEY_SECRET, STORAGE_ENCRYPTION_KEY, STORAGE_ENCRYPTION_KEY_VERSION, MACHINE_ID_SALT,
@@ -89,39 +93,33 @@ services:
         max-size: 10m
         max-file: "3"
 
-  omniroute-1:
+  omniroute:
     <<: *omniroute
-    container_name: omniroute-1
+    container_name: omniroute
+    # Leader + workers under PM2 instead of the image's single-process default command.
+    command: ["pm2-runtime", "ecosystem.config.cjs"]
     environment:
       <<: *omniroute-env
-      OMNIROUTE_ROLE: leader
-      OMNIROUTE_INSTANCE_ID: omniroute-1
+      # Roles, instance ids and ports are assigned per process by ecosystem.config.cjs.
+      OMNIROUTE_WORKERS: ${OMNIROUTE_WORKERS:-2}
+      OMNIROUTE_LEADER_MEMORY_MB: ${OMNIROUTE_LEADER_MEMORY_MB:-1024}
+      OMNIROUTE_WORKER_MEMORY_MB: ${OMNIROUTE_WORKER_MEMORY_MB:-768}
+    # PM2's graceful stop gives each process 15 s (kill_timeout); leave Docker room for all of them.
+    stop_grace_period: 30s
     ports:
-      # Loopback only: Docker-published ports bypass UFW.
+      # Loopback only: Docker-published ports bypass UFW. One line per process; add worker
+      # ports here when raising OMNIROUTE_WORKERS.
       - "127.0.0.1:20128:20128"
+      - "127.0.0.1:20200:20200"
+      - "127.0.0.1:20201:20201"
     volumes:
+      # One DATA_DIR for every process: call-log bodies written by any process are read by the
+      # dashboard on the leader.
       - omniroute-data:/app/data
-      - omniroute-call-logs:/app/data/call_logs
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-
-  omniroute-2:
-    <<: *omniroute
-    container_name: omniroute-2
-    environment:
-      <<: *omniroute-env
-      OMNIROUTE_ROLE: worker
-      OMNIROUTE_INSTANCE_ID: omniroute-2
-    ports:
-      - "127.0.0.1:20129:20128"
-    volumes:
-      - omniroute-data-2:/app/data
-      - omniroute-call-logs:/app/data/call_logs
-    depends_on:
-      omniroute-1:
         condition: service_healthy
 
 volumes:
@@ -129,8 +127,4 @@ volumes:
   # External, or compose would create an empty `omniroute_omniroute-data` volume.
   omniroute-data:
     external: true
-  omniroute-data-2:
-  # Call-log bodies are files under DATA_DIR/call_logs, written by whichever process served the
-  # request and read by the dashboard on the leader: one volume shared by every app container.
-  omniroute-call-logs:
   omniroute-pg:

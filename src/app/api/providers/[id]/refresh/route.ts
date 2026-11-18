@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import * as passive from "@omniroute/open-sse/services/tokenRefresh/passiveCodex.ts";
+import * as passiveRefresh from "@omniroute/open-sse/services/tokenRefresh/passiveRefresh.ts";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
 import { updateProviderConnection } from "@/lib/db/providers";
 import {
@@ -56,11 +57,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     }
 
     const provider = connection.provider;
-    if (passive.isPassiveCodex(provider)) {
-      return NextResponse.json(
-        { error: passive.PASSIVE_REFRESH_MESSAGE, code: "refresh_disabled" },
-        { status: 409 }
-      );
+    if (passiveRefresh.isPassiveRefresh(provider)) {
+      const message = passive.isPassiveCodex(provider)
+        ? passive.PASSIVE_REFRESH_MESSAGE
+        : passiveRefresh.PASSIVE_CLUSTER_MESSAGE;
+      return NextResponse.json({ error: message, code: "refresh_disabled" }, { status: 409 });
     }
 
     // Codex/OpenAI multi-account family-revocation cascade guard.

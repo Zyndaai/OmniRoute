@@ -1,4 +1,5 @@
-const MODEL_PERMISSION_CACHE_TTL = 60 * 1000;
+// Same bound as the key caches in ../apiKeys.ts (the floor if a bus invalidation is lost).
+const MODEL_PERMISSION_CACHE_TTL = 30 * 1000;
 
 interface ModelPermissionCacheValue {
   allowed: boolean;

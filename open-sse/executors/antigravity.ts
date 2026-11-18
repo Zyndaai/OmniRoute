@@ -253,16 +253,18 @@ export function createCreditsExtractionTransform(
   );
 }
 
-export function markConnectionQuotaExhausted(
+export async function markConnectionQuotaExhausted(
   connectionId: string,
   retryAfterMs: number,
   model?: string | null
-): void {
+): Promise<void> {
   try {
     if (markAntigravityModelQuotaExhausted(connectionId, retryAfterMs, model)) return;
-    // Best effort: the write is async now, so its failure is caught here, not by the try.
-    void setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs).catch(() => {});
-  } catch {}
+    // No in-memory lock backs this path, so wait for the row: the next request must see it.
+    await setConnectionRateLimitUntil(connectionId, Date.now() + retryAfterMs);
+  } catch {
+    // Best effort: a failed write must not fail the request.
+  }
 }
 
 /**
@@ -1813,7 +1815,7 @@ export class AntigravityExecutor extends BaseExecutor {
           ctx.correlationId
         );
         if (creditsResult) return { kind: "return", result: creditsResult };
-        if (retryMs) markConnectionQuotaExhausted(accountId, retryMs, ctx.model);
+        if (retryMs) await markConnectionQuotaExhausted(accountId, retryMs, ctx.model);
       }
 
       return {

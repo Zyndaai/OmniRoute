@@ -11,7 +11,7 @@ import { projectProviderValidationResultForPublicResponse } from "@/lib/provider
 import { getCliRuntimeStatus } from "@/shared/services/cliRuntime";
 import { buildQoderCliNotFoundHint } from "@omniroute/open-sse/services/qoderCliResolve.ts";
 // Use the shared open-sse token refresh with built-in dedup/race-condition cache
-import { getAccessToken, isPassiveCodex } from "@omniroute/open-sse/services/tokenRefresh.ts";
+import { getAccessToken, isPassiveRefresh } from "@omniroute/open-sse/services/tokenRefresh.ts";
 import { rotationGroupFor } from "@omniroute/open-sse/services/refreshSerializer.ts";
 import { saveCallLog } from "@/lib/usageDb";
 import { shouldHideLogs } from "@/lib/tokenHealthCheck";
@@ -207,38 +207,44 @@ async function refreshOAuthToken(connection: any) {
     // write happens before the lock releases. This prevents a concurrent caller
     // from reading the stale refresh_token between the network call and the DB
     // update.
-    const result = await getAccessToken(provider, credentials, console, null, async (refreshed: RefreshedCredentials) => {
-      if (!refreshed?.accessToken) return;
-      const update: any = {
-        accessToken: refreshed.accessToken,
-      };
-      if (refreshed.refreshToken) update.refreshToken = refreshed.refreshToken;
-      if (refreshed.expiresAt) {
-        update.expiresAt = refreshed.expiresAt;
-        update.tokenExpiresAt = refreshed.expiresAt;
-      } else if (refreshed.expiresIn) {
-        const expiresAt = new Date(Date.now() + refreshed.expiresIn * 1000).toISOString();
-        update.expiresAt = expiresAt;
-        update.tokenExpiresAt = expiresAt;
-      } else {
-        // Upstream returned neither expiresAt nor expiresIn. Persist a
-        // conservative 30-minute expiry so a NULL expiresAt (treated as
-        // expired by isTokenExpired when a refresh token exists) does not
-        // force a token rotation on EVERY subsequent test — the historical
-        // Google/OAuth default window, well inside any realistic token TTL.
-        const expiresAt = new Date(Date.now() + FALLBACK_REFRESH_EXPIRY_MS).toISOString();
-        update.expiresAt = expiresAt;
-        update.tokenExpiresAt = expiresAt;
-      }
-      if (refreshed.providerSpecificData) {
-        update.providerSpecificData = {
-          ...(connection.providerSpecificData || {}),
-          ...refreshed.providerSpecificData,
+    const result = await getAccessToken(
+      provider,
+      credentials,
+      console,
+      null,
+      async (refreshed: RefreshedCredentials) => {
+        if (!refreshed?.accessToken) return;
+        const update: any = {
+          accessToken: refreshed.accessToken,
         };
+        if (refreshed.refreshToken) update.refreshToken = refreshed.refreshToken;
+        if (refreshed.expiresAt) {
+          update.expiresAt = refreshed.expiresAt;
+          update.tokenExpiresAt = refreshed.expiresAt;
+        } else if (refreshed.expiresIn) {
+          const expiresAt = new Date(Date.now() + refreshed.expiresIn * 1000).toISOString();
+          update.expiresAt = expiresAt;
+          update.tokenExpiresAt = expiresAt;
+        } else {
+          // Upstream returned neither expiresAt nor expiresIn. Persist a
+          // conservative 30-minute expiry so a NULL expiresAt (treated as
+          // expired by isTokenExpired when a refresh token exists) does not
+          // force a token rotation on EVERY subsequent test — the historical
+          // Google/OAuth default window, well inside any realistic token TTL.
+          const expiresAt = new Date(Date.now() + FALLBACK_REFRESH_EXPIRY_MS).toISOString();
+          update.expiresAt = expiresAt;
+          update.tokenExpiresAt = expiresAt;
+        }
+        if (refreshed.providerSpecificData) {
+          update.providerSpecificData = {
+            ...(connection.providerSpecificData || {}),
+            ...refreshed.providerSpecificData,
+          };
+        }
+        await updateProviderConnection(connection.id, update);
       }
-      await updateProviderConnection(connection.id, update);
-    });
-    return isPassiveCodex(provider) && !result?.accessToken ? null : result; // { accessToken, expiresIn, refreshToken } or null
+    );
+    return isPassiveRefresh(provider) && !result?.accessToken ? null : result; // { accessToken, expiresIn, refreshToken } or null
   } catch (err) {
     console.error(
       `Error refreshing ${provider} token:`,

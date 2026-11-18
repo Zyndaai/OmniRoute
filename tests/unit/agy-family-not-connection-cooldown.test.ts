@@ -118,7 +118,7 @@ test("markConnectionQuotaExhausted with a Gemini model locks the family, not the
   });
   const connId = (conn as { id: string }).id;
 
-  markConnectionQuotaExhausted(connId, 24 * 60 * 60 * 1000, "gemini-3.1-flash-lite");
+  await markConnectionQuotaExhausted(connId, 24 * 60 * 60 * 1000, "gemini-3.1-flash-lite");
 
   assert.equal(
     await providersDb.isConnectionRateLimited(connId),

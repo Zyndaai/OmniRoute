@@ -1,4 +1,7 @@
-import { isPassiveCodex, recordRejectedToken } from "../../services/tokenRefresh/passiveCodex.ts";
+import {
+  isPassiveRefresh,
+  recordRejectedToken,
+} from "../../services/tokenRefresh/passiveRefresh.ts";
 import type { ChatCoreErrorResult, ProviderLegUsage } from "@/lib/skills/toolLoopTypes.ts";
 import type { getProviderCredentials } from "@/sse/services/auth.ts";
 import type { updateFromHeaders, updateFromResponseBody } from "../../services/rateLimitManager.ts";
@@ -377,7 +380,8 @@ export async function runProviderExecutionPipeline(
     while (true) {
       const candidate = await input.getNextFamilyFallback(currentModel, excluded, providerHint);
       if (!candidate || excluded.has(candidate)) return null;
-      if (await isFamilyFallbackEligible(candidate,target.provider, connectionId)) return candidate;
+      if (await isFamilyFallbackEligible(candidate, target.provider, connectionId))
+        return candidate;
       excluded.add(candidate);
     }
   };
@@ -500,7 +504,7 @@ export async function runProviderExecutionPipeline(
       typeof connection.refreshCredentials === "function" &&
       !(await shouldSkipCredentialRefresh(target.provider, attempt.response))
     ) {
-      if (isPassiveCodex(target.provider)) recordRejectedToken(connection.getCredentials());
+      if (isPassiveRefresh(target.provider)) recordRejectedToken(connection.getCredentials());
       const refreshed = await connection.refreshCredentials(connection.getCredentials());
       if (refreshed && (refreshed.accessToken || refreshed.copilotToken)) {
         connection.replaceCredentials({ ...connection.getCredentials(), ...refreshed });

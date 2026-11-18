@@ -133,7 +133,7 @@ import {
   classifyProviderError,
   PROVIDER_ERROR_TYPES,
 } from "@omniroute/open-sse/services/errorClassifier.ts";
-import { resolveTerminalConnectionStatus, isPassiveCodex } from "./authTerminalStatus.ts";
+import { resolveTerminalConnectionStatus, isPassiveRefresh } from "./authTerminalStatus.ts";
 import {
   ALIBABA_FREE_DRAINED_LOCK_MS,
   getAlibabaBillingMode,
@@ -2952,7 +2952,7 @@ export async function markAccountUnavailable(
     const tokenExpiryMs = Date.parse(String(conn?.tokenExpiresAt || conn?.expiresAt || ""));
     if (
       terminalStatus === "expired" &&
-      (isPassiveCodex(provider) ||
+      (isPassiveRefresh(provider) ||
         (Number.isFinite(tokenExpiryMs) && tokenExpiryMs > Date.now() + 60_000))
     ) {
       terminalStatus = null;

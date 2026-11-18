@@ -1,5 +1,8 @@
 import { projectFailureUsageErrorCode } from "./failureUsage.ts";
-import { isPassiveCodex, recordRejectedToken } from "../../services/tokenRefresh/passiveCodex.ts";
+import {
+  isPassiveRefresh,
+  recordRejectedToken,
+} from "../../services/tokenRefresh/passiveRefresh.ts";
 
 export { extractSystemRoleMessages, relocateDirectiveOnlyMessages } from "./claudeSystemRole.ts";
 
@@ -615,7 +618,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
     !(await shouldIsolateProbeFailures()) &&
     !(await shouldSkipCredentialRefresh(provider, providerResponse))
   ) {
-    if (isPassiveCodex(provider)) recordRejectedToken(credentials);
+    if (isPassiveRefresh(provider)) recordRejectedToken(credentials);
     // Fix A: wrap refreshCredentials in runWithOnPersist so the persist callback
     // executes INSIDE the per-connection mutex held by getAccessToken. This makes
     // [network refresh + DB write + outer-state mutation] one atomic step and
@@ -686,7 +689,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
       // mutation already happened atomically inside the mutex.
       if (!persistFnRan) {
         Object.assign(credentials, newCredentials);
-        if (onCredentialsRefreshed && !isPassiveCodex(provider)) {
+        if (onCredentialsRefreshed && !isPassiveRefresh(provider)) {
           await onCredentialsRefreshed(newCredentials);
         }
       }
@@ -726,7 +729,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
               upstreamExtraHeaders: retryUpstreamExtraHeaders,
               clientHeaders: getExecutorClientHeaders(),
               clientResponseFormat,
-              onCredentialsRefreshed: isPassiveCodex(provider)
+              onCredentialsRefreshed: isPassiveRefresh(provider)
                 ? handleCredentialsRefreshed
                 : onCredentialsRefreshed,
               skipUpstreamRetry: isCombo,

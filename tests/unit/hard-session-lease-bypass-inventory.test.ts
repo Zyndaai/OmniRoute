@@ -232,6 +232,10 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     "src/lib/cliproxyCompat/managementApi.ts": 1,
     "src/lib/cloudAgent/api.ts": 1,
     "src/lib/cloudSync.ts": 1,
+    // Cluster leader refreshing a token for a worker: reads the row uncached and refreshes
+    // through getAccessToken (credential refresh only, no upstream dispatch), like the
+    // token health sweep.
+    "src/lib/cluster/leaderRefresh.ts": 1,
     "src/lib/combos/builderOptions.ts": 1,
     "src/lib/copilot/tools.ts": 1,
     // #16190: the retest of gateway-disabled connections loads the inactive rows once per

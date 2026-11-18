@@ -29,6 +29,8 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void | Prom
   }
 }
 
+// Fail-safe: on a worker everything is passive except the known non-rotating providers.
+// github, cursor, qoder and clinepass accept a new refresh token when one comes back.
 const ROTATING = [
   "claude",
   "codex",
@@ -36,13 +38,17 @@ const ROTATING = [
   "kiro",
   "amazon-q",
   "cline",
+  "clinepass",
   "kimi-coding",
   "gitlab-duo",
   "openference",
+  "github",
+  "cursor",
+  "qoder",
 ];
-const NON_ROTATING = ["antigravity", "gemini", "github", "cursor", "qoder"];
+const NON_ROTATING = ["antigravity", "agy", "gemini", "gemini-cli", "muse-code"];
 
-test("worker: every rotating provider is passive, non-rotating ones are not", () =>
+test("worker: every provider is passive except the known non-rotating ones", () =>
   withEnv(
     { OMNIROUTE_ROLE: "worker", OMNIROUTE_TOKEN_REFRESH_PASSIVE_PROVIDERS: undefined },
     () => {

@@ -102,6 +102,23 @@ export async function ensureDbReadyForBoot(
   }
 }
 
+/**
+ * Runs a cluster boot step; on failure logs it and exits the process with code 1 (see the
+ * call sites in registerNodejs). `exit` is injectable for tests.
+ */
+export async function exitOnClusterBootFailure<T>(
+  step: () => Promise<T>,
+  what: string,
+  exit: (code: number) => never = (code) => process.exit(code)
+): Promise<T> {
+  try {
+    return await step();
+  } catch (err: unknown) {
+    console.error(`[CLUSTER] Fatal during ${what}: ${normalizeBootError(err).message}`);
+    return exit(1);
+  }
+}
+
 export function isBackgroundServicesDisabled(): boolean {
   const raw = process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES;
   if (!raw) return false;
@@ -563,13 +580,46 @@ export async function registerNodejs(): Promise<void> {
     await import("@/lib/providers/noAuthAutoRoutingReadiness");
   registerNoAuthAutoRoutingReadiness();
 
+  // Cluster role (OMNIROUTE_ROLE): validate the configuration and take the leader fence
+  // BEFORE the database is touched, so a second standalone process or a stale leader exits
+  // before it migrates or rewrites shared state. Workers take no fence and run no
+  // background work (enforceWorkerBackgroundSwitch also stops modules that start their own
+  // timers on import). Unset role = standalone = the single-process behaviour.
+  const [
+    { beginClusterRuntime, completeClusterRuntime },
+    { resolveBootPlan, enforceWorkerBackgroundSwitch },
+  ] = await Promise.all([import("@/lib/cluster/runtime"), import("@/lib/cluster/role")]);
+  // A cluster refusal must END the process, not leave it listening without a boot (the outer
+  // hook in instrumentation.ts keeps the listener up on a generic failure so the error is
+  // logged): a second leader that stayed up would hold a port and never be restarted by
+  // PM2/Docker, and a worker that gave up waiting for migrations should be restarted.
+  const plan = await exitOnClusterBootFailure(
+    async () => (await beginClusterRuntime()) ?? resolveBootPlan(),
+    "cluster start"
+  );
+  if (enforceWorkerBackgroundSwitch()) {
+    console.log("[STARTUP] Worker: background services, schedulers and token sweeps stay off");
+  }
+
   // Connect to PostgreSQL, run pending migrations and ensure partitions
   // (ensureDbInitialized) before ANY other startup step touches the database.
+  // A worker does not migrate: it waits until the leader has reached this image's head.
   // This MUST run before ensureSecrets, clearStaleCrashCooldowns, getSettings
   // and initAuditLog below. ensureDbInitialized() is idempotent, so later
   // callers just reuse the connected pool.
-  await ensureDbReadyForBoot();
+  if (plan.role === "worker") {
+    await exitOnClusterBootFailure(() => ensureDbReadyForBoot(), "worker database wait");
+  } else {
+    await ensureDbReadyForBoot();
+  }
+  if (plan.clusterMode) {
+    await exitOnClusterBootFailure(() => completeClusterRuntime(), "cluster bus");
+  } else {
+    await completeClusterRuntime();
+  }
 
+  // In cluster mode clusterConfigErrors() already required JWT_SECRET and API_KEY_SECRET in
+  // the environment, so a worker never generates and persists its own.
   await ensureSecrets();
   await Promise.all([
     import("@/lib/env/runtimeEnv").then(({ enforceWebRuntimeEnv }) => enforceWebRuntimeEnv()),
@@ -589,17 +639,20 @@ export async function registerNodejs(): Promise<void> {
   // all subsequent requests time out at Bottleneck's maxWaitMs (120 s default).
   // Terminal states (banned / expired / credits_exhausted) are intentionally kept.
   // See: https://github.com/cheaper-inference/OmniRoute/issues/3625 (Part A)
-  try {
-    const { clearStaleCrashCooldowns } = await import("@/lib/db/providers");
-    const { cleared } = await clearStaleCrashCooldowns();
-    if (cleared > 0) {
-      console.log(
-        `[STARTUP] Cleared ${cleared} stale transient connection cooldown(s) from prior crash (#3625)`
-      );
+  // Leader only: a worker joining a running cluster would wipe live cooldowns.
+  if (plan.leaderDuties) {
+    try {
+      const { clearStaleCrashCooldowns } = await import("@/lib/db/providers");
+      const { cleared } = await clearStaleCrashCooldowns();
+      if (cleared > 0) {
+        console.log(
+          `[STARTUP] Cleared ${cleared} stale transient connection cooldown(s) from prior crash (#3625)`
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[STARTUP] Could not clear stale crash cooldowns (non-fatal):", msg);
     }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[STARTUP] Could not clear stale crash cooldowns (non-fatal):", msg);
   }
 
   await scanComboModelNameCollisionsAtBoot();
@@ -644,17 +697,19 @@ export async function registerNodejs(): Promise<void> {
     import("@omniroute/open-sse/services/tierResolver").then((m) => m.ensureTierPricingLoaded()),
   ]);
 
-  // Proxy health scheduler (auto-removes dead proxies on interval)
-  await import("@/lib/proxyHealth/scheduler");
+  if (plan.leaderDuties) {
+    // Proxy health scheduler (auto-removes dead proxies on interval)
+    await import("@/lib/proxyHealth/scheduler");
 
-  // Free-proxy auto-sync scheduler (re-fetches free-proxy sources on interval, #7079).
-  // Optional: skipped in headless mode (src/lib/system/headless.ts).
-  if (!skipInHeadless("free-proxy-sync")) {
-    await import("@/lib/freeProxyProviders/scheduler");
+    // Free-proxy auto-sync scheduler (re-fetches free-proxy sources on interval, #7079).
+    // Optional: skipped in headless mode (src/lib/system/headless.ts).
+    if (!skipInHeadless("free-proxy-sync")) {
+      await import("@/lib/freeProxyProviders/scheduler");
+    }
   }
 
   initGracefulShutdown();
-  initApiBridgeServer();
+  if (plan.leaderDuties) initApiBridgeServer();
   startSpendBatchWriter();
   registerDefaultGuardrails();
   registerBuiltinSkills(skillExecutor);
@@ -698,12 +753,15 @@ export async function registerNodejs(): Promise<void> {
       import("@/lib/modelAliasSeed"),
     ]);
     let settings = await getSettings();
-    const passwordState = await ensurePersistentManagementPasswordHash({
-      logger: console,
-      settings,
-      source: "startup",
-    });
-    settings = passwordState.settings;
+    // Persisting a password hash is a shared write: the leader does it once.
+    if (plan.leaderDuties) {
+      const passwordState = await ensurePersistentManagementPasswordHash({
+        logger: console,
+        settings,
+        source: "startup",
+      });
+      settings = passwordState.settings;
+    }
     const runtimeChanges = await applyRuntimeSettings(settings, { force: true, source: "startup" });
     if (runtimeChanges.length > 0) {
       console.log(
@@ -756,13 +814,18 @@ export async function registerNodejs(): Promise<void> {
       console.log("[STARTUP] Task-Aware Routing config restored from settings");
     }
 
-    const seededModelAliases = await seedDefaultModelAliases();
-    console.log(
-      `[STARTUP] Model alias seed: applied=${seededModelAliases.applied.length}, skipped=${seededModelAliases.skipped.length}, removed=${seededModelAliases.removed.length}, failed=${seededModelAliases.failed.length}`
-    );
-    startSessionAccountAffinityCleanup();
+    // Seeds, data fixes and the affinity cleanup timer write shared rows: leader only.
+    const seededModelAliases = plan.leaderDuties ? await seedDefaultModelAliases() : null;
+    if (seededModelAliases) {
+      console.log(
+        `[STARTUP] Model alias seed: applied=${seededModelAliases.applied.length}, skipped=${seededModelAliases.skipped.length}, removed=${seededModelAliases.removed.length}, failed=${seededModelAliases.failed.length}`
+      );
+      startSessionAccountAffinityCleanup();
+    }
 
-    const migration = await migrateCodexConnectionDefaultsFromLegacySettings();
+    const migration = plan.leaderDuties
+      ? await migrateCodexConnectionDefaultsFromLegacySettings()
+      : { migrated: false, updatedConnectionIds: [] as string[] };
     if (migration.migrated) {
       console.log(
         `[STARTUP] Migrated Codex connection defaults for ${migration.updatedConnectionIds.length} connection(s)`
@@ -778,6 +841,8 @@ export async function registerNodejs(): Promise<void> {
       }
     }
 
+    // Every process: it polls the settings revision in the database, which is what keeps a
+    // worker's in-memory runtime config in step with changes made on the leader.
     startRuntimeConfigHotReload();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -788,6 +853,13 @@ export async function registerNodejs(): Promise<void> {
   // routes load no other src/sse module), so it must be in place before the first request.
   await import("@/sse/services/tokenRefresh");
 
+  // Cluster leader: refresh rotating tokens on behalf of workers (they never refresh them).
+  if (plan.clusterMode && plan.leaderDuties) {
+    const { installLeaderRefreshHandler } = await import("@/lib/cluster/leaderRefresh");
+    installLeaderRefreshHandler();
+    console.log("[STARTUP] Leader: refreshing rotating tokens for workers on request");
+  }
+
   // Proactively start the credential-health sweep at boot so stale web-session
   // connections (cookies that expired overnight) get re-probed and recovered on
   // startup — instead of staying red until the first real request lazily imports
@@ -795,50 +867,55 @@ export async function registerNodejs(): Promise<void> {
   // OMNIROUTE_DISABLE_CREDENTIAL_HEALTH_CHECK and its cadence is tunable via
   // CREDENTIAL_HEALTH_CHECK_INTERVAL. NOTE: this MUST live here (the real Next.js
   // instrumentation startup), NOT in the unused src/server-init.ts.
-  try {
-    const { initCredentialHealthCheck } = await import("@/lib/credentialHealth/scheduler");
-    const started = initCredentialHealthCheck();
-    console.log(
-      started
-        ? "[STARTUP] Credential health scheduler started"
-        : "[STARTUP] Credential health scheduler disabled"
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[STARTUP] Could not start credential health scheduler:", msg);
-  }
-
-  try {
-    const { initAuditLog, cleanupExpiredLogs } = await import("@/lib/compliance/index");
-    initAuditLog();
-    console.log("[COMPLIANCE] Audit log table initialized");
-
-    const cleanup = await cleanupExpiredLogs();
-    if (
-      cleanup.deletedUsage ||
-      cleanup.deletedCallLogs ||
-      cleanup.deletedProxyLogs ||
-      cleanup.deletedRequestDetailLogs ||
-      cleanup.deletedAuditLogs ||
-      cleanup.deletedMcpAuditLogs
-    ) {
-      console.log("[COMPLIANCE] Expired log cleanup:", cleanup);
+  // Leader only: the sweep refreshes OAuth tokens, which a worker must never do.
+  if (plan.leaderDuties)
+    try {
+      const { initCredentialHealthCheck } = await import("@/lib/credentialHealth/scheduler");
+      const started = initCredentialHealthCheck();
+      console.log(
+        started
+          ? "[STARTUP] Credential health scheduler started"
+          : "[STARTUP] Credential health scheduler disabled"
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[STARTUP] Could not start credential health scheduler:", msg);
     }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[COMPLIANCE] Could not initialize audit log:", msg);
-  }
+
+  // Retention passes delete shared rows: leader only.
+  if (plan.leaderDuties)
+    try {
+      const { initAuditLog, cleanupExpiredLogs } = await import("@/lib/compliance/index");
+      initAuditLog();
+      console.log("[COMPLIANCE] Audit log table initialized");
+
+      const cleanup = await cleanupExpiredLogs();
+      if (
+        cleanup.deletedUsage ||
+        cleanup.deletedCallLogs ||
+        cleanup.deletedProxyLogs ||
+        cleanup.deletedRequestDetailLogs ||
+        cleanup.deletedAuditLogs ||
+        cleanup.deletedMcpAuditLogs
+      ) {
+        console.log("[COMPLIANCE] Expired log cleanup:", cleanup);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[COMPLIANCE] Could not initialize audit log:", msg);
+    }
 
   // Retention cleanup scheduler (#4691/#6988, #9624): runs the general retention
   // cleanup once after startup and then every 6 hours. Previously this was only
   // wired into the unused src/server-init.ts, so telemetry tables grew unboundedly
   // even with retention.autoCleanupEnabled=true. Idempotent (guarded internally).
-  try {
-    startCleanupScheduler();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn("[STARTUP] Could not start cleanup scheduler (non-fatal):", msg);
-  }
+  if (plan.leaderDuties)
+    try {
+      startCleanupScheduler();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("[STARTUP] Could not start cleanup scheduler (non-fatal):", msg);
+    }
 
   if (!isBackgroundServicesDisabled()) {
     // Warm the model catalog's durable, apiKey-independent sub-caches at
@@ -876,7 +953,7 @@ export async function registerNodejs(): Promise<void> {
 
       // Optional subsystems (dashboard, catalog enrichment, embedded
       // services…): skipped entirely in headless mode — see OPTIONAL_BOOT_SUBSYSTEMS.
-      startOptionalBootSubsystems(),
+      plan.optionalSubsystems ? startOptionalBootSubsystems() : Promise.resolve([]),
     ]);
   }
 

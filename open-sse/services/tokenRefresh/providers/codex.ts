@@ -4,7 +4,7 @@
 import { PROVIDERS, OAUTH_ENDPOINTS } from "../../../config/constants.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
 import { buildFormParams } from "../shared.ts";
-import { isPassiveCodex } from "../passiveCodex.ts";
+import { isPassiveRefresh } from "../passiveRefresh.ts";
 
 /**
  * Specialized refresh for Codex (OpenAI) OAuth tokens.
@@ -13,7 +13,7 @@ import { isPassiveCodex } from "../passiveCodex.ts";
  * consumed or is invalid, so callers can stop retrying and request re-authentication.
  */
 export async function refreshCodexToken(refreshToken, log, proxyConfig: unknown = null) {
-  if (isPassiveCodex("codex")) return { error: "refresh_disabled" };
+  if (isPassiveRefresh("codex")) return { error: "refresh_disabled" };
   try {
     const response = await runWithProxyContext(proxyConfig, () =>
       fetch(OAUTH_ENDPOINTS.openai.token, {

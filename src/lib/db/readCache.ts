@@ -11,6 +11,8 @@
  *   const settings = await dbCache.getSettings();
  */
 
+import { onBusResync, onInvalidation, publishInvalidation } from "../cluster/bus";
+
 type CacheEntry<T> = {
   value: T;
   expiresAt: number;
@@ -311,9 +313,10 @@ export function getModelCatalogCacheVersion(): number {
   return modelCatalogCacheVersion;
 }
 
-/** Invalidate only the unified model catalog response cache. */
+/** Invalidate only the unified model catalog response cache (here and in the cluster). */
 export function invalidateModelCatalogCache(): void {
   modelCatalogCacheVersion++;
+  publishInvalidation(MODEL_CATALOG_SCOPE);
 }
 
 // ──────────────── API-Key Policy Config ────────────────
@@ -464,15 +467,66 @@ export function invalidateConnectionUpdate(
  * writes (create/update/delete) must keep the default (omit this flag) so
  * the catalog still reflects them immediately.
  */
+type DbCacheScope =
+  | "settings"
+  | "pricing"
+  | "connections"
+  | "combos"
+  | "nodes"
+  | "model-capabilities"
+  | "api-key-policy";
+
+const DB_CACHE_SCOPES: ReadonlySet<string> = new Set<DbCacheScope>([
+  "settings",
+  "pricing",
+  "connections",
+  "combos",
+  "nodes",
+  "model-capabilities",
+  "api-key-policy",
+]);
+
 export function invalidateDbCache(
-  scope?:
-    | "settings"
-    | "pricing"
-    | "connections"
-    | "combos"
-    | "nodes"
-    | "model-capabilities"
-    | "api-key-policy",
+  scope?: DbCacheScope,
+  id?: string,
+  opts?: { skipModelCatalog?: boolean }
+): void {
+  invalidateDbCacheLocal(scope, id, opts);
+  publishInvalidation(DB_CACHE_BUS_SCOPE, id, {
+    scope: scope ?? "all",
+    skipModelCatalog: opts?.skipModelCatalog === true,
+  });
+}
+
+// ──────────────── Cluster invalidation ────────────────
+//
+// In cluster mode every write also tells the other processes to drop the same entries
+// (src/lib/cluster/bus.ts). Received messages call only the local twins below, so they are
+// never republished. Some writers invalidate inside their transaction, so a peer could
+// re-read the old row before the commit lands: the receiver drops the entries again after
+// RECEIVED_REINVALIDATE_MS. The TTLs above stay as the floor when a message is lost.
+const DB_CACHE_BUS_SCOPE = "db-cache";
+const MODEL_CATALOG_SCOPE = "model-catalog";
+const RECEIVED_REINVALIDATE_MS = 1_000;
+
+function twice(fn: () => void): void {
+  fn();
+  setTimeout(fn, RECEIVED_REINVALIDATE_MS).unref?.();
+}
+
+onInvalidation(DB_CACHE_BUS_SCOPE, (id, data) => {
+  const raw = typeof data?.scope === "string" ? data.scope : "all";
+  const scope = DB_CACHE_SCOPES.has(raw) ? (raw as DbCacheScope) : undefined;
+  if (raw !== "all" && !scope) return;
+  const skipModelCatalog = data?.skipModelCatalog === true;
+  twice(() => invalidateDbCacheLocal(scope, id, { skipModelCatalog }));
+});
+onInvalidation(MODEL_CATALOG_SCOPE, () => twice(() => modelCatalogCacheVersion++));
+// After a bus reconnect, messages sent meanwhile are lost: drop everything once.
+onBusResync(() => invalidateDbCacheLocal());
+
+function invalidateDbCacheLocal(
+  scope?: DbCacheScope,
   id?: string,
   opts?: { skipModelCatalog?: boolean }
 ): void {
@@ -495,5 +549,6 @@ export function invalidateDbCache(
   // Settings/connections/combos all feed the unified model catalog builder
   // (blockedProviders + hidePaidModels, provider connections + excludedModels,
   // combo definitions, respectively) — pricing does too, via isFreeModel().
-  invalidateModelCatalogCache();
+  // Local bump only: the db-cache message already carries skipModelCatalog to peers.
+  modelCatalogCacheVersion++;
 }

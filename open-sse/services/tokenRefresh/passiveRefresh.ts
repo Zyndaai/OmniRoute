@@ -14,15 +14,33 @@
  *
  * The older env switch OMNIROUTE_TOKEN_REFRESH_PASSIVE_PROVIDERS=codex (a single
  * process that never refreshes Codex) keeps working through `isPassiveCodex`.
- * Non-rotating providers (Google/Antigravity, ...) refresh anywhere.
+ *
+ * Fail-safe on workers: every provider is passive EXCEPT the ones known not to rotate
+ * (WORKER_REFRESHABLE_PROVIDERS). Several refreshers accept a new refresh token when one
+ * comes back (github, qoder, cursor, clinepass) without being in ROTATION_LOCK_GROUP; an
+ * unknown provider costs a short wait for the leader, never a burned token family.
  */
 
 import { isWorker } from "@/lib/cluster/role";
 import { publishRefreshRequest } from "@/lib/cluster/bus";
 import { opaqueTokenFingerprint } from "../../utils/opaqueTokenFingerprint.ts";
 import { parseTokenExpiryMs } from "../../utils/tokenExpiry.ts";
-import { rotationGroupFor } from "../refreshSerializer.ts";
 import { getRejectedTokenFingerprints, isPassiveCodex } from "./passiveCodex.ts";
+
+export { getRejectedTokenFingerprints, recordRejectedToken } from "./passiveCodex.ts";
+
+/**
+ * Providers a worker may refresh itself: their refresh token is reusable, so two processes
+ * refreshing at once cannot revoke anything. Google OAuth (Gemini, Antigravity) never
+ * rotates; Muse Code re-sends its stored DCA token.
+ */
+export const WORKER_REFRESHABLE_PROVIDERS: ReadonlySet<string> = new Set([
+  "gemini",
+  "gemini-cli",
+  "antigravity",
+  "agy",
+  "muse-code",
+]);
 
 export const PASSIVE_WAIT_MS = 10_000;
 const PASSIVE_POLL_MS = 500;
@@ -38,10 +56,11 @@ function normalize(provider: unknown): string {
 export function isPassiveRefresh(provider: unknown): boolean {
   if (isPassiveCodex(provider)) return true;
   const id = normalize(provider);
-  return id !== "" && rotationGroupFor(id) !== null && isWorker();
+  return id !== "" && isWorker() && !WORKER_REFRESHABLE_PROVIDERS.has(id);
 }
 
 type Snapshot = {
+  provider?: string;
   connectionId?: string;
   id?: string;
   accessToken?: string;
@@ -65,7 +84,7 @@ const tokenString = (value: unknown) => (typeof value === "string" ? value : und
 
 export interface PassiveDeps {
   readConnection?: (id: string) => Promise<Record<string, unknown> | null>;
-  requestRefresh?: (connectionId: string) => void;
+  requestRefresh?: (connectionId: string, reason: "expired" | "rejected") => void;
   waitMs?: number;
   pollMs?: number;
   now?: () => number;
@@ -122,7 +141,7 @@ export async function resolvePassiveTokens(
     const first = adoptable(await readConnection(id), creds, now());
     if (first || waitMs <= 0 || !needsNewToken(creds, now())) return first ?? disabled;
 
-    requestRefresh(id);
+    requestRefresh(id, getRejectedTokenFingerprints(creds).length > 0 ? "rejected" : "expired");
     const deadline = now() + waitMs;
     while (now() < deadline) {
       await sleep(Math.min(pollMs, Math.max(0, deadline - now())));
@@ -131,7 +150,13 @@ export async function resolvePassiveTokens(
     }
     return disabled;
   } catch {
-    console.debug("[TOKEN_REFRESH]", { connectionId: id, reason: "passive re-read failed" });
+    // Same shape as the Codex passive gate always logged: ids only, never token material.
+    const provider = typeof creds?.provider === "string" ? creds.provider : undefined;
+    console.debug("[TOKEN_REFRESH]", {
+      ...(provider ? { provider } : {}),
+      connectionId: id,
+      reason: "reread failed",
+    });
     return disabled;
   }
 }
