@@ -1,10 +1,10 @@
 /**
  * Provider-default sliding-window rate-limit fallback (free-claude-code port, Fase 8.2).
  *
- * Providers that do NOT send rate-limit headers never let the adaptive Bottleneck path
+ * Providers that do NOT send rate-limit headers never let the adaptive limiter path
  * in rateLimitManager learn a reservoir, so `resolveRpm` leaves them effectively
  * un-throttled. For such a provider with a *documented* fixed cap, an operator can
- * declare a default here and a sliding window (burst-free, unlike Bottleneck's
+ * declare a default here and a sliding window (burst-free, unlike the rate limiter's
  * fixed-window reservoir which refills in one burst every interval) enforces it
  * proactively. `nvidia` is the first (and currently only) real entry — NVIDIA NIM's
  * free tier is documented as "~40 RPM" and exposes no rate-limit headers or usage
@@ -17,6 +17,7 @@
  * atomically.
  */
 import { SlidingWindowLimiter, type RateLimitWindow } from "./slidingWindowLimiter.ts";
+import { clusterProcessCount, shareOfCount } from "./clusterShare.ts";
 import {
   markLocalRateLimitError,
   LEGACY_RATE_LIMIT_QUEUE_TIMEOUT_CODE,
@@ -66,13 +67,17 @@ export function setProviderQuotaOverrides(
   providerQuotaOverrides = map;
 }
 
+/** This process's share of the provider's window (see ../services/clusterShare.ts). */
 export function getProviderDefaultRateLimit(provider: string): RateLimitWindow | undefined {
   if (!provider) return undefined;
   const rpmOverride = providerQuotaOverrides?.[provider]?.rpm;
-  if (typeof rpmOverride === "number" && rpmOverride > 0) {
-    return { requests: rpmOverride, windowMs: 60_000 };
-  }
-  return (providerDefaultOverrides ?? PROVIDER_DEFAULT_RATE_LIMITS)[provider];
+  const window =
+    typeof rpmOverride === "number" && rpmOverride > 0
+      ? { requests: rpmOverride, windowMs: 60_000 }
+      : (providerDefaultOverrides ?? PROVIDER_DEFAULT_RATE_LIMITS)[provider];
+  if (!window) return undefined;
+  const n = clusterProcessCount();
+  return n > 1 ? { ...window, requests: shareOfCount(window.requests, n) } : window;
 }
 
 /**
@@ -82,9 +87,15 @@ export function getProviderDefaultRateLimit(provider: string): RateLimitWindow |
  */
 export function getProviderConcurrencyCap(provider: string, fallback: number): number {
   const override = providerQuotaOverrides?.[provider]?.concurrency;
-  if (typeof override === "number" && override > 0) return override;
   const staticDefault = PROVIDER_DEFAULT_CONCURRENCY_CAP[provider];
-  return typeof staticDefault === "number" && staticDefault > 0 ? staticDefault : fallback;
+  const cap =
+    typeof override === "number" && override > 0
+      ? override
+      : typeof staticDefault === "number" && staticDefault > 0
+        ? staticDefault
+        : fallback;
+  // This process's share of the account's concurrency (see ../services/clusterShare.ts).
+  return shareOfCount(cap, clusterProcessCount());
 }
 
 /**
@@ -125,7 +136,7 @@ function sleepOrAbort(ms: number, signal: AbortSignal | null): Promise<void> {
 
 /**
  * Block until the provider's opt-in sliding-window default has a free slot (or the wait
- * budget is exhausted, in which case we proceed — Bottleneck still applies). No-op when
+ * budget is exhausted, in which case we proceed — the rate limiter still applies). No-op when
  * the provider has no configured default. Converges: each wait frees at least one slot.
  */
 export async function awaitProviderDefaultSlot(

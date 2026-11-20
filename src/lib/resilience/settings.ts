@@ -66,7 +66,7 @@ export const DEFAULT_REQUEST_QUEUE_MAX_WAIT_MS = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : 30000;
 })();
 
-// Limiter-managed execution backstop (Bottleneck `expiration`). Deliberately
+// Limiter-managed execution backstop (the limiter's `expiration`). Deliberately
 // separate from the queue-wait budget: non-incremental gateways (Console Go /
 // Command Code) buffer whole generations before first bytes, so legitimate
 // executions run minutes. Default 10 min; the backstop only catches executors

@@ -1,7 +1,7 @@
 /**
  * Batch model-test endpoint.
  *
- * Loops sequentially over `modelIds` so the `withRateLimit` Bottleneck can
+ * Loops sequentially over `modelIds` so the `withRateLimit` limiter can
  * serialize dispatches against the upstream provider/connection. Stops the
  * loop early if it sees `CONSECUTIVE_RATE_LIMIT_STOP_THRESHOLD` rate-limited
  * results in a row — a 429 storm usually means the upstream is down and the
@@ -97,8 +97,14 @@ export async function POST(request: Request) {
   }
   const { providerId, modelIds, connectionId, respectRateLimit, autoHideFailed } = validation.data;
   const providerConnections = await getProviderConnections({ provider: providerId });
-  if (providerConnections.length > 0 && providerConnections.every((connection) => connection.isActive === false)) {
-    return NextResponse.json({ error: { message: `Provider ${providerId} has no active connections` } }, { status: 409 });
+  if (
+    providerConnections.length > 0 &&
+    providerConnections.every((connection) => connection.isActive === false)
+  ) {
+    return NextResponse.json(
+      { error: { message: `Provider ${providerId} has no active connections` } },
+      { status: 409 }
+    );
   }
 
   // #6328 (follow-up to #6495): REMOVE — not just hide — paid Test-all dispatches
@@ -152,7 +158,7 @@ export async function POST(request: Request) {
       if (slowProbe && testedUpstream > 0 && SLOW_PROBE_DELAY_MS > 0) {
         await sleep(SLOW_PROBE_DELAY_MS);
       }
-      // `runSingleModelTest` only engages the Bottleneck rate limiter when
+      // `runSingleModelTest` only engages the rate limiter when
       // `connectionId` is provided. To honor `respectRateLimit=false`, we
       // omit the connectionId so the runner bypasses `withRateLimit`.
       const effectiveConnectionId =

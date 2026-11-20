@@ -481,8 +481,38 @@ quota_exhausted / auth_error / not_found / not_found_local:
 
 ## 5. Request Queue Admission Control (v3.8.49 · issue #6593)
 
-**Scope**: the local per-provider+connection rate-limit queue (`open-sse/services/rateLimitManager.ts`,
-backed by Bottleneck), one layer below the three mechanisms above.
+**Scope**: the per-provider+connection rate-limit queue (`open-sse/services/rateLimitManager.ts`),
+one layer below the three mechanisms above.
+
+**The limiter** (`open-sse/services/rateLimiter/`) keeps a FIFO queue per limiter key and
+asks a state object whether the head may start: concurrency (`maxConcurrent`), spacing
+between starts (`minTime`) and a token budget (`reservoir`, reset to
+`reservoirRefreshAmount` every `reservoirRefreshInterval`). When the head must wait, one
+timer is set for exactly that wait; a finished job, a cancelled head or a settings change
+wakes the queue. There is no heartbeat, so a queue cannot stall with capacity free. (It
+replaced Bottleneck, which needed two monkey-patches, a wedge watchdog and an internal
+queue-cancel helper.) Limiters unused for 10 minutes are dropped by an idle sweep
+(`rateLimitManager/idleSweep.ts`).
+
+**In a cluster** a limit holds per upstream account, not per process:
+
+- With Redis coordination (`REDIS_URL` set, leader/worker roles) the limiter state lives in
+  Redis (`rateLimiter/redisSlotState.ts`) and every process enforces the one shared limit.
+  Each decision is one Lua script on Redis's clock; concurrency slots are leases that expire
+  if a process dies mid-request. A limiter built in one process does not reset the budget
+  other processes already used. If Redis is unreachable the limiter lets requests through
+  and warns at most once a minute.
+- With PostgreSQL coordination each process enforces 1/N of every limit
+  (`open-sse/services/clusterShare.ts`, N = `OMNIROUTE_CLUSTER_SIZE`): spacing × N, counts ÷ N
+  (at least 1, so a count below N allows up to N across the cluster). The average rate holds,
+  but the processes do not see each other, so up to N requests can reach the upstream at the
+  same moment (measured: 3 processes, 350 ms spacing → bursts of 3 about 1,050 ms apart).
+- The provider-default caps (`providerDefaultRateLimit.ts`, nvidia) use the 1/N split in
+  both modes.
+- A change to the request-queue settings (`PATCH /api/resilience`) or to one connection's
+  `rateLimitOverrides` (`PUT /api/providers/[id]`) is applied by the process that served it
+  and published on the cluster bus (scope `rate-limits`); the other processes re-read it from
+  the database and apply it the same way.
 
 **`maxWaitMs` bounds queue wait; `executionMaxWaitMs` bounds execution.**
 The two are deliberately separate, and neither feeds the other.
@@ -496,7 +526,7 @@ in `src/lib/resilience/settings.ts` and pinned by
 `tests/unit/ratelimit-admission-control-6593.test.ts`, so a change to it turns
 that test red rather than leaving this paragraph quietly stale.
 
-`resilienceSettings.requestQueue.executionMaxWaitMs` is what Bottleneck
+`resilienceSettings.requestQueue.executionMaxWaitMs` is what the limiter
 receives as the job `expiration`, whose timer starts only after dispatch. It is
 a backstop for executors without an upstream timeout of their own, and it is
 raised to the executor's own fetch-start timeout when that is longer, so it
@@ -542,12 +572,12 @@ is locked too when an alias resolved it to that model, because those checks use
 the requested name; it is locked exactly (`lockExactModel`), so an alias that
 crosses an antigravity quota family or a codex scope never locks its own. A
 prose hint, an untyped `retryDelay`, or a
-limiter shared by the whole connection keeps the pause. When the limiter the
-429 path just rebuilt does pause, a caller whose remaining queue time ends
-before the pause does is turned away at once with the queue-timeout code
-(`checkLimiterPause`) rather than waiting that time out; the recorded end is
-anchored before the limiter is built, where Bottleneck starts its refresh
-clock, and any later change to the reservoir forgets it. Covered by
+limiter shared by the whole connection keeps the pause. When the limiter does
+pause, a caller whose remaining queue time ends before the pause does is turned
+away at once with the queue-timeout code (`checkLimiterPause`) rather than
+waiting that time out; the recorded end is anchored before the pause is
+applied (applying it restarts the refill clock), and any later change to the
+reservoir forgets it. Covered by
 `tests/unit/rate-limit-long-body-retry-lockout.test.ts` and
 `tests/unit/rate-limit-body-retry-pause.test.ts`.
 
@@ -564,7 +594,7 @@ Override via `RATE_LIMIT_MAX_QUEUE_DEPTH` (env) or
 
 The admission check itself is a pure function
 (`open-sse/services/rateLimitManager/admission.ts::checkQueueAdmission`) so
-it is unit-testable without a real Bottleneck limiter.
+it is unit-testable without a real limiter.
 
 > The RFC that opened #6593 also proposed a `bypassCompressionOnRateLimit`
 > flag. This repo's `open-sse/services/compression/` pipeline is
@@ -581,7 +611,7 @@ it is unit-testable without a real Bottleneck limiter.
 ### Rate-Limit Auto-Enable Safety Net & Connection Protection (`rateLimitProtection`)
 
 **Auto-enable safety net** (`resilienceSettings.requestQueue.autoEnableApiKeyProviders`, default `true`):
-By default, OmniRoute automatically enables rate-limit queue protection for all active API-key provider connections (`getProviderCategory(provider) === "apikey"`). This ensures incoming requests to rate-sensitive upstream API keys are queued and throttled through Bottleneck rather than bursting into upstream 429 errors. The safety net can be overridden via the `RATE_LIMIT_AUTO_ENABLE` environment variable (`false`/`0`/`off` disables, `true`/`1`/`on` forces on), which takes precedence over the persisted dashboard setting (**Settings → Resilience** / `PATCH /api/resilience`).
+By default, OmniRoute automatically enables rate-limit queue protection for all active API-key provider connections (`getProviderCategory(provider) === "apikey"`). This ensures incoming requests to rate-sensitive upstream API keys are queued and throttled through the rate limiter rather than bursting into upstream 429 errors. The safety net can be overridden via the `RATE_LIMIT_AUTO_ENABLE` environment variable (`false`/`0`/`off` disables, `true`/`1`/`on` forces on), which takes precedence over the persisted dashboard setting (**Settings → Resilience** / `PATCH /api/resilience`).
 
 **Semantics of per-connection `rateLimitProtection`:**
 Per-connection rate-limit protection is tracked via the `rateLimitProtection` boolean field on provider connections (persisted as `rate_limit_protection` in SQLite):

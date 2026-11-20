@@ -8,7 +8,7 @@
  * a connection). Pinned by tests/unit/probe-testall-isolation.test.ts.
  *
  * NOTE: when a probe dispatches through a scheduler with a queue
- * (Bottleneck via withRateLimit), runAsProbe must wrap the scheduled fn
+ * (the rate limiter via withRateLimit), runAsProbe must wrap the scheduled fn
  * itself — a queued job otherwise executes outside this context
  * (pinned by the queued-scheduler test below).
  *

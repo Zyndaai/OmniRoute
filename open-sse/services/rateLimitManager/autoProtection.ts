@@ -3,7 +3,7 @@
  *
  * Extracted from rateLimitManager.ts so the providers API can report the same
  * "auto-protected" verdict the limiter uses (dashboard badge, PR #15790)
- * without pulling Bottleneck/limiter state into the route.
+ * without pulling limiter state into the route.
  *
  * @module services/rateLimitManager/autoProtection
  */

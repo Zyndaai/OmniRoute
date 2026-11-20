@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import Bottleneck from "bottleneck";
+import { KeyedLimiter, MemorySlotState } from "../../open-sse/services/rateLimiter/index.ts";
 
 const { runAsProbe, isProbeContext } = await import("../../src/shared/utils/probeOrigin.ts");
 
@@ -21,13 +21,14 @@ test("runAsProbe propagates through nested async/await; false outside", async ()
 });
 
 test("queued scheduler job wrapped in runAsProbe keeps the probe context", async () => {
-  const limiter = new Bottleneck({ maxConcurrent: 1, minTime: 50 });
+  const settings = { maxConcurrent: 1, minTime: 50 };
+  const limiter = new KeyedLimiter("probe", settings, new MemorySlotState(settings));
   let insideQueuedJob: boolean | null = null;
   // Schedule job 1 WITHOUT awaiting it so job 2 really queues behind it
   // (maxConcurrent 1 + minTime 50) — the queued job must execute with the
   // probe context established at scheduling time.
-  const job1 = limiter.schedule(() => new Promise((r) => setTimeout(r, 30)));
-  const job2 = limiter.schedule(() =>
+  const job1 = limiter.schedule({}, () => new Promise((r) => setTimeout(r, 30)));
+  const job2 = limiter.schedule({}, () =>
     runAsProbe(() => {
       insideQueuedJob = isProbeContext();
       return Promise.resolve();

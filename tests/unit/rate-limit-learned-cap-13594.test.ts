@@ -18,7 +18,7 @@ const { RateLimitReason } = await import("../../open-sse/config/constants.ts");
 const { findMatchingErrorRule } = await import("../../open-sse/config/errorConfig.ts");
 const { STANDARD_HEADERS } = await import("../../open-sse/services/rateLimitManager/headers.ts");
 const { DEFAULT_RESILIENCE_SETTINGS } = await import("../../src/lib/resilience/settings.ts");
-const Bottleneck = (await import("bottleneck")).default;
+const { createKeyedLimiter } = await import("../../open-sse/services/rateLimiter/index.ts");
 
 const TOKENROUTER_429 = JSON.stringify({
   error: {
@@ -35,12 +35,13 @@ type Captured = {
 function captureLimiters(): Captured[] {
   const captured: Captured[] = [];
   rateLimitManager.__setLimiterFactoryForTests((options) => {
-    const limiter = new Bottleneck(options);
+    const { id, ...settings } = options;
+    const limiter = createKeyedLimiter(id, settings);
     const entry: Captured = { options: { ...options }, updates: [] };
     const original = limiter.updateSettings.bind(limiter);
     limiter.updateSettings = (updates) => {
       entry.updates.push({ ...updates });
-      return original(updates);
+      original(updates);
     };
     captured.push(entry);
     return limiter;

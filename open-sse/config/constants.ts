@@ -324,7 +324,7 @@ export const PROVIDER_PROFILES = {
 // These are intentionally HIGH — they won't restrict normal usage.
 // Real limits are learned from provider response headers.
 export const DEFAULT_API_LIMITS = {
-  requestsPerMinute: 60, // 60 RPM (reduced from 100 — saves Bottleneck queue memory)
+  requestsPerMinute: 60, // 60 RPM (reduced from 100 — saves limiter queue memory)
   minTimeBetweenRequests: 350, // 350ms minimum gap (increased from 200)
   concurrentRequests: 6, // Max 6 parallel per provider (reduced from 10)
 };

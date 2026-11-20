@@ -2,8 +2,8 @@
  * Sliding-window rate limiter (free-claude-code port, Fase 8.2).
  *
  * A small, dependency-free fallback limiter for providers that do NOT expose
- * rate-limit headers (so the adaptive Bottleneck path in rateLimitManager never
- * learns a reservoir) but have a documented fixed cap. Bottleneck's reservoir is a
+ * rate-limit headers (so the adaptive limiter path in rateLimitManager never
+ * learns a reservoir) but have a documented fixed cap. The rate limiter's reservoir is a
  * fixed-window counter that refills in one burst every interval; a true sliding
  * window enforces "no more than N requests in ANY trailing windowMs", which avoids
  * the 2× burst at window boundaries that can trip an upstream 429.

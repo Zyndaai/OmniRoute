@@ -1202,7 +1202,7 @@ export class BaseExecutor {
                   clientHeaders as Record<string, string | undefined> | undefined
                 );
             sessionId = headerSid ?? getSessionId(seed);
-            deviceId = resolveCliUserID(psd, seed);
+            deviceId = resolveCliUserID(psd, seed, activeCredentials?.connectionId);
             accountUUID = resolveAccountUUID(psd, seed, activeCredentials?.accessToken);
             identitySource = headerSid
               ? "upstream-header"

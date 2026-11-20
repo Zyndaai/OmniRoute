@@ -12,7 +12,7 @@ import {
   resolveModelTestTimeoutMs,
   classifyTestErrorQuota,
 } from "@/lib/api/modelTestRunner.ts";
-import Bottleneck from "bottleneck";
+import { createKeyedLimiter } from "@omniroute/open-sse/services/rateLimiter/index.ts";
 import * as rateLimitManager from "@omniroute/open-sse/services/rateLimitManager.ts";
 import {
   markLocalRateLimitError,
@@ -453,8 +453,8 @@ test("runSingleModelTest preserves trusted local limiter HTTP statuses", async (
     ] as const) {
       await rateLimitManager.__resetRateLimitManagerForTests();
       rateLimitManager.enableRateLimitProtection(connection.id);
-      rateLimitManager.__setLimiterFactoryForTests((options) => {
-        const limiter = new Bottleneck(options);
+      rateLimitManager.__setLimiterFactoryForTests(({ id, ...settings }) => {
+        const limiter = createKeyedLimiter(id, settings);
         Object.defineProperty(limiter, "schedule", {
           configurable: true,
           value: async () => {

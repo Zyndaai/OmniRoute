@@ -1,8 +1,8 @@
 /**
- * rateLimitManager/overrideUpdates — operator override → Bottleneck settings.
+ * rateLimitManager/overrideUpdates — operator override → limiter settings.
  *
  * Maps a per-connection overrides record (`rpm`, `minTime`, `maxConcurrent`)
- * onto Bottleneck constructor options, and loads the overrides map BEFORE
+ * onto limiter settings, and loads the overrides map BEFORE
  * any limiter exists (newborns pick them up). Zero/missing values fall
  * through to the global defaults (an rpm of 0 would set reservoir=0 =
  * depleted forever). Pure: plain record, no limiter dependency.

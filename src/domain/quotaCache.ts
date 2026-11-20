@@ -62,14 +62,13 @@ import {
   EXHAUSTED_MAX_PARK_MS,
   type QuotaCacheEntry,
   type QuotaInfo,
+  markQuotaHealthy as markQuotaHealthyLocal,
   unmarkQuotaHealthy,
   isQuotaHealthy,
 } from "./quotaCacheState";
 import { isCodexPaidCreditsEnabled } from "@/lib/providers/codexPaidCredits";
 import { updateQuotaBurnMetrics } from "./quotaBurnMetrics";
-
-// Keep markQuotaHealthy's public import path; the remaining leaf state stays internal.
-export { markQuotaHealthy } from "./quotaCacheState";
+import { getClusterBus, onBusResync, onInvalidation, publishInvalidation } from "@/lib/cluster/bus";
 
 export { normalizeQuotas, isExhausted, earliestResetAt, capParkWindow };
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -104,6 +103,112 @@ export const DEFAULT_QUOTA_THRESHOLD_PERCENT = 99;
 // can read the override without importing this module (see the import note there).
 
 const MAX_CONCURRENT_REFRESHES = 5;
+
+// ─── Cluster sync ───────────────────────────────────────────────────────────
+//
+// Each OmniRoute process (PM2 leader + workers) keeps its own copy of this cache, and only the
+// leader refreshes quotas from upstream. Without sync a worker never sees the leader's quota
+// reads, and a 429 seen by one worker does not stop another from trying the same exhausted
+// account. Changed entries and 429/credit marks are published over the cluster bus as the
+// whole entry; receivers apply them locally only (never persisted, never republished) and
+// keep the newer one. An entry too large for a PostgreSQL NOTIFY payload (8000 bytes) is
+// sent as "reload from snapshots" after its snapshot rows are written. No-op standalone.
+
+const QUOTA_BUS_SCOPE = "quota";
+const MAX_QUOTA_MESSAGE_BYTES = 7000;
+
+function writesSharedCache(): boolean {
+  return getState() === getQuotaCacheState();
+}
+
+function publishQuotaEntry(entry: QuotaCacheEntry, persisted: Promise<unknown>): void {
+  if (!getClusterBus()) return;
+  const json = JSON.stringify(entry);
+  if (Buffer.byteLength(json, "utf8") <= MAX_QUOTA_MESSAGE_BYTES) {
+    publishInvalidation(QUOTA_BUS_SCOPE, entry.connectionId, { entry: json });
+    return;
+  }
+  console.info(
+    `[QuotaCache] Entry for ${entry.connectionId} is ${json.length} bytes; peers reload it from snapshots`
+  );
+  void persisted.then(() =>
+    publishInvalidation(QUOTA_BUS_SCOPE, entry.connectionId, { reload: true })
+  );
+}
+
+onInvalidation(QUOTA_BUS_SCOPE, (connectionId, data) => {
+  if (!connectionId) return;
+  const shared = getQuotaCacheState();
+  if (typeof data?.entry === "string") {
+    let incoming: QuotaCacheEntry;
+    try {
+      incoming = JSON.parse(data.entry) as QuotaCacheEntry;
+    } catch {
+      return;
+    }
+    if (!incoming || incoming.connectionId !== connectionId) return;
+    const current = shared.cache.get(connectionId);
+    // Two processes may publish out of order: the newer observation wins.
+    if (current && current.fetchedAt > incoming.fetchedAt) return;
+    shared.cache.set(connectionId, incoming);
+    // A 429/credit mark (exhausted, no windows) re-parks at once, as it does locally.
+    if (incoming.exhausted && Object.keys(incoming.quotas ?? {}).length === 0) {
+      shared.healthyUntil.delete(connectionId);
+    }
+    return;
+  }
+  if (data?.reload === true) {
+    shared.cache.delete(connectionId);
+    void hydrateQuotaCacheFromSnapshots(connectionId).catch(() => {});
+    return;
+  }
+  if (typeof data?.healthyUntil === "number") {
+    const current = shared.healthyUntil.get(connectionId) ?? 0;
+    if (data.healthyUntil > current) shared.healthyUntil.set(connectionId, data.healthyUntil);
+  }
+});
+
+// After a bus reconnect messages may have been lost: reload the stored snapshots and keep
+// whichever observation is newer per connection.
+onBusResync(() => {
+  void (async () => {
+    try {
+      const snapshots = await getLatestQuotaSnapshotsForAllConnections();
+      const byConnection = new Map<string, typeof snapshots>();
+      for (const snapshot of snapshots) {
+        const raw = snapshot as unknown as { connectionId?: string; connection_id?: string };
+        const id = raw.connectionId ?? raw.connection_id;
+        if (!id) continue;
+        const list = byConnection.get(id);
+        if (list) list.push(snapshot);
+        else byConnection.set(id, [snapshot]);
+      }
+      const { cache } = getQuotaCacheState();
+      for (const [id, rows] of byConnection) {
+        const current = cache.get(id);
+        const reloaded = entryFromSnapshots(id, rows, new Map());
+        if (reloaded && (!current || reloaded.fetchedAt > current.fetchedAt)) {
+          cache.set(id, reloaded);
+        }
+      }
+    } catch (error) {
+      console.warn("[QuotaCache] Resync after bus reconnect failed:", error);
+    }
+  })();
+});
+
+/**
+ * #14359 — arm the healthy override for one park window (chat success hook). The first mark
+ * in a window is shared with the other cluster processes; repeats within it are not.
+ */
+export function markQuotaHealthy(connectionId: string): void {
+  const wasHealthy = isQuotaHealthy(connectionId);
+  markQuotaHealthyLocal(connectionId);
+  if (!wasHealthy && getClusterBus()) {
+    const until = getQuotaCacheState().healthyUntil.get(connectionId);
+    if (until) publishInvalidation(QUOTA_BUS_SCOPE, connectionId, { healthyUntil: until });
+  }
+}
 
 // ─── #14359 park window + healthy override ──────────────────────────────────
 
@@ -799,6 +904,10 @@ export function setQuotaCache(
   // The cache above is the source of truth for routing; persistence is fire-and-forget and
   // runs in order so one window's reset event always lands before its snapshot row.
   const persistOps: Array<() => Promise<unknown>> = [];
+  // True when a window's snapshot changed (the #4438 test below), which is also what is worth
+  // telling the other cluster processes. The reset-event writes run on every refresh and
+  // decide inside whether anything changed, so they do not count.
+  let snapshotChanged = false;
   if (entry && rawQuotas) {
     for (const [windowKey, quotaInfo] of Object.entries(rawQuotas)) {
       if (!quotaInfo || typeof quotaInfo !== "object") continue;
@@ -835,6 +944,7 @@ export function setQuotaCache(
         prior?.quotas?.[windowKey]?.fractionReported === normalized.fractionReported
       )
         continue;
+      snapshotChanged = true;
       persistOps.push(() =>
         saveQuotaSnapshot({
           provider,
@@ -850,16 +960,28 @@ export function setQuotaCache(
       );
     }
   }
-  if (persistOps.length > 0) {
-    void (async () => {
-      for (const op of persistOps) {
-        try {
-          await op();
-        } catch (error) {
-          console.error("[quotaCache] Failed to persist quota observation:", error);
-        }
-      }
-    })();
+  const persisted =
+    persistOps.length > 0
+      ? (async () => {
+          for (const op of persistOps) {
+            try {
+              await op();
+            } catch (error) {
+              console.error("[quotaCache] Failed to persist quota observation:", error);
+            }
+          }
+        })()
+      : Promise.resolve();
+
+  // Share real changes with the other cluster processes; an unchanged periodic refresh is not
+  // sent. A private read view (withQuotaCacheReadView) never publishes.
+  if (
+    writesSharedCache() &&
+    (snapshotChanged ||
+      prior?.exhausted !== entry.exhausted ||
+      JSON.stringify(prior?.modelQuotas ?? {}) !== JSON.stringify(entry.modelQuotas))
+  ) {
+    publishQuotaEntry(entry, persisted);
   }
 }
 
@@ -1212,7 +1334,7 @@ export function getQuotaSnapshotFetchedAt(connectionId: string): number | null {
 export function markAccountExhaustedFrom429(connectionId: string, provider: string) {
   // #14359 — a real upstream 429 is authoritative: drop any healthy override.
   unmarkQuotaHealthy(connectionId);
-  getState().cache.set(connectionId, {
+  const entry: QuotaCacheEntry = {
     connectionId,
     provider,
     quotas: {},
@@ -1220,7 +1342,10 @@ export function markAccountExhaustedFrom429(connectionId: string, provider: stri
     fetchedAt: Date.now(),
     exhausted: true,
     nextResetAt: null,
-  });
+  };
+  getState().cache.set(connectionId, entry);
+  // The other cluster processes park the account too, instead of each paying its own 429.
+  if (writesSharedCache()) publishQuotaEntry(entry, Promise.resolve());
 }
 
 // ─── Background Refresh ─────────────────────────────────────────────────────

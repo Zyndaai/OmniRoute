@@ -113,15 +113,18 @@ function normalizeLegacyPatch(body: JsonRecord): ResilienceSettingsPatch {
 }
 
 async function syncRuntimeSettings(resilienceSettings: ResilienceSettings) {
-  const [{ applyRequestQueueSettings }, { setProviderQuotaOverrides }] = await Promise.all([
-    import("@omniroute/open-sse/services/rateLimitManager"),
-    import("@omniroute/open-sse/services/providerDefaultRateLimit"),
-  ]);
+  const [{ applyRequestQueueSettings, publishRateLimitChange }, { setProviderQuotaOverrides }] =
+    await Promise.all([
+      import("@omniroute/open-sse/services/rateLimitManager"),
+      import("@omniroute/open-sse/services/providerDefaultRateLimit"),
+    ]);
   await applyRequestQueueSettings(resilienceSettings.requestQueue);
   // #6846 Phase 2: re-apply per-provider RPM/concurrency overrides on the hot
   // path so a PATCH takes effect without a process restart. Mirrors the call in
   // rateLimitManager.ts::initializeRateLimits() (startup).
   setProviderQuotaOverrides(resilienceSettings.providerQuotaOverrides);
+  // The other cluster processes re-read the saved settings and apply them too.
+  publishRateLimitChange();
 }
 
 /**

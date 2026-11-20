@@ -1,64 +1,52 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import Bottleneck from "bottleneck";
-import { LimiterWedgeWatchdog } from "../../open-sse/services/rateLimitManager/wedgeWatchdog.ts";
+import {
+  INACTIVE_LIMITER_MS,
+  sweepIdleLimiters,
+} from "../../open-sse/services/rateLimitManager/idleSweep.ts";
+import { KeyedLimiter, MemorySlotState } from "../../open-sse/services/rateLimiter/index.ts";
+import type { LimiterSettings } from "../../open-sse/services/rateLimiter/index.ts";
 
-const INACTIVE_MS = 10 * 60 * 1000;
+function newLimiter(key: string, settings: LimiterSettings = {}) {
+  return new KeyedLimiter(key, settings, new MemorySlotState(settings));
+}
 
-function buildWatchdog(
-  _now: number,
+function buildSweep(
   keys: string[],
   lastUsedOf: (key: string) => number,
-  limiterOptions: Bottleneck.ConstructorOptions = {}
+  settings: LimiterSettings = {},
+  withDebug = true
 ) {
-  const limiters = new Map<string, Bottleneck>();
+  const limiters = new Map<string, KeyedLimiter>();
   const limiterLastUsed = new Map<string, number>();
   for (const key of keys) {
-    const limiter = new Bottleneck(limiterOptions);
-    limiters.set(key, limiter);
+    limiters.set(key, newLimiter(key, settings));
     limiterLastUsed.set(key, lastUsedOf(key));
   }
   const logCalls: unknown[][] = [];
   const debugCalls: unknown[][] = [];
-  const tracked: Promise<unknown>[] = [];
-  const watchdog = new LimiterWedgeWatchdog({
+  const deps = {
     limiters,
     limiterLastUsed,
-    limiterEffectiveSettings: new WeakMap(),
-    preservedReplacementSettings: new Map(),
-    trackBackground: (promise) => {
-      tracked.push(promise);
-      promise.catch(() => {});
-    },
-    log: (...args) => {
+    log: (...args: unknown[]) => {
       logCalls.push(args);
     },
-    warn: (...args) => {
-      void args;
-    },
-    debug: (...args) => {
-      debugCalls.push(args);
-    },
-  });
-  return { watchdog, limiters, logCalls, debugCalls, tracked };
+    ...(withDebug
+      ? {
+          debug: (...args: unknown[]) => {
+            debugCalls.push(args);
+          },
+        }
+      : {}),
+  };
+  return { deps, limiters, logCalls, debugCalls };
 }
 
-async function cleanup(limiters: Map<string, Bottleneck>) {
-  for (const limiter of limiters.values()) {
-    await limiter.disconnect().catch(() => {});
-  }
-}
-
-test("idle eviction aggregates the info log to one line with per-key debug detail", async (t) => {
+test("idle eviction aggregates the info log to one line with per-key debug detail", () => {
   const now = Date.now();
   const keys = ["prov-a:conn-1", "prov-b:conn-2", "prov-c:conn-3"];
-  const { watchdog, limiters, logCalls, debugCalls } = buildWatchdog(
-    now,
-    keys,
-    () => now - INACTIVE_MS - 60_000
-  );
-  t.after(() => cleanup(limiters));
-  await watchdog.run(now);
+  const { deps, logCalls, debugCalls } = buildSweep(keys, () => now - INACTIVE_LIMITER_MS - 60_000);
+  sweepIdleLimiters(deps, now);
   assert.equal(logCalls.length, 1);
   assert.match(String(logCalls[0][0]), /Evicted idle limiters: 3/);
   assert.equal(debugCalls.length, 3);
@@ -70,66 +58,56 @@ test("idle eviction aggregates the info log to one line with per-key debug detai
   }
 });
 
-test("a single idle eviction still emits one aggregated info line", async (t) => {
+test("a single idle eviction still emits one aggregated info line", () => {
   const now = Date.now();
-  const { watchdog, limiters, logCalls, debugCalls } = buildWatchdog(
-    now,
+  const { deps, logCalls, debugCalls } = buildSweep(
     ["prov-a:conn-1"],
-    () => now - INACTIVE_MS - 60_000
+    () => now - INACTIVE_LIMITER_MS - 60_000
   );
-  t.after(() => cleanup(limiters));
-  await watchdog.run(now);
+  sweepIdleLimiters(deps, now);
   assert.equal(logCalls.length, 1);
   assert.match(String(logCalls[0][0]), /Evicted idle limiters: 1/);
   assert.equal(debugCalls.length, 1);
 });
 
-test("a pass without eviction emits no eviction info line", async (t) => {
+test("a pass without eviction emits no eviction info line", () => {
   const now = Date.now();
-  const { watchdog, limiters, logCalls, debugCalls } = buildWatchdog(
-    now,
-    ["prov-a:conn-1"],
-    () => now
-  );
-  t.after(() => cleanup(limiters));
-  await watchdog.run(now);
+  const { deps, logCalls, debugCalls } = buildSweep(["prov-a:conn-1"], () => now);
+  sweepIdleLimiters(deps, now);
   assert.equal(logCalls.length, 0);
   assert.equal(debugCalls.length, 0);
 });
 
-test("a limiter with queued work is kept and stays silent", async (t) => {
+test("a limiter with queued work is kept and stays silent", async () => {
   const now = Date.now();
-  const reservoir = { reservoir: 0, reservoirRefreshAmount: 0, reservoirRefreshInterval: 60_000 };
-  const { watchdog, limiters, logCalls, debugCalls } = buildWatchdog(
-    now,
+  const { deps, limiters, logCalls, debugCalls } = buildSweep(
     ["prov-a:conn-1"],
-    () => now - INACTIVE_MS - 60_000,
-    reservoir
+    () => now - INACTIVE_LIMITER_MS - 60_000,
+    { reservoir: 0, reservoirRefreshAmount: 0, reservoirRefreshInterval: 60_000 }
   );
   const limiter = limiters.get("prov-a:conn-1")!;
-  const gate = limiter.schedule(() => new Promise(() => {}));
+  const gate = limiter.schedule({}, () => new Promise(() => {}));
   gate.catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(limiter.counts().QUEUED, 1);
-  t.after(async () => {
-    await limiter.stop({ dropWaitingJobs: true }).catch(() => {});
-    await cleanup(limiters);
-  });
-  await watchdog.run(now);
-  assert.equal(logCalls.length, 0);
-  assert.equal(debugCalls.length, 0);
-  assert.ok(limiters.has("prov-a:conn-1"));
+  try {
+    sweepIdleLimiters(deps, now);
+    assert.equal(logCalls.length, 0);
+    assert.equal(debugCalls.length, 0);
+    assert.ok(limiters.has("prov-a:conn-1"));
+  } finally {
+    limiter.stop();
+  }
 });
 
-test("without an injected debug hook the per-key detail falls back to console.debug", async (t) => {
+test("without an injected debug hook the per-key detail falls back to console.debug", (t) => {
   const now = Date.now();
-  const limiters = new Map<string, Bottleneck>();
-  const limiterLastUsed = new Map<string, number>();
-  for (const key of ["prov-a:conn-1", "prov-b:conn-2", "prov-c:conn-3"]) {
-    limiters.set(key, new Bottleneck());
-    limiterLastUsed.set(key, now - INACTIVE_MS - 60_000);
-  }
-  const logCalls: unknown[][] = [];
+  const { deps, logCalls } = buildSweep(
+    ["prov-a:conn-1", "prov-b:conn-2", "prov-c:conn-3"],
+    () => now - INACTIVE_LIMITER_MS - 60_000,
+    {},
+    false
+  );
   const consoleDebugCalls: unknown[][] = [];
   const originalDebug = console.debug;
   console.debug = (...args: unknown[]) => {
@@ -138,33 +116,18 @@ test("without an injected debug hook the per-key detail falls back to console.de
   t.after(() => {
     console.debug = originalDebug;
   });
-  t.after(() => cleanup(limiters));
-  const watchdog = new LimiterWedgeWatchdog({
-    limiters,
-    limiterLastUsed,
-    limiterEffectiveSettings: new WeakMap(),
-    preservedReplacementSettings: new Map(),
-    trackBackground: (promise) => {
-      promise.catch(() => {});
-    },
-    log: (...args) => {
-      logCalls.push(args);
-    },
-    warn: () => {},
-  });
-  await watchdog.run(now);
+  sweepIdleLimiters(deps, now);
   assert.equal(logCalls.length, 1);
   assert.equal(consoleDebugCalls.length, 3);
 });
 
-test("the headline oldest-idle figure ignores entries without a recorded last use", async (t) => {
+test("the headline oldest-idle figure ignores entries without a recorded last use", () => {
   const now = Date.now();
   const keys = ["prov-a:conn-1", "prov-b:conn-2", "prov-c:conn-3"];
-  const { watchdog, limiters, logCalls } = buildWatchdog(now, keys, (key) =>
+  const { deps, logCalls } = buildSweep(keys, (key) =>
     key === "prov-c:conn-3" ? 0 : now - 642_000
   );
-  t.after(() => cleanup(limiters));
-  await watchdog.run(now);
+  sweepIdleLimiters(deps, now);
   assert.equal(logCalls.length, 1);
   assert.match(String(logCalls[0][0]), /oldest idle 642s/);
 });

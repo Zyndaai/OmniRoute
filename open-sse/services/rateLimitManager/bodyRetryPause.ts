@@ -23,12 +23,10 @@
  *
  * A pause the limiter does take is remembered per limiter instance, so a caller
  * whose remaining queue time ends before the pause does fails at once instead of
- * waiting that time out. Only a pause set on a limiter built for it is recorded,
- * from a time taken before the build: Bottleneck starts the refresh clock when
- * the limiter is constructed, so the recorded end never runs past the real
- * refill. An older limiter's clock may refill sooner, and an overstated pause
- * would turn away a request the queue could still serve. Any later change to the
- * reservoir or its refresh schedule forgets the record.
+ * waiting that time out. The end is recorded from a time taken before the pause is
+ * applied: setting the refresh schedule restarts the limiter's refill clock, so the
+ * recorded end never runs past the real refill. Any later change to the reservoir or
+ * its refresh schedule forgets the record.
  *
  * @module services/rateLimitManager/bodyRetryPause
  */

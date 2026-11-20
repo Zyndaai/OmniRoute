@@ -90,7 +90,7 @@ export interface RequestCapSettings {
 }
 
 /**
- * Bottleneck settings that keep dispatch under a cap: a reservoir of
+ * Limiter settings that keep dispatch under a cap: a reservoir of
  * `requests` refilled every `windowMs`, spread evenly by `minTime`.
  */
 export function requestCapSettings(cap: RequestCap): RequestCapSettings {

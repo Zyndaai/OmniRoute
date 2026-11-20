@@ -541,7 +541,7 @@ export function classifyTestErrorQuota(errorText: string): {
 
 /**
  * Run a single model test. When `connectionId` is provided, wraps the
- * upstream call with `withRateLimit` (Bottleneck). Returns a plain
+ * upstream call with `withRateLimit` (the rate limiter). Returns a plain
  * `SingleModelTestResult` (not an HTTP Response) so the single-test and
  * batch-test endpoints can format it differently.
  */
@@ -715,7 +715,7 @@ export async function runSingleModelTest(
         connectionId,
         fullModelStr,
         // T-PROBE: wrap the scheduled fn, not the withRateLimit call — a
-        // queued Bottleneck job executes from its own async resource and
+        // queued limiter job executes from its own async resource and
         // would otherwise run outside the probe context below.
         (signal) => runAsProbe(() => runInner(signal)),
         controller.signal

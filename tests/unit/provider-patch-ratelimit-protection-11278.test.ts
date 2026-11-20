@@ -139,3 +139,50 @@ test(
     assert.equal(rateLimitManager.isRateLimitEnabled(connection.id as string), true);
   }
 );
+
+test("a connection's rate-limit change reaches the other cluster processes over the bus", async () => {
+  const { createClusterBus, setClusterBus } = await import("../../src/lib/cluster/bus.ts");
+  const sent: Array<[string, string]> = [];
+  const bus = createClusterBus({
+    instanceId: "leader",
+    publisher: {
+      publish: async (channel: string, message: string) => {
+        sent.push([channel, message]);
+      },
+    },
+    subscriber: { on: () => {}, subscribe: async () => {} },
+  } as unknown as Parameters<typeof createClusterBus>[0]);
+  setClusterBus(bus);
+  try {
+    await rateLimitManager.initializeRateLimits();
+    const connection = (await createConnection(true)) as Record<string, unknown>;
+    const id = connection.id as string;
+    const request = await makeManagementSessionRequest(`http://localhost/api/providers/${id}`, {
+      method: "PUT",
+      body: {
+        name: connection.name,
+        priority: connection.priority,
+        rateLimitOverrides: { rpm: 30 },
+      },
+    });
+    const response = await providerByIdRoute.PUT(request, { params: Promise.resolve({ id }) });
+    assert.equal(response.status, 200);
+
+    const published = sent.find(([, raw]) => JSON.parse(raw).scope === "rate-limits");
+    assert.ok(published, "the route must publish the change");
+    assert.equal(JSON.parse(published[1]).id, id);
+
+    // Another process that has not seen the change yet receives the message.
+    rateLimitManager.disableRateLimitProtection(id);
+    const raw = JSON.stringify({ ...JSON.parse(published[1]), origin: "worker-elsewhere" });
+    bus.dispatch(published[0], raw);
+    const deadline = Date.now() + 2_000;
+    while (!rateLimitManager.isRateLimitEnabled(id) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(rateLimitManager.isRateLimitEnabled(id), true, "the receiver re-reads the row");
+  } finally {
+    setClusterBus(null);
+    await rateLimitManager.__resetRateLimitManagerForTests();
+  }
+});

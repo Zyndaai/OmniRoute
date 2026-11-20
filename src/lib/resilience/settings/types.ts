@@ -24,7 +24,7 @@ export interface RequestQueueSettings {
    */
   maxWaitMs: number;
   /**
-   * Limiter-managed execution backstop (Bottleneck `expiration`, which starts
+   * Limiter-managed execution backstop (the limiter's `expiration`, which starts
    * only after a job leaves QUEUED). Kept separate from `maxWaitMs` because
    * non-incremental gateways legitimately take minutes before first bytes;
    * the backstop must never undercut the upstream fetch-start timeout.

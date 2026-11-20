@@ -29,7 +29,7 @@ const rateLimitManager = await import("../../open-sse/services/rateLimitManager.
 const accountFallback = await import("../../open-sse/services/accountFallback.ts");
 const { LEGACY_RATE_LIMIT_QUEUE_TIMEOUT_CODE } =
   await import("../../open-sse/services/rateLimitManager/errors.ts");
-const Bottleneck = (await import("bottleneck")).default;
+const { createKeyedLimiter } = await import("../../open-sse/services/rateLimiter/index.ts");
 
 const MODEL = "gemini-3.6-flash";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -363,29 +363,36 @@ test("guard: a recorded pause never outlasts the refresh clock of the limiter it
   const conn = "conn-long-retry-anchor";
   await warm("gemini", conn, MODEL);
 
-  // Bottleneck starts the refresh clock when the limiter is built. A build that
-  // stalls (slow logging, a busy event loop) must not stretch the recorded pause
-  // past that clock, or the fail-fast would turn away a call the refill serves.
+  // The refill clock starts when the pause lands on the limiter, after the build.
+  // A build that stalls (slow logging, a busy event loop) must not make the
+  // recorded pause end early or late: the fail-fast must turn away exactly the
+  // callers the refill cannot serve in time.
   const STALL_MS = 2_500;
-  let builtAt = 0;
-  rateLimitManager.__setLimiterFactoryForTests((options) => {
-    builtAt = Date.now();
-    const limiter = new Bottleneck(options);
+  rateLimitManager.__setLimiterFactoryForTests(({ id, ...settings }) => {
+    const limiter = createKeyedLimiter(id, settings);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, STALL_MS);
     return limiter;
   });
   record429("gemini", conn, MODEL, gemini429Body("4s"));
+  const pausedAt = Date.now();
 
-  // About 1.5 s of the 4 s pause are left, well inside a 3 s budget.
+  // The whole 4 s pause is still ahead: a 3 s budget is turned away at once.
+  const turnedAway = Date.now();
+  await assert.rejects(
+    rateLimitManager.withRateLimit("gemini", conn, MODEL, async () => "early", null, 3_000),
+    { code: "RATE_LIMIT_QUEUE_TIMEOUT" }
+  );
+  assert.ok(Date.now() - turnedAway < 500, "the fail-fast must not wait out the budget");
+
+  // A 5 s budget covers it and is served when the reservoir refills.
   const result = await rateLimitManager.withRateLimit(
     "gemini",
     conn,
     MODEL,
     async () => "refilled",
     null,
-    3_000
+    5_000
   );
   assert.equal(result, "refilled");
-  // The refill comes 4 s after the build, however long the stall took.
-  assert.ok(Date.now() - builtAt >= 4_000, "the call waited for the refill");
+  assert.ok(Date.now() - pausedAt >= 3_900, "the call waited for the refill");
 });

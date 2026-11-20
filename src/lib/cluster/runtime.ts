@@ -30,6 +30,7 @@ import {
 } from "./bus";
 import { acquireLeaderFence, readLeaderHolder, type LeaderFence } from "./leaderFence";
 import { createPgBusPublisher, createPgBusSubscriber } from "./pgBus";
+import { setClusterRedis } from "./redisClient";
 import {
   FENCE_APPLICATION_PREFIX,
   acquirePgLeaderFence,
@@ -169,6 +170,9 @@ export async function completeClusterRuntime(): Promise<void> {
       current.closers.push(() => sub.quit().then(() => undefined));
       publisher = current.redis[0];
       subscriber = sub;
+      // Rate limiters keep their state on the command connection so a limit holds per
+      // account across the cluster (open-sse/services/rateLimiter/redisSlotState.ts).
+      setClusterRedis(current.redis[0]);
     } else if (plan.clusterMode) {
       publisher = createPgBusPublisher((text, values) => getDbBackend().execute(text, values));
       const pgSubscriber = createPgBusSubscriber({
@@ -216,6 +220,7 @@ export async function stopClusterRuntime(): Promise<void> {
   setState(null);
   if (!current) return;
   setClusterBus(null);
+  setClusterRedis(null);
   await current.fence?.release().catch(() => undefined);
   await Promise.all(current.closers.map((close) => close().catch(() => undefined)));
 }

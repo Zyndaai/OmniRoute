@@ -10,6 +10,7 @@ const {
   __setLimiterFactoryForTests,
   __resetRateLimitManagerForTests,
 } = rlm;
+const { createKeyedLimiter } = await import("../../open-sse/services/rateLimiter/index.ts");
 
 test.beforeEach(async () => {
   await __resetRateLimitManagerForTests();
@@ -27,43 +28,15 @@ test("headroom relaxation respects operator minTimeBetweenRequestsMs floor (#976
 
   let capturedMinTime: number | undefined;
 
-  // Inject a fake limiter whose updateSettings captures the minTime.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const noop = (): any => undefined;
-
-  __setLimiterFactoryForTests(() => {
-    const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
-    const fake = {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      updateSettings(updates: Record<string, any>) {
-        capturedMinTime = typeof updates.minTime === "number" ? updates.minTime : undefined;
-        return fake;
-      },
-      on(event: string, fn: (...args: unknown[]) => void) {
-        (listeners[event] ??= []).push(fn);
-        return fake;
-      },
-      schedule(arg0: unknown, arg1?: unknown) {
-        const fn = typeof arg1 === "function" ? arg1 : typeof arg0 === "function" ? arg0 : noop;
-        return fn();
-      },
-      disconnect() {
-        return Promise.resolve();
-      },
-      chain() {
-        return fake;
-      },
-      counts() {
-        return { RECEIVED: 0, QUEUED: 0, RUNNING: 0, EXECUTING: 0 };
-      },
-      currentReservoir() {
-        return Promise.resolve(null);
-      },
-      stop() {
-        return Promise.resolve();
-      },
+  // Wrap the real limiter so its updateSettings captures the minTime.
+  __setLimiterFactoryForTests(({ id, ...settings }) => {
+    const limiter = createKeyedLimiter(id, settings);
+    const original = limiter.updateSettings.bind(limiter);
+    limiter.updateSettings = (updates) => {
+      capturedMinTime = typeof updates.minTime === "number" ? updates.minTime : undefined;
+      original(updates);
     };
-    return fake;
+    return limiter;
   });
 
   enableRateLimitProtection("test-mintime-floor");

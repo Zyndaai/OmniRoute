@@ -8,7 +8,7 @@
  * release is captured.
  */
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 
 import {
   isClaudeOAuthSummarizedThinkingUnredacted,
@@ -93,12 +93,41 @@ export function passthroughUpstreamSessionId(
   return UUID_RE.test(v) ? v : null;
 }
 
-// ---------- Session ID (per OAuth account, process lifetime) -------------
+// ---------- Cluster-stable identity derivation ---------------------------
+//
+// Several OmniRoute processes (a PM2 leader + workers) can serve one account at the same
+// time. A per-process random id would make one account look like several clients. With
+// API_KEY_SECRET set (required in cluster mode, persisted in standalone) the ids are
+// derived with HMAC, so every process emits the same value; the secret keeps them
+// unpredictable to anyone holding the token. Without it the old per-process random ids
+// remain.
+
+const DAY_MS = 86_400_000;
+
+function identityKey(): string | null {
+  const secret = process.env.API_KEY_SECRET?.trim();
+  return secret ? secret : null;
+}
+
+function hmacHex(key: string, label: string): string {
+  return createHmac("sha256", key).update(label).digest("hex");
+}
+
+// ---------- Session ID (per OAuth account) --------------------------------
 
 const sessionCache = new Map<string, string>();
 
-/** Same value MUST be emitted as both X-Claude-Code-Session-Id and metadata.user_id.session_id. */
-export function getSessionId(seed: string): string {
+/**
+ * Same value MUST be emitted as both X-Claude-Code-Session-Id and metadata.user_id.session_id.
+ * Derived from the secret, the seed and the UTC day: identical in every process, and it
+ * rotates daily even for a setup token that lives a year (a session id frozen for a year
+ * would itself be a fingerprint; a real CLI gets a new one per run).
+ */
+export function getSessionId(seed: string, now: number = Date.now()): string {
+  const key = identityKey();
+  if (key) {
+    return uuidV4FromHash(hmacHex(key, `claude-session:${Math.floor(now / DAY_MS)}:${seed}`));
+  }
   let id = sessionCache.get(seed);
   if (id) return id;
   id = randomUUID();
@@ -121,18 +150,24 @@ const HEX64_RE = /^[a-f0-9]{64}$/i;
  * Resolve the cliUserID for an account, in priority order:
  *   1. providerSpecificData.cliUserID — persisted at OAuth provisioning.
  *   2. providerSpecificData.userID — alt key (matches real CLI's own).
- *   3. lazy-random — fresh randomBytes(32), cached for the process lifetime.
+ *   3. derived — HMAC(API_KEY_SECRET, connection id): the same in every cluster process and
+ *      stable across token refreshes and restarts, like the real CLI's persisted id.
+ *   4. lazy-random — fresh randomBytes(32), cached for the process lifetime (no secret or no
+ *      connection id).
  *
- * Never deterministic from the access token.
+ * Never derived from the access token (it would change at every refresh).
  */
 export function resolveCliUserID(
   providerSpecificData: Record<string, unknown> | undefined,
-  seed: string
+  seed: string,
+  accountKey?: string | null
 ): string {
   const cli = providerSpecificData?.cliUserID;
   if (typeof cli === "string" && HEX64_RE.test(cli)) return cli;
   const alt = providerSpecificData?.userID;
   if (typeof alt === "string" && HEX64_RE.test(alt)) return alt;
+  const key = identityKey();
+  if (key && accountKey) return hmacHex(key, `claude-device:${accountKey}`);
   let cached = lazyCliUserIDCache.get(seed);
   if (cached) return cached;
   cached = generateCliUserID();

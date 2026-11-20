@@ -73,6 +73,9 @@ function app(name, port, memoryMb, env) {
       DASHBOARD_PORT: String(port),
       API_PORT: String(port),
       OMNIROUTE_MEMORY_MB: String(memoryMb),
+      // Every process enforces 1/N of each upstream rate limit, so the cluster as a whole
+      // stays within the account's limit (open-sse/services/clusterShare.ts).
+      OMNIROUTE_CLUSTER_SIZE: String(workers + 1),
       ...env,
     },
   };

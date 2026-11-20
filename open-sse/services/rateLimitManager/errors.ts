@@ -57,7 +57,7 @@ export function getTrustedLocalRateLimitError(error: unknown): TrustedLocalRateL
 
 /**
  * Return the public fields for a trusted local failure without its low-level
- * Bottleneck cause, which must remain server-side diagnostic context.
+ * limiter cause, which must remain server-side diagnostic context.
  */
 export function getClientSafeLocalRateLimitError(
   error: unknown

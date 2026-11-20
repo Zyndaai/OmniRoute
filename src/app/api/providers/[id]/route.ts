@@ -30,6 +30,7 @@ import {
   refreshConnectionRateLimits,
   enableRateLimitProtection,
   disableRateLimitProtection,
+  publishRateLimitChange,
 } from "@/../open-sse/services/rateLimitManager";
 // Dynamically imported below, inside the one `provider === "chatgpt-web-codex"`
 // branch that needs it -- same fix as #12355 (src/app/api/providers/route.ts),
@@ -416,7 +417,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // Only (re)enable enforcement when rate limit protection is actually
     // persisted for this connection — this route never lets a caller flip
     // `rateLimitProtection` itself, so any drift here would silently start
-    // queuing requests through Bottleneck for a connection whose DB row (and
+    // queuing requests through the rate limiter for a connection whose DB row (and
     // the dashboard toggle reading it) both still say "off" (#11278).
     if (rateLimitOverrides !== undefined) {
       refreshConnectionRateLimits(id, updated?.rateLimitOverrides ?? null);
@@ -425,6 +426,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       } else {
         disableRateLimitProtection(id);
       }
+      // The other cluster processes re-read this connection and apply the same change.
+      publishRateLimitChange(id);
     }
 
     // Hide sensitive fields
