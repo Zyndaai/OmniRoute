@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 
 type ConceptKey = "search" | "scrape" | "compare" | "rerank" | "auto";

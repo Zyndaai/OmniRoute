@@ -8,30 +8,20 @@ import { CLI_TOOLS } from "@/shared/constants/cliTools";
 
 // ── Mocks (declared before any imports that depend on them) ───────────────────
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next/image", () => ({
-  default: ({
-    src,
-    alt,
-    ...props
-  }: React.ImgHTMLAttributes<HTMLImageElement> & { src: string; alt: string }) => (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} {...props} />
-  ),
-}));
-
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));

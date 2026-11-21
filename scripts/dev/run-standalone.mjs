@@ -1,7 +1,13 @@
 #!/usr/bin/env node
+// Production wrapper (Docker CMD, PM2 apps): bootstraps the env, sizes the V8 heap, then runs
+// the launcher (run-server.mjs start) as a child with forwarded signals. The heap flag has to be
+// on the child's command line, which is why this is a separate process.
+//
+// Start it from the app root (Docker WORKDIR, PM2 `cwd`): the env bootstrap reads `./.env`.
+// The launcher itself changes to the app root before loading `.build/app/server/index.js`.
 
-import { existsSync } from "node:fs";
 import { totalmem } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   resolveRuntimePorts,
   withRuntimePortEnv,
@@ -27,15 +33,15 @@ const maxOldSpaceMb = resolveMaxOldSpaceMb(
 );
 warnConflictingHeapLimits(childEnv, maxOldSpaceMb);
 childEnv.NODE_OPTIONS = buildStandaloneNodeOptions(childEnv, maxOldSpaceMb);
+// The env above is final: the launcher must not bootstrap again (that would repeat the
+// server.env writes and reset HOSTNAME).
+childEnv.OMNIROUTE_LAUNCHER_ENV_READY = "1";
 
-// Prefer the WS-aware wrapper (server-ws.mjs) over the bare Next standalone
-// server.js: it installs the trusted peer-IP stamp (scripts/dev/peer-stamp.mjs)
-// that the authz middleware needs to allow loopback/LAN access to LOCAL_ONLY
-// routes. Falling back to server.js fails CLOSED (every LOCAL_ONLY request 403s)
-// rather than trusting the spoofable Host header.
-const entry = existsSync("server-ws.mjs") ? "server-ws.mjs" : "server.js";
+// Sibling of this file, so the same code works from scripts/dev/ and from an image that copies
+// the launcher files into one folder.
+const launcher = fileURLToPath(new URL("./run-server.mjs", import.meta.url));
 
-spawnWithForwardedSignals(process.execPath, [entry], {
+spawnWithForwardedSignals(process.execPath, [launcher, "start"], {
   stdio: "inherit",
   env: childEnv,
 });

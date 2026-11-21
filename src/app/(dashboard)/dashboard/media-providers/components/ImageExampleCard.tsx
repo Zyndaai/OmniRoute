@@ -1,8 +1,5 @@
-"use client";
-
 import { useEffect, useId, useState } from "react";
-import Image from "next/image";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import { Field } from "@omniroute/ui-kit/field";
 import Select from "@/shared/components/Select";
@@ -90,13 +87,12 @@ function ImageResultRenderer(data: unknown, altText: string) {
         const src = url ?? (b64 ? `data:image/png;base64,${b64}` : null);
         if (!src) return null;
         return (
-          <Image
+          <img
             key={i}
             src={src}
             alt={`${altText} ${i + 1}`}
             width={200}
             height={200}
-            unoptimized
             className="max-w-full rounded-lg border border-border"
             style={{ maxHeight: "200px", objectFit: "contain" }}
           />

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   buildProviderStatsSince,
   getProviderCallStats,
@@ -70,7 +69,7 @@ export async function GET(request: Request) {
         provider: resolveName(m.provider, m.nodeName),
       }));
 
-      return NextResponse.json({
+      return Response.json({
         providers,
         models,
         comboMetrics,
@@ -80,7 +79,7 @@ export async function GET(request: Request) {
       });
     } catch (error) {
       console.error("Error fetching provider stats:", error);
-      return NextResponse.json({ error: "Failed to fetch provider stats" }, { status: 500 });
+      return Response.json({ error: "Failed to fetch provider stats" }, { status: 500 });
     }
   });
 }

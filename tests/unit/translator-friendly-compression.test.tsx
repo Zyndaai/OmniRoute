@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const t = (key: string) => key;
     t.has = () => true;

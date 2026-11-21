@@ -8,7 +8,7 @@
  *
  * Similarly, `content-length` becomes stale once we transform or repack the
  * response stream, and `transfer-encoding` is managed by the runtime
- * (Next.js / Node), not us.
+ * (Node's HTTP layer), not us.
  */
 
 const STRIP_HEADER_NAMES: ReadonlySet<string> = new Set([

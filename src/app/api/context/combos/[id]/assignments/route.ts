@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getAssignmentsForCompressionCombo,
@@ -19,9 +18,9 @@ export async function GET(request: Request, { params }) {
   if (authError) return authError;
   const { id } = await params;
   if (!(await getCompressionCombo(id))) {
-    return NextResponse.json({ error: "Compression combo not found" }, { status: 404 });
+    return Response.json({ error: "Compression combo not found" }, { status: 404 });
   }
-  return NextResponse.json({ assignments: await getAssignmentsForCompressionCombo(id) });
+  return Response.json({ assignments: await getAssignmentsForCompressionCombo(id) });
 }
 
 export async function PUT(request: Request, { params }) {
@@ -33,15 +32,15 @@ export async function PUT(request: Request, { params }) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(assignmentsUpdateSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const updated = await updateAssignments(id, validation.data.routingComboIds);
-  if (!updated) return NextResponse.json({ error: "Compression combo not found" }, { status: 404 });
-  return NextResponse.json({ assignments: await getAssignmentsForCompressionCombo(id) });
+  if (!updated) return Response.json({ error: "Compression combo not found" }, { status: 404 });
+  return Response.json({ assignments: await getAssignmentsForCompressionCombo(id) });
 }

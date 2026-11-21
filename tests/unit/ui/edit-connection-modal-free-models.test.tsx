@@ -6,11 +6,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The shared Modal is a kit Dialog (Radix) since KEA-7886: its content is portaled to
 // document.body, so queries start there (the container is a child of body).
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openrouter" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

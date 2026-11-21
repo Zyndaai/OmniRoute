@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, Input, EmptyState, Select, Checkbox } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";

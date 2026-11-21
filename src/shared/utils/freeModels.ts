@@ -24,7 +24,7 @@ import { AI_MODELS } from "@/shared/constants/models";
  * Why deciding stays on the shipped catalog: the answer is then identical in
  * the browser and on the server, reproducible offline from the release
  * artifact, and unit-testable without seeding a database. This module runs in
- * both — six `"use client"` components import it — so a DB-backed read here
+ * both — browser components import it — so a DB-backed read here
  * would also drag the SQLite driver into the client bundle. Splitting it
  * instead (server reads the feed, browser keeps the baseline) would make the
  * import modal's preview disagree with the import route that runs on click.

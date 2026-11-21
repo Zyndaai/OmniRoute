@@ -34,7 +34,8 @@ const CONFIG_TTL_MS = 60_000;
 let lastLoadTime = 0;
 let cachedProviders: Record<string, unknown> | null = null;
 
-// Survives Next.js dev HMR: module-level cache resets but process is the same (V4 pattern).
+// Survives dev-server module re-evaluation: the module-level cache resets but the process is the
+// same (V4 pattern).
 type CredGlobals = typeof globalThis & { __omnirouteCredNoFileLogged?: boolean };
 function credGlobals(): CredGlobals {
   return globalThis as CredGlobals;

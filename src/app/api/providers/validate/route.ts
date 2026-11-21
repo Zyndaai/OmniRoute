@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/errorSanitization.ts";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
@@ -38,7 +37,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -52,7 +51,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(validateProviderApiKeySchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const {
       provider,
@@ -103,10 +102,7 @@ export async function POST(request) {
           : isClaudeCodeCompatibleProvider(provider)
             ? "CC"
             : "Anthropic";
-        return NextResponse.json(
-          { error: `${typeName} Compatible node not found` },
-          { status: 404 }
-        );
+        return Response.json({ error: `${typeName} Compatible node not found` }, { status: 404 });
       }
       providerSpecificData = {
         ...providerSpecificData,
@@ -144,7 +140,7 @@ export async function POST(request) {
       // #5565/#5567: surface `unsupported` so the dashboard can treat "validation
       // not supported" as a non-blocking warning (allow Save) instead of a hard
       // "Invalid" block — providers like lmarena / piapi have no live validator.
-      return NextResponse.json(
+      return Response.json(
         { error: "Provider validation not supported", unsupported: true },
         { status: 400 }
       );
@@ -168,13 +164,13 @@ export async function POST(request) {
           },
         });
       }
-      return NextResponse.json(
+      return Response.json(
         { error: result.error || "Validation failed" },
         { status: result.statusCode }
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       valid: !!result.valid,
       error: result.valid ? null : result.error || "Invalid API key",
       warning: result.warning || null,
@@ -184,6 +180,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.log("Error validating API key:", sanitizeErrorMessage(error) || "Validation failed");
-    return NextResponse.json({ error: "Validation failed" }, { status: 500 });
+    return Response.json({ error: "Validation failed" }, { status: 500 });
   }
 }

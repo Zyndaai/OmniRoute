@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import Button from "@/shared/components/Button";
 import LinkifiedText from "@/shared/components/LinkifiedText";

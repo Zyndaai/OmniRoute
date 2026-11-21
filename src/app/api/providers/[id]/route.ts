@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import {
   getProviderAuditTarget,
@@ -80,7 +79,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const connection = await getCachedProviderConnectionById(id);
 
     if (!connection) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     const revealKeys = isApiKeyRevealEnabled();
@@ -100,10 +99,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       );
     }
 
-    return NextResponse.json({ connection: result });
+    return Response.json({ connection: result });
   } catch (error) {
     console.log("Error fetching connection:", error);
-    return NextResponse.json({ error: "Failed to fetch connection" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch connection" }, { status: 500 });
   }
 }
 
@@ -117,7 +116,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -139,7 +138,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ...validation.error.details.map((d) => d.field).filter(Boolean),
         ...validation.error.details.flatMap((d) => d.keys ?? []),
       ];
-      return NextResponse.json({ error: { ...validation.error, rejected } }, { status: 400 });
+      return Response.json({ error: { ...validation.error, rejected } }, { status: 400 });
     }
     const body = validation.data;
     const {
@@ -171,7 +170,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const existing = (await getCachedProviderConnectionById(id)) as Record<string, any> | null;
     if (!existing) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
     const retirementResponse = rejectRetiredCommonChatGptWebProvider(existing.provider);
     if (retirementResponse) return retirementResponse;
@@ -205,7 +204,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
             validationId
           ).encodedCredential;
         } catch (error) {
-          return NextResponse.json(
+          return Response.json(
             {
               error:
                 error instanceof Error
@@ -223,7 +222,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           try {
             updateData.apiKey = JSON.stringify(chatGptWebStorageStateFromCookieHeader(apiKey));
           } catch {
-            return NextResponse.json(
+            return Response.json(
               { error: "ChatGPT Web storage state JSON or Cookie header is invalid" },
               { status: 400 }
             );
@@ -461,10 +460,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       },
     });
 
-    return NextResponse.json({ connection: result });
+    return Response.json({ connection: result });
   } catch (error) {
     console.log("Error updating connection:", error);
-    return NextResponse.json({ error: "Failed to update connection" }, { status: 500 });
+    return Response.json({ error: "Failed to update connection" }, { status: 500 });
   }
 }
 
@@ -490,12 +489,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     // Fetch connection before deleting to check provider type
     const connection = (await getCachedProviderConnectionById(id)) as Record<string, any> | null;
     if (!connection) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     const deleted = await deleteProviderConnection(id);
     if (!deleted) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     // Remove this connection's synced models. Provider-level imported models
@@ -523,10 +522,10 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       },
     });
 
-    return NextResponse.json({ message: "Connection deleted successfully" });
+    return Response.json({ message: "Connection deleted successfully" });
   } catch (error) {
     console.log("Error deleting connection:", error);
-    return NextResponse.json({ error: "Failed to delete connection" }, { status: 500 });
+    return Response.json({ error: "Failed to delete connection" }, { status: 500 });
   }
 }
 

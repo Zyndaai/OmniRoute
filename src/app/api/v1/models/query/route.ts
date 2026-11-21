@@ -1,5 +1,3 @@
-import { after } from "next/server";
-
 import { getUnifiedModelsResponse } from "../catalog";
 import { catalogBadRequest, queryCatalogResponse } from "../catalogDiscovery";
 import {
@@ -55,10 +53,6 @@ export async function POST(request: Request) {
   const { filters, limit } = normalizeCatalogQueryBody(parsed.data);
 
   return queryCatalogResponse(request, filters, limit, (catalogRequest) =>
-    getUnifiedModelsResponse(
-      catalogRequest,
-      {},
-      { scheduleBackgroundRefresh: (task) => after(task) }
-    )
+    getUnifiedModelsResponse(catalogRequest)
   );
 }

@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Checkbox } from "@/shared/components";
 
 import { useState } from "react";

@@ -1,9 +1,7 @@
-"use client";
-
 import { useState, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "react-router";
 import { ConfirmModal, RequestLoggerV2 } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import {
   DropdownMenu,
@@ -44,7 +42,7 @@ function logsText(
 }
 
 function LogsPageContent() {
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   // Read ONCE: #6830 fixed the detail modal reopening on first close by freezing this
   // value, and the #8354 page rewrite regressed it by reading the live searchParams on
   // every render — the prop flips mid-session and re-fires the child's deep-link effect

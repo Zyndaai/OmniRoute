@@ -1,8 +1,6 @@
-"use client";
-
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "use-intl";
+import { useNavigate, useSearchParams } from "react-router";
 import {
   Table,
   TableBody,
@@ -223,11 +221,11 @@ function ConversationLogView({
 
 function ConversationsPageContent() {
   const t = useTranslations("conversations");
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   // Read once on mount, mirroring dashboard/logs/page.tsx (#6830/#8354): re-reading the
   // live searchParams on every render re-fires the deep-link open effect right when the
-  // panel closes and router.replace() strips the ?id= param.
+  // panel closes and navigate() strips the ?id= param.
   const [initialId] = useState(() => searchParams.get("id"));
   // Deep link for the conversation modal — separate param from `id` (the
   // request-detail panel) so either overlay can be linked independently.
@@ -396,7 +394,7 @@ function ConversationsPageContent() {
       try {
         const url = new URL(globalThis.location.href);
         url.searchParams.set("id", id);
-        router.replace(url.pathname + url.search);
+        navigate({ search: url.search }, { replace: true, preventScrollReset: true });
       } catch {
         // ignore navigation errors
       }
@@ -426,7 +424,7 @@ function ConversationsPageContent() {
         setDetailLoading(false);
       }
     },
-    [router]
+    [navigate]
   );
 
   const closeDetail = useCallback(() => {
@@ -435,11 +433,11 @@ function ConversationsPageContent() {
     try {
       const url = new URL(globalThis.location.href);
       url.searchParams.delete("id");
-      router.replace(url.pathname + url.search);
+      navigate({ search: url.search }, { replace: true, preventScrollReset: true });
     } catch {
       // ignore navigation errors
     }
-  }, [router]);
+  }, [navigate]);
 
   useEffect(() => {
     if (!initialId || initialOpenedRef.current) return;
@@ -518,7 +516,7 @@ function ConversationsPageContent() {
       try {
         const url = new URL(globalThis.location.href);
         url.searchParams.set("tree", row.id);
-        router.replace(url.pathname + url.search);
+        navigate({ search: url.search }, { replace: true, preventScrollReset: true });
       } catch {
         // ignore navigation errors
       }
@@ -542,7 +540,7 @@ function ConversationsPageContent() {
           scrollToBottom();
         });
     },
-    [router, fetchConversationPage, scrollToBottom]
+    [navigate, fetchConversationPage, scrollToBottom]
   );
 
   const closeConversation = useCallback(() => {
@@ -550,11 +548,11 @@ function ConversationsPageContent() {
     try {
       const url = new URL(globalThis.location.href);
       url.searchParams.delete("tree");
-      router.replace(url.pathname + url.search);
+      navigate({ search: url.search }, { replace: true, preventScrollReset: true });
     } catch {
       // ignore navigation errors
     }
-  }, [router]);
+  }, [navigate]);
 
   const loadOlderTurns = useCallback(() => {
     const panel = conversationPanelRef.current;

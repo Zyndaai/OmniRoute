@@ -1,5 +1,3 @@
-"use client";
-
 // Phase 1d extraction — Issue #3501
 // ModelCompatPopover and its local helper (recordToHeaderRows) moved out of
 // ProviderDetailPageClient.tsx. Leaf deps: @/shared + providerPageHelpers.

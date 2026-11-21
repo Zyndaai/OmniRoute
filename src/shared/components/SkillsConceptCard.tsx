@@ -1,8 +1,6 @@
-"use client";
-
 import type { JSX } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "./Icon";
 
 export interface SkillsConceptCardProps {
@@ -42,7 +40,7 @@ export function SkillsConceptCard({
           <h3 className="text-sm font-semibold text-text-main">{title}</h3>
         </div>
         <Link
-          href={crossLinkHref}
+          to={crossLinkHref}
           className="shrink-0 flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
         >
           {crossLinkLabel}

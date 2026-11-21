@@ -3,9 +3,9 @@ import assert from "node:assert";
 import { getMainServerTimeoutConfig as mjsImpl } from "../../scripts/dev/main-server-timeouts.mjs";
 import { getMainServerTimeoutConfig as tsImpl } from "../../src/shared/utils/runtimeTimeouts.ts";
 
-// The shipped server-ws.mjs uses the SIBLING scripts/dev/main-server-timeouts.mjs
-// (a ../../src import escapes the package after the dist copy — 2026-07-15 boot
-// crash, #7065 class). This parity matrix is the anti-drift guard between the
+// The launcher (run-server.mjs) uses the SIBLING scripts/dev/main-server-timeouts.mjs
+// (it runs before any TypeScript loads; #7065 class). This parity matrix is the
+// anti-drift guard between the
 // sibling and the canonical src/shared/utils/runtimeTimeouts.ts implementation.
 const ENV_MATRIX: Record<string, string | undefined>[] = [
   {},

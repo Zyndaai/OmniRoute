@@ -6,7 +6,6 @@
  * Returns which proxies can reach the target and their latency.
  */
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -48,20 +47,20 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(testSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const { targetUrl, proxyUrls: providedUrls } = validation.data;
 
     // SSRF guard: refuse private/link-local/metadata targets and proxies.
     if (blockedPrivateUrl(targetUrl)) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Blocked private or local target URL" },
         { status: 400 }
       );
     }
     if (providedUrls && providedUrls.some((u) => blockedPrivateUrl(u))) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Blocked private or local proxy URL" },
         { status: 400 }
       );
@@ -74,7 +73,7 @@ export async function POST(request: Request) {
         : await getProxyCandidates(targetUrl);
 
     if (proxyUrls.length === 0) {
-      return NextResponse.json(
+      return Response.json(
         {
           results: [],
           message: "No proxy candidates available to test. Configure a proxy first.",
@@ -91,11 +90,11 @@ export async function POST(request: Request) {
       failed: results.filter((r) => !r.ok).length,
     };
 
-    return NextResponse.json({ results, summary });
+    return Response.json({ results, summary });
   } catch (error: unknown) {
     const message =
       error instanceof Error ? error.message : "Failed to test proxy fallback";
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || message },
       { status: 500 }
     );

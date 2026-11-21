@@ -46,13 +46,13 @@ test("docs slug page binds defaultMdxComponents from the default export", () => 
 
   assert.match(
     source,
-    /\{\s*default:\s*defaultMdxComponents\s*\}\s*\]\s*=\s*await\s+Promise\.all/,
-    "docs slug page must destructure `{ default: defaultMdxComponents }` from the awaited import"
+    /import\s+defaultMdxComponents\s+from\s+"fumadocs-ui\/mdx"/,
+    "docs slug page must default-import defaultMdxComponents from fumadocs-ui/mdx"
   );
 
   assert.doesNotMatch(
     source,
-    /,\s*defaultMdxComponents\s*\]\s*=\s*await\s+Promise\.all/,
+    /import\s+\*\s+as\s+defaultMdxComponents/,
     "docs slug page must not bind the raw module namespace as defaultMdxComponents"
   );
 });

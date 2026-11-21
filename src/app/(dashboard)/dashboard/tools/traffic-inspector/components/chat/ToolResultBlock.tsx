@@ -1,5 +1,3 @@
-"use client";
-
 import Collapsible from "@/shared/components/Collapsible";
 import { JsonViewer } from "../shared/JsonViewer";
 import { shortCallId } from "@/shared/utils/formatting";

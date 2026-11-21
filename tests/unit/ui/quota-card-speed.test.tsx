@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   // Echo the key so translateUsageOrFallback() renders the English fallback.
   useTranslations: () => (key: string) => key,

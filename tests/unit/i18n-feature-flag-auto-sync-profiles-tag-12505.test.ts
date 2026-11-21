@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "@formatjs/icu-messageformat-parser";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import i18nConfig from "../../config/i18n.json" with { type: "json" };
 
 const { FEATURE_FLAG_DEFINITIONS } =

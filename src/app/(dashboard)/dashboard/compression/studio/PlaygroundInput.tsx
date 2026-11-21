@@ -1,6 +1,5 @@
-"use client";
 import type { ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import Button from "@/shared/components/Button";
 import Checkbox from "@/shared/components/Checkbox";

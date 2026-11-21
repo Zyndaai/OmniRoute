@@ -1,4 +1,3 @@
-"use client";
 import type { CSSProperties } from "react";
 import { DISPLAY_COLORS, type DisplayKind } from "./availabilityDisplay";
 export function capsuleStyle(kind: DisplayKind): CSSProperties {

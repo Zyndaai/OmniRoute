@@ -54,10 +54,6 @@ export function shouldNullRefreshTokenAfterUnrecoverable(provider: unknown): boo
 
 const EXPIRED_RETRY_BACKOFF_MIN = 5; // backoff between expired retries (minutes)
 
-function isBuildProcess(): boolean {
-  return typeof process !== "undefined" && process.env.NEXT_PHASE === "phase-production-build";
-}
-
 function getConnectionLogLabel(conn: { name?: string; email?: string; id?: string }): string {
   return pickMaskedDisplayValue([conn.name, conn.email], conn.id || "-");
 }
@@ -320,11 +316,7 @@ function isEnvFlagEnabled(name: string): boolean {
 }
 
 export function isHealthCheckDisabled(): boolean {
-  return (
-    isEnvFlagEnabled("OMNIROUTE_DISABLE_TOKEN_HEALTHCHECK") ||
-    isBuildProcess() ||
-    isAutomatedTestProcess()
-  );
+  return isEnvFlagEnabled("OMNIROUTE_DISABLE_TOKEN_HEALTHCHECK") || isAutomatedTestProcess();
 }
 
 /**
@@ -350,11 +342,7 @@ let pendingHideLogs: Promise<boolean> | null = null;
 const CACHE_TTL = 30_000; // Cache settings for 30 seconds
 
 export async function shouldHideLogs(): Promise<boolean> {
-  if (
-    isEnvFlagEnabled("OMNIROUTE_HIDE_HEALTHCHECK_LOGS") ||
-    isBuildProcess() ||
-    isAutomatedTestProcess()
-  ) {
+  if (isEnvFlagEnabled("OMNIROUTE_HIDE_HEALTHCHECK_LOGS") || isAutomatedTestProcess()) {
     return true;
   }
 

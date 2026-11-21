@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { ServiceStatusCard } from "../components/ServiceStatusCard";

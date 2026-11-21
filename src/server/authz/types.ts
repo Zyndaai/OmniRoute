@@ -1,8 +1,8 @@
 /**
  * Unified authz type definitions.
  *
- * These types are the canonical contract between the Next.js middleware,
- * the policy layer, and any defense-in-depth helpers used by route handlers.
+ * These types are the canonical contract between the authz pipeline
+ * (`src/server/authz/pipeline.ts`), the policy layer, and any defense-in-depth helpers used by route handlers.
  *
  * Three classes of HTTP routes are recognized:
  *

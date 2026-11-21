@@ -17,10 +17,8 @@ export type AuthOutcome = AuthDecision | AuthRejection;
 export interface RequestLike {
   method: string;
   headers: Headers;
-  cookies?: { get?: (name: string) => { value?: string } | undefined };
-  nextUrl?: { pathname?: string | null } | null;
   url?: string;
-  ip?: string;
+  /** Real socket peer, present only for direct Node / test callers. */
   socket?: { remoteAddress?: string };
 }
 

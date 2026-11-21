@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Assessor } from "@/domain/assessment/assessor";
 import { Categorizer } from "@/domain/assessment/categorizer";
@@ -68,12 +67,12 @@ function isModelListItem(value: unknown): value is ModelListItem {
   );
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const rawBody = await request.json();
     const validation = validateBody(assessmentPostSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const scope: AssessmentScope = validation.data.scope;
@@ -95,7 +94,7 @@ export async function POST(request: NextRequest) {
       categorizer.assignCategoriesAndFitness(assessment);
     }
 
-    return NextResponse.json({
+    return Response.json({
       run_id: run.id,
       status: "completed",
       models_tested: run.modelsTested,
@@ -105,14 +104,14 @@ export async function POST(request: NextRequest) {
       duration_ms: run.durationMs,
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : "Unknown error") },
       { status: 500 }
     );
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const url = new URL(request.url);
   const action = url.searchParams.get("action");
 
@@ -128,18 +127,18 @@ export async function GET(request: NextRequest) {
       results = results.filter((a) => a.categories.includes(category));
     }
 
-    return NextResponse.json({ models: results });
+    return Response.json({ models: results });
   }
 
   if (action === "combo-health") {
-    return NextResponse.json({ combos: [], message: "Combo health requires DB access" });
+    return Response.json({ combos: [], message: "Combo health requires DB access" });
   }
 
   if (action === "working") {
-    return NextResponse.json({ models: assessor.getWorkingModels() });
+    return Response.json({ models: assessor.getWorkingModels() });
   }
 
-  return NextResponse.json({
+  return Response.json({
     endpoints: {
       "GET ?action=results": "Get assessment results (filter: status, provider, category)",
       "GET ?action=combo-health": "Get combo health status",

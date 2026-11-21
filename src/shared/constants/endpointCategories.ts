@@ -139,7 +139,7 @@ export function resolveEndpointCategory(pathname: string): string | null {
 }
 
 /**
- * Short alias spellings `next.config.mjs` rewrites onto `/api/v1/…`, mapped to
+ * Short alias spellings the server rewrites onto `/api/v1/…`, mapped to
  * the `/v1/…` path the category table speaks. Mirrors that rewrite table.
  */
 const ENDPOINT_ALIAS_REWRITES: readonly { source: string; canonical: string }[] = [
@@ -155,10 +155,10 @@ const ENDPOINT_ALIAS_REWRITES: readonly { source: string; canonical: string }[] 
  * Rewrite a client-facing alias path onto the canonical `/v1/…` form that
  * `resolveEndpointCategory()` understands.
  *
- * A route handler sees the client's original URL — Next never rewrites
- * `request.url` — so a request that arrived as `/chat/completions`, `/models`
+ * A route handler sees the client's original URL (a rewrite does not
+ * change `request.url`), so a request that arrived as `/chat/completions`, `/models`
  * or `/codex/…` matched no prefix at all and the endpoint check was skipped
- * entirely (#13685). The `/api/v1/…` (App Router) and doubled `/v1/v1/…`
+ * entirely (#13685). The `/api/v1/…` and doubled `/v1/v1/…`
  * spellings of the same endpoint fold onto `/v1/…` here as well. Anything
  * already canonical, or belonging to no category, comes back unchanged.
  */

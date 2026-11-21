@@ -7,7 +7,7 @@
 import { test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import enMessages from "../../src/i18n/messages/en.json" with { type: "json" };
@@ -205,7 +205,7 @@ async function renderCardNote(): Promise<{ note: Element | null; cleanup: () => 
   await act(async () => {
     root.render(
       React.createElement(
-        NextIntlClientProvider,
+        IntlProvider,
         { locale: "en", messages: enMessages },
         React.createElement(NoAuthAccountCard, {
           providerId: CARD_PROVIDER,
@@ -299,7 +299,7 @@ test("card renders no note when the visibility fetch fails", async () => {
     await act(async () => {
       root.render(
         React.createElement(
-          NextIntlClientProvider,
+          IntlProvider,
           { locale: "en", messages: enMessages },
           React.createElement(NoAuthAccountCard, {
             providerId: CARD_PROVIDER,

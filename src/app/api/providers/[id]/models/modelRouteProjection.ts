@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getRegistryEntry } from "@omniroute/open-sse/config/providerRegistry.ts";
 import { filterChatSelectableModels } from "@omniroute/open-sse/services/modelEndpointPolicy.ts";
 import { filterSelectableModels } from "@omniroute/open-sse/services/modelLifecycle.ts";
@@ -95,7 +94,7 @@ export async function buildNoAuthModelsResponse(
   chatOnly: boolean
 ) {
   if (isProviderBlockedByIdOrAlias(providerId, (await getSettings()).blockedProviders)) {
-    return NextResponse.json({ error: "Provider is disabled" }, { status: 403 });
+    return Response.json({ error: "Provider is disabled" }, { status: 403 });
   }
 
   const registryEntry = getRegistryEntry(providerId);
@@ -131,7 +130,7 @@ export async function buildNoAuthModelsResponse(
     });
   // Keep the outcome of this discovery: the response carrying it is gone on the next read.
   await recordDiscoveryOutcome(payload);
-  return NextResponse.json(payload);
+  return Response.json(payload);
 }
 
 async function buildLocalCatalogPayload(

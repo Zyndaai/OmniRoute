@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import {
@@ -13,9 +11,8 @@ import {
   memo,
   Suspense,
 } from "react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Link, useSearchParams } from "react-router";
+import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Field } from "@omniroute/ui-kit/field";
@@ -116,16 +113,12 @@ import { DEAD_COMBO_CONFIG_KEYS } from "@/lib/combos/deadConfigKeys";
 import { modelFamily } from "@/lib/combos/invariants";
 import { resolveProviderAlias } from "@omniroute/open-sse/services/providerAlias.ts";
 import { resolveServerErrorMessage } from "@/lib/api/serverErrorMessage";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/shared/utils/cn";
 import { strategyBadgeClass } from "./strategyPalette";
 
-const ModelSelectModal = dynamic(() => import("@/shared/components/ModelSelectModal"), {
-  ssr: false,
-});
-const ProxyConfigModal = dynamic(() => import("@/shared/components/ProxyConfigModal"), {
-  ssr: false,
-});
+const ModelSelectModal = clientOnlyLazy(() => import("@/shared/components/ModelSelectModal"));
+const ProxyConfigModal = clientOnlyLazy(() => import("@/shared/components/ProxyConfigModal"));
 
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_/.\-\[\] ]+$/;
 
@@ -869,8 +862,7 @@ function formatComboEntryDisplay(
 function CombosPageContent() {
   const t = useTranslations("combos");
   const tc = useTranslations("common");
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [combos, setCombos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -1176,8 +1168,7 @@ function CombosPageContent() {
       params.set("filter", nextFilter);
     }
 
-    const queryString = params.toString();
-    router.replace(`/dashboard/combos${queryString ? `?${queryString}` : ""}`, { scroll: false });
+    setSearchParams(params, { replace: true, preventScrollReset: true });
   };
 
   const handleIntelligentComboUpdated = (updatedCombo) => {
@@ -1985,7 +1976,7 @@ function ComboCardInner({
               />
             )}
             <Link
-              href={`/dashboard/combos/${combo.id}`}
+              to={`/dashboard/combos/${combo.id}`}
               onClick={(e) => e.stopPropagation()}
               className={buttonVariants({
                 variant: "ghost",
@@ -2289,7 +2280,9 @@ function ComboFormModal({
   const [builderError, setBuilderError] = useState("");
   const [builderStage, setBuilderStage] = useState<ComboBuilderStage>(COMBO_BUILDER_STAGES[0]);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [config, setConfig] = useState<ComboRuntimeConfig>(sanitizeComboRuntimeConfig(combo?.config));
+  const [config, setConfig] = useState<ComboRuntimeConfig>(
+    sanitizeComboRuntimeConfig(combo?.config)
+  );
   // Validate persisted enum; ensure reset on combo change not just first mount.
   const initialSortMethod = normalizeSortMethod(
     (config.modelSort as { method?: unknown } | undefined)?.method

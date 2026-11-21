@@ -21,7 +21,6 @@ vi.mock("@/lib/db/readCache", () => ({
 vi.mock("@/lib/db/core", async () => ({
   ...(await import("@/lib/db/caseMapping")),
   isCloud: false,
-  isBuildPhase: false,
   DATA_DIR:
     process.env.DATA_DIR ||
     (await import("node:path")).join(
@@ -190,7 +189,7 @@ it("availability GET reads snapshots without fetchers, writes, refreshes or shar
   guard.attempts.length = 0;
   urls.length = 0;
   fetch.mockClear();
-  const { registerQuotaFetchers } = await import("@/instrumentation-node");
+  const { registerQuotaFetchers } = await import("@/server/boot");
   await registerQuotaFetchers();
   const preflight = await import("@omniroute/open-sse/services/quotaPreflight.ts");
   expect(guard.fetchers.size).toBeGreaterThan(0);

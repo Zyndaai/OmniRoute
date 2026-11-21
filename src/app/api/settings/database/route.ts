@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -68,22 +67,22 @@ async function updateDatabaseSettings(updates: Partial<UserDatabaseSettings>) {
   invalidateDbCache("settings");
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    return NextResponse.json(await publicDatabaseSettings());
+    return Response.json(await publicDatabaseSettings());
   } catch (error) {
     console.error("Error getting database settings:", error);
-    return NextResponse.json({ error: "Failed to load database settings" }, { status: 500 });
+    return Response.json({ error: "Failed to load database settings" }, { status: 500 });
   }
 }
 
-export async function PATCH(request: NextRequest) {
+export async function PATCH(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -91,19 +90,19 @@ export async function PATCH(request: NextRequest) {
     const validation = validateBody(databaseSettingsPatchSchema, rawBody);
 
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     await updateDatabaseSettings(validation.data as Partial<UserDatabaseSettings>);
 
     // Return merged settings (GET response pattern)
-    return NextResponse.json(await publicDatabaseSettings());
+    return Response.json(await publicDatabaseSettings());
   } catch (error) {
     console.error("Error updating database settings:", error);
-    return NextResponse.json({ error: "Failed to update database settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update database settings" }, { status: 500 });
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function PUT(request: Request) {
   return PATCH(request);
 }

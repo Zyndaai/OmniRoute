@@ -10,10 +10,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-// Use the shared next-intl test adapter backed by the real English messages.
+// Use the shared test adapter backed by the real English messages.
 // The contract is the visible legend, not the internal translation key names.
-vi.mock("next/dynamic", () => ({
-  default: () => (props: Record<string, unknown>) => (
+vi.mock("../../../src/app/(dashboard)/home/ProviderTopology", () => ({
+  default: (props: Record<string, unknown>) => (
     <div
       data-testid="provider-topology"
       data-providers={String((props.providers as unknown[])?.length ?? 0)}
@@ -46,8 +46,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it("renders the topology card and forwards providers to ProviderTopology", () => {
-  act(() => {
+it("renders the topology card and forwards providers to ProviderTopology", async () => {
+  await act(async () => {
     root.render(
       <HomeProviderTopologySection
         providers={[

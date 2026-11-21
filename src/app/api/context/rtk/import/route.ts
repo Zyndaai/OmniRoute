@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
@@ -52,11 +51,11 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
+    return Response.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
   }
   const parsed = RequestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(buildErrorBody(400, "Invalid RTK TOML import request"), {
+    return Response.json(buildErrorBody(400, "Invalid RTK TOML import request"), {
       status: 400,
     });
   }
@@ -69,12 +68,12 @@ export async function POST(request: Request) {
     if (parsed.data.action === "install") {
       loadRtkFilters({ refresh: true });
     }
-    return NextResponse.json(responseBody(result));
+    return Response.json(responseBody(result));
   } catch (error) {
     if (error instanceof RtkTomlCompatibilityError) {
-      return NextResponse.json(buildErrorBody(400, error.publicMessage), { status: 400 });
+      return Response.json(buildErrorBody(400, error.publicMessage), { status: 400 });
     }
-    return NextResponse.json(buildErrorBody(500, "Failed to process RTK TOML filter import"), {
+    return Response.json(buildErrorBody(500, "Failed to process RTK TOML filter import"), {
       status: 500,
     });
   }

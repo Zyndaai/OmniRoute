@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { Badge, Button, Input, Modal, Select, Toggle } from "@/shared/components";
 import { readFetchErrorMessage } from "@/shared/utils/fetchError";

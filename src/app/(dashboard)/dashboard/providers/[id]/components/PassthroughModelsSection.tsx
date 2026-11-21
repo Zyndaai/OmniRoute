@@ -1,4 +1,3 @@
-"use client";
 import { filterUnavailableModelRows } from "@/lib/providers/mergeProviderModelListing";
 /**
  * PassthroughModelsSection — Issue #3501 Phase 1e

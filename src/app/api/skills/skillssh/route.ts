@@ -1,11 +1,10 @@
-import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { searchSkillsSh } from "@/lib/skills/skillssh";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
     const { searchParams } = new URL(request.url);
@@ -13,7 +12,7 @@ export async function GET(request: Request) {
     const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 20, 1), 100);
 
     const data = await searchSkillsSh(q, limit);
-    return NextResponse.json({
+    return Response.json({
       skills: data.skills.map((s) => ({
         id: s.id,
         skillId: s.skillId,
@@ -24,6 +23,6 @@ export async function GET(request: Request) {
     });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

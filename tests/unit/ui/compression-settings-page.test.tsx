@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // ── Mock next-intl (CompressionSettingsTab calls useTranslations) ──────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));
@@ -21,7 +22,7 @@ function mountInContainer(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(ui);
+    root.render(<MemoryRouter>{ui}</MemoryRouter>);
   });
   return container;
 }

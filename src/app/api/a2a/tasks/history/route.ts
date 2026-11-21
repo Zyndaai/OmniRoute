@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authorizeA2ATaskRoute } from "@/app/api/a2a/_auth";
@@ -64,7 +63,7 @@ export async function GET(request: Request) {
 
     if (!parsed.success) {
       const firstIssue = parsed.error.issues[0]?.message ?? "Invalid query parameters";
-      return NextResponse.json(buildErrorBody(400, `Invalid history query: ${firstIssue}`), {
+      return Response.json(buildErrorBody(400, `Invalid history query: ${firstIssue}`), {
         status: 400,
       });
     }
@@ -89,9 +88,9 @@ export async function GET(request: Request) {
       completedAt: row.completed_at,
     }));
 
-    return NextResponse.json({ tasks, total, limit, offset });
+    return Response.json({ tasks, total, limit, offset });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list A2A task history";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

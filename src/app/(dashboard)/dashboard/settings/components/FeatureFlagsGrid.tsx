@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Button, EmptyState, Input, SegmentedControl, Select, Skeleton } from "@/shared/components";
 import Icon from "@/shared/components/Icon";

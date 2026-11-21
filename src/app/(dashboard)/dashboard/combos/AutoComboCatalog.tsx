@@ -1,10 +1,8 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
-import Link from "next/link";
+import { Link } from "react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
@@ -80,7 +78,7 @@ function CatalogItemActions({
   return (
     <div className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5">
       <Link
-        href={`/dashboard/combos/${encodeURIComponent(item.id)}`}
+        to={`/dashboard/combos/${encodeURIComponent(item.id)}`}
         className={buttonVariants({
           variant: "ghost",
           size: "icon-sm",

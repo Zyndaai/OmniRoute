@@ -49,13 +49,12 @@ export const EXHAUSTED_MAX_PARK_MS = 30 * 60 * 1000;
 
 // ─── State ──────────────────────────────────────────────────────────────────
 //
-// #8065 — Next.js `output: "standalone"` builds can load this module from
-// independent webpack chunks (e.g. the instrumentation-hook-started
-// `providerLimitsSyncScheduler` write path vs an API-route/SSE-handler read
-// path such as `auth.ts::evaluateQuotaLimitPolicy()`) — each gets its OWN
-// top-level module state, so a bare module-scope `Map` silently splits the
-// cache in two. Anchor all mutable state on `globalThis` so every chunk
-// shares one instance. Mirrors the identical fix already applied for
+// #8065 — the boot-started `providerLimitsSyncScheduler` write path and an
+// API-route/SSE-handler read path such as `auth.ts::evaluateQuotaLimitPolicy()`
+// must see one cache. The dev server re-evaluates edited modules, which gives
+// the new copy its OWN top-level module state, so a bare module-scope `Map`
+// silently splits the cache in two. Anchor all mutable state on `globalThis`
+// so every evaluation shares one instance. Mirrors the pattern in
 // `src/lib/pricingSync.ts` (commit de9d748dac, #6325) and the same pattern in
 // `src/lib/credentialHealth/cache.ts`.
 

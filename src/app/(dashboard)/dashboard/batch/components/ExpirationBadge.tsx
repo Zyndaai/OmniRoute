@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 import Icon from "@/shared/components/Icon";
 

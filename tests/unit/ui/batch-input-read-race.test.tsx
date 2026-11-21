@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import InputStep from "@/app/(dashboard)/dashboard/batch/components/wizard/InputStep";
 import type { WizardInput } from "@/lib/batches/types";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

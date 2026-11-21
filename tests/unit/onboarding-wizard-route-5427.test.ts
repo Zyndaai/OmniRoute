@@ -21,8 +21,8 @@ const newRoute = join(
 test("#5427: new-provider route does NOT redirect (no longer a silent stub)", () => {
   const src = readFileSync(newRoute, "utf8");
   assert.ok(
-    !/from\s+["']next\/navigation["']/.test(src) || !/\bredirect\s*\(/.test(src),
-    "new/page.tsx must not call redirect() from next/navigation — that reintroduces the #5427 silent failure"
+    !/from\s+["']react-router["']/.test(src) || !/\bredirect\s*\(/.test(src),
+    "new/page.tsx must not call redirect() from react-router — that reintroduces the #5427 silent failure"
   );
 });
 

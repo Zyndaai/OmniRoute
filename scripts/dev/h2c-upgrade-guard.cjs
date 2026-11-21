@@ -31,8 +31,7 @@
  *   - TLS connections: RFC 9113 §3.1 forbids the h2c upgrade over https, so we
  *     never rewrite there and the existing behaviour is preserved.
  *
- * Wired into both `standalone-server-ws.mjs` (production: `omniroute serve`,
- * Docker, Electron) and `run-next.mjs` (`npm start` / dev).
+ * Wired into the launcher's upgrade dispatcher (`run-server.mjs`, every mode).
  */
 
 // Header names (lowercase) that only exist to negotiate the h2c upgrade.

@@ -1,8 +1,6 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -390,7 +388,7 @@ export default function ComboControlCenterClient({ comboId }: { comboId: string 
   if (error && !combo) {
     return (
       <div className="space-y-4">
-        <Link href="/dashboard/combos" className="text-sm text-primary hover:underline">
+        <Link to="/dashboard/combos" className="text-sm text-primary hover:underline">
           ← {t("backToCombos")}
         </Link>
         <Card className="border border-error/20 bg-error/10 p-6">
@@ -409,7 +407,7 @@ export default function ComboControlCenterClient({ comboId }: { comboId: string 
         compact
         breadcrumbs={
           <Link
-            href="/dashboard/combos"
+            to="/dashboard/combos"
             className="text-sm text-text-muted hover:text-text-main hover:underline"
           >
             ← {t("backToCombos")}
@@ -433,7 +431,7 @@ export default function ComboControlCenterClient({ comboId }: { comboId: string 
             <Button variant="outline" icon="refresh" onClick={() => void load()}>
               {t("refresh")}
             </Button>
-            <Link href="/dashboard/combos" className={buttonVariants()}>
+            <Link to="/dashboard/combos" className={buttonVariants()}>
               {t("editInCombos")}
             </Link>
           </>
@@ -609,7 +607,7 @@ export default function ComboControlCenterClient({ comboId }: { comboId: string 
             [t("playground"), "/dashboard/playground"],
             [t("providers"), "/dashboard/providers"],
           ].map(([label, href]) => (
-            <Link key={href} href={href} className={buttonVariants({ variant: "outline" })}>
+            <Link key={href} to={href} className={buttonVariants({ variant: "outline" })}>
               {label}
             </Link>
           ))}

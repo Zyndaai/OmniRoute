@@ -1,7 +1,5 @@
-"use client";
-
 import { useId } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import {

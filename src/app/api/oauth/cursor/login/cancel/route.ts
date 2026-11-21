@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -24,7 +23,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -37,9 +36,9 @@ export async function POST(request: Request) {
 
   const validation = validateBody(cancelSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const cancelled = cancelCursorLoginSession(validation.data.sessionId);
-  return NextResponse.json({ success: true, cancelled });
+  return Response.json({ success: true, cancelled });
 }

@@ -13,7 +13,7 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const detailLabels: Record<string, string> = {
     totalOut: "Total Out: {value}",
     reasoning: "Reasoning: {value}",
@@ -30,10 +30,6 @@ vi.mock("next-intl", () => {
         : interpolate(key, params),
   };
 });
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
-}));
 
 vi.mock("@/store/emailPrivacyStore", () => ({
   default: () => ({ emailsVisible: true }),

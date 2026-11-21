@@ -1,5 +1,3 @@
-"use client";
-
 export interface QuantumLockBadgeProps {
   stats?: { fragments: number; categories: Record<string, number> } | null;
 }

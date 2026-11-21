@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
  * contract in its header; this test holds it on the server arc.
  *
  * `client-bundle-no-server-only-10692.test.ts` already holds the browser arc
- * (every `"use client"` file must not reach server-only code). Nothing held the
+ * (no browser component may reach server-only code). Nothing held the
  * server arc: wiring the import route, the published catalog or the paid-model
  * filter onto `getRadarCatalog` would make the modal's preview disagree with
  * the import that runs on click, and no check would turn red. That is the
@@ -142,13 +142,17 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/** Route modules (their loaders run on the server) are not browser components. */
+const ROUTE_MODULE = /(?:^|\/)(?:page|layout|root|entry\.client|entry\.server)\.tsx$/;
+
+/** A component file: it ships to the browser, whose arc #10692 guards. */
 function isClientComponent(file: string): boolean {
-  return /^\s*["']use client["']/m.test(readSource(file).slice(0, 200));
+  return file.endsWith(".tsx") && !ROUTE_MODULE.test(file);
 }
 
 /**
- * Every file that decides: the verdict module, plus every non-`"use client"`
- * file importing it. Client components are skipped because the browser arc is
+ * Every file that decides: the verdict module, plus every file importing it that is not a
+ * browser component. Client components are skipped because the browser arc is
  * already guarded by #10692 — not because they are outside the contract.
  */
 function decidingEntries(): string[] {

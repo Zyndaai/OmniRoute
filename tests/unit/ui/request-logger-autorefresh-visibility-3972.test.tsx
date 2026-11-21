@@ -32,15 +32,15 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => "/dashboard/logs",
+vi.mock("react-router", () => ({
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  useLocation: () => ({ pathname: "/dashboard/logs" }),
 }));
 
 vi.mock("@/store/emailPrivacyStore", () => ({

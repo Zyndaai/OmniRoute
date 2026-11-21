@@ -9,7 +9,6 @@
  *   days      (optional, default 7) — lookback window in days
  */
 
-import { NextResponse } from "next/server";
 import { getPerEngineAnalytics } from "@/lib/db/compressionAnalytics";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 
@@ -21,7 +20,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const engineId = url.searchParams.get("engineId");
     if (!engineId) {
-      return NextResponse.json({ error: "engineId query parameter is required" }, { status: 400 });
+      return Response.json({ error: "engineId query parameter is required" }, { status: 400 });
     }
 
     const daysParam = url.searchParams.get("days");
@@ -29,10 +28,10 @@ export async function GET(req: Request) {
 
     const result = await getPerEngineAnalytics(engineId, days);
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/context/analytics/engine]", msg);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

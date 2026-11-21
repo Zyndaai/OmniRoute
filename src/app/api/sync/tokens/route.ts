@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import { createErrorResponse, createErrorResponseFromUnknown } from "@/lib/api/errorResponse";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -18,7 +17,7 @@ export async function GET(request: Request) {
 
   try {
     const tokens = await listSyncTokenSummaries();
-    return NextResponse.json({
+    return Response.json({
       tokens,
       total: tokens.length,
     });
@@ -48,7 +47,7 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(createSyncTokenSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const syncApiKeyId = await resolveSyncApiKeyIdFromManagementRequest(request);
@@ -83,7 +82,7 @@ export async function POST(request: Request) {
       metadata: tokenSummary,
     });
 
-    return NextResponse.json(
+    return Response.json(
       {
         token: issued.token,
         syncToken: tokenSummary,

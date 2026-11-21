@@ -1,5 +1,3 @@
-"use client";
-
 interface ContextColorBarProps {
   contextKey?: string;
   className?: string;

@@ -1,27 +1,39 @@
 import Icon from "@/shared/components/Icon";
-import Link from "next/link";
-import { Metadata } from "next";
-import { source } from "@/lib/source";
-import { getTranslations } from "next-intl/server";
+import { Link, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import { source } from "@/lib/source.server";
+import { getTranslator } from "@/i18n/request.server";
+import { pageMeta } from "@/shared/utils/pageMeta";
+import { useTranslations } from "use-intl";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("docs");
+export async function loader({ request }: LoaderFunctionArgs) {
+  const t = await getTranslator("docs", request);
   return {
-    title: t("homeTitle"),
-    description: t("homeMetadataDescription"),
-    openGraph: {
+    pages: source.getPages().map((page) => ({ url: page.url, title: page.data.title })),
+    meta: {
       title: t("homeTitle"),
       description: t("homeMetadataDescription"),
-      type: "website",
-      url: "https://omniroute.online/docs",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: t("homeTitle"),
-      description: t("homeTwitterDescription"),
+      twitterDescription: t("homeTwitterDescription"),
     },
   };
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
+  pageMeta(
+    matches,
+    loaderData
+      ? [
+          { title: loaderData.meta.title },
+          { name: "description", content: loaderData.meta.description },
+          { property: "og:title", content: loaderData.meta.title },
+          { property: "og:description", content: loaderData.meta.description },
+          { property: "og:type", content: "website" },
+          { property: "og:url", content: "https://omniroute.online/docs" },
+          { name: "twitter:card", content: "summary_large_image" },
+          { name: "twitter:title", content: loaderData.meta.title },
+          { name: "twitter:description", content: loaderData.meta.twitterDescription },
+        ]
+      : []
+  );
 
 const featuredLinks = [
   {
@@ -71,9 +83,13 @@ const sections = [
   },
 ];
 
-export default async function DocsHomePage() {
-  const t = await getTranslations("docs");
-  const pages = source.getPages();
+export default function DocsHomePage({
+  loaderData,
+}: {
+  loaderData: Awaited<ReturnType<typeof loader>>;
+}) {
+  const t = useTranslations("docs");
+  const { pages } = loaderData;
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-4">
@@ -95,7 +111,7 @@ export default async function DocsHomePage() {
         {featuredLinks.map((link) => (
           <Link
             key={link.href}
-            href={link.href}
+            to={link.href}
             className="flex flex-col items-center text-center p-6 bg-fd-card border border-fd-border rounded-xl
               hover:border-fd-primary hover:bg-fd-accent transition-all group"
           >
@@ -129,10 +145,10 @@ export default async function DocsHomePage() {
                 {sectionPages.map((page) => (
                   <li key={page.url}>
                     <Link
-                      href={page.url}
+                      to={page.url}
                       className="text-sm text-fd-muted-foreground hover:text-primary transition-colors"
                     >
-                      {page.data.title}
+                      {page.title}
                     </Link>
                   </li>
                 ))}

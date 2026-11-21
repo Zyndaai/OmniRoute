@@ -1,5 +1,3 @@
-"use client";
-
 import type { AgentId } from "@/mitm/types";
 
 // The emoji carries each agent's colour; the label text uses the muted token (light + dark).

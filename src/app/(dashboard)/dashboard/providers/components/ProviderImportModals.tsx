@@ -1,5 +1,3 @@
-"use client";
-
 import { ImportProvidersFromFileModal } from "./ImportProvidersFromFileModal";
 import { OAuthExportImportModal } from "./OAuthExportImportModal";
 

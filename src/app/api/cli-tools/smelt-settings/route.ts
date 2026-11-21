@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -60,7 +57,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus(TOOL_ID);
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -77,7 +74,7 @@ export async function GET(request: Request) {
 
     const config = await readConfig();
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -89,7 +86,7 @@ export async function GET(request: Request) {
       configPath: getSmeltConfigPath(),
     });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -102,13 +99,13 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // Extract keyId BEFORE Zod validation — Zod strips unknown fields
@@ -116,7 +113,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, model } = validation.data;
     const apiKey = await resolveApiKey(keyId, validation.data.apiKey);
@@ -154,7 +151,7 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Smelt settings applied successfully!",
       configPath,
@@ -162,7 +159,7 @@ export async function POST(request: Request) {
   } catch (err) {
     const refusal = configClobberRefusalResponse(err);
     if (refusal) return refusal;
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -174,7 +171,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const configPath = getSmeltConfigPath();
@@ -189,7 +186,7 @@ export async function DELETE(request: Request) {
       existing = JSON.parse(raw) as Record<string, unknown>;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No config file to reset" });
+        return Response.json({ success: true, message: "No config file to reset" });
       }
       throw err;
     }
@@ -213,8 +210,8 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({ success: true, message: "Smelt OmniRoute settings removed" });
+    return Response.json({ success: true, message: "Smelt OmniRoute settings removed" });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }

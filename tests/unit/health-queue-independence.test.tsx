@@ -1,6 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import HealthPage from "../../src/app/(dashboard)/dashboard/health/page";
 import messages from "../../src/i18n/messages/en.json";
@@ -43,9 +43,9 @@ it("keeps queue polling and refresh mounted through health loading and health fa
   });
   vi.stubGlobal("fetch", fetchMock);
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+    <IntlProvider locale="en" timeZone="UTC" messages={messages}>
       <HealthPage />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);

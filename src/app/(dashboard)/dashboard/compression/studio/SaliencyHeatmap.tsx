@@ -1,4 +1,3 @@
-"use client";
 import type { CompressionHeatmap } from "@omniroute/open-sse/services/compression/diffHelper";
 
 /**

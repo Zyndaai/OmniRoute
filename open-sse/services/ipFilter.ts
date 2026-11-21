@@ -253,7 +253,7 @@ export async function removeFromWhitelist(ip) {
 }
 
 /**
- * Express/Next.js middleware factory
+ * Express-style middleware factory (also works with a raw Node response)
  */
 export function createIPFilterMiddleware() {
   return async (req, res, next) => {
@@ -274,11 +274,11 @@ export function createIPFilterMiddleware() {
 }
 
 /**
- * For Next.js App Router — check IP from request object
+ * Check the IP of a fetch `Request`.
  *
  * D1 (#9033): accepts an optional trustedPeerIp (resolved from the authenticated
- * peer stamp, available on direct connections where the proxy runtime has no
- * socket). When provided, it is checked FIRST before falling through to the
+ * peer stamp, the only peer address on a `Request`, which has no socket). When
+ * provided, it is checked FIRST before falling through to the
  * forwarding headers, so a blacklisted IP on a direct connection (no XFF, no
  * socket) is blocked. When behind a reverse proxy (via-proxy marker set), the
  * caller passes null so the XFF path continues to work.
@@ -289,7 +289,6 @@ export async function checkRequestIP(request, trustedPeerIp) {
     pickFirstValidIp(request.headers?.get?.("cf-connecting-ip")) ||
     pickFirstValidIp(request.headers?.get?.("x-forwarded-for")) ||
     pickFirstValidIp(request.headers?.get?.("x-real-ip")) ||
-    normalizeIP(request.ip || "") ||
     "unknown";
   return checkIP(ip);
 }

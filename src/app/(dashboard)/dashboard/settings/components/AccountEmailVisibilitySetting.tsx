@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useShallow } from "zustand/react/shallow";
 import { Toggle } from "@/shared/components";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";

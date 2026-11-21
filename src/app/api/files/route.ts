@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { parseIntegerQueryParam } from "@/lib/api/queryIntegerParam";
 import { listFiles } from "@/lib/db/files";
 import { getApiKeyRequestScope, resolveListScope } from "@/app/api/v1/_helpers/apiKeyScope";
@@ -23,9 +22,9 @@ export async function GET(request: Request) {
       listScope.mode === "api_key"
         ? await listFiles({ limit, apiKeyId: listScope.apiKeyId })
         : await listFiles({ limit });
-    return NextResponse.json({ files });
+    return Response.json({ files });
   } catch (error) {
     console.log("Error fetching files:", error);
-    return NextResponse.json({ error: "Failed to fetch files" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch files" }, { status: 500 });
   }
 }

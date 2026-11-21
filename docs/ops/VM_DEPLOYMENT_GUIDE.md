@@ -431,5 +431,5 @@ For deployments on small VPS instances (1 GB RAM or less):
 - **Use SQLite WAL mode** — enabled by default, reduces peak memory during concurrent reads.
 - **Cap the V8 heap** — set `OMNIROUTE_MEMORY_MB` (e.g. `512`) so the runtime does not calibrate a ceiling larger than the VM. See `docs/reference/ENVIRONMENT.md`.
 - **Heavyweight admission auto-scales with the heap cap** -- once `OMNIROUTE_MEMORY_MB` is set above, the ingest byte budget (`OMNIROUTE_CHAT_MAX_INFLIGHT_BYTES`) derives itself from that same ceiling, so a memory-constrained VM already gets a smaller concurrent-request budget with no extra tuning; excess requests get a retryable `503` with `Retry-After` instead of competing for memory. Set the legacy `OMNIROUTE_CHAT_MAX_HEAVY_IN_FLIGHT` request-count cap only if you need a hard ceiling on top of that.
-- **Avoid `next build` on the VPS** — build locally and deploy the standalone output (`.next/standalone/`).
+- **Avoid `npm run build` on the VPS** — build elsewhere (the Docker image is built by `.github/workflows/docker-build-push.yml`) and deploy the image, or the whole app directory including `.build/app/`.
 - **Monitor with `top` / `free -m`** — OmniRoute typically uses 200-400 MB RSS at idle on a 1 GB VM.

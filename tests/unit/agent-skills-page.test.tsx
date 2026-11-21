@@ -7,7 +7,7 @@ import type { Root } from "react-dom/client";
 import type { AgentSkill, SkillCoverage } from "../../src/lib/agentSkills/types";
 
 // ── i18n stub ────────────────────────────────────────────────────────────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => {
     const t = (key: string) => key;
@@ -17,33 +17,21 @@ vi.mock("next-intl", () => ({
 }));
 
 // ── next/link stub ───────────────────────────────────────────────────────────
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     className,
   }: {
-    href: string;
+    to: string;
     children: React.ReactNode;
     className?: string;
   }) => (
-    <a href={href} className={className}>
+    <a href={to} className={className}>
       {children}
     </a>
   ),
-}));
-
-// ── next/dynamic stub — renders placeholder immediately ───────────────────────
-vi.mock("next/dynamic", () => ({
-  default: (
-    loader: () => Promise<{ default: React.ComponentType<{ children: string }> }>,
-    _opts?: unknown
-  ) => {
-    // Return a synchronous stub that renders children as plain text.
-    return function DynamicStub({ children }: { children: string }) {
-      return <div data-testid="react-markdown">{children}</div>;
-    };
-  },
 }));
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────

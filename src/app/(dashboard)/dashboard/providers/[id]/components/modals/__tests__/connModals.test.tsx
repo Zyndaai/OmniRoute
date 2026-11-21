@@ -10,11 +10,21 @@ import { kitSelectValue } from "../../../../../../../../../tests/helpers/kitSele
 import AddApiKeyModal from "../AddApiKeyModal";
 import EditConnectionModal from "../EditConnectionModal";
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns?: string) => (k: string) => (ns ? `${ns}.${k}` : k),
 }));
 

@@ -1,5 +1,4 @@
 // Allow large audio/video file uploads — 5min for processing large files (up to 2GB)
-export const maxDuration = 300;
 import { getRequestedModelEndpointMismatch } from "@/lib/providerModels/modelEndpointGuard";
 import { handleAudioTranscription } from "@omniroute/open-sse/handlers/audioTranscription.ts";
 import { fetchRemoteMedia } from "@/shared/network/remoteImageFetch";

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { explainRouteByRequestId } from "@/lib/usage/routeExplain";
 
@@ -11,12 +10,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const explanation = await explainRouteByRequestId(id);
 
     if (!explanation) {
-      return NextResponse.json({ error: "Routing decision not found" }, { status: 404 });
+      return Response.json({ error: "Routing decision not found" }, { status: 404 });
     }
 
-    return NextResponse.json(explanation);
+    return Response.json(explanation);
   } catch (error) {
     console.error("[API ERROR] /api/usage/route-explain/[id] failed:", error);
-    return NextResponse.json({ error: "Failed to explain route" }, { status: 500 });
+    return Response.json({ error: "Failed to explain route" }, { status: 500 });
   }
 }

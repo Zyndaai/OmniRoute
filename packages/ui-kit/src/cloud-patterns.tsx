@@ -1,5 +1,3 @@
-"use client";
-
 import { useId } from "react";
 import { ArrowRight, ArrowUpRight, Check, Cloud, Cpu, Info, Layers3, MapPin, Server, Database, ExternalLink, Globe2, KeyRound, PencilLine, CreditCard, LockKeyhole, Network, Plug, Sparkles, Terminal, Zap } from "lucide-react";
 import { Badge } from "./badge";

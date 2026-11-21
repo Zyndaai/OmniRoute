@@ -3,7 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
     const labels: Record<string, string> = {

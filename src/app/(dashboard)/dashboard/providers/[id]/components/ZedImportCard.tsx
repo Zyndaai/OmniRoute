@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card, Input, Select } from "@/shared/components";
 
 type ZedImportCardProps = {

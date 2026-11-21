@@ -1,18 +1,17 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
-import Link from "next/link";
-import { notFound } from "next/navigation";
+import { Link } from "react-router";
 import Icon from "@/shared/components/Icon";
 import { Card } from "@/shared/components";
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";
 import { shouldAutoSyncOnOpen } from "@/lib/radar/autoSync";
 import { isValidSupporterKeyFormat } from "@/lib/radar/supporterKey";
+import RadarNotFound from "./RadarNotFound";
+import { resolveRadarPageState } from "./radarPageState";
 import { RadarAccessExplainer } from "./RadarAccessExplainer";
 import { RadarCatalogTable, type RadarMergedEntry } from "./RadarCatalogTable";
 
@@ -25,8 +24,6 @@ interface RadarMeta {
   tier: string;
   fetchedAt: string;
 }
-
-type PageState = "flag_off" | "optin_pending" | "empty" | "populated";
 
 /** D28 — referral links / free credits. Client-side mirror of RadarReferral. */
 interface RadarReferralItem {
@@ -49,18 +46,6 @@ type RadarTabId = "catalog" | "referrals";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Determine the page state from the fetch result. */
-export function resolveRadarPageState(
-  flagOn: boolean,
-  optedIn: boolean,
-  hasEntries: boolean
-): PageState {
-  if (!flagOn) return "flag_off";
-  if (!optedIn) return "optin_pending";
-  if (!hasEntries) return "empty";
-  return "populated";
-}
 
 /** Relative time string (e.g., "3h ago", "2d ago"). */
 function relativeTime(isoDate: string): string {
@@ -320,7 +305,7 @@ export default function RadarPage() {
 
   // Flag off — render not-found
   if (featureAvailable === false && !loading) {
-    notFound();
+    return <RadarNotFound />;
   }
 
   return (
@@ -333,7 +318,7 @@ export default function RadarPage() {
           <div className="flex flex-wrap items-center gap-2">
             {(pageState === "empty" || pageState === "populated") && (
               <Link
-                href="/dashboard/radar/intel"
+                to="/dashboard/radar/intel"
                 className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 {t("intel")}
@@ -341,7 +326,7 @@ export default function RadarPage() {
             )}
             {(pageState === "empty" || pageState === "populated") && (
               <Link
-                href="/dashboard/radar/offers"
+                to="/dashboard/radar/offers"
                 className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 {t("offers")}
@@ -349,7 +334,7 @@ export default function RadarPage() {
             )}
             {(pageState === "empty" || pageState === "populated") && (
               <Link
-                href="/dashboard/radar/combos"
+                to="/dashboard/radar/combos"
                 className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 {t("guidedCombos")}

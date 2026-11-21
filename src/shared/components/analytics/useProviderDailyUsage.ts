@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useProviderDailyUsage — data hook for #4009's request-count-by-provider-date table.
  * Split out of RequestCountByProviderDateTable to keep that container under the
@@ -7,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { readFetchErrorMessage } from "@/shared/utils/fetchError";
 import type { ProviderDailyUsageRow } from "./RequestCountTable";
 

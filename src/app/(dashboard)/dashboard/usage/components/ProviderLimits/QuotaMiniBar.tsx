@@ -1,5 +1,3 @@
-"use client";
-
 import { cn } from "@/shared/utils/cn";
 import { getBarColor } from "./utils";
 

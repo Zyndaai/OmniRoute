@@ -1,9 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useLocale, useTranslations } from "next-intl";
-import { useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { useLocale, useTranslations } from "use-intl";
+import { Link, useSearchParams } from "react-router";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card } from "@/shared/components";
 import Button from "@/shared/components/Button";
@@ -53,7 +50,7 @@ function resolveText(text: RadarLocalizedText, locale: string): string {
 function RadarSetupPageContent() {
   const t = useTranslations("radarSetupPage");
   const locale = useLocale();
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const provider = searchParams.get("provider");
 
   const [setupData, setSetupData] = useState<ProviderSetupData | null>(null);
@@ -177,7 +174,7 @@ function RadarSetupPageContent() {
         compact
         breadcrumbs={
           <Link
-            href="/dashboard/radar"
+            to="/dashboard/radar"
             className="text-sm text-text-muted hover:text-text-main transition-colors"
           >
             ← {t("backToCatalog")}
@@ -280,7 +277,7 @@ function RadarSetupPageContent() {
               <h2 className="font-semibold">{t("addConnection")}</h2>
               <p className="text-sm text-text-muted">{t("addConnectionDescription")}</p>
               <Link
-                href={providerSetupConnectionUrl(provider)}
+                to={providerSetupConnectionUrl(provider)}
                 className="text-primary hover:underline text-sm"
               >
                 {t("addConnectionLink")}

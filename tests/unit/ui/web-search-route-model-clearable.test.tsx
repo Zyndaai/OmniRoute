@@ -21,7 +21,7 @@ import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from "vite
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import ModelSelectField from "@/shared/components/ModelSelectField";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const t = (key: string) => key;
     return t;

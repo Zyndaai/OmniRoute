@@ -37,10 +37,6 @@ const INITIAL_DELAY_MS = 15_000; // Wait for server boot before first sweep
 const LOG_PREFIX = "[LocalHealthCheck]";
 const TRUE_ENV_VALUES = new Set(["1", "true", "yes", "on"]);
 
-function isBuildProcess(): boolean {
-  return typeof process !== "undefined" && process.env.NEXT_PHASE === "phase-production-build";
-}
-
 // ── State (globalThis survives HMR re-evaluation) ───────────────────────
 
 declare global {
@@ -88,11 +84,7 @@ function isEnvFlagEnabled(name: string): boolean {
 }
 
 function isLocalHealthCheckDisabled(): boolean {
-  return (
-    isEnvFlagEnabled("OMNIROUTE_DISABLE_LOCAL_HEALTHCHECK") ||
-    isBuildProcess() ||
-    isAutomatedTestProcess()
-  );
+  return isEnvFlagEnabled("OMNIROUTE_DISABLE_LOCAL_HEALTHCHECK") || isAutomatedTestProcess();
 }
 
 /**

@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MediaProviderPageClient from "@/app/(dashboard)/dashboard/media-providers/[kind]/[id]/MediaProviderPageClient";
 import SettingsAiPage from "@/app/(dashboard)/dashboard/settings/ai/page";
 import ModalityBridgeMovedCard from "@/app/(dashboard)/dashboard/settings/components/ModalityBridgeMovedCard";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () =>
     Object.assign((key: string) => key, {
       rich: (key: string) => key,
@@ -90,7 +91,7 @@ async function render(node: React.ReactNode): Promise<HTMLDivElement> {
   document.body.appendChild(el);
   const root = createRoot(el);
   await act(async () => {
-    root.render(node);
+    root.render(<MemoryRouter>{node}</MemoryRouter>);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   roots.push({ root, el });

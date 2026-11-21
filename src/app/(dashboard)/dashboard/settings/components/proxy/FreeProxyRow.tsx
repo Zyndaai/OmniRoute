@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { TableCell, TableRow } from "@omniroute/ui-kit/table";
 import { Badge, Button, Checkbox } from "@/shared/components";
 

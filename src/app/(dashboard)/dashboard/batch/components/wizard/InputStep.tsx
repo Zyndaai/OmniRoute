@@ -1,7 +1,5 @@
-"use client";
-
 import { useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import CsvMappingStep from "./CsvMappingStep";

@@ -1,7 +1,5 @@
-"use client";
-
-import { useSearchParams, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useSearchParams, useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import Icon from "@/shared/components/Icon";
@@ -27,13 +25,13 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 export default function ServicesPage() {
   const t = useTranslations("embeddedServices");
-  const sp = useSearchParams();
-  const router = useRouter();
+  const [sp] = useSearchParams();
+  const navigate = useNavigate();
   const requestedTab = sp.get("tab");
   const active = (TABS.some((tab) => tab.id === requestedTab) ? requestedTab : "cliproxy") as Tab;
 
   function setTab(tab: Tab) {
-    router.push(`/dashboard/providers/services?tab=${tab}`);
+    navigate(`/dashboard/providers/services?tab=${tab}`);
   }
 
   const panels: Record<Tab, React.ReactNode> = {

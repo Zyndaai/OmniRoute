@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { CLI_TOOLS } from "@/shared/constants/cliTools";
 import { CardSkeleton } from "@/shared/components";

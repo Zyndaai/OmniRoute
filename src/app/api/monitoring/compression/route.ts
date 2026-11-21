@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import pino from "pino";
 
 const logger = pino({ name: "monitoring-compression-api" });
@@ -16,12 +15,10 @@ const logger = pino({ name: "monitoring-compression-api" });
  * Lightweight (no DB, no provider reads) and intentionally distinct from the
  * heavier /api/monitoring/health snapshot so it can be polled more frequently.
  */
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   try {
     const { getMemoStats } = await import("@omniroute/open-sse/services/compression/index.ts");
-    return NextResponse.json(
+    return Response.json(
       {
         compression: {
           memo: getMemoStats(),
@@ -37,7 +34,7 @@ export async function GET() {
     );
   } catch (error) {
     logger.error({ err: error }, "GET /api/monitoring/compression failed");
-    return NextResponse.json(
+    return Response.json(
       { status: "error", error: "compression_stats_unavailable" },
       { status: 503 }
     );

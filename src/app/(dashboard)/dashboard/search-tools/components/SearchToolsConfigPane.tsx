@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox, Select } from "@/shared/components";
 import type { SearchProviderCatalogItem } from "@/shared/schemas/searchTools";
 import type { ActiveTab } from "./SearchToolsTopBar";

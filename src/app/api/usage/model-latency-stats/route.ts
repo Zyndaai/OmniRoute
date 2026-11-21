@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -32,7 +31,7 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, parsed.error.issues[0]?.message ?? "Invalid query parameters"),
         { status: 400 }
       );
@@ -47,14 +46,14 @@ export async function GET(request: Request) {
       model,
     });
 
-    return NextResponse.json({
+    return Response.json({
       entries: Object.values(statsByKey),
       windowHours: windowHours ?? 24,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
     console.error("[API] GET /api/usage/model-latency-stats error:", error);
-    return NextResponse.json(buildErrorBody(500, "Failed to build model latency stats"), {
+    return Response.json(buildErrorBody(500, "Failed to build model latency stats"), {
       status: 500,
     });
   }

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { finalizeTokens } from "@/lib/oauth/providers";
 import { persistOAuthConnection } from "@/lib/oauth/connectionPersistence";
@@ -93,7 +92,7 @@ export async function POST(
 
   const { provider } = await params;
   if (!PASTE_CREDENTIAL_PROVIDERS.has(provider)) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           `import-export not supported for provider: ${provider}. ` +
@@ -110,12 +109,9 @@ export async function POST(
     );
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
-      return NextResponse.json(
-        { error: "Account export exceeds the 5 MiB limit" },
-        { status: 413 }
-      );
+      return Response.json({ error: "Account export exceeds the 5 MiB limit" }, { status: 413 });
     }
-    return NextResponse.json({ error: "Invalid or empty JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid or empty JSON body" }, { status: 400 });
   }
 
   // Accept the raw export document (its own shape), a bare array, or a
@@ -133,13 +129,13 @@ export async function POST(
     )
     .safeParse(candidate);
   if (!accounts.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: accounts.error.issues[0]?.message ?? "Invalid request body" },
       { status: 400 }
     );
   }
   if (accounts.data.length === 0) {
-    return NextResponse.json({ error: "No accounts found in payload" }, { status: 400 });
+    return Response.json({ error: "No accounts found in payload" }, { status: 400 });
   }
 
   const results: Array<
@@ -214,7 +210,7 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({
+  return Response.json({
     success: failed === 0,
     imported,
     failed,

@@ -1,5 +1,3 @@
-"use client";
-
 import type { ComponentProps, ReactNode } from "react";
 import { BrandLoader } from "./brand-loader";
 import { cn } from "./lib/utils";

@@ -9,20 +9,19 @@ import RadarSetupPage from "../../src/app/(dashboard)/dashboard/radar/setup/page
 let providerId = "openai";
 let searchParams = new URLSearchParams("action=add-api-key");
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: providerId }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => `/dashboard/providers/${providerId}`,
-  useSearchParams: () => searchParams,
-}));
-
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: `/dashboard/providers/${providerId}`, search: "", hash: "" }),
+  useSearchParams: () => [searchParams, vi.fn()],
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(to)} {...props}>
       {children}
     </a>
   ),
 }));
+
 
 function response(body: unknown = {}) {
   return {

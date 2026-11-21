@@ -12,6 +12,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import ProviderPageHeader from "@/app/(dashboard)/dashboard/providers/[id]/components/ProviderPageHeader";
 
@@ -52,14 +53,16 @@ describe("ProviderPageHeader — Get API key link", () => {
     mounted.push({ root, container });
     act(() => {
       root.render(
-        <ProviderPageHeader
-          {...BASE_PROPS}
-          {...overrides}
-          providerInfo={{
-            ...BASE_PROPS.providerInfo,
-            ...((overrides.providerInfo as Record<string, unknown>) || {}),
-          }}
-        />
+        <MemoryRouter>
+          <ProviderPageHeader
+            {...BASE_PROPS}
+            {...overrides}
+            providerInfo={{
+              ...BASE_PROPS.providerInfo,
+              ...((overrides.providerInfo as Record<string, unknown>) || {}),
+            }}
+          />
+        </MemoryRouter>
       );
     });
     return container;

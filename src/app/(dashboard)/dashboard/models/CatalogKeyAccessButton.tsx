@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Popover, PopoverContent, PopoverTrigger } from "@omniroute/ui-kit/popover";
 import { Switch } from "@omniroute/ui-kit/switch";
 import { Button } from "@/shared/components";
@@ -77,7 +75,7 @@ function KeyAccessRow({
         {(access.via === "all" || access.via === "blocked" || lastItem) && (
           <Link
             className="text-xs text-primary"
-            href={`/dashboard/api-manager/${encodeURIComponent(accessKey.id)}/access`}
+            to={`/dashboard/api-manager/${encodeURIComponent(accessKey.id)}/access`}
           >
             {t("editKeyAccess")}
           </Link>

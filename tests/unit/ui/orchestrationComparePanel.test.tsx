@@ -10,7 +10,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (k: string, v?: Record<string, unknown>) =>
     v ? `${k}:${JSON.stringify(v)}` : k,
 }));

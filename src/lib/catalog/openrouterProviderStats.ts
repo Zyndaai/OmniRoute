@@ -332,7 +332,7 @@ function startPeriodicSync(intervalMs?: number): void {
 }
 
 /**
- * Boot entry point — called once from instrumentation-node.ts.
+ * Boot entry point — called once from src/server/boot.ts.
  * On by default; opt out via OPENROUTER_PROVIDER_STATS_ENABLED=false.
  */
 export function initOpenRouterProviderStatsSync(): boolean {

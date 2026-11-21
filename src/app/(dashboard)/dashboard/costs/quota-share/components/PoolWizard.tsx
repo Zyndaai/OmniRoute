@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * PoolWizard — 3-step guided pool creation wizard.
  *
@@ -18,7 +16,7 @@
  */
 
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Modal } from "@/shared/components";
 import Badge from "@/shared/components/Badge";
 import Checkbox from "@/shared/components/Checkbox";

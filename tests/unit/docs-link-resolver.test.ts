@@ -102,3 +102,24 @@ HTML link: <a href="../routing/AUTO-COMBO.md#scoring">Scoring</a>.
   assert.ok(out.includes('[2]: /docs/frameworks/MCP-SERVER "MCP"'));
   assert.ok(out.includes('[1]: https://example.com "Example"'));
 });
+
+test("the resolver runs in the browser: it imports no Node module", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../../src/lib/docsLinkResolver.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /export function normalizeDocsMarkdownLinks\(/);
+  assert.doesNotMatch(source, /from\s+["'](?:node:[^"']+|path|fs)["']/);
+});
+
+test("resolveDocHref: escaping the docs tree resolves against the repo root", () => {
+  assert.equal(
+    resolveDocHref("../../src/lib/db/core.ts", "architecture/ARCHITECTURE.md"),
+    `${GITHUB_REPO_BLOB_URL}/src/lib/db/core.ts`
+  );
+  assert.equal(
+    resolveDocHref("../README.md", "ARCHITECTURE.md"),
+    `${GITHUB_REPO_BLOB_URL}/README.md`
+  );
+});

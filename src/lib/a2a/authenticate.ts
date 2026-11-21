@@ -9,7 +9,6 @@
  */
 
 import { createHash, timingSafeEqual } from "crypto";
-import type { NextRequest } from "next/server";
 import { extractApiKey, isValidApiKey } from "@/sse/services/auth";
 import { isDashboardSessionAuthenticated } from "@/shared/utils/apiAuth";
 import { isRequireApiKeyEnabled } from "@/shared/utils/featureFlags";
@@ -27,8 +26,8 @@ function tokensMatch(provided: string, expected: string): boolean {
  * otherwise honor the legacy explicit A2A key; otherwise stay keyless (the
  * same local-first default as /v1).
  */
-export async function authenticateA2ARequest(req: NextRequest | Request): Promise<boolean> {
-  const apiKey = extractApiKey(req as NextRequest);
+export async function authenticateA2ARequest(req: Request): Promise<boolean> {
+  const apiKey = extractApiKey(req);
   if (isRequireApiKeyEnabled()) {
     if (apiKey) return isValidApiKey(apiKey);
     // #12888: mirror clientApiPolicy's dashboard-session fallback so the
@@ -55,8 +54,8 @@ export async function authenticateA2ARequest(req: NextRequest | Request): Promis
  * the call carries neither (keyless posture — ownerless tasks stay visible to
  * everyone, by design).
  */
-export async function resolveA2AOwner(req: NextRequest | Request): Promise<string | undefined> {
-  const apiKey = extractApiKey(req as NextRequest);
+export async function resolveA2AOwner(req: Request): Promise<string | undefined> {
+  const apiKey = extractApiKey(req);
   if (apiKey) return createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
   if (await isDashboardSessionAuthenticated(req)) return "dashboard";
   return undefined;

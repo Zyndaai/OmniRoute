@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 /**
  * CustomModelsSection — Issue #3501 Phase 1e
@@ -11,7 +9,7 @@ import Icon from "@/shared/components/Icon";
  * Never imports from ProviderDetailPageClient.
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, CapabilityBadge, Checkbox, Input, Select } from "@/shared/components";
 import {
   normalizeModelSupportedEndpoints,

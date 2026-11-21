@@ -3,7 +3,6 @@
  * POST — Send a test ping event to a specific webhook and return full diagnostics.
  */
 
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { getWebhook, recordWebhookDelivery } from "@/lib/db/webhooks";
 import { decryptMetadata } from "@/lib/webhookDispatcher";
@@ -89,7 +88,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     const { id } = await params;
     const webhook = await getWebhook(id);
     if (!webhook) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
 
     const kind = webhook.kind ?? "custom";
@@ -113,7 +112,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       const meta = decryptMetadata(webhook.metadata_encrypted ?? null);
       const botToken = meta?.botToken;
       if (!botToken) {
-        return NextResponse.json({ error: "Missing Telegram botToken" }, { status: 422 });
+        return Response.json({ error: "Missing Telegram botToken" }, { status: 422 });
       }
       fetchUrl = buildTelegramUrl(botToken);
       payloadSent = { ...buildTelegramPayload("test.ping", testData, webhook.url) };
@@ -146,7 +145,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
     }
     await recordWebhookDelivery(webhook.id, result.status, result.success);
 
-    return NextResponse.json({
+    return Response.json({
       delivered: result.success,
       status: result.status,
       latencyMs: result.latencyMs,
@@ -155,6 +154,6 @@ export async function POST(_: Request, { params }: { params: Promise<{ id: strin
       error: result.error ? sanitizeErrorMessage(result.error) : null,
     });
   } catch (error: any) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

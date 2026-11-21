@@ -3,17 +3,27 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (k: string, v?: Record<string, unknown>) =>
     v ? `${k}:${JSON.stringify(v)}` : k,
 }));
 
 const replaceMock = vi.fn();
 const searchState = { current: "tab=overview" };
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(searchState.current),
-  useRouter: () => ({ replace: replaceMock }),
-  usePathname: () => "/dashboard/orchestration",
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useSearchParams: () => [new URLSearchParams(searchState.current), vi.fn()],
+  useNavigate: () => replaceMock,
+  useLocation: () => ({ pathname: "/dashboard/orchestration", search: "", hash: "" }),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 const DEFAULT_SNAPSHOT = {
@@ -120,7 +130,7 @@ describe("OrchestrationPageClient", () => {
     cleanup();
   });
 
-  it("clicking the Agents tab button pushes ?tab=agents via router.replace", () => {
+  it("clicking the Agents tab button pushes ?tab=agents via navigate", () => {
     const { c, cleanup } = render(<OrchestrationPageClient />);
     const agentsTabButton = Array.from(c.querySelectorAll('[role="tab"]')).find(
       (el) => el.textContent === "tabAgents"
@@ -132,7 +142,7 @@ describe("OrchestrationPageClient", () => {
     expect(replaceMock).toHaveBeenCalledTimes(1);
     const [url, opts] = replaceMock.mock.calls[0];
     expect(url).toContain("tab=agents");
-    expect(opts).toEqual({ scroll: false });
+    expect(opts).toEqual({ replace: true, preventScrollReset: true });
     cleanup();
   });
 
@@ -168,7 +178,7 @@ describe("OrchestrationPageClient", () => {
     cleanup();
   });
 
-  it("clicking a state chip in the toolbar sets ?state= via router.replace", () => {
+  it("clicking a state chip in the toolbar sets ?state= via navigate", () => {
     searchState.current = "tab=agents";
     const { c, cleanup } = render(<OrchestrationPageClient />);
     const runningChip = Array.from(c.querySelectorAll("button")).find(
@@ -184,7 +194,7 @@ describe("OrchestrationPageClient", () => {
     cleanup();
   });
 
-  it("toggling a collapse from AgentsTab writes ?collapsed= via router.replace", () => {
+  it("toggling a collapse from AgentsTab writes ?collapsed= via navigate", () => {
     searchState.current = "tab=agents";
     const { cleanup } = render(<OrchestrationPageClient />);
     const props = agentsTabCalls.at(-1) as { onToggleCollapse: (s: string) => void };

@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { NextRequest } from "next/server";
 import { getTestBackend, resetTestDb } from "../helpers/postgres.ts";
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-flag-policy-"));
@@ -50,7 +49,7 @@ let cookie: string;
 let chat: Request;
 
 function request(method = "GET", body?: { key: string; value?: string }) {
-  return new NextRequest("http://localhost/api/settings/feature-flags", {
+  return new Request("http://localhost/api/settings/feature-flags", {
     method,
     headers: { Cookie: cookie, "Content-Type": "application/json" },
     ...(body ? { body: JSON.stringify(body) } : {}),

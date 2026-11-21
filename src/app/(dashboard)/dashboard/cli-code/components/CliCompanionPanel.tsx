@@ -1,7 +1,5 @@
-"use client";
-
 import { useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   buildCompanionCommands,
   companionStatus,

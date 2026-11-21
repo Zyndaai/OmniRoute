@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
 import { Button, ProviderCardGrid } from "@/shared/components";
 import { computeNextBlockedProviders } from "@/shared/utils/noAuthProviders";

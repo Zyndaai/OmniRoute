@@ -1,6 +1,5 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { NextResponse } from "next/server";
 import {
   applyCorsHeaders,
   credentialRejectionCorsHeaders,
@@ -110,7 +109,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("does not set Allow-Origin when origin is not in allowlist", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/chat/completions", {
       headers: { Origin: "https://evil.example.com" },
     });
@@ -121,7 +120,7 @@ describe("cors/origins.applyCorsHeaders", () => {
 
   it("echoes origin and sets Vary: Origin when origin is allowed", () => {
     process.env.CORS_ALLOWED_ORIGINS = "https://app.example.com";
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/chat/completions", {
       headers: { Origin: "https://app.example.com" },
     });
@@ -133,7 +132,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   it("CLIENT_API: echoes arbitrary Origin (+Vary) for a token-carrying request (relaxForTokenAuth)", () => {
     // Token-authenticated /v1/* surface (issue #5242): no allowlist, arbitrary
     // origin → echo it back so browser/Electron renderers can read the body.
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models", {
       headers: { Origin: "http://localhost", Authorization: "Bearer omr_test_key" },
     });
@@ -145,7 +144,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("CLIENT_API: returns '*' when no Origin header is present for a token-carrying request", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models", {
       headers: { "x-api-key": "omr_test_key" },
     });
@@ -158,7 +157,7 @@ describe("cors/origins.applyCorsHeaders", () => {
     // A keyless install serves /v1 anonymously; echoing the Origin to a
     // credential-less cross-origin page would let any visited page drive the
     // gateway. Only token-carrying requests get the permissive echo.
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models", {
       headers: { Origin: "https://evil.example" },
     });
@@ -179,7 +178,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("MANAGEMENT: stays fail-closed for arbitrary Origin with no allowlist (relax off)", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/keys", {
       headers: { Origin: "http://localhost" },
     });
@@ -192,7 +191,7 @@ describe("cors/origins.applyCorsHeaders", () => {
 
   it("relaxForTokenAuth still honors an explicit allowlist match exactly (no wildcard)", () => {
     process.env.CORS_ALLOWED_ORIGINS = "https://app.example.com";
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models", {
       headers: { Origin: "https://app.example.com" },
     });
@@ -202,7 +201,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("CLIENT_API: appends Vary: Accept-Encoding on a 2xx relaxForTokenAuth response (#6737)", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models");
     applyCorsHeaders(res, req, true);
     assert.match(res.headers.get("Vary") || "", /Accept-Encoding/);
@@ -210,7 +209,7 @@ describe("cors/origins.applyCorsHeaders", () => {
 
   it("CLIENT_API: combines with Vary: Origin into a single comma-joined header (#6737)", () => {
     process.env.CORS_ALLOWED_ORIGINS = "https://app.example.com";
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/models", {
       headers: { Origin: "https://app.example.com" },
     });
@@ -221,7 +220,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("MANAGEMENT: does not append Vary: Accept-Encoding (relax off) (#6737)", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/keys");
     applyCorsHeaders(res, req);
     assert.doesNotMatch(res.headers.get("Vary") || "", /Accept-Encoding/);
@@ -230,7 +229,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("204 response: does not append Vary: Accept-Encoding even with relaxForTokenAuth (#6737)", () => {
-    const res = new NextResponse(null, { status: 204 });
+    const res = new Response(null, { status: 204 });
     const req = new Request("https://server.example.com/api/v1/models", {
       method: "OPTIONS",
     });
@@ -239,7 +238,7 @@ describe("cors/origins.applyCorsHeaders", () => {
   });
 
   it("CLIENT_API: appends Vary: Accept-Encoding even without an Origin header (#6737)", () => {
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     // Token-carrying request (post-GHSA-7px7 the permissive echo requires a
     // credential); this test's point is the Vary: Accept-Encoding stamp.
     const req = new Request("https://server.example.com/api/v1/models", {
@@ -252,7 +251,7 @@ describe("cors/origins.applyCorsHeaders", () => {
 
   it("reflects requested headers from Access-Control-Request-Headers preflight", () => {
     process.env.CORS_ALLOWED_ORIGINS = "https://app.example.com";
-    const res = NextResponse.json({ ok: true });
+    const res = Response.json({ ok: true });
     const req = new Request("https://server.example.com/api/v1/chat/completions", {
       method: "OPTIONS",
       headers: {

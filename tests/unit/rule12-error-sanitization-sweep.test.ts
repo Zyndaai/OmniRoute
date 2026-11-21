@@ -19,7 +19,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-rule12-sweep-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -46,8 +45,8 @@ function makeLeakyError(): Error {
   return err;
 }
 
-function makeRequest(url: string, options?: RequestInit): NextRequest {
-  return new Request(url, options) as unknown as NextRequest;
+function makeRequest(url: string, options?: RequestInit): Request {
+  return new Request(url, options) as unknown as Request;
 }
 
 // Sanity: the sanitizer really does strip these leaks (guards the test itself —

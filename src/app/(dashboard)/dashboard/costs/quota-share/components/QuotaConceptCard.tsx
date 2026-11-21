@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Collapsible from "@/shared/components/Collapsible";
 import Icon from "@/shared/components/Icon";
 

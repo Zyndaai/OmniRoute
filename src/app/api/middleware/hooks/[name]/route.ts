@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getMiddlewareHook,
@@ -43,7 +42,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     const hook = await getMiddlewareHook(name);
     if (!hook) {
-      return NextResponse.json({ error: "Hook not found" }, { status: 404 });
+      return Response.json({ error: "Hook not found" }, { status: 404 });
     }
 
     const result: Record<string, unknown> = { hook };
@@ -51,10 +50,10 @@ export async function GET(request: Request, { params }: RouteParams) {
       result.logs = getHookLogs(name, logLimit);
     }
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     console.error("[API] GET /api/middleware/hooks/[name] error:", error);
-    return NextResponse.json({ error: "Failed to get hook" }, { status: 500 });
+    return Response.json({ error: "Failed to get hook" }, { status: 500 });
   }
 }
 
@@ -72,13 +71,13 @@ export async function PUT(request: Request, { params }: RouteParams) {
     const rawBody = await request.json();
     const validation = validateBody(updateHookSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
     const existing = await getMiddlewareHook(name);
     if (!existing) {
-      return NextResponse.json({ error: "Hook not found" }, { status: 404 });
+      return Response.json({ error: "Hook not found" }, { status: 404 });
     }
 
     // Build updates from request body
@@ -92,7 +91,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     // Persist to DB
     const saved = await updateMiddlewareHook(name, updates);
     if (!saved) {
-      return NextResponse.json({ error: "Failed to update hook" }, { status: 500 });
+      return Response.json({ error: "Failed to update hook" }, { status: 500 });
     }
 
     // Update runtime registry
@@ -102,10 +101,10 @@ export async function PUT(request: Request, { params }: RouteParams) {
       registerHook(saved);
     }
 
-    return NextResponse.json({ hook: saved });
+    return Response.json({ hook: saved });
   } catch (error: any) {
     console.error("[API] PUT /api/middleware/hooks/[name] error:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to update hook" },
       { status: 500 }
     );
@@ -124,21 +123,21 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
     const existing = await getMiddlewareHook(name);
     if (!existing) {
-      return NextResponse.json({ error: "Hook not found" }, { status: 404 });
+      return Response.json({ error: "Hook not found" }, { status: 404 });
     }
 
     // Remove from DB
     const deleted = await deleteMiddlewareHook(name);
     if (!deleted) {
-      return NextResponse.json({ error: "Failed to delete hook" }, { status: 500 });
+      return Response.json({ error: "Failed to delete hook" }, { status: 500 });
     }
 
     // Remove from runtime registry
     unregisterHook(name);
 
-    return NextResponse.json({ success: true, message: `Hook "${name}" deleted` });
+    return Response.json({ success: true, message: `Hook "${name}" deleted` });
   } catch (error) {
     console.error("[API] DELETE /api/middleware/hooks/[name] error:", error);
-    return NextResponse.json({ error: "Failed to delete hook" }, { status: 500 });
+    return Response.json({ error: "Failed to delete hook" }, { status: 500 });
   }
 }

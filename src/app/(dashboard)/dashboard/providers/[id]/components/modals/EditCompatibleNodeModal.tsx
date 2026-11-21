@@ -1,8 +1,6 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Badge, Input, Modal, Select, Toggle } from "@/shared/components";
 import { isValidProviderIconUrl } from "@/shared/validation/iconUrl";
 import { CC_COMPATIBLE_DEFAULT_CHAT_PATH } from "../../providerDetailConstants";

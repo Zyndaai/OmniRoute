@@ -104,7 +104,7 @@ test("#11779: dashboard navigations are not intercepted so the browser can retry
   assert.equal(result.intercepted, false, "dashboard navigation must fall through to the browser");
 });
 
-test("#11779: API and Next assets still go through the worker", async () => {
+test("#11779: API stays out and hashed build assets still go through the worker", async () => {
   const harness = createServiceWorkerHarness();
   harness.setFetch(async () => new Response("ok", { status: 200 }));
 
@@ -117,7 +117,7 @@ test("#11779: API and Next assets still go through the worker", async () => {
   assert.equal(api.intercepted, false, "/api/ is already excluded");
 
   const asset = await harness.dispatchFetch({
-    url: "https://app.example/_next/static/chunk.js",
+    url: "https://app.example/assets/chunk-3f9a1c.js",
     method: "GET",
     mode: "cors",
     destination: "script",

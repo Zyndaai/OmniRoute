@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { ResponseCookieJar, redirectWithCookies } from "@/lib/api/cookieJar";
 import { getCachedSettings } from "@/lib/db/readCache";
 import {
   PKCE_CHALLENGE_METHOD,
@@ -6,9 +6,13 @@ import {
   generateCodeVerifier,
 } from "@/lib/oauth/utils/pkce";
 
-function setOidcFlowCookies(res: NextResponse, cookies: Record<string, string>, secure: boolean) {
+function setOidcFlowCookies(
+  jar: ResponseCookieJar,
+  cookies: Record<string, string>,
+  secure: boolean
+) {
   for (const [name, value] of Object.entries(cookies)) {
-    res.cookies.set(name, value, {
+    jar.set(name, value, {
       httpOnly: true,
       sameSite: "lax",
       path: "/",
@@ -43,7 +47,7 @@ export async function GET(request: Request) {
       : "/api/auth/oidc/callback";
 
   if (!enabled || !rawIssuer || !clientId || !clientSecret) {
-    return NextResponse.json(
+    return Response.json(
       { error: "OIDC is not configured. Use password login or configure OIDC in settings." },
       { status: 400 }
     );
@@ -103,11 +107,11 @@ export async function GET(request: Request) {
   const isHttpsRequest = scheme === "https";
   const useSecureCookie = process.env.AUTH_COOKIE_SECURE === "true" || isHttpsRequest;
 
-  const res = NextResponse.redirect(url.toString());
+  const jar = new ResponseCookieJar(request);
   setOidcFlowCookies(
-    res,
+    jar,
     { oidc_state: state, oidc_pkce_verifier: codeVerifier, oidc_nonce: nonce },
     useSecureCookie
   );
-  return res;
+  return redirectWithCookies(jar, url);
 }

@@ -1,13 +1,10 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback, useId } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
-import Image from "next/image";
 import CliStatusBadge from "./CliStatusBadge";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { DEFAULT_DISPLAY_BASE_URL } from "@/shared/hooks";
 import { cn } from "@/shared/utils/cn";
@@ -240,13 +237,12 @@ export default function KiloToolCard({
         <div className="flex min-w-0 items-center gap-3">
           <div className="size-8 rounded-lg flex items-center justify-center shrink-0">
             {tool.image ? (
-              <Image
+              <img
                 src={tool.image}
                 alt={tool.name}
                 width={32}
                 height={32}
                 className="size-8 object-contain rounded-lg"
-                sizes="32px"
                 onError={(e) => {
                   (e.currentTarget as HTMLElement).style.display = "none";
                 }}

@@ -16,8 +16,6 @@ import { resolveClientApiKey } from "@/sse/services/clientApiKeyResolver";
 import { withInjectionGuard } from "@/middleware/promptInjectionGuard";
 import { getSpecialtyModelsResponse } from "@/app/api/v1/_shared/specialtyCatalog";
 
-export const dynamic = "force-dynamic";
-
 export async function OPTIONS() {
   return new Response(null, {
     headers: {

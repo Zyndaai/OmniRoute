@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   getSession,
@@ -34,7 +33,7 @@ function publicSession(session: VncSession | undefined | null) {
 
 function errorResponse(status: number, error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
-  return NextResponse.json(buildErrorBody(status, sanitizeErrorMessage(raw)), { status });
+  return Response.json(buildErrorBody(status, sanitizeErrorMessage(raw)), { status });
 }
 
 /**
@@ -61,12 +60,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ para
   if (!connectionId) return errorResponse(400, "connectionId is required");
 
   if (!sessionId) {
-    return NextResponse.json({ sessions: listSessions(connectionId).map(publicSession) });
+    return Response.json({ sessions: listSessions(connectionId).map(publicSession) });
   }
 
   const session = getSession(connectionId, sessionId);
   if (!session) return errorResponse(404, "Browser-login session not found");
-  return NextResponse.json({ session: publicSession(session) });
+  return Response.json({ session: publicSession(session) });
 }
 
 export async function POST(
@@ -85,7 +84,7 @@ export async function POST(
   try {
     if (second === "start" && !action) {
       const session = await startSession(connectionId);
-      return NextResponse.json({
+      return Response.json({
         session: publicSession(session),
         note:
           "The viewer is loopback-only. Open it on the OmniRoute host or forward its port over SSH, then harvest the session.",
@@ -96,7 +95,7 @@ export async function POST(
 
     if (action === "harvest") {
       const result = await harvestSession(connectionId, second);
-      return NextResponse.json({
+      return Response.json({
         ...result,
         validation: result.validation
           ? {
@@ -113,7 +112,7 @@ export async function POST(
         return errorResponse(404, "Browser-login session not found");
       }
       markViewerActive(connectionId, second);
-      return NextResponse.json({ ok: true, sessionId: second, connectionId });
+      return Response.json({ ok: true, sessionId: second, connectionId });
     }
 
     return errorResponse(400, `Unknown browser-login action: ${action}`);
@@ -138,10 +137,9 @@ export async function DELETE(
 
   try {
     await stopSession(connectionId, sessionId);
-    return NextResponse.json({ stopped: true, connectionId, sessionId });
+    return Response.json({ stopped: true, connectionId, sessionId });
   } catch (error) {
     return errorResponse(500, error);
   }
 }
 
-export const runtime = "nodejs";

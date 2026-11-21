@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import {
   canAccessOwnedRecord,
@@ -24,7 +23,7 @@ export async function OPTIONS() {
 }
 
 function notFound(): Response {
-  return NextResponse.json(buildErrorBody(404, "Media not found"), {
+  return Response.json(buildErrorBody(404, "Media not found"), {
     status: 404,
     headers: CORS_HEADERS,
   });
@@ -55,7 +54,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const scope = await getApiKeyRequestScope(request);
   if (scope.rejection) return scope.rejection;
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });

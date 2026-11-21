@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // keys. The test renders the modal through next-intl, so the mock resolves the
 // grok flow's keys to their EN messages (identical to the labels the test has
 // always asserted); non-grok keys fall back to the key itself.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) =>
     ({
       tabDeviceCode: "Device Code",

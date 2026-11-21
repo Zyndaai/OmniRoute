@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getAgent } from "@/lib/cloudAgent/registry";
 import {
   createCloudAgentTaskTable,
@@ -26,8 +25,8 @@ function ensureTable() {
   }
 }
 
-export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, { headers: getCloudAgentCorsHeaders(request) });
+export async function OPTIONS(request: Request) {
+  return new Response(null, { headers: getCloudAgentCorsHeaders(request) });
 }
 
 const ApproveSchema = z.object({
@@ -49,14 +48,14 @@ const TaskActionSchema = z.discriminatedUnion("action", [
   CancelSchema,
 ]);
 
-function cloudAgentCredentialsRequiredResponse(providerId: string, request: NextRequest) {
-  return NextResponse.json(
+function cloudAgentCredentialsRequiredResponse(providerId: string, request: Request) {
+  return Response.json(
     { error: `No active credentials configured for cloud agent provider: ${providerId}` },
     { status: 400, headers: getCloudAgentCorsHeaders(request) }
   );
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     ensureTable();
     const authError = await requireCloudAgentManagementAuth(request);
@@ -66,7 +65,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const task = await getCloudAgentTaskById(id);
 
     if (!task) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Task not found" },
         { status: 404, headers: getCloudAgentCorsHeaders(request) }
       );
@@ -97,14 +96,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const updatedTask = await getCloudAgentTaskById(id);
 
-    return NextResponse.json(
+    return Response.json(
       {
         data: serializeCloudAgentTask(updatedTask!),
       },
       { headers: getCloudAgentCorsHeaders(request) }
     );
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           sanitizeErrorMessage(error instanceof Error ? error.message : "Unknown error") ||
@@ -115,7 +114,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     ensureTable();
     const authError = await requireCloudAgentManagementAuth(request);
@@ -125,7 +124,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const body = await request.json();
     const validation = TaskActionSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Validation failed", details: validation.error.issues },
         { status: 400, headers: getCloudAgentCorsHeaders(request) }
       );
@@ -133,7 +132,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const task = await getCloudAgentTaskById(id);
     if (!task) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Task not found" },
         { status: 404, headers: getCloudAgentCorsHeaders(request) }
       );
@@ -143,7 +142,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const agent = getAgent(task.provider_id);
     if (!agent) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Agent not found" },
         { status: 500, headers: getCloudAgentCorsHeaders(request) }
       );
@@ -151,7 +150,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (validated.action === "approve") {
       if (!task.external_id) {
-        return NextResponse.json(
+        return Response.json(
           { error: "No external task to approve" },
           { status: 400, headers: getCloudAgentCorsHeaders(request) }
         );
@@ -162,7 +161,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       await updateCloudAgentTask(id, { status: "running" });
     } else if (validated.action === "message") {
       if (!task.external_id) {
-        return NextResponse.json(
+        return Response.json(
           { error: "No external task to message" },
           { status: 400, headers: getCloudAgentCorsHeaders(request) }
         );
@@ -178,13 +177,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const updatedTask = await getCloudAgentTaskById(id);
-    return NextResponse.json(
+    return Response.json(
       { success: true, data: updatedTask ? serializeCloudAgentTask(updatedTask) : null },
       { headers: getCloudAgentCorsHeaders(request) }
     );
   } catch (error) {
     logger.error({ err: error }, "Failed to process task action");
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           sanitizeErrorMessage(error instanceof Error ? error.message : "Unknown error") ||
@@ -195,10 +194,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     ensureTable();
     const authError = await requireCloudAgentManagementAuth(request);
@@ -207,16 +203,16 @@ export async function DELETE(
     const { id } = await params;
     const task = await getCloudAgentTaskById(id);
     if (!task) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Task not found" },
         { status: 404, headers: getCloudAgentCorsHeaders(request) }
       );
     }
 
     await deleteCloudAgentTask(id);
-    return NextResponse.json({ success: true }, { headers: getCloudAgentCorsHeaders(request) });
+    return Response.json({ success: true }, { headers: getCloudAgentCorsHeaders(request) });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           sanitizeErrorMessage(error instanceof Error ? error.message : "Unknown error") ||

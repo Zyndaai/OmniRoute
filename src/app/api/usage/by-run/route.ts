@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -35,17 +34,17 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, parsed.error.issues[0]?.message ?? "Invalid query parameters"),
         { status: 400 }
       );
     }
 
     const rows = await getCostBySessionTag(parsed.data.run_id);
-    return NextResponse.json({ runId: parsed.data.run_id, rows });
+    return Response.json({ runId: parsed.data.run_id, rows });
   } catch (error) {
     console.error("[API] GET /api/usage/by-run error:", error);
-    return NextResponse.json(buildErrorBody(500, "Failed to fetch per-run costs"), {
+    return Response.json(buildErrorBody(500, "Failed to fetch per-run costs"), {
       status: 500,
     });
   }

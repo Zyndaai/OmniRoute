@@ -1,5 +1,5 @@
 /**
- * Tests for G1 — i18n deep-merge EN fallback (src/i18n/request.ts).
+ * Tests for G1 — i18n deep-merge EN fallback (src/i18n/messages.ts).
  *
  * Strategy (A): test `deepMergeFallback` directly via its named export.
  * This avoids mocking next/headers, next-intl, and dynamic imports while
@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deepMergeFallback } from "../../src/i18n/request.ts";
+import { deepMergeFallback } from "../../src/i18n/messages.ts";
 
 // ---------------------------------------------------------------------------
 // 1. deepMergeFallback — locale-specific key wins (target wins)

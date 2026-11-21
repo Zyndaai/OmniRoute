@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { deleteCustomEvalSuite, getCustomEvalSuite, saveCustomEvalSuite } from "@/lib/db/evals";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -12,14 +11,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ suit
     const { suiteId } = await params;
     const suite = await getCustomEvalSuite(suiteId);
     if (!suite) {
-      return NextResponse.json({ error: "Eval suite not found" }, { status: 404 });
+      return Response.json({ error: "Eval suite not found" }, { status: 404 });
     }
-    return NextResponse.json({ suite });
+    return Response.json({ suite });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: error?.message || "Failed to load eval suite" },
-      { status: 500 }
-    );
+    return Response.json({ error: error?.message || "Failed to load eval suite" }, { status: 500 });
   }
 }
 
@@ -31,7 +27,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ suit
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -44,20 +40,20 @@ export async function PUT(request: Request, { params }: { params: Promise<{ suit
 
   const validation = validateBody(evalSuiteSaveSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
     const { suiteId } = await params;
     const existing = await getCustomEvalSuite(suiteId);
     if (!existing) {
-      return NextResponse.json({ error: "Eval suite not found" }, { status: 404 });
+      return Response.json({ error: "Eval suite not found" }, { status: 404 });
     }
 
     const suite = await saveCustomEvalSuite({ ...validation.data, id: suiteId });
-    return NextResponse.json({ suite });
+    return Response.json({ suite });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: error?.message || "Failed to update eval suite" },
       { status: 500 }
     );
@@ -75,11 +71,11 @@ export async function DELETE(
     const { suiteId } = await params;
     const deleted = await deleteCustomEvalSuite(suiteId);
     if (!deleted) {
-      return NextResponse.json({ error: "Eval suite not found" }, { status: 404 });
+      return Response.json({ error: "Eval suite not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: error?.message || "Failed to delete eval suite" },
       { status: 500 }
     );

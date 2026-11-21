@@ -150,6 +150,9 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     // persisted-cooldown gate's connection read moved here byte-identically
     // (readConnectionForCooldownGate), so this is the same site, renamed.
     "open-sse/services/combo/executeTargetGates.ts": 1,
+    // Cluster: when another process announces a rate-limit change for one connection, the
+    // limiter re-reads that connection's saved limits by id. A settings read, not selection.
+    "open-sse/services/rateLimitManager.ts": 1,
     // #15927: providerWildcard.ts no longer queries connections itself — the Alibaba
     // free-tier drained-model filter now reads through getCachedProviderPoolConnections()
     // (open-sse/services/providerConnectionPool.ts), which goes through the shared
@@ -222,7 +225,7 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     "src/app/api/usage/quota/route.ts": 1,
     "src/app/api/usage/utilization/route.ts": 1,
     "src/app/api/v1beta/models/route.ts": 1,
-    "src/instrumentation-node.ts": 1,
+    "src/server/boot.ts": 1,
     "src/lib/a2a/skills/providerDiscovery.ts": 1,
     "src/lib/chaos/chaosExecutor.ts": 1,
     // #17999: CLIProxyAPI management compat (/v0/management/api-call) re-resolves the

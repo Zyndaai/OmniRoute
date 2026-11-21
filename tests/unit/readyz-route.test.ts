@@ -7,12 +7,12 @@ import {
   markServerReady,
   markServerStopping,
 } from "../../src/lib/serverLifecycle.ts";
+import { isAuthzPath } from "../../src/server/http/authzPaths.ts";
 
 const readyz = await import("../../src/app/readyz/route.ts");
 const healthz = await import("../../src/app/healthz/route.ts");
 
 test("/readyz matches /healthz lifecycle for GET and HEAD", async () => {
-  assert.equal(readyz.dynamic, "force-dynamic");
   markServerStarting();
 
   const startingReady = await readyz.GET();
@@ -41,19 +41,14 @@ test("/readyz matches /healthz lifecycle for GET and HEAD", async () => {
   assert.equal(stoppingHealth.status, 503);
 });
 
-test("/readyz is omitted from the centralized auth proxy matcher", () => {
-  const proxySource = fs.readFileSync("src/proxy.ts", "utf8");
-  const matcherBlock = proxySource.match(/matcher:\s*\[([\s\S]*?)\]/)?.[1];
-  assert.ok(matcherBlock, "proxy matcher configuration must remain discoverable");
-  assert.equal(/["']\/readyz/.test(matcherBlock), false);
-  assert.equal(/["']\/healthz/.test(matcherBlock), false);
+test("/readyz is omitted from the centralized authz pipeline", () => {
+  assert.equal(isAuthzPath("/readyz"), false);
+  assert.equal(isAuthzPath("/healthz"), false);
 });
 
-test("/readyz re-exports the /healthz handlers and declares its route config locally", () => {
+test("/readyz re-exports the /healthz handlers", () => {
   const source = fs.readFileSync("src/app/readyz/route.ts", "utf8");
   assert.match(source, /from ["']\.\.\/healthz\/route["']/);
-  assert.match(source, /export const dynamic = ["']force-dynamic["']/);
-  assert.doesNotMatch(source, /export\s*\{[^}]*\bdynamic\b[^}]*\}\s*from/);
   assert.equal(/monitoring/i.test(source), false);
   assert.equal(/sqlite/i.test(source), false);
 });

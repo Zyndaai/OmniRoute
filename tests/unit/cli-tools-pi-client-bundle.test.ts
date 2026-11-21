@@ -5,11 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * #15515: PiToolCard is a `"use client"` component. Its first revision imported
+ * #15515: PiToolCard is a browser component. Its first revision imported
  * `OMNIROUTE_PROVIDER_API` / `ensurePiV1BaseUrl` / `getPiModelsPath` directly from
  * `@/shared/services/piConfig`, which opens with `import fs from "fs/promises"`.
  *
- * Webpack refuses to resolve `fs/promises` inside a client chunk, so the whole Pi
+ * The bundler cannot resolve `fs/promises` inside a client chunk, so the whole Pi
  * detail page failed with HTTP 500 — `Module not found: Can't resolve 'fs/promises'`
  * — and the dashboard showed a blank page instead of the Pi integration card.
  * The general guard (client-bundle-no-server-only-10692) only walks the *existing*
@@ -29,7 +29,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const PI_CARD = "src/app/(dashboard)/dashboard/cli-code/components/PiToolCard.tsx";
 const PI_CONFIG = "src/shared/services/piConfig.ts";
 
-/** Next ships no client fallback for these, so the client build cannot resolve them. */
+/** The browser build has no polyfill for these, so a client chunk cannot resolve them. */
 const UNPOLYFILLED_NODE_BUILTINS = ["fs", "fs/promises", "net", "tls", "child_process", "module"];
 
 /** First-party runtime imports of a file, skipping `import type` (erased at build time). */
@@ -67,11 +67,14 @@ function hasForbiddenBuiltin(source: string): string | null {
   return null;
 }
 
-test("PiToolCard is a client component", () => {
+test("PiToolCard is a plain component, not a route module", () => {
+  // A route module may import server code for its loader; a component file ships to the
+  // browser whole, which is what the pins below assume.
   const source = repoRead(PI_CARD);
-  assert.ok(
-    /^\s*["']use client["']/m.test(source.slice(0, 200)),
-    `${PI_CARD} lost its "use client" directive — the pin below assumes a browser bundle`
+  assert.doesNotMatch(
+    source,
+    /export\s+(?:async\s+)?(?:function|const)\s+(?:loader|action|headers|middleware)\b/,
+    `${PI_CARD} exports a route-module function — the pin below assumes a browser bundle`
   );
 });
 

@@ -38,17 +38,14 @@ test("#13990 runner-base copies the app with --chown=node:node instead of a seco
   const stage = runnerBaseStage();
 
   const copiesFromBuilder = stage.filter((l) => /^COPY\b.*--from=builder\b/.test(l));
-  assert.ok(
-    copiesFromBuilder.length >= 3,
-    "runner-base must COPY the standalone build, better-sqlite3 and healthcheck.mjs from the builder"
-  );
+  assert.ok(copiesFromBuilder.length >= 1, "runner-base must COPY the app from the builder");
   for (const line of copiesFromBuilder) {
     assert.match(line, /--chown=node:node\b/, `COPY must set node ownership at copy time: ${line}`);
   }
 
   assert.ok(
     !stage.some((l) => /^RUN\b.*chown\s+-R\b/.test(l)),
-    "runner-base must not run a recursive chown: it rewrites the whole standalone tree into a duplicate layer"
+    "runner-base must not run a recursive chown: it rewrites the whole app into a duplicate layer"
   );
 });
 

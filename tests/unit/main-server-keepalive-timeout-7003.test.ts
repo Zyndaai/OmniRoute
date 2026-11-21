@@ -6,8 +6,8 @@ import { getMainServerTimeoutConfig } from "../../src/shared/utils/runtimeTimeou
 
 // #7003 — JetBrains AI Assistant ("Test Connection" / completions) reported
 // "HTTP/1.1 header parser received no bytes". The main OmniRoute server
-// (scripts/dev/run-next.mjs) boots a bare `http.createServer(...)` and never
-// configures `keepAliveTimeout`/`headersTimeout`, leaving Node's http.Server
+// (now scripts/dev/run-server.mjs) booted a bare `http.createServer(...)` and never
+// configured `keepAliveTimeout`/`headersTimeout`, leaving Node's http.Server
 // default of keepAliveTimeout=5_000ms with no `Keep-Alive: timeout=N` response
 // hint. JetBrains AI Assistant's JVM `java.net.http.HttpClient` connection pool
 // can reuse a socket idle for longer than that window; the server has already
@@ -16,7 +16,7 @@ import { getMainServerTimeoutConfig } from "../../src/shared/utils/runtimeTimeou
 //
 // This spec proves both halves:
 //   1. `getMainServerTimeoutConfig()` raises the defaults well above Node's
-//      unconfigured 5_000ms window (the actual fix wired into run-next.mjs).
+//      unconfigured 5_000ms window (the fix wired into run-server.mjs).
 //   2. A bare http.Server left at Node's defaults drops a socket reused after
 //      an idle gap past 5s, while the same server configured via
 //      `getMainServerTimeoutConfig()` keeps serving the reused connection.

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getUnpricedUsageReport } from "@/lib/usage/unpricedUsage";
 import * as log from "@/sse/utils/logger";
@@ -14,9 +13,9 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    return NextResponse.json(await getUnpricedUsageReport());
+    return Response.json(await getUnpricedUsageReport());
   } catch (error) {
     log.error("pricing", "Error building unpriced usage report", error);
-    return NextResponse.json({ error: "Failed to build unpriced usage report" }, { status: 500 });
+    return Response.json({ error: "Failed to build unpriced usage report" }, { status: 500 });
   }
 }

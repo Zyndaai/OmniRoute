@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox } from "@omniroute/ui-kit/checkbox";
 import Button from "@/shared/components/Button";
 

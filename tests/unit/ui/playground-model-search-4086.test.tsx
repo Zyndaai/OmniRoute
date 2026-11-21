@@ -10,7 +10,7 @@ import type { ConfigStateSetter } from "../../../src/app/(dashboard)/dashboard/p
 // a flat list (e.g. 50+ OpenRouter models). Regression guard for the search box added to
 // StudioConfigPane's model picker.
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

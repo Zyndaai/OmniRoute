@@ -1,4 +1,3 @@
-"use client";
 /**
  * Search input + filter chips for the Agents/Overview tabs — pure presentation over the URL
  * params owned by OrchestrationPageClient (`q`/`state`/`source`/`provider`). No filtering logic
@@ -6,7 +5,7 @@
  * `setParams` to mutate it. Spec: task-a6-brief.md (2.3+2.4).
  */
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";
 import { isEmptyFilter } from "./model/filterSnapshot";

@@ -11,6 +11,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
+import { securityHeadersFor } from "../../../../../src/server/http/securityHeaders.ts";
+
 // ── module shape ──────────────────────────────────────────────────────────────
 
 describe("NinerouterServiceTab — module shape", () => {
@@ -96,11 +98,11 @@ describe("EmbeddedUiCard — iframe URL (G-10)", () => {
     assert.ok(!proxyUrl.includes("localhost"), "must NOT reference localhost directly");
   });
 
-  it("proxy path matches the embed route pattern in next.config.mjs", () => {
-    const proxyUrl = "/dashboard/providers/services/9router/embed/";
-    // Pattern: /dashboard/providers/services/:name/embed/:path*
-    assert.ok(proxyUrl.startsWith("/dashboard/providers/services/"), "matches base segment");
-    assert.ok(proxyUrl.includes("/embed/"), "contains /embed/ segment");
+  it("proxy path gets the same-origin embed CSP from securityHeaders", () => {
+    // The trailing slash of the iframe URL is redirected away before headers are chosen.
+    const proxyPath = "/dashboard/providers/services/9router/embed";
+    const csp = Object.fromEntries(securityHeadersFor(proxyPath, null))["Content-Security-Policy"];
+    assert.equal(csp, "frame-ancestors 'self'");
   });
 });
 

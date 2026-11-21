@@ -1,5 +1,3 @@
-"use client";
-
 import { useContext, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
 import { cn } from "./lib/utils";
 import { MetricMotionContext } from "./metric-motion";

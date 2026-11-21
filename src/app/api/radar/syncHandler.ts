@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { CORS_HEADERS } from "@/shared/utils/cors";
@@ -11,13 +10,13 @@ export async function handleRadarFeedSync(
   failureMessage: string
 ) {
   if (!isFeatureFlagEnabled("RADAR_ENABLED")) {
-    return NextResponse.json(buildErrorBody(404, "Not found"), {
+    return Response.json(buildErrorBody(404, "Not found"), {
       status: 404,
       headers: CORS_HEADERS,
     });
   }
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json(buildErrorBody(401, "Unauthorized"), {
+    return Response.json(buildErrorBody(401, "Unauthorized"), {
       status: 401,
       headers: CORS_HEADERS,
     });
@@ -25,16 +24,16 @@ export async function handleRadarFeedSync(
 
   const bodyError = radarSyncBodyError(await validateRadarSyncBody(request));
   if (bodyError) {
-    return NextResponse.json(buildErrorBody(bodyError.status, bodyError.message), {
+    return Response.json(buildErrorBody(bodyError.status, bodyError.message), {
       status: bodyError.status,
       headers: CORS_HEADERS,
     });
   }
 
   try {
-    return NextResponse.json(await sync(), { headers: CORS_HEADERS });
+    return Response.json(await sync(), { headers: CORS_HEADERS });
   } catch (error: unknown) {
-    return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(error) || failureMessage), {
+    return Response.json(buildErrorBody(500, sanitizeErrorMessage(error) || failureMessage), {
       status: 500,
       headers: CORS_HEADERS,
     });

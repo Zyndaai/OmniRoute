@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback, useId } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
@@ -7,7 +5,7 @@ import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import CliStatusBadge from "./CliStatusBadge";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { DEFAULT_DISPLAY_BASE_URL } from "@/shared/hooks";
 import { cn } from "@/shared/utils/cn";

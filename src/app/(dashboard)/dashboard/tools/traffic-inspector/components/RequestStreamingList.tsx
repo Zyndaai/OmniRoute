@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import EmptyState from "@/shared/components/EmptyState";
 import type { InterceptedRequest } from "@/mitm/inspector/types";

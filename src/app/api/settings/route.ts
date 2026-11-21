@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ResponseCookieJar, applyCookies } from "@/lib/api/cookieJar";
 import {
   getSettings,
   getSettingsRevision,
@@ -59,9 +59,6 @@ import {
  * items) visible immediately after refresh or restart instead of falling back
  * to stale Next.js fetch cache. Ported from upstream decolua/9router#951.
  */
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 /** Response headers applied to every successful GET/PATCH on /api/settings. */
 const SETTINGS_RESPONSE_HEADERS = { "Cache-Control": "no-store" } as const;
 
@@ -216,7 +213,7 @@ export async function GET(request: Request) {
       // best effort — don't fail GET /api/settings if this lookup fails
     }
 
-    return NextResponse.json(
+    return Response.json(
       {
         ...safeSettings,
         settingsRevision,
@@ -244,7 +241,7 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     console.log("Error getting settings:", error);
-    return NextResponse.json({ error: "Failed to load settings" }, { status: 500 });
+    return Response.json({ error: "Failed to load settings" }, { status: 500 });
   }
 }
 
@@ -380,7 +377,7 @@ export async function PATCH(request: Request) {
     // Malformed JSON — surface a zod-style failure path so the rejection
     // is auditable like every other 400.
     await emitSettingsFailureAudit(request, actor, "INVALID_JSON", []);
-    return NextResponse.json(
+    return Response.json(
       { error: { code: "INVALID_JSON", message: "Request body is not valid JSON" } },
       { status: 400 }
     );
@@ -388,7 +385,7 @@ export async function PATCH(request: Request) {
   if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
     // Valid JSON that is not an object (`null`, a string, a number): nothing to read keys from.
     await emitSettingsFailureAudit(request, actor, "INVALID_BODY", []);
-    return NextResponse.json(
+    return Response.json(
       { error: { code: "INVALID_BODY", message: "Request body must be a JSON object" } },
       { status: 400 }
     );
@@ -412,7 +409,7 @@ export async function PATCH(request: Request) {
         isBypassPrefixRejection ? "BYPASS_PREFIX_NOT_ALLOWED" : "VALIDATION_FAILED",
         attemptedKeys
       );
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body: typeof validation.data & { password?: string } = { ...validation.data };
 
@@ -434,13 +431,13 @@ export async function PATCH(request: Request) {
     const oidcPolicyError = await validateOidcPolicyPatch(body);
     if (oidcPolicyError) {
       await emitSettingsFailureAudit(request, actor, oidcPolicyError.code, attemptedKeys);
-      return NextResponse.json({ error: oidcPolicyError }, { status: 400 });
+      return Response.json({ error: oidcPolicyError }, { status: 400 });
     }
 
     const entraPolicyError = await validateEntraSsoPatch(body);
     if (entraPolicyError) {
       await emitSettingsFailureAudit(request, actor, entraPolicyError.code, attemptedKeys);
-      return NextResponse.json({ error: entraPolicyError }, { status: 400 });
+      return Response.json({ error: entraPolicyError }, { status: 400 });
     }
 
     // VALIDATED body so we never trip on stray unknown keys. If any security
@@ -472,7 +469,7 @@ export async function PATCH(request: Request) {
       if (!isColdBoot) {
         if (!body.currentPassword) {
           await emitSettingsFailureAudit(request, actor, "PASSWORD_REQUIRED", attemptedKeys);
-          return NextResponse.json(
+          return Response.json(
             {
               error: {
                 code: "PASSWORD_REQUIRED",
@@ -486,7 +483,7 @@ export async function PATCH(request: Request) {
         const isValid = await verifyManagementPassword(body.currentPassword, storedPasswordHash);
         if (!isValid) {
           await emitSettingsFailureAudit(request, actor, "PASSWORD_MISMATCH", attemptedKeys);
-          return NextResponse.json(
+          return Response.json(
             {
               error: {
                 code: "PASSWORD_MISMATCH",
@@ -514,7 +511,7 @@ export async function PATCH(request: Request) {
             "PAID_MODEL_TARGET_BLOCKED",
             attemptedKeys
           );
-          return NextResponse.json(
+          return Response.json(
             {
               error: {
                 code: "PAID_MODEL_TARGET_BLOCKED",
@@ -554,7 +551,7 @@ export async function PATCH(request: Request) {
     } catch (error) {
       if (error instanceof SettingsRevisionConflictError) {
         await emitSettingsFailureAudit(request, actor, "SETTINGS_REVISION_CONFLICT", attemptedKeys);
-        return NextResponse.json(
+        return Response.json(
           {
             error: {
               code: "SETTINGS_REVISION_CONFLICT",
@@ -575,7 +572,7 @@ export async function PATCH(request: Request) {
       const urlValidation = validateProxyUrl(cpaUrl);
       if (urlValidation.valid === false) {
         await emitSettingsFailureAudit(request, actor, "CLIPROXY_URL_INVALID", attemptedKeys);
-        return NextResponse.json(
+        return Response.json(
           { error: `Invalid CLIProxyAPI URL: ${urlValidation.error}` },
           { status: 400 }
         );
@@ -656,7 +653,7 @@ export async function PATCH(request: Request) {
       ...safeSettings
     } = settings;
     const settingsRevision = await getSettingsRevision();
-    const response = NextResponse.json(
+    const response = Response.json(
       { ...safeSettings, settingsRevision },
       { headers: settingsResponseHeaders(settingsRevision) }
     );
@@ -668,7 +665,8 @@ export async function PATCH(request: Request) {
         .split(",")[0]
         .trim()
         .toLowerCase();
-      response.cookies.set(DASHBOARD_SESSION_COOKIE, await mintDashboardSessionToken(secret), {
+      const jar = new ResponseCookieJar(request);
+      jar.set(DASHBOARD_SESSION_COOKIE, await mintDashboardSessionToken(secret), {
         httpOnly: true,
         secure:
           process.env.AUTH_COOKIE_SECURE === "true" ||
@@ -678,11 +676,12 @@ export async function PATCH(request: Request) {
         path: "/",
         maxAge: 60 * 60 * 24 * 30,
       });
+      applyCookies(jar, response);
     }
     return response;
   } catch (error) {
     console.log("Error updating settings:", error);
-    return NextResponse.json({ error: "Failed to update settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update settings" }, { status: 500 });
   }
 }
 

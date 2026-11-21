@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -26,7 +25,7 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, parsed.error.issues[0]?.message ?? "Invalid query parameters"),
         { status: 400 }
       );
@@ -34,13 +33,13 @@ export async function GET(request: Request) {
 
     const response = await buildComboHealthDashboardResponse(parsed.data);
     if (parsed.data.comboId && response.health.combos.length === 0) {
-      return NextResponse.json(buildErrorBody(404, "Combo not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Combo not found"), { status: 404 });
     }
 
-    return NextResponse.json(response);
+    return Response.json(response);
   } catch (error) {
     console.error("[API] GET /api/usage/combo-health-dashboard error:", error);
-    return NextResponse.json(buildErrorBody(500, "Failed to build combo health dashboard"), {
+    return Response.json(buildErrorBody(500, "Failed to build combo health dashboard"), {
       status: 500,
     });
   }

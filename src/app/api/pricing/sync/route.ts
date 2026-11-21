@@ -6,12 +6,11 @@
  * DELETE — Clear all synced pricing data.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { pricingSyncRequestSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -19,7 +18,7 @@ export async function POST(request: NextRequest) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -33,43 +32,43 @@ export async function POST(request: NextRequest) {
   try {
     const validation = validateBody(pricingSyncRequestSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { sources, dryRun = false } = validation.data;
 
     const { syncPricingFromSources } = await import("@/lib/pricingSync");
     const result = await syncPricingFromSources({ sources, dryRun });
 
-    return NextResponse.json(result, { status: result.success ? 200 : 502 });
+    return Response.json(result, { status: result.success ? 200 : 502 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
   try {
     const { getSyncStatus } = await import("@/lib/pricingSync");
-    return NextResponse.json(await getSyncStatus());
+    return Response.json(await getSyncStatus());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
   try {
     const { clearSyncedPricing } = await import("@/lib/pricingSync");
     await clearSyncedPricing();
-    return NextResponse.json({ success: true, message: "Synced pricing data cleared" });
+    return Response.json({ success: true, message: "Synced pricing data cleared" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

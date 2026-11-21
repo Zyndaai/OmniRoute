@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle, type CardProps } from "./card";
 import { cn } from "./lib/utils";

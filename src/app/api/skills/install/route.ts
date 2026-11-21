@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { GLOBAL_SKILL_OWNER_ID, skillRegistry } from "@/lib/skills/registry";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -28,7 +27,7 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(installManifestSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(validation.error, { status: 400 });
+      return Response.json(validation.error, { status: 400 });
     }
 
     const { name, version, description, schema, handlerCode, apiKeyId } = validation.data;
@@ -43,9 +42,9 @@ export async function POST(request: Request) {
       enabled: true,
     });
 
-    return NextResponse.json({ success: true, id: skill.id });
+    return Response.json({ success: true, id: skill.id });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

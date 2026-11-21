@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { Modal, Button } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 type ExternalLinkModalProps = {
   isOpen: boolean;

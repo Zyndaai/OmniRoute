@@ -1,10 +1,8 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import Toggle from "@/shared/components/Toggle";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import Input from "@/shared/components/Input";
 import { ENDPOINT_CATEGORIES } from "@/shared/constants/endpointCategories";

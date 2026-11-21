@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";

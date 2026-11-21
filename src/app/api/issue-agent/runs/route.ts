@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { appendIssueAgentAuditRecord } from "@/lib/issueAgent/audit";
 import {
@@ -48,7 +47,7 @@ function isNodeSystemError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 export async function GET() {
-  return NextResponse.json({
+  return Response.json({
     ok: true,
     enabled: isIssueAgentEnabled(),
     supportedModes: ["recorded-triage"],
@@ -61,24 +60,24 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(issueAgentRunRequestSchema, body);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const parsed = validation.data;
   if (parsed.mode !== "recorded-triage") {
-    return NextResponse.json(
+    return Response.json(
       { error: "Unsupported issue-agent mode", supportedModes: ["recorded-triage"] },
       { status: 400 }
     );
   }
 
   if (!isIssueAgentEnabled()) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: "Issue Agent execution is disabled",
         enabled: false,
@@ -97,7 +96,7 @@ export async function POST(request: Request) {
     });
     const audit = await appendIssueAgentAuditRecord(run);
     if (run.dryRun) {
-      return NextResponse.json({ ...run, auditPath: audit.path });
+      return Response.json({ ...run, auditPath: audit.path });
     }
 
     const completion = await executeRecordedTriageChatCompletion(
@@ -110,7 +109,7 @@ export async function POST(request: Request) {
       },
       postChatCompletion
     );
-    return NextResponse.json(
+    return Response.json(
       {
         ...run,
         runner: "omniroute-chat-completions",
@@ -121,7 +120,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     if (error instanceof RecordedTriageTimeoutError) {
-      return NextResponse.json(
+      return Response.json(
         { error: sanitizeErrorMessage(error.message), code: "ISSUE_AGENT_TIMEOUT" },
         { status: 504 }
       );
@@ -136,6 +135,6 @@ export async function POST(request: Request) {
     const message = isNodeSystemError(error)
       ? "Issue Agent request failed due to an internal error"
       : sanitizeErrorMessage(error instanceof Error ? error.message : "Invalid issue-agent request");
-    return NextResponse.json({ error: message }, { status: 400 });
+    return Response.json({ error: message }, { status: 400 });
   }
 }

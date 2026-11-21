@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useCallback } from "react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 // The kit Checkbox directly: the adapter does not type the kit `card` prop.
 import { Checkbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import Button from "@/shared/components/Button";
@@ -196,7 +194,7 @@ export default function CompareTab({ providers, onMetrics }: CompareTabProps) {
           ⚖
         </span>
         <p className="text-sm text-text-muted mb-2">{t("noActiveProviderDescription")}</p>
-        <Link href="/dashboard/providers" className="text-accent text-sm hover:underline">
+        <Link to="/dashboard/providers" className="text-accent text-sm hover:underline">
           {t("configureProviders")}
         </Link>
       </div>

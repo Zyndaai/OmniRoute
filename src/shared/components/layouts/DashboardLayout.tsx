@@ -1,5 +1,3 @@
-"use client";
-
 import DashboardShell from "./DashboardShell";
 
 /** Dashboard chrome: the Keak CI UI Kit shell (KEA-7886). `sidebarDefaultOpen` comes from the

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/db/providers";
 import { maskStoredApiKey } from "@/lib/apiKeyExposure";
 import { sanitizeProviderSpecificDataForResponse } from "@/lib/providers/requestDefaults";
@@ -24,9 +23,9 @@ export async function GET() {
         : undefined,
     }));
 
-    return NextResponse.json({ connections: clientConnections });
+    return Response.json({ connections: clientConnections });
   } catch (error) {
     console.log("Error fetching providers for client:", error);
-    return NextResponse.json({ error: "Failed to fetch providers" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch providers" }, { status: 500 });
   }
 }

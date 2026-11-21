@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useRef } from "react";
 import { Card, Button, Input, ModelSelectField, Select, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
@@ -9,7 +7,7 @@ import {
   ROUTING_STRATEGIES,
   SETTINGS_FALLBACK_STRATEGY_VALUES,
 } from "@/shared/constants/routingStrategies";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 const STRATEGY_LABEL_FALLBACKS: Record<string, string> = {
   "context-relay": "Context Relay",

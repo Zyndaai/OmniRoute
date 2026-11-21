@@ -137,7 +137,7 @@ test("search-only key blocks /api/v1/chat/completions too — the App Router pat
 });
 
 test("search-only key blocks the /chat/completions alias", async () => {
-  // `next.config.mjs` rewrites `/chat/completions` onto the chat route without
+  // `src/server/http/rewrites.ts` maps `/chat/completions` onto the chat route without
   // touching `request.url`, so the policy sees the bare alias. It has to map
   // onto the canonical `/v1/…` path or the allowlist fails open (#13685).
   const policy = await loadPolicy("search-blocks-chat-alias");

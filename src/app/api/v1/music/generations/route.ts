@@ -24,8 +24,6 @@ import {
 } from "@/app/api/v1/_shared/mediaGenerationRoute";
 import { getSpecialtyModelsResponse } from "@/app/api/v1/_shared/specialtyCatalog";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Handle CORS preflight
  */

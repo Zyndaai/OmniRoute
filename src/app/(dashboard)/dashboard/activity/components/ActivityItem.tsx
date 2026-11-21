@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations, useLocale } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import { getActivityIcon } from "@/lib/audit/activityIcons";
 import { relativeTime } from "@/lib/audit/timeline";

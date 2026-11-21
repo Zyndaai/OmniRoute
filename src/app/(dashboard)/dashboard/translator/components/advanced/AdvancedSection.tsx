@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card } from "@/shared/components";
 import type { AdvancedSlug } from "../../types";
 
@@ -30,7 +28,7 @@ export default function AdvancedSection({ forceOpenSlug, children }: AdvancedSec
   const tr = (key: string, fallback: string): string => {
     try {
       const v = t(key as Parameters<typeof t>[0]);
-      // When next-intl returns the key itself (missing key), use fallback.
+      // When use-intl returns the key itself (missing key), use fallback.
       if (v === key || v === `translator.${key}`) return fallback;
       return v as string;
     } catch {

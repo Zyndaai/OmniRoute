@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { interpolateNodes, nodeArgs } from "@/shared/utils/interpolateNodes";
 import { Switch } from "@omniroute/ui-kit/switch";

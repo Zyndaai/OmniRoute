@@ -44,13 +44,17 @@ let urlScheme = "http";
 // suppresses the automatic browser open (the dashboard answers 404 headless).
 let serveHeadless = false;
 const ROOT = join(__dirname, "..", "..", "..");
-// The standalone bundle ships in `dist/` (since the build-output-isolation
-// refactor). Fall back to the legacy `app/` location so an upgrade over a
-// partially-replaced install — or a package built before the rename — still
-// boots. Backward-compatible by design: every deployed runtime keeps its path.
-const APP_DIR = existsSync(join(ROOT, "dist", "server.js"))
-  ? join(ROOT, "dist")
-  : join(ROOT, "app");
+// The package root is the app root: the launcher (scripts/dev/run-server.mjs) serves the
+// build in `.build/app` and changes to this directory before it starts.
+const APP_DIR = ROOT;
+const LAUNCHER = join(ROOT, "scripts", "dev", "run-server.mjs");
+const SERVER_BUNDLE = join(
+  process.env.OMNIROUTE_BUILD_DIR
+    ? join(ROOT, process.env.OMNIROUTE_BUILD_DIR)
+    : join(ROOT, ".build", "app"),
+  "server",
+  "index.js"
+);
 
 /**
  * Headless mode (R0.1, rail 3.8.53): `--headless` hands the server process
@@ -234,11 +238,11 @@ export async function runServe(opts = {}) {
     console.warn(`\x1b[33m  ⚠  ${exposureWarning}\x1b[0m\n`);
   }
 
-  const serverWsJs = join(APP_DIR, "server-ws.mjs");
-  const serverJs = existsSync(serverWsJs) ? serverWsJs : join(APP_DIR, "server.js");
+  const serverJs = LAUNCHER;
 
-  if (!existsSync(serverJs)) {
-    console.error("\x1b[31m✖ Server not found at:\x1b[0m", serverJs);
+  if (!existsSync(SERVER_BUNDLE)) {
+    console.error("\x1b[31m✖ Server build not found at:\x1b[0m", SERVER_BUNDLE);
+    console.error(`  Build it first: \x1b[36mcd ${APP_DIR} && npm run build\x1b[0m`);
     console.error("  The package may not have been built correctly.");
     console.error("");
     const nodeExec = process.execPath || "";
@@ -310,8 +314,8 @@ export async function runServe(opts = {}) {
     calibrateHeapFallbackMb(totalmem())
   );
 
-  // #5242: opt-in native HTTPS. CLI flags take precedence over env; the child
-  // server (server-ws.mjs) reads these and terminates TLS on the same listener.
+  // #5242: opt-in native HTTPS. CLI flags take precedence over env; the launcher
+  // (scripts/dev/run-server.mjs) reads these and terminates TLS on the same listener.
   const tlsCert = opts.tlsCert ?? process.env.OMNIROUTE_TLS_CERT;
   const tlsKey = opts.tlsKey ?? process.env.OMNIROUTE_TLS_KEY;
 
@@ -327,6 +331,9 @@ export async function runServe(opts = {}) {
       // Windows; OMNIROUTE_SERVER_HOST is the cross-platform explicit setting.
       HOSTNAME: serverHost,
       NODE_ENV: "production",
+      // The CLI has prepared ports, host and secrets; the launcher must not redo its own
+      // bootstrap over them.
+      OMNIROUTE_LAUNCHER_ENV_READY: "1",
       // #5238: preserve a user-set NODE_OPTIONS (incl. their own
       // `--max-old-space-size=…`) instead of clobbering it with the calibrated
       // default — mirror the Electron/standalone launchers.

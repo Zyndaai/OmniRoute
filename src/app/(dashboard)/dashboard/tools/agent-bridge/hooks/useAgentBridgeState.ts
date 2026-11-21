@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentBridgePageData } from "../AgentBridgePageClient";
 import { normalizeAgentBridgeState } from "../normalizeState";

@@ -135,7 +135,7 @@ function getPayloadRulesPath() {
   return (
     process.env.OMNIROUTE_PAYLOAD_RULES_PATH ||
     process.env.PAYLOAD_RULES_PATH ||
-    path.join(/* turbopackIgnore: true */ process.cwd(), "config", "payloadRules.json")
+    path.join(process.cwd(), "config", "payloadRules.json")
   );
 }
 
@@ -218,9 +218,9 @@ export function clearPayloadRulesConfigOverride() {
 // #2986: Read the DB-persisted payload rules (the source of truth, written by
 // the Settings UI via updateSettings). Used as the fallback when no in-memory
 // runtimeOverride is set — e.g. a fresh process before the startup
-// applyRuntimeSettings hook ran, or a separate module instance in the
-// standalone Next.js build — so saved rules survive a server restart instead of
-// silently reverting to the (usually empty) file config.
+// applyRuntimeSettings hook ran, or a module re-evaluated by the dev server — so
+// saved rules survive a server restart instead of silently reverting to the
+// (usually empty) file config.
 async function loadPayloadRulesFromSettings(): Promise<PayloadRulesConfig | null> {
   try {
     const { getCachedSettings } = await import("@/lib/db/readCache");

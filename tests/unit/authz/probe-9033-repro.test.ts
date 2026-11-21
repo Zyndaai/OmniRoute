@@ -5,7 +5,6 @@
 // Bonus: ipFilterModeSchema rejects "whitelist-priority" that the UI offers and checkIP implements
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NextRequest } from "next/server";
 import { wrapRequestListenerWithPeerStamp } from "../../../scripts/dev/peer-stamp.mjs";
 
 // Each test file gets its own PostgreSQL database (tests/_setup/isolatePostgres.ts); tests
@@ -35,7 +34,7 @@ test.beforeEach(async () => {
 const BLOCKED = "203.0.113.99";
 
 function makeRequest(extraHeaders: Record<string, string> = {}) {
-  return new NextRequest("http://localhost/v1/models", {
+  return new Request("http://localhost/v1/models", {
     headers: { ...extraHeaders },
   });
 }

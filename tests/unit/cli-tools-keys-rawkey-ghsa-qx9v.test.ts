@@ -116,8 +116,9 @@ test("an instance with login disabled still receives rawKey", async () => {
 });
 
 test("fails closed with 503 and no key material when the operator check throws", async () => {
-  // `request.ip` is read by the CLI-token check. Count how many times the management
-  // gate reads it, then throw on the next read — i.e. inside resolveOperatorCredential.
+  // `request.socket` (the peer address) is read by the CLI-token check. Count how many times
+  // the management gate reads it, then throw on the next read — i.e. inside
+  // resolveOperatorCredential.
   const mkRequest = (throwAfter: number, counter: { n: number }) => {
     const req = new Request(URL_KEYS, {
       headers: {
@@ -125,7 +126,7 @@ test("fails closed with 503 and no key material when the operator check throws",
         "x-omniroute-cli-token": "not-the-real-token",
       },
     });
-    Object.defineProperty(req, "ip", {
+    Object.defineProperty(req, "socket", {
       get() {
         counter.n += 1;
         if (counter.n > throwAfter)
@@ -138,7 +139,7 @@ test("fails closed with 503 and no key material when the operator check throws",
 
   const probe = { n: 0 };
   assert.equal(await requireManagementAuth(mkRequest(Infinity, probe)), null);
-  assert.ok(probe.n > 0, "probe must observe at least one ip read");
+  assert.ok(probe.n > 0, "probe must observe at least one peer-address read");
 
   const counter = { n: 0 };
   const res = await keysRoute.GET(mkRequest(probe.n, counter));

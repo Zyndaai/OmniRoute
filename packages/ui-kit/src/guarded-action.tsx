@@ -1,5 +1,3 @@
-"use client";
-
 import { forwardRef, useId, useState } from "react";
 import type { MouseEventHandler } from "react";
 import { Button, type ButtonProps } from "./button";

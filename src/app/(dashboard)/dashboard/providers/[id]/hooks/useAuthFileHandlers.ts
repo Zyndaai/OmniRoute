@@ -1,5 +1,3 @@
-"use client";
-
 // Phase 1j extraction — Issue #3501
 // Manages Codex / Claude auth-file apply+export state and handlers.
 

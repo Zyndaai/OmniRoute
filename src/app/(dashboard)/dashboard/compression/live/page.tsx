@@ -1,4 +1,3 @@
-"use client";
 import { CompressionCockpit } from "../studio/CompressionCockpit";
 import { useLiveCompression } from "@/hooks/useLiveCompression";
 export default function CompressionLivePage() {

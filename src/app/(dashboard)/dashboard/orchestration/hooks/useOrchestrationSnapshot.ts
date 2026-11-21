@@ -1,4 +1,3 @@
-"use client";
 /**
  * Polls the 3 agent sources (allSettled), listens to the `agents` WS channel as a refetch
  * trigger, and relaxes the poll interval from 5s to 30s while that WS connection is up (the

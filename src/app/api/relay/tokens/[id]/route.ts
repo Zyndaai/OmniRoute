@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getRelayToken,
@@ -33,7 +32,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (authError) return authError;
   const { id } = await params;
   const token = await getRelayToken(id);
-  if (!token) return NextResponse.json({ error: "Token not found" }, { status: 404 });
+  if (!token) return Response.json({ error: "Token not found" }, { status: 404 });
 
   // Get usage stats
   const now = Math.floor(Date.now() / 1000);
@@ -41,7 +40,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const lastDay = await getRelayUsage(id, now - 86400);
   const logs = await getRelayLogs(id, 20);
 
-  return NextResponse.json({
+  return Response.json({
     ...token,
     usage: { lastHour, lastDay },
     logs,
@@ -56,18 +55,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const validation = validateBody(relayTokenPatchSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
   const body = validation.data;
 
   if (body.enabled !== undefined) {
     const token = await toggleRelayToken(id, body.enabled);
-    if (!token) return NextResponse.json({ error: "Token not found" }, { status: 404 });
-    return NextResponse.json(token);
+    if (!token) return Response.json({ error: "Token not found" }, { status: 404 });
+    return Response.json(token);
   }
 
   const token = await updateRelayToken(id, {
@@ -81,8 +80,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     maxCostPerDay: body.maxCostPerDay,
   });
 
-  if (!token) return NextResponse.json({ error: "Token not found" }, { status: 404 });
-  return NextResponse.json(token);
+  if (!token) return Response.json({ error: "Token not found" }, { status: 404 });
+  return Response.json(token);
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -90,5 +89,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   if (authError) return authError;
   const { id } = await params;
   await deleteRelayToken(id);
-  return NextResponse.json({ success: true });
+  return Response.json({ success: true });
 }

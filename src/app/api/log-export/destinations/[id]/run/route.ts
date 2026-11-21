@@ -4,7 +4,6 @@
  *        hourly job. Same code path as the scheduled run, same cursor semantics.
  */
 
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { runSingleLogExport } from "@/lib/logExport/runner";
@@ -17,11 +16,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { id } = await params;
     const result = await runSingleLogExport(id);
     if (!result) {
-      return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
+      return Response.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ result });
+    return Response.json({ result });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to run log export" },
       { status: 500 }
     );

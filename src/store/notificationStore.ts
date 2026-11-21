@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Notification Store — FASE-07 UX & Microinteractions
  *

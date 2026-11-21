@@ -181,7 +181,13 @@ test("hot-path callers read settings and combo lookups through the read cache", 
 
   const rateLimitManager = read("open-sse/services/rateLimitManager.ts");
   assert.match(rateLimitManager, /getCachedSettings\(\)/);
-  assert.doesNotMatch(rateLimitManager, /\bgetSettings\b/);
+  // The only direct read is reloadRateLimitsFromDb (import + call): it runs right after another
+  // process changed the settings, so it must bypass the 5 s cache to see that write.
+  assert.equal(rateLimitManager.match(/\bgetSettings\b/g)?.length, 2);
+  assert.match(
+    rateLimitManager,
+    /async function reloadRateLimitsFromDb[\s\S]*?const \{ getSettings \}[\s\S]*?await getSettings\(\)/
+  );
 
   const apiKeyPolicy = read("src/shared/utils/apiKeyPolicy.ts");
   assert.match(apiKeyPolicy, /getCachedComboByName\(/);

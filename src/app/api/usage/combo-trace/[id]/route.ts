@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getComboTrace } from "@omniroute/open-sse/services/combo/decisionTrace.ts";
 
@@ -15,11 +14,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const { id } = await params;
   if (!id || !id.startsWith("combo-")) {
-    return NextResponse.json({ error: "Invalid invocation id" }, { status: 400 });
+    return Response.json({ error: "Invalid invocation id" }, { status: 400 });
   }
   const trace = getComboTrace(id);
   if (!trace) {
-    return NextResponse.json({ error: "Combo trace not found or expired" }, { status: 404 });
+    return Response.json({ error: "Combo trace not found or expired" }, { status: 404 });
   }
-  return NextResponse.json(trace);
+  return Response.json(trace);
 }

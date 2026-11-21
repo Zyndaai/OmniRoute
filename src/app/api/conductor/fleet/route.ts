@@ -5,13 +5,11 @@
  * the hub is unset/offline — never a 5xx for that).
  */
 
-import { NextResponse } from "next/server";
-
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getFleetSnapshot } from "@/lib/conductor/hubProxy";
 
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json(await getFleetSnapshot());
+  return Response.json(await getFleetSnapshot());
 }

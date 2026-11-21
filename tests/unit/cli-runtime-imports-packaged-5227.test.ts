@@ -84,3 +84,38 @@ test("#5227 — every scripts/* module imported by bin/ is in the npm files whit
     `bin/ imports these scripts/* modules that are NOT in package.json "files" (global install will fail): ${missing.join(", ")}`
   );
 });
+
+/** Every repo-relative module reachable from `entry` through relative imports. */
+function relativeImportClosure(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const rel = queue.shift() as string;
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    const src = readFileSync(join(REPO_ROOT, rel), "utf8");
+    const re = /(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      const resolved = resolve(dirname(join(REPO_ROOT, rel)), m[1]);
+      queue.push(relative(REPO_ROOT, resolved).split("\\").join("/"));
+    }
+  }
+  return [...seen];
+}
+
+test("`omniroute serve` ships the launcher it spawns, everything it imports, and the build", () => {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+  const files: string[] = pkg.files || [];
+
+  // serve.mjs spawns this file by path (not an import), so the bin/ scan above cannot see it.
+  const serve = readFileSync(join(REPO_ROOT, "bin/cli/commands/serve.mjs"), "utf8");
+  assert.match(serve, /"scripts", "dev", "run-server\.mjs"/);
+  assert.match(serve, /\.build[\s\S]{0,40}app[\s\S]{0,40}server[\s\S]{0,40}index\.js/);
+
+  const closure = relativeImportClosure("scripts/dev/run-server.mjs");
+  assert.ok(closure.includes("scripts/dev/v1-ws-bridge.mjs"), "the import scan must follow imports");
+  const missing = closure.filter((p) => !isCovered(p, files));
+  assert.deepEqual(missing, [], `launcher modules missing from "files": ${missing.join(", ")}`);
+  assert.ok(isCovered(".build/app/server/index.js", files), "the server bundle must be published");
+});

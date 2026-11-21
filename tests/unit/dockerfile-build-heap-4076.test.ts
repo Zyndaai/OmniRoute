@@ -4,11 +4,9 @@
  * since #4052 replaced the panicking Turbopack engine) needs more heap than V8's
  * default ceiling, which a memory-constrained Docker build does not provide.
  *
- * Fix: the `builder` stage must raise the heap ceiling via NODE_OPTIONS
- * (`--max-old-space-size`) BEFORE running `npm run build`, so the value propagates
- * to the spawned `next build` child (build-next-isolated.mjs → resolveNextBuildEnv
- * spreads process.env). This is a Docker-only change — CI/local builds invoke
- * `npm run build` directly and are unaffected.
+ * Fix: the `builder` stage sets OMNIROUTE_BUILD_MEMORY_MB BEFORE running `npm run build`;
+ * scripts/build/build.mjs turns it into `--max-old-space-size` on the `react-router build`
+ * child (tests/unit/build/backend-only-smoke-workflows.test.ts covers that half).
  *
  * This guards the mechanism (the heap setting is present and ordered correctly);
  * the end-to-end "the OOM is gone" proof is a successful `docker build`.
@@ -42,26 +40,28 @@ function findInstructionIndex(stage: string[], re: RegExp): number {
   return stage.findIndex((l) => !l.trim().startsWith("#") && re.test(l));
 }
 
-test("#4076 builder stage raises the Node heap ceiling via NODE_OPTIONS", () => {
+const HEAP_ENV = /^ENV\s+OMNIROUTE_BUILD_MEMORY_MB=/;
+
+test("#4076 builder stage sets the build heap ceiling", () => {
   const { start, end } = builderStageRange();
   const stage = lines.slice(start, end);
-  const heapLineIdx = findInstructionIndex(stage, /NODE_OPTIONS.*--max-old-space-size/);
+  const heapLineIdx = findInstructionIndex(stage, HEAP_ENV);
   assert.ok(
     heapLineIdx >= 0,
-    "builder stage must set NODE_OPTIONS with --max-old-space-size to avoid the #4076 build OOM"
+    "builder stage must set OMNIROUTE_BUILD_MEMORY_MB to avoid the #4076 build OOM"
   );
 });
 
-test("#4076 the heap ceiling is set BEFORE `npm run build` so it reaches `next build`", () => {
+test("#4076 the heap ceiling is set BEFORE `npm run build` so it reaches the build", () => {
   const { start, end } = builderStageRange();
   const stage = lines.slice(start, end);
-  const heapLineIdx = findInstructionIndex(stage, /NODE_OPTIONS.*--max-old-space-size/);
+  const heapLineIdx = findInstructionIndex(stage, HEAP_ENV);
   const buildLineIdx = findInstructionIndex(stage, /npm run build\b/);
   assert.ok(buildLineIdx >= 0, "builder stage must run `npm run build`");
   assert.ok(heapLineIdx >= 0, "builder stage must set the heap ceiling");
   assert.ok(
     heapLineIdx < buildLineIdx,
-    "NODE_OPTIONS heap ceiling must be set before the `npm run build` step"
+    "the heap ceiling must be set before the `npm run build` step"
   );
 });
 

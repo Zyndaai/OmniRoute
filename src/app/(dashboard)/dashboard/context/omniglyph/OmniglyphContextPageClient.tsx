@@ -1,5 +1,3 @@
-"use client";
-
 // OmniglyphContextPageClient — the dedicated detail screen for the "omniglyph"
 // context-as-image compression engine. Four sections: economics (measured savings),
 // a real before→after (dense text vs the rendered PNG page), the fail-closed gate
@@ -10,7 +8,7 @@
 // Card/Toggle are imported from their direct module paths (not the @/shared/components
 // barrel) — the barrel pulls a Node-only module that hangs vitest/jsdom.
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Toggle from "@/shared/components/Toggle";
 import Button from "@/shared/components/Button";
@@ -123,7 +121,6 @@ function BeforeAfterCard() {
           </span>
           {/* White paper behind the rendered page image (its own background), in both themes. */}
           <div className="overflow-auto rounded border border-border bg-white p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element -- data URI, no loader needed */}
             <img
               src={SAMPLE_PAGE_PNG_DATA_URI}
               alt={t("renderedImageAlt", {

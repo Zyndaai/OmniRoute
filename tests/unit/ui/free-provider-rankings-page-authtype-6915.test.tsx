@@ -30,7 +30,7 @@ globalThis.ResizeObserver ??= class {
 // the effect to re-fire (and refetch) on every render, an infinite loop that
 // only exists in this mock, not in production with real next-intl.
 const stableT = (key: string) => key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => stableT,
 }));
 

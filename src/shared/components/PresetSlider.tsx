@@ -1,5 +1,3 @@
-"use client";
-
 import { Slider } from "@omniroute/ui-kit/slider";
 
 interface PresetSliderProps {

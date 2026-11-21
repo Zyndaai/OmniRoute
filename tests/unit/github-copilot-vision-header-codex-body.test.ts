@@ -57,6 +57,6 @@ test("copilot-vision-request is set automatically when the turn carries an image
   assert.equal(h(textBody)["copilot-vision-request"], undefined);
 });
 
-test("gpt-5.6 does not take max_tokens on the chat path", () => {
-  assert.equal(supportsMaxTokens("gpt-5.6-terra"), false);
+test("gpt-5.6 does not take max_tokens on the chat path", async () => {
+  assert.equal(await supportsMaxTokens("gpt-5.6-terra"), false);
 });

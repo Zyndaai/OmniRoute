@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useSyncExternalStore } from "react";
 
 export const RISK_ACKNOWLEDGED_STORAGE_KEY = "omniroute-risk-acknowledged";

@@ -11,7 +11,7 @@
  *   (kind/type, provider, model, targetIndex, strategy, latencyMs, error). It is
  *   intentionally compatible with `LiveComboEvent` from `useLiveDashboard.ts`, but
  *   adds the optional `strategy` field that the actual WS payload (`ComboTargetAttemptPayload`)
- *   carries. This avoids importing a "use client" hook file into a pure module.
+ *   carries. This avoids importing a React hook file into a pure module.
  * - `classifyFailKind` checks `/circuit/i` first so a combined message like
  *   "circuit open after 429" maps to `circuit-open`, not `rate-limit`.
  * - Targets are kept sorted by `targetIndex`. A `Map<number, TargetNodeModel>` is

@@ -30,7 +30,7 @@ beforeAll(() => {
 const hover = (el: Element | null | undefined) =>
   el?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => {
     const t = (key: string, values?: Record<string, any>) => {

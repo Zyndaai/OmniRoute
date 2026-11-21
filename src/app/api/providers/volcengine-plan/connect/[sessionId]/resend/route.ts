@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 
 /**
@@ -19,13 +18,13 @@ export async function POST(
       await import("@omniroute/open-sse/services/volcengineConsoleAutoLogin.ts");
     const session = await volcengineConsoleAutoLoginService.resendCode(sessionId);
     if (!session) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: "Unknown or expired Volcano login session" },
         { status: 404 }
       );
     }
-    return NextResponse.json({ success: true, session });
+    return Response.json({ success: true, session });
   } catch {
-    return NextResponse.json({ success: false, error: "Resend failed" }, { status: 500 });
+    return Response.json({ success: false, error: "Resend failed" }, { status: 500 });
   }
 }

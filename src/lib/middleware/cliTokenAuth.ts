@@ -1,13 +1,12 @@
 import crypto from "node:crypto";
-import { headers } from "next/headers";
 
 import { getLegacyCliTokenSync, getMachineTokenSync } from "@/lib/machineToken";
 import { AUTHZ_HEADER_PEER_LOCALITY } from "@/server/authz/headers";
+import { currentRequest } from "@/server/requestContext";
 
 const HEADER_NAME = "x-omniroute-cli-token";
 
 type RequestWithPeer = Request & {
-  ip?: string;
   socket?: { remoteAddress?: string };
 };
 
@@ -17,22 +16,14 @@ export function isLoopback(ip: string): boolean {
 }
 
 /**
- * Read a header value preferring the Request's own headers (works in any
- * context — App Router request handlers, unit tests, raw fetch) and falling
- * back to `next/headers` only when the request object isn't carrying them.
- *
- * Calling `headers()` outside a request scope throws (see Next.js
- * `next-dynamic-api-wrong-context`), so we guard the import.
+ * Read a header value preferring the Request's own headers and falling back to
+ * the request being handled (`currentRequest()`) when the object passed in
+ * isn't carrying them. Outside a request there is no fallback.
  */
 async function readHeader(request: Request, name: string): Promise<string | null> {
   const fromRequest = request.headers?.get(name);
   if (fromRequest != null) return fromRequest;
-  try {
-    const hdrs = await headers();
-    return hdrs.get(name);
-  } catch {
-    return null;
-  }
+  return currentRequest()?.headers.get(name) ?? null;
 }
 
 function firstHeaderIp(value: string | null): string | null {
@@ -40,7 +31,7 @@ function firstHeaderIp(value: string | null): string | null {
 }
 
 function requestPeerAddress(request: RequestWithPeer): string | null {
-  return request.ip || request.socket?.remoteAddress || null;
+  return request.socket?.remoteAddress || null;
 }
 
 async function isLocalCliRequest(request: RequestWithPeer): Promise<boolean> {

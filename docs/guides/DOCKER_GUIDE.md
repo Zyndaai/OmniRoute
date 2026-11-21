@@ -34,8 +34,8 @@ Each build is tagged `:latest` and `:<commit sha>`. The package is public, so a 
 without logging in.
 
 The `Dockerfile` has three stages: `base` (Node 26 on Debian trixie), `builder` (installs
-dependencies and runs `npm run build`) and `runner-base` (the Next.js standalone output, no
-browsers and no provider CLIs). Upstream's `runner-web` (Chromium for web-cookie providers) and
+dependencies and runs `npm run build`) and `runner-base` (the application directory with the build output in `.build/app`, production
+`node_modules` and the launcher in `scripts/dev/`; no browsers and no provider CLIs). Upstream's `runner-web` (Chromium for web-cookie providers) and
 `runner-cli` (bundled Codex, Claude Code, Droid, OpenClaw and Qoder CLIs) targets were removed;
 web-cookie providers such as `gemini-web` and `claude-web` fail at request time on this image.
 
@@ -115,59 +115,18 @@ write proceeds with a warning that it will not survive the container.
 
 ## Build-time resources
 
-Four build args control what the `builder` stage costs. They are build-time only —
+The image is built with `npm run build` (React Router + Vite, `scripts/build/build.mjs`).
+One build arg controls what the `builder` stage costs. It is build-time only —
 `OMNIROUTE_MEMORY_MB` (below) is a separate, runtime knob.
 
-| Build arg                   | Default | Effect                                                                              |
-| --------------------------- | ------- | ----------------------------------------------------------------------------------- |
-| `OMNIROUTE_USE_TURBOPACK`   | `0`     | `0` builds with webpack: lower peak memory, slower. `1` opts into Turbopack.        |
-| `OMNIROUTE_BUILD_CACHE`     | unset   | `1` keeps the bundler cache; only worth it on a builder that keeps its cache mount. |
-| `OMNIROUTE_BUILD_MEMORY_MB` | `6144`  | V8 heap ceiling (`--max-old-space-size`) for the spawned `next build`.              |
-| `OMNIROUTE_BUILD_WORKERS`   | `2`     | Feeds `CIRCLE_NODE_TOTAL`; Next derives `workers = N - 1` for page-data collection. |
+| Build arg                   | Default | Effect                                                                                                 |
+| --------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `OMNIROUTE_BUILD_MEMORY_MB` | `6144`  | V8 heap ceiling (`--max-old-space-size`) for the build; ignored if `NODE_OPTIONS` already sets one. |
 
-`OMNIROUTE_BUILD_WORKERS` is the one to raise on a big builder and the one to
-suspect when a constrained build dies **after** `✓ Compiled successfully`. Each
-page-data worker is its own process, and so is the parent `next build` itself;
-a live VPS reproduction (issue #7518) measured each process's peak RSS at
-~4.5 GB independent of the `NODE_OPTIONS` heap flag (Turbopack compiles in
-native/Rust memory outside the V8 heap). The default of `2` (→ 1 worker, 2
-processes total) is sized for the 16 GB / 4 vCPU GitHub-hosted runners the
-publish pipeline uses. At `8` (→ 7 workers) that runner ran out of memory and
-buildkit failed the step with `ResourceExhausted: ... cannot allocate memory`;
-`3` (→ 2 workers) still didn't fit once the per-process RSS was measured
-directly instead of inferred. `tests/unit/docker-build-memory-budget.test.ts`
-does the arithmetic against the measured figure and fails if either knob
-outgrows the runner.
-
-Turbopack compiles in native Rust memory that lives **outside** the V8 heap, so
-`OMNIROUTE_BUILD_MEMORY_MB` does not bound it. On a host with a memory ceiling the
-build is then SIGKILLed by the OOM killer with no error text at all — it simply
-stops mid-`Creating an optimized production build`, which reads like a hang rather
-than an out-of-memory. That is why the `Dockerfile` defaults to webpack
-(`OMNIROUTE_USE_TURBOPACK=0`), unlike `npm run dev` / `npm run build`, where
-Turbopack is the code default: a bare `docker build .` with no build args (what
-Railway and other one-click hosts run) must not die silently on a memory-capped
-builder. The published images already pass `OMNIROUTE_USE_TURBOPACK=0`
-explicitly in `docker-publish.yml`. On a builder with plenty of RAM, opt into
-Turbopack for a faster build:
-
-```bash
-docker build --target runner-base \
-  --build-arg OMNIROUTE_USE_TURBOPACK=1 \
-  -t omniroute:base .
-```
-
-`webpackBuildWorker` is enabled, so `next build` runs a parent **and** a worker
-process and each honours `OMNIROUTE_BUILD_MEMORY_MB` separately. Size the container
-ceiling above roughly twice that value, not once.
-
-Measured on this tree (`--target runner-base`, `OMNIROUTE_BUILD_MEMORY_MB=6144`):
-
-| Bundler   | Container ceiling | Result                        |
-| --------- | ----------------- | ----------------------------- |
-| Turbopack | 8 GiB / 16 GiB    | OOM-killed at both, silently  |
-| webpack   | 8 GiB             | build worker SIGKILLed        |
-| webpack   | 12 GiB            | succeeded, peaked at 11.1 GiB |
+Size the builder's container ceiling above this heap value: native memory and the esbuild worker
+bundling sit outside the V8 heap. The memory figures measured for the former Next.js build
+(Turbopack, webpack, page-data workers) no longer apply and have not been re-measured for the
+Vite build.
 
 ### Runtime defaults
 
@@ -176,7 +135,7 @@ Defaults exported by `runner-base`: `PORT=20128`, `HOSTNAME=0.0.0.0`, `OMNIROUTE
 Memory behavior in Docker:
 
 - The image sets `OMNIROUTE_MEMORY_MB=1024` and derives `NODE_OPTIONS=--max-old-space-size=1024` from it.
-- The actual server process is started by the standalone launcher, which reads `OMNIROUTE_MEMORY_MB` and appends `--max-old-space-size=<OMNIROUTE_MEMORY_MB>`.
+- The actual server process is started by `scripts/dev/run-standalone.mjs` (the image CMD, which wraps the launcher `scripts/dev/run-server.mjs`), which reads `OMNIROUTE_MEMORY_MB` and appends `--max-old-space-size=<OMNIROUTE_MEMORY_MB>`.
 - Node uses the last repeated `--max-old-space-size` value, so setting `OMNIROUTE_MEMORY_MB` controls the effective Docker heap limit.
 - Because the image always sets it, the launcher's own RAM-calibrated fallback never applies under Docker. Raise it explicitly for the workload (table below). `2048` is still too small for coding-agent `/v1/responses`.
 
@@ -209,7 +168,7 @@ Beyond the defaults documented in [ENVIRONMENT.md](../reference/ENVIRONMENT.md),
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | `OMNIROUTE_WS_BRIDGE_SECRET`  | Shared secret for the WebSocket bridge. **Required in production** — set to a strong random string.                                                                                                                                                  | unset (must be provided) |
 | `REDIS_URL`                   | Connection string for the rate limiter / cache backend                                                                                                                                                                                               | `redis://redis:6379`     |
-| `OMNIROUTE_MEMORY_MB`         | Runtime Node heap ceiling for the Docker standalone server; overrides the image default above. Coding agents: `8192`+ (see [runtime RAM](#runtime-ram-for-coding-agents)).                                                                           | `1024`                   |
+| `OMNIROUTE_MEMORY_MB`         | Runtime Node heap ceiling for the Docker server process; overrides the image default above. Coding agents: `8192`+ (see [runtime RAM](#runtime-ram-for-coding-agents)).                                                                           | `1024`                   |
 | `DASHBOARD_PORT` / `API_PORT` | Override exposed ports for dashboard (20128) and API (20129)                                                                                                                                                                                         | `20128` / `20129`        |
 | `OMNIROUTE_PLUGINS_DIR`       | Directory the runtime plugin scanner reads and installs into. Set it when plugins are bind-mounted: the default follows `HOME`, which an image need not export.                                                                                      | `~/.omniroute/plugins`   |
 | `OMNIROUTE_BASE_PATH`         | URL subpath when the app is published behind a reverse proxy (e.g. `/omniroute`)                                                                                                                                                                     | _(empty = root)_         |
@@ -218,23 +177,19 @@ Beyond the defaults documented in [ENVIRONMENT.md](../reference/ENVIRONMENT.md),
 
 ## Reverse Proxy on a Subpath (Traefik / nginx)
 
-Next.js `basePath` is compiled into the standalone bundle. OmniRoute records the baked
-value in a sentinel file at the app root (written during `npm run build`; read by
-`scripts/docker/ensure-docker-base-path.mjs`) and compares it with
-`OMNIROUTE_BASE_PATH` when the container starts. When they differ and the image was
-built for the domain root, the entrypoint rewrites the standalone manifests, the
-embedded `basePath`/`assetPrefix` literals (Next 16 renders SSR asset URLs from
-`assetPrefix` alone — the patcher mirrors the subpath into it), the baked
-`/_next/static` asset URLs (client-reference manifests, media imports, prerendered
-error pages) and the client `process.env` shim before `node dev/run-standalone.mjs`
-runs.
+The base path is compiled into the build: it becomes the React Router `basename` and the
+Vite asset prefix. The `Dockerfile` records the value it was built with in
+`.build/app/BASE_PATH`. When the container starts, `scripts/check-permissions.sh` (the
+entrypoint) runs `scripts/docker/check-base-path.mjs`, which compares that sentinel with
+`OMNIROUTE_BASE_PATH` and prints a warning when they differ. It never rewrites the bundle and
+never blocks the start: a different runtime value has no effect until the image is rebuilt.
 
-### Pre-built root image + runtime subpath
+### Subpath image
 
-The `ghcr.io/zyndaai/omniroute` images are built for the domain root (the `Dockerfile` also
-accepts an `OMNIROUTE_BASE_PATH` build arg). You can still
-set `OMNIROUTE_BASE_PATH` at runtime; the container patches the bundle once on startup.
-Pair it with the matching public origin:
+The `ghcr.io/zyndaai/omniroute` images are built for the domain root. To serve a subpath, build
+the image for it with the `OMNIROUTE_BASE_PATH` build arg (`docker build --build-arg
+OMNIROUTE_BASE_PATH=/omniroute ...`), then set the same value at runtime together with the
+matching public origin:
 
 ```yaml
 services:
@@ -247,8 +202,8 @@ services:
 
 Configure the reverse proxy to forward the **full** external path (do not strip the
 prefix). Traefik should route `PathPrefix(`/omniroute`)` to the container without
-`StripPrefix`, so Next.js receives `/omniroute/...` and serves assets from
-`/omniroute/_next/...`.
+`StripPrefix`, so the server receives `/omniroute/...` and serves assets from
+`/omniroute/assets/...`.
 
 The Docker healthcheck probes the lightweight `/healthz` lifecycle endpoint prefixed
 with the active `OMNIROUTE_BASE_PATH`. `/api/monitoring/health` remains available for

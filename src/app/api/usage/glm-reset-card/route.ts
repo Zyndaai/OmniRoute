@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
@@ -28,7 +27,7 @@ function buildErrorResponse(error: unknown) {
     code,
     message,
   });
-  return NextResponse.json({ ok: false, code, error: message }, { status });
+  return Response.json({ ok: false, code, error: message }, { status });
 }
 
 export async function GET(request: Request) {
@@ -40,13 +39,13 @@ export async function GET(request: Request) {
       new URL(request.url).searchParams.get("connectionId")
     );
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         { ok: false, code: "invalid_connection_id", error: "Invalid connectionId." },
         { status: 400 }
       );
     }
     const result = await listGlmResetCards(parsed.data);
-    return NextResponse.json({ ok: true, ...result });
+    return Response.json({ ok: true, ...result });
   } catch (error) {
     return buildErrorResponse(error);
   }
@@ -60,7 +59,7 @@ export async function POST(request: Request) {
     const raw = await request.json().catch(() => ({}));
     const parsed = GlmResetCardBodySchema.safeParse(raw);
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         { ok: false, code: "invalid_request_body", error: "Invalid request body." },
         { status: 400 }
       );
@@ -71,7 +70,7 @@ export async function POST(request: Request) {
       parsed.data.idempotencyKey,
       parsed.data.creditId
     );
-    return NextResponse.json({ ok: true, ...result });
+    return Response.json({ ok: true, ...result });
   } catch (error) {
     return buildErrorResponse(error);
   }

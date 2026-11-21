@@ -1,23 +1,16 @@
-import { notFound } from "next/navigation";
-import type { Metadata } from "next";
-import { cookies } from "next/headers";
-import { DEFAULT_LOCALE, LOCALE_COOKIE } from "@/i18n/config";
+import { useMemo, type ComponentProps, type FC } from "react";
+import { data, type MetaFunction } from "react-router";
+import { DocsPage, DocsBody } from "fumadocs-ui/layouts/docs/page";
+import defaultMdxComponents from "fumadocs-ui/mdx";
+import type { MDXProps } from "mdx/types";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveSafeI18nSectionDir } from "@/lib/docsI18nPath";
 import { resolveDocHref, normalizeDocsMarkdownLinks } from "@/lib/docsLinkResolver";
-import { getTranslations } from "next-intl/server";
-
-// ── Locale detection ────────────────────────────────────────────────────────
-
-function getDocsLocale(): string {
-  try {
-    const cookieStore = cookies();
-    return (cookieStore as any).get(LOCALE_COOKIE)?.value || DEFAULT_LOCALE;
-  } catch {
-    return DEFAULT_LOCALE;
-  }
-}
+import { getRequestLocale, getTranslator } from "@/i18n/request.server";
+import { source } from "@/lib/source.server";
+import { pageMeta } from "@/shared/utils/pageMeta";
+import browserCollections from "../../../../.source/browser";
 
 // ── i18n fallback ───────────────────────────────────────────────────────────
 // When locale ≠ "en", try to load the translated .md from
@@ -27,7 +20,7 @@ function getDocsLocale(): string {
 async function tryI18nFallback(slug: string[], locale: string): Promise<string | null> {
   if (!locale || locale === "en") return null;
 
-  // 🛡️ Path traversal prevention — `locale` is a user-controllable cookie, so
+  // 🛡️ Path traversal prevention — `locale` comes from a user-controllable cookie, so
   // validate segments + confine the resolved dir to docs/i18n before any fs read.
   // Centralized in resolveSafeI18nSectionDir (pure, unit-tested).
   const docsRoot = path.resolve(process.cwd(), "docs");
@@ -70,42 +63,52 @@ async function tryI18nFallback(slug: string[], locale: string): Promise<string |
   return sanitizeDocsHtml(html);
 }
 
+// ── Loader ──────────────────────────────────────────────────────────────────
+
+export async function loader({ request, params }: { request: Request; params: { "*"?: string } }) {
+  const slug = (params["*"] ?? "").split("/").filter(Boolean);
+  const page = source.getPage(slug);
+  if (!page) throw data(null, { status: 404 });
+
+  const [html, t] = await Promise.all([
+    tryI18nFallback(slug, getRequestLocale(request)),
+    getTranslator("docs", request),
+  ]);
+  const title = page.data.title;
+  return {
+    metaTitle: t("pageMetadataTitle", { title }),
+    metaDescription: page.data.description ?? t("pageMetadataDescription", { title }),
+    // Path of the compiled MDX module, the key of the browser collection.
+    path: page.path || `${slug.join("/")}.md`,
+    full: page.data.full ?? false,
+    // Sanitised HTML of the translated document; null renders the English MDX.
+    html,
+    toc: html ? page.data.toc : null,
+  };
+}
+
 // ── Page component ──────────────────────────────────────────────────────────
 
-export default async function Page(props: { params: Promise<{ slug: string[] }> }) {
-  const params = await props.params;
-  const { source } = await import("../../../lib/source");
-  const [{ DocsPage, DocsBody }, { default: defaultMdxComponents }] = await Promise.all([
-    import("fumadocs-ui/layouts/docs/page"),
-    import("fumadocs-ui/mdx"),
-  ]);
-  const page = source.getPage(params.slug);
-  if (!page) notFound();
+type DocsContentProps = {
+  toc: ComponentProps<typeof DocsPage>["toc"];
+  MDX: FC<MDXProps>;
+  docPath: string;
+  full: boolean;
+};
 
-  const locale = getDocsLocale();
-  const i18nHtml = await tryI18nFallback(params.slug, locale);
-
-  if (i18nHtml) {
-    // Render translated markdown (non-English locale with available translation)
-    return (
-      <DocsPage toc={page.data.toc} full={page.data.full}>
-        <DocsBody>
-          <div className="prose-content" dangerouslySetInnerHTML={{ __html: i18nHtml }} />
-        </DocsBody>
-      </DocsPage>
-    );
-  }
-
-  // Default: English MDX rendered natively by Fumadocs with resolved links
-  const MDX = page.data.body;
-  const docPath = page.path || `${params.slug.join("/")}.md`;
-  const DocsLink = (linkProps: React.ComponentProps<typeof defaultMdxComponents.a>) => {
-    const resolved = linkProps.href ? resolveDocHref(linkProps.href, docPath) : linkProps.href;
-    return <defaultMdxComponents.a {...linkProps} href={resolved} />;
-  };
+function DocsContent({ toc, MDX, docPath, full }: DocsContentProps) {
+  // Markdown links are written relative to the source file; resolve them to site URLs.
+  const DocsLink = useMemo(
+    () =>
+      function DocsLink(linkProps: ComponentProps<typeof defaultMdxComponents.a>) {
+        const resolved = linkProps.href ? resolveDocHref(linkProps.href, docPath) : linkProps.href;
+        return <defaultMdxComponents.a {...linkProps} href={resolved} />;
+      },
+    [docPath]
+  );
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage toc={toc} full={full}>
       <DocsBody>
         <MDX components={{ ...defaultMdxComponents, a: DocsLink }} />
       </DocsBody>
@@ -113,25 +116,42 @@ export default async function Page(props: { params: Promise<{ slug: string[] }> 
   );
 }
 
-// ── Runtime metadata ───────────────────────────────────────────────────────
+const clientLoader = browserCollections.docs.createClientLoader<{
+  docPath: string;
+  full: boolean;
+}>({
+  component({ toc, default: MDX }, { docPath, full }) {
+    return <DocsContent toc={toc} MDX={MDX} docPath={docPath} full={full} />;
+  },
+});
 
-// Keep the docs route dynamic. Fumadocs' generated source includes build-only
-// metadata that Next's Bun page-data workers cannot reliably traverse during
-// generateStaticParams; rendering on request preserves the docs while keeping
-// the production build Bun-compatible.
-export const dynamic = "force-dynamic";
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
+  pageMeta(
+    matches,
+    loaderData
+      ? [
+          { title: loaderData.metaTitle },
+          { name: "description", content: loaderData.metaDescription },
+        ]
+      : []
+  );
 
-export async function generateMetadata(props: {
-  params: Promise<{ slug: string[] }>;
-}): Promise<Metadata> {
-  const params = await props.params;
-  const { source } = await import("../../../lib/source");
-  const page = source.getPage(params.slug);
-  if (!page) return {};
-  const t = await getTranslations("docs");
+export default function Page({ loaderData }: { loaderData: Awaited<ReturnType<typeof loader>> }) {
+  const { path: docPath, full, html, toc } = loaderData;
 
-  return {
-    title: t("pageMetadataTitle", { title: page.data.title }),
-    description: page.data.description ?? t("pageMetadataDescription", { title: page.data.title }),
-  };
+  return (
+    <>
+      {html ? (
+        // Translated markdown (non-English locale with an available translation)
+        <DocsPage toc={toc ?? []} full={full}>
+          <DocsBody>
+            <div className="prose-content" dangerouslySetInnerHTML={{ __html: html }} />
+          </DocsBody>
+        </DocsPage>
+      ) : (
+        // English MDX rendered by Fumadocs with resolved links
+        clientLoader.useContent(docPath, { docPath, full })
+      )}
+    </>
+  );
 }

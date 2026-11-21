@@ -1,5 +1,3 @@
-"use client";
-
 import Textarea from "@/shared/components/Textarea";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -7,7 +5,7 @@ import Icon from "@/shared/components/Icon";
 // src/app/(dashboard)/dashboard/playground/components/tabs/ChatTab.tsx
 
 import { useState, useRef, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import MarkdownMessage from "../MarkdownMessage";
 import TokenCostCounter from "../TokenCostCounter";
 import ImageResultsInline, {

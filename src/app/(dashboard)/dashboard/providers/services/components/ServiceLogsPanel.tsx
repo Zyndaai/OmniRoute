@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { Button, Input } from "@/shared/components";
 import { cn } from "@/shared/utils/cn";
 import { useServiceLogs } from "../hooks/useServiceLogs";

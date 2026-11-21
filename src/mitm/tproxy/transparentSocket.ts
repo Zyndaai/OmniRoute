@@ -40,7 +40,7 @@ const ADDON_REL_PATHS = [
  *  - module-relative (`./native/...`) — dev / source runs where this file sits
  *    next to `native/`;
  *  - cwd-absolute (`<cwd>/src/mitm/tproxy/native/...`) — the standalone/Docker
- *    bundle, where this module is compiled into `.next/server/...` (so the
+ *    bundle, where this module is compiled into `.build/app/...` (so the
  *    module-relative path misses) but `assembleStandalone` copies the addon to
  *    `<standalone-root>/src/mitm/tproxy/native/...` and the server runs with
  *    cwd = the standalone root.

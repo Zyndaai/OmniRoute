@@ -7,14 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 // Real DashboardShell + real Header + real Sidebar: the budget covers mounting the whole shell.
 vi.setConfig({ testTimeout: 60_000 });
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/home",
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-}));
-vi.mock("next/link", () => ({
-  default: ({ href, children, prefetch: _p, ...p }: any) => (
-    <a href={href} {...p}>
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/home" }),
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),

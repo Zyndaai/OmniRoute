@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getComboBuilderOptions } from "@/lib/combos/builderOptions";
 import { findAllStaleComboModelRefs } from "@/lib/combos/staleModelRefs";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -14,9 +13,9 @@ export async function GET(request: Request) {
       // break the builder, so it degrades to "nothing flagged".
       findAllStaleComboModelRefs().catch(() => []),
     ]);
-    return NextResponse.json({ ...options, staleComboRefs });
+    return Response.json({ ...options, staleComboRefs });
   } catch (error) {
     console.log("Error fetching combo builder options:", error);
-    return NextResponse.json({ error: "Failed to fetch combo builder options" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch combo builder options" }, { status: 500 });
   }
 }

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   OutboundUrlGuardError,
   parseAndValidateNonMetadataUrl,
@@ -20,7 +19,7 @@ function guardProviderNodeBaseUrl(baseUrl: string): void {
   parseAndValidatePublicUrl(baseUrl);
 }
 
-export function validateProviderNodeBaseUrl(baseUrl: string): NextResponse | null {
+export function validateProviderNodeBaseUrl(baseUrl: string): Response | null {
   try {
     guardProviderNodeBaseUrl(baseUrl);
     return null;
@@ -31,7 +30,7 @@ export function validateProviderNodeBaseUrl(baseUrl: string): NextResponse | nul
           ? "Invalid provider base URL format"
           : error.message
         : "Invalid provider base URL";
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",

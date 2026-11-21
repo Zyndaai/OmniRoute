@@ -1,10 +1,8 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 
 // src/app/(dashboard)/dashboard/playground/components/CompareColumn.tsx
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import type { StreamMetrics } from "@/shared/schemas/playground";
 import MarkdownMessage from "./MarkdownMessage";

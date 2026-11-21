@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { reorderCombos } from "@/lib/db/combos";
 import { isCloudEnabled } from "@/lib/db/settings";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
@@ -16,7 +15,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -30,16 +29,16 @@ export async function POST(request) {
   try {
     const validation = validateBody(reorderCombosSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const combos = await reorderCombos(validation.data.comboIds);
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({ combos });
+    return Response.json({ combos });
   } catch (error) {
     console.log("Error reordering combos:", error);
-    return NextResponse.json({ error: "Failed to reorder combos" }, { status: 500 });
+    return Response.json({ error: "Failed to reorder combos" }, { status: 500 });
   }
 }
 

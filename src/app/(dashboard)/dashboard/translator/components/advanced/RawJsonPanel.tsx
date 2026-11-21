@@ -1,12 +1,10 @@
-"use client";
-
 // Direct module import: tests stub the barrel Button with a reduced prop set.
 import IconButton from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import { cn } from "@/shared/utils/cn";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Button, Select, Badge } from "@/shared/components";
 import Collapsible from "@/shared/components/Collapsible";
 import Editor from "@/shared/components/MonacoEditor";

@@ -10,9 +10,6 @@
  * the legacy `message/send` (see src/app/a2a/route.ts).
  */
 
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-
 import { buildAgentCardMetadata } from "@/lib/a2a/agentCardMetadata";
 import { getFleetSkills } from "@/lib/conductor/fleetSkills";
 import { getBaseUrl } from "@/lib/wellKnown";
@@ -22,7 +19,7 @@ import { getBaseUrl } from "@/lib/wellKnown";
  *
  * Returns the OmniRoute Agent Card (A2A v1.0).
  */
-export async function GET(request?: NextRequest) {
+export async function GET(request?: Request) {
   const fleetSkills = await getFleetSkills();
   const baseUrl = getBaseUrl(request);
 
@@ -48,7 +45,7 @@ export async function GET(request?: NextRequest) {
     },
   };
 
-  return NextResponse.json(agentCard, {
+  return Response.json(agentCard, {
     headers: {
       "Cache-Control": "public, max-age=3600",
       "Content-Type": "application/json",

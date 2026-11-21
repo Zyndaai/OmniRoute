@@ -117,14 +117,6 @@ test("log route: clamps limit to max 200", () => {
   assert.ok(routeSrc.includes("200"), "route must clamp limit to a maximum of 200");
 });
 
-test("log route: has dynamic export (force-dynamic)", () => {
-  assert.ok(
-    routeSrc.includes('dynamic = "force-dynamic"') ||
-      routeSrc.includes("dynamic = 'force-dynamic'"),
-    "route must export dynamic = 'force-dynamic'"
-  );
-});
-
 // ── DB module: listConsumptionForPool ─────────────────────────────────────────
 
 test("quotaConsumption: exports listConsumptionForPool", () => {

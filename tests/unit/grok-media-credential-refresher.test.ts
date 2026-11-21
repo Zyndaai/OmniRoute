@@ -45,6 +45,6 @@ test("the token-refresh module registers itself and startup loads it", async () 
   await import(`../../src/sse/services/tokenRefresh.ts?registers=${Date.now()}`);
   assert.equal(typeof getRegisteredCredentialRefresher(), "function");
 
-  const startup = fs.readFileSync("src/instrumentation-node.ts", "utf8");
+  const startup = fs.readFileSync("src/server/boot.ts", "utf8");
   assert.match(startup, /await import\("@\/sse\/services\/tokenRefresh"\)/);
 });

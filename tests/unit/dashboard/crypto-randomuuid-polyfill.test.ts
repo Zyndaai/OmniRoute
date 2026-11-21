@@ -8,26 +8,26 @@ import { resolve, join } from "node:path";
 // `window.crypto.randomUUID` is undefined in several browsers (it is gated to
 // secure contexts), so any client code that called `crypto.randomUUID()` threw a
 // TypeError and broke the dashboard. The fix installs a small polyfill in the
-// blocking inline <script> in src/app/layout.tsx (it runs before any app code),
+// blocking inline <script> in src/app/root.tsx (it runs before any app code),
 // guarded so it never overrides a native implementation. These assertions fail on
 // the pre-fix tree (no polyfill present) and stay green afterwards.
 
 const cwd = process.cwd();
-const layoutPath = resolve(join(cwd, "src/app/layout.tsx"));
+const layoutPath = resolve(join(cwd, "src/app/root.tsx"));
 
-test("layout.tsx polyfills crypto.randomUUID for non-secure contexts (guarded)", () => {
+test("root.tsx polyfills crypto.randomUUID for non-secure contexts (guarded)", () => {
   const layout = readFileSync(layoutPath, "utf8");
   // The polyfill is installed only when the native implementation is absent —
   // it must NEVER clobber a real (secure-context) crypto.randomUUID.
   assert.match(
     layout,
     /if\s*\(\s*!\s*window\.crypto\.randomUUID\s*\)/,
-    "layout.tsx must guard the polyfill behind `if (!window.crypto.randomUUID)`"
+    "root.tsx must guard the polyfill behind `if (!window.crypto.randomUUID)`"
   );
   assert.match(
     layout,
     /window\.crypto\.randomUUID\s*=\s*function/,
-    "layout.tsx must assign a fallback window.crypto.randomUUID implementation"
+    "root.tsx must assign a fallback window.crypto.randomUUID implementation"
   );
 });
 

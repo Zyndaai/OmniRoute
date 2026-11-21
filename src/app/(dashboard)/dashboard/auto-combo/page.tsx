@@ -1,5 +1,9 @@
-import { redirect } from "next/navigation";
+import { redirect } from "react-router";
+
+export function loader() {
+  throw redirect("/dashboard/combos?filter=intelligent", 307);
+}
 
 export default function AutoComboRedirectPage() {
-  redirect("/dashboard/combos?filter=intelligent");
+  return null;
 }

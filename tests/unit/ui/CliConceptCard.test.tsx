@@ -7,19 +7,19 @@ import type { CliConceptType } from "@/shared/components/cli/CliConceptCard";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", () => ({
+  Link: ({
+    to,
     children,
-    ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

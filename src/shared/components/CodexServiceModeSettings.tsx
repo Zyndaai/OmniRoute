@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Select from "./Select";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";

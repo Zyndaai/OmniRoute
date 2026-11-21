@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Select from "./Select";
 import { DiscoveryDegradedNotice } from "./DiscoveryDegradedNotice";
 import { readDiscoveryDegradation } from "@/shared/discovery/degradedCause";

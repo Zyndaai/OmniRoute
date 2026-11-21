@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup as reactRenderToStaticMarkup } from "react-dom/server";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import enMessages from "../../src/i18n/messages/en.json" with { type: "json" };
 import { NOAUTH_PROVIDERS } from "../../src/shared/constants/providers/noauth.ts";
 import NoAuthProviderCard from "../../src/shared/components/NoAuthProviderCard.tsx";
@@ -13,7 +13,7 @@ const PLAIN = enMessages.noAuthProvider.description;
 function renderBanner(providerId: keyof typeof NOAUTH_PROVIDERS) {
   return reactRenderToStaticMarkup(
     React.createElement(
-      NextIntlClientProvider,
+      IntlProvider,
       { locale: "en", timeZone: "UTC", messages: { noAuthProvider: enMessages.noAuthProvider } },
       React.createElement(NoAuthProviderCard, { providerId, enabled: true })
     )
@@ -37,7 +37,7 @@ test("a no-auth banner stays the plain ready message when the provider has no no
 test("an account no-auth banner includes the stored notice beside the account message", () => {
   const html = reactRenderToStaticMarkup(
     React.createElement(
-      NextIntlClientProvider,
+      IntlProvider,
       { locale: "en", timeZone: "UTC", messages: { noAuthProvider: enMessages.noAuthProvider } },
       React.createElement(NoAuthAccountCard, {
         providerId: "uncloseai",

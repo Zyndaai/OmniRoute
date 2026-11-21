@@ -53,8 +53,8 @@ let testFetch: FetchLike | null = null;
 let catalogFetch: FetchLike | null = null;
 
 /**
- * The gate lives on `globalThis` so duplicated module instances (route bundles vs.
- * instrumentation) see the registration made by whichever copy of the executor loaded.
+ * The gate lives on `globalThis` so every module instance (including copies re-evaluated
+ * by the dev server) sees the registration made by whichever copy of the executor loaded.
  */
 const GATE_KEY = Symbol.for("omniroute.opencodePublishedCatalogRoutingGate");
 type GateStore = { [GATE_KEY]?: (() => boolean) | null };

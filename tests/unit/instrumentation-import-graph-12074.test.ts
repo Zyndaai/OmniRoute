@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-const instrumentationPath = path.join(process.cwd(), "src/instrumentation-node.ts");
+const instrumentationPath = path.join(process.cwd(), "src/server/boot.ts");
 const quotaAutoPingPath = path.join(process.cwd(), "src/lib/services/quotaAutoPing.ts");
 const credentialRefreshPath = path.join(
   process.cwd(),
@@ -46,7 +46,7 @@ test("quota auto-ping lazily loads only the Codex executor", () => {
 
 test("startup still registers bespoke, batch, and generic quota fetchers", async () => {
   const [{ registerQuotaFetchers }, { getQuotaFetcher }] = await Promise.all([
-    import("../../src/instrumentation-node.ts"),
+    import("../../src/server/boot.ts"),
     import("../../open-sse/services/quotaPreflight.ts"),
   ]);
 

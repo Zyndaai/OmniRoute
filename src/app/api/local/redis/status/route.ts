@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -77,7 +76,7 @@ export async function GET() {
   const guard = isLocalRequestAllowed();
   if (!guard.allowed) {
     const reason = (guard as { reason?: string }).reason ?? "Forbidden: not a loopback request";
-    return NextResponse.json({ error: reason }, { status: 403 });
+    return Response.json({ error: reason }, { status: 403 });
   }
 
   // Docker/Podman container state (the 1-click launcher path).
@@ -100,7 +99,7 @@ export async function GET() {
   const reachable = container.reachable || redisUrlReachable;
   const exists = container.exists || redisUrlReachable;
 
-  return NextResponse.json({
+  return Response.json({
     runtime: runtime ?? null,
     name: CONTAINER_NAME,
     port: HOST_PORT,

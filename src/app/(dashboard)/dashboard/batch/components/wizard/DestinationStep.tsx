@@ -1,7 +1,5 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import Icon from "@/shared/components/Icon";
 import Select from "@/shared/components/Select";
 import { BATCH_SUPPORTED_PROVIDERS, SUPPORTED_BATCH_ENDPOINTS } from "@/lib/batches/types";
@@ -37,7 +35,7 @@ export default function DestinationStep({
         <Icon name="cloud_off" size={36} className="text-text-muted" />
         <p className="text-sm text-text-muted max-w-sm">{t("wizardEmptyProviders")}</p>
         <Link
-          href="/dashboard/providers"
+          to="/dashboard/providers"
           className="text-sm text-accent underline underline-offset-2 hover:opacity-80"
         >
           {t("wizardDestinationConnectProvider")}

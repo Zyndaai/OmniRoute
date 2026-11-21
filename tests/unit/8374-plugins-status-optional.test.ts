@@ -17,7 +17,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 // Hermetic DB: isolate from the shared dev DATA_DIR so this test never
 // touches or depends on real plugin rows, and so a fresh install has no
@@ -50,8 +49,8 @@ after(async () => {
 });
 
 test("BUG #8374: GET /api/plugins with no ?status= returns 200, not 400", async () => {
-  // @ts-ignore - handler accepts NextRequest at runtime
-  const req = new NextRequest("http://localhost:3000/api/plugins");
+  // @ts-ignore - handler accepts Request at runtime
+  const req = new Request("http://localhost:3000/api/plugins");
   const res = await GET(req);
   const body = await res.json();
   assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(body)}`);
@@ -60,7 +59,7 @@ test("BUG #8374: GET /api/plugins with no ?status= returns 200, not 400", async 
 
 test("GET /api/plugins with a valid ?status= filter still works and filters", async () => {
   // @ts-ignore
-  const req = new NextRequest("http://localhost:3000/api/plugins?status=active");
+  const req = new Request("http://localhost:3000/api/plugins?status=active");
   const res = await GET(req);
   const body = await res.json();
   assert.equal(res.status, 200);
@@ -76,7 +75,7 @@ test("GET /api/plugins with a valid ?status= filter still works and filters", as
 
 test("GET /api/plugins with an invalid ?status= still returns 400", async () => {
   // @ts-ignore
-  const req = new NextRequest("http://localhost:3000/api/plugins?status=bogus");
+  const req = new Request("http://localhost:3000/api/plugins?status=bogus");
   const res = await GET(req);
   const body = await res.json();
   assert.equal(res.status, 400);

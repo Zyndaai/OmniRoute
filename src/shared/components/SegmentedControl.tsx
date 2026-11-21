@@ -1,5 +1,3 @@
-"use client";
-
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import { cn } from "@/shared/utils/cn";
 import Icon from "./Icon";

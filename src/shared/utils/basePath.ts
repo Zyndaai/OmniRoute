@@ -1,7 +1,7 @@
 /**
- * Client/server helpers for Next.js `basePath` / `OMNIROUTE_BASE_PATH` deploys.
+ * Client/server helpers for `OMNIROUTE_BASE_PATH` (sub-path) deploys.
  *
- * Next.js rewrites Link/router automatically, but absolute browser calls like
+ * The router's `basename` prefixes Link/navigate targets automatically, but absolute browser calls like
  * `fetch("/api/...")` and `new EventSource("/api/...")` do not get the prefix.
  * Under a reverse-proxy subpath those hit the domain root instead of the app.
  */
@@ -16,13 +16,13 @@ export function normalizeBasePath(value?: string | null): string {
 
 /**
  * Deploy basePath as seen by the client bundle.
- * Set via next.config `env.NEXT_PUBLIC_OMNIROUTE_BASE_PATH` from `OMNIROUTE_BASE_PATH`.
+ * Inlined at build time as `NEXT_PUBLIC_OMNIROUTE_BASE_PATH` from `OMNIROUTE_BASE_PATH`.
  */
 export function getDeployBasePath(env?: Record<string, string | undefined>): string {
   if (env) {
     return normalizeBasePath(env.NEXT_PUBLIC_OMNIROUTE_BASE_PATH || env.OMNIROUTE_BASE_PATH || "");
   }
-  // Direct member access so Next.js can inline the value into client bundles
+  // Direct member access so the bundler can inline the value into client bundles
   // (a bare `process.env` object is the browser polyfill and carries nothing, #18062).
   return normalizeBasePath(
     process.env.NEXT_PUBLIC_OMNIROUTE_BASE_PATH || process.env.OMNIROUTE_BASE_PATH || ""

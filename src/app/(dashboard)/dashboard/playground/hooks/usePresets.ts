@@ -1,6 +1,4 @@
 // src/app/(dashboard)/dashboard/playground/hooks/usePresets.ts
-"use client";
-
 import { useState, useCallback } from "react";
 import type {
   PlaygroundPresetListItem,

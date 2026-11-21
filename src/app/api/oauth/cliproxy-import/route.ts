@@ -1,6 +1,5 @@
 import os from "os";
 import path from "path";
-import { NextResponse } from "next/server";
 
 import { createProviderConnection } from "@/models";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -39,9 +38,9 @@ export async function GET(request: Request) {
       type: c.type,
       email: c.email,
     }));
-    return NextResponse.json({ dir: cliProxyConfigDir(), scanned, skipped, accounts });
+    return Response.json({ dir: cliProxyConfigDir(), scanned, skipped, accounts });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
@@ -70,9 +69,9 @@ export async function POST(request: Request) {
         });
       }
     }
-    return NextResponse.json({ scanned, skipped, imported, results });
+    return Response.json({ scanned, skipped, imported, results });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );

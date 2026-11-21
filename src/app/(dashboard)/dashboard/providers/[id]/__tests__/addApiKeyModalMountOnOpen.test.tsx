@@ -12,13 +12,23 @@ import ProviderModalsPanel from "../components/ProviderModalsPanel";
 
 const modalLifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0 }));
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/providers/openai",
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/dashboard/providers/openai", search: "", hash: "" }),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

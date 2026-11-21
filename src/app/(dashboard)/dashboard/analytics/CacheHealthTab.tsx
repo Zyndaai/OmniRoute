@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
 import { Skeleton } from "@/shared/components/Loading";

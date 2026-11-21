@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card, Collapsible, Input, SegmentedControl } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 

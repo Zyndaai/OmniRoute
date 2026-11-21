@@ -6,7 +6,6 @@
  * and persists extracted credentials to the provider connection.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
 import { updateProviderConnection } from "@/lib/db/providers";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -94,8 +93,8 @@ function adobeFireflySuccessResponse(data: {
   account: string;
   arpSessionId?: string;
   via: "pure-cdp";
-}): NextResponse {
-  return NextResponse.json({
+}): Response {
+  return Response.json({
     success: true,
     account: data.account || undefined,
     accessToken: data.accessToken || undefined,
@@ -118,7 +117,7 @@ function adobeFireflySuccessResponse(data: {
 async function loginAdobeFirefly(
   connectionId: string,
   body: { timeout?: unknown; freshSession?: unknown }
-): Promise<NextResponse> {
+): Promise<Response> {
   const timeout = typeof body.timeout === "number" ? body.timeout : undefined;
   const freshSession = typeof body.freshSession === "boolean" ? body.freshSession : true;
 
@@ -144,7 +143,7 @@ async function loginAdobeFirefly(
         via: "pure-cdp",
       });
     }
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: pure.error || "Adobe Firefly sign-in did not capture an authenticated IMS JWT.",
@@ -153,7 +152,7 @@ async function loginAdobeFirefly(
     );
   } catch (err) {
     const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-    return NextResponse.json({ success: false, error: msg }, { status: 400 });
+    return Response.json({ success: false, error: msg }, { status: 400 });
   }
 }
 
@@ -172,7 +171,7 @@ async function loginMaxaiEmail(
   connectionId: string,
   connection: Record<string, unknown>,
   body: { step?: unknown; email?: unknown; code?: unknown }
-): Promise<NextResponse> {
+): Promise<Response> {
   const { randomUUID } = await import("node:crypto");
   const { requestMaxaiEmailCode, verifyMaxaiEmailCode } = await import(
     "@omniroute/open-sse/executors/maxai/emailLogin.ts"
@@ -184,7 +183,7 @@ async function loginMaxaiEmail(
   if (step === "request") {
     const email = String(body.email || "").trim();
     if (!email) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: "An email address is required." },
         { status: 400 }
       );
@@ -208,12 +207,12 @@ async function loginMaxaiEmail(
 
     const result = await requestMaxaiEmailCode({ email, deviceId });
     if (!result.ok) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: result.error || "Failed to send the sign-in code." },
         { status: result.status && result.status >= 400 ? result.status : 400 }
       );
     }
-    return NextResponse.json({
+    return Response.json({
       success: true,
       step: "request",
       message: `A sign-in code was emailed to ${email}. Enter it to finish connecting.`,
@@ -227,7 +226,7 @@ async function loginMaxaiEmail(
     const deviceId = String(psd.maxaiDeviceId || psd.deviceId || "");
     const clientUserId = String(psd.maxaiClientUserId || psd.clientUserId || "");
     if (!code || !email || !deviceId) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: !deviceId
@@ -240,7 +239,7 @@ async function loginMaxaiEmail(
 
     const result = await verifyMaxaiEmailCode({ email, code, deviceId, clientUserId });
     if (!result.ok || !result.credential) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: result.error || "Code verification failed." },
         { status: result.status && result.status >= 400 ? result.status : 400 }
       );
@@ -264,12 +263,12 @@ async function loginMaxaiEmail(
       });
     } catch (err) {
       const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: `Signed in but failed to persist: ${msg}` },
         { status: 500 }
       );
     }
-    return NextResponse.json({
+    return Response.json({
       success: true,
       step: "verify",
       persisted: true,
@@ -278,7 +277,7 @@ async function loginMaxaiEmail(
     });
   }
 
-  return NextResponse.json(
+  return Response.json(
     { success: false, error: `Unknown login step: ${step}` },
     { status: 400 }
   );
@@ -287,7 +286,7 @@ async function loginMaxaiEmail(
 // --- POST: Start login flow -------------------------------------------------
 
 export async function POST(
-  req: NextRequest,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   const auth = await requireManagementAuth(req);
@@ -296,7 +295,7 @@ export async function POST(
   const { id } = await params;
   const provider = await getCachedProviderConnectionById(id);
   if (!provider) {
-    return NextResponse.json({ success: false, error: "Provider not found" }, { status: 404 });
+    return Response.json({ success: false, error: "Provider not found" }, { status: 404 });
   }
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -316,7 +315,7 @@ export async function POST(
       });
     } catch (err) {
       const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: `MaxAI sign-in error: ${msg}` },
         { status: 500 }
       );
@@ -329,7 +328,7 @@ export async function POST(
       return await loginAdobeFirefly(id, body);
     } catch (err) {
       const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: `Adobe Firefly sign-in error: ${msg}` },
         { status: 500 }
       );
@@ -347,7 +346,7 @@ export async function POST(
         typeof body.timeout === "number" ? body.timeout : undefined
       );
       if (!result.success || !result.credentials) {
-        return NextResponse.json(result, { status: 400 });
+        return Response.json(result, { status: 400 });
       }
       try {
         await updateProviderConnection(id, {
@@ -356,19 +355,19 @@ export async function POST(
         });
       } catch (err) {
         const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-        return NextResponse.json(
+        return Response.json(
           { success: false, error: `Extracted but failed to persist: ${msg}` },
           { status: 500 }
         );
       }
-      return NextResponse.json({
+      return Response.json({
         success: true,
         credentials: result.credentials,
         persisted: true,
       });
     } catch (err) {
       const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: `Login endpoint error: ${msg}` },
         { status: 500 }
       );
@@ -395,7 +394,7 @@ export async function POST(
           providerSpecificData: result.credentials,
         });
 
-        return NextResponse.json({
+        return Response.json({
           success: true,
           credentials: result.credentials,
           persisted: true,
@@ -403,20 +402,20 @@ export async function POST(
       } catch (err) {
         // Hard Rule #12: never put raw err.message/stack in a response body.
         const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-        return NextResponse.json(
+        return Response.json(
           { success: false, error: `Extracted but failed to persist: ${msg}` },
           { status: 500 }
         );
       }
     }
 
-    return NextResponse.json(result, {
+    return Response.json(result, {
       status: result.success ? 200 : 400,
     });
   } catch (err) {
     // Hard Rule #12: never put raw err.message/stack in a response body.
     const msg = sanitizeErrorMessage(err instanceof Error ? err.message : err);
-    return NextResponse.json(
+    return Response.json(
       { success: false, error: `Login endpoint error: ${msg}` },
       { status: 500 }
     );

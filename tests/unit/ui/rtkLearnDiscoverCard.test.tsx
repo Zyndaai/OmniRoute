@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Passthrough i18n: t(key) → key, t(key, params) → "key:{json}" so assertions can read params.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
 }));

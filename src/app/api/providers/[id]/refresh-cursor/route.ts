@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
 import { updateProviderConnection } from "@/lib/db/providers";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -77,11 +76,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
     const connection = (await getCachedProviderConnectionById(id)) as CursorConnectionLike | null;
     if (!connection) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     if (connection.provider !== "cursor") {
-      return NextResponse.json(
+      return Response.json(
         { error: "This route only supports Cursor connections" },
         { status: 400 }
       );
@@ -94,7 +93,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const elapsedMs = now - lastAttempt;
     if (elapsedMs < MANUAL_REFRESH_COOLDOWN_MS) {
       const retryAfterMs = MANUAL_REFRESH_COOLDOWN_MS - elapsedMs;
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Refresh already attempted recently — please wait before retrying.",
           retryAfterMs,
@@ -123,7 +122,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
           const nowIso = new Date().toISOString();
           const update = buildCursorRenewedUpdate(connection, result, nowIso);
           await updateProviderConnection(connection.id, update);
-          return NextResponse.json({
+          return Response.json({
             success: true,
             connectionId: connection.id,
             provider: "cursor",
@@ -132,7 +131,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
           });
         }
         case "unchanged": {
-          return NextResponse.json({
+          return Response.json({
             success: true,
             unchanged: true,
             connectionId: connection.id,
@@ -143,7 +142,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
           });
         }
         case "error": {
-          return NextResponse.json(
+          return Response.json(
             {
               error: "Token refresh failed — provider returned no new token",
               details: result.error,
@@ -158,7 +157,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       }
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: "Token refresh failed",
         details: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),

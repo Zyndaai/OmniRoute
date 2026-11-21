@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NextRequest } from "next/server";
 
 import { GET as getLegacyCard } from "../../src/app/.well-known/agent.json/route.ts";
 import { GET as getCurrentCard } from "../../src/app/.well-known/agent-card.json/route.ts";
@@ -25,7 +24,7 @@ const ENV_KEYS = [
 const originalEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 function request(language?: string) {
-  return new NextRequest("https://gateway.example.test/.well-known/agent.json", {
+  return new Request("https://gateway.example.test/.well-known/agent.json", {
     headers: language ? { "accept-language": language } : {},
   });
 }

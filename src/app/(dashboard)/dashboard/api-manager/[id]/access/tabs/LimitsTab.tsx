@@ -1,10 +1,8 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Toggle from "@/shared/components/Toggle";
 
 import { useId } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Input from "@/shared/components/Input";
 import { UsageLimitSettings } from "@/app/(dashboard)/dashboard/api-manager/components/UsageLimitSettings";
 import type { ApiKeyAccessFormState } from "../useApiKeyAccessForm";

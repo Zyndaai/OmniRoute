@@ -1,5 +1,3 @@
-"use client";
-
 import { TableCell } from "@omniroute/ui-kit/table";
 import { Checkbox } from "@/shared/components";
 

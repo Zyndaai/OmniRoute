@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getCallLogById } from "@/lib/usageDb";
 
@@ -11,12 +10,12 @@ export async function GET(request, { params }) {
     const log = await getCallLogById(id);
 
     if (!log) {
-      return NextResponse.json({ error: "Log not found" }, { status: 404 });
+      return Response.json({ error: "Log not found" }, { status: 404 });
     }
 
-    return NextResponse.json(log);
+    return Response.json(log);
   } catch (error) {
     console.error("[API ERROR] /api/usage/call-logs/[id] failed:", error);
-    return NextResponse.json({ error: "Failed to fetch log" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch log" }, { status: 500 });
   }
 }

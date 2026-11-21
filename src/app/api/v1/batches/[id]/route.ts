@@ -1,6 +1,5 @@
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import { getBatch, deleteBatch } from "@/lib/db/batches";
-import { NextResponse } from "next/server";
 import {
   getApiKeyRequestScope,
   canAccessOwnedRecord,
@@ -23,7 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -56,13 +55,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // (GHSA-2jm2-mpx8-6523): the previous local check let ANY caller read or
   // delete an unowned batch by id.
   if (!batch || !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, batch.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Batch not found", type: "invalid_request_error" } },
       { status: 404, headers: CORS_HEADERS }
     );
   }
 
-  return NextResponse.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
+  return Response.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -74,7 +73,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -104,7 +103,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const effectiveApiKeyId = resolveEffectiveApiKeyId(scope, policy.apiKeyInfo);
 
   if (!batch || !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, batch.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Batch not found", type: "invalid_request_error" } },
       { status: 404, headers: CORS_HEADERS }
     );
@@ -113,7 +112,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   // Only allow deleting terminal batches (completed, failed, cancelled, expired)
   const terminal = ["completed", "failed", "cancelled", "expired"];
   if (!terminal.includes(batch.status)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Only terminal batches can be deleted", type: "invalid_request_error" } },
       { status: 409, headers: CORS_HEADERS }
     );
@@ -121,5 +120,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   await deleteBatch(id);
 
-  return NextResponse.json({ id, object: "batch", deleted: true }, { headers: CORS_HEADERS });
+  return Response.json({ id, object: "batch", deleted: true }, { headers: CORS_HEADERS });
 }

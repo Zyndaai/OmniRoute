@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState, type ComponentProps } from "react";
 import { BRAND_PATHS } from "./lib/brand-loader-geometry";
 import { cn } from "./lib/utils";

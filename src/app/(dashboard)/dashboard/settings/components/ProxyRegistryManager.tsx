@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   DropdownMenu,
   DropdownMenuContent,

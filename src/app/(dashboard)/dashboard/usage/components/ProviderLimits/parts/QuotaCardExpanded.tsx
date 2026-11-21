@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import { buildGrokBillingCardRows } from "@/shared/utils/grokBilling";

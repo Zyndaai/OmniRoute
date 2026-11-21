@@ -24,22 +24,27 @@ test("PWA_THEME_COLORS are the kit background hex for light and dark", async () 
 });
 
 test("the web manifest uses the kit background, not the pre-kit #0b0f1a", async () => {
-  const { default: manifest } = await import("../../src/app/manifest.ts");
-  const m = manifest();
+  const { GET } = await import("../../src/app/manifest.webmanifest/route.ts");
+  const res = GET();
+  assert.equal(res.headers.get("content-type"), "application/manifest+json");
+  const m = await res.json();
   assert.equal(m.background_color, "#fbfbf8");
   assert.equal(m.theme_color, "#fbfbf8");
+  assert.equal(m.start_url, "/dashboard");
+  assert.deepEqual(
+    m.icons.map((icon: { purpose?: string }) => icon.purpose ?? null),
+    ["any", "any maskable", "maskable", null]
+  );
 });
 
-test("viewport.themeColor has one kit colour per prefers-color-scheme", () => {
-  const layout = read("src/app/layout.tsx");
-  assert.doesNotMatch(layout, /#0b0f1a/i);
+test("the document has one kit theme-color per prefers-color-scheme", () => {
+  const root = read("src/app/root.tsx");
+  assert.doesNotMatch(root, /#0b0f1a/i);
   assert.match(
-    layout,
-    /\{ media: "\(prefers-color-scheme: light\)", color: PWA_THEME_COLORS\.light \}/
+    root,
+    /media="\(prefers-color-scheme: light\)"\s+content=\{PWA_THEME_COLORS\.light\}/
   );
-  assert.match(
-    layout,
-    /\{ media: "\(prefers-color-scheme: dark\)", color: PWA_THEME_COLORS\.dark \}/
-  );
-  assert.doesNotMatch(read("src/app/manifest.ts"), /#0b0f1a/i);
+  assert.match(root, /media="\(prefers-color-scheme: dark\)"\s+content=\{PWA_THEME_COLORS\.dark\}/);
+  assert.match(root, /<link rel="manifest" href="\/manifest\.webmanifest" \/>/);
+  assert.doesNotMatch(read("src/app/manifest.webmanifest/route.ts"), /#0b0f1a/i);
 });

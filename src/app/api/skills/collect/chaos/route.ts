@@ -23,7 +23,6 @@
  *     summary?: string
  *   }
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -31,8 +30,6 @@ import { validateApiKey, getApiKeyMetadata } from "@/lib/db/apiKeys";
 import { getChaosConfig } from "@/lib/chaos/chaosConfig";
 import { executeChaosRun, type ChaosRunResult } from "@/lib/chaos/chaosExecutor";
 import * as log from "@/sse/utils/logger";
-
-export const dynamic = "force-dynamic";
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 
@@ -96,7 +93,7 @@ export async function POST(request: Request) {
     // ── API Key auth check ─────────────────────────────────────────────
     const bearerToken = extractBearerToken(request);
     if (!bearerToken) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(401, "Missing or invalid Authorization header — Bearer token required"),
         { status: 401 }
       );
@@ -104,7 +101,7 @@ export async function POST(request: Request) {
 
     const auth = await verifyChaosKey(bearerToken);
     if (!auth.ok) {
-      return NextResponse.json(buildErrorBody(403, auth.error!), { status: 403 });
+      return Response.json(buildErrorBody(403, auth.error!), { status: 403 });
     }
 
     // ── Parse request body ─────────────────────────────────────────────
@@ -112,11 +109,11 @@ export async function POST(request: Request) {
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
+      return Response.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
     }
     const validation = validateBody(chaosSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(buildErrorBody(400, validation.error.message), {
+      return Response.json(buildErrorBody(400, validation.error.message), {
         status: 400,
       });
     }
@@ -126,7 +123,7 @@ export async function POST(request: Request) {
     // ── Load global chaos config ───────────────────────────────────────
     const globalConfig = await getChaosConfig();
     if (!globalConfig.enabled) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(
           400,
           "Chaos Mode is not enabled globally. Enable it in Dashboard → Chaos Mode."
@@ -146,10 +143,10 @@ export async function POST(request: Request) {
       apiKey: bearerToken,
     });
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
     log.error("chaos", "Chaos external API error", err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

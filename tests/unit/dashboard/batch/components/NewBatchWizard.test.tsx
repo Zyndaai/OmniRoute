@@ -5,15 +5,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
 // ── next/link mock ────────────────────────────────────────────────────────────
 
-vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
   ),
 }));
 

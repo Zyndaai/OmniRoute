@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Phase 1t.6 extraction — Issue #3501

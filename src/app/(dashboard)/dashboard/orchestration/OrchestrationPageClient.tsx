@@ -1,7 +1,6 @@
-"use client";
 import { useCallback, useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import { useLiveComboStatus } from "@/hooks/useLiveDashboard";
 import { useProviderBreakerHealth } from "@/hooks/useProviderBreakerHealth";
@@ -37,9 +36,9 @@ const TAB_KEY: Record<Tab, string> = {
  * `useSearchParams` — no state of its own, so the URL stays the single source of truth.
  */
 function useOrchUrlState() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const params = useSearchParams();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [params] = useSearchParams();
 
   const tab: Tab = (TABS as readonly string[]).includes(params.get("tab") ?? "")
     ? (params.get("tab") as Tab)
@@ -54,9 +53,9 @@ function useOrchUrlState() {
     (patch: Record<string, string | null>) => {
       const next = new URLSearchParams(params.toString());
       for (const [k, v] of Object.entries(patch)) v === null ? next.delete(k) : next.set(k, v);
-      router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+      navigate(`${pathname}?${next.toString()}`, { replace: true, preventScrollReset: true });
     },
-    [params, pathname, router]
+    [params, pathname, navigate]
   );
 
   const filter: OrchFilter = useMemo(

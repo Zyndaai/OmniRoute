@@ -7,13 +7,14 @@ import type { SearchProviderCatalogItem } from "../../../src/shared/schemas/sear
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) =>
-    React.createElement("a", { href, ...props }, children),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) =>
+    React.createElement("a", { href: to, ...props }, children),
 }));
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

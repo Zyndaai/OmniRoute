@@ -32,7 +32,7 @@ const mockTranslate = (key: string, values?: Record<string, any>) => {
 };
 mockTranslate.has = () => true;
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => mockTranslate,
 }));

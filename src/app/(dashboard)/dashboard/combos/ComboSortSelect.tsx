@@ -1,4 +1,3 @@
-"use client";
 import Select from "@/shared/components/Select";
 import type { SortMethod } from "@/lib/combos/comboSort";
 

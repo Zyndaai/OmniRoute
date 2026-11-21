@@ -10,7 +10,7 @@ process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 // that load, not a mask for an eager-render bug.
 vi.setConfig({ testTimeout: 30_000 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const translate = (key: string) => {
       if (key === "pinnedSection") return "Pinned";
@@ -26,8 +26,18 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/analytics",
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard/analytics" }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
+      {children}
+    </a>
+  ),
 }));
 
 const cleanupCallbacks: Array<() => void> = [];

@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { InterceptedRequest } from "@/mitm/inspector/types";
 import { parseSseStream, mergeStream, type MergedResponse } from "@/mitm/inspector/sseMerger";
 import Button from "@/shared/components/Button";

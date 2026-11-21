@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { skillRegistry } from "@/lib/skills/registry";
 import { parsePaginationParams, buildPaginatedResponse } from "@/shared/types/pagination";
 import { getSkillsProviderSetting } from "@/lib/skills/providerSettings";
@@ -50,7 +49,7 @@ export async function GET(request?: Request) {
     const params = parsePaginationParams(parsedUrl.searchParams);
     const paged = allSkills.slice((params.page - 1) * params.limit, params.page * params.limit);
     const response = buildPaginatedResponse(paged, allSkills.length, params);
-    return NextResponse.json({
+    return Response.json({
       ...response,
       skills: response.data,
       provider,
@@ -58,6 +57,6 @@ export async function GET(request?: Request) {
     });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

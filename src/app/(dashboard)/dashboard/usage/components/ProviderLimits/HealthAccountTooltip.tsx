@@ -1,5 +1,3 @@
-"use client";
-
 import { useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { HealthAccount } from "./healthOverview";

@@ -24,7 +24,7 @@ function normalizePathname(rawPath: string): { path: string; reason?: Classifica
   if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
 
   // Client-API aliases are matched case-insensitively on the control segment.
-  // Next's rewrite layer accepts `/V1/...`, `/CODEX`, etc. and routes them to
+  // The rewrites (src/server/http/rewrites.ts) accept `/V1/...`, `/CODEX`, etc. and route them to
   // the client handler, so the classifier must recognize the same casing —
   // otherwise an uppercase alias falls through to the management fallback and
   // the request is treated as a different route class than it is actually

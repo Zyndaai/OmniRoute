@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { getProviderById } from "@/shared/constants/providers";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { serveAnalyticsCached } from "@/lib/usage/analyticsResponseCache";
@@ -637,7 +635,7 @@ async function computeAnalyticsResponse(
             pricingContext
           )
       );
-      return NextResponse.json({ byApiKey });
+      return Response.json({ byApiKey });
     }
 
     const summaryRow = asUsageRow(await getUsageSummary(unifiedSource, unifiedParams));
@@ -1167,14 +1165,14 @@ async function computeAnalyticsResponse(
       analytics.presetSummaries = presetSummaries;
     }
 
-    return NextResponse.json(analytics);
+    return Response.json(analytics);
   } catch (error) {
     console.error("Error computing analytics:", error);
     // Surface the real (sanitized) reason so the dashboard can show it instead of a
     // generic placeholder (#3356). buildErrorBody strips stacks/absolute paths.
     const { buildErrorBody } = await import("@omniroute/open-sse/utils/error");
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(buildErrorBody(500, message || "Failed to compute analytics"), {
+    return Response.json(buildErrorBody(500, message || "Failed to compute analytics"), {
       status: 500,
     });
   }

@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useMemo } from "react";
 import React from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PROVIDER_COLORS as CHART_SERIES_COLORS } from "@/shared/components/analytics/chartColors";
 import Select from "@/shared/components/Select";
 import Input from "@/shared/components/Input";

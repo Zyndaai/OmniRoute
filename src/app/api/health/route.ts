@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 /**
  * GET /api/health — canonical liveness probe, no auth required.
  *
@@ -17,10 +15,8 @@ import { NextResponse } from "next/server";
  * Readiness (DB-backed) lives at /api/health/ping (pingDb, 503 when down); this route stays liveness-only so a slow DB never restarts the container.
  */
 
-export const dynamic = "force-dynamic";
-
 export async function GET() {
-  return NextResponse.json(
+  return Response.json(
     { status: "ok", timestamp: new Date().toISOString() },
     {
       status: 200,

@@ -1,5 +1,3 @@
-"use client";
-
 // Compression Hub — the single place to understand and control compression.
 //
 // Phase 2: this Hub is now a thin overview. The master toggle, mode selector, and the
@@ -8,7 +6,7 @@
 // (Default-from-panel | a named combo) + a read-only preview.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";

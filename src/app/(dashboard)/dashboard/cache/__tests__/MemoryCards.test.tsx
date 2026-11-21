@@ -5,7 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import React from "react";
 import MemoryCards from "../components/MemoryCards";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

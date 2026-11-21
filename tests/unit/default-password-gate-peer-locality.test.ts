@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-default-pw-peer-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -77,24 +76,21 @@ async function throughPipeline(url: string, body: unknown, caller: Caller): Prom
   };
   if (caller.forwardedFor) headers["x-forwarded-for"] = caller.forwardedFor;
   const payload = JSON.stringify(body);
-  const incoming = new NextRequest(`http://${host}${url}`, {
+  const incoming = new Request(`http://${host}${url}`, {
     method: "POST",
     headers,
     body: payload,
   });
-  const res = await pipeline.runAuthzPipeline(incoming, { enforce: true });
-  assert.equal(
-    res.headers.get("x-middleware-next"),
-    "1",
-    `pipeline blocked the request: ${res.status}`
-  );
-  const forwarded = new Headers();
-  for (const [name, value] of res.headers) {
-    if (name.startsWith("x-middleware-request-")) {
-      forwarded.set(name.slice("x-middleware-request-".length), value);
-    }
-  }
-  return new Request(`http://${host}${url}`, { method: "POST", headers: forwarded, body: payload });
+  let routeRequest: Request | null = null;
+  const res = await pipeline.runAuthzPipeline(incoming, {
+    enforce: true,
+    next: (forwarded) => {
+      routeRequest = forwarded;
+      return new Response(null);
+    },
+  });
+  assert.ok(routeRequest, `pipeline blocked the request: ${res.status}`);
+  return routeRequest;
 }
 
 async function login(password: string, caller: Caller) {

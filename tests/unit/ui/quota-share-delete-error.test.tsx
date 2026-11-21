@@ -30,12 +30,15 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   // #14466 / #14807: PoolSchedulesCard and ProxyHealthCell now call useLocale().
   useLocale: () => "en",
 }));
-vi.mock("next/dynamic", () => ({ default: () => () => null }));
+vi.mock(
+  "../../../src/app/(dashboard)/dashboard/costs/quota-share/components/BurnRateChart",
+  () => ({ default: () => null })
+);
 
 vi.mock("@/shared/components", () => ({
   Button: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (

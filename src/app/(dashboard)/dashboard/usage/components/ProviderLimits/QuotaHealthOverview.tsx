@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { useNow } from "next-intl";
+import { useNow } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import { pickDisplayValue } from "@/shared/utils/maskEmail";

@@ -10,13 +10,10 @@
  *   totalSkills: number
  * }
  */
-import { NextRequest, NextResponse } from "next/server";
 import { getCliRuntimeStatus, CLI_TOOL_IDS } from "@/shared/services/cliRuntime";
 import { searchGitHubSkills, type GitHubSkillRepo } from "@/lib/skills/githubCollector";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
-
-export const dynamic = "force-dynamic";
 
 const CODING_TOOL_KEYWORDS: Record<string, string[]> = {
   claude: ["claude", "anthropic", "claude-code"],
@@ -135,7 +132,7 @@ function distributeUnmatchedSkills(
   return [...matchedSkills, ...distributed];
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -150,7 +147,7 @@ export async function GET(request: NextRequest) {
     const directMatches = matchSkillsToTools(repos, installedTools);
     const matchedSkills = distributeUnmatchedSkills(repos, directMatches, installedTools);
 
-    return NextResponse.json({
+    return Response.json({
       tools: detectedTools,
       installedToolIds: installedTools,
       matchedSkills: matchedSkills.slice(0, 50),
@@ -160,6 +157,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

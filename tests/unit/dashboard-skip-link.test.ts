@@ -13,7 +13,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), "utf8");
 
 test("the root layout renders no skip link of its own", () => {
-  assert.doesNotMatch(read("src/app/layout.tsx"), /href="#main-content"/);
+  assert.doesNotMatch(read("src/app/root.tsx"), /href="#main-content"/);
 });
 
 test("the dashboard shell renders exactly one skip link and its #main-content target", () => {

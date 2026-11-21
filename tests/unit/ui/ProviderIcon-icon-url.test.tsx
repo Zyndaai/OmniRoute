@@ -5,19 +5,6 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// ── Mocks ─────────────────────────────────────────────────────────────────────
-
-vi.mock("next/image", () => ({
-  default: (props: Record<string, unknown>) => {
-    const { onError, alt, ...rest } = props as { onError?: () => void; alt?: string } & Record<
-      string,
-      unknown
-    >;
-    // eslint-disable-next-line @next/next/no-img-element -- test double for next/image
-    return <img data-testid="next-image" alt={alt || ""} onError={onError} {...rest} />;
-  },
-}));
-
 const { default: ProviderIcon } = await import("@/shared/components/ProviderIcon");
 
 // Prepare the real catalog during collection: cold Vite dependency evaluation

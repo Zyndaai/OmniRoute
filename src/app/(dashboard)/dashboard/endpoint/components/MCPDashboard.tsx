@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Table,
@@ -14,7 +12,7 @@ import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 type McpTransport = "stdio" | "sse" | "streamable-http";
 

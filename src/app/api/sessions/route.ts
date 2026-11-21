@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getActiveSessions,
   getActiveSessionCount,
@@ -52,13 +51,13 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
+    return Response.json({
       count,
       sessions,
       byApiKey,
       exclusiveSessions,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

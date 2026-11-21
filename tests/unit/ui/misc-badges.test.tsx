@@ -7,7 +7,8 @@
 import React from "react";
 import axe from "axe-core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { MemoryRouter } from "react-router";
+import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CapabilityBadge from "@/shared/components/CapabilityBadge";
 import DegradationBadge from "@/shared/components/DegradationBadge";
@@ -21,9 +22,11 @@ afterEach(() => {
 
 const wrap = (ui: React.ReactElement) =>
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
-      {ui}
-    </NextIntlClientProvider>
+    <MemoryRouter>
+      <IntlProvider locale="en" timeZone="UTC" messages={messages}>
+        {ui}
+      </IntlProvider>
+    </MemoryRouter>
   );
 
 async function runAxe(root: HTMLElement) {
@@ -122,10 +125,10 @@ describe("TokenHealthBadge", () => {
   it("opens on hover without moving focus away from what the user is typing in", async () => {
     stubFetch({ total: 3, healthy: 1, errored: 2, warning: 0, status: "error" });
     render(
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+      <IntlProvider locale="en" timeZone="UTC" messages={messages}>
         <input aria-label="search" />
         <TokenHealthBadge />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     const trigger = await screen.findByRole("button", {
       name: "Token refresh failures detected",

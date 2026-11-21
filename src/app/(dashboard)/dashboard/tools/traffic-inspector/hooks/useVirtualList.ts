@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const ESTIMATED_ROW_HEIGHT = 48;

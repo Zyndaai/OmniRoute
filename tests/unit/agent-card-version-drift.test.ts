@@ -14,7 +14,6 @@
  */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import type { NextRequest } from "next/server";
 import { APP_CONFIG } from "../../src/shared/constants/appConfig.ts";
 
 const PREV_NPM_PACKAGE_VERSION = process.env.npm_package_version;
@@ -26,10 +25,8 @@ after(() => {
   else process.env.npm_package_version = PREV_NPM_PACKAGE_VERSION;
 });
 
-function makeCardRequest(url: string): NextRequest {
-  const request = new Request(url) as unknown as NextRequest;
-  Object.defineProperty(request, "nextUrl", { value: new URL(url), configurable: true });
-  return request;
+function makeCardRequest(url: string): Request {
+  return new Request(url);
 }
 
 test("agent.json advertises the real package version without npm_package_version", async () => {

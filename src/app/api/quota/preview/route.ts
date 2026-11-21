@@ -21,14 +21,11 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { QuotaPreviewQuerySchema } from "@/shared/schemas/quota";
 import { getPool } from "@/lib/db/quotaPools";
 import { enforceQuotaShare } from "@/lib/quota/enforce";
-
-export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
@@ -47,7 +44,7 @@ export async function GET(request: Request): Promise<Response> {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     const { apiKeyId, poolId, estimatedTokens, estimatedUsd, estimatedRequests } = parsed.data;
@@ -55,7 +52,7 @@ export async function GET(request: Request): Promise<Response> {
     // Resolve pool to get connectionId and provider
     const pool = await getPool(poolId);
     if (!pool) {
-      return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
 
     // Dry-run enforcement — enforceQuotaShare only peeks (does not consume)
@@ -70,9 +67,9 @@ export async function GET(request: Request): Promise<Response> {
       },
     });
 
-    return NextResponse.json({ decision });
+    return Response.json({ decision });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to preview quota enforcement";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

@@ -16,10 +16,9 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
 // the shared `@/lib/providers/validation` barrel that every provider
 // validator's callers pull in, and executors/chatgpt-web-codex.ts's own
 // import chain (its vendor browser adapter -> token-estimate.ts -> tiktoken's
-// WASM tokenizer) fails to bundle under Turbopack dev mode even with
-// `tiktoken` server-externalized -- turning validation of an unrelated
-// provider into a route-wide crash for anyone who merely imports the barrel.
-// A static import here evaluates that whole chain unconditionally.
+// WASM tokenizer) is heavy and can fail to load -- turning validation of an
+// unrelated provider into a route-wide crash for anyone who merely imports
+// the barrel. A static import here evaluates that whole chain unconditionally.
 
 export async function validateChatGptWebCodexProvider({
   apiKey,

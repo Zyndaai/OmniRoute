@@ -1,5 +1,3 @@
-"use client";
-
 import { Suspense, useEffect, useInsertionEffect, useState } from "react";
 import { Sidebar as KitSidebar, SidebarInset, SidebarProvider } from "@omniroute/ui-kit/sidebar";
 import Sidebar, { useSidebarSide } from "../Sidebar";
@@ -14,7 +12,7 @@ import {
   prefetchDashboardCsrfToken,
 } from "@/shared/utils/dashboardCsrf";
 import { installBasePathFetch } from "@/shared/utils/basePathFetch";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 const isE2EMode = process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE === "1";
 

@@ -1,11 +1,9 @@
-"use client";
-
 import { useMemo, useState, useCallback, useId } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { copyToClipboard } from "@/shared/utils/clipboard";
 import {

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildTelemetryPayload } from "@/lib/monitoring/observability";
 import { getTelemetrySummary } from "@/shared/utils/requestTelemetry";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -18,7 +17,7 @@ export async function GET(request) {
       activeSessions,
     });
     const totalRequests = payload.totalRequests || 0;
-    return NextResponse.json({
+    return Response.json({
       ...payload,
       uptime: process.uptime(),
       memoryUsage: process.memoryUsage(),
@@ -27,6 +26,6 @@ export async function GET(request) {
         totalRequests > 0 ? (quotaMonitorSummary.errors / Math.max(totalRequests, 1)) * 100 : 0,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

@@ -8,10 +8,9 @@
  * (wrong name -- the real module exports `install`) and `resolveSpawnArgs`,
  * missing getInstalledVersion/getLatestVersion/update/uninstall entirely.
  * Real consumers (app/api/services/9router/{status,install,update}/route.ts)
- * import all of these by name -- under Turbopack's resolveAlias mechanism
- * this produced 9 real "Export X doesn\'t exist in target module" compile
- * errors, meaning OMNIROUTE_BUILD_PROFILE=minimal could not produce a
- * working build via the Turbopack path at all. Every export below matches
+ * import all of these by name -- with the stub aliased in, a missing export
+ * is a compile error, so OMNIROUTE_BUILD_PROFILE=minimal could not produce a
+ * working build at all. Every export below matches
  * the real module\'s exact name and signature; each still only throws
  * FeatureDisabledError -- no privileged functionality is restored.
  */

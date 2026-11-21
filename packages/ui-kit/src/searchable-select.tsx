@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverAlign } from "./popover";

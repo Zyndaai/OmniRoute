@@ -1,8 +1,6 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/ParamSliders.tsx
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Slider } from "@omniroute/ui-kit/slider";
 import Input from "@/shared/components/Input";
 import Toggle from "@/shared/components/Toggle";

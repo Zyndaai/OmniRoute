@@ -12,7 +12,6 @@
  *
  * Returns: { ok, results: { target, action, destDir, error? }[] }
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
 import { sanitizeErrorMessage, buildErrorBody } from "@omniroute/open-sse/utils/error";
@@ -91,7 +90,7 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(installSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(buildErrorBody(400, validation.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, validation.error.message), { status: 400 });
     }
 
     const { repoName, targets, description } = validation.data;
@@ -117,7 +116,7 @@ export async function POST(request: Request) {
       }
     });
 
-    return NextResponse.json({
+    return Response.json({
       ok: results.every((r) => r.ok),
       repoName,
       skillName,
@@ -125,6 +124,6 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

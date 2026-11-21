@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useMemo, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import { maskEmailLikeValue } from "@/shared/utils/maskEmail";
 import Button from "@/shared/components/Button";

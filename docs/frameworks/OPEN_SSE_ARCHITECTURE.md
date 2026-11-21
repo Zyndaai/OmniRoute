@@ -18,7 +18,7 @@ lastUpdated: 2026-06-28
 
 1. **Reusability** — `open-sse` is published as `@omniroute/open-sse` on npm, so other projects can use it independently
 2. **Clean boundaries** — the streaming engine is decoupled from the OmniRoute-specific UI/DB layer
-3. **Performance** — the engine has no Next.js dependencies, enabling faster cold starts in CLI/serverless contexts
+3. **Performance** — the engine has no web-framework dependencies, enabling faster cold starts in CLI/serverless contexts
 4. **Versioning** — `open-sse` can release on its own cadence
 
 ```json
@@ -66,7 +66,7 @@ Every LLM request flows through a **5-stage pipeline**:
 ```
                               ┌──────────────┐
    HTTP request                │  1. ROUTE    │   combo resolution, model selection
-   (Next.js route)             └──────┬───────┘
+   (API route)                 └──────┬───────┘
                                      │
                                      ▼
                               ┌──────────────┐

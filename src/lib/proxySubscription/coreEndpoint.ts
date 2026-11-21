@@ -3,7 +3,7 @@
  * endpoints (one per line).
  *
  * Extracted from `subscriptionService.isLocalCoreEndpointAllowed` so the
- * security gate is unit-testable without the full DB / Next.js stack.
+ * security gate is unit-testable without the full DB / server stack.
  */
 
 import { redactSubscriptionUrl } from "./url";

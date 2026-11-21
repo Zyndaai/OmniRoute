@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useLocale, useTranslations } from "use-intl";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import { SortableTableHead } from "@omniroute/ui-kit/data-table-shell";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -23,19 +21,16 @@ import {
   getServiceTierDisplayLabel,
   type TranslationFn as CostTranslationFn,
 } from "@/shared/utils/serviceTierLabels";
-import dynamic from "next/dynamic";
+import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 
-const CostTrendCard = dynamic(
-  () => import("./components/CostCharts").then((m) => ({ default: m.CostTrendCard })),
-  { ssr: false }
+const CostTrendCard = clientOnlyLazy(() =>
+  import("./components/CostCharts").then((m) => ({ default: m.CostTrendCard }))
 );
-const ProviderSpendCard = dynamic(
-  () => import("./components/CostCharts").then((m) => ({ default: m.ProviderSpendCard })),
-  { ssr: false }
+const ProviderSpendCard = clientOnlyLazy(() =>
+  import("./components/CostCharts").then((m) => ({ default: m.ProviderSpendCard }))
 );
-const WeeklyPatternCard = dynamic(
-  () => import("./components/CostCharts").then((m) => ({ default: m.WeeklyPatternCard })),
-  { ssr: false }
+const WeeklyPatternCard = clientOnlyLazy(() =>
+  import("./components/CostCharts").then((m) => ({ default: m.WeeklyPatternCard }))
 );
 
 import {
@@ -56,6 +51,7 @@ import { ApiKeyUsageLimitCard } from "./components/ApiKeyUsageLimitCard";
 import { MetricCard } from "./components/MetricCard";
 import { TopListCard } from "./components/TopListCard";
 import { useApiKeyUsageLimits } from "./useApiKeyUsageLimits";
+import { csvCell } from "./costCsv";
 
 interface UsageAnalyticsSummary {
   totalCost: number;
@@ -210,11 +206,6 @@ function formatCurrencyCost(locale: string, value: number): string {
   }).format(numericValue);
 }
 
-function csvCell(value: string | number): string {
-  const text = String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
 // The exports are consumed outside the app, where no i18n runtime is available
 // and the header/summary keys are already English literals, so the estimate
 // disclosure ships as an English marker alongside them.
@@ -327,7 +318,7 @@ export default function CostOverviewTab() {
   const t = useTranslations("costs");
   const locale = useLocale();
   const nodeMap = useProviderNodeMap();
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const apiKeyIdsParam = searchParams.get("apiKeyIds");
   const selectedApiKeyIds = useMemo(() => parseApiKeyIds(apiKeyIdsParam), [apiKeyIdsParam]);
   const selectedApiKeyId = selectedApiKeyIds.length === 1 ? selectedApiKeyIds[0] : null;

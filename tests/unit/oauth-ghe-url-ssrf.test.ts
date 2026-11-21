@@ -11,7 +11,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-oauth-ghe-ssrf-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -87,7 +86,7 @@ function reachedMetadata() {
 async function deviceCode(gheUrl: string) {
   const url =
     "http://localhost/api/oauth/ghe-copilot/device-code" + `?gheUrl=${encodeURIComponent(gheUrl)}`;
-  return route.GET(new Request(url) as unknown as NextRequest, {
+  return route.GET(new Request(url) as unknown as Request, {
     params: Promise.resolve({ provider: "ghe-copilot", action: "device-code" }),
   });
 }
@@ -98,7 +97,7 @@ async function poll(gheUrl: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ deviceCode: "device-code", extraData: { gheUrl } }),
   });
-  return route.POST(request as unknown as NextRequest, {
+  return route.POST(request as unknown as Request, {
     params: Promise.resolve({ provider: "ghe-copilot", action: "poll" }),
   });
 }

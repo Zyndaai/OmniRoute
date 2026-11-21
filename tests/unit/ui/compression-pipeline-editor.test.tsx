@@ -7,7 +7,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 
 const { CompressionPipelineEditor } =
@@ -35,13 +35,13 @@ afterEach(() => {
 function render(steps: { engine: string; intensity?: string }[], onChange: (s: unknown) => void) {
   act(() => {
     root.render(
-      <NextIntlClientProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
+      <IntlProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
         <CompressionPipelineEditor
           steps={steps}
           onChange={onChange}
           engineIntensities={TABLE as unknown as Record<string, readonly string[]>}
         />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
   });
 }

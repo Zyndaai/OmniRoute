@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Icon from "./Icon";
 import Card from "./Card";
 import Button from "./Button";

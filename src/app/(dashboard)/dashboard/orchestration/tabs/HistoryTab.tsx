@@ -1,4 +1,3 @@
-"use client";
 /**
  * History tab — Airflow-grid style view over PERSISTED runs (A2A task history from Task C3's
  * `GET /api/a2a/tasks/history`, plus the existing in-memory `GET /api/v1/agents/tasks` for
@@ -16,7 +15,7 @@
  * range, independent of the live snapshot filter pipeline.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   Table,
   TableBody,

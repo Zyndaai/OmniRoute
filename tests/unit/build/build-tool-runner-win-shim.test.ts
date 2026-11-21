@@ -12,20 +12,16 @@ import {
 } from "../../../scripts/build/buildToolRunner.mjs";
 
 /**
- * Regression coverage for the Windows `postbuild` crash.
+ * Regression coverage for the Windows build-tool spawn.
  *
- * `colocate-standalone.mjs` spawned `node_modules/.bin/esbuild` — an
- * extensionless POSIX shell script that does not exist on Windows. `npm run
- * build` therefore died with
+ * Spawning `node_modules/.bin/esbuild` — an extensionless POSIX shell script
+ * that does not exist on Windows — died with
  *
  *   Error: spawnSync C:\…\node_modules\.bin\esbuild ENOENT
  *
- * immediately AFTER `next build` reported "✓ Compiled successfully", leaving a
- * complete `.build/next/standalone` tree next to a failed build.
- *
- * The platform is injected into `planBuildToolSpawn()` (same seam as
- * `resolveNextBuildEnv()` in build-next-isolated.mjs) so the Windows decisions
- * are asserted from CI's Linux runners.
+ * so every build step that runs a tool goes through `runBuildTool()`. The
+ * platform is injected into `planBuildToolSpawn()` so the Windows decisions
+ * are asserted from Linux runners.
  */
 
 test("planBuildToolSpawn prefers the tool's own JS entry over any .bin shim", () => {
@@ -190,15 +186,12 @@ test("runBuildTool actually runs esbuild from this repo's dependency tree", () =
   }
 });
 
-test("colocate-standalone.mjs never spawns the node_modules/.bin shim again", () => {
-  const source = readFileSync(
-    new URL("../../../scripts/build/colocate-standalone.mjs", import.meta.url),
-    "utf8"
-  );
+test("build.mjs never spawns the node_modules/.bin shim", () => {
+  const source = readFileSync(new URL("../../../scripts/build/build.mjs", import.meta.url), "utf8");
 
   assert.ok(
     !/\.bin["'\s,]+["']esbuild/.test(source),
-    "the postbuild hook must not reference node_modules/.bin/esbuild — that path is Windows-fatal"
+    "the build must not reference node_modules/.bin/esbuild — that path is Windows-fatal"
   );
   assert.match(
     source,

@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PoolUsageSnapshot } from "@/lib/quota/types";
 

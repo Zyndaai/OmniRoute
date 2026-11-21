@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { TYPE_COLORS, LEVEL_COLORS, PROVIDER_COLORS } from "@/shared/constants/colors";
 import {
   formatDuration as formatLatency,

@@ -17,15 +17,25 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 // Stub next/navigation (not used by CompressionHub but required by module graph)
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/",
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/", search: "", hash: "" }),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 // Track all fetch calls
@@ -104,9 +114,9 @@ describe("CompressionHub — PUT sends patch only, not full settings", () => {
   it("sends only the changed field when activeComboId is updated", async () => {
     await act(async () => {
       root.render(
-        <NextIntlClientProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
+        <IntlProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
           <CompressionHub />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
     });
 
@@ -138,9 +148,9 @@ describe("CompressionHub — PUT sends patch only, not full settings", () => {
   it("sends only the toggle field when contextEditing is toggled", async () => {
     await act(async () => {
       root.render(
-        <NextIntlClientProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
+        <IntlProvider locale="en" messages={{ contextCombos: messages.contextCombos }}>
           <CompressionHub />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
     });
 

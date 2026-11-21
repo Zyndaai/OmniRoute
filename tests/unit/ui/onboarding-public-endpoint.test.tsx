@@ -4,19 +4,25 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const { pushMock, replaceMock } = vi.hoisted(() => ({
-  pushMock: vi.fn(),
-  replaceMock: vi.fn(),
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: pushMock,
-    replace: replaceMock,
-  }),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => navigateMock,
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
@@ -65,8 +71,7 @@ beforeEach(() => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
-  pushMock.mockReset();
-  replaceMock.mockReset();
+  navigateMock.mockReset();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -103,7 +108,7 @@ it("renders the public API URL instead of rebuilding an internal apiPort URL", a
   await waitForText("https://api.example.com/api/v1");
   expect(container.textContent).toContain("https://api.example.com/api/v1");
   expect(container.textContent).not.toContain(":20131/api/v1");
-  expect(replaceMock).not.toHaveBeenCalled();
+  expect(navigateMock).not.toHaveBeenCalledWith("/dashboard", { replace: true });
 });
 
 // F4 (KEA-7886, lote 3): the page had no h1 (the step title was an h2) and the 6-step stepper

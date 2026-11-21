@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import fs from "fs/promises";
 import path from "path";
@@ -129,12 +128,9 @@ export async function GET(request: Request) {
       // no metadata yet
     }
 
-    return NextResponse.json({ success: true, roles, firstSetupAt });
+    return Response.json({ success: true, roles, firstSetupAt });
   } catch (error) {
-    return NextResponse.json(
-      { success: false, error: sanitizeErrorMessage(error) },
-      { status: 500 }
-    );
+    return Response.json({ success: false, error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -146,12 +142,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   const parsed = hermesAgentSettingsSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid request" },
       { status: 400 }
     );
@@ -160,7 +156,7 @@ export async function POST(request: Request) {
   const { baseUrl, keyId, apiKey, selections, preview } = parsed.data;
 
   if (!validateBaseUrl(baseUrl)) {
-    return NextResponse.json({ error: "baseUrl must be a valid http(s) URL" }, { status: 400 });
+    return Response.json({ error: "baseUrl must be a valid http(s) URL" }, { status: 400 });
   }
 
   const configPath = getCliPrimaryConfigPath("hermes-agent") || getConfigPath();
@@ -192,12 +188,12 @@ export async function POST(request: Request) {
   const result = await generateHermesAgentConfig(payload);
 
   if (result.error) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    return Response.json({ error: result.error }, { status: 400 });
   }
 
   // Preview mode: return the would-be YAML without writing it (Phase 5 polish)
   if (preview === true) {
-    return NextResponse.json({
+    return Response.json({
       success: true,
       preview: true,
       yaml: result.yaml,
@@ -209,7 +205,7 @@ export async function POST(request: Request) {
   const existingEnv = await readTextIfPresent(envPath);
   const hasExistingApiKey = hasUsableHermesApiKey(existingEnv);
   if (!resolvedApiKey && !hasExistingApiKey) {
-    return NextResponse.json(
+    return Response.json(
       { error: "The selected OmniRoute API key could not be resolved" },
       { status: 400 }
     );
@@ -232,7 +228,7 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     message: `Hermes Agent config saved to ${configPath}`,
     configPath,

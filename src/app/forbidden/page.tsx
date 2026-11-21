@@ -1,6 +1,5 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 
 /**
  * 403 Forbidden Page — Phase 8.1
@@ -11,7 +10,6 @@ import { useTranslations } from "next-intl";
  * - Rate limit exceeded
  */
 
-import Link from "next/link";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Icon from "@/shared/components/Icon";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
@@ -36,7 +34,7 @@ export default function ForbiddenPage() {
       <p className="text-[15px] text-text-muted max-w-[400px] leading-relaxed mb-8">
         {t("accessDeniedDescription")}
       </p>
-      <Link href="/dashboard" className={buttonVariants({ size: "lg" })}>
+      <Link to="/dashboard" className={buttonVariants({ size: "lg" })}>
         {t("goToDashboard")}
       </Link>
     </main>

@@ -1,7 +1,5 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { EmptyState } from "@omniroute/ui-kit/empty-state";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Icon from "@/shared/components/Icon";
@@ -22,7 +20,7 @@ export function EmptyStateNoProviders() {
         "To use AgentBridge, first connect at least one provider. It will be the destination where IDE requests are routed."
       }
       actions={
-        <Link href="/dashboard/providers" className={buttonVariants({ variant: "default" })}>
+        <Link to="/dashboard/providers" className={buttonVariants({ variant: "default" })}>
           <Icon name="arrow_forward" size={16} />
           {t("emptyGoToProviders") || "Go to Providers"}
         </Link>

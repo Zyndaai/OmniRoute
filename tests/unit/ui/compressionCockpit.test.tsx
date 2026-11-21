@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 import type { CompressionRunModel } from "@/app/(dashboard)/dashboard/compression/studio/compressionFlowModel";
 
@@ -44,12 +44,12 @@ function mount(ui: React.ReactElement): HTMLElement {
   mounted.push({ root, container });
   act(() => {
     root.render(
-      <NextIntlClientProvider
+      <IntlProvider
         locale="en"
         messages={{ compressionStudio: messages.compressionStudio }}
       >
         {ui}
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
   });
   return container;

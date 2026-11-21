@@ -5,7 +5,6 @@
  * Includes provider breakdown, cache hit rate, cost summary, and error count.
  */
 
-import { NextResponse } from "next/server";
 import { SEARCH_PROVIDERS } from "@omniroute/open-sse/config/searchRegistry.ts";
 import { enforceApiKeyPolicy } from "@/shared/utils/apiKeyPolicy";
 import { getSearchAggregateStats, getSearchProviderCounts } from "@/lib/db/callLogStats";
@@ -42,7 +41,7 @@ export async function GET(req: Request) {
 
     const cacheHitRate = total > 0 ? Math.round((cached / total) * 100) : 0;
 
-    return NextResponse.json({
+    return Response.json({
       total,
       today,
       cached,
@@ -56,6 +55,6 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/v1/search/analytics]", msg);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -21,8 +21,6 @@ const localDb = { updateSettings };
 // @ts-ignore - intentional for test harness timing
 const callbackRoute = await import("../../src/app/api/auth/oidc/callback/route.ts");
 
-import type { default as CookieStore } from "next/headers"; // not really, just for shape
-
 interface CapturedCookie {
   value: string;
   options?: Record<string, unknown>;

@@ -68,7 +68,7 @@ Client → API Route (/v1/chat/completions)
 
 ### Key Modules
 - **open-sse/**: Core streaming engine (handlers, executors, translator)
-- **src/app/api/**: Next.js App Router API routes
+- **src/app/api/**: API route handlers (route.ts files)
 - **src/lib/**: Infrastructure (db, events, memory, skills, guardrails, etc.)
 - **src/mitm/**: MITM proxy (cert management, DNS, targets)
 - **src/server/**: Server infrastructure (WebSocket, authz)

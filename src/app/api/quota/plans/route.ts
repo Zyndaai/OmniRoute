@@ -14,13 +14,10 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { listPlans as listProviderPlans } from "@/lib/db/providerPlans";
 import { knownProviders, getKnownPlan } from "@/lib/quota/planRegistry";
-
-export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
@@ -58,9 +55,9 @@ export async function GET(request: Request): Promise<Response> {
       merged.push(dbPlan);
     }
 
-    return NextResponse.json({ plans: merged });
+    return Response.json({ plans: merged });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list plans";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

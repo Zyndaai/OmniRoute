@@ -1,4 +1,3 @@
-"use client";
 /**
  * Side-by-side comparison panel for two History runs (Task A3, PR-A). Fetches each side's
  * detail the SAME way the drawer does (`drawer/useDrawerDetail.ts`'s `routeFor` /
@@ -19,7 +18,7 @@
  * `"error"` is indistinguishable from a genuinely empty timeline.
  */
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import { orchStateColor, type OrchState } from "../model/orchestrationTypes";
 import { normalizeRunSide, buildComparison } from "../model/compareRuns";

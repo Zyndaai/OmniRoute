@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, Suspense } from "react";
 import { CardSkeleton } from "@/shared/components";
 import ProviderLimits from "../usage/components/ProviderLimits";

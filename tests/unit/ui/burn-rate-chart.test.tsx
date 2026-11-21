@@ -18,31 +18,6 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-// Eagerly resolve the dynamic import so BurnRateChartInner actually renders instead of
-// staying null forever (mirrors the pattern in playground-studio.test.tsx). Tracked via
-// state (not a bare closure variable) so the resolution itself triggers the re-render
-// that picks it up, instead of relying on some later, unrelated state update to do so.
-vi.mock("next/dynamic", () => ({
-  default: (fn: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>) => {
-    return function DynamicWrapper(props: Record<string, unknown>) {
-      const [Component, setComponent] = React.useState<React.ComponentType<
-        Record<string, unknown>
-      > | null>(null);
-      React.useEffect(() => {
-        let mounted = true;
-        fn().then((m) => {
-          if (mounted) setComponent(() => m.default);
-        });
-        return () => {
-          mounted = false;
-        };
-      }, []);
-      if (!Component) return null;
-      return React.createElement(Component, props);
-    };
-  },
-}));
-
 const { default: BurnRateChart } =
   await import("../../../src/app/(dashboard)/dashboard/costs/quota-share/components/BurnRateChart");
 

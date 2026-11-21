@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveProviderAlias } from "@omniroute/open-sse/services/model.ts";
 import { parseReasoningEffortsOverride } from "@/shared/reasoning/reasoningEffortsOverride";
@@ -169,7 +168,7 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   const { nodeToPrefix, eligibleNodeIds, compatibleNodeIds } = await loadPrefixMaps();
-  return NextResponse.json({
+  return Response.json({
     overrides: await listPublicOverrides(nodeToPrefix, eligibleNodeIds, compatibleNodeIds),
   });
 }
@@ -182,12 +181,12 @@ export async function PATCH(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const parsed = upsertOverrideSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.issues }, { status: 400 });
+    return Response.json({ error: parsed.error.issues }, { status: 400 });
   }
 
   const { entries, nodeToPrefix, prefixToNode, eligibleNodeIds, compatibleNodeIds } =
@@ -200,7 +199,7 @@ export async function PATCH(request: Request) {
     eligibleNodeIds
   );
   if (!canonical.ok) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid or ambiguous model capability override target" },
       { status: 400 }
     );
@@ -216,10 +215,10 @@ export async function PATCH(request: Request) {
           parsed.data.value
         );
   if (!written) {
-    return NextResponse.json({ error: "Invalid model capability override" }, { status: 400 });
+    return Response.json({ error: "Invalid model capability override" }, { status: 400 });
   }
 
-  return NextResponse.json({
+  return Response.json({
     overrides: await listPublicOverrides(nodeToPrefix, eligibleNodeIds, compatibleNodeIds),
   });
 }
@@ -243,7 +242,7 @@ export async function DELETE(request: Request) {
   );
 
   if (!canonical.ok || !parsedKey.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "target and key are required; target must be a valid model override target" },
       { status: 400 }
     );
@@ -255,7 +254,7 @@ export async function DELETE(request: Request) {
   } else {
     await removeModelCapabilityOverride(canonical.target, parsedKey.data as ModelCapabilityOverrideKey);
   }
-  return NextResponse.json({
+  return Response.json({
     overrides: await listPublicOverrides(nodeToPrefix, eligibleNodeIds, compatibleNodeIds),
   });
 }

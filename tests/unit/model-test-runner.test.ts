@@ -484,9 +484,9 @@ test("runSingleModelTest preserves trusted local limiter HTTP statuses", async (
 // #13376 skip path — a non-chat generation model (image/music/video) must be
 // rejected with a real HTTP status and never dispatched as a chat completion.
 //
-// The route hands `result.httpStatus` straight to NextResponse
+// The route hands `result.httpStatus` straight to Response.json
 // (src/app/api/models/test/route.ts). When the early return omitted it, the
-// status was `undefined`, Next fell back to 200, and a skipped test reached the
+// status was `undefined`, the response fell back to 200, and a skipped test reached the
 // client as an HTTP success carrying `status: "error"` in the body.
 // ---------------------------------------------------------------------------
 

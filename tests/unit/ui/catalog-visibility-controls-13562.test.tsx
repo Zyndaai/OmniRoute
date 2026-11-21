@@ -13,7 +13,7 @@ process.env.OMNIROUTE_PLUGINS_DIR = path.join(dataDir, "plugins");
 process.env.NODE_ENV = "test";
 process.env.API_KEY_SECRET = "synthetic-catalog-ui-13562";
 
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 vi.mock("@/app/(dashboard)/dashboard/settings/components/RoutingStrategyCard", () => ({
   default: () => null,
 }));
@@ -40,15 +40,15 @@ vi.mock("@/shared/components/routing/RoutingEntryLink", () => ({ default: () => 
 
 const { default: SettingsRoutingPage } =
   await import("@/app/(dashboard)/dashboard/settings/routing/page");
-const { NextIntlClientProvider } = await import("next-intl");
+const { IntlProvider } = await import("use-intl");
 const fetchMock = vi.fn<typeof fetch>();
 let stored = { hideAutoCombos: false, hideNoThinkVariants: false, exposeCombosOnly: false };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const mount = (locale = "en") =>
   render(
-    <NextIntlClientProvider locale={locale} timeZone="UTC" messages={locale === "ar" ? ar : en}>
+    <IntlProvider locale={locale} timeZone="UTC" messages={locale === "ar" ? ar : en}>
       <SettingsRoutingPage />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 const autoSwitch = () => screen.getByRole("switch", { name: "Hide auto/*" });
 const noThinkSwitch = () => screen.getByRole("switch", { name: "Hide no-think/*" });

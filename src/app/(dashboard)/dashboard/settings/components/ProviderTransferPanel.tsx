@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import {

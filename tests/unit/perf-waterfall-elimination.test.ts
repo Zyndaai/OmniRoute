@@ -62,7 +62,7 @@ test("A1: home page fetches settings + machineId concurrently (#11396)", () => {
   assert.ok(pair![1].indexOf("loadHomeSettings()") < pair![1].indexOf("getMachineId()"));
 
   // both values are still consumed exactly as before the batching
-  assert.match(src, /setupComplete=\{Boolean\(settings\.setupComplete\)\}/);
+  assert.match(src, /setupComplete: Boolean\(settings\.setupComplete\)/);
   assert.match(src, /machineId=\{machineId\}/);
 
   // no serial awaits left for these two reads

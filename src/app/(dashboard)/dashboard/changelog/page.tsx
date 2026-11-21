@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { SegmentedControl } from "@/shared/components";
 import ChangelogViewer from "./components/ChangelogViewer";

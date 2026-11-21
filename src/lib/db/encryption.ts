@@ -179,7 +179,7 @@ export function isEncryptionEnabled(): boolean {
  * crash-loop Docker, which sets NODE_ENV=production and starts from that
  * example env. The box is logged once at boot and the process keeps serving.
  *
- * Call once from `src/instrumentation-node.ts`, not from encrypt()/decrypt().
+ * Call once from `src/server/boot.ts`, not from encrypt()/decrypt().
  * `encryptionEnabled` is injectable so a test can reach this branch without
  * reading the operator's `.env`.
  */

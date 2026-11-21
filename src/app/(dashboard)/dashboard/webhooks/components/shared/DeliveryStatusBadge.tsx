@@ -1,5 +1,3 @@
-"use client";
-
 import Badge from "@/shared/components/Badge";
 import Icon from "@/shared/components/Icon";
 

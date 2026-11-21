@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-a2a-enabled-route-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -25,12 +24,12 @@ async function resetStorage() {
   await resetTestDb();
 }
 
-function makeJsonRpcRequest(body: unknown): NextRequest {
+function makeJsonRpcRequest(body: unknown): Request {
   return new Request("http://localhost/a2a", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  }) as unknown as NextRequest;
+  }) as unknown as Request;
 }
 
 test.beforeEach(async () => {

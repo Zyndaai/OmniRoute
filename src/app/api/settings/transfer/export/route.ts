@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   CREDENTIAL_EXPORT_FORBIDDEN_MESSAGE,
   requireOperatorCredential,
@@ -25,11 +24,11 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
   const validation = validateBody(providerTransferExportSchema, body);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -46,7 +45,7 @@ export async function POST(request: Request) {
       metadata: { via: "transfer", connectionIds: validation.data.connectionIds },
     });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    return new NextResponse(JSON.stringify(bundle, null, 2), {
+    return new Response(JSON.stringify(bundle, null, 2), {
       status: 200,
       headers: {
         "Content-Type": "application/json",

@@ -1,5 +1,3 @@
-"use client";
-
 import { Switch } from "@omniroute/ui-kit/switch";
 import { cn } from "@/shared/utils/cn";
 

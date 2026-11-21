@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getAllAliases,
   getCustomAliases,
@@ -42,14 +41,14 @@ export async function GET(request: Request) {
         // Best-effort hydration — fall through with empty custom aliases
       }
     }
-    return NextResponse.json({
+    return Response.json({
       builtIn: getBuiltInAliases(),
       custom: getCustomAliases(),
       all: getAllAliases(),
     });
   } catch (error) {
     console.error("[API ERROR] /api/settings/model-aliases GET:", error);
-    return NextResponse.json({ error: "Failed to get model aliases" }, { status: 500 });
+    return Response.json({ error: "Failed to get model aliases" }, { status: 500 });
   }
 }
 
@@ -65,7 +64,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -79,15 +78,15 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateModelAliasesSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { aliases } = validation.data;
     setCustomAliases(aliases);
     await updateSettings({ modelAliases: aliases });
-    return NextResponse.json({ success: true, custom: getCustomAliases() });
+    return Response.json({ success: true, custom: getCustomAliases() });
   } catch (error) {
     console.error("[API ERROR] /api/settings/model-aliases PUT:", error);
-    return NextResponse.json({ error: "Failed to update model aliases" }, { status: 500 });
+    return Response.json({ error: "Failed to update model aliases" }, { status: 500 });
   }
 }
 
@@ -103,7 +102,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -117,15 +116,15 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(addModelAliasSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { from, to } = validation.data;
     addCustomAlias(from, to);
     await updateSettings({ modelAliases: getCustomAliases() });
-    return NextResponse.json({ success: true, custom: getCustomAliases() });
+    return Response.json({ success: true, custom: getCustomAliases() });
   } catch (error) {
     console.error("[API ERROR] /api/settings/model-aliases POST:", error);
-    return NextResponse.json({ error: "Failed to add alias" }, { status: 500 });
+    return Response.json({ error: "Failed to add alias" }, { status: 500 });
   }
 }
 
@@ -141,7 +140,7 @@ export async function DELETE(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -155,17 +154,17 @@ export async function DELETE(request: Request) {
   try {
     const validation = validateBody(removeModelAliasSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { from } = validation.data;
     const removed = removeCustomAlias(from);
     if (!removed) {
-      return NextResponse.json({ error: "Alias not found" }, { status: 404 });
+      return Response.json({ error: "Alias not found" }, { status: 404 });
     }
     await updateSettings({ modelAliases: getCustomAliases() });
-    return NextResponse.json({ success: true, custom: getCustomAliases() });
+    return Response.json({ success: true, custom: getCustomAliases() });
   } catch (error) {
     console.error("[API ERROR] /api/settings/model-aliases DELETE:", error);
-    return NextResponse.json({ error: "Failed to remove alias" }, { status: 500 });
+    return Response.json({ error: "Failed to remove alias" }, { status: 500 });
   }
 }

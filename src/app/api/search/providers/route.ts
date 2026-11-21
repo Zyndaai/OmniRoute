@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   SEARCH_PROVIDERS,
   getSearchCredentialFallbacks,
@@ -143,7 +142,7 @@ async function resolveProviderStatus(
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json(buildErrorBody(401, "Unauthorized"), { status: 401 });
+    return Response.json(buildErrorBody(401, "Unauthorized"), { status: 401 });
   }
 
   try {
@@ -219,9 +218,9 @@ export async function GET(request: Request) {
       search_types: p.searchTypes ?? [],
     }));
 
-    return NextResponse.json({ providers, data });
+    return Response.json({ providers, data });
   } catch (error) {
     log.error("SEARCH_PROVIDERS", "Failed to list providers", error);
-    return NextResponse.json(buildErrorBody(500, "Failed to list providers"), { status: 500 });
+    return Response.json(buildErrorBody(500, "Failed to list providers"), { status: 500 });
   }
 }

@@ -17,7 +17,7 @@ import BuilderIntelligentStep from "../../src/app/(dashboard)/dashboard/combos/B
 import enMessages from "../../src/i18n/messages/en.json";
 
 // A real translator built from the app's actual EN catalog, with no custom
-// onError -- this is what NextIntlClientProvider uses by default (see
+// onError -- this is what IntlProvider uses by default (see
 // app/layout.tsx / app/global-error.tsx), so it faithfully reproduces the
 // live FORMATTING_ERROR throw for a message with an unsupplied ICU variable.
 const t = createTranslator({

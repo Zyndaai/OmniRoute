@@ -1,14 +1,13 @@
-"use client";
-
-import dynamic from "next/dynamic";
+import { lazy, Suspense } from "react";
+import { ClientOnly } from "@/shared/components/ClientOnly";
 import type { ConfigState } from "../SearchToolsConfigPane";
 import type { SearchFormData } from "../SearchForm";
 import type { SearchProviderCatalogItem } from "@/shared/schemas/searchTools";
 
-const SearchForm = dynamic(() => import("../SearchForm"), { ssr: false });
-const ResultsPanel = dynamic(() => import("../ResultsPanel"), { ssr: false });
-const RerankPanel = dynamic(() => import("../RerankPanel"), { ssr: false });
-const SearchHistory = dynamic(() => import("../SearchHistory"), { ssr: false });
+const SearchForm = lazy(() => import("../SearchForm"));
+const ResultsPanel = lazy(() => import("../ResultsPanel"));
+const RerankPanel = lazy(() => import("../RerankPanel"));
+const SearchHistory = lazy(() => import("../SearchHistory"));
 
 interface SearchResult {
   title: string;
@@ -49,7 +48,7 @@ interface SearchTabProps {
 }
 
 import { useState, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 
 export default function SearchTab({
@@ -143,55 +142,61 @@ export default function SearchTab({
   };
 
   return (
-    <div className="flex h-full" data-testid="search-tab">
-      {/* Left: form + history */}
-      <div className="w-[300px] shrink-0 border-r border-border overflow-y-auto flex flex-col bg-bg-alt">
-        <SearchForm
-          onSearch={handleSearch}
-          loading={loading}
-          onCancel={handleCancel}
-          providers={providers}
-          catalogProviders={catalogProviders}
-        />
-        <SearchHistory onReplay={handleHistoryReplay} />
-      </div>
+    <ClientOnly>
+      {() => (
+        <Suspense fallback={null}>
+          <div className="flex h-full" data-testid="search-tab">
+            {/* Left: form + history */}
+            <div className="w-[300px] shrink-0 border-r border-border overflow-y-auto flex flex-col bg-bg-alt">
+              <SearchForm
+                onSearch={handleSearch}
+                loading={loading}
+                onCancel={handleCancel}
+                providers={providers}
+                catalogProviders={catalogProviders}
+              />
+              <SearchHistory onReplay={handleHistoryReplay} />
+            </div>
 
-      {/* Right: results + rerank */}
-      <div className="flex-1 overflow-y-auto p-1">
-        <ResultsPanel
-          response={response}
-          rawJson={rawJson}
-          loading={loading}
-          error={error}
-          statusCode={statusCode}
-          duration={duration}
-          noProvidersConfigured={providers.filter((p) => p.status === "active").length === 0}
-        />
+            {/* Right: results + rerank */}
+            <div className="flex-1 overflow-y-auto p-1">
+              <ResultsPanel
+                response={response}
+                rawJson={rawJson}
+                loading={loading}
+                error={error}
+                statusCode={statusCode}
+                duration={duration}
+                noProvidersConfigured={providers.filter((p) => p.status === "active").length === 0}
+              />
 
-        {response && (
-          <div className="px-4 py-2 flex gap-2">
-            <Button
-              variant="outline"
-              fullWidth
-              icon="swap_vert"
-              aria-expanded={showRerank}
-              onClick={() => setShowRerank(!showRerank)}
-            >
-              {t("rerank")}
-            </Button>
+              {response && (
+                <div className="px-4 py-2 flex gap-2">
+                  <Button
+                    variant="outline"
+                    fullWidth
+                    icon="swap_vert"
+                    aria-expanded={showRerank}
+                    onClick={() => setShowRerank(!showRerank)}
+                  >
+                    {t("rerank")}
+                  </Button>
+                </div>
+              )}
+
+              {showRerank && response && (
+                <div className="px-4 pb-3">
+                  <RerankPanel
+                    query={response.query}
+                    results={response.results}
+                    onClose={() => setShowRerank(false)}
+                  />
+                </div>
+              )}
+            </div>
           </div>
-        )}
-
-        {showRerank && response && (
-          <div className="px-4 pb-3">
-            <RerankPanel
-              query={response.query}
-              results={response.results}
-              onClose={() => setShowRerank(false)}
-            />
-          </div>
-        )}
-      </div>
-    </div>
+        </Suspense>
+      )}
+    </ClientOnly>
   );
 }

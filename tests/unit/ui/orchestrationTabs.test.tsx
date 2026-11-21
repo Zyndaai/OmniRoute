@@ -14,7 +14,15 @@ vi.mock("@xyflow/react", async () => {
   const actual = (await vi.importActual("@xyflow/react")) as Record<string, unknown>;
   return { ...actual, Handle: () => null, Position: { Top: "top", Bottom: "bottom" } };
 });
-vi.mock("next-intl", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
+vi.mock("use-intl", () => ({
   useTranslations: () => (k: string, v?: Record<string, unknown>) =>
     v ? `${k}:${JSON.stringify(v)}` : k,
 }));

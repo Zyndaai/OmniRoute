@@ -13,7 +13,6 @@
  *
  * Returns the same shape as POST /api/skills/collect/chaos.
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -21,8 +20,6 @@ import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/
 import { getChaosConfig } from "@/lib/chaos/chaosConfig";
 import { executeChaosRun, type ChaosRunResult } from "@/lib/chaos/chaosExecutor";
 import * as log from "@/sse/utils/logger";
-
-export const dynamic = "force-dynamic";
 
 const runSchema = z.object({
   task: z.string().min(1, "Task is required").max(100_000, "task too long"),
@@ -41,7 +38,7 @@ export async function POST(request: Request) {
     // Load global chaos config
     const globalConfig = await getChaosConfig();
     if (!globalConfig.enabled) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, "Chaos Mode is not enabled. Enable it in Dashboard → Chaos Mode."),
         { status: 400 }
       );
@@ -51,11 +48,11 @@ export async function POST(request: Request) {
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
+      return Response.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
     }
     const validation = validateBody(runSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(buildErrorBody(400, validation.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, validation.error.message), { status: 400 });
     }
 
     const { task, providers, mode, systemPrompt, maxTokens } = validation.data;
@@ -69,10 +66,10 @@ export async function POST(request: Request) {
       maxTokens: maxTokens || globalConfig.maxTokens,
     });
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
     log.error("chaos", "Chaos run error", err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

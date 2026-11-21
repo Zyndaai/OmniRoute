@@ -1,7 +1,7 @@
 /**
  * MCP HTTP Transport Layer — session-aware handlers for SSE and Streamable HTTP.
  *
- * Runs the MCP server **inside** the Next.js process so it can be toggled
+ * Runs the MCP server **inside** the web server process so it can be toggled
  * from the dashboard without requiring `omniroute --mcp`.
  *
  * Transport modes:
@@ -311,7 +311,7 @@ async function handleStreamableRequest(request: Request): Promise<Response> {
 
 /**
  * Handle Streamable HTTP requests (POST / GET / DELETE).
- * Used by the Next.js route at /api/mcp/stream.
+ * Used by the route at /api/mcp/stream.
  */
 export async function handleMcpStreamableHTTP(request: Request): Promise<Response> {
   return protectMcpSseResponse(request, await handleStreamableRequest(request));

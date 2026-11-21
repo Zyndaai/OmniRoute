@@ -9,27 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// Import the pure helper directly from the page module
-// We need to use a dynamic import since the page is a "use client" component,
-// but the helper is a plain function. We'll test it by reimplementing the
-// same logic inline (the source of truth is the page.tsx export).
-
-/**
- * Mirror of resolveRadarPageState from the page component.
- * This is the exact logic — if the page changes, this test must change too.
- */
-type PageState = "flag_off" | "optin_pending" | "empty" | "populated";
-
-function resolveRadarPageState(
-  flagOn: boolean,
-  optedIn: boolean,
-  hasEntries: boolean,
-): PageState {
-  if (!flagOn) return "flag_off";
-  if (!optedIn) return "optin_pending";
-  if (!hasEntries) return "empty";
-  return "populated";
-}
+import { resolveRadarPageState } from "../../src/app/(dashboard)/dashboard/radar/radarPageState.ts";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -56,7 +36,7 @@ test("resolveRadarPageState: flag on, opted in, has entries => populated", () =>
 });
 
 test("resolveRadarPageState: all states are reachable", () => {
-  const states = new Set<PageState>();
+  const states = new Set<string>();
   states.add(resolveRadarPageState(false, false, false));
   states.add(resolveRadarPageState(true, false, false));
   states.add(resolveRadarPageState(true, true, false));

@@ -172,8 +172,8 @@ function ensureWorker(): Worker {
   if (worker) return worker;
 
   const { workerFile, execArgv } = workerFileOverride ?? resolveCallLogArtifactWorker();
-  // Reflect.construct keeps Next/Turbopack from interpreting the runtime-selected
-  // worker path as a build-time glob and tracing tens of thousands of unrelated files.
+  // Reflect.construct keeps the bundler from reading the runtime-selected worker path as a
+  // build-time worker reference and trying to bundle it.
   const created = Reflect.construct(Worker, [
     pathToFileURL(workerFile),
     callLogWorkerOptions(execArgv),

@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import {
   Table,
   TableBody,
@@ -271,7 +269,7 @@ export function RadarCatalogTable({ entries, refreshCatalog, onError }: RadarCat
                       )}
                       {entry.setup?.keyUrl && (
                         <Link
-                          href={`/dashboard/radar/setup?provider=${encodeURIComponent(entry.provider)}`}
+                          to={`/dashboard/radar/setup?provider=${encodeURIComponent(entry.provider)}`}
                           className="text-xs text-primary hover:underline"
                           title={t("setupGuide")}
                           aria-label={t("setupGuide")}

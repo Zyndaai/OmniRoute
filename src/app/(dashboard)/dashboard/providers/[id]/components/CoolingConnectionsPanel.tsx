@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@/shared/components";
 
 /**
@@ -34,7 +32,7 @@ import { Button } from "@/shared/components";
  */
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { formatResetCountdown } from "@/shared/utils/formatting";
 import type { ConnectionRowConnection } from "./ConnectionRow";
 // `providerText` is DEFINED in ./providerCredentialText (a leaf whose only

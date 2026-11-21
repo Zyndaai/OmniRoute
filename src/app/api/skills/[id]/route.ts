@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { updateSkill } from "@/lib/db/skills";
 import { skillRegistry } from "@/lib/skills/registry";
 import { z } from "zod";
@@ -19,12 +18,12 @@ export async function DELETE(_request: Request, props: { params: Promise<{ id: s
     const { id } = await props.params;
     const deleted = await skillRegistry.unregisterById(id);
     if (!deleted) {
-      return NextResponse.json({ error: "Skill not found" }, { status: 404 });
+      return Response.json({ error: "Skill not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }
 
@@ -37,7 +36,7 @@ export async function PUT(request: Request, props: { params: Promise<{ id: strin
     const rawBody = await request.json();
     const validation = validateBody(updateSkillSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(validation.error, { status: 400 });
+      return Response.json(validation.error, { status: 400 });
     }
 
     const patch: Record<string, unknown> = {};
@@ -59,20 +58,20 @@ export async function PUT(request: Request, props: { params: Promise<{ id: strin
     }
 
     if (Object.keys(patch).length === 0) {
-      return NextResponse.json({ error: "No update payload provided" }, { status: 400 });
+      return Response.json({ error: "No update payload provided" }, { status: 400 });
     }
 
     await updateSkill(id, patch);
 
     await skillRegistry.loadFromDatabase();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       enabled: validation.data.enabled,
       mode: validation.data.mode,
     });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

@@ -11,7 +11,7 @@ export function shouldRetryCompressionInProcess(error: unknown): boolean {
   logCompressionWorkerFault(error, retryInProcess);
 
   // A non-pool failure (for example, the dynamic import itself failing with
-  // Turbopack's MODULE_NOT_FOUND) never reaches the pool's notification point.
+  // MODULE_NOT_FOUND) never reaches the pool's notification point.
   // Pool errors carry retryInProcess and were already reported before rejection.
   if ((error as { retryInProcess?: boolean } | null)?.retryInProcess === undefined) {
     notifyCompressionFailOpen(sanitizeErrorMessage(error instanceof Error ? error.message : error));

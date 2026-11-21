@@ -8,9 +8,6 @@
  * from package.json and skills based on available combos.
  */
 
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-
 import { buildAgentCardMetadata } from "@/lib/a2a/agentCardMetadata";
 import { getFleetSkills } from "@/lib/conductor/fleetSkills";
 import { getBaseUrl } from "@/lib/wellKnown";
@@ -21,7 +18,7 @@ import { getBaseUrl } from "@/lib/wellKnown";
  * Returns the OmniRoute Agent Card that describes this gateway's
  * capabilities as an A2A agent.
  */
-export async function GET(request?: NextRequest) {
+export async function GET(request?: Request) {
   // Conductor PRD RF2: fleet skills from the OmniConductor hub (cached ~60s; [] when
   // the hub is unset/offline — the card stays valid without the fleet section).
   const fleetSkills = await getFleetSkills();
@@ -34,7 +31,7 @@ export async function GET(request?: NextRequest) {
     },
   };
 
-  return NextResponse.json(agentCard, {
+  return Response.json(agentCard, {
     headers: {
       "Cache-Control": "public, max-age=3600",
       "Content-Type": "application/json",

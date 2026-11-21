@@ -1,5 +1,4 @@
-"use client";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { CodePreview } from "@omniroute/ui-kit/code-preview";
 import { Card } from "@/shared/components";
 

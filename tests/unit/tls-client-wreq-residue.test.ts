@@ -48,7 +48,7 @@ test("the distributable pins wreq-js 3.2.0 and carries all nine native lock entr
 
   for (const relativePath of [
     "package-lock.json",
-    "next.config.mjs",
+    "vite.config.ts",
     "Dockerfile",
     "pnpm.json",
     "pnpm-workspace.yaml",

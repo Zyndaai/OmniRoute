@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import KimiComboPresetCard from "@/app/(dashboard)/dashboard/combos/KimiComboPresetCard";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }));
+vi.mock("use-intl", () => ({ useTranslations: () => (k: string) => k }));
 
 describe("KimiComboPresetCard", () => {
   let container: HTMLDivElement | null = null;

@@ -1,5 +1,3 @@
-"use client";
-
 import Input from "@/shared/components/Input";
 import Textarea from "@/shared/components/Textarea";
 import Button from "@/shared/components/Button";
@@ -8,7 +6,7 @@ import Icon from "@/shared/components/Icon";
 // src/app/(dashboard)/dashboard/playground/components/ToolsBuilder.tsx
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useToolsBuilder } from "../hooks/useToolsBuilder";
 import type { ToolDefinition } from "@/lib/playground/codeExport";
 

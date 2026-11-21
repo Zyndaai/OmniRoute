@@ -138,7 +138,7 @@ export async function resolveQuotaAutoPingModel(
   asOf: Date | number | string = Date.now()
 ): Promise<string | null> {
   // Lazy for the same reason loadQuotaAutoPingExecutor is: this module sits on the
-  // instrumentation boot path and the model registry is a large import graph (#12074).
+  // boot path (src/server/boot.ts) and the model registry is a large import graph (#12074).
   const { getProviderModels } = await import("@omniroute/open-sse/config/providerModels.ts");
   for (const model of getProviderModels(provider)) {
     if (splitCodexReasoningSuffix(model.id).effort !== null) continue;

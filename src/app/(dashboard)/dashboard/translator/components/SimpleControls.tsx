@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Select, SegmentedControl } from "@/shared/components";
 import { InfoTooltip } from "@/shared/components";
 import Textarea from "@/shared/components/Textarea";

@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { CodePreview } from "@omniroute/ui-kit/code-preview";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import {

@@ -1,7 +1,5 @@
-"use client";
-
 import { cn } from "@/shared/utils/cn";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Toggle from "./Toggle";
 
 interface NoAuthProviderToggleProps {

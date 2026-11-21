@@ -1,4 +1,3 @@
-"use client";
 import { ComboLiveStudio } from "@/app/(dashboard)/dashboard/combos/live/ComboLiveStudio";
 import type { ComboLiveStudioProps } from "@/app/(dashboard)/dashboard/combos/live/ComboLiveStudio";
 import type { LiveComboEvent } from "@/hooks/useLiveDashboard";

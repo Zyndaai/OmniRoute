@@ -6,26 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("next/dynamic", () => ({
-  default: (loader: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>) => {
-    return function DynamicComponent(props: Record<string, unknown>) {
-      const [Comp, setComp] = React.useState<React.ComponentType<Record<string, unknown>> | null>(null);
-      React.useEffect(() => {
-        loader().then((m) => setComp(() => m.default));
-      }, []);
-      if (!Comp) return React.createElement("div", { "data-testid": "dyn-loading" });
-      return React.createElement(Comp, props);
-    };
-  },
-}));
-
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) =>
-    React.createElement("a", { href, ...props }, children),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) =>
+    React.createElement("a", { href: to, ...props }, children),
 }));
 
 // Mock SearchHistory (no-op)
@@ -95,11 +83,13 @@ interface SearchTabTestProps {
   providers?: typeof ACTIVE_PROVIDERS;
 }
 
-function renderSearchTab({ providers = ACTIVE_PROVIDERS }: SearchTabTestProps = {}): HTMLDivElement {
+async function renderSearchTab({
+  providers = ACTIVE_PROVIDERS,
+}: SearchTabTestProps = {}): Promise<HTMLDivElement> {
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => {
+  await act(async () => {
     root.render(
       React.createElement(SearchTab, {
         configState: { provider: "auto", searchType: "web", fetchFormat: "markdown", fullPage: false, rerankModel: "" },
@@ -153,8 +143,8 @@ describe("SearchTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders search-tab data-testid", () => {
-    const el = renderSearchTab();
+  it("renders search-tab data-testid", async () => {
+    const el = await renderSearchTab();
     expect(el.querySelector("[data-testid='search-tab']")).toBeTruthy();
   });
 

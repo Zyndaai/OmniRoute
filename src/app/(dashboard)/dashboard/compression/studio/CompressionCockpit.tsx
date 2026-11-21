@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { NodeTypes } from "@xyflow/react";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ensureDbReadyForBoot } from "../../src/instrumentation-node";
+import { ensureDbReadyForBoot } from "../../src/server/boot";
 
 // Regression guard for #7773: on Termux/Android, when the whole SQLite driver
 // cascade (better-sqlite3 -> node:sqlite -> sql.js) fails at boot,

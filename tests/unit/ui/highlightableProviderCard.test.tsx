@@ -2,8 +2,8 @@
 /**
  * HighlightableProviderCard — the wrapper owning the back-navigation
  * highlight concern: per-instance highlighted-id state initialized from
- * history.state, ref wiring into ProviderCard's imperative handle, and
- * click-time navigation recording.
+ * the id recorded for the current history entry (`location.key`), ref wiring into ProviderCard's
+ * imperative handle, and click-time navigation recording.
  *
  * Complements providerPageHighlightLogic.test.tsx (pure utils) and
  * providerCardHandle.test.tsx (imperative handle) by covering the wiring
@@ -14,20 +14,27 @@ import { createRoot } from "react-dom/client";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import HighlightableProviderCard from "@/app/(dashboard)/dashboard/providers/components/HighlightableProviderCard";
+import {
+  readRecordedProvider,
+  recordProviderNavigation,
+} from "@/app/(dashboard)/dashboard/providers/providerPageHighlightUtils";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }));
+const LOCATION_KEY = "list-entry";
+
+vi.mock("use-intl", () => ({ useTranslations: () => (k: string) => k }));
 vi.mock("@/shared/components/ProviderTestSlideOver", () => ({ default: () => null }));
 vi.mock("@/shared/components/ProviderIcon", () => ({ default: () => null }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => {} }) }));
-// Deterministic anchor so the click path does not depend on next/link's router.
-vi.mock("next/link", () => ({
-  __esModule: true,
-  default: React.forwardRef(function MockLink(
-    { href, children, ...rest }: { href: string; children: React.ReactNode },
+// Deterministic anchor so the click path does not depend on a router context.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => () => {},
+  useLocation: () => ({ key: LOCATION_KEY, pathname: "/dashboard/providers", search: "" }),
+  Link: React.forwardRef(function MockLink(
+    { to, children, ...rest }: { to: string; children: React.ReactNode },
     ref: React.Ref<HTMLAnchorElement>
   ) {
     return (
-      <a href={href} ref={ref} {...rest}>
+      <a href={to} ref={ref} {...rest}>
         {children}
       </a>
     );
@@ -80,15 +87,15 @@ describe("HighlightableProviderCard", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    window.history.replaceState(null, "");
+    window.sessionStorage.clear();
     if (container) {
       document.body.removeChild(container);
       container = null;
     }
   });
 
-  it("scrolls and highlights on mount when history.state.providerId matches", () => {
-    window.history.replaceState({ providerId: "openai" }, "");
+  it("scrolls and highlights on mount when the recorded provider id matches", () => {
+    recordProviderNavigation(LOCATION_KEY, "openai");
     const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
     const animateSpy = vi.spyOn(Element.prototype, "animate");
 
@@ -99,8 +106,8 @@ describe("HighlightableProviderCard", () => {
     expect(animateSpy).toHaveBeenCalled();
   });
 
-  it("does not scroll or highlight when history.state holds a different provider id", () => {
-    window.history.replaceState({ providerId: "anthropic" }, "");
+  it("does not scroll or highlight when the recorded id is a different provider", () => {
+    recordProviderNavigation(LOCATION_KEY, "anthropic");
     const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
     const animateSpy = vi.spyOn(Element.prototype, "animate");
 
@@ -110,7 +117,16 @@ describe("HighlightableProviderCard", () => {
     expect(animateSpy).not.toHaveBeenCalled();
   });
 
-  it("does nothing when history.state is null", () => {
+  it("does not highlight a provider recorded for another history entry", () => {
+    recordProviderNavigation("some-other-entry", "openai");
+    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
+
+    container = renderCards("openai");
+
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when nothing was recorded", () => {
     const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
     const animateSpy = vi.spyOn(Element.prototype, "animate");
 
@@ -120,8 +136,8 @@ describe("HighlightableProviderCard", () => {
     expect(animateSpy).not.toHaveBeenCalled();
   });
 
-  it("among several cards only the one matching history.state.providerId reacts", () => {
-    window.history.replaceState({ providerId: "cursor" }, "");
+  it("among several cards only the one matching the recorded provider id reacts", () => {
+    recordProviderNavigation(LOCATION_KEY, "cursor");
     const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
     const animateSpy = vi.spyOn(Element.prototype, "animate");
 
@@ -131,8 +147,7 @@ describe("HighlightableProviderCard", () => {
     expect(animateSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("records the clicked provider id into history.state", () => {
-    const replaceSpy = vi.spyOn(window.history, "replaceState");
+  it("records the clicked provider id against the current history entry", () => {
     container = renderCards("openai");
     const link = container.querySelector("a");
     expect(link).not.toBeNull();
@@ -141,6 +156,6 @@ describe("HighlightableProviderCard", () => {
       link!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
 
-    expect(replaceSpy).toHaveBeenCalledWith({ providerId: "openai" }, "");
+    expect(readRecordedProvider(LOCATION_KEY)).toBe("openai");
   });
 });

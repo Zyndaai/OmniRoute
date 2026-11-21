@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge, Modal } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { pickDisplayValue } from "@/shared/utils/maskEmail";

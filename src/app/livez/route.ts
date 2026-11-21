@@ -3,8 +3,6 @@
  * Does not inspect the database, catalog, or providers. Still runs on the
  * main Node event loop — busy ≠ dead; prefer TCP liveness under stall.
  */
-export const dynamic = "force-dynamic";
-
 const LIVE_BODY = "ok\n";
 
 function createLiveResponse(method: "GET" | "HEAD"): Response {

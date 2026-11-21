@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ReactNode } from "react";
 import Icon from "./Icon";
 import { NOAUTH_PROVIDERS } from "@/shared/constants/providers/noauth";

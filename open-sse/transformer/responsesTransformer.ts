@@ -22,7 +22,7 @@ const CORRUPTED_REQUEST_ID_THRESHOLD = 200;
 /**
  * Responses API Transformer
  * Converts OpenAI Chat Completions SSE to Codex Responses API SSE format
- * Can be used in both Next.js and Cloudflare Workers
+ * Can be used in both Node and Cloudflare Workers
  */
 
 // Dynamic import for Node.js-only modules (fs/path unavailable in Workers)

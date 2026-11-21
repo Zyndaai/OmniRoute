@@ -10,10 +10,24 @@ process.env.DATA_DIR = dataDir;
 process.env.OMNIROUTE_PLUGINS_DIR = path.join(dataDir, "plugins");
 const originalConnect = Socket.prototype.connect;
 let socketAttempts = 0;
-Socket.prototype.connect = function (): Socket {
+// The app's own PostgreSQL pool (background cache cleanup on import) is allowed to connect;
+// anything else would be real network access from the executor.
+const postgresPort = (() => {
+  try {
+    return Number(new URL(process.env.OMNIROUTE_POSTGRES_URL ?? "").port) || 5432;
+  } catch {
+    return 5432;
+  }
+})();
+Socket.prototype.connect = function (this: Socket, ...args: unknown[]): Socket {
+  const first = args[0] as { port?: number | string } | number | string | undefined;
+  const port = Number(typeof first === "object" && first !== null ? first.port : first);
+  if (port === postgresPort) {
+    return (originalConnect as (...a: unknown[]) => Socket).apply(this, args);
+  }
   socketAttempts++;
   throw new Error("Unexpected network access in the DuckDuckGo error fixture");
-};
+} as typeof Socket.prototype.connect;
 const originalFetch = globalThis.fetch;
 const {
   DuckDuckGoWebExecutor,

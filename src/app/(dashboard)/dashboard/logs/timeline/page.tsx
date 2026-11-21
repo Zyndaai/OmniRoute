@@ -1,12 +1,10 @@
-"use client";
-
 import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import RequestTimeline from "@/shared/components/RequestTimeline";
 
 function LogsTimelinePageContent() {
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const initialId = searchParams.get("id");
 
   return (

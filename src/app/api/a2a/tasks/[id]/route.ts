@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getTaskManager } from "@/lib/a2a/taskManager";
 import { authorizeA2ATaskRoute } from "@/app/api/a2a/_auth";
 import {
@@ -78,7 +77,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const tm = getTaskManager();
     const task = tm.getTask(id, auth.owner);
     if (task) {
-      return NextResponse.json({ task });
+      return Response.json({ task });
     }
 
     // Fallen out of the in-memory TTL window — fall back to the persisted history row (Task C3).
@@ -91,12 +90,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // passing a stricter owner clause into the history fallback.
     const historyRow = await getA2ATaskHistoryById(id, auth.owner);
     if (historyRow) {
-      return NextResponse.json({ task: await reconstituteHistoricalTask(historyRow) });
+      return Response.json({ task: await reconstituteHistoricalTask(historyRow) });
     }
 
-    return NextResponse.json({ error: `Task not found: ${id}` }, { status: 404 });
+    return Response.json({ error: `Task not found: ${id}` }, { status: 404 });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: sanitizeErrorMessage(
           error instanceof Error ? error.message : "Failed to load A2A task"

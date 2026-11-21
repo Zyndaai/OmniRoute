@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * RequestCountByProviderDateTable — #4009
  *
@@ -13,7 +11,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "../Card";
 import RequestCountDateFilter from "./RequestCountDateFilter";
 import RequestCountTable, { type RequestCountSortField } from "./RequestCountTable";

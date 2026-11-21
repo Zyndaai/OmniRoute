@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getRtkFilterCatalog,
   getRtkFilterLoadDiagnostics,
@@ -8,7 +7,7 @@ import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json({
+  return Response.json({
     filters: getRtkFilterCatalog(),
     diagnostics: getRtkFilterLoadDiagnostics(),
   });

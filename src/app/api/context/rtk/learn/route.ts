@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   suggestFilter,
   commandToId,
@@ -27,7 +26,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const command = (url.searchParams.get("command") || "").trim();
   if (!command) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "The 'command' query parameter is required.", type: "invalid_request" } },
       { status: 400 }
     );
@@ -40,5 +39,5 @@ export async function GET(request: Request) {
   );
   const filter = suggestFilter(command, matching);
 
-  return NextResponse.json({ command, sampleCount: matching.length, filter });
+  return Response.json({ command, sampleCount: matching.length, filter });
 }

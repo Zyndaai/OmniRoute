@@ -1,7 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
-
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 import { guardCliConfigWrite } from "@/lib/api/cliConfigWriteGuard";
@@ -90,7 +86,7 @@ export async function GET(request: Request) {
     const modelsPath = getPiModelsPath();
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         ...piRuntimeFields(runtime, modelsPath),
         providers: null,
         hasOmniRoute: false,
@@ -101,12 +97,12 @@ export async function GET(request: Request) {
       });
     }
 
-    return NextResponse.json({
+    return Response.json({
       ...piRuntimeFields(runtime, modelsPath),
       ...piProviderState(await readPiModelsJson()),
     });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -119,7 +115,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   try {
@@ -128,14 +124,14 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { model } = validation.data;
     let baseUrl: string;
     try {
       baseUrl = normalizePiBaseUrl(validation.data.baseUrl);
     } catch (err) {
-      return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 400 });
+      return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 400 });
     }
     const apiKey = await resolveApiKey(keyId, validation.data.apiKey);
 
@@ -170,7 +166,7 @@ export async function POST(request: Request) {
       /* non-critical bookkeeping */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Pi settings applied successfully!",
       configPath: modelsPath,
@@ -178,7 +174,7 @@ export async function POST(request: Request) {
   } catch (err) {
     const refusal = configClobberRefusalResponse(err);
     if (refusal) return refusal;
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -206,11 +202,11 @@ export async function DELETE(request: Request) {
       }
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: removed ? "Pi OmniRoute settings removed" : "No OmniRoute provider to remove",
     });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }

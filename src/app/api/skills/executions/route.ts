@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { skillExecutor } from "@/lib/skills/executor";
 import { parsePaginationParams, buildPaginatedResponse } from "@/shared/types/pagination";
 import { z } from "zod";
@@ -8,7 +7,7 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
     const url = new URL(request.url);
@@ -18,10 +17,10 @@ export async function GET(request: Request) {
       skillExecutor.countExecutions(apiKeyId),
       skillExecutor.listExecutions(apiKeyId, params.limit, (params.page - 1) * params.limit),
     ]);
-    return NextResponse.json(buildPaginatedResponse(executions, total, params));
+    return Response.json(buildPaginatedResponse(executions, total, params));
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }
 
@@ -34,13 +33,13 @@ const executionSchema = z.object({
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
     const rawBody = await request.json();
     const validation = validateBody(executionSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(validation.error, { status: 400 });
+      return Response.json(validation.error, { status: 400 });
     }
     const { skillName, input, apiKeyId, sessionId } = validation.data;
 
@@ -48,12 +47,12 @@ export async function POST(request: Request) {
       apiKeyId,
       sessionId,
     });
-    return NextResponse.json({ execution });
+    return Response.json({ execution });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
     if (error.includes("disabled")) {
-      return NextResponse.json({ error }, { status: 503 });
+      return Response.json({ error }, { status: 503 });
     }
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

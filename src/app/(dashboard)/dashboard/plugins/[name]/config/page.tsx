@@ -1,13 +1,12 @@
-"use client";
-
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useParams } from "react-router";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card, Button } from "@/shared/components";
 import Checkbox from "@/shared/components/Checkbox";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 interface ConfigField {
   type: string;
@@ -24,8 +23,8 @@ interface PluginConfig {
   configSchema: Record<string, ConfigField>;
 }
 
-export default function PluginConfigPage({ params }: { params: Promise<{ name: string }> }) {
-  const { name } = use(params);
+export default function PluginConfigPage() {
+  const { name = "" } = useParams();
   const { addNotification } = useNotificationStore();
   const t = useTranslations("plugins");
   const [plugin, setPlugin] = useState<PluginConfig | null>(null);

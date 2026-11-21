@@ -8,7 +8,6 @@
  * `begin` fires, and clock offsets must be plain seconds — `begin="id.begin"` syncbase
  * references silently never fire once mounted inside React.
  */
-"use client";
 import { memo } from "react";
 import { BaseEdge, getBezierPath, type EdgeProps } from "@xyflow/react";
 import { orchStateColor, type OrchState } from "../model/orchestrationTypes";

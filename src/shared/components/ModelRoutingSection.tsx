@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/shared/utils/cn";
 import Badge from "./Badge";
 import Button from "./Button";

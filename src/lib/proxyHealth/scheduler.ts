@@ -445,10 +445,6 @@ function getRemoveAfter(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REMOVE_AFTER;
 }
 
-function isBuildProcess(): boolean {
-  return typeof process !== "undefined" && process.env.NEXT_PHASE === "phase-production-build";
-}
-
 function isBackgroundServicesDisabled(): boolean {
   const raw = process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES;
   if (!raw) return false;
@@ -834,7 +830,7 @@ function scheduleRecoveryPass(): void {
 }
 
 export function initProxyHealthCheck(): void {
-  if (!isEnabled() || isBuildProcess() || isBackgroundServicesDisabled()) return;
+  if (!isEnabled() || isBackgroundServicesDisabled()) return;
   if (globalThis.__proxyHealthInterval) return;
 
   setTimeout(() => {

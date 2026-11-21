@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";

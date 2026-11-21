@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCachedProviderConnections } from "@/lib/db/readCache";
 import { getAllCircuitBreakerStatuses } from "@/shared/utils/circuitBreaker";
 import { isModelLocked, isAccountUnavailable } from "@omniroute/open-sse/services/accountFallback";
@@ -48,9 +47,6 @@ import {
  *   ]
  * }
  */
-
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 interface ModelHealth {
   model: string;
@@ -347,10 +343,10 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ timestamp, summary, providers });
+    return Response.json({ timestamp, summary, providers });
   } catch (error) {
     console.error("[API] GET /api/monitoring/model-health error:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: "Failed to fetch model health", message: sanitizeErrorMessage(error) },
       { status: 500 }
     );

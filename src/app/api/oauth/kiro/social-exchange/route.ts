@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import {
@@ -34,7 +33,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -47,7 +46,7 @@ export async function POST(request: Request) {
 
   const validation = validateBody(socialExchangeSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json(
+    return Response.json(
       { error: validation.error || "Missing deviceCode or provider" },
       { status: 400 }
     );
@@ -66,7 +65,7 @@ export async function POST(request: Request) {
     const poll = classifyKiroSocialPoll(response.ok, response.status, data);
 
     if (poll.kind === "pending") {
-      return NextResponse.json({
+      return Response.json({
         success: false,
         pending: true,
         error: poll.error,
@@ -74,7 +73,7 @@ export async function POST(request: Request) {
     }
 
     if (poll.kind === "error") {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           pending: false,
@@ -123,7 +122,7 @@ export async function POST(request: Request) {
 
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: {
         id: connection.id,
@@ -133,7 +132,7 @@ export async function POST(request: Request) {
     });
   } catch (error: any) {
     console.error("Kiro social exchange error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 

@@ -3,13 +3,13 @@
  * (AgentRouter, v0-vercel, freemodel-dev, grok-cli, xai-oauth, firecrawl,
  * context7, tavily, llmgateway, lyceum).
  *
- * Do not call `registerQuotaTrackersBatch()` at module scope. Webpack emits
- * `quotaPreflight.ts` as an async module; a top-level call invokes
- * `registerQuotaFetcher` before that live binding is a function
- * (`(0 , e.Zd) is not a function`), rejects the chat-route module, and caches
- * an empty HTTP 500 for every later chat/messages/responses request.
+ * Do not call `registerQuotaTrackersBatch()` at module scope. `quotaPreflight.ts`
+ * can still be mid-evaluation (an async module or an import cycle) when this module
+ * body runs, so a top-level call invokes `registerQuotaFetcher` before that binding
+ * is a function, rejects the chat-route module, and caches an empty HTTP 500 for
+ * every later chat/messages/responses request.
  * Callers must invoke it once imports have resolved: the `chat.ts` module body,
- * and `instrumentation-node.ts` after `await import`.
+ * and the boot sequence (`src/server/boot.ts`) after `await import`.
  */
 
 import { registerAgentrouterQuotaFetcher } from "./agentrouterQuotaFetcher.ts";

@@ -8,19 +8,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let capturedTranslationsNamespace = "";
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns: string) => {
     capturedTranslationsNamespace = ns;
     return (key: string) => key;

@@ -7,7 +7,6 @@
  * with the API-key auth model used by `/v1/models` and projects out internal
  * routing details (account/connection ids, weights, internal labels).
  */
-import { NextResponse } from "next/server";
 import { getCombos } from "@/lib/db/combos";
 import { errorResponse } from "@omniroute/open-sse/utils/error.ts";
 import { HTTP_STATUS } from "@omniroute/open-sse/config/constants.ts";
@@ -47,10 +46,7 @@ export async function GET(request: Request) {
     // snapshot so nested combos agree with /v1/models without per-member reads.
     const data = await projectComboCollectionWithCapabilities(Array.isArray(combos) ? combos : []);
 
-    return NextResponse.json(
-      { object: "list", data },
-      { headers: { "Cache-Control": "no-store" } }
-    );
+    return Response.json({ object: "list", data }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return errorResponse(HTTP_STATUS.SERVER_ERROR, "Failed to fetch combos");
   }

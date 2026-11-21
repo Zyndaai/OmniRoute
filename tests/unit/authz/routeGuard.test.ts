@@ -43,10 +43,9 @@ test("isLocalOnlyPath: regular management routes are not local-only", () => {
   assert.equal(isLocalOnlyPath("/api/providers"), false);
 });
 
-test("isLocalOnlyPath: spawn-capable system/db-backups routes are local-only (6A.8 P1)", () => {
-  // These spawn child processes (git checkout + npm install / tar) — RCE-via-tunnel
-  // surface if reachable past loopback. Classified after the route-guard gate found them.
-  assert.equal(isLocalOnlyPath("/api/system/version"), true);
+test("isLocalOnlyPath: spawn-capable db-backups routes are local-only (6A.8 P1)", () => {
+  // These spawn child processes (tar) — RCE-via-tunnel surface if reachable past loopback.
+  // Classified after the route-guard gate found them.
   assert.equal(isLocalOnlyPath("/api/db-backups/exportAll"), true);
   // Sibling routes that do NOT spawn remain reachable (scope kept minimal).
   assert.equal(isLocalOnlyPath("/api/system/env/repair"), false);

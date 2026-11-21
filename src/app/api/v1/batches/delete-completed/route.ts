@@ -1,6 +1,5 @@
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import { deleteCompletedBatches, type DeleteCompletedBatchesScope } from "@/lib/db/batches";
-import { NextResponse } from "next/server";
 import { getApiKeyRequestScope, resolveEffectiveApiKeyId } from "@/app/api/v1/_helpers/apiKeyScope";
 import { enforceApiKeyPolicy } from "@/shared/utils/apiKeyPolicy";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
@@ -36,7 +35,7 @@ export async function DELETE(request: Request) {
       apiKeyId: scope.apiKeyId,
       isSessionAuth: scope.isSessionAuth,
     });
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -86,7 +85,7 @@ export async function DELETE(request: Request) {
     sweepScope = { allTenants: true };
     mode = "instance";
   } else {
-    return NextResponse.json(buildErrorBody(401, "Authentication required"), {
+    return Response.json(buildErrorBody(401, "Authentication required"), {
       status: 401,
       headers: CORS_HEADERS,
     });
@@ -102,7 +101,7 @@ export async function DELETE(request: Request) {
       apiKeyId: effectiveApiKeyId,
       error: err instanceof Error ? { message: err.message, stack: err.stack } : String(err),
     });
-    return NextResponse.json(buildErrorBody(500, "Failed to delete completed batches"), {
+    return Response.json(buildErrorBody(500, "Failed to delete completed batches"), {
       status: 500,
       headers: CORS_HEADERS,
     });
@@ -128,7 +127,7 @@ export async function DELETE(request: Request) {
     log.info("BATCHES", "completed-batch sweep (no-op)", audit);
   }
 
-  return NextResponse.json(
+  return Response.json(
     {
       deleted: true,
       deletedBatches: result.deletedBatches,

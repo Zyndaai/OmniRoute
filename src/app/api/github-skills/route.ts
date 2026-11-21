@@ -9,7 +9,6 @@
  * POST: Install a discovered GitHub skill into target agent directories
  *       Body: { repoName, targets, description }
  */
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { searchGitHubSkills } from "@/lib/skills/githubCollector";
 import { matchesSearch } from "@/shared/utils/turkishText";
@@ -23,9 +22,7 @@ const installSkillSchema = z.object({
   description: z.string().optional().default(""),
 });
 
-export const dynamic = "force-dynamic";
-
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -49,7 +46,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       skills: filtered.map((r) => ({
         fullName: r.fullName,
         stars: r.stars,
@@ -63,18 +60,18 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     const msg = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error: msg, skills: [], total: 0 }, { status: 500 });
+    return Response.json({ error: msg, skills: [], total: 0 }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
   try {
     const parsed = validateBody(installSkillSchema, await request.json());
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, "repoName is required"), { status: 400 });
+      return Response.json(buildErrorBody(400, "repoName is required"), { status: 400 });
     }
     const { repoName, targets, description } = parsed.data;
 
@@ -90,7 +87,7 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json({
+    return Response.json({
       repoName,
       skillName,
       results,
@@ -98,6 +95,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

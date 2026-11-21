@@ -163,12 +163,12 @@ function collectMissingEnglishDirectTranslationKeys() {
 
   for (const file of walkSourceFiles(srcDir)) {
     const raw = fs.readFileSync(file, "utf8");
-    if (!raw.includes("useTranslations") && !raw.includes("getTranslations")) continue;
+    if (!raw.includes("useTranslations") && !raw.includes("getTranslator")) continue;
 
     const source = stripSourceComments(raw);
     const bindings = [];
     const bindingPattern =
-      /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:useTranslations|getTranslations)\s*\(\s*(?:["']([^"']*)["'])?\s*\)/g;
+      /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:useTranslations|getTranslator)\s*\(\s*(?:["']([^"']*)["'])?\s*\)/g;
     for (const match of source.matchAll(bindingPattern)) {
       bindings.push({ varName: match[1], namespace: match[2] ?? "", position: match.index ?? 0 });
     }

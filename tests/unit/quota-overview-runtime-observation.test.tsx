@@ -2,12 +2,12 @@ import { healthyResponse } from "./quota-availability-fixtures";
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, render, renderHook } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ProviderLimits from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits";
 import { useAvailability } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/useAvailability";
 import { displayAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/availabilityDisplay";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 vi.mock("@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCard", () => ({
   default: () => null,
 }));
@@ -218,13 +218,13 @@ it("a later DB-only provider response preserves the live model-lock capsule", as
     })
   );
   render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale="en"
       timeZone="UTC"
       messages={{ usage: en.usage, common: en.common }}
     >
       <ProviderLimits />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   await advance(1000);
   await act(async () => {

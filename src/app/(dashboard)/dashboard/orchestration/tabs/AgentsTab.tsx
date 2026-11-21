@@ -1,8 +1,7 @@
-"use client";
 import { useMemo } from "react";
 import type { NodeTypes, EdgeTypes, NodeMouseHandler } from "@xyflow/react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import Button from "@/shared/components/Button";
 import Checkbox from "@/shared/components/Checkbox";
 import { FlowCanvas } from "@/shared/components/flow/FlowCanvas";
@@ -86,13 +85,13 @@ export function AgentsTab({
       <div className="flex flex-col items-center justify-center h-full gap-3 text-text-muted">
         <p className="text-sm">{t("emptyTitle")}</p>
         <div className="flex gap-2 text-xs">
-          <Link className="underline" href="/dashboard/cloud-agents">
+          <Link className="underline" to="/dashboard/cloud-agents">
             {t("emptyCloudAgentCta")}
           </Link>
-          <Link className="underline" href="/dashboard/endpoint">
+          <Link className="underline" to="/dashboard/endpoint">
             {t("emptyA2ACta")}
           </Link>
-          <Link className="underline" href="/dashboard/conductor">
+          <Link className="underline" to="/dashboard/conductor">
             {t("emptyConductorCta")}
           </Link>
         </div>

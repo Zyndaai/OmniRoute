@@ -1,8 +1,6 @@
-"use client";
-
 import { useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Badge, Button } from "@/shared/components";
 import Editor from "@/shared/components/MonacoEditor";
 import Icon from "@/shared/components/Icon";
@@ -220,7 +218,7 @@ export default function ResultsPanel({
           </span>
           <p className="text-sm text-text-muted mb-2">{t("noActiveProvider")}</p>
           <Link
-            href="/dashboard/providers"
+            to="/dashboard/providers"
             className="text-accent text-sm hover:underline font-medium"
             data-testid="configure-providers-link"
           >

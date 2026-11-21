@@ -7,7 +7,7 @@ import type { Root } from "react-dom/client";
 
 import ComboControlCenterClient from "@/app/(dashboard)/dashboard/combos/ComboControlCenterClient";
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   // `t` is a useCallback/useEffect dep in the client — it must be referentially
   // stable across renders or the load effect re-fires forever inside act().
   const t = (key: string) => key;
@@ -16,9 +16,10 @@ vi.mock("next-intl", () => {
   return { useTranslations: () => t };
 });
 
-vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
+    <a href={to}>{children}</a>
   ),
 }));
 

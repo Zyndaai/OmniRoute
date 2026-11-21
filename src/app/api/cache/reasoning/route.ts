@@ -1,5 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
   clearReasoningCacheAll,
@@ -19,9 +17,9 @@ function errorMessage(error: unknown): string {
  * Returns reasoning replay cache stats + paginated entries.
  * Query params: ?provider=deepseek&model=deepseek-reasoner&limit=50&offset=0
  */
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -39,9 +37,9 @@ export async function GET(req: NextRequest) {
       model,
     });
 
-    return NextResponse.json({ stats, entries });
+    return Response.json({ stats, entries });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+    return Response.json({ error: errorMessage(error) }, { status: 500 });
   }
 }
 
@@ -51,9 +49,9 @@ export async function GET(req: NextRequest) {
  * Clears reasoning cache entries.
  * Query params: ?toolCallId=call_abc (single entry), ?provider=deepseek, or no params.
  */
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: Request) {
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -63,7 +61,7 @@ export async function DELETE(req: NextRequest) {
 
     if (toolCallId) {
       const cleared = await deleteReasoningCacheEntry(toolCallId);
-      return NextResponse.json({
+      return Response.json({
         ok: true,
         cleared,
         scope: "toolCallId",
@@ -73,13 +71,13 @@ export async function DELETE(req: NextRequest) {
 
     const cleared = await clearReasoningCacheAll(provider);
 
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       cleared,
       scope: provider ? "provider" : "all",
       ...(provider ? { provider } : {}),
     });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 500 });
+    return Response.json({ error: errorMessage(error) }, { status: 500 });
   }
 }

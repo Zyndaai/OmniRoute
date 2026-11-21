@@ -1,12 +1,7 @@
-import { NextResponse } from "next/server";
-
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { probeVideoRuntime } from "@/lib/guardrails/videoBridgeRuntime";
 import { AUTHZ_HEADER_PEER_LOCALITY } from "@/server/authz/headers";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 interface VideoRuntimeStatusDependencies {
   probe?: typeof probeVideoRuntime;
@@ -26,7 +21,7 @@ export async function handleVideoRuntimeStatus(
   if (authError) return authError;
 
   const status = await (dependencies.probe ?? probeVideoRuntime)();
-  return NextResponse.json(status, { headers: { "Cache-Control": "no-store" } });
+  return Response.json(status, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function GET(request: Request): Promise<Response> {

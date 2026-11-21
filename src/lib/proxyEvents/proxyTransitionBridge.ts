@@ -3,7 +3,7 @@
  *
  * Subscribes to proxy set-aside transitions from the refusal store and emits
  * `proxy.set_aside` to the dashboard event bus plus the webhook dispatcher
- * (fire-and-forget). Imported once at server boot (see instrumentation-node);
+ * (fire-and-forget). Imported once at server boot (see src/server/boot.ts);
  * importing this module registers the subscription as a side effect.
  *
  * Pure helpers (maskEgressKey, buildPoolExhaustedEvent, shouldEmitPoolExhausted)

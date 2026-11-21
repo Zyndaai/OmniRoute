@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
@@ -7,8 +6,6 @@ import {
   DEFAULT_BENCHMARK_ENGINES,
 } from "@omniroute/open-sse/services/compression/harness/benchmark";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
-
-export const dynamic = "force-dynamic";
 
 const CompareRequestSchema = z.object({
   messages: z
@@ -30,11 +27,11 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const parsed = CompareRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
+    return Response.json({ error: "Invalid request", details: parsed.error.issues }, { status: 400 });
   }
   const { messages, engineIds } = parsed.data;
   const text = messagesToText(messages);
@@ -42,10 +39,10 @@ export async function POST(req: Request) {
   try {
     const reports = await benchmarkEngines([{ id: "input", input: text }], ids);
     const rows = compareReports(reports);
-    return NextResponse.json({ rows });
+    return Response.json({ rows });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/compression/compare]", msg);
-    return NextResponse.json({ error: "Compare failed", details: sanitizeErrorMessage(msg) }, { status: 500 });
+    return Response.json({ error: "Compare failed", details: sanitizeErrorMessage(msg) }, { status: 500 });
   }
 }

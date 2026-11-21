@@ -1,4 +1,3 @@
-"use client";
 import { useCallback, useState } from "react";
 import { previewToRunModel, type CompressionRunModel, type PreviewResponse } from "@/app/(dashboard)/dashboard/compression/studio/compressionFlowModel";
 export interface PreviewMessage { role: string; content: unknown; }

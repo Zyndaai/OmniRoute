@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { getTranslations } from "next-intl/server";
+import { getTranslator } from "@/i18n/request.server";
 import { handleTraeCallback } from "./handleCallback";
 
 /**
@@ -31,7 +30,7 @@ import { handleTraeCallback } from "./handleCallback";
  * honoured for a state issued that way, and the modal checks the echoed value
  * before trusting the postMessage.
  */
-function htmlClose(message: Record<string, unknown>, t: (key: string) => string): NextResponse {
+function htmlClose(message: Record<string, unknown>, t: (key: string) => string): Response {
   // Embedding values: only emit the small/sanitized status payload — never the
   // raw token. We post to the loopback origin pair (localhost + 127.0.0.1) on
   // this same port rather than "*": Trae forces the callback onto 127.0.0.1,
@@ -44,7 +43,7 @@ function htmlClose(message: Record<string, unknown>, t: (key: string) => string)
   }).replace(/</g, "\\u003c");
   const title = message.success ? t("traeAuthorizationSuccess") : t("traeAuthorizationFailed");
   const body = message.success ? t("closeAuthorizationWindow") : t("returnToDashboard");
-  return new NextResponse(
+  return new Response(
     `<!doctype html><html><body style="font:16px sans-serif;padding:40px">
       <h2 style="margin:0 0 8px">${title}</h2>
       <p>${body}</p>
@@ -68,7 +67,7 @@ function htmlClose(message: Record<string, unknown>, t: (key: string) => string)
 }
 
 export async function GET(request: Request) {
-  const t = await getTranslations("auth");
+  const t = await getTranslator("auth", request);
   const q = new URL(request.url).searchParams;
   try {
     const result = await handleTraeCallback(q);

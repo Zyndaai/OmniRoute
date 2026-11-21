@@ -9,6 +9,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 import ProviderPageHeader from "@/app/(dashboard)/dashboard/providers/[id]/components/ProviderPageHeader";
 
@@ -37,15 +38,17 @@ describe("ProviderPageHeader — Kimi partner-link note", () => {
     mounted.push({ root, container });
     act(() => {
       root.render(
-        <ProviderPageHeader
-          providerId={id}
-          providerInfo={{ id, name, website, color: "#1783FF" }}
-          connectionsCount={0}
-          isOpenAICompatible={false}
-          isAnthropicProtocolCompatible={false}
-          onOpenTutorial={() => {}}
-          t={t}
-        />
+        <MemoryRouter>
+          <ProviderPageHeader
+            providerId={id}
+            providerInfo={{ id, name, website, color: "#1783FF" }}
+            connectionsCount={0}
+            isOpenAICompatible={false}
+            isAnthropicProtocolCompatible={false}
+            onOpenTutorial={() => {}}
+            t={t}
+          />
+        </MemoryRouter>
       );
     });
     return container;

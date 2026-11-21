@@ -1,6 +1,6 @@
 // DOM shims live in tinycmsDomMocks.ts — never alias `window` to the Node
 // global. See that file for why `g.window = g` without `location` poisons
-// Next.js SSR (`getLocationOrigin`) for the rest of the process lifetime.
+// server-side rendering (`getLocationOrigin`) for the rest of the process lifetime.
 import {
   setupDomMocks,
   withTinyCmsDomMocks,
@@ -378,9 +378,9 @@ async function __wbg_init(module_or_path) {
         // `new URL(<sidecar>, import.meta.url)`. OmniRoute ships the module inlined as
         // WASM_BASE64 instead — no sidecar exists in the repo — and the only caller,
         // initTinyCmsWasm(), always passes that decoded Buffer explicitly, so this
-        // branch is unreachable. The literal URL still had to go: Turbopack resolves
-        // `new URL(<literal>, import.meta.url)` statically, so keeping it failed
-        // `next build` with a "Module not found" for the missing sidecar.
+        // branch is unreachable. The literal URL must not appear here: the bundler resolves
+        // `new URL(<literal>, import.meta.url)` statically, so keeping it would fail the
+        // build with a "Module not found" for the missing sidecar.
         throw new Error('TinyCMS WASM module must be supplied explicitly (see initTinyCmsWasm)');
     }
     const imports = __wbg_get_imports();
@@ -403,7 +403,7 @@ let wasmInitialized = false;
 export async function initTinyCmsWasm() {
   if (wasmInitialized) return;
   // Install the DOM shims the wasm-bindgen glue expects, then restore (#12072).
-  // The await below yields, so Next.js SSR can run concurrently with a live
+  // The await below yields, so server-side rendering can run concurrently with a live
   // `window` stub — that stub must include `location` (tinycmsDomMocks.ts) or
   // getLocationOrigin throws `Cannot destructure property 'protocol'`.
   await withTinyCmsDomMocksAsync(async () => {

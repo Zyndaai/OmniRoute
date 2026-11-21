@@ -1,9 +1,7 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 import { getTaskManager } from "@/lib/a2a/taskManager";
 import { getCachedSettings } from "@/lib/db/settings";
 
-export async function GET(request?: NextRequest) {
+export async function GET(request?: Request) {
   try {
     const [settings, stats] = await Promise.all([
       getCachedSettings(),
@@ -22,7 +20,7 @@ export async function GET(request?: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    return Response.json({
       status: enabled ? "ok" : "disabled",
       online: enabled,
       enabled,
@@ -40,6 +38,6 @@ export async function GET(request?: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load A2A status";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

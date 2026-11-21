@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Maintenance Banner — Phase 8.4
  *
@@ -10,7 +8,7 @@
 
 import { useState, useEffect } from "react";
 import { useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "./Button";
 import Icon from "./Icon";
 

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { ensureCliConfigWriteAllowed } from "@/shared/services/cliRuntime";
 import { isContainerWriteRefusal } from "@/shared/utils/containerConfigGuard";
 
@@ -16,12 +15,12 @@ import { isContainerWriteRefusal } from "@/shared/utils/containerConfigGuard";
 export function guardCliConfigWrite(
   targetPath: string,
   options: { toolLabel?: string; hostCommand?: string } = {}
-): NextResponse | null {
+): Response | null {
   const writeError = ensureCliConfigWriteAllowed(targetPath, options);
   if (!writeError) return null;
 
   const containerEphemeralTarget = isContainerWriteRefusal(writeError);
-  return NextResponse.json(
+  return Response.json(
     {
       error: writeError,
       ...(containerEphemeralTarget

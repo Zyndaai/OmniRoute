@@ -1,5 +1,3 @@
-"use client";
-
 import {
   useState,
   useEffect,
@@ -8,7 +6,7 @@ import {
   useImperativeHandle,
   type RefObject,
 } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Select from "@/shared/components/Select";
 import Textarea from "@/shared/components/Textarea";

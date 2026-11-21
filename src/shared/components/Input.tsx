@@ -1,7 +1,5 @@
-"use client";
-
 import { forwardRef, useCallback, useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { Input as KitInput } from "@omniroute/ui-kit/input";
 import { cn } from "@/shared/utils/cn";

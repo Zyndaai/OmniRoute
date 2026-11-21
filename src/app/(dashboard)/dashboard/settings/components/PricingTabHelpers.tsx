@@ -1,5 +1,3 @@
-"use client";
-
 import Select from "@/shared/components/Select";
 
 export function HeroStat({

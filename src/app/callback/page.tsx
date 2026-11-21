@@ -1,17 +1,14 @@
-"use client";
-
 import Card from "@/shared/components/Card";
 import Icon from "@/shared/components/Icon";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 
 /**
  * OAuth Callback Page
  *
- * Reads URL params via window.location.search (not useSearchParams) to avoid
- * the Next.js Suspense boundary requirement, which can delay hydration in popup
- * windows that navigate back from a cross-origin OAuth page (e.g. Google).
+ * Reads the URL straight from the browser once per page load: the relayed payload includes the
+ * exact URL the provider redirected to, and nothing on this page navigates or changes it.
  * Sends the callback data back via three methods in order of reliability:
  *   1. postMessage to window.opener (may be null after COOP cross-origin nav)
  *   2. BroadcastChannel (same-origin, works across browsing context groups)

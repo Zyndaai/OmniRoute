@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import DebugModeCard from "../components/DebugModeCard";
 import LogToolSourcesCard from "../components/LogToolSourcesCard";

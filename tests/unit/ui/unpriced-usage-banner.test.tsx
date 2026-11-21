@@ -4,10 +4,17 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
-vi.mock("next/link", () => ({ default: "a" }));
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children, ...props }: { to: string; children?: React.ReactNode }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 import UnpricedUsageBanner from "../../../src/app/(dashboard)/dashboard/UnpricedUsageBanner";
 

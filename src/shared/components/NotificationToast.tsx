@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * NotificationToast — bridges the notification store into the kit Toaster (KEA-7886).
  *
@@ -12,7 +10,7 @@
  */
 
 import { useEffect, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Toaster, dismissToast, toast } from "@omniroute/ui-kit/toast";
 import { useNotificationStore } from "@/store/notificationStore";
 

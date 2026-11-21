@@ -1,5 +1,3 @@
-"use client";
-
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { THEME_CONFIG } from "@/shared/constants/appConfig";
@@ -14,7 +12,7 @@ interface ThemeState {
 /**
  * Apply light/dark to <html>. The CI UI Kit flips its `--ci-*` tokens on `data-theme="dark"`;
  * the `.dark` class stays for the ~1.3k legacy `dark:` utilities until the final wave.
- * Keep this in sync with the pre-hydration inline script in src/app/layout.tsx.
+ * Keep this in sync with the pre-hydration inline script in src/app/root.tsx.
  */
 export function applyTheme(theme: string) {
   if (typeof window === "undefined") return;

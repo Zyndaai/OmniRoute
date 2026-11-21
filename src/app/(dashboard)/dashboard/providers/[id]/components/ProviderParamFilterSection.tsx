@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Card, Checkbox, Input } from "@/shared/components";
 
 /**
@@ -12,7 +10,7 @@ import { Button, Card, Checkbox, Input } from "@/shared/components";
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useNotificationStore } from "@/store/notificationStore";
 
 interface ProviderParamFilterSectionProps {

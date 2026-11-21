@@ -1,8 +1,5 @@
 // Node.js-only route: uses child_process, fs, path via mitm/manager
 // Dynamic imports prevent Turbopack from statically resolving native modules
-export const runtime = "nodejs";
-
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { cliMitmStartSchema, cliMitmStopSchema } from "@/shared/validation/schemas";
@@ -26,7 +23,7 @@ export async function GET(request) {
     // containers without sudo). MITM elevation is decided by the server OS,
     // not by the browser's user agent — see PR title.
     const needsSudoPassword = !isWin && !hasCachedPassword && isSudoPasswordRequired();
-    return NextResponse.json({
+    return Response.json({
       running: status.running,
       pid: status.pid || null,
       dnsConfigured: status.dnsConfigured || false,
@@ -37,7 +34,7 @@ export async function GET(request) {
     });
   } catch (error) {
     console.log("Error getting MITM status:", sanitizeErrorMessage(error));
-    return NextResponse.json({ error: "Failed to get MITM status" }, { status: 500 });
+    return Response.json({ error: "Failed to get MITM status" }, { status: 500 });
   }
 }
 
@@ -50,7 +47,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -64,13 +61,13 @@ export async function POST(request) {
   try {
     const validation = validateBody(cliMitmStartSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { apiKey: rawApiKey, keyId: rawKeyId, sudoPassword } = validation.data;
     const apiKeyId = rawKeyId ?? null;
     const apiKey = await resolveApiKey(apiKeyId, rawApiKey);
     if (!apiKey || apiKey === "sk_omniroute") {
-      return NextResponse.json(
+      return Response.json(
         { error: "Missing apiKey: provide a valid apiKey or a resolvable keyId" },
         { status: 400 }
       );
@@ -85,20 +82,20 @@ export async function POST(request) {
     // prompt on Windows (UAC), root, NOPASSWD sudoers, and minimal containers
     // without sudo on PATH (#822).
     if (!isWin && !pwd && !isRootUser && isSudoPasswordRequired()) {
-      return NextResponse.json({ error: "Missing sudoPassword" }, { status: 400 });
+      return Response.json({ error: "Missing sudoPassword" }, { status: 400 });
     }
 
     const result = await startMitm(apiKey, pwd);
     if (!isWin && pwd) setCachedPassword(pwd);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       running: result.running,
       pid: result.pid,
     });
   } catch (error) {
     console.log("Error starting MITM:", sanitizeErrorMessage(error));
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to start MITM proxy" },
       { status: 500 }
     );
@@ -114,7 +111,7 @@ export async function DELETE(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -128,7 +125,7 @@ export async function DELETE(request) {
   try {
     const validation = validateBody(cliMitmStopSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { sudoPassword } = validation.data;
     const { stopMitm, getCachedPassword, setCachedPassword } =
@@ -141,16 +138,16 @@ export async function DELETE(request) {
     // prompt on Windows (UAC), root, NOPASSWD sudoers, and minimal containers
     // without sudo on PATH (#822).
     if (!isWin && !pwd && !isRootUser && isSudoPasswordRequired()) {
-      return NextResponse.json({ error: "Missing sudoPassword" }, { status: 400 });
+      return Response.json({ error: "Missing sudoPassword" }, { status: 400 });
     }
 
     await stopMitm(pwd);
     if (!isWin && sudoPassword) setCachedPassword(sudoPassword);
 
-    return NextResponse.json({ success: true, running: false });
+    return Response.json({ success: true, running: false });
   } catch (error) {
     console.log("Error stopping MITM:", sanitizeErrorMessage(error));
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to stop MITM proxy" },
       { status: 500 }
     );

@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";

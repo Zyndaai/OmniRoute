@@ -1,7 +1,7 @@
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ProviderLimits from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits";
 import { queueSummaryRefresh } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/queueSummaryRefresh";
@@ -11,7 +11,7 @@ import {
   useSaveQuotaWindowThresholds,
 } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/useConfirmedAvailabilityChange";
 import { useCodexResetCreditRedemption } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/useCodexResetCreditRedemption";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 vi.mock("@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCard", () => ({
   default: ({ connection, onToggleActive }) => (
     <button data-active={String(connection.isActive)} onClick={() => onToggleActive(false)}>
@@ -103,13 +103,13 @@ for (const summaryFails of [false, true])
       })
     );
     render(
-      <NextIntlClientProvider
+      <IntlProvider
         locale="en"
         timeZone="UTC"
         messages={{ usage: en.usage, common: en.common }}
       >
         <ProviderLimits />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);

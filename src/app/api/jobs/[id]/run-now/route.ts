@@ -9,12 +9,9 @@
  * promise that waits for the in-flight run to finish before starting the queued
  * one. Cancelling here does not cancel the job -- the handler keeps running.
  */
-import { NextResponse } from "next/server";
 
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 import { getJobRegistry } from "@/lib/jobRegistry";
-
-export const dynamic = "force-dynamic";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -23,7 +20,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const { id } = await params;
     const registry = getJobRegistry();
     if (!(await registry.listJobs()).some((j) => j.id === id)) {
-      return NextResponse.json(buildErrorBody(404, "Job not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Job not found"), { status: 404 });
     }
     const timeoutMs = Number(process.env.OMNIROUTE_RUNNOW_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
     // Clear the loser: Promise.race settles on the first result but leaves the
@@ -40,12 +37,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
           );
         }),
       ]);
-      return NextResponse.json({ data: result });
+      return Response.json({ data: result });
     } finally {
       if (timer) clearTimeout(timer);
     }
   } catch (err) {
     console.error("[API] POST /api/jobs/:id/run-now error:", err);
-    return NextResponse.json(buildErrorBody(500, "Failed to run job"), { status: 500 });
+    return Response.json(buildErrorBody(500, "Failed to run job"), { status: 500 });
   }
 }

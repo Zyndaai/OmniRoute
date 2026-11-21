@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge as KitBadge } from "@omniroute/ui-kit/badge";
 import { cn } from "@/shared/utils/cn";
 import Icon from "./Icon";

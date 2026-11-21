@@ -18,7 +18,6 @@
 
 import os from "node:os";
 
-import { isNextBuildPhase } from "@/lib/buildPhase";
 import { getDbBackend } from "@/lib/db/backends/selection";
 import {
   createClusterBus,
@@ -100,12 +99,9 @@ async function connectPg(applicationName: string, env: NodeJS.ProcessEnv) {
 /**
  * Phase 1, before the database is initialized. Throws (and so stops the boot) on a
  * configuration error, when the coordination store is unreachable, or when another
- * process holds the fence. Returns null during `next build`, which must never fence.
+ * process holds the fence.
  */
-export async function beginClusterRuntime(
-  env: NodeJS.ProcessEnv = process.env
-): Promise<BootPlan | null> {
-  if (isNextBuildPhase()) return null;
+export async function beginClusterRuntime(env: NodeJS.ProcessEnv = process.env): Promise<BootPlan> {
   const existing = getState();
   if (existing) return existing.plan;
   const errors = clusterConfigErrors(env);
@@ -201,11 +197,9 @@ export async function completeClusterRuntime(): Promise<void> {
 }
 
 /** Both phases in one call (tests and scripts that do not split the boot). */
-export async function startClusterRuntime(
-  env: NodeJS.ProcessEnv = process.env
-): Promise<BootPlan | null> {
+export async function startClusterRuntime(env: NodeJS.ProcessEnv = process.env): Promise<BootPlan> {
   const plan = await beginClusterRuntime(env);
-  if (plan) await completeClusterRuntime();
+  await completeClusterRuntime();
   return plan;
 }
 

@@ -6,7 +6,7 @@
  */
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import EventTypeFilter from "@/app/(dashboard)/dashboard/activity/components/EventTypeFilter";
 import { SelectAllHeaderCell } from "@/app/(dashboard)/dashboard/models/CatalogTableParts";
@@ -14,9 +14,9 @@ import messages from "../../../src/i18n/messages/en.json";
 
 const wrap = (ui: React.ReactElement) =>
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+    <IntlProvider locale="en" timeZone="UTC" messages={messages}>
       {ui}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 
 // Warm the kit render path once, outside the 5 s per-test budget (cold transform on a loaded

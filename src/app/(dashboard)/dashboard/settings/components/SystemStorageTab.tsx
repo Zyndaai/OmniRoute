@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Button, Badge, Checkbox, ConfirmModal, Input, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import ProviderTransferPanel from "./ProviderTransferPanel";

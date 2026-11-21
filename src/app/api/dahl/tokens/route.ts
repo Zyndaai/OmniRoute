@@ -11,7 +11,6 @@
  * Response shape from upstream:
  *   { "available_tokens": number, "token": string }
  */
-import { NextResponse } from "next/server";
 import {
   safeOutboundFetch,
   SafeOutboundFetchError,
@@ -30,23 +29,23 @@ export async function POST() {
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
-      return NextResponse.json(
+      return Response.json(
         { error: `Upstream ${resp.status}`, detail: sanitizeErrorMessage(body) },
         { status: resp.status }
       );
     }
 
     const data = await resp.json();
-    return NextResponse.json(data, { status: resp.status });
+    return Response.json(data, { status: resp.status });
   } catch (err) {
     if (err instanceof SafeOutboundFetchError) {
       const status = getSafeOutboundFetchErrorStatus(err) ?? 502;
-      return NextResponse.json(
+      return Response.json(
         { error: "Upstream fetch failed", detail: sanitizeErrorMessage(err.message) },
         { status }
       );
     }
-    return NextResponse.json(
+    return Response.json(
       {
         error: "Internal error",
         detail: sanitizeErrorMessage(err instanceof Error ? err.message : String(err)),

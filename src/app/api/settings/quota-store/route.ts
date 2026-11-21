@@ -19,15 +19,12 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { QuotaStoreSettingsSchema } from "@/shared/schemas/quota";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import { logAuditEvent, getAuditRequestContext } from "@/lib/compliance/index";
 import { resetQuotaStoreSingleton } from "@/lib/quota/QuotaStore";
-
-export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
@@ -49,7 +46,7 @@ export async function GET(request: Request): Promise<Response> {
 
     // Hard Rule #12 / B25 / B1 — NEVER return the Redis URL (it's a credential).
     // Only surface driver + a boolean flag indicating whether a URL is configured.
-    return NextResponse.json({
+    return Response.json({
       driver,
       redisUrlConfigured,
       // Explicit: URL is redacted, never returned
@@ -57,7 +54,7 @@ export async function GET(request: Request): Promise<Response> {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to read quota store settings";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -69,14 +66,14 @@ export async function PUT(request: Request): Promise<Response> {
     const body = await request.json().catch(() => null);
     const parsed = QuotaStoreSettingsSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     const { driver, redisUrl } = parsed.data;
 
     // Validate: redis driver requires a URL
     if (driver === "redis" && !redisUrl) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, "Redis URL is required when driver is set to 'redis'"),
         { status: 400 }
       );
@@ -104,13 +101,13 @@ export async function PUT(request: Request): Promise<Response> {
       requestId: ctx.requestId,
     });
 
-    return NextResponse.json({
+    return Response.json({
       driver,
       redisUrlConfigured: Boolean(redisUrl),
       redisUrl: null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update quota store settings";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

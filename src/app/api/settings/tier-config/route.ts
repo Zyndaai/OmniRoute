@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { loadTierConfig, saveTierConfig } from "@/lib/db/tierConfig";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -26,7 +25,7 @@ const tierOverridePutSchema = z.object({
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json(await loadTierConfig());
+  return Response.json(await loadTierConfig());
 }
 
 export async function PUT(request: Request) {
@@ -36,7 +35,7 @@ export async function PUT(request: Request) {
   const rawBody = await request.json().catch(() => null);
   const parsed = tierOverridePutSchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json(buildErrorBody(400, "Invalid tier override payload"), {
+    return Response.json(buildErrorBody(400, "Invalid tier override payload"), {
       status: 400,
     });
   }
@@ -54,5 +53,5 @@ export async function PUT(request: Request) {
   await saveTierConfig(nextConfig);
   await setTierConfig(nextConfig); // bust the in-process routing cache immediately
 
-  return NextResponse.json(nextConfig);
+  return Response.json(nextConfig);
 }

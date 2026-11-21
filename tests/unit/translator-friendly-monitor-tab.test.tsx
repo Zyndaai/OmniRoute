@@ -16,7 +16,7 @@ beforeAll(() => {
 });
 
 // ── i18n stub — returns fallback key so we can assert on translateOrFallback ──
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => {
     const t = (key: string) => key;

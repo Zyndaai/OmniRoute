@@ -99,13 +99,23 @@ describe("matchesAccountQuery / filterConnectionsByQuery — #7937", () => {
 // useProviderConnections — accountSearch state + page reset
 // ---------------------------------------------------------------------------
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "test-provider" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/providers/test-provider",
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/providers/test-provider", search: "", hash: "" }),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
     if (values) {
       return Object.entries(values).reduce((acc, [k, v]) => acc.replace(`{${k}}`, String(v)), key);

@@ -33,7 +33,7 @@ test("Material Symbols is gone: no import, no dependency, no ligature span, no n
   const pkg = JSON.parse(read("package.json"));
   assert.equal(pkg.dependencies?.["material-symbols"], undefined);
   assert.equal(pkg.devDependencies?.["material-symbols"], undefined);
-  assert.doesNotMatch(read("next.config.mjs"), /material-symbols/);
+  assert.doesNotMatch(read("vite.config.ts"), /material-symbols/);
   const hits = filesContaining(
     "material-symbols-outlined",
     ["src", "public"],
@@ -65,7 +65,7 @@ test("the legacy shell, its CSS hooks and the UI_KIT_SHELL flag are removed", ()
 test("no font is loaded from the Google Fonts CDN (#3695: unreachable in some regions)", () => {
   // Carried over from the deleted material-icons-self-hosted.test.ts: the guard is about the CDN,
   // not about Material — every font (the kit's Switzer included) stays self-hosted.
-  for (const file of ["src/app/layout.tsx", "src/app/globals.css"]) {
+  for (const file of ["src/app/root.tsx", "src/app/globals.css"]) {
     assert.doesNotMatch(
       read(file),
       /fonts\.(googleapis|gstatic)\.com/,

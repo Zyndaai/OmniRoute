@@ -4,7 +4,6 @@
  * GET /api/cli-tools/openclaw/auto-order
  */
 
-import { NextResponse } from "next/server";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { getComboModelProvider } from "@/lib/combos/steps";
 import { resolveOmniRouteBaseUrl } from "@/shared/utils/resolveOmniRouteBaseUrl";
@@ -59,7 +58,7 @@ export async function GET(request: Request) {
       .sort((a, b) => b[1] - a[1])
       .map(([provider]) => provider);
 
-    return NextResponse.json({
+    return Response.json({
       provider: {
         order: ordered,
         allow_fallbacks: true,
@@ -68,7 +67,7 @@ export async function GET(request: Request) {
       source: "omniroute-auto-combo",
     });
   } catch {
-    return NextResponse.json({
+    return Response.json({
       provider: {
         order: ["anthropic", "google", "openai"],
         allow_fallbacks: true,

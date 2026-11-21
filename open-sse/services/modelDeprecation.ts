@@ -88,14 +88,12 @@ const BUILT_IN_ALIASES: Record<string, string> = {
 
 // ── Custom Aliases (persisted via Settings API) ─────────────────────────────
 //
-// Backed by globalThis so the singleton store is shared across the SEPARATE webpack
-// module graphs Next.js builds for `instrumentation.ts` (boot-time hydration via
-// applyRuntimeSettings → setCustomAliases) and the app-route `GET /api/settings/model-aliases`.
-// A plain module-level `let` is DUPLICATED per graph, so startup hydration lands on the
-// instrumentation graph's copy while the API route reads an empty copy — the exact
-// symptom #5777 patched at the route layer. Migrating the store to globalThis fixes the
-// root cause (both instances read/write one store), mirroring the #5312 pattern already
-// applied to thinkingBudget.ts and backgroundTaskDetector.ts (and systemPrompt.ts #2470).
+// Backed by globalThis so the singleton store survives dev-server module re-evaluation:
+// boot-time hydration (applyRuntimeSettings → setCustomAliases) and the route
+// `GET /api/settings/model-aliases` must read and write one store, and a plain module-level
+// `let` would be reset when an edited module is re-evaluated (the #5777 symptom of an empty
+// alias list). Same pattern as thinkingBudget.ts and backgroundTaskDetector.ts (#5312) and
+// systemPrompt.ts (#2470).
 const CUSTOM_ALIASES_GLOBAL_KEY = "__omniroute_customAliases__";
 const _aliasStore = globalThis as unknown as Record<string, Record<string, string> | undefined>;
 

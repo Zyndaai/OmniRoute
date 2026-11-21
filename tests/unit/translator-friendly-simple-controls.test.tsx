@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FormatId, TranslateMode } from "@/app/(dashboard)/dashboard/translator/types";
 
 // --- Mock next-intl ---
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

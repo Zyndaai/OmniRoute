@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -348,14 +346,14 @@ export default function AgentBridgePageClient({
             <h3 className="ci-eyebrow mb-2">{t("quickLinks")}</h3>
             <div className="flex flex-wrap gap-2">
               <Link
-                href="/dashboard/providers"
+                to="/dashboard/providers"
                 className={buttonVariants({ variant: "ghost", size: "sm" })}
               >
                 <Icon name="dns" size={14} />
                 {t("quickLinkProviders")}
               </Link>
               <Link
-                href="/dashboard/tools/traffic-inspector"
+                to="/dashboard/tools/traffic-inspector"
                 className={buttonVariants({ variant: "ghost", size: "sm" })}
               >
                 <Icon name="network_check" size={14} />

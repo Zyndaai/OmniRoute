@@ -14,7 +14,7 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace: string) => (key: string) => {
     if (namespace === "common" && key === "active") return "Localized active";
     if (namespace === "usage" && key === "noSessions") return "Localized empty state";

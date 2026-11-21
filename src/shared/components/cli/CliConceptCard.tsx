@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 
 import Badge from "@/shared/components/Badge";
 import Card from "@/shared/components/Card";
@@ -52,7 +50,7 @@ export default function CliConceptCard({ currentType }: CliConceptCardProps) {
             .map((type) => (
               <Link
                 key={type}
-                href={TYPE_HREFS[type]}
+                to={TYPE_HREFS[type]}
                 className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full bg-bg-subtle text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
               >
                 {t(`concept.${type}.title`)} — {t(`concept.${type}.seeOther`)}

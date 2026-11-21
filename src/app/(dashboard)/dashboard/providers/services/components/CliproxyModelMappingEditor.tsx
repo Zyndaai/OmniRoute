@@ -3,12 +3,10 @@
  * Renders inside CliproxyServiceTab, between FallbackRoutingCard and ServiceLogsPanel.
  * Persists to upstream_proxy_config via PATCH /api/settings { cliproxyapi_model_mapping }.
  */
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card, Textarea } from "@/shared/components";
 
 // ── Pure validator (exported for unit tests) ──────────────────────────────────

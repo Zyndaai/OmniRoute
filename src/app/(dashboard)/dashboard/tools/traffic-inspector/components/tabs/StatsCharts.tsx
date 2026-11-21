@@ -1,5 +1,3 @@
-"use client";
-
 import {
   ResponsiveContainer,
   BarChart,
@@ -10,7 +8,7 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { InterceptedRequest } from "@/mitm/inspector/types";
 
 // Tooltip on the theme surface (recharts defaults to a white box in both themes).

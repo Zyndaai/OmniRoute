@@ -107,19 +107,18 @@ export function classifyIpScope(addr: string | null | undefined): IpScope {
 }
 
 /**
- * Extract client IP from a Request or NextRequest object.
+ * Extract client IP from a Request (or a Node request carrying its socket).
  *
  * Behind a local reverse proxy (TCP peer is loopback) we trust the standard
  * forwarding headers in priority order: CF-Connecting-IP > X-Forwarded-For >
  * X-Real-IP. Directly from a public socket those headers are spoofable, so we
  * key by the unspoofable TCP peer address instead. When no peer is known
- * (edge runtime / fetch path with no socket) we fall back to the headers so
+ * (a fetch `Request` has no socket) we fall back to the headers so
  * we don't regress to "unknown" for every request in that path.
  */
 export function getClientIpFromRequest(req: {
   headers?: Headers | { get?: (n: string) => string | null };
   socket?: { remoteAddress?: string };
-  ip?: string;
 }): string {
   // Helper to get header value from either Headers object or plain object
   const getHeader = (name: string): string | null => {
@@ -130,7 +129,7 @@ export function getClientIpFromRequest(req: {
     return null;
   };
 
-  const remoteAddress = req.ip ?? req.socket?.remoteAddress;
+  const remoteAddress = req.socket?.remoteAddress;
   const hasPeer = Boolean(normalizePeer(remoteAddress));
   const trustForwardingHeaders = !hasPeer || isLoopbackPeer(remoteAddress);
 

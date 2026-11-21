@@ -3,7 +3,7 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useProviderConnections } from "@/app/(dashboard)/dashboard/providers/[id]/hooks/useProviderConnections";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 vi.mock("@/store/notificationStore", () => ({
   useNotificationStore: () => ({
     success: vi.fn(),

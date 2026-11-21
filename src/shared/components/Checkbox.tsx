@@ -1,5 +1,3 @@
-"use client";
-
 import { forwardRef } from "react";
 import { Checkbox as KitCheckbox } from "@omniroute/ui-kit/checkbox";
 

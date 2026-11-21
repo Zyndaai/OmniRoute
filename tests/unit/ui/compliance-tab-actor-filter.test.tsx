@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Minimal i18n stub — returns key as-is so assertions are stable.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
     if (values && typeof values.count !== "undefined" && typeof values.total !== "undefined") {
       return `${values.count}/${values.total} ${key}`;

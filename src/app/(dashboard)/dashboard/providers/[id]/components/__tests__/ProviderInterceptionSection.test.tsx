@@ -16,7 +16,7 @@ import ProviderInterceptionSection from "../ProviderInterceptionSection";
 // effect after every setState (an infinite loop) instead of running once.
 const stableTranslate = (key: string, values?: Record<string, string>) =>
   values ? `${key}:${JSON.stringify(values)}` : key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => stableTranslate,
 }));
 

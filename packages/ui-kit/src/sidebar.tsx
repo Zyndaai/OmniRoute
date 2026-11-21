@@ -1,5 +1,3 @@
-"use client";
-
 import { cloneElement, createContext, forwardRef, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, version as reactVersion } from "react";
 import type { ComponentProps, MouseEvent as ReactMouseEvent, MutableRefObject, ReactElement, ReactNode } from "react";
 import { PanelLeft } from "lucide-react";

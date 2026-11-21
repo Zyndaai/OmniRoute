@@ -1,5 +1,3 @@
-"use client";
-
 import CompressionPanel from "./CompressionPanel";
 import CompressionStylesTile from "../CompressionStylesTile";
 

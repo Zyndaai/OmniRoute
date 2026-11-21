@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import { updateAutoDisableAccountsSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -21,13 +20,10 @@ export async function GET(request: Request) {
   if (authError) return authError;
   try {
     const settings = await getSettings();
-    return NextResponse.json(toAutoDisableResponse(settings));
+    return Response.json(toAutoDisableResponse(settings));
   } catch (error) {
     console.error("Error reading auto-disable accounts config:", error);
-    return NextResponse.json(
-      { error: "Failed to read auto-disable accounts config" },
-      { status: 500 }
-    );
+    return Response.json({ error: "Failed to read auto-disable accounts config" }, { status: 500 });
   }
 }
 
@@ -38,7 +34,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -52,7 +48,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateAutoDisableAccountsSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
@@ -63,10 +59,10 @@ export async function PUT(request: Request) {
     });
 
     const settings = await getSettings();
-    return NextResponse.json(toAutoDisableResponse(settings));
+    return Response.json(toAutoDisableResponse(settings));
   } catch (error) {
     console.error("Error updating auto-disable accounts config:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: "Failed to update auto-disable accounts config" },
       { status: 500 }
     );

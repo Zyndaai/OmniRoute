@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export function getI18nOrFallback(t, key, fallback, values = undefined) {
   try {

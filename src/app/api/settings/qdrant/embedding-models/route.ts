@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getProviderConnections } from "@/lib/db/providers";
 import { providerAllowsOptionalApiKey } from "@/shared/constants/providers";
@@ -16,9 +15,9 @@ function modelLabel(value: string, name: string, dimensions?: number): string {
   return `${value} - ${name}${dimensions ? ` (${dimensions}d)` : ""}`;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -101,9 +100,9 @@ export async function GET(request: NextRequest) {
     );
     const withRegistry = mergeEmbeddingOptions(options, configuredRegistry);
 
-    return NextResponse.json({ models: withRegistry });
+    return Response.json({ models: withRegistry });
   } catch (error) {
     const message = sanitizeErrorMessage(error instanceof Error ? error.message : String(error));
-    return NextResponse.json({ error: { message }, models: [] }, { status: 500 });
+    return Response.json({ error: { message }, models: [] }, { status: 500 });
   }
 }

@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import type { SearchProviderCatalogItem } from "@/shared/schemas/searchTools";
@@ -136,7 +134,7 @@ function ProviderCard({
 
       {item.status === "missing" && (
         <Link
-          href={item.configureHref}
+          to={item.configureHref}
           className="mt-2 block text-[10px] text-accent hover:underline"
           data-testid={`configure-link-${item.id}`}
         >
@@ -219,7 +217,7 @@ export default function ProviderCatalog({
       {filtered.length === 0 && (
         <div className="text-xs text-text-muted py-4 text-center">
           No provider found.{" "}
-          <Link href="/dashboard/providers" className="text-accent hover:underline">
+          <Link to="/dashboard/providers" className="text-accent hover:underline">
             Configure providers →
           </Link>
         </div>

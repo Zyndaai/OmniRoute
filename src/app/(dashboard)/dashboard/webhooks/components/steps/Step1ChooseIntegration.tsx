@@ -1,5 +1,3 @@
-"use client";
-
 import { IntegrationCard, type WebhookKind, type ComingSoonKind } from "../shared/IntegrationCard";
 
 interface Step1Props {

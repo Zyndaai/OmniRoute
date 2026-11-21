@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { registerBuiltinCompressionEngines } from "@omniroute/open-sse/services/compression/engines/index.ts";
@@ -19,8 +18,8 @@ export async function GET(req: Request) {
       metadata: e.metadata,
       configSchema: e.getConfigSchema(),
     }));
-    return NextResponse.json({ engines });
+    return Response.json({ engines });
   } catch {
-    return NextResponse.json(buildErrorBody(500, "Failed to list engines"), { status: 500 });
+    return Response.json(buildErrorBody(500, "Failed to list engines"), { status: 500 });
   }
 }

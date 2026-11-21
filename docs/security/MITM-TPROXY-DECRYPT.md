@@ -104,8 +104,9 @@ npm run build:native:tproxy      # cd src/mitm/tproxy/native && node-gyp rebuild
 - During `npm run build`, `scripts/build/build-tproxy-native.mjs` runs `node-gyp
 rebuild`. It is **Linux-only and non-fatal** — a missing toolchain just leaves
   the capture mode unavailable.
-- `assembleStandalone.mjs` copies `build/Release/transparent.node` into the
-  standalone bundle; `transparentSocket.ts` resolves it both module-relative and
+- `scripts/build/build.mjs` copies `build/Release/transparent.node` into
+  `.build/app/app-root/` (laid out as it belongs under the app directory);
+  `transparentSocket.ts` resolves it both module-relative and
   cwd-relative (`<cwd>/src/mitm/tproxy/native/...`).
 - `build/` and `prebuilds/` are git-ignored — the binary is **built, never
   committed**.

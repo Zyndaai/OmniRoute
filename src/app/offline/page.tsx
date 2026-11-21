@@ -1,15 +1,13 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
 
 import { useSyncExternalStore } from "react";
-import Link from "next/link";
+import { Link } from "react-router";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 function subscribeToOnline(callback: () => void) {
   window.addEventListener("online", callback);
@@ -51,7 +49,7 @@ export default function OfflinePage() {
           <Button size="lg" onClick={() => window.location.reload()}>
             {t("offline.retryConnection")}
           </Button>
-          <Link href="/status" className={buttonVariants({ variant: "outline", size: "lg" })}>
+          <Link to="/status" className={buttonVariants({ variant: "outline", size: "lg" })}>
             {t("offline.openStatusPage")}
           </Link>
         </div>

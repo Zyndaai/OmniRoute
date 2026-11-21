@@ -1,8 +1,6 @@
 import { getServerLifecyclePhase } from "@/lib/serverLifecycle";
 import { observeHealthzEventLoopLag } from "@/lib/healthzLag";
 
-export const dynamic = "force-dynamic";
-
 const HEALTH_BODIES = {
   ready: "ok\n",
   starting: "starting\n",

@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import React from "react";
 import CachePerformance from "@/app/(dashboard)/dashboard/cache/components/CachePerformance";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

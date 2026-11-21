@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import {
@@ -12,8 +10,8 @@ import {
   useImperativeHandle,
 } from "react";
 import { z } from "zod";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import {
   Table,
   TableBody,
@@ -572,7 +570,7 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, RequestLoggerV2Initial
     // Fetch log detail from the persisted call-log endpoint. If a deep-linked
     // request is still being finalized, keep the modal open and poll this same
     // endpoint until the row appears.
-    const router = useRouter();
+    const navigate = useNavigate();
 
     const closeDetail = useCallback(() => {
       detailRequestRef.current = "";
@@ -582,11 +580,12 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, RequestLoggerV2Initial
         // remove id param when closing detail
         const url = new URL(globalThis.location.href);
         url.searchParams.delete("id");
-        router.replace(url.pathname + url.search, { scroll: false });
+        // Only the query changes, so navigate by search and leave the path to the router.
+        navigate({ search: url.search }, { replace: true, preventScrollReset: true });
       } catch {
         // ignore navigation errors
       }
-    }, [router]);
+    }, [navigate]);
 
     const openDetail = useCallback(
       async (logEntry) => {
@@ -606,7 +605,7 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, RequestLoggerV2Initial
         try {
           const url = new URL(globalThis.location.href);
           url.searchParams.set("id", logEntry.id);
-          router.replace(url.pathname + url.search, { scroll: false });
+          navigate({ search: url.search }, { replace: true, preventScrollReset: true });
         } catch {
           // ignore navigation errors
         }
@@ -670,7 +669,7 @@ const RequestLoggerV2 = forwardRef<RequestLoggerV2Handle, RequestLoggerV2Initial
           if (isCurrentDetailRequest()) setDetailLoading(false);
         }
       },
-      [closeDetail, router]
+      [closeDetail, navigate]
     );
 
     const sortedLogsForNav = useMemo(() => sortedLogs, [sortedLogs]);

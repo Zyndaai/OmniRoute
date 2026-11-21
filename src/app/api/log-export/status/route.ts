@@ -4,7 +4,6 @@
  *       dashboard can answer "is the hourly export healthy?" in one request.
  */
 
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getJobRegistry } from "@/lib/jobRegistry";
@@ -24,7 +23,7 @@ export async function GET(request: Request) {
     const registry = getJobRegistry();
     const job = (await registry.listJobs()).find((entry) => entry.id === LOG_EXPORT_JOB_ID) ?? null;
 
-    return NextResponse.json({
+    return Response.json({
       job: job
         ? {
             id: job.id,
@@ -38,7 +37,7 @@ export async function GET(request: Request) {
       destinations,
     });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to read log export status" },
       { status: 500 }
     );

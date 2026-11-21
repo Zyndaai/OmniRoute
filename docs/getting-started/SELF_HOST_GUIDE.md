@@ -194,7 +194,7 @@ npm install -g omniroute
 omniroute
 ```
 
-This runs the Next.js standalone server directly on your host, on the same
+This runs the OmniRoute server (the built bundle, started by `scripts/dev/run-server.mjs`) directly on your host, on the same
 ports. It keeps its data and its `.env` in `~/.omniroute` by default
 (when `~/.omniroute` does not exist: `%APPDATA%\omniroute` on Windows, or
 `$XDG_CONFIG_HOME/omniroute` when that variable is set; `$DATA_DIR` overrides

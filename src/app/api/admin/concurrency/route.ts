@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { getAllRateLimitStatus } from "@omniroute/open-sse/services/rateLimitManager.ts";
 import { getStats as getComboSemaphoreStats } from "@omniroute/open-sse/services/rateLimitSemaphore.ts";
 import {
@@ -15,7 +13,7 @@ export async function GET(request: Request) {
     return authError;
   }
 
-  return NextResponse.json(
+  return Response.json(
     {
       timestamp: new Date().toISOString(),
       rateLimits: getAllRateLimitStatus(),
@@ -37,12 +35,12 @@ export async function POST(request: Request) {
   const action = url.searchParams.get("action");
   if (action === "reset-semaphores") {
     resetAllSemaphores();
-    return NextResponse.json(
+    return Response.json(
       { ok: true, action },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   }
-  return NextResponse.json(
+  return Response.json(
     { error: "unknown action" },
     { status: 400, headers: { "Cache-Control": "private, no-store" } }
   );

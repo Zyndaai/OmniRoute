@@ -1,5 +1,4 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { requestCookie } from "@/server/requestContext";
 import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import {
@@ -34,10 +33,9 @@ import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 const LOGIN_SETTINGS_FORBIDDEN_MESSAGE =
   "Changing login settings requires a signed-in dashboard session or the local CLI; API keys and access tokens cannot set the management password or toggle the login requirement.";
 
-async function checkSessionAuthenticated(): Promise<boolean> {
+async function checkSessionAuthenticated(request?: Request): Promise<boolean> {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value;
+    const token = requestCookie(DASHBOARD_SESSION_COOKIE, request);
     return (await verifyDashboardSessionToken(token, getDashboardJwtSecret())) !== null;
   } catch {
     return false;
@@ -58,12 +56,12 @@ function isBootstrapSecurityWindow(settings: Record<string, unknown>) {
   return !hasConfiguredPassword(settings);
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
   const nodeInfo = getNodeCompatibility();
   try {
     const settings = await getSettings();
     const requireLogin = settings.requireLogin !== false;
-    const authenticated = await checkSessionAuthenticated();
+    const authenticated = await checkSessionAuthenticated(request);
     const hasPassword = hasManagementPasswordConfigured(settings);
     const setupComplete = !!settings.setupComplete;
     const oidcEnabled = !!settings.oidcEnabled;
@@ -73,7 +71,7 @@ export async function GET() {
         isFeatureFlagEnabled("OMNIROUTE_OIDC_DISABLE_PASSWORD_LOGIN") ||
         process.env.OMNIROUTE_OIDC_DISABLE_PASSWORD_LOGIN === "true" ||
         process.env.OIDC_DISABLE_PASSWORD_LOGIN === "true");
-    return NextResponse.json({
+    return Response.json({
       authenticated,
       requireLogin,
       hasPassword,
@@ -84,7 +82,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[API] Error fetching require-login settings:", error);
-    return NextResponse.json(
+    return Response.json(
       {
         authenticated: false,
         requireLogin: true,
@@ -118,7 +116,7 @@ async function authorizeLoginSettingsWrite(
   });
   if (verdict.ok === false) {
     if (verdict.response.status === 401) {
-      return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+      return { response: Response.json({ error: "Unauthorized" }, { status: 401 }) };
     }
     if (verdict.response.status === 403) {
       const actor = await deriveSettingsAuditActor(request);
@@ -182,7 +180,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -196,7 +194,7 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(updateRequireLoginSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
     const { requireLogin, password, currentPassword } = body;
@@ -227,10 +225,10 @@ export async function POST(request: Request) {
     // this write via the bootstrap token cannot replay it for a second write.
     // A no-op when the header is absent or stale (never matches).
     consumeBootstrapToken(request.headers.get(BOOTSTRAP_TOKEN_HEADER));
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     console.error("[API] Error updating require-login settings:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : "Failed to update settings" },
       { status: 500 }
     );

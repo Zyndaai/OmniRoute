@@ -1,6 +1,3 @@
-export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -169,7 +166,7 @@ export async function GET(request: Request) {
     const installed = await checkOmpInstalled();
 
     if (!installed) {
-      return NextResponse.json({
+      return Response.json({
         installed: false,
         config: null,
         message: "Oh My Pi is not installed",
@@ -181,7 +178,7 @@ export async function GET(request: Request) {
     const ymlProvider = modelsYml?.providers?.[PROVIDER_ID];
     const configYml = await readForStatus(readConfigYml);
 
-    return NextResponse.json({
+    return Response.json({
       installed: true,
       config: {
         providers: {
@@ -197,7 +194,7 @@ export async function GET(request: Request) {
       configPath: getOmpModelsYmlPath(),
     });
   } catch (error) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -208,13 +205,13 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   try {
     const validation = validateBody(ompSettingsSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, apiKey, roles } = validation.data;
 
@@ -250,7 +247,7 @@ export async function POST(request: Request) {
     // 3. Write auth_credentials — so omp sees omniroute as "logged in"
     saveOmpCredentials(PROVIDER_ID, keyRef, normalizedBaseUrl);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message:
         "Oh My Pi settings applied! Run omp and all OmniRoute models appear under omniroute in /model.",
@@ -260,7 +257,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -293,13 +290,13 @@ export async function DELETE(request: Request) {
     // 3. Remove from auth_credentials
     deleteOmpCredentials(PROVIDER_ID);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute removed from Oh My Pi",
     });
   } catch (error) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }

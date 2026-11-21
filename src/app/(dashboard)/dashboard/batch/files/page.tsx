@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import FilesListTab from "../FilesListTab";
 import FilesConceptCard from "../components/FilesConceptCard";

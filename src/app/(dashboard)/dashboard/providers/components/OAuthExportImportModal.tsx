@@ -1,7 +1,5 @@
-"use client";
-
 import { useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import {
   Table,

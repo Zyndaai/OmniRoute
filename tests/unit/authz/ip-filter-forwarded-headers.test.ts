@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 import { wrapRequestListenerWithPeerStamp } from "../../../scripts/dev/peer-stamp.mjs";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ipfilter-fwd-"));
@@ -56,10 +55,10 @@ function stampedRequest(peer: string, headers: Record<string, string>) {
   wrapRequestListenerWithPeerStamp((req: { headers: Record<string, string> }) => {
     Object.assign(stamped, req.headers);
   })({ headers: { ...headers }, socket: { remoteAddress: peer } } as never, {} as never);
-  return new NextRequest("http://localhost/v1/models", { headers: stamped });
+  return new Request("http://localhost/v1/models", { headers: stamped });
 }
 
-async function blockedByIpFilter(request: NextRequest): Promise<boolean> {
+async function blockedByIpFilter(request: Request): Promise<boolean> {
   const res = await pipeline.runAuthzPipeline(request, { enforce: true });
   if (res.status !== 403) return false;
   const body = (await res.clone().json()) as { error?: unknown };

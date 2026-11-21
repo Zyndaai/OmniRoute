@@ -1,5 +1,3 @@
-"use client";
-
 import { Field } from "@omniroute/ui-kit/field";
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";
@@ -9,7 +7,7 @@ import Textarea from "@/shared/components/Textarea";
 // src/app/(dashboard)/dashboard/playground/components/StudioConfigPane.tsx
 
 import { useEffect, useId, useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import ParamSliders, { type PlaygroundParams } from "./ParamSliders";
 import type { PlaygroundEndpoint } from "@/lib/playground/codeExport";
 import { endpointToPath } from "@/lib/playground/codeExport";

@@ -31,10 +31,6 @@ const qdrantEmbeddingModelsRoute =
 
 // ── Helpers ──
 
-// Route handlers are typed against NextRequest; the management-session helper
-// returns the Fetch API Request, which is structurally sufficient at runtime.
-const asNextRequest = (req: Request) => req as unknown as import("next/server").NextRequest;
-
 // Mirrors EmbeddingModelOption from the embedding-models route response shape.
 interface EmbeddingModelOptionLike {
   value: string;
@@ -85,7 +81,7 @@ test("GET /api/settings/qdrant/embedding-models — returns models array", async
     headers: Object.fromEntries(headers.entries()),
   });
 
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   // 200 expected; verify shape
   assert.strictEqual(res.status, 200);
   const body = await res.json();
@@ -107,7 +103,7 @@ test("GET /api/settings/qdrant/embedding-models — lists only configured provid
     headers: Object.fromEntries(headers.entries()),
   });
 
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.ok(body.models.length > 0, "should list models for configured provider");
@@ -134,7 +130,7 @@ test("GET /api/settings/qdrant/embedding-models — includes an active local no-
     headers: Object.fromEntries(headers.entries()),
   });
 
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.ok(
@@ -161,7 +157,7 @@ test("GET /api/settings/qdrant/embedding-models — keeps curated models for con
     isActive: false,
   });
   const req = await makeAuthRequest("GET", "http://localhost/api/settings/qdrant/embedding-models");
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   assert.equal(res.status, 200);
   const { models } = (await res.json()) as { models: EmbeddingModelOptionLike[] };
   assert.ok(
@@ -195,7 +191,7 @@ test("GET /api/settings/qdrant/embedding-models — still excludes a remote prov
     headers: Object.fromEntries(headers.entries()),
   });
 
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.ok(
@@ -207,7 +203,7 @@ test("GET /api/settings/qdrant/embedding-models — still excludes a remote prov
 test("GET /api/settings/qdrant/embedding-models — 401 without auth", async () => {
   await setRequireLogin(true);
   const req = makeUnauthRequest("GET", "http://localhost/api/settings/qdrant/embedding-models");
-  const res = await qdrantEmbeddingModelsRoute.GET(asNextRequest(req));
+  const res = await qdrantEmbeddingModelsRoute.GET(req);
   assert.strictEqual(res.status, 401);
   await setRequireLogin(false);
 });

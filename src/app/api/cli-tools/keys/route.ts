@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import { resolveOperatorCredential } from "@/lib/api/operatorCredential";
@@ -31,9 +30,9 @@ export async function GET(request: Request) {
       ...(operator ? { rawKey: key.key } : {}),
       key: maskStoredApiKey(key.key),
     }));
-    return NextResponse.json({ keys: cliToolKeys, total: cliToolKeys.length });
+    return Response.json({ keys: cliToolKeys, total: cliToolKeys.length });
   } catch (error) {
     console.log("Error fetching CLI tool keys:", error);
-    return NextResponse.json({ error: "Failed to fetch CLI tool keys" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch CLI tool keys" }, { status: 500 });
   }
 }

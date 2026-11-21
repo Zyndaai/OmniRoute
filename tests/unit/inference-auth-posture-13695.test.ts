@@ -89,21 +89,26 @@ test("inference server stays silent on loopback, and on 0.0.0.0 with the key req
   });
 });
 
-test("host resolution tracks both entrypoints that bind the inference server", () => {
-  // The two runners are dependency-free and boot before any TypeScript, so
-  // neither can import the guard. run-next.mjs publishes what it binds;
-  // the standalone/Docker path goes through Next's own HOSTNAME convention.
-  // If either contract moves, the warning names an interface the server is
-  // not on — and one false warning is enough to train an operator to ignore
-  // the next one.
-  const runner = fs.readFileSync(path.join(REPO_ROOT, "scripts/dev/run-next.mjs"), "utf8");
-  const match = runner.match(/const hostname = process\.env\.HOST \|\| "([^"]+)"/);
-  assert.ok(match, 'run-next.mjs no longer resolves its bind host as `process.env.HOST || "..."`');
-  assert.equal(match[1], MAIN_SERVER_DEFAULT_HOST);
+test("host resolution tracks the launcher that binds the inference server", async () => {
+  // The launcher is dependency-free and boots before any TypeScript, so it
+  // cannot import the guard. It publishes what it binds as OMNIROUTE_BOUND_HOST.
+  // If that contract moves, the warning names an interface the server is not
+  // on — and one false warning is enough to train an operator to ignore the
+  // next one.
+  const runner = fs.readFileSync(path.join(REPO_ROOT, "scripts/dev/run-server.mjs"), "utf8");
+  const { resolveBindHost } = await import("../../scripts/dev/run-server.mjs");
+  assert.equal(resolveBindHost({}), MAIN_SERVER_DEFAULT_HOST);
+  assert.equal(resolveBindHost({ HOST: "127.0.0.1", HOSTNAME: "0.0.0.0" }), "127.0.0.1");
+  assert.equal(resolveBindHost({ HOSTNAME: "10.0.0.7" }), "10.0.0.7");
+  assert.match(
+    runner,
+    /const hostname = resolveBindHost\(\);/,
+    "run-server.mjs no longer binds the host resolveBindHost() returns"
+  );
   assert.match(
     runner,
     /process\.env\.OMNIROUTE_BOUND_HOST = hostname;/,
-    "run-next.mjs no longer publishes the host it binds"
+    "run-server.mjs no longer publishes the host it binds"
   );
 
   const dockerfile = fs.readFileSync(path.join(REPO_ROOT, "Dockerfile"), "utf8");
@@ -116,21 +121,20 @@ test("host resolution tracks both entrypoints that bind the inference server", (
   withEnv(CLEAR_HOST, () => {
     assert.equal(resolveMainServerHost(), MAIN_SERVER_DEFAULT_HOST);
   });
-  // run-next.mjs path: the published value wins over anything ambient.
+  // The published value wins over anything ambient.
   withEnv({ ...CLEAR_HOST, OMNIROUTE_BOUND_HOST: "127.0.0.1", HOSTNAME: "build-box" }, () => {
     assert.equal(resolveMainServerHost(), "127.0.0.1");
   });
-  // standalone/Docker path: no published value, Next reads HOSTNAME.
+  // Without a published value (a process the launcher did not start), HOSTNAME.
   withEnv({ ...CLEAR_HOST, HOSTNAME: "10.0.0.7" }, () => {
     assert.equal(resolveMainServerHost(), "10.0.0.7");
   });
-  // HOST is deliberately absent from the chain: the standalone server ignores
-  // it, and run-next.mjs has already folded it into OMNIROUTE_BOUND_HOST.
+  // HOST is deliberately absent from the chain: the launcher has already
+  // folded it into OMNIROUTE_BOUND_HOST.
   withEnv({ ...CLEAR_HOST, HOST: "10.0.0.8" }, () => {
     assert.equal(resolveMainServerHost(), MAIN_SERVER_DEFAULT_HOST);
   });
-  // Ordering is load-bearing: on the standalone path Next binds HOSTNAME, so
-  // a stray HOST in the environment must not win.
+  // Without a published value a stray HOST must not win over HOSTNAME.
   withEnv({ ...CLEAR_HOST, HOSTNAME: "127.0.0.1", HOST: "192.168.1.9" }, () => {
     assert.equal(resolveMainServerHost(), "127.0.0.1");
   });
@@ -148,7 +152,7 @@ test("a loopback-bound Docker instance does not get a false warning", () => {
 test("the Next boot hook actually invokes the inference exposure guard", () => {
   // A guard nobody calls is what #13695 is reporting: the module existed and
   // was tested, but the inference server never reached it.
-  const boot = fs.readFileSync(path.join(REPO_ROOT, "src/instrumentation-node.ts"), "utf8");
+  const boot = fs.readFileSync(path.join(REPO_ROOT, "src/server/boot.ts"), "utf8");
   assert.match(boot, /warnIfInferenceServerExposed\(\)/);
 });
 

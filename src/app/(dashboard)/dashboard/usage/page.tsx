@@ -1,5 +1,9 @@
-import { redirect } from "next/navigation";
+import { redirect } from "react-router";
+
+export function loader() {
+  throw redirect("/dashboard/logs", 307);
+}
 
 export default function UsageRedirectPage() {
-  redirect("/dashboard/logs");
+  return null;
 }

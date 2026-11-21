@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import { Field } from "@omniroute/ui-kit/field";
 import { Card, Button, Input, Select, Toggle, Textarea, Badge } from "@/shared/components";

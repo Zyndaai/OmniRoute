@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@/shared/components";
 
 /**
@@ -17,7 +15,7 @@ import { Card } from "@/shared/components";
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useNotificationStore } from "@/store/notificationStore";
 import Toggle from "@/shared/components/Toggle";
 

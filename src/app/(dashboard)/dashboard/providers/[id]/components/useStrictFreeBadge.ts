@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import { FREE_BADGE_STRICT_FLAG } from "@/shared/utils/freeModels";
 

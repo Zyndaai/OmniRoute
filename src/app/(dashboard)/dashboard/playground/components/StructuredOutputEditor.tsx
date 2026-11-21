@@ -1,5 +1,3 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/StructuredOutputEditor.tsx
 
 import Button from "@/shared/components/Button";
@@ -7,7 +5,7 @@ import Input from "@/shared/components/Input";
 import Toggle from "@/shared/components/Toggle";
 import Textarea from "@/shared/components/Textarea";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useStructuredOutput } from "../hooks/useStructuredOutput";
 import type { StructuredOutputSchemaInput } from "../hooks/useStructuredOutput";
 

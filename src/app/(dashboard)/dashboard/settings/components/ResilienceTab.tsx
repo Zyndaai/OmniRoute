@@ -1,10 +1,8 @@
-"use client";
-
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Button, Card, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import AutoDisableCard from "./AutoDisableCard";
 import ModelLockoutCard from "./ModelLockoutCard";
 import TokenRefreshBreakerCard, { type TokenRefreshBreakerValue } from "./TokenRefreshBreakerCard";

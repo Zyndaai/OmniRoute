@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { BrowserRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/i18n/messages/en.json";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns: string = "common") => {
     const bag = ((enMessages as Record<string, unknown>)[ns] || {}) as Record<string, string>;
     const translate = (key: string, params?: Record<string, unknown>) => {
@@ -103,7 +104,11 @@ describe("Model catalog visibility controls", () => {
 
   async function renderPage() {
     await act(async () => {
-      root.render(<ModelCatalogPage />);
+      root.render(
+        <BrowserRouter>
+          <ModelCatalogPage />
+        </BrowserRouter>
+      );
     });
     await flush();
   }

@@ -8,7 +8,7 @@
  *
  * Combines two scheduler idioms already used elsewhere in this codebase:
  *   - `proxyHealth/scheduler.ts`: `globalThis`-guarded interval,
- *     `isBuildProcess()` / `isBackgroundServicesDisabled()` guards.
+ *     `isBackgroundServicesDisabled()` guard.
  *   - `providerLimitsSyncScheduler.ts`: `isRunning` reentrancy guard,
  *     elapsed-since-last-run initial delay, `.unref()`'d timers.
  *
@@ -53,10 +53,6 @@ export function getFreeProxyAutoSyncIntervalMs(): number {
   const raw = parseInt(process.env.FREE_PROXY_AUTO_SYNC_INTERVAL_MS ?? "", 10);
   const candidate = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_INTERVAL_MS;
   return Math.max(candidate, MIN_INTERVAL_MS);
-}
-
-function isBuildProcess(): boolean {
-  return typeof process !== "undefined" && process.env.NEXT_PHASE === "phase-production-build";
 }
 
 function isBackgroundServicesDisabled(): boolean {
@@ -107,7 +103,7 @@ async function computeInitialDelayMs(intervalMs: number): Promise<number> {
 
 /** Guarded entrypoint — auto-called at module bottom, matching `proxyHealth/scheduler.ts`. */
 export function initFreeProxyAutoSync(): void {
-  if (!isFreeProxyAutoSyncEnabled() || isBuildProcess() || isBackgroundServicesDisabled()) return;
+  if (!isFreeProxyAutoSyncEnabled() || isBackgroundServicesDisabled()) return;
   if (globalThis.__freeProxyAutoSyncInterval || globalThis.__freeProxyAutoSyncStartupTimer) return;
 
   if (getEnabledProviders().length === 0) {

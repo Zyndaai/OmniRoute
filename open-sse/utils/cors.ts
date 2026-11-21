@@ -1,10 +1,10 @@
 /**
  * Static CORS headers for open-sse handlers.
  *
- * `Access-Control-Allow-Origin` is set by the Next.js middleware
- * (`src/server/cors/origins.ts`). Handlers in this package only need the
- * methods/headers list; the middleware overlays the allowed origin per
- * the central allowlist on the way out.
+ * `Access-Control-Allow-Origin` is set by the authz pipeline
+ * (`src/server/authz/pipeline.ts`, allowlist in `src/server/cors/origins.ts`).
+ * Handlers in this package only need the methods/headers list; the pipeline
+ * overlays the allowed origin per the central allowlist on the way out.
  */
 export const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",

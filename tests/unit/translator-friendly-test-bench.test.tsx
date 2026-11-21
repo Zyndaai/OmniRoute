@@ -18,7 +18,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── i18n stub ──────────────────────────────────────────────────────────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) => {
     // Return key-based human-readable labels for assertions
     if (key === "runAllTests") return "Run All Tests";

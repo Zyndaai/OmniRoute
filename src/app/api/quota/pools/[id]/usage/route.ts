@@ -12,7 +12,6 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getPool } from "@/lib/db/quotaPools";
@@ -20,8 +19,6 @@ import { getQuotaStore } from "@/lib/quota/QuotaStore";
 import { resolvePlan } from "@/lib/quota/planResolver";
 import { resolveConnectionProvider } from "@/lib/quota/connectionProvider";
 import type { PoolUsageSnapshot } from "@/lib/quota/types";
-
-export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -35,7 +32,7 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
     // 1. Get pool — 404 if not found
     const pool = await getPool(id);
     if (!pool) {
-      return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
 
     // 2. Resolve the provider plan for this pool's connection.
@@ -71,9 +68,9 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
       snapshot = await store.poolUsage(id);
     }
 
-    return NextResponse.json({ usage: snapshot });
+    return Response.json({ usage: snapshot });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to get pool usage";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

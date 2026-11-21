@@ -1,10 +1,7 @@
-"use client";
-
 // Issue #3501 strangler-fig decomposition — Phase 1t (final push)
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link, useParams, useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { Card, Button, CardSkeleton } from "@/shared/components";
 import ProviderTosNotice from "@/shared/components/ProviderTosNotice";
 import {
@@ -79,7 +76,7 @@ import AnonymousFallbackToggle from "./components/AnonymousFallbackToggle";
 
 export default function ProviderDetailPageClient() {
   const params = useParams();
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   const providerId = params.id as string;
 
   // ── UI-only modal state (not owned by hooks) ─────────────────────────────
@@ -572,7 +569,7 @@ export default function ProviderDetailPageClient() {
     return (
       <div className="text-center py-20">
         <p className="text-text-muted">{t("providerNotFound")}</p>
-        <Link href="/dashboard/providers" className="text-primary mt-4 inline-block">
+        <Link to="/dashboard/providers" className="text-primary mt-4 inline-block">
           {t("backToProviders")}
         </Link>
       </div>

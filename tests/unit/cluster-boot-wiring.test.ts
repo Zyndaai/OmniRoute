@@ -263,7 +263,7 @@ test("a second copy of bus.ts (another Next bundle) publishes through the bus in
 // ── Cluster boot failures end the process ──────────────────────────────────────────
 
 test("a failed cluster boot step exits with code 1; a passing one returns its value", async () => {
-  const { exitOnClusterBootFailure } = await import("../../src/instrumentation-node.ts");
+  const { exitOnClusterBootFailure } = await import("../../src/server/boot.ts");
   const codes: number[] = [];
   const exit = ((code: number) => {
     codes.push(code);

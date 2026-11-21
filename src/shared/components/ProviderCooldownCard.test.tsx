@@ -19,7 +19,7 @@ import {
   type ProviderCooldownSettings,
 } from "../../app/(dashboard)/dashboard/settings/components/ResilienceTab";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

@@ -1,8 +1,6 @@
-import { NextResponse } from "next/server";
 import { homedir } from "os";
 import { join } from "path";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
-import { isNextBuildPhase } from "@/lib/buildPhase";
 import {
   createProviderConnection,
   getProviderConnections,
@@ -51,7 +49,7 @@ export async function GET(request: Request) {
     return await saveAndRespond(cacheResult, targetProvider, request);
   }
 
-  return NextResponse.json({
+  return Response.json({
     found: false,
     error:
       "Kiro credentials not found. " +
@@ -84,11 +82,6 @@ async function tryKiroCliSqlite(): Promise<{
 
   let Database: any;
   try {
-    // Never load the native better-sqlite3 addon during the Next.js build:
-    // its Statement destructor aborts with SIGABRT at build-worker teardown
-    // (node::RemoveEnvironmentCleanupHook). Kiro auto-import never runs during
-    // build, so returning "not found" here is safe. (#10060)
-    if (isNextBuildPhase()) throw new Error("Skip better-sqlite3 during build");
     Database = (await import("better-sqlite3")).default;
   } catch {
     return { found: false, triedPaths: candidatePaths };
@@ -543,7 +536,7 @@ async function saveAndRespond(
         const machineId = await getConsistentMachineId();
         await syncToCloud(machineId).catch(() => {});
       }
-      return NextResponse.json({
+      return Response.json({
         found: true,
         source: result.source,
         email: email || null,
@@ -665,7 +658,7 @@ async function saveAndRespond(
       await syncToCloud(machineId).catch(() => {});
     }
 
-    return NextResponse.json({
+    return Response.json({
       found: true,
       source: result.source,
       email: email || null,
@@ -675,6 +668,6 @@ async function saveAndRespond(
     });
   } catch (error: any) {
     console.error("[kiro auto-import] save error:", error);
-    return NextResponse.json({ found: false, error: "Internal server error" }, { status: 500 });
+    return Response.json({ found: false, error: "Internal server error" }, { status: 500 });
   }
 }

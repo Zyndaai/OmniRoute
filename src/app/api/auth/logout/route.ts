@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import {
@@ -14,10 +13,11 @@ import {
   verifyDashboardSessionToken,
   type RevokedSession,
 } from "@/shared/utils/dashboardSessionToken";
-import { cookies } from "next/headers";
+import { ResponseCookieJar, applyCookies, type CookieStore } from "@/lib/api/cookieJar";
 
 export const logoutRouteInternals = {
-  getCookieStore: cookies,
+  getCookieStore: (request: Request): CookieStore | Promise<CookieStore> =>
+    new ResponseCookieJar(request),
   getSettings,
   getSettingsRevision,
   updateSettings,
@@ -56,9 +56,9 @@ async function persistRevokedSession(session: RevokedSession): Promise<void> {
   }
 }
 
-export async function POST(request) {
+export async function POST(request: Request) {
   const auditContext = getAuditRequestContext(request);
-  const cookieStore = await logoutRouteInternals.getCookieStore();
+  const cookieStore = await logoutRouteInternals.getCookieStore(request);
 
   // Clearing the cookie only ends the session in this browser. A copy of the token would stay
   // valid for the rest of its 30 days, so the session id is also revoked on the server, and the
@@ -90,7 +90,7 @@ export async function POST(request) {
         requestId: auditContext.requestId,
         metadata: { reason: "revocation_not_persisted" },
       });
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(503, "Sign-out could not be completed. Please try again."),
         {
           status: 503,
@@ -113,5 +113,5 @@ export async function POST(request) {
     ipAddress: auditContext.ipAddress || undefined,
     requestId: auditContext.requestId,
   });
-  return NextResponse.json({ success: true });
+  return applyCookies(cookieStore, Response.json({ success: true }));
 }

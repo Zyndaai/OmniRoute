@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Badge from "@/shared/components/Badge";
 import Icon from "@/shared/components/Icon";
@@ -36,7 +34,7 @@ export default function MediaProviderHeader({
       compact
       breadcrumbs={
         <Link
-          href={backHref}
+          to={backHref}
           className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text-main transition-colors w-fit"
         >
           <Icon name="arrow_back" size={16} />

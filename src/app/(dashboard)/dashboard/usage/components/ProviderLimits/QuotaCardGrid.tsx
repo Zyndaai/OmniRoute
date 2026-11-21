@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { PROVIDER_ORDER } from "./constants";
@@ -9,7 +7,7 @@ import QuotaHealthOverview from "./QuotaHealthOverview";
 import { buildHealthGroups, type HealthAccount } from "./healthOverview";
 import { displayAccount } from "./availabilityDisplay";
 import { HealthCounts } from "./HealthOverviewChrome";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   worstStatus,
   type CardStatus,

@@ -1,8 +1,6 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -340,7 +338,7 @@ function ComboAutopilotPanel({ report }: { report: ComboAutopilotReport }) {
                       action.href ? (
                         <Link
                           key={`${issue.id}-${action.type}`}
-                          href={action.href}
+                          to={action.href}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-main transition-colors hover:bg-surface-2"
                         >
                           <Icon name="arrow_forward" size={14} />

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { listVncProviders } from "@/lib/vncSession/manifest";
 import { listSessions } from "@/lib/vncSession/service";
@@ -14,7 +13,7 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
-  return NextResponse.json({
+  return Response.json({
     sessions: listSessions().map(({ containerName, profileDir, ...rest }) => rest),
     providers: listVncProviders().map((provider) => ({
       id: provider.id,

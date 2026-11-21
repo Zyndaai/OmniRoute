@@ -5,8 +5,6 @@ import { createErrorResponse } from "@/lib/api/errorResponse";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { getRequestPeerLocality } from "@/shared/utils/apiAuth";
 
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request): Promise<Response> {
   try {
     const settings = await getCachedSettings();

@@ -54,7 +54,7 @@ test("getRequestPeerLocality keeps the LAN verdict and fails closed to remote", 
   const prevToken = process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   delete process.env.OMNIROUTE_PEER_STAMP_TOKEN;
   try {
-    const withIp = (ip: string) => ({ ip, headers: new Headers() });
+    const withIp = (ip: string) => ({ socket: { remoteAddress: ip }, headers: new Headers() });
     assert.equal(getRequestPeerLocality(withIp("127.0.0.1")), "loopback");
     assert.equal(getRequestPeerLocality(withIp("192.168.1.20")), "lan");
     assert.equal(getRequestPeerLocality(withIp("8.8.8.8")), "remote");

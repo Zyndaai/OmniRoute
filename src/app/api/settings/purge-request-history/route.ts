@@ -1,19 +1,16 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { purgeCallLogs } from "@/lib/db/cleanup";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 
-export const runtime = "nodejs";
-
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const callLogs = await purgeCallLogs();
 
-    return NextResponse.json(
+    return Response.json(
       {
         deleted: callLogs.deleted,
         deletedArtifacts: callLogs.deletedArtifacts ?? 0,
@@ -22,7 +19,7 @@ export async function POST(request: Request) {
       { status: callLogs.errors > 0 ? 500 : 200 }
     );
   } catch {
-    return NextResponse.json(buildErrorBody(500, "Failed to purge request history"), {
+    return Response.json(buildErrorBody(500, "Failed to purge request history"), {
       status: 500,
     });
   }

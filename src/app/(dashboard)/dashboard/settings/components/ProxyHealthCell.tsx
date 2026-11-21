@@ -1,6 +1,4 @@
-"use client";
-
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import type { BlockedHistoryEntry } from "@/lib/proxyHealth/blockedHistory";
 import type { SweepVerdict } from "@/lib/proxyHealth/sweepVerdict";
 

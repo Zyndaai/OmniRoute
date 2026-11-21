@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useId, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "./Button";
 import Modal, { TALL_MODAL_PROPS } from "./Modal";
 import Select from "./Select";

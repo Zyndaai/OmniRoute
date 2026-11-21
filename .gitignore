@@ -87,7 +87,8 @@ gitleaks-local.json
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+# React Router route types (`npm run typegen`)
+/.react-router/
 
 # data and logs
 /data/
@@ -134,13 +135,10 @@ app.__qa_backup/
 .app-build-backup-*/
 backup/
 
-# Build intermediates (.build/) and shippable standalone (dist/).
-# These are fully reproducible from source; never committed.
-# Layer 1: Next.js now writes to .build/next (was .next); assembled bundle → dist/
-# (Previously /app/ was the standalone output; renamed to /dist/ in Layer 1.)
+# Build output (.build/app, see scripts/build/build.mjs) and the old npm bundle dir (dist/).
+# Fully reproducible from source; never committed.
 /.build/
 /dist/
-/.next/
 
 icon.iconset/
 

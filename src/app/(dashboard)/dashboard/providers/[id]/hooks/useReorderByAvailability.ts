@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useReorderByAvailability — extracted from useProviderConnections (file-size
  * ratchet: useProviderConnections.ts is frozen at 954 lines; this feature

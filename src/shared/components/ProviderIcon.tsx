@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * ProviderIcon — Renders a provider icon from a provenance-aware resolution chain.
  *
@@ -30,9 +28,8 @@ import { useTheme } from "@/shared/hooks/useTheme";
  * Tier 4 (LobeHub npm icons) is loaded through a dynamic import on demand.
  *
  * `./lobeProviderIcons` statically imports 179 icon components (~605 KB raw /
- * ~106 KB gzip) which `next.config.mjs` pins into a single `vendor-lobe-icons`
- * chunk. ProviderIcon is rendered by the dashboard Header on every page, so a
- * static import here pulls that entire chunk into the initial load of every
+ * ~106 KB gzip). ProviderIcon is rendered by the dashboard Header on every page, so a
+ * static import here pulls all of them into the initial load of every
  * route — for a single 22px icon. The map is only needed when resolution
  * actually falls through to Tier 4 (no themed SVG, no local SVG asset), so it
  * is fetched lazily and the generic icon renders while it loads. Pages that
@@ -403,15 +400,14 @@ const ProviderIcon = memo(function ProviderIcon({
   }, [needsLobeIcons, lobeIcons]);
 
   // #2166: a custom remote icon URL always wins over the resolution chain below.
-  // It is a plain <img> (not next/image) so operators can point at any host
-  // without requiring `images.remotePatterns` allow-listing for arbitrary domains.
+  // It is a plain <img> so operators can point at any host.
   if (trimmedSrc && !remoteSrcFailed) {
     return (
       <span
         className={className}
         style={{ display: "inline-flex", alignItems: "center", ...style }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- operator-supplied remote URL, not a static/known asset */}
+        {/* Operator-supplied remote URL. */}
         <img
           src={trimmedSrc}
           alt={alt || providerId}
@@ -470,7 +466,6 @@ const ProviderIcon = memo(function ProviderIcon({
         className={className}
         style={{ display: "inline-flex", alignItems: "center", ...style }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- themed local SVG asset; see the Tier 3 comment for why these use a plain <img> */}
         <img
           src={themedSrc}
           alt={providerId}
@@ -489,19 +484,16 @@ const ProviderIcon = memo(function ProviderIcon({
   }
 
   // Tier 3: Local SVG — fastest, cached separately from the JS bundle.
-  // Rendered as a plain <img> (not next/image): provider SVGs carry their own
-  // intrinsic aspect ratio (some wordmarks are much wider than tall), and next/image's
-  // dev-mode check warns whenever the layout size differs from the square
-  // width/height attributes — a false positive for non-square logos rendered
-  // at fixed icon sizes. Explicit CSS dimensions keep the flex item from
-  // collapsing to 0×0; object-fit preserves each logo's intrinsic ratio.
+  // Rendered as a plain <img>: provider SVGs carry their own intrinsic aspect
+  // ratio (some wordmarks are much wider than tall) and are shown at fixed icon
+  // sizes. Explicit CSS dimensions keep the flex item from collapsing to 0×0;
+  // object-fit preserves each logo's intrinsic ratio.
   if (hasSvg && !svgFailed) {
     return (
       <span
         className={className}
         style={{ display: "inline-flex", alignItems: "center", ...style }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- local static SVG asset, see comment above */}
         <img
           src={`/providers/${localSvgId}.svg`}
           alt={providerId}
@@ -556,7 +548,7 @@ const ProviderIcon = memo(function ProviderIcon({
         className={className}
         style={{ display: "inline-flex", alignItems: "center", ...style }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- external SVG from thesvg.org, not a static/known asset */}
+        {/* External SVG from thesvg.org. */}
         <img
           src={`https://thesvg.org/icons/${normalizedId}/default.svg`}
           alt={providerId}

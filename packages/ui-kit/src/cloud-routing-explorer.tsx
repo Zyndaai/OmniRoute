@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useId, useRef, useState } from "react";
 import { Cloud, Code2, Command, KeyRound, LockKeyhole, Sparkles, Terminal } from "lucide-react";
 

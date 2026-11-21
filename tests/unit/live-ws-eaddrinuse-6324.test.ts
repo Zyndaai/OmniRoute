@@ -9,7 +9,7 @@ import net from "node:net";
 // already has a `.catch`; before this fix the listen error never reached it.
 //
 // Importing liveServer.ts is safe here: its auto-start guard is short-circuited
-// by isBuildOrTest() (the node:test runner passes "--test" in process.argv).
+// by isAutomatedTestProcess() (the node:test runner passes "--test" in process.argv).
 const { startLiveDashboardServer } = await import("../../src/server/ws/liveServer.ts");
 
 function occupyPort(host: string): Promise<{ port: number; release: () => Promise<void> }> {

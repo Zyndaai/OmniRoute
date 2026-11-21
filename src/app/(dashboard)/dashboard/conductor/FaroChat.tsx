@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Faro chat with voice (Conductor PRD RF4). Text: input → /api/conductor/ask
  * (server-side proxy — the hub credential never reaches the browser). When the
@@ -14,7 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";

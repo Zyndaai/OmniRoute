@@ -11,7 +11,7 @@ test("companion loader accepts the real executable manifest without a type asser
   assert.equal(config.error, undefined);
   const options = ts.convertCompilerOptionsFromJson(config.config.compilerOptions, root);
   assert.deepEqual(options.errors, []);
-  const files = ["src/lib/cli-helper/companionTargets.ts", "src/shared/utils/cliCompanion.ts"].map(
+  const files = ["src/lib/cli-helper/companionTargets.server.ts", "src/shared/utils/cliCompanion.ts"].map(
     (file) => path.join(root, file)
   );
   // Use Next's real ambient declarations for the server-only module boundary.

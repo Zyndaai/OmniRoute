@@ -1,8 +1,12 @@
-import { NextResponse } from "next/server";
 import { getCachedSettings } from "@/lib/db/readCache";
 import { updateSettings } from "@/lib/db/settings";
 import { jwtVerify, createRemoteJWKSet } from "jose";
-import { cookies } from "next/headers";
+import {
+  ResponseCookieJar,
+  redirectResponse,
+  redirectWithCookies,
+  type CookieStore,
+} from "@/lib/api/cookieJar";
 import { timingSafeCompare } from "@/shared/utils/timingSafeCompare";
 import {
   matchesOidcAdmissionClaim,
@@ -15,7 +19,8 @@ import {
 // Test seam (static) — allows tests to inject a cookie store and capture the minted auth_token.
 // Mirrors the pattern in src/app/api/auth/login/route.ts
 export const oidcCallbackInternals = {
-  getCookieStore: cookies,
+  getCookieStore: (request: Request): CookieStore | Promise<CookieStore> =>
+    new ResponseCookieJar(request),
   clearJwksCache() {
     for (const k of Object.keys(jwksClientsCache)) {
       delete jwksClientsCache[k];
@@ -46,7 +51,7 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const returnedState = url.searchParams.get("state");
   // Compute origin early so ALL redirects (including error cases) are absolute.
-  // Required by Next.js 16 in some test/runtime contexts and keeps behavior consistent with success path.
+  // A redirect Location must be absolute, and this keeps the error paths consistent with the success path.
   const forwardedProtoEarly = (request.headers.get("x-forwarded-proto") || "")
     .split(",")[0]
     .trim()
@@ -58,17 +63,20 @@ export async function GET(request: Request) {
   const originEarly = `${schemeEarly}://${hostEarly}`;
 
   if (!code || !returnedState) {
-    return NextResponse.redirect(new URL("/login?oidc_error=missing_code", originEarly));
+    return redirectResponse(new URL("/login?oidc_error=missing_code", originEarly));
   }
 
   // Validate state from cookie (via seam so tests can capture)
-  const cookieStore = await oidcCallbackInternals.getCookieStore();
+  const cookieStore = await oidcCallbackInternals.getCookieStore(request);
   const storedState = cookieStore.get("oidc_state")?.value;
   // Constant-time: `!==` short-circuits on the first differing byte, so
   // rejection time correlates with matching-prefix length (GHSA-7434-6q4c-33fh).
   // The sibling OAuth callback already compares `state` this way.
   if (!storedState || !timingSafeCompare(storedState, returnedState)) {
-    return NextResponse.redirect(new URL("/login?oidc_error=invalid_state", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=invalid_state", originEarly)
+    );
   }
 
   // Clear state cookie
@@ -109,7 +117,10 @@ export async function GET(request: Request) {
     (rawAdmissionClaim != null && !admissionClaim?.success) ||
     (allowed.length === 0 && !admissionClaim)
   ) {
-    return NextResponse.redirect(new URL("/login?oidc_error=not_configured", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=not_configured", originEarly)
+    );
   }
 
   // Compute absolute redirect_uri matching what we sent
@@ -174,28 +185,40 @@ export async function GET(request: Request) {
       signal: AbortSignal.timeout(10000),
     });
   } catch {
-    return NextResponse.redirect(new URL("/login?oidc_error=token_exchange", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=token_exchange", originEarly)
+    );
   }
 
   if (!tokenResp.ok) {
-    return NextResponse.redirect(new URL("/login?oidc_error=token_exchange", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=token_exchange", originEarly)
+    );
   }
 
   let tokenData: unknown;
   try {
     tokenData = await tokenResp.json();
   } catch {
-    return NextResponse.redirect(new URL("/login?oidc_error=token_response", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=token_response", originEarly)
+    );
   }
 
   if (!tokenData || typeof tokenData !== "object") {
-    return NextResponse.redirect(new URL("/login?oidc_error=token_response", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=token_response", originEarly)
+    );
   }
 
   const td = tokenData as Record<string, unknown>;
   const idToken = typeof td.id_token === "string" ? td.id_token : undefined;
   if (!idToken) {
-    return NextResponse.redirect(new URL("/login?oidc_error=no_id_token", originEarly));
+    return redirectWithCookies(cookieStore, new URL("/login?oidc_error=no_id_token", originEarly));
   }
 
   // Validate ID token
@@ -229,7 +252,10 @@ export async function GET(request: Request) {
       typeof tokenNonce !== "string" ||
       !timingSafeCompare(expectedNonce, tokenNonce)
     ) {
-      return NextResponse.redirect(new URL("/login?oidc_error=id_token_invalid", originEarly));
+      return redirectWithCookies(
+        cookieStore,
+        new URL("/login?oidc_error=id_token_invalid", originEarly)
+      );
     }
 
     const sub = typeof payload.sub === "string" ? payload.sub : "";
@@ -243,13 +269,22 @@ export async function GET(request: Request) {
       return email !== "" && v.toLowerCase() === email;
     });
     if (allowed.length > 0 && !ok) {
-      return NextResponse.redirect(new URL("/login?oidc_error=subject_not_allowed", originEarly));
+      return redirectWithCookies(
+        cookieStore,
+        new URL("/login?oidc_error=subject_not_allowed", originEarly)
+      );
     }
     if (admissionClaim?.success && !matchesOidcAdmissionClaim(payload, admissionClaim.data)) {
-      return NextResponse.redirect(new URL("/login?oidc_error=role_not_allowed", originEarly));
+      return redirectWithCookies(
+        cookieStore,
+        new URL("/login?oidc_error=role_not_allowed", originEarly)
+      );
     }
   } catch {
-    return NextResponse.redirect(new URL("/login?oidc_error=id_token_invalid", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=id_token_invalid", originEarly)
+    );
   }
   // First successful OIDC login marks setupComplete (like password bootstrap).
   try {
@@ -260,7 +295,10 @@ export async function GET(request: Request) {
   // Mint the exact same dashboard session JWT as password login
   const secret = getDashboardJwtSecret();
   if (!secret) {
-    return NextResponse.redirect(new URL("/login?oidc_error=server_misconfigured", originEarly));
+    return redirectWithCookies(
+      cookieStore,
+      new URL("/login?oidc_error=server_misconfigured", originEarly)
+    );
   }
 
   const forceSecureCookie = process.env.AUTH_COOKIE_SECURE === "true";
@@ -271,8 +309,7 @@ export async function GET(request: Request) {
 
   const jwt = await mintDashboardSessionToken(secret);
 
-  const store = await oidcCallbackInternals.getCookieStore();
-  store.set("auth_token", jwt, {
+  cookieStore.set("auth_token", jwt, {
     httpOnly: true,
     secure: useSecureCookie,
     sameSite: "lax",
@@ -281,13 +318,13 @@ export async function GET(request: Request) {
   });
 
   // Single-use PKCE material: clear it once the session is minted.
-  store.set("oidc_pkce_verifier", "", {
+  cookieStore.set("oidc_pkce_verifier", "", {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
   });
-  store.set("oidc_nonce", "", {
+  cookieStore.set("oidc_nonce", "", {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -295,5 +332,5 @@ export async function GET(request: Request) {
   });
 
   // Success — go to dashboard
-  return NextResponse.redirect(`${origin}/dashboard`);
+  return redirectWithCookies(cookieStore, `${origin}/dashboard`);
 }

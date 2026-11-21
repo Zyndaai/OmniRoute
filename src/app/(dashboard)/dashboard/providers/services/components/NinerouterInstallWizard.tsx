@@ -3,12 +3,10 @@
  * Shown only when service state === "not_installed".
  * Calls POST /api/services/9router/install and triggers a status mutate on success.
  */
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card, Input } from "@/shared/components";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 

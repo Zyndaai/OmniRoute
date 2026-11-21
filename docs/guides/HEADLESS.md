@@ -58,9 +58,9 @@ headless mode too.
 
 **Dashboard pages.** `/dashboard`, `/dashboard/*`, `/home` and `/home/*` answer
 `404` with the JSON body `{"error":"dashboard disabled (headless)"}`. The gate runs in
-`src/proxy.ts` before the authorization pipeline, so no other route is affected.
+`src/server/http/handler.ts` before the authorization pipeline, so no other route is affected.
 
-**Optional boot subsystems.** `registerNodejs()` in `src/instrumentation-node.ts` skips:
+**Optional boot subsystems.** `registerNodejs()` in `src/server/boot.ts` skips:
 
 | Subsystem name              | What it does on the full server                                        |
 | --------------------------- | ---------------------------------------------------------------------- |

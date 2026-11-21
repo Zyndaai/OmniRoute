@@ -1,3 +1,4 @@
+import { useLoaderData } from "react-router";
 import { getProviderConnections } from "@/lib/db/providers";
 import { ALL_TARGETS } from "@/mitm/targets/index";
 import AgentBridgePageClient from "./AgentBridgePageClient";
@@ -5,10 +6,10 @@ import type { AgentBridgePageData } from "./AgentBridgePageClient";
 import { normalizeAgentBridgeState } from "./normalizeState";
 
 /**
- * AgentBridge page — Server Component entry point.
- * Fetches initial state from the backend API and passes to client orchestrator.
+ * Initial AgentBridge state for the page: whether any provider is configured, the REST API's
+ * current state, and the target list (without the server-only `handler`).
  */
-export default async function AgentBridgePage() {
+export async function loader() {
   // Check if any providers are configured (D15)
   let hasProviders = false;
   try {
@@ -57,10 +58,19 @@ export default async function AgentBridgePage() {
     // Backend not yet available — use defaults; client will poll
   }
 
+  return {
+    initialData,
+    targets: ALL_TARGETS.map(({ handler, ...rest }) => rest),
+    hasProviders,
+  };
+}
+
+export default function AgentBridgePage() {
+  const { initialData, targets, hasProviders } = useLoaderData<typeof loader>();
   return (
     <AgentBridgePageClient
       initialData={initialData}
-      targets={ALL_TARGETS.map(({ handler, ...rest }) => rest)}
+      targets={targets}
       hasProviders={hasProviders}
     />
   );

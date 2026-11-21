@@ -155,7 +155,7 @@ model id:
 ```
 
 At boot, `scanComboModelNameCollisionsAtBoot()`
-(`src/instrumentation-node.ts`) also logs a one-line `[STARTUP]` warning
+(`src/server/boot.ts`) also logs a one-line `[STARTUP]` warning
 enumerating every existing combo that shadows a model id, so operators who
 hit this by accident (rather than intentionally, per #6940) have a signal.
 The detection helper lives in `src/lib/combos/modelNameCollision.ts`.

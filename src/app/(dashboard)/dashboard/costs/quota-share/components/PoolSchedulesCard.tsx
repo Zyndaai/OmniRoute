@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations, useLocale } from "use-intl";
 import Button from "@/shared/components/Button";
 import Checkbox from "@/shared/components/Checkbox";
 import Icon from "@/shared/components/Icon";

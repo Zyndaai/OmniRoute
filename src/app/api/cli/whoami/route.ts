@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { extractBearer, ACCESS_TOKEN_PREFIX } from "@/server/authz/accessTokenAuth";
 import { verifyAccessToken, getAccessToken } from "@/lib/db/accessTokens";
@@ -21,7 +20,7 @@ export async function GET(request: Request) {
     const verified = await verifyAccessToken(bearer);
     if (verified) {
       const record = await getAccessToken(verified.id);
-      return NextResponse.json({
+      return Response.json({
         authenticated: true,
         viaAccessToken: true,
         id: verified.id,
@@ -34,5 +33,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ authenticated: true, viaAccessToken: false, scope: null });
+  return Response.json({ authenticated: true, viaAccessToken: false, scope: null });
 }

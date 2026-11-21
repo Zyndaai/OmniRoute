@@ -6,33 +6,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next/navigation", () => ({
-  notFound: () => {
-    throw new Error("NOT_FOUND");
-  },
-}));
+// The page reads the loader's result through useLoaderData; the test feeds it the loader's output.
+let loaderResult: unknown = null;
 
-vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
-  useLocale: () => "en",
-}));
-
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useLoaderData: () => loaderResult,
+  Link: ({
+    to,
     children,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-  ok: true,
-  json: async () => ({ connections: [], keys: [], data: [], cloudEnabled: false }),
+vi.mock("use-intl", () => ({
+  useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
+
+vi.stubGlobal(
+  "fetch",
+  vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ connections: [], keys: [], data: [], cloudEnabled: false }),
+  })
+);
 
 vi.mock("@/shared/constants/models", () => ({
   PROVIDER_ID_TO_ALIAS: {},
@@ -48,9 +50,8 @@ vi.mock("@/app/(dashboard)/dashboard/cli-code/components/ToolDetailClient", () =
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-const { default: CliAgentsDetailPage } = await import(
-  "@/app/(dashboard)/dashboard/cli-agents/[id]/page"
-);
+const { default: CliAgentsDetailPage, loader } =
+  await import("@/app/(dashboard)/dashboard/cli-agents/[id]/page");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,12 +59,12 @@ const containers: HTMLElement[] = [];
 
 async function renderPage(id: string): Promise<{ container: HTMLElement; notFound: boolean }> {
   let notFoundThrown = false;
-  let jsx: React.ReactNode | null = null;
 
   try {
-    jsx = await CliAgentsDetailPage({ params: Promise.resolve({ id }) });
-  } catch (err: any) {
-    if (err?.message === "NOT_FOUND") {
+    loaderResult = loader({ params: { id } });
+  } catch (err) {
+    const status = (err as { init?: { status?: number } } | null)?.init?.status;
+    if (status === 404) {
       notFoundThrown = true;
     } else {
       throw err;
@@ -74,10 +75,10 @@ async function renderPage(id: string): Promise<{ container: HTMLElement; notFoun
   document.body.appendChild(container);
   containers.push(container);
 
-  if (!notFoundThrown && jsx) {
+  if (!notFoundThrown) {
     const root = createRoot(container);
     act(() => {
-      root.render(jsx as React.ReactElement);
+      root.render(<CliAgentsDetailPage />);
     });
   }
 
@@ -87,6 +88,7 @@ async function renderPage(id: string): Promise<{ container: HTMLElement; notFoun
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  loaderResult = null;
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;

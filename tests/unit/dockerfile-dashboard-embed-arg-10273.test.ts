@@ -1,9 +1,9 @@
 /**
  * #10273 — `DASHBOARD_ALLOW_EMBED=vscode` relaxes the dashboard's CSP
  * `frame-ancestors` so the VS Code Simple Browser (the OmniCopilot extension's
- * `dashboardOpen: "editor"` mode) can render it. next.config.mjs reads the
- * variable while the bundle is built and Next.js compiles the result into the
- * route manifest, so the policy is frozen at build time.
+ * `dashboardOpen: "editor"` mode) can render it. vite.config.ts inlines the
+ * variable into the server bundle while it is built (src/server/http/securityHeaders.ts),
+ * so the policy is frozen at build time.
  *
  * The Dockerfile therefore has to expose it as a build argument. Without an
  * `ARG`, `docker build --build-arg DASHBOARD_ALLOW_EMBED=vscode` is silently

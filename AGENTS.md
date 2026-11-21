@@ -11,7 +11,7 @@
 ```bash
 npm install                    # Install deps (auto-generates .env from .env.example)
 npm run dev                    # Dev server at http://localhost:20128
-npm run build                  # Production build (Next.js 16 standalone)
+npm run build                  # Production build (React Router + Vite, output in .build/app)
 npm run lint                   # ESLint (0 errors expected; warnings are pre-existing)
 npm run typecheck:core         # TypeScript check (should be clean)
 npm run typecheck:noimplicit:core  # Strict check (no implicit any)
@@ -31,7 +31,7 @@ Running tests: see [Testing](#testing) below (run the most focused test for chan
 
 **OmniRoute** — unified AI proxy/router. One endpoint, 380 LLM providers, auto-fallback.
 
-- API Routes — `src/app/api/v1/` (Next.js App Router entry points)
+- API Routes — `src/app/api/v1/` (`route.ts` files, served as React Router resource routes)
 - Handlers — `open-sse/handlers/` (request processing: chat, embeddings, etc)
 - Executors — `open-sse/executors/` (provider-specific HTTP dispatch)
 - Translators — `open-sse/translator/` (format conversion OpenAI↔Claude↔Gemini)
@@ -43,14 +43,14 @@ Running tests: see [Testing](#testing) below (run the most focused test for chan
 - A2A Server — `src/lib/a2a/` (JSON-RPC 2.0 agent protocol)
 - Skills — `src/lib/skills/` (extensible skill framework); Memory — `src/lib/memory/` (persistent conversational memory)
 
-Monorepo: `src/` (Next.js 16 app), `open-sse/` (streaming engine workspace), `tests/`, `bin/` (CLI entry point).
+Monorepo: `src/` (React Router 8 app; Express server in `src/server/`), `open-sse/` (streaming engine workspace), `tests/`, `bin/` (CLI entry point).
 
 ---
 
 ## Request Pipeline
 
 ```
-Client → /v1/chat/completions (Next.js route)
+Client → /v1/chat/completions (API route)
   → CORS → Zod validation → auth? → policy check → prompt injection guard
   → handleChatCore() [open-sse/handlers/chatCore.ts]
     → cache check → rate limit → combo routing?
@@ -61,7 +61,7 @@ Client → /v1/chat/completions (Next.js route)
     → If Responses API: responsesTransformer.ts TransformStream
 ```
 
-API routes follow a consistent pattern: `Route → CORS preflight → Zod body validation → Optional auth (extractApiKey/isValidApiKey) → API key policy enforcement → Handler delegation (open-sse)`. No global Next.js middleware — interception is route-specific.
+API routes follow a consistent pattern: `Route → CORS preflight → Zod body validation → Optional auth (extractApiKey/isValidApiKey) → API key policy enforcement → Handler delegation (open-sse)`. No global middleware: every request passes `src/server/http/handler.ts` (redirects → headless gate → authz → rewrites); everything else is route-specific.
 
 **Combo routing** (`open-sse/services/combo.ts`): 20 public strategies (priority, weighted, fill-first, round-robin, p2c, random, least-used, cost-optimized, reset-aware, reset-window, headroom, quota-weighted, strict-random, auto, lkgp, context-optimized, cache-optimized, context-relay, fusion, pipeline). Each target calls `handleSingleModel()` (wraps `handleChatCore()` with per-target error handling + circuit breaker checks); the `fusion` strategy instead fans out to a panel of models in parallel and a judge model synthesizes one final answer (`open-sse/services/fusion.ts`). 16-factor Auto-Combo scoring + full strategy table: `docs/routing/AUTO-COMBO.md`; the 3 resilience layers: `docs/architecture/RESILIENCE_GUIDE.md`.
 
@@ -108,7 +108,7 @@ Read the nearest `AGENTS.md` and the linked deep-dive before making a non-trivia
 
 **The project root MUST ONLY contain:**
 
-- Configuration files (`vitest.config.ts`, `next.config.mjs`, `eslint.config.mjs`, `tsconfig*.json`, `playwright.config.ts`, `prettier.config.mjs`, `postcss.config.mjs`, `docker-compose*.yml`, `Dockerfile`)
+- Configuration files (`vitest.config.ts`, `vite.config.ts`, `react-router.config.ts`, `eslint.config.mjs`, `tsconfig*.json`, `playwright.config.ts`, `prettier.config.mjs`, `docker-compose*.yml`, `Dockerfile`, `ecosystem.config.cjs`, `source.config.ts`)
 - Dependency files (`package.json`, `package-lock.json`)
 - Documentation files (`README.md`, `CHANGELOG.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SECURITY.md`, `llm.txt`)
 - CI/CD files and ignore definitions (`.gitignore`, `.dockerignore`, `.npmignore`, `.npmrc`, `.node-version`, `.nvmrc`, `.env.example`)
@@ -393,13 +393,3 @@ wins: `503 "MCP server is disabled"` means `mcpEnabled` was saved as false, and 
 another transport means `mcpTransport` was changed. Fixing either is a settings change like any
 other (propose, then apply). While `OMNIROUTE_MCP_ENFORCE_SCOPES` is off,
 the key reaches every MCP tool, plugin installs included, so prefer the HTTP API for writes.
-
-<!-- BEGIN:nextjs-agent-rules -->
-
-## This is NOT the Next.js you know
-
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->

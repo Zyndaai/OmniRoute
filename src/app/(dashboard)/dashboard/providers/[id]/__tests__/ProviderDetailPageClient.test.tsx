@@ -37,22 +37,21 @@ function installLocalStorageStub() {
   });
 }
 
-// next/navigation — the client reads the route id via useParams() and never
+// react-router — the client reads the route id via useParams() and never
 // receives props from the thin page.tsx wrapper, so this mock is what supplies it.
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
-  usePathname: () => "/dashboard/providers/openai",
-  useSearchParams: () => new URLSearchParams(),
-}));
-
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/dashboard/providers/openai", search: "", hash: "" }),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(to)} {...props}>
       {children}
     </a>
   ),
 }));
+
 
 function renderProviderPage() {
   const container = document.createElement("div");

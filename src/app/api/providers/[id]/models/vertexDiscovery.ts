@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { getStaticModelsForProvider } from "@/lib/providers/staticModels";
 import { updateProviderConnection } from "@/lib/db/providers";
@@ -225,7 +224,7 @@ export async function maybeHandleVertexModelDiscovery(
       failure: { code: "NO_CREDENTIAL" },
     });
     if (fallback) return fallback;
-    return NextResponse.json(
+    return Response.json(
       { error: "No usable Vertex AI credential configured for model discovery." },
       { status: 400 }
     );

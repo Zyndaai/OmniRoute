@@ -57,8 +57,8 @@ export function runCursorAgent(
   });
 }
 
-// Resolve cursor-agent across common install locations, since the standalone
-// Next.js server may run with a PATH that doesn't include the user's local bin.
+// Resolve cursor-agent across common install locations, since the
+// server process may run with a PATH that doesn't include the user's local bin.
 export function resolveCursorAgentBinary(options?: { allowPathFallback?: boolean }): string | null {
   const allowPathFallback = options?.allowPathFallback ?? true;
   const home = homedir();

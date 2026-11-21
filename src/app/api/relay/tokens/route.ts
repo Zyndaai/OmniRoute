@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRelayTokens, createRelayToken } from "@/lib/db/relayProxies";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -51,7 +50,7 @@ export async function GET(request: Request) {
     expiresAt: t.expiresAt,
     lastUsedAt: t.lastUsedAt,
   }));
-  return NextResponse.json(safe);
+  return Response.json(safe);
 }
 
 export async function POST(request: Request) {
@@ -65,16 +64,16 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const validation = validateBody(relayTokenInputSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
   try {
     const token = await createRelayToken(validation.data);
 
-    return NextResponse.json({
+    return Response.json({
       id: token.id,
       name: token.name,
       rawToken: token.rawToken,
@@ -82,6 +81,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = sanitizeErrorMessage(error instanceof Error ? error.message : String(error));
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

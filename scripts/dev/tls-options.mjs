@@ -2,8 +2,8 @@
 //
 // Pure, dependency-light helpers for OmniRoute's opt-in native HTTPS/TLS serving
 // (#5242, Bug 1C). Kept side-effect-free and free of heavy imports so it can be
-// imported both by the CLI (bin/cli/commands/serve.mjs) and by the standalone
-// server wrapper (standalone-server-ws.mjs), and unit-tested in isolation.
+// imported both by the CLI (bin/cli/commands/serve.mjs) and by the launcher
+// (run-server.mjs), and unit-tested in isolation.
 //
 // TLS is strictly opt-in: when neither cert nor key is provided the server
 // behaves EXACTLY as before (plain HTTP). A misconfiguration (only one of the

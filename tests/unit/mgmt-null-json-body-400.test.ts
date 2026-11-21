@@ -10,7 +10,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-non-object-mgmt-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -25,8 +24,8 @@ const logsDetailRoute = await import("../../src/app/api/logs/detail/route.ts");
 const settingsRoute = await import("../../src/app/api/settings/route.ts");
 const providersRoute = await import("../../src/app/api/providers/route.ts");
 
-function jsonRequest(url: string, body: unknown, method: string): NextRequest {
-  return new NextRequest(url, {
+function jsonRequest(url: string, body: unknown, method: string): Request {
+  return new Request(url, {
     method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -95,7 +94,7 @@ test("POST /api/logs/detail — malformed JSON returns 400", async () => {
   await expect400(
     () =>
       logsDetailRoute.POST(
-        new NextRequest("http://localhost/api/logs/detail", {
+        new Request("http://localhost/api/logs/detail", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: "{not json",

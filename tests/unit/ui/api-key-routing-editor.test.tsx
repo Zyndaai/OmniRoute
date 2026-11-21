@@ -2,7 +2,7 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 import ReasoningRoutingRules from "../../../src/shared/components/ReasoningRoutingRules";
 import RoutingPageClient from "../../../src/app/(dashboard)/dashboard/api-manager/routing/RoutingPageClient";
@@ -10,7 +10,19 @@ import RoutingPageClient from "../../../src/app/(dashboard)/dashboard/api-manage
 // mode): no DOM <select>, so changes go through the menu instead of fireEvent.change.
 import { chooseKitSelectValue, kitSelectValue } from "../../helpers/kitSelect";
 
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 const savedRule = {
   id: "rule",
@@ -67,9 +79,9 @@ function setup(options: { failLoad?: boolean; failSave?: boolean } = {}) {
     })
   );
   render(
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       <ReasoningRoutingRules initialApiKeyId="key" />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return writes;
 }
@@ -85,9 +97,9 @@ describe("isolated routing editor", () => {
     setup();
     cleanup();
     const { container } = render(
-      <NextIntlClientProvider locale="en" messages={messages}>
+      <IntlProvider locale="en" messages={messages}>
         <RoutingPageClient />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     await screen.findByText("Luna low");
     const classes = Array.from(container.firstElementChild!.classList);

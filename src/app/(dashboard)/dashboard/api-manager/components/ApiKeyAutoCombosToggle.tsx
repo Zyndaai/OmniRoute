@@ -1,8 +1,6 @@
-"use client";
-
 import Toggle from "@/shared/components/Toggle";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /**
  * Per-key access to the built-in `auto/*` combos, used by the API key

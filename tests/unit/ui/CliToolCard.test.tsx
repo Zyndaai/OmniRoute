@@ -8,13 +8,13 @@ import type { ToolBatchStatus } from "@/shared/types/cliBatchStatus";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", () => ({
+  Link: ({
+    to,
     children,
-    ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),

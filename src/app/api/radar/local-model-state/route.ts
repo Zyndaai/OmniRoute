@@ -4,7 +4,6 @@
  * The browser never sends these settings to the private Radar server. The
  * route is management-authenticated and exists only while RADAR_ENABLED is on.
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import {
@@ -20,9 +19,6 @@ import {
   readRequestBodyWithLimit,
   RequestBodyTooLargeError,
 } from "@/shared/middleware/bodySizeGuard";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 const providerSchema = z
   .string()
@@ -59,18 +55,18 @@ const overrideSchema = z
 const tombstoneSchema = z.object({ ...identityShape, tombstoned: z.boolean() }).strict();
 const identitySchema = z.object(identityShape).strict();
 
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, {
+function json(body: unknown, status = 200): Response {
+  return Response.json(body, {
     status,
     headers: { ...CORS_HEADERS, "Cache-Control": "no-store" },
   });
 }
 
-function error(status: number, message: string): NextResponse {
+function error(status: number, message: string): Response {
   return json(buildErrorBody(status, message), status);
 }
 
-async function authorize(request: Request): Promise<NextResponse | null> {
+async function authorize(request: Request): Promise<Response | null> {
   if (!isFeatureFlagEnabled("RADAR_ENABLED")) return error(404, "Not found");
   if (!(await isAuthenticated(request))) return error(401, "Unauthorized");
   return null;
@@ -92,11 +88,11 @@ async function readJson(request: Request): Promise<ReadJsonResult> {
   }
 }
 
-async function stateResponse(): Promise<NextResponse> {
+async function stateResponse(): Promise<Response> {
   return json({ states: await listRadarLocalModelState() });
 }
 
-function internalError(cause: unknown): NextResponse {
+function internalError(cause: unknown): Response {
   return error(500, sanitizeErrorMessage(cause) || "Failed to update Radar local state");
 }
 
@@ -104,7 +100,7 @@ export async function OPTIONS(): Promise<Response> {
   return handleCorsOptions();
 }
 
-export async function GET(request: Request): Promise<NextResponse> {
+export async function GET(request: Request): Promise<Response> {
   const authError = await authorize(request);
   if (authError) return authError;
   try {
@@ -114,7 +110,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 }
 
-export async function PATCH(request: Request): Promise<NextResponse> {
+export async function PATCH(request: Request): Promise<Response> {
   const authError = await authorize(request);
   if (authError) return authError;
 
@@ -139,7 +135,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   }
 }
 
-export async function PUT(request: Request): Promise<NextResponse> {
+export async function PUT(request: Request): Promise<Response> {
   const authError = await authorize(request);
   if (authError) return authError;
 
@@ -159,7 +155,7 @@ export async function PUT(request: Request): Promise<NextResponse> {
   }
 }
 
-export async function DELETE(request: Request): Promise<NextResponse> {
+export async function DELETE(request: Request): Promise<Response> {
   const authError = await authorize(request);
   if (authError) return authError;
 

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { deriveDefaultPlan } from "@omniroute/open-sse/services/compression/deriveDefaultPlan";
 import { getCompressionSettings } from "@/lib/db/compression";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -22,7 +21,7 @@ export async function GET(request: Request) {
 
   // Shape kept compatible with prior consumers: `pipeline` is the ordered list of
   // { engine, intensity? } steps, plus the effective `mode`.
-  return NextResponse.json({
+  return Response.json({
     mode: plan.mode,
     pipeline: plan.stackedPipeline,
     derived: true,
@@ -30,7 +29,7 @@ export async function GET(request: Request) {
 }
 
 function deprecationResponse() {
-  return NextResponse.json(buildErrorBody(DEPRECATION_STATUS, DEPRECATION_MESSAGE), {
+  return Response.json(buildErrorBody(DEPRECATION_STATUS, DEPRECATION_MESSAGE), {
     status: DEPRECATION_STATUS,
   });
 }

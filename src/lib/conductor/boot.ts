@@ -2,7 +2,7 @@
  * Conductor bridge boot — production wiring for `createConductorBridge`.
  *
  * Opt-in: only starts when `CONDUCTOR_HUB_URL` is set. Called from
- * `instrumentation-node.ts` (same non-fatal pattern as the other daemons).
+ * `src/server/boot.ts` (same non-fatal pattern as the other daemons).
  * No graceful-shutdown registration needed: the cursor is persisted after each
  * event, so an abrupt exit loses nothing — the hub replay converges the mirror.
  */

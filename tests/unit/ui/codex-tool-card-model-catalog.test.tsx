@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const translate = (key: string) => key;
 
-vi.mock("next-intl", () => ({ useTranslations: () => translate }));
+vi.mock("use-intl", () => ({ useTranslations: () => translate }));
 vi.mock("@/shared/components/ProviderIcon", () => ({ default: () => null }));
 vi.mock("@/app/(dashboard)/dashboard/cli-code/components/CliStatusBadge", () => ({
   default: () => null,

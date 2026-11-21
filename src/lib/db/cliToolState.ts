@@ -12,7 +12,7 @@
  */
 
 import { db } from "./pg";
-import { isBuildPhase, isCloud } from "./core";
+import { isCloud } from "./core";
 import {
   configJson,
   deleteConfigValue,
@@ -36,7 +36,7 @@ export async function saveCliToolLastConfigured(
   toolId: string,
   timestamp: string = new Date().toISOString()
 ): Promise<void> {
-  if (isBuildPhase || isCloud) return;
+  if (isCloud) return;
   await setConfigValue("cliToolLastConfig", toolId, timestamp);
 }
 
@@ -45,7 +45,7 @@ export async function saveCliToolLastConfigured(
  * @returns ISO timestamp string or null if never configured.
  */
 export async function getCliToolLastConfigured(toolId: string): Promise<string | null> {
-  if (isBuildPhase || isCloud) return null;
+  if (isCloud) return null;
   const value = await getConfigValue("cliToolLastConfig", toolId);
   return typeof value === "string" ? value : null;
 }
@@ -55,7 +55,7 @@ export async function getCliToolLastConfigured(toolId: string): Promise<string |
  * @returns Record<toolId, ISO timestamp>
  */
 export async function getAllCliToolLastConfigured(): Promise<Record<string, string>> {
-  if (isBuildPhase || isCloud) return {};
+  if (isCloud) return {};
   const result: Record<string, string> = {};
   for (const row of await getConfigEntries("cliToolLastConfig")) {
     if (typeof row.value === "string") result[row.key] = row.value;
@@ -67,7 +67,7 @@ export async function getAllCliToolLastConfigured(): Promise<Record<string, stri
  * Delete last-configured timestamp for a CLI tool.
  */
 export async function deleteCliToolLastConfigured(toolId: string): Promise<void> {
-  if (isBuildPhase || isCloud) return;
+  if (isCloud) return;
   await deleteConfigValue("cliToolLastConfig", toolId);
 }
 
@@ -82,7 +82,7 @@ export async function saveCliToolInitialConfig(
   toolId: string,
   config: JsonRecord
 ): Promise<boolean> {
-  if (isBuildPhase || isCloud) return false;
+  if (isCloud) return false;
   const { changes } = await db().execute(
     `INSERT INTO config_entries (namespace, key, value) VALUES ('cliToolInitialConfig', $1, $2::jsonb)
      ON CONFLICT (namespace, key) DO NOTHING`,
@@ -96,7 +96,7 @@ export async function saveCliToolInitialConfig(
  * @returns Config object or null if no snapshot exists.
  */
 export async function getCliToolInitialConfig(toolId: string): Promise<JsonRecord | null> {
-  if (isBuildPhase || isCloud) return null;
+  if (isCloud) return null;
   return toRecord(await getConfigValue("cliToolInitialConfig", toolId));
 }
 
@@ -104,6 +104,6 @@ export async function getCliToolInitialConfig(toolId: string): Promise<JsonRecor
  * Delete the initial config snapshot for a CLI tool.
  */
 export async function deleteCliToolInitialConfig(toolId: string): Promise<void> {
-  if (isBuildPhase || isCloud) return;
+  if (isCloud) return;
   await deleteConfigValue("cliToolInitialConfig", toolId);
 }

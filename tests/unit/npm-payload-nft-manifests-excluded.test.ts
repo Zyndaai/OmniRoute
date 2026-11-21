@@ -31,15 +31,16 @@ test("package.json files[] excludes Next's .nft.json trace manifests", () => {
   );
 });
 
-test("the negation sits after the positive dist/ entry it has to override", () => {
+test("the negation sits after the positive build-output entry it has to override", () => {
   // npm applies files[] in order: a negation listed BEFORE the directory that
   // pulls the files in is a no-op. Positive anchor, so this test cannot pass
-  // just because both strings happen to be present somewhere.
+  // just because both strings happen to be present somewhere. The build output is
+  // .build/app/ since the React Router port (it was dist/ under Next.js).
   const files = pkg.files ?? [];
-  const dist = files.indexOf("dist/");
+  const build = files.indexOf(".build/app/");
   const negation = files.indexOf("!**/*.nft.json");
-  assert.notEqual(dist, -1, "dist/ must still be published");
-  assert.ok(negation > dist, "the .nft.json negation must come after dist/");
+  assert.notEqual(build, -1, ".build/app/ must still be published");
+  assert.ok(negation > build, "the .nft.json negation must come after .build/app/");
 });
 
 test("no source module reads a .nft.json at runtime", () => {

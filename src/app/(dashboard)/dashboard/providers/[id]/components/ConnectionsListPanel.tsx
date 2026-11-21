@@ -1,8 +1,6 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import React from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { type ConnectionRowConnection } from "./ConnectionRow";
 import ConnectionRow from "./ConnectionRow";
 import {

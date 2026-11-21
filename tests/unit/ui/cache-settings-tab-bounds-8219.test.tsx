@@ -9,7 +9,7 @@ import CacheSettingsTab from "@/app/(dashboard)/dashboard/settings/components/Ca
 // a validation message. This test proves those bounds actually work end to
 // end against the (now-fixed) /api/settings/cache-config route.
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useFormatter: () => ({ number: (value: number) => String(value) }),
 }));

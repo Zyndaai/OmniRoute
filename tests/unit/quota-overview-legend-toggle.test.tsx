@@ -8,19 +8,19 @@ import { isInaccessible } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { hydrateRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import i18nConfig from "../../config/i18n.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 const key = "omniroute:limits:healthLegendHidden";
 const now = new Date("2099-01-01T00:00:00Z");
 function overview(locale = "en") {
   const messages = locale === "en" ? en : ar;
   return (
-    <NextIntlClientProvider
+    <IntlProvider
       locale={locale}
       messages={{ usage: messages.usage, common: messages.common }}
       timeZone="UTC"
@@ -36,7 +36,7 @@ function overview(locale = "en") {
         emailsVisible
         renderCard={() => null}
       />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 function mount(locale = "en") {

@@ -11,7 +11,7 @@ import { describe, it, vi } from "vitest";
 import assert from "node:assert/strict";
 import { render, screen } from "@testing-library/react";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
     if (key === "accountShort") return `account ${String(values?.id ?? "")}`;
     if (key === "dynamic") return "dynamic";

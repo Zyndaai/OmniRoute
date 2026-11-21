@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 
 import * as outputStyles from "../../../open-sse/services/compression/outputStyles/apply.ts";
 import { resolveOutputStyleSelection } from "../../../open-sse/services/compression/outputStyles/backCompat.ts";
@@ -52,7 +52,7 @@ function decodeHtml(text: string): string {
 function renderedPreview(): string {
   const html = renderToStaticMarkup(
     React.createElement(
-      NextIntlClientProvider,
+      IntlProvider,
       { locale: "en", timeZone: "UTC", messages: enMessages },
       React.createElement(CavemanContextPageClient)
     )

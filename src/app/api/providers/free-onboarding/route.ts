@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -23,11 +22,11 @@ export async function GET(request: Request) {
   try {
     const candidates = getEligibleFreeOnboardingProviders();
     const connections = await getProviderConnections();
-    return NextResponse.json({
+    return Response.json({
       providers: selectUnconfiguredFreeOnboardingProviders(candidates, connections),
     });
   } catch {
-    return NextResponse.json({ error: "Failed to load free providers" }, { status: 500 });
+    return Response.json({ error: "Failed to load free providers" }, { status: 500 });
   }
 }
 
@@ -39,12 +38,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(setupSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -56,14 +55,11 @@ export async function POST(request: Request) {
         create: (input) => createProviderConnection({ ...input }),
       })
     );
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Ineligible free provider IDs:")) {
-      return NextResponse.json(
-        { error: "One or more providers are not eligible" },
-        { status: 400 }
-      );
+      return Response.json({ error: "One or more providers are not eligible" }, { status: 400 });
     }
-    return NextResponse.json({ error: "Failed to set up free providers" }, { status: 500 });
+    return Response.json({ error: "Failed to set up free providers" }, { status: 500 });
   }
 }

@@ -9,7 +9,7 @@ const __dirname = dirname(__filename);
 
 const INSTRUMENTATION_NODE_PATH = resolve(
   __dirname,
-  "../../src/instrumentation-node.ts"
+  "../../src/server/boot.ts"
 );
 
 describe("repro-9624: startCleanupScheduler wired in Next.js startup path", () => {

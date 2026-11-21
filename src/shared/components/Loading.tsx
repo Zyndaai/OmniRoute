@@ -1,7 +1,5 @@
-"use client";
-
 import type { HTMLAttributes } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, CardContent } from "@omniroute/ui-kit/card";
 import { LoadingState } from "@omniroute/ui-kit/loading-state";
 import { Skeleton as KitSkeleton } from "@omniroute/ui-kit/skeleton";

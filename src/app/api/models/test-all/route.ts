@@ -10,7 +10,6 @@
  * When `autoHideFailed` is true, models that return a hard error (NOT
  * rate-limited) are persisted as hidden via `setModelIsHidden`.
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, runSingleModelTest } from "@/lib/api/modelTestRunner";
@@ -80,7 +79,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -93,7 +92,7 @@ export async function POST(request: Request) {
 
   const validation = testAllSchema.safeParse(rawBody);
   if (!validation.success) {
-    return NextResponse.json({ error: validation.error.format() }, { status: 400 });
+    return Response.json({ error: validation.error.format() }, { status: 400 });
   }
   const { providerId, modelIds, connectionId, respectRateLimit, autoHideFailed } = validation.data;
   const providerConnections = await getProviderConnections({ provider: providerId });
@@ -101,7 +100,7 @@ export async function POST(request: Request) {
     providerConnections.length > 0 &&
     providerConnections.every((connection) => connection.isActive === false)
   ) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: `Provider ${providerId} has no active connections` } },
       { status: 409 }
     );
@@ -286,7 +285,7 @@ export async function POST(request: Request) {
     }
   );
 
-  return NextResponse.json({
+  return Response.json({
     results,
     ...(stoppedEarly && stopReason ? { stoppedEarly: true, stopReason } : {}),
   });

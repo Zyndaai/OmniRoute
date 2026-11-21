@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_CHAOS_PAGE_CONFIG,

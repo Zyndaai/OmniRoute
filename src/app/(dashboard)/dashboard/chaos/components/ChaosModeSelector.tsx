@@ -1,5 +1,3 @@
-"use client";
-
 import { RadioGroup, RadioGroupItem } from "@omniroute/ui-kit/radio-group";
 import Icon from "@/shared/components/Icon";
 

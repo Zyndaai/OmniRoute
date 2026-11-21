@@ -3,7 +3,7 @@
  * `__MISSING__:<english>` sentinel written by `scripts/i18n/sync-ui-keys.mjs`
  * instead of falling back to the clean English value.
  *
- * `deepMergeFallback` (src/i18n/request.ts) previously only substituted the
+ * `deepMergeFallback` (src/i18n/messages.ts) previously only substituted the
  * EN value when a key was entirely `undefined`; a key that existed but still
  * carried the untranslated placeholder passed through untouched and was
  * rendered verbatim to the user.
@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { deepMergeFallback, PLACEHOLDER_PREFIX } from "../../src/i18n/request.ts";
+import { deepMergeFallback, PLACEHOLDER_PREFIX } from "../../src/i18n/messages.ts";
 
 const messagesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),

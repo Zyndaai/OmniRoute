@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect } from "react";
 
 /** Re-read only server caches. Never call the live per-account or POST refresh paths. */

@@ -9,6 +9,9 @@ const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
 import { resetTestDb } from "../helpers/postgres.ts";
+const { createManagementSessionHeaders } = await import("../helpers/managementSession.ts");
+// The install route requires management auth even when login is off.
+const SESSION_HEADERS = Object.fromEntries(await createManagementSessionHeaders());
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -47,7 +50,7 @@ test.after(async () => {
 test("SkillsMP installs are available to API-key-scoped requests", async () => {
   const req = new Request("http://localhost/api/skills/marketplace/install", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { ...SESSION_HEADERS, "content-type": "application/json" },
     body: JSON.stringify({
       name: "release-notes",
       description: "Draft release notes from repository changes",

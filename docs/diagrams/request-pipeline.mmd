@@ -2,7 +2,7 @@
 %% Reflects: src/app/api/v1/chat/completions/route.ts → open-sse/handlers/chatCore.ts
 %% v3.8.0
 flowchart LR
-  Client["Client<br/>(IDE/CLI/SDK)"] --> Route["Next.js Route<br/>/v1/chat/completions"]
+  Client["Client<br/>(IDE/CLI/SDK)"] --> Route["API route (route.ts)<br/>/v1/chat/completions"]
   Route --> CORS["CORS preflight"]
   CORS --> Validate["Zod validation<br/>(request body)"]
   Validate --> Authz["AuthZ pipeline<br/>(extractApiKey +<br/>isValidApiKey)"]

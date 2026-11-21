@@ -1,6 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
-
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { issueDashboardCsrfToken } from "@/server/authz/csrf";
 
@@ -9,7 +6,7 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   const issued = issueDashboardCsrfToken(request);
-  return NextResponse.json(issued ?? { token: null, expiresAt: null }, {
+  return Response.json(issued ?? { token: null, expiresAt: null }, {
     headers: { "Cache-Control": "no-store" },
   });
 }

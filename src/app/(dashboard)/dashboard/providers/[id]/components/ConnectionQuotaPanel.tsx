@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { Button } from "@/shared/components";
 
@@ -15,7 +13,7 @@ import { Button } from "@/shared/components";
  */
 
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import {
   parseQuotaData,
   sortQuotasByWindow,

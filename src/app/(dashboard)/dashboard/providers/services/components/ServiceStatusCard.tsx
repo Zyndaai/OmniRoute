@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { Card } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/shared/utils/cn";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 

@@ -1,11 +1,9 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Phase 1d extraction — Issue #3501
 // SiliconFlowEndpointModal moved out of ProviderDetailPageClient.tsx.
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Modal } from "@/shared/components";
 import { providerText, SILICONFLOW_ENDPOINTS } from "../providerPageHelpers";
 

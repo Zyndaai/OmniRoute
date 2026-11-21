@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Button, ConfirmModal } from "@/shared/components";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 

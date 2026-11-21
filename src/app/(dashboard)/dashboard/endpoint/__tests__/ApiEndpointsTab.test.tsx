@@ -5,15 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ApiEndpointsTab from "../ApiEndpointsTab";
 import { DEFAULT_DISPLAY_BASE_URL } from "@/shared/hooks/useDisplayBaseUrl";
 
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(to)} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace?: string) => {
     const messages: Record<string, string> = {
       "endpoint.apiEndpointsCatalogUnavailable": "API catalog unavailable",

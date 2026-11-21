@@ -1,5 +1,4 @@
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
-import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getPluginByName, updatePluginConfig } from "@/lib/db/plugins";
@@ -12,20 +11,20 @@ export async function OPTIONS() {
 /**
  * GET /api/plugins/[name]/config — Get plugin configuration
  */
-export async function GET(request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ name: string }> }) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const { name } = await params;
   const plugin = await getPluginByName(name);
 
   if (!plugin) {
-    return NextResponse.json(buildErrorBody(404, `Plugin '${name}' not found`), {
+    return Response.json(buildErrorBody(404, `Plugin '${name}' not found`), {
       status: 404,
       headers: CORS_HEADERS,
     });
   }
 
-  return NextResponse.json(
+  return Response.json(
     {
       config: JSON.parse(plugin.config || "{}"),
       configSchema: JSON.parse(plugin.configSchema || "{}"),
@@ -37,7 +36,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 /**
  * PUT /api/plugins/[name]/config — Update plugin configuration
  */
-export async function PUT(request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
+export async function PUT(request: Request, { params }: { params: Promise<{ name: string }> }) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const { name } = await params;
@@ -46,7 +45,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), {
+    return Response.json(buildErrorBody(400, "Invalid JSON body"), {
       status: 400,
       headers: CORS_HEADERS,
     });
@@ -58,7 +57,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(buildErrorBody(400, "Invalid request"), {
+    return Response.json(buildErrorBody(400, "Invalid request"), {
       status: 400,
       headers: CORS_HEADERS,
     });
@@ -66,7 +65,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const plugin = await getPluginByName(name);
   if (!plugin) {
-    return NextResponse.json(buildErrorBody(404, `Plugin '${name}' not found`), {
+    return Response.json(buildErrorBody(404, `Plugin '${name}' not found`), {
       status: 404,
       headers: CORS_HEADERS,
     });
@@ -80,20 +79,20 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (!field) continue; // Allow extra keys
       if (field.type === "number" && typeof value === "number") {
         if (field.min !== undefined && value < field.min) {
-          return NextResponse.json(buildErrorBody(400, `Config '${key}' must be >= ${field.min}`), {
+          return Response.json(buildErrorBody(400, `Config '${key}' must be >= ${field.min}`), {
             status: 400,
             headers: CORS_HEADERS,
           });
         }
         if (field.max !== undefined && value > field.max) {
-          return NextResponse.json(buildErrorBody(400, `Config '${key}' must be <= ${field.max}`), {
+          return Response.json(buildErrorBody(400, `Config '${key}' must be <= ${field.max}`), {
             status: 400,
             headers: CORS_HEADERS,
           });
         }
       }
       if (field.type === "select" && field.enum && !field.enum.includes(String(value))) {
-        return NextResponse.json(
+        return Response.json(
           buildErrorBody(400, `Config '${key}' must be one of: ${field.enum.join(", ")}`),
           { status: 400, headers: CORS_HEADERS }
         );
@@ -103,8 +102,5 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   await updatePluginConfig(name, parsed.data.config);
 
-  return NextResponse.json(
-    { success: true, config: parsed.data.config },
-    { headers: CORS_HEADERS }
-  );
+  return Response.json({ success: true, config: parsed.data.config }, { headers: CORS_HEADERS });
 }

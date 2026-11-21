@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { pingDb, getSchemaVersion } from "@/lib/db/core";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -18,18 +17,15 @@ async function diagnose() {
 
 async function handle(request: Request, label: string) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: { message: "Authentication required" } }, { status: 401 });
+    return Response.json({ error: { message: "Authentication required" } }, { status: 401 });
   }
 
   try {
-    return NextResponse.json(await diagnose());
+    return Response.json(await diagnose());
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[API] DB health ${label} failed:`, message);
-    return NextResponse.json(
-      { error: { message: sanitizeErrorMessage(message) } },
-      { status: 500 }
-    );
+    return Response.json({ error: { message: sanitizeErrorMessage(message) } }, { status: 500 });
   }
 }
 

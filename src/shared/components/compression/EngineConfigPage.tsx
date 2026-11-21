@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import type { EngineConfigField } from "@omniroute/open-sse/services/compression/engines/types";
 import { EngineConfigForm } from "@/shared/components/compression/EngineConfigForm";
 import { Alert } from "@omniroute/ui-kit/alert";

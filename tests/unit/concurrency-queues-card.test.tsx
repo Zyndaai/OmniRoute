@@ -1,6 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ConcurrencyQueuesCard from "../../src/app/(dashboard)/dashboard/health/ConcurrencyQueuesCard";
 import messages from "../../src/i18n/messages/en.json";
@@ -38,9 +38,9 @@ function deferred<T>() {
 }
 function mount() {
   return render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+    <IntlProvider locale="en" timeZone="UTC" messages={messages}>
       <ConcurrencyQueuesCard />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 async function tick(ms = 0) {

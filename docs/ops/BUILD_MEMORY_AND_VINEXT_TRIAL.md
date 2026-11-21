@@ -6,6 +6,10 @@ lastUpdated: 2026-11-01
 
 # Build memory and vinext trial (2026-11-01)
 
+> **Historical record.** This page describes the former Next.js build. The app has since been
+> ported to React Router (framework mode) and now builds with Vite through `npm run build`
+> (`scripts/build/build.mjs`). The Next.js settings and scripts named below no longer exist.
+
 Measurements and findings from trying to lower `next build` memory, and from a trial
 build with [vinext](https://github.com/cloudflare/vinext) (Cloudflare's Vite-based
 reimplementation of the Next.js API). The trial branch was deleted afterwards; this

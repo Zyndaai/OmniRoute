@@ -15,16 +15,17 @@ beforeAll(() => {
 });
 
 // ── i18n stub ──────────────────────────────────────────────────────────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   // #14466 / #14807: PoolSchedulesCard and ProxyHealthCell now call useLocale().
   useLocale: () => "en",
 }));
 
-// ── next/dynamic stub ──────────────────────────────────────────────────────
-vi.mock("next/dynamic", () => ({
-  default: () => () => null,
-}));
+// ── Chart stub (recharts is unrelated to these tests) ──────────────────────
+vi.mock(
+  "../../../src/app/(dashboard)/dashboard/costs/quota-share/components/BurnRateChart",
+  () => ({ default: () => null })
+);
 
 // ── Shared component stubs ─────────────────────────────────────────────────
 vi.mock("@/shared/components", () => ({

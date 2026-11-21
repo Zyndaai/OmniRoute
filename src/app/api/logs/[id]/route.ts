@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/errorSanitization.ts";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { sanitizeErrorFramesFromLogChunks } from "@/lib/logPayloads";
@@ -101,8 +100,6 @@ export function extractPartialAssistantText(
   return "";
 }
 
-export const dynamic = "force-dynamic";
-
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> | { id: string } }
@@ -112,7 +109,7 @@ export async function GET(
 
   try {
     const { id } = await params;
-    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
     // Prefer in-flight active pending requests first to avoid races where
     // an entry moves to completed between the call-logs list and detail fetch.
@@ -148,7 +145,7 @@ export async function GET(
           partialAssistantText: extractPartialAssistantText(safeStreamChunks),
         };
 
-        return NextResponse.json(activeEntry);
+        return Response.json(activeEntry);
       }
     } catch (e) {
       console.warn("/api/logs/[id] - failed to read active pending detail:", e);
@@ -205,7 +202,7 @@ export async function GET(
       }
     }
 
-    if (!persistedRequest) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!persistedRequest) return Response.json({ error: "Not found" }, { status: 404 });
 
     // "Continues from" link for the dashboard's conversation panel: resolve
     // this entry's own previous_response_id back to the call-log row that
@@ -220,9 +217,9 @@ export async function GET(
       ? await resolveCallLogIdByResponseId(previousResponseId, persistedRequest.apiKeyId ?? null)
       : null;
 
-    return NextResponse.json({ ...persistedRequest, previousResponseId, parentLogId });
+    return Response.json({ ...persistedRequest, previousResponseId, parentLogId });
   } catch (err) {
     console.error("[API ERROR] /api/logs/[id] failed:", err);
-    return NextResponse.json({ error: "Failed to fetch log" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch log" }, { status: 500 });
   }
 }

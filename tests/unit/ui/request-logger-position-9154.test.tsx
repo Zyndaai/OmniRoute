@@ -13,16 +13,16 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-type ReplaceOptions = { scroll?: boolean };
-type Replace = (url: string, options?: ReplaceOptions) => void;
+type NavigateOptions = { replace?: boolean; preventScrollReset?: boolean };
+type Navigate = (to: { search: string }, options?: NavigateOptions) => void;
 
 const routerControl = vi.hoisted(() => ({
   pendingUrl: null as string | null,
   bumpPageRender: () => {},
-  replace: vi.fn<Replace>(),
+  navigate: vi.fn<Navigate>(),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: (namespace?: string) => (key: string) => {
     if (namespace === "requestLogger.detail") {
@@ -32,15 +32,10 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    replace: routerControl.replace,
-    push: vi.fn(),
-    prefetch: vi.fn(),
-    refresh: vi.fn(),
-  }),
-  usePathname: () => "/dashboard/logs",
-  useSearchParams: () => new URLSearchParams(globalThis.location.search),
+vi.mock("react-router", () => ({
+  useNavigate: () => routerControl.navigate,
+  useLocation: () => ({ pathname: "/dashboard/logs" }),
+  useSearchParams: () => [new URLSearchParams(globalThis.location.search), vi.fn()],
 }));
 
 vi.mock("@/store/emailPrivacyStore", () => ({
@@ -253,9 +248,9 @@ beforeEach(() => {
   deferredDetail = null;
   routerControl.pendingUrl = null;
   routerControl.bumpPageRender = () => {};
-  routerControl.replace.mockReset();
-  routerControl.replace.mockImplementation((url) => {
-    routerControl.pendingUrl = url;
+  routerControl.navigate.mockReset();
+  routerControl.navigate.mockImplementation((to) => {
+    routerControl.pendingUrl = `/dashboard/logs${to.search}`;
     routerControl.bumpPageRender();
   });
 
@@ -310,9 +305,9 @@ describe("request-log position preservation (#9154)", () => {
       await openOlderRow();
 
       expect(routerControl.pendingUrl).toBe("/dashboard/logs?view=requests&tenant=kept&id=log-080");
-      expect(routerControl.replace).toHaveBeenLastCalledWith(
-        "/dashboard/logs?view=requests&tenant=kept&id=log-080",
-        { scroll: false }
+      expect(routerControl.navigate).toHaveBeenLastCalledWith(
+        { search: "?view=requests&tenant=kept&id=log-080" },
+        { replace: true, preventScrollReset: true }
       );
       assertRetainedView(scrollContainer);
     }
@@ -344,7 +339,7 @@ describe("request-log position preservation (#9154)", () => {
       const scrollContainer = await renderExpandedView();
       await openOlderRow();
       commitPendingUrl();
-      routerControl.replace.mockClear();
+      routerControl.navigate.mockClear();
 
       await act(async () => {
         await close();
@@ -352,10 +347,10 @@ describe("request-log position preservation (#9154)", () => {
       await settle();
 
       expect(routerControl.pendingUrl).toBe("/dashboard/logs?view=requests&tenant=kept");
-      expect(routerControl.replace).toHaveBeenCalledTimes(1);
-      expect(routerControl.replace).toHaveBeenCalledWith(
-        "/dashboard/logs?view=requests&tenant=kept",
-        { scroll: false }
+      expect(routerControl.navigate).toHaveBeenCalledTimes(1);
+      expect(routerControl.navigate).toHaveBeenCalledWith(
+        { search: "?view=requests&tenant=kept" },
+        { replace: true, preventScrollReset: true }
       );
       commitPendingUrl();
       expect(container.querySelector('[aria-label="Request log detail"]')).toBeNull();

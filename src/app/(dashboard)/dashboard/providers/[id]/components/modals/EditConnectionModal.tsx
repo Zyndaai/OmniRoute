@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import ConnectionTestModelField from "@/shared/components/ConnectionTestModelField";
 import { useConnectionTestModelDraft } from "@/shared/components/useConnectionTestModelDraft";
 import { Button, Badge, Input, Modal, Toggle, Select } from "@/shared/components";

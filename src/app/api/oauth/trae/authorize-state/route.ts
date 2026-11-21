@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { createTraeLoginState } from "@/lib/oauth/traeLoginState";
 
@@ -12,5 +11,5 @@ import { createTraeLoginState } from "@/lib/oauth/traeLoginState";
 export async function POST(request: Request) {
   const authResponse = await requireManagementAuth(request, { invalidApiKeyStatus: 401 });
   if (authResponse) return authResponse;
-  return NextResponse.json({ state: createTraeLoginState() });
+  return Response.json({ state: createTraeLoginState() });
 }

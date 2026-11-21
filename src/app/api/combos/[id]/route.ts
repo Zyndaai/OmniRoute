@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getComboById, updateCombo, deleteCombo, getComboByName, getCombos } from "@/lib/db/combos";
 import { isCloudEnabled } from "@/lib/db/settings";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
@@ -61,7 +60,7 @@ export async function GET(request, { params }) {
       console.warn("Failed to resolve combo connection labels:", error);
     }
 
-    return NextResponse.json({ ...combo, connectionLabels });
+    return Response.json({ ...combo, connectionLabels });
   } catch (error) {
     console.log("Error fetching combo:", error);
     return comboErrorResponse("INTERNAL_001", 500, undefined, request);
@@ -261,7 +260,7 @@ export async function PUT(request, { params }) {
     // (#6940 — bare-model-id provider fallback), so it is never rejected.
     // Surface it as a non-blocking warning instead of silently shadowing it.
     const warning = comboName ? buildComboNameCollisionWarning(String(comboName)) : null;
-    return NextResponse.json(warning ? { ...combo, warning } : combo);
+    return Response.json(warning ? { ...combo, warning } : combo);
   } catch (error) {
     if (error instanceof ComboInvariantError) {
       return comboErrorResponse("COMBO_008", 400, { reason: error.message }, request);
@@ -305,7 +304,7 @@ export async function DELETE(request, { params }) {
     // Auto sync to Cloud if enabled
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     console.log("Error deleting combo:", error);
     return comboErrorResponse("INTERNAL_001", 500, undefined, request);

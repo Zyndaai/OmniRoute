@@ -25,12 +25,12 @@ without inventing new modules.
 
 | Concern       | Choice                                                                                                                   |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Web framework | **Next.js 16** (App Router, standalone output, no global middleware)                                                     |
+| Web framework | **React Router 8** framework mode (SSR) on **Vite 8**, served by an Express app (`src/server/app.ts`); no global middleware |
 | Language      | **TypeScript 6.0+** — target `ES2022`, `module: esnext`, `moduleResolution: bundler`, `strict: false`                    |
 | Runtime       | **Node.js** `>=22.22.2 <23` or `>=24.0.0 <27` (enforced via `engines` + `SUPPORTED_NODE_RANGE`)                          |
 | Database      | **SQLite** via `better-sqlite3` (singleton, WAL journaling)                                                              |
 | Tests         | **Node native test runner** (unit/integration), **Vitest** (MCP, autoCombo, cache), **Playwright** (e2e + protocols-e2e) |
-| Build         | Next.js standalone via `scripts/build/build-next-isolated.mjs`                                                           |
+| Build         | `npm run build` → `scripts/build/build.mjs` (React Router + Vite; output in `.build/app/`)                                |
 | Lint/format   | ESLint flat config + Prettier (`lint-staged` via Husky pre-commit)                                                       |
 | Module system | ESM everywhere (`"type": "module"`)                                                                                      |
 | Dashboard UI  | **Tailwind CSS 4** + the vendored **Keak CI UI Kit** (`packages/ui-kit`), Lucide icons — see `DESIGN_SYSTEM.md`          |
@@ -52,7 +52,7 @@ directory is `DATA_DIR` env var, defaulting to `~/.omniroute/`.
 
 ```
 OmniRoute/
-├── src/                  Next.js application (App Router, libs, domain, server, shared)
+├── src/                  React Router application (routes, libs, domain, server, shared)
 ├── open-sse/             Streaming engine workspace (@omniroute/open-sse)
 ├── packages/             Workspaces: ui-kit (vendored Keak CI UI Kit), browser-pool
 ├── bin/                  CLI entry points (omniroute, reset-password)
@@ -71,32 +71,36 @@ OmniRoute/
 
 ---
 
-## 3. `src/` — Next.js Application
+## 3. `src/` — React Router Application
 
 ```
 src/
-├── app/                  App Router pages + API routes
+├── app/                  Pages + API routes, turned into React Router routes by routes.ts
 ├── lib/                  Core libraries (DB, auth, OAuth, skills, memory, …)
 ├── domain/               Pure domain layer (policy, fallback, cost, lockout, …)
-├── server/               Server-only modules (authz, cors, auth)
+├── server/               Server-only modules (app.ts, http pipeline, routing, authz, cors, auth)
 ├── shared/               Types, constants, validation, contracts, utils (cross-boundary safe)
 ├── mitm/                 Man-in-the-middle proxy helpers for CLI integration
 ├── models/               Local model metadata / aliasing
 ├── sse/                  Legacy SSE handlers that still live under src/ (not open-sse/)
 ├── store/                Client-side state stores
-├── middleware/           Route-level middleware utilities (not Next.js global middleware)
+├── middleware/           Route-level guard utilities (no global middleware)
 ├── scripts/              In-tree scripts importable by app code
 ├── types/                Ambient and shared TS types
-├── i18n/                 Locale bundles
-├── instrumentation.ts    Next.js instrumentation hook
-├── instrumentation-node.ts
-└── proxy.ts              Top-level proxy bootstrap helper
+└── i18n/                 Locale bundles (use-intl)
 ```
 
-### 3.1 `src/app/` — App Router
+### 3.1 `src/app/` — Routes
 
-The App Router exposes both the dashboard UI and the public/management HTTP API.
-There is **no global middleware** — interception is done per-route.
+`src/app/routes.ts` (with `routeConvention.ts`) builds the React Router route table from the
+folders under `src/app/`: `page.tsx` is a page, `layout.tsx` a layout and `route.ts` an API
+endpoint exporting `GET`/`POST`/… handlers `(request, { params })`. Folder names keep their old
+meaning: `[id]` becomes `:id`, `[...x]` a splat, `(group)` adds no URL segment and `_x` folders
+are skipped. Every endpoint is served by one resource route (`src/server/routing/apiResource.ts`
+and `apiHandlers.server.ts`), and `root.tsx` is the document shell.
+There is **no global middleware**: the request pipeline in `src/server/http/handler.ts`
+(redirects → headless gate → authz → rewrites) runs inside the Express app, and route-level
+guards cover the rest.
 
 Top-level segments under `src/app/`:
 
@@ -112,8 +116,8 @@ Top-level segments under `src/app/`:
 | `status/`, `maintenance/`, `offline/`                                         | Operational pages                         |
 | `privacy/`, `terms/`                                                          | Legal pages                               |
 | `400/`, `401/`, `403/`, `408/`, `429/`, `500/`, `502/`, `503/`                | Static error pages                        |
-| `error.tsx`, `global-error.tsx`, `not-found.tsx`, `forbidden/`, `loading.tsx` | Framework error/loading boundaries        |
-| `layout.tsx`, `page.tsx`, `globals.css`, `manifest.ts`                        | Root shell                                |
+| `root.tsx` (`ErrorBoundary`), `[...rest]/`, `forbidden/`                      | Error boundary, localised 404 catch-all   |
+| `root.tsx`, `entry.client.tsx`, `page.tsx`, `globals.css`, `manifest.webmanifest/` | Root shell, browser entry, PWA manifest |
 
 #### 3.1.1 `src/app/(dashboard)/dashboard/` — UI pages
 
@@ -289,7 +293,7 @@ table groups the actual directories and notable top-level files.
 | `env/`            | Env loading + introspection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `evals/`          | Eval runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `guardrails/`     | `piiMasker.ts`, `promptInjection.ts`, `visionBridge.ts`, `visionBridgeHelpers.ts`, `registry.ts`, `base.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `jobs/`           | Background jobs (`autoUpdate.ts`, …)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `jobs/`           | Background jobs (`budgetResetJob.ts`, `tokenHealthCheckJob.ts`, …)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `memory/`         | Persistent memory: `store.ts`, `cache.ts`, `retrieval.ts`, `summarization.ts`, `extraction.ts`, `injection.ts`, `qdrant.ts`, `settings.ts`, `verify.ts`, `schemas.ts`, `types.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `monitoring/`     | `observability.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `oauth/`          | OAuth/import provider modules (22): `agy`, `antigravity`, `claude`, `cline`, `codebuddy-cn`, `codex`, `cursor`, `devin-desktop`, `ghe-copilot`, `github`, `gitlab-duo`, `grok-cli-oauth`, `grok-cli`, `kilocode`, `kimi-coding`, `kiro`, `openference`, `qoder`, `trae`, `xai-oauth`, `zed-hosted`, `zed`, plus `services/`, `utils/`, and `constants/oauth.ts`                                                                                                                                                                                                                                                                                                                  |
@@ -651,13 +655,14 @@ Common commands:
 
 Organized into 6 subfolders by purpose.
 
-- **`scripts/build/`** — `build-next-isolated.mjs`, `prepublish.ts`,
+- **`scripts/build/`** — `build.mjs` (`npm run build`), `prepublish.ts`,
   `pack-artifact-policy.ts`,
   `validate-pack-artifact.ts`, `postinstall.mjs`, `postinstallSupport.mjs`,
   `uninstall.mjs`, `bootstrap-env.mjs`, `runtime-env.mjs`,
   `native-binary-compat.mjs`.
-- **`scripts/dev/`** — `run-next.mjs`, `run-next-playwright.mjs`,
-  `run-standalone.mjs`, `standalone-server-ws.mjs`, `responses-ws-proxy.mjs`,
+- **`scripts/dev/`** — `run-server.mjs` (the launcher behind `npm run dev` / `npm start`),
+  `run-next-playwright.mjs` (Playwright web server), `run-standalone.mjs` (PM2 / Docker
+  wrapper), `responses-ws-proxy.mjs`,
   `v1-ws-bridge.mjs`,
   `run-playwright-tests.mjs`, `run-ecosystem-tests.mjs`,
   `run-protocol-clients-tests.mjs`, `sync-env.mjs`, `healthcheck.mjs`,

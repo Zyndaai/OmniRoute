@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import { getProxyById, getScopePoolEgressRows, getScopeRotationStrategy } from "@/lib/db/proxies";
@@ -31,7 +29,7 @@ function freeTierPausesResponse(searchParams: URLSearchParams, now: number) {
       type: "invalid_request",
     });
   }
-  return NextResponse.json({
+  return Response.json({
     provider,
     pauses: listOpencodeFreeTierPauses(provider, now),
     processMemory: true,
@@ -145,7 +143,7 @@ export async function GET(request: Request) {
       const entry = await getProxyById(proxyId.trim(), { includeSecrets: false });
       const row = (entry ?? {}) as MemberRow;
       const { ordered, rankedBy } = rankRows(entry ? [row] : []);
-      return NextResponse.json({
+      return Response.json({
         scope: null,
         strategy: null,
         rankedBy,
@@ -179,7 +177,7 @@ export async function GET(request: Request) {
       getScopeRotationStrategy(scope, normalizedScopeId),
     ]);
     const { ordered, rankedBy } = rankRows(rows as MemberRow[]);
-    return NextResponse.json({
+    return Response.json({
       scope,
       strategy,
       rankedBy,

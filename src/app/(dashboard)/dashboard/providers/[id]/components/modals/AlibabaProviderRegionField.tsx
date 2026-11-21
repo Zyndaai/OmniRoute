@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Input, Modal, Select } from "@/shared/components";
 import {
   getDefaultAlibabaProviderRegion,

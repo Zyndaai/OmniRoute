@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -33,15 +32,15 @@ export async function GET(request: Request) {
   const provider = new URL(request.url).searchParams.get("provider") || undefined;
   const parsedProvider = provider === undefined ? undefined : providerSchema.safeParse(provider);
   if (parsedProvider && !parsedProvider.success) {
-    return NextResponse.json(buildErrorBody(400, "Invalid provider"), { status: 400 });
+    return Response.json(buildErrorBody(400, "Invalid provider"), { status: 400 });
   }
 
   try {
     const connections = await listConnectionCooldowns(parsedProvider?.data);
-    return NextResponse.json({ connections, generatedAt: new Date().toISOString() });
+    return Response.json({ connections, generatedAt: new Date().toISOString() });
   } catch (err) {
     console.error("[API] GET /api/resilience/cooldowns error:", err);
-    return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(err)), { status: 500 });
+    return Response.json(buildErrorBody(500, sanitizeErrorMessage(err)), { status: 500 });
   }
 }
 
@@ -58,19 +57,19 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
+    return Response.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
   }
 
   const validation = validateBody(clearSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
     const result = await clearConnectionCooldowns(validation.data);
-    return NextResponse.json({ ok: true, ...result });
+    return Response.json({ ok: true, ...result });
   } catch (err) {
     console.error("[API] POST /api/resilience/cooldowns error:", err);
-    return NextResponse.json(buildErrorBody(500, sanitizeErrorMessage(err)), { status: 500 });
+    return Response.json(buildErrorBody(500, sanitizeErrorMessage(err)), { status: 500 });
   }
 }

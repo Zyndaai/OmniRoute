@@ -95,7 +95,7 @@ travel only in one start IPC message, never argv or environment; output/error fo
 prefixed and sanitized. Only `ExperimentalWarning` is disabled in child exec arguments to avoid
 repeating Node's SQLite warning each cron run; other warning types remain visible.
 
-Destination modules must be importable without Next.js/server-only dependencies. The existing
+Destination modules must be importable without React Router/server-only dependencies. The existing
 BigQuery implementation already meets that contract. Access-token caches last only for the child
 run, not across runs. Node is the supported runtime (`package.json` engines), but README's Bun
 installation section and `Dockerfile.bun` also advertise a production compatibility path using

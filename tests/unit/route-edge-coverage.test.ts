@@ -927,11 +927,10 @@ test("embeddings route tolerates custom-model and provider-node lookup failures"
       "custom_models",
       "custom models unavailable",
       async () => {
+        // The catalog fails closed when the hidden-model flags (stored in the same
+        // custom_models column) cannot be read, rather than listing models the operator hid.
         const response = await embeddingsRoute.GET();
-        const body = (await response.json()) as any;
-
-        assert.equal(response.status, 200, `GET body: ${JSON.stringify(body)}`);
-        assert.ok(body.data.some((model) => model.id === "openai/text-embedding-3-small"));
+        assert.equal(response.status, 500);
       }
     );
 

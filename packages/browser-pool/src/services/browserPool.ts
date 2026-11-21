@@ -94,7 +94,7 @@ const state: PoolState = {
 
 function getCloakbrowserModuleId(): string {
   // Keep this computed: cloakbrowser is an optional runtime enhancer, and a literal
-  // dynamic import with the package name makes Turbopack resolve it during route compilation.
+  // dynamic import with the package name makes the bundler try to resolve it at build time.
   return ["cloak", "browser"].join("");
 }
 
@@ -103,7 +103,7 @@ async function resolveCloakLaunch(): Promise<((opts: unknown) => Promise<Browser
   state.cloakLaunchResolved = true;
   try {
     const mod = (await import(
-      /* webpackIgnore: true */
+      /* @vite-ignore */
       getCloakbrowserModuleId()
     )) as unknown as {
       launch?: (opts: unknown) => Promise<Browser>;

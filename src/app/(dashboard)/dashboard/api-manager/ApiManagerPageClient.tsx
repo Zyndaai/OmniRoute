@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from "react";
-import Link from "next/link";
+import { Link } from "react-router";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import {
@@ -22,7 +20,7 @@ import Modal from "@/shared/components/Modal";
 import Toggle from "@/shared/components/Toggle";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { matchesSearch } from "@/shared/utils/turkishText";
 import ApiKeyFilterBar from "./components/ApiKeyFilterBar";
 import {
@@ -849,7 +847,7 @@ export default function ApiManagerPageClient() {
                       {/* Existing badges */}
                       {isModelRestricted ? (
                         <Link
-                          href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=models`}
+                          to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=models`}
                           className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-warning/10 text-warning text-xs font-medium hover:bg-warning/20 transition-colors"
                         >
                           <Icon name="lock" size={14} />
@@ -857,7 +855,7 @@ export default function ApiManagerPageClient() {
                         </Link>
                       ) : (
                         <Link
-                          href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=models`}
+                          to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=models`}
                           className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-success/10 text-success text-xs font-medium hover:bg-success/20 transition-colors"
                         >
                           <Icon name="lock_open" size={14} />
@@ -866,7 +864,7 @@ export default function ApiManagerPageClient() {
                       )}
                       {hasConnectionRestrictions && (
                         <Link
-                          href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=connections`}
+                          to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=connections`}
                           className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-info/10 text-info text-xs font-medium hover:bg-info/20 transition-colors"
                         >
                           <Icon name="cable" size={14} />
@@ -875,7 +873,7 @@ export default function ApiManagerPageClient() {
                       )}
                       {hasExclusiveLeaseScope && (
                         <Link
-                          href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access`}
+                          to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access`}
                           className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-chart-3/10 text-chart-3 text-xs font-medium hover:bg-chart-3/20 transition-colors"
                         >
                           <Icon name="key_vertical" size={14} />
@@ -884,7 +882,7 @@ export default function ApiManagerPageClient() {
                       )}
                       {hasComboRestrictions && (
                         <Link
-                          href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=combos`}
+                          to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access?tab=combos`}
                           className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-chart-4/10 text-chart-4 text-xs font-medium hover:bg-chart-4/20 transition-colors"
                         >
                           <Icon name="hub" size={14} />
@@ -1022,7 +1020,7 @@ export default function ApiManagerPageClient() {
                         icon="refresh"
                       />
                       <Link
-                        href={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access`}
+                        to={`/dashboard/api-manager/${encodeURIComponent(key.id)}/access`}
                         className="p-2 hover:bg-primary/10 rounded text-text-muted hover:text-primary opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all inline-flex items-center justify-center"
                         title={t("editPermissions")}
                       >

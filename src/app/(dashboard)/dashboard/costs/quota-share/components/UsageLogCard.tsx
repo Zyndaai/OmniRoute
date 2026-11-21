@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import type { ConsumptionEvent } from "@/lib/db/quotaConsumption";

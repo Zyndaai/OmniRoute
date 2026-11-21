@@ -1,25 +1,22 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
-import { cookies } from "next/headers";
+import { requestCookie } from "@/server/requestContext";
 import {
   getDashboardJwtSecret,
   verifyDashboardSessionToken,
   DASHBOARD_SESSION_COOKIE,
 } from "@/shared/utils/dashboardSessionToken";
 
-export async function GET() {
+export async function GET(request?: Request) {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value;
+    const token = requestCookie(DASHBOARD_SESSION_COOKIE, request);
     const secret = getDashboardJwtSecret();
 
     if (!token || !secret) {
-      return NextResponse.json({ authenticated: false });
+      return Response.json({ authenticated: false });
     }
 
     const payload = await verifyDashboardSessionToken(token, secret);
-    return NextResponse.json({ authenticated: payload !== null });
+    return Response.json({ authenticated: payload !== null });
   } catch {
-    return NextResponse.json({ authenticated: false });
+    return Response.json({ authenticated: false });
   }
 }

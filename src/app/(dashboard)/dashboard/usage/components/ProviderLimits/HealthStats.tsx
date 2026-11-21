@@ -1,4 +1,3 @@
-"use client";
 import Button from "@/shared/components/Button";
 import {
   DISPLAY_COLORS,

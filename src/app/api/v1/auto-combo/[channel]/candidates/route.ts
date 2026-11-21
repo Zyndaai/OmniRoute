@@ -6,7 +6,6 @@
  * `channel` is the suffix after "auto/" (e.g. "best-coding", "coding:free",
  * "glm") or the literal "auto" for the base channel.
  */
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
@@ -40,7 +39,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
   // even when it carries a stale bearer header (the precedence question is #14333
   // LEDGER-21, deliberately not settled here).
   if (!scope.isSessionAuth && scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -49,7 +48,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
   const { channel: rawChannel } = await params;
   const parsedChannel = channelParamSchema.safeParse(rawChannel);
   if (!parsedChannel.success) {
-    return NextResponse.json(buildErrorBody(400, "Invalid auto channel"), {
+    return Response.json(buildErrorBody(400, "Invalid auto channel"), {
       status: 400,
       headers: CORS_HEADERS,
     });
@@ -57,15 +56,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
 
   try {
     const result = await getAutoComboCandidates(parsedChannel.data, scope.apiKeyId);
-    return NextResponse.json(result, { headers: CORS_HEADERS });
+    return Response.json(result, { headers: CORS_HEADERS });
   } catch (err) {
     if (isUnknownAutoChannelError(err)) {
-      return NextResponse.json(buildErrorBody(404, "Unknown auto channel"), {
+      return Response.json(buildErrorBody(404, "Unknown auto channel"), {
         status: 404,
         headers: CORS_HEADERS,
       });
     }
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(500, err instanceof Error ? err.message : "Failed to list candidates"),
       { status: 500, headers: CORS_HEADERS }
     );

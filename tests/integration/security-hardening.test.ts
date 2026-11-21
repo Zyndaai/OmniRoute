@@ -51,13 +51,13 @@ test("package.json does not contain hardcoded legacy secrets", () => {
   }
 });
 
-test("proxy.ts does not contain hardcoded JWT_SECRET fallback", () => {
-  const content = readIfExists("src/proxy.ts");
-  assert.ok(content, "src/proxy.ts should exist");
+test("the request handler does not contain hardcoded JWT_SECRET fallback", () => {
+  const content = readIfExists("src/server/http/handler.ts");
+  assert.ok(content, "src/server/http/handler.ts should exist");
   assert.equal(
     content.includes("omniroute-default-secret-change-me"),
     false,
-    "src/proxy.ts should not have hardcoded JWT_SECRET fallback"
+    "src/server/http/handler.ts should not have hardcoded JWT_SECRET fallback"
   );
 });
 
@@ -135,8 +135,8 @@ test("chat handler wires guardrail pre-call validation", () => {
 });
 
 test("instrumentation-node.ts validates runtime env after restoring secrets", () => {
-  const content = readIfExists("src/instrumentation-node.ts");
-  assert.ok(content, "src/instrumentation-node.ts should exist");
+  const content = readIfExists("src/server/boot.ts");
+  assert.ok(content, "src/server/boot.ts should exist");
   assert.ok(
     content.includes("enforceWebRuntimeEnv"),
     "instrumentation-node.ts should call enforceWebRuntimeEnv"

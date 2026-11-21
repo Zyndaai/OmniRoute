@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
@@ -23,7 +22,7 @@ export const tailscaleSudoSchema = z.object({
 
 export async function requireTailscaleAuth(request: Request) {
   if (await isAuthenticated(request)) return null;
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 export async function parseOptionalJsonBody<T extends z.ZodTypeAny>(request: Request, schema: T) {
@@ -33,7 +32,7 @@ export async function parseOptionalJsonBody<T extends z.ZodTypeAny>(request: Req
     const rawText = await request.text();
     rawBody = rawText.trim() ? JSON.parse(rawText) : {};
   } catch {
-    return { response: NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }) };
+    return { response: Response.json({ error: "Invalid JSON body" }, { status: 400 }) };
   }
 
   const validation = validateBody(schema, rawBody);
@@ -42,7 +41,7 @@ export async function parseOptionalJsonBody<T extends z.ZodTypeAny>(request: Req
     // the previous `{ response: validation.response }` handed every caller an
     // `undefined` response and Next answered with a framework 500 instead of a 400.
     return {
-      response: NextResponse.json(
+      response: Response.json(
         { error: formatValidationMessage(validation.error) },
         { status: 400 }
       ),

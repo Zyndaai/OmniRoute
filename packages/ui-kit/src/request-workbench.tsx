@@ -1,5 +1,3 @@
-"use client";
-
 import { useId, useMemo, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import {

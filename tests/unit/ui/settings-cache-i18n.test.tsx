@@ -1,6 +1,6 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider, createFormatter, createTranslator } from "next-intl";
+import { IntlProvider, createFormatter, createTranslator } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CacheSettingsTab from "@/app/(dashboard)/dashboard/settings/components/CacheSettingsTab";
 import ar from "@/i18n/messages/ar.json";
@@ -26,7 +26,7 @@ const config = {
   embeddingOptions: [{ id: "openai", name: "OpenAI", hasConnection: true, models: [model] }],
 };
 // Exercise the real catalog and formatter, not the global key-only test mock.
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 
 const s = ar.settings;
 // ICU-parameterised strings are expected through the real formatter, so digit shaping and
@@ -41,7 +41,7 @@ const fetchMock = vi.fn<typeof fetch>();
 
 function mount() {
   return render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale="ar"
       timeZone="UTC"
       messages={{ settings: ar.settings, common: ar.common }}
@@ -50,7 +50,7 @@ function mount() {
       }}
     >
       <CacheSettingsTab />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 

@@ -2,14 +2,14 @@ import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 import type { ConnectionQuotaAvailability } from "@/lib/usage/availabilityTypes";
 
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 afterEach(cleanup);
 
 for (const provider of ["antigravity", "agy"])
@@ -65,7 +65,7 @@ for (const provider of ["antigravity", "agy"])
         availabilityObservedAt: now,
       });
       render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale={locale}
           messages={{ usage: messages.usage, common: messages.common }}
           timeZone="UTC"
@@ -79,7 +79,7 @@ for (const provider of ["antigravity", "agy"])
             providerLabels={{ [provider]: "Antigravity" }}
             renderCard={() => null}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
       const capsule = document.querySelector(`[data-account="${connection.id}"]`)!;
       expect(capsule).toHaveAttribute("data-kind", "ok");

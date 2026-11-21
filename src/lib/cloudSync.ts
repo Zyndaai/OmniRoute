@@ -46,7 +46,7 @@ function toDateMs(value: unknown): number {
 
 // SECURITY-AUDITOR-NOTE: HMAC signature verification of the Cloud response.
 // Closes the silent-credential-swap surface flagged by Socket.dev (finding for
-// `app/.next/server/app/api/keys/[id]/route.js`). Two-leg defence:
+// the bundled `api/keys/[id]` route). Two-leg defence:
 //   1. The Cloud endpoint signs each response body with
 //      `HMAC-SHA256(OMNIROUTE_CLOUD_SYNC_SECRET, rawBody)` and returns the hex
 //      digest in `X-Cloud-Sig`.
@@ -198,7 +198,7 @@ export async function syncToCloud(
  * cloudProviders is object keyed by provider ID
  *
  * SECURITY-AUDITOR-NOTE: This function appears in Socket.dev finding for
- * `app/.next/server/app/api/keys/[id]/route.js`. From v3.8.6 onward,
+ * the bundled `api/keys/[id]` route. From v3.8.6 onward,
  * `accessToken` / `refreshToken` / `providerSpecificData` are only synced when
  * `OMNIROUTE_CLOUD_SYNC_SECRETS=true`. The default mode syncs non-credential
  * metadata only. Combined with `verifyCloudSignature()` above, this closes the

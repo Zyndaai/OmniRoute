@@ -127,13 +127,11 @@ export const DEFAULT_THINKING_CONFIG = {
 
 // In-memory config (loaded from DB on startup, or default).
 //
-// Backed by globalThis so the singleton is shared across the SEPARATE webpack
-// module graphs Next.js builds for `instrumentation.ts` (boot-time hydration via
-// hydrateThinkingBudgetConfig) and the app-route / open-sse executors (per-request
-// reads in base.ts). A plain module-level `let` is DUPLICATED per graph, so the
-// boot hydration would land on the instrumentation graph's copy and never reach
-// base.ts — exactly the #5312 fix-A break proven on the VPS. Mirrors the same
-// globalThis pattern systemPrompt.ts already uses for the Global System Prompt (#2470).
+// Backed by globalThis so the singleton survives dev-server module re-evaluation: boot-time
+// hydration (hydrateThinkingBudgetConfig) and the per-request reads in base.ts must see one
+// config, and a plain module-level `let` would be reset on re-evaluation, losing the
+// hydrated value (the #5312 fix-A break). Mirrors the same globalThis pattern
+// systemPrompt.ts uses for the Global System Prompt (#2470).
 const GLOBAL_KEY = "__omniroute_thinkingBudget_config__";
 const _store = globalThis as unknown as Record<string, ThinkingBudgetConfig | undefined>;
 

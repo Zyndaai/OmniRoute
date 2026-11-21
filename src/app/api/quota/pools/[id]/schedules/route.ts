@@ -13,15 +13,12 @@
  * Part of: Quota Sharing Engine — time-aware quotas.
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { SchedulesReplaceSchema } from "@/shared/schemas/quota";
 import { getPool } from "@/lib/db/quotaPools";
 import { listSchedules, replaceSchedules } from "@/lib/db/quotaSchedules";
 import { logAuditEvent, getAuditRequestContext } from "@/lib/compliance/index";
-
-export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -32,12 +29,12 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   try {
     const { id } = await params;
     if (!(await getPool(id))) {
-      return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
-    return NextResponse.json({ schedules: await listSchedules(id) });
+    return Response.json({ schedules: await listSchedules(id) });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list schedules";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -48,13 +45,13 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
   try {
     const { id } = await params;
     if (!(await getPool(id))) {
-      return NextResponse.json(buildErrorBody(404, "Pool not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Pool not found"), { status: 404 });
     }
 
     const body = await request.json().catch(() => null);
     const parsed = SchedulesReplaceSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     const schedules = await replaceSchedules(id, parsed.data.schedules);
@@ -68,9 +65,9 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
       requestId: ctx.requestId,
     });
 
-    return NextResponse.json({ schedules });
+    return Response.json({ schedules });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to update schedules";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

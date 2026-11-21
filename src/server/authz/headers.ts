@@ -5,7 +5,7 @@
  * auth decision. Route handlers and downstream services read them through
  * the assertAuth() helper instead of re-running auth logic.
  *
- * All header names are lowercase to match Next.js / fetch semantics.
+ * All header names are lowercase to match fetch / Node header semantics.
  *
  * IMPORTANT: these headers are stripped from incoming client requests
  * before classification (see pipeline.ts) so a remote caller cannot
@@ -35,8 +35,8 @@ export const CLI_TOKEN_HEADER = "x-omniroute-cli-token";
 export const BOOTSTRAP_TOKEN_HEADER = "x-omniroute-bootstrap-token";
 
 /**
- * The real TCP peer IP, stamped by the custom Node server BEFORE Next runs
- * (scripts/dev/peer-stamp.mjs), formatted as `<token>|<ip>`. The middleware has
+ * The real TCP peer IP, stamped by the launcher before the app sees the request
+ * (scripts/dev/peer-stamp.mjs), formatted as `<token>|<ip>`. The fetch pipeline has
  * no socket, so this is the only trustworthy locality signal — but ONLY when the
  * token matches this process's OMNIROUTE_PEER_STAMP_TOKEN (see
  * policies/management.ts → resolveStampedPeer). Any client-supplied value is

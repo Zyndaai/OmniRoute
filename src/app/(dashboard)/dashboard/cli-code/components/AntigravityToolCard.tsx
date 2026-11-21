@@ -1,11 +1,9 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, Badge, Modal, Input, ModelSelectModal } from "@/shared/components";
 import Select from "@/shared/components/Select";
 import { MITM_TOOL_HOSTS } from "@/shared/constants/mitmToolHosts";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { CANONICAL_EFFORT_VALUES } from "@/shared/reasoning/effortStandardization";

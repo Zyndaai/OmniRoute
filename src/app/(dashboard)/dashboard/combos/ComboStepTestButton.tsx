@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useSyncExternalStore } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Icon } from "@/shared/components";
 import { getI18nOrFallback } from "./comboPageHelpers";
 import {

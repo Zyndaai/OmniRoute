@@ -1,7 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import Select from "@/shared/components/Select";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -461,6 +460,7 @@ export default function RouteExplainabilityTab({
   const t = useTranslations("analytics") as AnalyticsTranslator;
   const nodeMap = useProviderNodeMap();
   const [logs, setLogs] = useState<CallLogOption[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState(initialRequestId);
   const [explanation, setExplanation] = useState<RouteExplainabilityResponse | null>(null);
   const [logsLoading, setLogsLoading] = useState(true);
@@ -539,17 +539,22 @@ export default function RouteExplainabilityTab({
   }, [fetchExplanation, selectedId]);
 
   useEffect(() => {
-    if (!selectedId || typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (
-      url.searchParams.get("tab") === "route-trace" ||
-      url.searchParams.get("tab") === "route-explain"
-    ) {
-      url.searchParams.set("tab", "route-trace");
-      url.searchParams.set("id", selectedId);
-      window.history.replaceState(null, "", url.toString());
-    }
-  }, [selectedId]);
+    if (!selectedId) return;
+    const tab = searchParams.get("tab");
+    if (tab !== "route-trace" && tab !== "route-explain") return;
+    // Skip when the URL already says so: every replace yields a new `searchParams`, which
+    // would otherwise re-run this effect forever.
+    if (tab === "route-trace" && searchParams.get("id") === selectedId) return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("tab", "route-trace");
+        next.set("id", selectedId);
+        return next;
+      },
+      { replace: true, preventScrollReset: true }
+    );
+  }, [selectedId, searchParams, setSearchParams]);
 
   const selectedLog = useMemo(
     () => logs.find((log) => log.id === selectedId) || null,

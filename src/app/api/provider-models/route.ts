@@ -38,7 +38,6 @@ import {
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getRegisteredEndpointAdapterStatuses } from "@/lib/providerModels/endpointAdapterAvailability";
 import { isHiddenForModality } from "@/shared/utils/modelVisibility";
-export const dynamic = "force-dynamic";
 import { providerModelMutationSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 

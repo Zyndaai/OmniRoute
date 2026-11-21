@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server";
 import { parseIntegerQueryParam } from "@/lib/api/queryIntegerParam";
-export const dynamic = "force-dynamic";
 import { listBatches } from "@/lib/db/batches";
 import { getApiKeyRequestScope, resolveListScope } from "@/app/api/v1/_helpers/apiKeyScope";
 
@@ -22,9 +20,9 @@ export async function GET(request: Request) {
     const limit = parsedLimit.value;
     const ownerFilter = listScope.mode === "api_key" ? listScope.apiKeyId : undefined;
     const batches = await listBatches(ownerFilter, limit);
-    return NextResponse.json({ batches });
+    return Response.json({ batches });
   } catch (error) {
     console.log("Error fetching batches:", error);
-    return NextResponse.json({ error: "Failed to fetch batches" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch batches" }, { status: 500 });
   }
 }

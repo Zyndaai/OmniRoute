@@ -10,7 +10,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 // ── S2: agent-card route tests (no heavy mocking needed) ──────────────
 
@@ -33,7 +32,7 @@ describe("S2 — agent-card topology sanitisation", () => {
     const mod = await import("../../src/app/.well-known/agent-card.json/route.ts");
     const request = new Request(
       "https://gateway.example.com/.well-known/agent-card.json"
-    ) as unknown as NextRequest;
+    ) as unknown as Request;
     Object.defineProperty(request, "nextUrl", {
       value: new URL("https://gateway.example.com/.well-known/agent-card.json"),
       configurable: true,
@@ -63,7 +62,7 @@ describe("S2 — agent-card topology sanitisation", () => {
     const mod = await import("../../src/app/.well-known/agent-card.json/route.ts");
     const request = new Request(
       "http://localhost:20128/.well-known/agent-card.json"
-    ) as unknown as NextRequest;
+    ) as unknown as Request;
     Object.defineProperty(request, "nextUrl", {
       value: new URL("http://localhost:20128/.well-known/agent-card.json"),
       configurable: true,
@@ -84,7 +83,7 @@ describe("S2 — agent-card topology sanitisation", () => {
     const mod = await import("../../src/app/.well-known/agent.json/route.ts");
     const request = new Request(
       "https://gateway.example.com/.well-known/agent.json"
-    ) as unknown as NextRequest;
+    ) as unknown as Request;
     Object.defineProperty(request, "nextUrl", {
       value: new URL("https://gateway.example.com/.well-known/agent.json"),
       configurable: true,
@@ -255,7 +254,7 @@ describe("S1 — login rate-limit key uses anti-spoofed peer IP", () => {
           "x-forwarded-for": i === 0 ? FORGED_XFF : `10.0.0.${i}, 172.16.0.1`,
         },
         body: JSON.stringify({ password: "wrong-password" }),
-      }) as unknown as NextRequest;
+      }) as unknown as Request;
       Object.defineProperty(request, "nextUrl", {
         value: new URL("http://localhost:20128/api/auth/login"),
         configurable: true,
@@ -305,7 +304,7 @@ describe("S1 — login rate-limit key uses anti-spoofed peer IP", () => {
           "x-forwarded-for": REAL_IP,
         },
         body: JSON.stringify({ password: "wrong-password" }),
-      }) as unknown as NextRequest;
+      }) as unknown as Request;
       Object.defineProperty(request, "nextUrl", {
         value: new URL("http://localhost:20128/api/auth/login"),
         configurable: true,
@@ -342,7 +341,7 @@ describe("S1 — login rate-limit key uses anti-spoofed peer IP", () => {
           "x-forwarded-for": REQUEST_IP,
         },
         body: JSON.stringify({ password: "wrong-password" }),
-      }) as unknown as NextRequest;
+      }) as unknown as Request;
       Object.defineProperty(request, "nextUrl", {
         value: new URL("http://localhost:20128/api/auth/login"),
         configurable: true,
@@ -374,7 +373,7 @@ describe("S1 — login rate-limit key uses anti-spoofed peer IP", () => {
           "x-omniroute-trusted-peer-ip": "203.0.113.99",
         },
         body: JSON.stringify({ password: "wrong-password" }),
-      }) as unknown as NextRequest;
+      }) as unknown as Request;
       Object.defineProperty(request, "nextUrl", {
         value: new URL("http://localhost:20128/api/auth/login"),
         configurable: true,

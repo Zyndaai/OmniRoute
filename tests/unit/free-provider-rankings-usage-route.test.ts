@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-rankings-usage-route-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -22,8 +21,8 @@ const core = await import("../../src/lib/db/core.ts");
 const route = await import("../../src/app/api/free-provider-rankings/route.ts");
 const { getTestBackend } = await import("../helpers/postgres.ts");
 
-function get(query: string): NextRequest {
-  return new Request(`http://localhost/api/free-provider-rankings${query}`) as NextRequest;
+function get(query: string): Request {
+  return new Request(`http://localhost/api/free-provider-rankings${query}`) as Request;
 }
 
 test.after(async () => {

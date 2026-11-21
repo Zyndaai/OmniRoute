@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import React from "react";
 import { renderToString } from "react-dom/server";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 
 const { CompressionPipelineEditor } =
   await import("../../../src/shared/components/compression/CompressionPipelineEditor.tsx");
@@ -23,7 +23,7 @@ const ID_PREFIX = "ssr-";
 function renderOnServer(element: React.ReactElement) {
   return renderToString(
     React.createElement(
-      NextIntlClientProvider,
+      IntlProvider,
       { locale: "en", timeZone: "UTC", messages: enMessages },
       element
     ),

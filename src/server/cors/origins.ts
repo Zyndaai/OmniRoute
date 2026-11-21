@@ -142,9 +142,10 @@ export function getCorsStatus(): CorsStatus {
  * the echo/wildcard stays safe.
  *
  * On that same `relaxForTokenAuth` surface, also appends `Vary: Accept-Encoding`
- * to every response with a body (RFC 9110 §12.5.5, issue #6737) — Next's built-in
- * compression middleware only appends it conditionally, so shared caches can't
- * otherwise reliably tell compressed vs uncompressed variants apart.
+ * to every response with a body (RFC 9110 §12.5.5, issue #6737) — the compression
+ * middleware (`src/server/http/compression.ts`) only appends it to the responses it
+ * considers compressing, so shared caches can't otherwise reliably tell compressed vs
+ * uncompressed variants apart.
  */
 function requestCarriesTokenOrPreflight(request: Request): boolean {
   // Preflight (OPTIONS) never carries the Authorization / x-api-key header, so it
@@ -189,12 +190,12 @@ export function applyCorsHeaders(
     response.headers.append("Vary", "Origin");
   }
   // RFC 9110 §12.5.5 (issue #6737): the token-authenticated /v1*/v1beta* surface
-  // (relaxForTokenAuth) negotiates content-encoding via Next's built-in
-  // compression middleware, which only appends `Vary: Accept-Encoding`
-  // conditionally (after its own content-type/threshold filter) — so shared
-  // caches (CDNs/proxies) can't reliably tell compressed vs uncompressed variants
-  // apart. Stamp it explicitly here, at the same chokepoint that already appends
-  // `Vary: Origin`, on every relaxed-CORS response with a body.
+  // (relaxForTokenAuth) negotiates content-encoding through the compression
+  // middleware (src/server/http/compression.ts), which appends `Vary: Accept-Encoding`
+  // only when its filter accepts the response (compressible, not streamed, no
+  // `no-transform`) — so shared caches (CDNs/proxies) can't reliably tell compressed
+  // vs uncompressed variants apart. Stamp it explicitly here, at the same chokepoint
+  // that already appends `Vary: Origin`, on every relaxed-CORS response with a body.
   if (relaxForTokenAuth && response.status !== 204) {
     response.headers.append("Vary", "Accept-Encoding");
   }
@@ -220,9 +221,10 @@ export function applyCorsHeaders(
  *
  * Returns the extra headers for that 401: the caller's `Origin` plus
  * `Vary: Origin`, only when the request carries a token credential. Never
- * paired with `Access-Control-Allow-Credentials`. When the middleware already
- * set `Access-Control-Allow-Origin` (allowlisted origin), Next.js keeps the
- * middleware value and does not duplicate the header.
+ * paired with `Access-Control-Allow-Credentials`. The authz pipeline only adds the
+ * headers a route did not set (`mergeResponseHeaders` in `../authz/pipeline.ts`), so
+ * the header is never duplicated; for an allowlisted origin both values are the
+ * request's `Origin`.
  */
 export function credentialRejectionCorsHeaders(request: Request): Record<string, string> {
   const requestOrigin = request.headers.get("origin");

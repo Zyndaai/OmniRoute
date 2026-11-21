@@ -21,7 +21,7 @@ const logsMessages: Record<string, string> = {
   tokens: "tokens",
 };
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace: string) => {
     namespacesSeen.push(namespace);
     return (key: string) => {

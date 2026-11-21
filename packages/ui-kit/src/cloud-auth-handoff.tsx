@@ -1,5 +1,3 @@
-"use client";
-
 import { ArrowLeft, ArrowRight, Check, Cloud, LockKeyhole, ShieldCheck } from "lucide-react";
 import { BrandLoader } from "./brand-loader";
 import { Button } from "./button";

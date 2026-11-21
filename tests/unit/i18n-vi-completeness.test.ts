@@ -73,7 +73,7 @@ test("no-auth provider controls keep locale translators unambiguous", () => {
     "utf8"
   );
 
-  assert.equal(source.match(/import \{ useTranslations \} from "next-intl";/g)?.length, 1);
+  assert.equal(source.match(/import \{ useTranslations \} from "use-intl";/g)?.length, 1);
   assert.match(source, /const noAuthT = useTranslations\("noAuthProvider"\);/);
   assert.match(source, /const t = useTranslations\("providers"\);/);
 });

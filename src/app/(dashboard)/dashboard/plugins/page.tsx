@@ -1,12 +1,10 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card, Button, EmptyState } from "@/shared/components";
 import Badge from "@/shared/components/Badge";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 interface PluginInfo {
   name: string;

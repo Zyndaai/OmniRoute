@@ -1,9 +1,7 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import { Card, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { NumberField } from "./ResilienceFields";
 
 type QuotaPreflightSettings = {

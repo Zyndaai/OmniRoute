@@ -13,9 +13,10 @@ import type { SearchProviderCatalogItem } from "../../../src/shared/schemas/sear
 // previous `(key) => key` mock rendered as the raw key, never matching this file's
 // literal-text assertions.
 
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) =>
-    React.createElement("a", { href, ...props }, children),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) =>
+    React.createElement("a", { href: to, ...props }, children),
 }));
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

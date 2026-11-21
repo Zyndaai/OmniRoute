@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, type JSX } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import {
   Table,

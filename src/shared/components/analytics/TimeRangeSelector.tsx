@@ -1,5 +1,3 @@
-"use client";
-
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import type { UtilizationTimeRange } from "@/shared/types/utilization";
 

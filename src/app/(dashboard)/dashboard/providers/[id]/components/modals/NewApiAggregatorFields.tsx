@@ -1,5 +1,3 @@
-"use client";
-
 import { Input } from "@/shared/components";
 import type { ProviderMessageTranslator } from "../../providerPageHelpers";
 

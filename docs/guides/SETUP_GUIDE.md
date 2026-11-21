@@ -58,6 +58,8 @@ npm install
 PORT=20128 DASHBOARD_PORT=20129 NEXT_PUBLIC_BASE_URL=http://localhost:20129 npm run dev
 ```
 
+`npm run dev` runs `scripts/dev/run-server.mjs dev`: Vite in middleware mode with hot reload. Only `src/`, `open-sse/`, `packages/`, `docs/`, `public/`, `skills/` and `.source/` are watched, so after editing `vite.config.ts` or `.env` restart `npm run dev`. To run a production build locally, use `npm run build` followed by `npm start` (`run-server.mjs start`, which needs `.build/app/server/index.js`).
+
 > **Windows note:** By default, OmniRoute uses `%APPDATA%\omniroute` when the legacy `%USERPROFILE%\.omniroute` directory is not present. Set `DATA_DIR` to choose a different data-directory location.
 
 > **Note:** `npm install` auto-generates `.env` from `.env.example` on first run. Subsequent installs will not overwrite an existing `.env`, so customizations are preserved. To re-seed, delete `.env` before re-running.
@@ -349,22 +351,18 @@ do_build() {
 	esac
 
 	NODE_ENV=development npm ci --ignore-scripts
-	npm run build
-	cp -r .next/static .next/standalone/.next/static
-	[ -d public ] && cp -r public .next/standalone/public || true
 
 	local _node_gyp=/usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js
 	(cd node_modules/better-sqlite3 && node "$_node_gyp" rebuild --arch="$_gyp_arch")
 
-	local _bs3_release=.next/standalone/node_modules/better-sqlite3/build/Release
-	mkdir -p "$_bs3_release"
-	cp node_modules/better-sqlite3/build/Release/better_sqlite3.node "$_bs3_release/"
+	# React Router + Vite build into .build/app (client/, server/, app-root/)
+	npm run build
 
-	rm -rf .next/standalone/node_modules/@img
+	# Worker bundles that the server starts by file path go to their fixed locations
+	cp -R .build/app/app-root/. ./
+	rm -rf .build/app/app-root
 
-	for _mod in pino-abstract-transport split2 process-warning; do
-		cp -r "node_modules/$_mod" .next/standalone/node_modules/
-	done
+	npm prune --omit=dev --ignore-scripts
 }
 
 do_check() {
@@ -372,15 +370,10 @@ do_check() {
 }
 
 do_install() {
-	vmkdir usr/lib/omniroute/.next
-	vcopy .next/standalone/. usr/lib/omniroute/.next/standalone
-
-	for _d in \
-		.next/standalone/.next/server/app/dashboard \
-		.next/standalone/.next/server/app/dashboard/settings \
-		.next/standalone/.next/server/app/dashboard/providers; do
-		touch "${DESTDIR}/usr/lib/omniroute/${_d}/.keep"
-	done
+	# The whole application directory: the launcher reads migrations, docs and
+	# public files relative to the app root, next to .build/app and node_modules
+	vmkdir usr/lib/omniroute
+	vcopy ./. usr/lib/omniroute
 
 	cat > "${WRKDIR}/omniroute" <<'EOF'
 #!/bin/sh
@@ -388,7 +381,7 @@ export PORT="${PORT:-20128}"
 export DATA_DIR="${DATA_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/omniroute}"
 export APP_LOG_TO_FILE="${APP_LOG_TO_FILE:-false}"
 mkdir -p "${DATA_DIR}"
-exec node /usr/lib/omniroute/.next/standalone/server.js "$@"
+exec node /usr/lib/omniroute/scripts/dev/run-server.mjs start
 EOF
 	vbin "${WRKDIR}/omniroute"
 }

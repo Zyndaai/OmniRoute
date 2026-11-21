@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";

@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useConnectionDeleteConfirm — Issue #7361.
  *
@@ -11,7 +9,7 @@
  */
 
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { providerText } from "../providerPageHelpers";
 
 export interface ConnectionDeleteConfirmTarget {

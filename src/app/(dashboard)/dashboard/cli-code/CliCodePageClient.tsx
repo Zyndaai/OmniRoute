@@ -1,9 +1,7 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
-import Link from "next/link";
+import { Link } from "react-router";
 import Icon from "@/shared/components/Icon";
 import { Button, CardSkeleton, Input } from "@/shared/components";
 import Select from "@/shared/components/Select";
@@ -217,7 +215,7 @@ export default function CliCodePageClient({
               {tCommon("detail.noActiveProvidersDesc")}
             </p>
             <Link
-              href="/dashboard/providers"
+              to="/dashboard/providers"
               className="inline-flex items-center gap-1 mt-2 text-xs text-primary font-medium hover:underline"
             >
               {tCommon("detail.openProviders")}

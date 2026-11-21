@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getModelAliases, setModelAlias, getProviderConnections } from "@/models";
 import { AI_MODELS, PROVIDER_ID_TO_ALIAS } from "@/shared/constants/models";
@@ -72,7 +71,7 @@ export async function handleGetModels(request: Request, dependencies: GetModelsD
       withLimits: searchParams.get("withLimits") ?? undefined,
     });
     if (isValidationFailure(query)) {
-      return NextResponse.json({ error: query.error }, { status: 400 });
+      return Response.json({ error: query.error }, { status: 400 });
     }
     const { withLimits } = query.data;
 
@@ -227,10 +226,10 @@ export async function handleGetModels(request: Request, dependencies: GetModelsD
       };
     }));
 
-    return NextResponse.json({ models });
+    return Response.json({ models });
   } catch (error) {
     console.log("Error fetching models:", error);
-    return NextResponse.json({ error: "Failed to fetch models" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch models" }, { status: 500 });
   }
 }
 
@@ -244,7 +243,7 @@ export async function PUT(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -258,7 +257,7 @@ export async function PUT(request) {
   try {
     const validation = validateBody(updateModelAliasSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { model, alias } = validation.data;
 
@@ -270,15 +269,15 @@ export async function PUT(request) {
     );
 
     if (existingModel) {
-      return NextResponse.json({ error: "Alias already in use" }, { status: 400 });
+      return Response.json({ error: "Alias already in use" }, { status: 400 });
     }
 
     // Update alias
     await setModelAlias(model, alias);
 
-    return NextResponse.json({ success: true, model, alias });
+    return Response.json({ success: true, model, alias });
   } catch (error) {
     console.log("Error updating alias:", error);
-    return NextResponse.json({ error: "Failed to update alias" }, { status: 500 });
+    return Response.json({ error: "Failed to update alias" }, { status: 500 });
   }
 }

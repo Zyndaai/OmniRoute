@@ -7,20 +7,17 @@
  * visits. The Graph client secret is never included.
  */
 
-import { NextResponse } from "next/server";
 import { entraIssuer, getEntraConfig } from "@/server/authz/entra/config";
-
-export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     const config = await getEntraConfig();
 
     if (!config.enabled) {
-      return NextResponse.json({ enabled: false }, { status: 200 });
+      return Response.json({ enabled: false }, { status: 200 });
     }
 
-    return NextResponse.json({
+    return Response.json({
       enabled: true,
       authorityHost: config.authorityHost,
       tenantId: config.tenantId,
@@ -30,6 +27,6 @@ export async function GET() {
       scope: `${config.audience}/.default`,
     });
   } catch {
-    return NextResponse.json({ enabled: false }, { status: 200 });
+    return Response.json({ enabled: false }, { status: 200 });
   }
 }

@@ -1,6 +1,6 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import AccessTokensTab from "@/app/(dashboard)/dashboard/settings/components/AccessTokensTab";
 import ar from "@/i18n/messages/ar.json";
@@ -19,7 +19,7 @@ const token = {
   revokedAt: null,
 };
 // Exercise the real catalog and formatter, not the global key-only test mock.
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 
 // The kit Table measures itself with ResizeObserver (persistent scrollbar); jsdom lacks it.
 beforeAll(() => {
@@ -35,7 +35,7 @@ const reply = (data: unknown, status = 200) => new Response(JSON.stringify(data)
 const fetchMock = vi.fn<typeof fetch>();
 function mount() {
   return render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale="ar"
       timeZone="UTC"
       messages={{ settings: ar.settings, common: ar.common }}
@@ -44,7 +44,7 @@ function mount() {
       }}
     >
       <AccessTokensTab />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 beforeEach(() => {

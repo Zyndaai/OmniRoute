@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { compressionPreviewConfigSchema } from "@/shared/validation/compressionConfigSchemas";
@@ -224,12 +223,12 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const parsed = PreviewRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid request", details: parsed.error.issues },
       { status: 400 }
     );
@@ -334,7 +333,7 @@ export async function POST(req: Request) {
     }
     const fallbackReason = fallbackReasons[0] ?? null;
 
-    return NextResponse.json({
+    return Response.json({
       encoderComparison,
       original: originalText,
       compressed: compressedText,
@@ -374,7 +373,7 @@ export async function POST(req: Request) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/compression/preview]", msg);
-    return NextResponse.json(
+    return Response.json(
       { error: "Compression failed", details: sanitizeErrorMessage(msg) },
       { status: 500 }
     );

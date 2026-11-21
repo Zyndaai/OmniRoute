@@ -1,9 +1,6 @@
-export const runtime = "nodejs";
-
 import fs from "fs/promises";
 import path from "path";
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { toPublicSafeTunnelError } from "@/lib/api/publicSafeTunnelError";
 import { resolveApiKey } from "@/shared/services/apiKeyResolver";
@@ -181,9 +178,9 @@ export async function GET(request: Request) {
     if (searchParams.get("download") === "cert") {
       const { certPath, mode } = resolveActiveMitmCert();
       if (!(await fileExists(certPath))) {
-        return NextResponse.json({ error: activeCertMissingMessage(mode) }, { status: 404 });
+        return Response.json({ error: activeCertMissingMessage(mode) }, { status: 404 });
       }
-      return new NextResponse(await fs.readFile(certPath), {
+      return new Response(await fs.readFile(certPath), {
         headers: {
           "Content-Type": "application/x-pem-file",
           "Content-Disposition": `attachment; filename="${activeCertDownloadName(mode)}"`,
@@ -191,9 +188,9 @@ export async function GET(request: Request) {
       });
     }
 
-    return NextResponse.json(await buildMitmResponse());
+    return Response.json(await buildMitmResponse());
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(error, "Failed to load the MITM settings.", "settings/mitm GET"),
       { status: 500 }
     );
@@ -208,12 +205,12 @@ export async function PUT(request: Request) {
     const rawBody = await request.json().catch(() => ({}));
     const parsed = updateMitmSchema.safeParse(rawBody);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+      return Response.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
     const config = await readConfig();
     if (parsed.data.port !== undefined && parsed.data.port !== DEFAULT_PORT) {
-      return NextResponse.json({ error: MITM_PORT_ERROR }, { status: 400 });
+      return Response.json({ error: MITM_PORT_ERROR }, { status: 400 });
     }
 
     if (parsed.data.port !== undefined) {
@@ -233,7 +230,7 @@ export async function PUT(request: Request) {
       if (parsed.data.enabled) {
         const apiKey = await resolveApiKey(parsed.data.keyId || null, parsed.data.apiKey || null);
         if (!apiKey || (!isWin && !isRootUser && !sudoPassword)) {
-          return NextResponse.json(
+          return Response.json(
             { error: isWin ? "Missing apiKey" : "Missing apiKey or sudoPassword" },
             { status: 400 }
           );
@@ -242,16 +239,16 @@ export async function PUT(request: Request) {
         if (!isWin) setCachedPassword(sudoPassword);
       } else {
         if (!isWin && !isRootUser && !sudoPassword) {
-          return NextResponse.json({ error: "Missing sudoPassword" }, { status: 400 });
+          return Response.json({ error: "Missing sudoPassword" }, { status: 400 });
         }
         await stopMitm(sudoPassword);
         if (!isWin && parsed.data.sudoPassword) setCachedPassword(parsed.data.sudoPassword);
       }
     }
 
-    return NextResponse.json(await buildMitmResponse());
+    return Response.json(await buildMitmResponse());
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(error, "Failed to update the MITM settings.", "settings/mitm PUT"),
       { status: 500 }
     );
@@ -266,13 +263,13 @@ export async function POST(request: Request) {
     const rawBody = await request.json().catch(() => ({}));
     const parsed = regenerateSchema.safeParse(rawBody);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+      return Response.json({ error: parsed.error.flatten() }, { status: 400 });
     }
 
     const { getMitmStatus, getCachedPassword } = await import("@/mitm/manager.runtime");
     const status = await getMitmStatus();
     if (status.running) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Stop the MITM proxy before regenerating certificates" },
         { status: 409 }
       );
@@ -293,12 +290,12 @@ export async function POST(request: Request) {
       { checkCertInstalled, uninstallCert, isSudoPasswordRequired: isMitmSudoPasswordRequired }
     );
     if (isRegenerateFailure(result)) {
-      return NextResponse.json({ error: result.message }, { status: result.status });
+      return Response.json({ error: result.message }, { status: result.status });
     }
 
-    return NextResponse.json({ ...(await buildMitmResponse()), certRegeneration: result });
+    return Response.json({ ...(await buildMitmResponse()), certRegeneration: result });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(
         error,
         "Failed to regenerate the MITM certificate.",

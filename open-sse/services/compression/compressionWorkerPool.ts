@@ -67,8 +67,9 @@ function runtimeAnchors(): string[] {
 export function resolveWorkerFile(): string {
   const anchors = runtimeAnchors();
 
-  // The tracked .js file is only a Turbopack build-time placeholder in the source tree.
-  // A colocated bundle has its own ESM scope, written by colocate-standalone.mjs.
+  // The tracked .js file in the source tree is only a placeholder for the built worker.
+  // A colocated bundle has its own ESM scope (a package.json next to it), so it is only
+  // trusted when that marker exists or no .ts source is present.
   const jsRoot = firstAncestorWith(anchors, WORKER_JS_REL);
   if (
     jsRoot &&
@@ -157,8 +158,8 @@ export class CompressionWorkerPool {
   private readonly maxOldGenerationSizeMb: number;
   private readonly spawnWorker: () => Worker;
   /**
-   * Set when spawn() throws synchronously (e.g. Turbopack's moduleContext
-   * MODULE_NOT_FOUND in the standalone build). A pool that cannot create a
+   * Set when spawn() throws synchronously (e.g. MODULE_NOT_FOUND because the worker
+   * entry is missing from the built output). A pool that cannot create a
    * single worker is structurally broken — every subsequent run() fail-opens
    * immediately instead of pushing jobs into a queue that can never drain
    * (unbounded main-isolate heap leak, one full request body per job).
@@ -403,7 +404,7 @@ export function runCompressionInWorker(
   return pool.run(body, mode, options, onEngineStep);
 }
 /** Test seam: force the lazily created shared pool to use a factory that throws
- *  synchronously (Turbopack moduleContext MODULE_NOT_FOUND) or serves fake workers. */
+ *  synchronously (MODULE_NOT_FOUND) or serves fake workers. */
 export async function __setCompressionWorkerFactoryForTests(
   factory: (() => Worker) | null
 ): Promise<void> {

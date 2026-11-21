@@ -17,13 +17,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
-}));
-
-vi.mock("next/image", () => ({
-  default: () => <span data-testid="next-image" />,
 }));
 
 vi.mock("@/app/(dashboard)/dashboard/cli-code/components/CliStatusBadge", () => ({

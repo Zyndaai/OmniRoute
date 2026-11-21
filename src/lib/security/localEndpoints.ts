@@ -15,7 +15,7 @@
  * manage-scope bypass can never whitelist it.
  *
  * This function is a SECONDARY, best-effort, defense-in-depth check layered behind
- * that gate. In the Next.js runtime it is currently INERT for real requests:
+ * that gate. In the server runtime it is currently INERT for real requests:
  * `globalThis.__omniRequestHeaders` is not populated per-request, so the loopback/
  * bearer branches below never run and the function falls through to its env-gated
  * default. Do NOT rely on it as the trust boundary — keep `/api/local/*` classified

@@ -167,7 +167,7 @@ test("scanComboModelNameCollisionsAtBoot: logs a startup warning enumerating exi
     models: [{ provider: "claude", model: "claude-sonnet-4-6" }],
   });
 
-  const { scanComboModelNameCollisionsAtBoot } = await import("../../src/instrumentation-node.ts");
+  const { scanComboModelNameCollisionsAtBoot } = await import("../../src/server/boot.ts");
   const originalWarn = console.warn;
   const warnings: unknown[][] = [];
   console.warn = (...args: unknown[]) => {

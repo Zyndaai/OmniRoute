@@ -1,6 +1,4 @@
 // src/app/(dashboard)/dashboard/playground/hooks/useStructuredOutput.ts
-"use client";
-
 import { useState, useCallback } from "react";
 import { StructuredOutputSchema } from "@/shared/schemas/playground";
 

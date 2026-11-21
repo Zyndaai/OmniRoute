@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useSyncExternalStore } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Button from "@/shared/components/Button";
@@ -106,7 +104,7 @@ export default function FirstRunReadinessCard({ setupComplete }: FirstRunReadine
       }
       actions={
         <>
-          <Link href="/dashboard/onboarding" className={buttonVariants({ size: "sm" })}>
+          <Link to="/dashboard/onboarding" className={buttonVariants({ size: "sm" })}>
             {t("readinessContinue")}
           </Link>
           <Button variant="ghost" size="sm" onClick={dismiss}>

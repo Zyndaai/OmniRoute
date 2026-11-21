@@ -26,12 +26,6 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
-// Stub next/image to avoid Next.js internals in jsdom
-vi.mock("next/image", () => ({
-  default: (props: Record<string, unknown>) =>
-    React.createElement("img", { src: props.src as string, alt: props.alt as string }),
-}));
-
 // ── Import after mocks ─────────────────────────────────────────────────────
 
 const { ComboLiveStudio } = await import("@/app/(dashboard)/dashboard/combos/live/ComboLiveStudio");

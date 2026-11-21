@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { translateUsageOrFallback } from "../i18nFallback";
 import { buildSpeedLines } from "../formatters";
 import Icon from "@/shared/components/Icon";

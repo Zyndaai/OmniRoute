@@ -1,7 +1,7 @@
 /**
  * Best-effort build of the TPROXY IP_TRANSPARENT native addon (build 4e/N). It
- * runs at production-build time so assembleStandalone can copy transparent.node
- * into the standalone bundle. IP_TRANSPARENT is Linux-only and a missing toolchain
+ * runs at production-build time so build.mjs can copy transparent.node into the
+ * build output. IP_TRANSPARENT is Linux-only and a missing toolchain
  * is NOT fatal (the capture mode degrades gracefully), so the decision logic must
  * skip cleanly off-Linux / when sources are absent / when node-gyp fails. All
  * effectful seams (platform/run/exists) are injected.

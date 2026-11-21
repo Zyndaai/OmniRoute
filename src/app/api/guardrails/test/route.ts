@@ -7,7 +7,6 @@
  *
  * LOCAL_ONLY: not process-spawning; management-scoped via requireManagementAuth.
  */
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { CORS_HEADERS, handleCorsOptions } from "@/shared/utils/cors";
@@ -25,7 +24,7 @@ export async function OPTIONS() {
   return handleCorsOptions();
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -47,7 +46,7 @@ export async function POST(request: NextRequest) {
     disabledGuardrails: parsed.disabledGuardrails,
   });
 
-  return NextResponse.json(
+  return Response.json(
     { blocked: outcome.blocked, results: outcome.results, payload: outcome.payload },
     { headers: CORS_HEADERS }
   );

@@ -1,5 +1,3 @@
-"use client";
-
 import { Label } from "@omniroute/ui-kit/label";
 import InfoTooltip from "@/shared/components/InfoTooltip";
 

@@ -1,4 +1,3 @@
-"use client";
 import { useSyncExternalStore } from "react";
 
 const STORAGE_KEY = "omniroute:limits:healthLegendHidden";

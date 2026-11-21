@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   discoverRepeatedNoise,
   listRtkCommandSamples,
@@ -25,5 +24,5 @@ export async function GET(request: Request) {
   const samples = listRtkCommandSamples({ limit });
   const candidates = discoverRepeatedNoise(samples);
 
-  return NextResponse.json({ sampleCount: samples.length, candidates });
+  return Response.json({ sampleCount: samples.length, candidates });
 }

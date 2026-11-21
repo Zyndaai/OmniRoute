@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { revokeAccessToken } from "@/lib/db/accessTokens";
 
@@ -16,13 +15,10 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const { id } = await params;
   const result = await revokeAccessToken(id);
   if (result.ambiguous) {
-    return NextResponse.json(
-      { error: "Token prefix matches more than one token" },
-      { status: 409 }
-    );
+    return Response.json({ error: "Token prefix matches more than one token" }, { status: 409 });
   }
   if (!result.revoked) {
-    return NextResponse.json({ error: "Token not found" }, { status: 404 });
+    return Response.json({ error: "Token not found" }, { status: 404 });
   }
-  return NextResponse.json({ success: true, id, alreadyRevoked: result.alreadyRevoked });
+  return Response.json({ success: true, id, alreadyRevoked: result.alreadyRevoked });
 }

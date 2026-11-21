@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getCallLogFilterOptions } from "@/lib/usageDb";
 import type { CallLogFilterOptions } from "@/lib/usage/callLogFilterOptions";
@@ -36,9 +34,9 @@ export async function GET(request: Request) {
         name: typeof key.name === "string" && key.name.length > 0 ? key.name : null,
       }));
 
-    return NextResponse.json({ ...options, configuredKeys });
+    return Response.json({ ...options, configuredKeys });
   } catch (error) {
     console.error("[API ERROR] /api/usage/call-logs/filters failed:", error);
-    return NextResponse.json({ error: "Failed to fetch call log filter options" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch call log filter options" }, { status: 500 });
   }
 }

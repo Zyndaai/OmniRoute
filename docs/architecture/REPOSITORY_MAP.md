@@ -15,14 +15,14 @@ lastUpdated: 2026-06-28
 
 ```
 OmniRoute/
-├── src/                  # Next.js 16 application (UI + API routes + libs + domain + server)
+├── src/                  # React Router application (UI + API routes + libs + domain + server)
 ├── open-sse/             # Streaming engine workspace (handlers, executors, translator, MCP server)
 ├── packages/            # npm workspaces: ui-kit (vendored Keak CI UI Kit) and browser-pool
 ├── bin/                  # CLI entry point and command handlers
 ├── scripts/              # Build, check, sync, and one-off scripts
 ├── docs/                 # Public documentation (you are here)
 ├── tests/                # All test suites (unit, integration, e2e, protocol clients)
-├── public/               # Next.js static assets, PWA manifest, service worker, icons
+├── public/               # Static assets (copied into the client build), service worker, icons
 ├── config/               # Static config + quality-gate state (i18n, payloadRules, quality/)
 ├── images/               # Marketing / README image assets
 ├── @omniroute/           # Publishable companion packages (opencode-plugin, opencode-provider)
@@ -39,14 +39,14 @@ OmniRoute/
 ├── _mono_repo/           # Historic subprojects (cloud, site, vscode-extension)
 ├── _references/          # Read-only reference clones from related OSS projects
 ├── _tasks/               # Per-release task tracking files (informal)
-├── .build/ .worktrees/ dist/   # local build / git-worktree / build-output scratch (gitignored)
+├── .build/ .worktrees/ dist/   # `.build/app` = `npm run build` output (client/, server/, app-root/); git-worktree / build-output scratch (gitignored)
 ├── .issues/              # Local issue cache (gitignored)
 ├── .playwright-mcp/      # Playwright MCP test artifacts
 ├── coverage/             # c8 coverage output (gitignored)
 ├── logs/                 # Runtime logs (gitignored)
 ├── node_modules/         # Dependencies (gitignored)
 ├── package/              # npm pack staging area (build artifact)
-├── .next/                # Next.js build output (gitignored)
+├── .react-router/        # React Router generated route types (gitignored)
 └── (root files — see below)
 ```
 
@@ -70,11 +70,10 @@ OmniRoute/
 | **tsconfig.typecheck-core.json**            | Typecheck config for `src/` core                                                         |
 | **tsconfig.typecheck-noimplicit-core.json** | Strict (`noImplicitAny`) typecheck                                                       |
 | **tsconfig.tsbuildinfo**                    | TS incremental build cache (gitignored)                                                  |
-| **next.config.mjs**                         | Next.js 16 build configuration (standalone output)                                       |
-| **next-env.d.ts**                           | Next.js auto-generated env types                                                         |
+| **vite.config.ts**                          | Vite 8 config: plugins (Tailwind, Fumadocs MDX, React Router), build-time env, stubs     |
+| **react-router.config.ts**                  | React Router framework-mode config (`src/app`, base path, `.build/app` output, SSR)      |
 | **eslint.config.mjs**                       | ESLint flat config (rules per project area)                                              |
 | **prettier.config.mjs**                     | Prettier formatting rules                                                                |
-| **postcss.config.mjs**                      | PostCSS config for Tailwind/CSS pipeline                                                 |
 | **playwright.config.ts**                    | Playwright E2E test config                                                               |
 | **vitest.config.ts**                        | Vitest config (default suite)                                                            |
 | **vitest.mcp.config.ts**                    | Vitest config for MCP server / autoCombo / cache suites                                  |
@@ -109,17 +108,17 @@ OmniRoute/
 
 ---
 
-## `src/` — Next.js application
+## `src/` — React Router application
 
 ```
 src/
-├── app/                 # App Router (pages + API routes + status pages + landing)
+├── app/                 # React Router routes generated from folders (page.tsx, layout.tsx, route.ts) + root.tsx, entry.client.tsx, routes.ts
 ├── lib/                 # Core libraries / domain modules (80 subdirs + ~70 top-level files)
 ├── domain/              # Pure domain logic (policy engine, fallback, cost, lockout, comboResolver, assessment)
-├── server/              # Server-only modules (authz pipeline, cors, auth middleware) — cannot import from client
+├── server/              # Server-only modules: app.ts (Express app + boot), http/ (request pipeline), routing/ (API resource route), authz/, cors/, auth/ — `.server.ts` files are refused in the browser bundle
 ├── shared/              # Shared between server and client where safe (constants, types, validation, contracts, utils)
-├── i18n/                # next-intl config + per-locale message JSON (67 locales)
-├── middleware/          # Next.js middleware (request enrichment, locale detection)
+├── i18n/                # use-intl config + per-locale message JSON (67 locales); server side in request.server.ts
+├── middleware/          # Route-level guards (promptInjectionGuard.ts); there is no global middleware
 ├── mitm/                # MITM proxy core: cert gen/install, handlers, targets, inspector, masks, passthrough
 │   ├── handlers/        # 9 IDE-agent handler classes extending MitmHandlerBase (antigravity, kiro, copilot, codex, cursor, zed, claudeCode, openCode, trae)
 │   └── inspector/       # Traffic capture layer: buffer (in-memory ring), sseMerger, conversationNormalizer, kindDetector, contextKey, httpProxyServer, systemProxyConfig
@@ -127,13 +126,10 @@ src/
 ├── scripts/             # In-tree maintenance scripts (e.g., backfillAggregation)
 ├── sse/                 # Legacy SSE handlers/services (chat.ts, chatHelpers.ts, services/auth.ts)
 ├── store/               # Legacy in-memory store (being phased out for src/lib/db)
-├── types/               # Shared TS type files
-├── instrumentation.ts   # Next.js telemetry hook (browser + edge)
-├── instrumentation-node.ts  # Node-only instrumentation
-└── proxy.ts             # HTTP-proxy entry shim
+└── types/               # Shared TS type files
 ```
 
-### `src/app/` — App Router (Next.js 16)
+### `src/app/` — React Router routes
 
 | Path                                                                         | Purpose                                                                                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -158,8 +154,9 @@ src/
 | `app/login/`, `forgot-password/`, `forbidden/`                               | Auth-related pages                                                                                                                                                                                                                                                                                                 |
 | `app/{400,401,403,408,429,500,502,503}/`                                     | HTTP error pages                                                                                                                                                                                                                                                                                                   |
 | `app/maintenance/`, `offline/`, `status/`, `privacy/`, `terms/`, `callback/` | Static/status pages                                                                                                                                                                                                                                                                                                |
-| `app/layout.tsx`, `page.tsx`, `manifest.ts`, `globals.css`                   | Root layout, home, PWA manifest, global CSS                                                                                                                                                                                                                                                                        |
-| `app/error.tsx`, `global-error.tsx`, `not-found.tsx`, `loading.tsx`          | Error boundaries                                                                                                                                                                                                                                                                                                   |
+| `app/root.tsx`, `entry.client.tsx`, `page.tsx`, `manifest.webmanifest/route.ts`, `globals.css` | Document shell, browser entry, home, PWA manifest endpoint, global CSS                                                                                                                                                                                                                                             |
+| `app/root.tsx` (`ErrorBoundary`), `app/[...rest]/page.tsx`                   | Error boundary and the catch-all that renders the localised 404                                                                                                                                                                                                                                                    |
+| `app/routes.ts`, `app/routeConvention.ts`                                    | Route table built from the folders (`page.tsx` = page, `layout.tsx` = layout, `route.ts` = API endpoint); `[id]` → `:id`, `[...x]` → splat, `(group)` adds no URL segment, `_x` folders are skipped                                                                                                              |
 
 ### `src/lib/` — Core libraries (~50 modules)
 
@@ -336,8 +333,9 @@ open-sse/
 
 | Script                              | Purpose                                                                    |
 | ----------------------------------- | -------------------------------------------------------------------------- |
-| `run-next.mjs`                      | Dev/start runner with env hydration                                        |
-| `build-next-isolated.mjs`           | Standalone build (Next.js 16 standalone)                                   |
+| `dev/run-server.mjs`                | HTTP launcher: `dev` (Vite middleware mode) or `start` (built bundle)      |
+| `dev/run-standalone.mjs`            | PM2 / Docker wrapper: env bootstrap and heap sizing around the launcher    |
+| `build/build.mjs`                   | `npm run build`: React Router + Vite build, `sw.js` stamp, worker bundles  |
 | `prepublish.ts`                     | Package preparation before `npm pack`                                      |
 | `postinstall.mjs`                   | Auto-create `.env` from `.env.example` on first install                    |
 | `sync-env.mjs`                      | Re-sync `.env` keys with `.env.example`                                    |
@@ -363,7 +361,6 @@ open-sse/
 | `validate-pack-artifact.ts`         | Validate npm pack output                                                   |
 | `responses-ws-proxy.mjs`            | WebSocket bridge for Codex Responses API                                   |
 | `v1-ws-bridge.mjs`                  | WebSocket bridge for `/api/v1/ws` endpoint                                 |
-| `standalone-server-ws.mjs`          | Standalone WS server runner                                                |
 | `system-info.mjs`                   | Print system/runtime info for support                                      |
 | `healthcheck.mjs`                   | One-shot health check (used by Docker HEALTHCHECK)                         |
 | `uninstall.mjs`                     | Clean uninstall script                                                     |
@@ -553,7 +550,8 @@ Not included in `npm pack` output. See `.npmignore`.
 | Path                   | Purpose                       |
 | ---------------------- | ----------------------------- |
 | `node_modules/`        | npm dependencies              |
-| `.next/`               | Next.js build output          |
+| `.build/app/`          | `npm run build` output        |
+| `.react-router/`       | React Router generated types  |
 | `coverage/`            | c8 coverage reports           |
 | `logs/`                | Runtime logs                  |
 | `package/`             | npm pack staging              |

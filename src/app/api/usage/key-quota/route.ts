@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   getKeyQuotaStatus,
@@ -23,13 +22,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const apiKeyId = searchParams.get("apiKeyId");
     if (!apiKeyId) {
-      return NextResponse.json({ error: "apiKeyId query param is required" }, { status: 400 });
+      return Response.json({ error: "apiKeyId query param is required" }, { status: 400 });
     }
     const status = await getKeyQuotaStatus(apiKeyId);
-    return NextResponse.json(status);
+    return Response.json(status);
   } catch (error) {
     console.error("Error fetching key quota:", error);
-    return NextResponse.json({ error: "Failed to fetch key quota" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch key quota" }, { status: 500 });
   }
 }
 
@@ -41,7 +40,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -55,14 +54,14 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(setKeyQuotaSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { apiKeyId, tpmLimit, rpmLimit, monthlyAmountUsd } = validation.data;
     const limits = await upsertKeyQuotaLimits(apiKeyId, { tpmLimit, rpmLimit, monthlyAmountUsd });
-    return NextResponse.json({ success: true, apiKeyId, limits });
+    return Response.json({ success: true, apiKeyId, limits });
   } catch (error) {
     console.error("Error setting key quota:", error);
-    return NextResponse.json({ error: "Failed to set key quota" }, { status: 500 });
+    return Response.json({ error: "Failed to set key quota" }, { status: 500 });
   }
 }
 
@@ -77,12 +76,12 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const apiKeyId = searchParams.get("apiKeyId");
     if (!apiKeyId) {
-      return NextResponse.json({ error: "apiKeyId query param is required" }, { status: 400 });
+      return Response.json({ error: "apiKeyId query param is required" }, { status: 400 });
     }
     await clearKeyQuotaLimits(apiKeyId);
-    return NextResponse.json({ success: true, apiKeyId });
+    return Response.json({ success: true, apiKeyId });
   } catch (error) {
     console.error("Error clearing key quota:", error);
-    return NextResponse.json({ error: "Failed to clear key quota" }, { status: 500 });
+    return Response.json({ error: "Failed to clear key quota" }, { status: 500 });
   }
 }

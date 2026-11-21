@@ -1,6 +1,4 @@
-"use client";
-
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import Badge from "@/shared/components/Badge";
 

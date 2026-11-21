@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
 import { getEvalScorecard, listEvalRuns } from "@/lib/db/evals";
 import { getApiKeys } from "@/lib/db/apiKeys";
 import { listSuites, runSuite, createScorecard } from "@/lib/evals/evalRunner";
@@ -22,7 +21,7 @@ export async function GET(request: Request) {
       getApiKeys(),
     ]);
 
-    return NextResponse.json({
+    return Response.json({
       suites,
       recentRuns,
       scorecard,
@@ -34,7 +33,7 @@ export async function GET(request: Request) {
       })),
     });
   } catch (error: unknown) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -46,7 +45,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -60,14 +59,14 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(evalRunSuiteSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const { suiteId, outputs, target, compareTarget, apiKeyId } = validation.data;
 
     if (outputs && Object.keys(outputs).length > 0) {
       const result = await runSuite(suiteId, outputs);
-      return NextResponse.json(result);
+      return Response.json(result);
     }
 
     const targetsToRun = [target || { type: "suite-default" as const, id: null }];
@@ -99,7 +98,7 @@ export async function POST(request: Request) {
           )
         : null;
 
-    return NextResponse.json({
+    return Response.json({
       suiteId,
       runGroupId,
       runs,
@@ -108,6 +107,6 @@ export async function POST(request: Request) {
       historyScorecard: await getEvalScorecard({ limit: 50 }),
     });
   } catch (error: unknown) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

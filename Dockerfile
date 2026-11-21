@@ -59,9 +59,8 @@ RUN --mount=type=cache,id=omniroute-apt-cache,target=/var/cache/apt,sharing=lock
 #
 # Deleting npm from the runner stages is NOT an option: the application shells
 # out to npm at runtime (src/lib/services/installers/utils.ts::runNpm for the
-# embedded services, src/lib/system/{autoUpdate,globalPackagePath}.ts,
-# src/app/api/system/version). The previous version of this comment claimed the
-# opposite; it was wrong.
+# embedded services). The previous version of this comment claimed the opposite;
+# it was wrong.
 #
 # The overlay is semver-compatible with the ranges npm's own tree declares
 # (minimatch → brace-expansion ^5.0.5, socks → ip-address ^10.1.1, node-gyp →
@@ -87,12 +86,6 @@ RUN set -eux; \
 # ── Builder ────────────────────────────────────────────────────────────────
 FROM base AS builder
 ARG NODE_DIST_URL=
-
-# No telemetry, anywhere. Disable Next.js's anonymous build-time telemetry
-# (it otherwise pings Vercel during `next build`). Set on the builder stage so
-# every image build is silent; the runtime never builds, so this covers the
-# only phase Next telemetry can fire.
-ENV NEXT_TELEMETRY_DISABLED=1
 
 # Build tools for native module compilation
 # apt-get update needed here because base's rm -rf clears the shared cache
@@ -141,41 +134,15 @@ RUN --mount=type=cache,id=omniroute-npm-cache,target=/root/.npm \
   && node -e "require('better-sqlite3')(':memory:').close()" \
   && node -e "const wreq=require('wreq-js'); if(typeof wreq.createTransport!=='function') process.exit(1)"
 
-# Bundler for the image build. The DOCKERFILE default is webpack
-# (OMNIROUTE_USE_TURBOPACK=0), deliberately different from the repo's code
-# default for local dev and non-Docker builds (Turbopack, =1 — read by
-# scripts/dev/run-next.mjs and scripts/build/build-next-isolated.mjs). A bare
-# `docker build .` with no build args is what one-click hosts (Railway and
-# similar) and ad-hoc self-hosters run, usually on memory-capped builders, and
-# Turbopack is the bundler that gets OOM-killed silently there (see the ARG+ENV
-# note below). The official images are unaffected: docker-publish.yml already
-# pins OMNIROUTE_USE_TURBOPACK=0 explicitly. On a big builder, opt back into
-# Turbopack with `--build-arg OMNIROUTE_USE_TURBOPACK=1`: the v3.8.27-era
-# TurbopackInternalError panic ("entered unreachable code: there must be a path
-# to a root" in ImportTracer::get_traces) no longer reproduces on Next 16.2.9 —
-# validated 2026-07-05 with clean amd64 (12min14s, image smoke-tested:
-# /api/monitoring/health 200) and arm64 (qemu, exit 0, zero panic strings)
-# builds, and Turbopack cut the bare build from 17min to 9min on the same
-# 32-core box. See docs/ops/QUALITY_GATE_PLAYBOOK.md Parte 6.
-#
-# Declared as ARG+ENV, not a bare ENV: a bare ENV shadows any same-named ARG for
-# the rest of the stage, so `--build-arg OMNIROUTE_USE_TURBOPACK=0` was silently
-# ignored and the webpack escape hatch only ever worked via `-e` at runtime,
-# never at build time. Turbopack compiles in native Rust memory that lives outside the
-# V8 heap, so OMNIROUTE_BUILD_MEMORY_MB cannot bound it and a memory-constrained
-# build host gets SIGKILLed by the cgroup OOM killer with no error message.
-ARG OMNIROUTE_USE_TURBOPACK=0
-ENV OMNIROUTE_USE_TURBOPACK="${OMNIROUTE_USE_TURBOPACK}"
-
-# Next.js basePath is fixed at build time; pass OMNIROUTE_BASE_PATH here when the
-# image should serve under a reverse-proxy subpath without a runtime patch.
+# The base path (reverse-proxy subpath) is fixed at build time: it becomes the router's
+# `basename` and the asset URL prefix. An image serves only the subpath it was built for;
+# the entrypoint warns when the container is started with a different one.
 ARG OMNIROUTE_BASE_PATH=""
 ENV OMNIROUTE_BASE_PATH=$OMNIROUTE_BASE_PATH
 
-# #10273: the dashboard's `frame-ancestors` policy is compiled into the route
-# manifest by next.config.mjs (via scripts/build/dashboardEmbed.mjs), so it is
-# fixed when the image is built and cannot be flipped with `-e` on a running
-# container. Build with `--build-arg DASHBOARD_ALLOW_EMBED=vscode` to produce an
+# #10273: the dashboard's `frame-ancestors` policy is inlined into the server bundle at
+# build time (vite.config.ts, src/server/http/securityHeaders.ts), so it cannot be
+# flipped with `-e` on a running container. Build with `--build-arg DASHBOARD_ALLOW_EMBED=vscode` to produce an
 # image whose HTML pages may be framed by the VS Code Simple Browser
 # (OmniCopilot's `dashboardOpen: "editor"`). Unset — the default — keeps every
 # route on `frame-ancestors 'none'` + X-Frame-Options: DENY. Builder-stage only:
@@ -189,66 +156,26 @@ ENV DASHBOARD_ALLOW_EMBED=$DASHBOARD_ALLOW_EMBED
 # Docker-only: npm/Electron/VPS builds must bundle the REAL manager (#6344).
 ENV OMNIROUTE_MITM_STUB=1
 
-# Raise the V8 heap ceiling for the build. The webpack production optimization
-# pass needs more than V8's default ceiling (~2 GB) for a codebase this size; a
-# memory-constrained Docker build otherwise dies with "FATAL ERROR: ... JavaScript
-# heap out of memory" during the builder stage (#4076). Turbopack's compile is
-# native (Rust) and less V8-heap-bound, but the prerender/export phase still runs
-# on V8, so keep the ceiling. NODE_OPTIONS propagates to the spawned `next build`
-# child (build-next-isolated.mjs → resolveNextBuildEnv spreads process.env).
-# Build-only; the runtime heap is set separately on the runner stage
-# (OMNIROUTE_MEMORY_MB). Override: `--build-arg OMNIROUTE_BUILD_MEMORY_MB=6144`.
-# Default raised 4096 → 6144 (#10060): the Next 16 production pass on a codebase
-# this size intermittently OOMs a build worker at 4 GB on memory-tight hosts.
+# V8 heap ceiling for the build (scripts/build/build.mjs passes it to `react-router build`
+# unless NODE_OPTIONS already sets one). Build-only; the runtime heap is set on the runner
+# stage (OMNIROUTE_MEMORY_MB).
 ARG OMNIROUTE_BUILD_MEMORY_MB=6144
-ENV NODE_OPTIONS="--max-old-space-size=${OMNIROUTE_BUILD_MEMORY_MB}"
-
-# Cap Next.js build worker pools. Next 16 defaults to `os.cpus().length - 1`
-# workers for page-data collection (31 on a 32-core builder); on memory-tight
-# hosts 31 workers + webpack's multi-GB heap blow past RAM and a worker dies
-# with SIGSEGV at teardown ("worker exited with code: null and signal: SIGSEGV"),
-# silently leaving no standalone bundle. Next derives the worker count from
-# CIRCLE_NODE_TOTAL (workers = N-1). (#10060)
-#
-# Lowered 8 → 3 (7 workers → 2) in #11419, then 3 → 2 (2 workers → 1) in #7518.
-# Every page-data worker inherits NODE_OPTIONS above, so the ceiling is per
-# PROCESS, not per build: 7 workers on a 16 GB GitHub runner (ubuntu-24.04 /
-# ubuntu-24.04-arm, 4 vCPU) exhausted the host and buildkit failed the whole
-# step with `ResourceExhausted: ... cannot allocate memory`. The compile phase
-# always finished ("✓ Compiled successfully in 4.2min"); the kernel killed the
-# build right after "Collecting page data using N workers".
-#
-# #11419's first fix (8 → 3) modeled the per-worker peak as an INFERENCE
-# (2560 MB, guessed from "7 workers didn't fit") and assumed the parent
-# process's RSS tracked the V8 heap ceiling. Both assumptions were wrong: a
-# live VPS reproduction (issue #7518, dmesg OOM-killer report) measured the
-# real per-process RSS directly at ~4.5 GB, independent of the NODE_OPTIONS
-# heap flag (Turbopack itself is native/Rust, outside the V8 heap) — and it
-# applies to the parent process too, not just workers. 2 workers (3 processes
-# × 4.5 GB = 13.5 GB) still didn't fit the 12.288 GB (75%) budget on a 16 GB
-# runner, matching the still-live publish failures after #11419 merged. 1
-# worker (2 processes × 4.5 GB = 9 GB) fits with headroom to spare.
-# tests/unit/docker-build-memory-budget.test.ts does the arithmetic against
-# the measured figure and fails if either knob is raised past what a 16 GB
-# runner holds. Override for a big builder: `--build-arg
-# OMNIROUTE_BUILD_WORKERS=8`.
-ARG OMNIROUTE_BUILD_WORKERS=2
-ENV CIRCLE_NODE_TOTAL=${OMNIROUTE_BUILD_WORKERS}
-
-# Production builds skip the webpack and Turbopack persistent caches unless this
-# is 1 (see next.config.mjs). Set it only on a builder that keeps the cache mount
-# below (a long-lived BuildKit host); a fresh builder never reads the cache back.
-# Declared as ARG+ENV so `--build-arg OMNIROUTE_BUILD_CACHE=1` reaches `npm run build`.
-ARG OMNIROUTE_BUILD_CACHE=""
-ENV OMNIROUTE_BUILD_CACHE=$OMNIROUTE_BUILD_CACHE
+ENV OMNIROUTE_BUILD_MEMORY_MB=${OMNIROUTE_BUILD_MEMORY_MB}
 
 COPY . ./
-# The cache mount keeps .build/next/cache across builds on the same BuildKit host.
-# It holds only the SWC cache unless OMNIROUTE_BUILD_CACHE=1.
-RUN --mount=type=cache,id=omniroute-next-cache,target=/app/.build/next/cache \
-  mkdir -p /app/data \
+# Build, then drop the build-only packages. The image keeps the repository layout: the
+# server reads files relative to its working directory (PostgreSQL migrations, docs, MITM
+# server, compression rules, the MCP server source that `omniroute mcp` runs through tsx),
+# and the launcher in scripts/dev/ imports its helpers by relative path.
+# `.build/app/app-root/` holds the worker bundles at the paths the server spawns them from.
+RUN mkdir -p /app/data \
   && npm run build \
-  && node --input-type=module -e "import { createRequire } from 'node:module'; import { pathToFileURL } from 'node:url'; const standaloneRoot = '/app/.build/next/standalone/node_modules/'; const require = createRequire('/app/.build/next/standalone/package.json'); for (const pkg of ['js-tiktoken']) { const resolved = require.resolve(pkg); if (!resolved.startsWith(standaloneRoot)) throw new Error(pkg + ' resolved outside standalone: ' + resolved); await import(pathToFileURL(resolved).href); }"
+  && cp -R .build/app/app-root/. ./ \
+  && rm -rf .build/app/app-root \
+  && printf '%s' "${OMNIROUTE_BASE_PATH}" > .build/app/BASE_PATH \
+  && npm prune --omit=dev --no-audit --no-fund --legacy-peer-deps --ignore-scripts \
+  && node -e "require('better-sqlite3')(':memory:').close()" \
+  && rm -rf .react-router .source
 
 # ── Runner base ────────────────────────────────────────────────────────────
 FROM base AS runner-base
@@ -276,9 +203,9 @@ ENV DATA_DIR=/app/data
 RUN mkdir -p /app/data && chown node:node /app /app/data
 
 # PM2 runs a leader plus N workers in this one container when compose sets
-# `command: ["pm2-runtime", "ecosystem.config.cjs"]` (docker-compose.cluster.yml). Not traced
-# into the standalone bundle (the app never imports it), so it is installed globally, pinned.
-# The default CMD below still starts a single standalone process.
+# `command: ["pm2-runtime", "ecosystem.config.cjs"]` (docker-compose.cluster.yml). The app
+# never imports it, so it is installed globally, pinned. The default CMD below starts a
+# single process.
 RUN npm install -g pm2@7.1.2 && npm cache clean --force
 
 # #13679: default the PUBLISHED image to requiring an API key. A bare
@@ -293,39 +220,21 @@ RUN npm install -g pm2@7.1.2 && npm cache clean --force
 # `-e REQUIRE_API_KEY=false` for an intentionally keyless deployment.
 ENV REQUIRE_API_KEY=true
 
-# This self-hosted copy builds and deploys its own image, so upstream's npm releases and news feed
-# are not updates for it: no npm/GitHub/news lookups and no "update available"
-# banner (src/lib/system/versionCheck.ts::isUpdateCheckDisabled).
+# This self-hosted copy builds and deploys its own image, so upstream's npm releases are not
+# updates for it: the `omniroute` CLI must not print an update notice (bin/omniroute.mjs).
 ENV OMNIROUTE_NO_UPDATE_NOTIFIER=1
 
-# `npm run build` (build-next-isolated → assembleStandalone) bundles ALL runtime
-# files into .build/next/standalone/ — .next, node_modules, migrations, scripts,
-# docs, and the previously hand-COPY'd modules below (@swc/helpers, pino-*, split2,
-# migrations). assembleStandalone copies them straight from the builder's
-# node_modules, so they are present regardless of NFT/Turbopack trace behaviour.
-# The old per-module overrides were therefore pure duplication and were removed
-# (build-output-isolation cleanup). See scripts/build/assembleStandalone.mjs
-# (EXTRA_MODULE_ENTRIES) for the single source of truth.
-COPY --chown=node:node --from=builder /app/.build/next/standalone ./
-# better-sqlite3 is the one exception still copied explicitly: assembleStandalone
-# only syncs its native build/ dir; the JS wrapper (lib/, package.json) is left to
-# Next.js tracing. bootstrap-env requires SQLite BEFORE the standalone server
-# starts, so guarantee the complete package independent of trace behaviour.
-COPY --chown=node:node --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
-RUN test -f /app/node_modules/better-sqlite3/build/Release/better_sqlite3.node
-# migrations land at <standalone>/migrations via assembleStandalone; point the runtime at them.
-ENV OMNIROUTE_MIGRATIONS_DIR=/app/migrations
-
-# Docker healthcheck script — not traced by Next.js standalone output, so copy
-# it explicitly. The HEALTHCHECK CMD references it as `node healthcheck.mjs`.
-COPY --chown=node:node --from=builder /app/scripts/dev/healthcheck.mjs ./healthcheck.mjs
-# PM2 process file (leader + workers, one port each). Used only when compose runs pm2-runtime.
-COPY --chown=node:node --from=builder /app/ecosystem.config.cjs ./ecosystem.config.cjs
+# The whole application directory: build output (.build/app), production node_modules,
+# the launcher (scripts/), PM2's ecosystem.config.cjs and the files the server reads at
+# run time. .dockerignore keeps tests, docs translations and local data out of it.
+COPY --chown=node:node --from=builder /app ./
+RUN test -f /app/.build/app/server/index.js \
+  && test -f /app/node_modules/better-sqlite3/build/Release/better_sqlite3.node
 
 # Every COPY above hands its files to the baked-in `node` non-root user
 # (UID/GID 1000) at copy time. Do NOT add a `RUN chown -R node:node /app`
 # afterwards: in the overlay filesystem changing ownership rewrites every file
-# into a new layer, which stored the ~2 GB standalone build twice (#13990).
+# into a new layer, which stores the application twice (#13990).
 
 EXPOSE 20128
 
@@ -337,6 +246,13 @@ COPY --chmod=755 scripts/check-permissions.sh /app/check-permissions.sh
 ENTRYPOINT ["/app/check-permissions.sh"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["node", "healthcheck.mjs"]
+  CMD ["node", "scripts/dev/healthcheck.mjs"]
 
-CMD ["node", "dev/run-standalone.mjs"]
+# The commit this image was built from, reported as `system.buildSha` on
+# /api/monitoring/health (src/lib/monitoring/buildSha.ts). The publish workflow passes it;
+# a local build leaves it empty. Last in the stage: it changes on every commit, so any layer
+# after it would be rebuilt every time.
+ARG OMNIROUTE_BUILD_SHA=""
+ENV OMNIROUTE_BUILD_SHA=${OMNIROUTE_BUILD_SHA}
+
+CMD ["node", "scripts/dev/run-standalone.mjs"]

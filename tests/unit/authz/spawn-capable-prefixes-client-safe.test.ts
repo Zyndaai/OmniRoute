@@ -117,7 +117,6 @@ test("SPAWN_CAPABLE_PREFIXES is defined in the server-free constants leaf with t
     // (drift guard: tests/unit/authz/local-only-bypass-spawn-denylist.test.ts).
     "/api/middleware/",
     "/api/acp/agents",
-    "/api/system/version",
     "/api/db-backups/exportAll",
     "/api/db/health",
     "/api/oauth/cursor/auto-import",
@@ -141,5 +140,5 @@ test("SPAWN_CAPABLE_PREFIXES is defined in the server-free constants leaf with t
   // + 1 host-credential read (/api/oauth/kiro/auto-import) that must never be bypassable.
   // + 1 (whycodes-settings, #14107).
   // qwen-settings is the one pre-existing entry not enumerated above.
-  assert.equal(SPAWN_CAPABLE_PREFIXES.length, 53);
+  assert.equal(SPAWN_CAPABLE_PREFIXES.length, 52);
 });

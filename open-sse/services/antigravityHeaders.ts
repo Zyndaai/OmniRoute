@@ -32,9 +32,14 @@ const ANTIGRAVITY_PLATFORM_ENUM = {
   WINDOWS_AMD64: 5,
 } as const;
 
+// The provider registry builds these headers when it loads, and the dashboard imports the
+// registry too: in the browser there is no `process`, and the headers are never sent from there.
+const hostPlatform = (): string => globalThis.process?.platform ?? "";
+const hostArch = (): string => globalThis.process?.arch ?? "";
+
 function resolveAntigravityPlatformEnum(): number {
-  const platform = process.platform;
-  const arch = process.arch;
+  const platform = hostPlatform();
+  const arch = hostArch();
   if (platform === "darwin") {
     return arch === "arm64"
       ? ANTIGRAVITY_PLATFORM_ENUM.DARWIN_ARM64
@@ -84,8 +89,8 @@ const ANTIGRAVITY_GO_ARCH: Record<string, string> = {
 
 /** Map a Node `process.platform`/`process.arch` pair onto Go's GOOS/GOARCH tokens. */
 export function resolveAntigravityGoPlatform(
-  platform: string = process.platform,
-  arch: string = process.arch
+  platform: string = hostPlatform(),
+  arch: string = hostArch()
 ): { osType: string; arch: string } {
   return {
     osType: ANTIGRAVITY_GO_OS[platform] ?? platform,

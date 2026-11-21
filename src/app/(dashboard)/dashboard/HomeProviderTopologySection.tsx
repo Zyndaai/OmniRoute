@@ -1,13 +1,12 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import dynamic from "next/dynamic";
+import { useTranslations } from "use-intl";
+import { lazy, Suspense } from "react";
+import { ClientOnly } from "@/shared/components/ClientOnly";
 
 import { Card } from "@/shared/components";
 import { useLiveRequests } from "@/hooks/useLiveDashboard";
 import { selectActiveRequests } from "../home/topologyUtils";
 
-const ProviderTopology = dynamic(() => import("../home/ProviderTopology"), { ssr: false });
+const ProviderTopology = lazy(() => import("../home/ProviderTopology"));
 
 type TopologyProvider = {
   id: string;
@@ -59,12 +58,18 @@ export function HomeProviderTopologySection({
           </span>
         </div>
       </div>
-      <ProviderTopology
-        providers={providers}
-        activeRequests={activeRequests}
-        lastProvider={lastProvider}
-        errorProvider={errorProvider}
-      />
+      <ClientOnly>
+        {() => (
+          <Suspense fallback={null}>
+            <ProviderTopology
+              providers={providers}
+              activeRequests={activeRequests}
+              lastProvider={lastProvider}
+              errorProvider={errorProvider}
+            />
+          </Suspense>
+        )}
+      </ClientOnly>
     </Card>
   );
 }

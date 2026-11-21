@@ -7,7 +7,7 @@ import { listenWithRetry } from "../../scripts/dev/listen-with-retry.mjs";
 
 // Reproduces the integration port race (base-red #15306, job 111855214488):
 // harnesses pick the server port with bind(0)-release at module load, but
-// run-next.mjs only binds it after ~15-18s of next prepare(). A transient
+// the launcher only binds it after boot() and, in dev, Vite startup. A transient
 // occupant in that window used to kill the boot with EADDRINUSE. The unit test
 // pins the contract: retry while the port is busy, reject with the original
 // error once attempts are exhausted, resolve with the bound address otherwise.

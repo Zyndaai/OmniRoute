@@ -5,7 +5,7 @@ import { parseQuotaData } from "@/app/(dashboard)/dashboard/usage/components/Pro
 import QuotaCardExpanded from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/parts/QuotaCardExpanded";
 import { normalizeClaudeUsageQuotas } from "../../open-sse/services/usage/claudeQuota";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en-US",
   useTranslations: () => Object.assign((key: string) => key, { has: () => false }),
 }));

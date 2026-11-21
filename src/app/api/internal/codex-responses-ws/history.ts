@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getApiKeyMetadata } from "@/lib/db/apiKeys";
 import { extractWsTokenFromRequest } from "@/lib/ws/handshake";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
@@ -260,5 +259,5 @@ export async function persistResponsesWsCallHistory(body: JsonRecord) {
     connectionId: context.connectionId,
     account: context.account,
   });
-  return NextResponse.json({ ok: true, logged: true });
+  return Response.json({ ok: true, logged: true });
 }

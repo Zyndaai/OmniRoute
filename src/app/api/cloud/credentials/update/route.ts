@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnections, updateProviderConnection } from "@/models";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { cloudCredentialUpdateSchema } from "@/shared/validation/schemas";
@@ -16,7 +15,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Invalid request", details: [{ field: "body", message: "Invalid JSON body" }] } },
       { status: 400 }
     );
@@ -25,7 +24,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(cloudCredentialUpdateSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { provider, credentials } = validation.data;
 
@@ -34,7 +33,7 @@ export async function PUT(request: Request) {
     const connection = connections[0];
 
     if (!connection) {
-      return NextResponse.json(
+      return Response.json(
         { error: `No active connection found for provider: ${provider}` },
         { status: 404 }
       );
@@ -54,16 +53,16 @@ export async function PUT(request: Request) {
 
     const connectionId = typeof connection.id === "string" ? connection.id : null;
     if (!connectionId) {
-      return NextResponse.json({ error: "Invalid provider connection ID" }, { status: 500 });
+      return Response.json({ error: "Invalid provider connection ID" }, { status: 500 });
     }
     await updateProviderConnection(connectionId, updateData);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: `Credentials updated for provider: ${provider}`,
     });
   } catch (error) {
     console.log("Update credentials error:", error);
-    return NextResponse.json({ error: "Failed to update credentials" }, { status: 500 });
+    return Response.json({ error: "Failed to update credentials" }, { status: 500 });
   }
 }

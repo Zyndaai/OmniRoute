@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { copyToClipboard } from "@/shared/utils/clipboard";
 import { formatApiKeyLabel } from "@/shared/utils/formatting";
 import { MCP_TOOL_SCOPES } from "@/shared/constants/mcpScopes";
@@ -51,7 +49,7 @@ export default function RequestTimeline({
 }: {
   initialSelectedId?: string | null;
 } = {}) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("requestTimeline");
   const [logs, setLogs] = useState<TimelineLog[]>([]);
   const [mode, setMode] = useState<ViewMode>("follow");
@@ -96,7 +94,7 @@ export default function RequestTimeline({
   const canvasRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<number>(0);
   // Guards the ?id= deep-link mount effect below. Also armed by any manual
-  // open/close so a stale `initialSelectedId` (App Router's router.replace()
+  // open/close so a stale `initialSelectedId` (a router navigation
   // commits the URL after the re-render it triggers, so the prop can briefly
   // still reflect the just-closed id on the very next render) can never
   // reopen the modal right after the user closed it.
@@ -343,7 +341,7 @@ export default function RequestTimeline({
       try {
         const url = new URL(globalThis.location.href);
         url.searchParams.set("id", log.id);
-        router.replace(url.pathname + url.search);
+        navigate({ search: url.search }, { replace: true, preventScrollReset: true });
       } catch {
         // ignore navigation errors
       }
@@ -355,7 +353,7 @@ export default function RequestTimeline({
         .catch(() => {})
         .finally(() => setDetailLoading(false));
     },
-    [router]
+    [navigate]
   );
 
   const closeDetail = useCallback(() => {
@@ -365,11 +363,11 @@ export default function RequestTimeline({
     try {
       const url = new URL(globalThis.location.href);
       url.searchParams.delete("id");
-      router.replace(url.pathname + url.search);
+      navigate({ search: url.search }, { replace: true, preventScrollReset: true });
     } catch {
       // ignore navigation errors
     }
-  }, [router]);
+  }, [navigate]);
 
   // Deep-link support: open the request from ?id= on mount without waiting for
   // it to show up in the polled `logs` list (mirrors RequestLoggerV2's openDetail).
@@ -378,7 +376,7 @@ export default function RequestTimeline({
       try {
         const url = new URL(globalThis.location.href);
         url.searchParams.set("id", id);
-        router.replace(url.pathname + url.search);
+        navigate({ search: url.search }, { replace: true, preventScrollReset: true });
       } catch {
         // ignore navigation errors
       }
@@ -408,7 +406,7 @@ export default function RequestTimeline({
         setDetailLoading(false);
       }
     },
-    [router]
+    [navigate]
   );
 
   useEffect(() => {

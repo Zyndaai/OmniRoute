@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
@@ -10,7 +8,7 @@ import CliStatusBadge from "./CliStatusBadge";
 import ClaudeClassifierCompatToggle from "./ClaudeClassifierCompatToggle";
 import ClaudeCcDiscoveryInfoButton from "./ClaudeCcDiscoveryInfoButton";
 import ClaudeGatewayOnboardingBlock from "./ClaudeGatewayOnboardingBlock";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   getStoredClaudeAuthValue,
   normalizeClaudeBaseUrl,

@@ -19,15 +19,18 @@ type TransformedRequest = {
 
 const CREDENTIALS = { apiKey: "glm-key" };
 
-function toAnthropic(model: string, body: Record<string, unknown>): TransformedRequest {
+async function toAnthropic(
+  model: string,
+  body: Record<string, unknown>
+): Promise<TransformedRequest> {
   const executor = new GlmExecutor("glm");
-  return executor.transformForTransport(
+  return (await executor.transformForTransport(
     model,
     { messages: [{ role: "user", content: "hi" }], ...body },
     false,
     CREDENTIALS,
     "anthropic"
-  ) as TransformedRequest;
+  )) as TransformedRequest;
 }
 
 function assertValidBudget(out: TransformedRequest, label: string) {
@@ -42,8 +45,8 @@ function assertValidBudget(out: TransformedRequest, label: string) {
   );
 }
 
-test("glm-5.2-high without client thinking sends enabled thinking with the high-tier budget", () => {
-  const out = toAnthropic("glm-5.2-high", {});
+test("glm-5.2-high without client thinking sends enabled thinking with the high-tier budget", async () => {
+  const out = await toAnthropic("glm-5.2-high", {});
 
   assert.equal(out.model, "glm-5.2");
   assert.equal(out.effort, "high");
@@ -52,8 +55,8 @@ test("glm-5.2-high without client thinking sends enabled thinking with the high-
   assert.equal(out.thinking?.budget_tokens, 24576);
 });
 
-test("glm-5.2-max without client thinking derives a larger budget that still fits max_tokens", () => {
-  const out = toAnthropic("glm-5.2-max", {});
+test("glm-5.2-max without client thinking derives a larger budget that still fits max_tokens", async () => {
+  const out = await toAnthropic("glm-5.2-max", {});
 
   assert.equal(out.model, "glm-5.2");
   assert.equal(out.effort, "max");
@@ -63,23 +66,23 @@ test("glm-5.2-max without client thinking derives a larger budget that still fit
   assert.equal(out.thinking?.budget_tokens, 131072 - 1024);
 });
 
-test("glm-5.2 tiers turn adaptive thinking (reasoning_effort max/xhigh) into a budgeted enabled block", () => {
+test("glm-5.2 tiers turn adaptive thinking (reasoning_effort max/xhigh) into a budgeted enabled block", async () => {
   for (const [model, effort] of [
     ["glm-5.2-max", "max"],
     ["glm-5.2-high", "xhigh"],
   ] as const) {
-    const out = toAnthropic(model, { reasoning_effort: effort });
+    const out = await toAnthropic(model, { reasoning_effort: effort });
     assertValidBudget(out, `${model} reasoning_effort=${effort}`);
   }
 });
 
-test("glm-5.2 tiers turn a client adaptive thinking block without budget into a budgeted enabled block", () => {
-  const out = toAnthropic("glm-5.2-max", { thinking: { type: "adaptive" } });
+test("glm-5.2 tiers turn a client adaptive thinking block without budget into a budgeted enabled block", async () => {
+  const out = await toAnthropic("glm-5.2-max", { thinking: { type: "adaptive" } });
   assertValidBudget(out, "glm-5.2-max adaptive");
 });
 
-test("glm-5.2 tiers keep the client's own budget_tokens", () => {
-  const out = toAnthropic("glm-5.2-high", {
+test("glm-5.2 tiers keep the client's own budget_tokens", async () => {
+  const out = await toAnthropic("glm-5.2-high", {
     max_tokens: 32000,
     thinking: { type: "enabled", budget_tokens: 8000 },
   });
@@ -89,29 +92,29 @@ test("glm-5.2 tiers keep the client's own budget_tokens", () => {
   assertValidBudget(out, "client budget");
 });
 
-test("glm-5.2 tier budget is clamped under a small client max_tokens", () => {
-  const out = toAnthropic("glm-5.2-high", { max_tokens: 4096 });
+test("glm-5.2 tier budget is clamped under a small client max_tokens", async () => {
+  const out = await toAnthropic("glm-5.2-high", { max_tokens: 4096 });
 
   assert.equal(out.max_tokens, 4096);
   assertValidBudget(out, "max_tokens=4096");
   assert.equal(out.thinking?.budget_tokens, 4096 - 1024);
 });
 
-test("glm-5.2 tier drops thinking instead of sending an invalid budget when max_tokens is too small", () => {
-  const out = toAnthropic("glm-5.2-high", { max_tokens: 1500 });
+test("glm-5.2 tier drops thinking instead of sending an invalid budget when max_tokens is too small", async () => {
+  const out = await toAnthropic("glm-5.2-high", { max_tokens: 1500 });
 
   assert.equal(out.max_tokens, 1500);
   assert.equal(out.thinking, undefined);
   assert.equal(out.effort, "high");
 });
 
-test("non-tier GLM models on the Anthropic transport also get a budget for bare enabled thinking", () => {
-  const out = toAnthropic("glm-5.1", { thinking: { type: "enabled" } });
+test("non-tier GLM models on the Anthropic transport also get a budget for bare enabled thinking", async () => {
+  const out = await toAnthropic("glm-5.1", { thinking: { type: "enabled" } });
   assertValidBudget(out, "glm-5.1 enabled");
 });
 
-test("GLM Anthropic transport leaves disabled thinking untouched", () => {
-  const out = toAnthropic("glm-5.1", { thinking: { type: "disabled" } });
+test("GLM Anthropic transport leaves disabled thinking untouched", async () => {
+  const out = await toAnthropic("glm-5.1", { thinking: { type: "disabled" } });
   assert.deepEqual(out.thinking, { type: "disabled" });
 });
 

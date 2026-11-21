@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getUpstreamProxyConfig,
   upsertUpstreamProxyConfig,
@@ -40,13 +39,13 @@ export async function GET(
 ) {
   const { providerId } = await params;
   if (!providerId) {
-    return NextResponse.json({ error: "providerId required" }, { status: 400 });
+    return Response.json({ error: "providerId required" }, { status: 400 });
   }
   const config = await getUpstreamProxyConfig(providerId);
   if (!config) {
-    return NextResponse.json({ enabled: false, mode: "native", fallbackBackend: "cliproxyapi" });
+    return Response.json({ enabled: false, mode: "native", fallbackBackend: "cliproxyapi" });
   }
-  return NextResponse.json(config);
+  return Response.json(config);
 }
 
 export async function PUT(
@@ -55,20 +54,20 @@ export async function PUT(
 ) {
   const { providerId } = await params;
   if (!providerId) {
-    return NextResponse.json({ error: "providerId required" }, { status: 400 });
+    return Response.json({ error: "providerId required" }, { status: 400 });
   }
 
   const rawBody = await request.json();
   const validation = validateBody(upstreamProxySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json(validation.error, { status: 400 });
+    return Response.json(validation.error, { status: 400 });
   }
 
   const { mode, enabled, fallbackBackend } = validation.data;
 
   const wantsDario = mode === "dario" || (mode === "fallback" && fallbackBackend === "dario");
   if (wantsDario && !isDarioEligibleProvider(providerId)) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           `Dario only proxies Claude-Code-shaped traffic (it authenticates via a Claude ` +
@@ -86,7 +85,7 @@ export async function PUT(
     ...(fallbackBackend !== undefined ? { fallbackBackend } : {}),
   });
 
-  return NextResponse.json(config);
+  return Response.json(config);
 }
 
 export async function DELETE(
@@ -95,8 +94,8 @@ export async function DELETE(
 ) {
   const { providerId } = await params;
   if (!providerId) {
-    return NextResponse.json({ error: "providerId required" }, { status: 400 });
+    return Response.json({ error: "providerId required" }, { status: 400 });
   }
   const deleted = await deleteUpstreamProxyConfig(providerId);
-  return NextResponse.json({ deleted });
+  return Response.json({ deleted });
 }

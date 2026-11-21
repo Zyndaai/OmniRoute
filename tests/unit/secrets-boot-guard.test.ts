@@ -73,7 +73,7 @@ test("enforceWebRuntimeEnv exits the process on a secret error", () => {
 });
 
 test("registerNodejs calls enforceWebRuntimeEnv, after ensureSecrets", () => {
-  const source = readSource("src/instrumentation-node.ts");
+  const source = readSource("src/server/boot.ts");
   const ensure = source.indexOf("await ensureSecrets();");
   const enforce = source.indexOf("enforceWebRuntimeEnv()");
 

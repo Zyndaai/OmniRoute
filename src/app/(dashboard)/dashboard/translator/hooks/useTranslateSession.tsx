@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useState } from "react";
 import type { FormatId, TranslateMode, TranslateNarratedResult } from "../types";
 

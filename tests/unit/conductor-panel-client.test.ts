@@ -10,7 +10,7 @@ const PAGE = "src/app/(dashboard)/dashboard/conductor/page.tsx";
 
 test("client: poll com setInterval + clearInterval; fala SÓ com /api/conductor (nunca com o hub)", () => {
   const src = fs.readFileSync(path.join(process.cwd(), CLIENT), "utf8");
-  assert.match(src, /"use client"/);
+  assert.doesNotMatch(src, /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"/, "client code imports no server module");
   assert.match(src, /setInterval\(/);
   assert.match(src, /clearInterval\(/);
   assert.match(src, /\/api\/conductor\/fleet/);
@@ -27,9 +27,14 @@ test("client: cancelar é destrutivo → ConfirmModal antes do POST", () => {
   assert.match(src, /useTranslations\("conductor"\)/, "strings via i18n, namespace conductor");
 });
 
-test("page: wrapper fino de servidor com metadata (padrão relay)", () => {
+test("page: wrapper fino; título via loader + export meta (um só <title>)", () => {
   const src = fs.readFileSync(path.join(process.cwd(), PAGE), "utf8");
-  assert.match(src, /export const metadata/);
+  assert.match(src, /export const meta/);
+  assert.match(src, /export async function loader/);
+  assert.doesNotMatch(src, /<title>/, "o título vem do meta, não de um <title> no componente");
   assert.match(src, /ConductorPageClient/);
-  assert.ok(!src.includes('"use client"'), "page.tsx é server component fino");
+  assert.doesNotMatch(src, /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|server-only)"/, "page.tsx não importa módulo de servidor");
+  // @/i18n/request.server is allowed only for the loader: the component must not reference it.
+  const componentPart = src.slice(src.indexOf("export default function"));
+  assert.doesNotMatch(componentPart, /getTranslator/);
 });

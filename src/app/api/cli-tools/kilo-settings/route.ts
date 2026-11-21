@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -48,7 +45,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus("kilo");
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -92,7 +89,7 @@ export async function GET(request: Request) {
       /* VS Code settings not available */
     }
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -108,7 +105,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error checking kilo settings:", error);
-    return NextResponse.json({ error: "Failed to check kilo settings" }, { status: 500 });
+    return Response.json({ error: "Failed to check kilo settings" }, { status: 500 });
   }
 }
 
@@ -121,7 +118,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -135,7 +132,7 @@ export async function POST(request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // (#549) Extract keyId BEFORE validation — Zod strips unknown fields!
@@ -143,7 +140,7 @@ export async function POST(request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, model } = validation.data;
     const apiKey = await resolveApiKey(keyId, validation.data.apiKey);
@@ -206,7 +203,7 @@ export async function POST(request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Kilo Code settings applied successfully!",
       authPath: AUTH_PATH,
@@ -215,7 +212,7 @@ export async function POST(request) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
     console.log("Error updating kilo settings:", error);
-    return NextResponse.json({ error: "Failed to update kilo settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update kilo settings" }, { status: 500 });
   }
 }
 
@@ -227,7 +224,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // Backup before reset
@@ -240,7 +237,7 @@ export async function DELETE(request: Request) {
       auth = JSON.parse(existing);
     } catch (error) {
       if (error.code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No settings file to reset" });
+        return Response.json({ success: true, message: "No settings file to reset" });
       }
       throw error;
     }
@@ -276,12 +273,12 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute settings removed from Kilo Code",
     });
   } catch (error) {
     console.log("Error resetting kilo settings:", error);
-    return NextResponse.json({ error: "Failed to reset kilo settings" }, { status: 500 });
+    return Response.json({ error: "Failed to reset kilo settings" }, { status: 500 });
   }
 }

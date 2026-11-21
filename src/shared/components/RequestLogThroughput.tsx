@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { formatDuration } from "@/shared/utils/formatting";
 import { buildLogTpsTitle, computeLogE2eTps, computeLogTps } from "@/shared/utils/logTps";
 

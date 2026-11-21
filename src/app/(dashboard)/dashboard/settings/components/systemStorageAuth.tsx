@@ -1,10 +1,8 @@
-"use client";
-
 // #12709: database-settings requests are ALWAYS_PROTECTED (routeGuard.ts) — a guest/anonymous
 // session correctly gets a 401 AUTH_001 from /api/settings/database
 // (GHSA-mghq-58h3-qcqj, GHSA-v7g9-7f55-5g46). Do NOT loosen that gate; this module only makes the
 // client surface the failure instead of silently rendering a blank section.
-import Link from "next/link";
+import { Link } from "react-router";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 
 export interface DatabaseSettingsFetchResult {
@@ -43,7 +41,7 @@ export function AuthRequiredBanner({ t }: { t: (key: string) => string }) {
       </h2>
       <p className="mt-1 text-sm text-text-muted">{t("databaseSettingsAuthRequiredBody")}</p>
       <Link
-        href="/login"
+        to="/login"
         className={buttonVariants({ variant: "default", size: "sm", className: "mt-3" })}
       >
         {t("databaseSettingsAuthRequiredCta")}

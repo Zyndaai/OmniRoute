@@ -6,14 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdvancedSlug } from "@/app/(dashboard)/dashboard/translator/types";
 
 // --- Mock next-intl ---
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
 // --- Mock next/navigation (used by deep-link hook, not by TranslateTab directly) ---
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 // --- Mock shared components ---

@@ -1,6 +1,4 @@
 // src/app/(dashboard)/dashboard/playground/hooks/useStreamMetrics.ts
-"use client";
-
 import { useRef, useState } from "react";
 import type { StreamMetrics } from "@/shared/schemas/playground";
 import { computeMetrics } from "@/lib/playground/streamMetrics";

@@ -162,6 +162,7 @@ test("production audit regressions stay localized and provider icons stay bounde
   const storage = readSource(
     "src/app/(dashboard)/dashboard/settings/components/SystemStorageTab.tsx"
   );
+  assert.match(storage, /export default function SystemStorageTab\(/);
   for (const rawText of [
     ">Database Statistics<",
     "Automatic SQLite backups are stored",

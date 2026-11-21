@@ -1,8 +1,6 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { RadioGroup, RadioGroupItem } from "@omniroute/ui-kit/radio-group";
 
 export type CatalogScope = "all" | "combos" | "models";

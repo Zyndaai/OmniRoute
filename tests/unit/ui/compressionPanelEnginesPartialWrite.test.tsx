@@ -4,9 +4,10 @@
 // engines another page (the Omniglyph page, the MCP tool) changed after the panel loaded.
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key} ${Object.values(values).join(" ")}` : key,
   useLocale: () => "en",
@@ -22,7 +23,7 @@ function mount(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(ui);
+    root.render(<MemoryRouter>{ui}</MemoryRouter>);
   });
   return container;
 }

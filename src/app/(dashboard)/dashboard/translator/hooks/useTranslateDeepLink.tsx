@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useNavigate, useSearchParams } from "react-router";
 import type { AdvancedSlug, TranslateMode, TranslatorTab, TranslateDeepLink } from "../types";
 
 const VALID_TABS: ReadonlySet<TranslatorTab> = new Set(["translate", "monitor"]);
@@ -22,8 +20,8 @@ export interface UseTranslateDeepLinkReturn {
 }
 
 export function useTranslateDeepLink(): UseTranslateDeepLinkReturn {
-  const router = useRouter();
-  const params = useSearchParams();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
 
   const state = useMemo<TranslateDeepLink>(() => {
     const tab = params.get("tab");
@@ -47,9 +45,9 @@ export function useTranslateDeepLink(): UseTranslateDeepLinkReturn {
       next.set("mode", merged.mode);
       if (merged.advanced) next.set("advanced", merged.advanced);
       else next.delete("advanced");
-      router.replace(`?${next.toString()}`, { scroll: false });
+      navigate(`?${next.toString()}`, { replace: true, preventScrollReset: true });
     },
-    [params, router, state]
+    [params, navigate, state]
   );
 
   return {

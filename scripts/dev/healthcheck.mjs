@@ -63,7 +63,7 @@ function normalizeHealthPath(value) {
  * Resolve the health route to probe. By default the lightweight /healthz
  * lifecycle endpoint (pure in-memory, no DB reads). An explicit
  * OMNIROUTE_HEALTHCHECK_PATH override opts back into the deep monitoring
- * probe. The configured Next.js basePath is always prefixed.
+ * probe. The configured base path is always prefixed.
  *
  * @param {string} [basePathValue] value of OMNIROUTE_BASE_PATH
  * @param {string} [healthPathValue] value of OMNIROUTE_HEALTHCHECK_PATH

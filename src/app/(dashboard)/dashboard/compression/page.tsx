@@ -1,14 +1,9 @@
-import { redirect } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { redirect } from "react-router";
 
-export async function generateMetadata() {
-  const t = await getTranslations("metadata");
-  return {
-    title: t("compressionTitle"),
-    description: t("compressionDescription"),
-  };
+export function loader() {
+  throw redirect("/dashboard/context/caveman");
 }
 
 export default function CompressionPage() {
-  redirect("/dashboard/context/caveman");
+  return null;
 }

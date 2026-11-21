@@ -1,5 +1,3 @@
-"use client";
-
 import { ServiceStatusCard } from "../components/ServiceStatusCard";
 import { ServiceLifecycleButtons } from "../components/ServiceLifecycleButtons";
 import { ServiceLogsPanel } from "../components/ServiceLogsPanel";

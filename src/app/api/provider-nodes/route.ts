@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
 import { getProviderNodesCount, isProviderNodeIdConflictError } from "@/lib/db/providers/nodes";
 import { createErrorResponse } from "@/lib/api/errorResponse";
@@ -92,7 +91,7 @@ export async function GET(request?: Request) {
     };
     const validation = validateBody(paginationSchema, raw);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { limit: parsedLimit, offset: parsedOffset } = validation.data;
     const limit =
@@ -102,14 +101,14 @@ export async function GET(request?: Request) {
 
     const total = await getProviderNodesCount();
     const nodes = await getProviderNodes({}, limit, offset);
-    return NextResponse.json({
+    return Response.json({
       nodes,
       total,
       ccCompatibleProviderEnabled: isCcCompatibleProviderEnabled(),
     });
   } catch (error) {
     console.log("Error fetching provider nodes:", error);
-    return NextResponse.json({ error: "Failed to fetch provider nodes" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch provider nodes" }, { status: 500 });
   }
 }
 
@@ -119,7 +118,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -133,7 +132,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(createProviderNodeSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const {
       name,
@@ -177,7 +176,7 @@ export async function POST(request) {
           dailyQuotaResetHour === 0 || dailyQuotaResetHour != null ? dailyQuotaResetHour : null,
       });
       await registerMoonshotFetchersForCreatedNode(node);
-      return NextResponse.json({ node }, { status: 201 });
+      return Response.json({ node }, { status: 201 });
     }
 
     // Determine type
@@ -206,12 +205,12 @@ export async function POST(request) {
           dailyQuotaResetHour === 0 || dailyQuotaResetHour != null ? dailyQuotaResetHour : null,
       });
       await registerMoonshotFetchersForCreatedNode(node);
-      return NextResponse.json({ node }, { status: 201 });
+      return Response.json({ node }, { status: 201 });
     }
 
     if (nodeType === "anthropic-compatible") {
       if (compatMode === "cc" && !isCcCompatibleProviderEnabled()) {
-        return NextResponse.json({ error: "CC Compatible provider is disabled" }, { status: 403 });
+        return Response.json({ error: "CC Compatible provider is disabled" }, { status: 403 });
       }
 
       const rawBaseUrl = baseUrl || ANTHROPIC_COMPATIBLE_DEFAULTS.baseUrl;
@@ -240,15 +239,15 @@ export async function POST(request) {
           dailyQuotaResetHour === 0 || dailyQuotaResetHour != null ? dailyQuotaResetHour : null,
       });
       await registerMoonshotFetchersForCreatedNode(node);
-      return NextResponse.json({ node }, { status: 201 });
+      return Response.json({ node }, { status: 201 });
     }
 
-    return NextResponse.json({ error: "Invalid provider node type" }, { status: 400 });
+    return Response.json({ error: "Invalid provider node type" }, { status: 400 });
   } catch (error) {
     if (isProviderNodeIdConflictError(error)) {
       return createErrorResponse({ status: 409, message: error.message, type: "conflict" });
     }
     console.log("Error creating provider node:", error);
-    return NextResponse.json({ error: "Failed to create provider node" }, { status: 500 });
+    return Response.json({ error: "Failed to create provider node" }, { status: 500 });
   }
 }

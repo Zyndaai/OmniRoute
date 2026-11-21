@@ -186,6 +186,8 @@ describe("D. auth bypass lock", () => {
     core.resetDbInstance();
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+    const { resetTestDb } = await import("../helpers/postgres.ts");
+    await resetTestDb();
   }
 
   test("catalogued free id without :free suffix is still served on credits_exhausted", async () => {

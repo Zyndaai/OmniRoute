@@ -7,22 +7,21 @@
  *   DELETE — end session
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { getCachedSettings } from "@/lib/db/settings";
 import { handleMcpStreamableHTTP } from "../../../../../open-sse/mcp-server/httpTransport";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 
-async function guardEnabled(): Promise<NextResponse | null> {
+async function guardEnabled(): Promise<Response | null> {
   const settings = await getCachedSettings();
   if (!settings.mcpEnabled) {
-    return NextResponse.json(
+    return Response.json(
       { error: "MCP server is disabled. Enable it from the Endpoints page." },
       { status: 503 }
     );
   }
   const transport = settings.mcpTransport as string;
   if (transport !== "streamable-http") {
-    return NextResponse.json(
+    return Response.json(
       {
         error: `MCP transport is set to "${transport}", not "streamable-http". Change it from Settings.`,
       },
@@ -32,7 +31,7 @@ async function guardEnabled(): Promise<NextResponse | null> {
   return null;
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request, { acceptMcpConnectScope: true });
   if (authError) return authError;
   const blocked = await guardEnabled();
@@ -40,7 +39,7 @@ export async function POST(request: NextRequest) {
   return handleMcpStreamableHTTP(request);
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireManagementAuth(request, { acceptMcpConnectScope: true });
   if (authError) return authError;
   const blocked = await guardEnabled();
@@ -48,7 +47,7 @@ export async function GET(request: NextRequest) {
   return handleMcpStreamableHTTP(request);
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: Request) {
   const authError = await requireManagementAuth(request, { acceptMcpConnectScope: true });
   if (authError) return authError;
   const blocked = await guardEnabled();

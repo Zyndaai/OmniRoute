@@ -1,19 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getCompressionRunTelemetrySummary } from "@/lib/db/compressionRunTelemetry";
 
-export const dynamic = "force-dynamic";
-
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const summary = await getCompressionRunTelemetrySummary();
-    return NextResponse.json(summary);
+    return Response.json(summary);
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         totalRuns: 0,
         totalTokensSaved: 0,

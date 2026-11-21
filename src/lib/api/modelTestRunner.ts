@@ -617,7 +617,7 @@ export async function runSingleModelTest(
       latencyMs: 0,
       // 422, not the 409 the managed-lease return above uses: the request is valid, but this
       // model's modality cannot be exercised by a chat test. The route passes httpStatus
-      // straight to NextResponse — omitting it made Next answer 200 for a skipped test.
+      // straight to the response status — omitting it answered 200 for a skipped test.
       httpStatus: 422,
       skipped: true,
       error:

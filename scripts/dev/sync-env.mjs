@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 /**
  * Resolve the repository/package root that holds `.env` / `.env.example`.
  *
- * When this module is statically bundled into a Next.js standalone route,
+ * When this module is statically bundled into the server build,
  * `import.meta.url` is frozen to the build-machine path
  * (`file:///home/runner/.../sync-env.mjs`) and `fileURLToPath` can throw at
  * runtime. Callers (e.g. the env-repair route) pass an explicit `rootDir`;
@@ -43,7 +43,7 @@ function resolveRootDir(rootDir) {
 // here: the server owns them. It restores each one from its durable store, or
 // generates and persists it there on first use — STORAGE_ENCRYPTION_KEY in
 // bin/omniroute.mjs (guarded by bin/cli/utils/storageKeyProvision.mjs), the
-// other two in src/instrumentation-node.ts::ensureSecrets(), which persists to
+// other two in src/server/boot.ts::ensureSecrets(), which persists to
 // the `secrets` namespace of the database under DATA_DIR.
 //
 // Filling any of them here defeats that: this file lives inside the installed

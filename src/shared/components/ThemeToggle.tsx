@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useTheme } from "@/shared/hooks/useTheme";
 import Button from "./Button";
 import Icon from "./Icon";

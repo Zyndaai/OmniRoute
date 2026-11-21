@@ -1,5 +1,5 @@
 import ErrorPageScaffold from "@/shared/components/ErrorPageScaffold";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export default function RequestTimeoutPage() {
   const t = useTranslations("publicSystem");

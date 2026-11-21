@@ -1,16 +1,21 @@
-"use client";
-
-import dynamic from "next/dynamic";
+import { lazy, Suspense } from "react";
+import { ClientOnly } from "@/shared/components/ClientOnly";
 import type { PoolUsageSnapshot } from "@/lib/quota/types";
 
-const BurnRateChartInner = dynamic(() => import("./BurnRateChartInner"), {
-  ssr: false,
-});
+const BurnRateChartInner = lazy(() => import("./BurnRateChartInner"));
 
 export interface BurnRateChartProps {
   usage: PoolUsageSnapshot | null;
 }
 
 export default function BurnRateChart({ usage }: BurnRateChartProps) {
-  return <BurnRateChartInner usage={usage} />;
+  return (
+    <ClientOnly>
+      {() => (
+        <Suspense fallback={null}>
+          <BurnRateChartInner usage={usage} />
+        </Suspense>
+      )}
+    </ClientOnly>
+  );
 }

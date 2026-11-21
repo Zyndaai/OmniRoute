@@ -18,7 +18,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omr-mcp-origin-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -121,13 +120,16 @@ function run(pathname: string, method: string, headers: Record<string, string>, 
     init.body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
     (init.headers as Record<string, string>)["content-type"] = "application/json";
   }
-  return pipeline.runAuthzPipeline(new NextRequest(`${base}${pathname}`, init), { enforce: true });
+  return pipeline.runAuthzPipeline(new Request(`${base}${pathname}`, init), {
+    enforce: true,
+    next: () => new Response(null, { headers: { "x-test-route-reached": "1" } }),
+  });
 }
 
 /** The pipeline let the request through to the route handler. */
 function assertPassedThrough(response: Response, label: string) {
   assert.equal(response.status, 200, label);
-  assert.equal(response.headers.get("x-middleware-next"), "1", label);
+  assert.equal(response.headers.get("x-test-route-reached"), "1", label);
 }
 
 async function assertInvalidOrigin(response: Response, label: string) {
@@ -203,7 +205,7 @@ test("a dashboard session that proves same-origin with its CSRF token keeps the 
   await requireLogin(true);
   const cookie = await dashboardCookie();
   const issued = csrf.issueDashboardCsrfToken(
-    new NextRequest(`${BASE}/api/auth/csrf`, { headers: { cookie } })
+    new Request(`${BASE}/api/auth/csrf`, { headers: { cookie } })
   );
   assert.ok(issued);
 

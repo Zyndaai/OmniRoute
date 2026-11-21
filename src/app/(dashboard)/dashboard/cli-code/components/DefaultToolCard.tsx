@@ -1,11 +1,9 @@
-"use client";
-
 import { useEffect, useRef, useState, useCallback } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { copyToClipboard } from "@/shared/utils/clipboard";
 import { buildOpenCodeConfigDocument } from "@/shared/services/opencodeConfig";
 import { useTheme } from "@/shared/hooks/useTheme";
@@ -664,12 +662,9 @@ export default function DefaultToolCard({
   };
 
   const renderIcon = () => {
-    // Tool SVGs are non-square (e.g. opencode is 234×42, cursor is 467×532).
-    // next/image's dev check warns whenever the rendered aspect-ratio size
-    // differs from the square width/height attributes, so these render as a
-    // plain <img> capped at 32px on both axes — true ratio, no dev noise.
+    // Tool SVGs are non-square (e.g. opencode is 234×42, cursor is 467×532), so
+    // they render capped at 32px on both axes to keep their true ratio.
     const renderImg = (src: string) => (
-      // eslint-disable-next-line @next/next/no-img-element -- local static SVG asset
       <img
         src={src}
         alt={tool.name}

@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { Badge, Button, Card, Input, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";

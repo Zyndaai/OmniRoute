@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getUsageStats, buildActiveRequests } from "@/lib/usageDb";
 import { serveAnalyticsCached } from "@/lib/usage/analyticsResponseCache";
@@ -12,10 +11,10 @@ export async function GET(request: Request) {
   const cached = await serveAnalyticsCached("history", async () => {
     try {
       const stats = await getUsageStats();
-      return NextResponse.json(stats);
+      return Response.json(stats);
     } catch (error) {
       console.error("Error fetching usage stats:", error);
-      return NextResponse.json({ error: "Failed to fetch usage stats" }, { status: 500 });
+      return Response.json({ error: "Failed to fetch usage stats" }, { status: 500 });
     }
   });
 

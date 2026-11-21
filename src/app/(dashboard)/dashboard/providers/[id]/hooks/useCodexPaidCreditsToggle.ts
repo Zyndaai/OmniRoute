@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useCodexPaidCreditsToggle — extracted from useProviderConnections (file-size
  * ratchet: useProviderConnections.ts is frozen; a new full handler pushed it

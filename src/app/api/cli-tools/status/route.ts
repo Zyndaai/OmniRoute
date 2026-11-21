@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { getCliRuntimeStatus, CLI_TOOL_IDS } from "@/shared/services/cliRuntime";
 import { getAllCliToolLastConfigured } from "@/lib/db/cliToolState";
@@ -89,9 +86,9 @@ export async function GET(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json(statuses);
+    return Response.json(statuses);
   } catch (error) {
     console.log("Error fetching CLI tool statuses:", error);
-    return NextResponse.json({ error: "Failed to fetch statuses" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch statuses" }, { status: 500 });
   }
 }

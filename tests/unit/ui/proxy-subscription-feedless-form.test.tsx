@@ -7,7 +7,7 @@ import SubscriptionTab from "@/app/(dashboard)/dashboard/settings/components/pro
 // The component lists `t` in effect/callback dependencies, so the translator must be referentially
 // stable across renders (a fresh function per render re-fires the load effect forever).
 const translate = (key: string) => key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translate,
 }));
 

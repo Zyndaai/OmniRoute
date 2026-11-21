@@ -1,5 +1,3 @@
-"use client";
-
 // Shared primitive form fields for the Resilience settings tab. Extracted out
 // of ResilienceTab.tsx (DRY, keeps ResilienceTab.tsx under the frozen
 // file-size cap) — no behavior change from the extraction itself.

@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
+import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
+import { isProtectedFeatureFlag } from "@/shared/constants/protectedFeatureFlags";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import {
   FEATURE_FLAG_DEFINITIONS,
@@ -56,9 +57,9 @@ function flagPayload(
  * GET /api/settings/feature-flags
  * Returns all feature flags with their effective values and a summary.
  */
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -66,22 +67,22 @@ export async function GET(request: NextRequest) {
 
     const flags = await Promise.all(
       resolved.map(async ({ key, effectiveValue, source, definition, ...provenance }) => {
-      // Flags whose gate resolves with env-wins-over-db precedence (the
-      // opposite of resolveAllFeatureFlags' generic db-wins-over-env order)
-      // report the gate's own resolution so the dashboard never shows a source
-      // that doesn't match actual gate behavior.
-      if (key === CC_DISCOVERY_ALIASES_FLAG_KEY) {
-        const gateState = await getCcAliasGlobalState();
-        return flagPayload(definition, gateState.enabled ? "true" : "false", gateState.source);
-      }
-      // #9654 U7: the adaptive virtual-lanes gate reads env at runtime
-      // construction — env wins over any DB override, and a DB override gates
-      // at next boot (see lib/admissionVirtualLanes.ts).
-      if (key === ADAPTIVE_VIRTUAL_LANES_FLAG_KEY) {
-        const state = await resolveAdaptiveVirtualLanesFlag();
-        return flagPayload(definition, state.enabled ? "true" : "false", state.source);
-      }
-      return { ...flagPayload(definition, effectiveValue, source), ...provenance };
+        // Flags whose gate resolves with env-wins-over-db precedence (the
+        // opposite of resolveAllFeatureFlags' generic db-wins-over-env order)
+        // report the gate's own resolution so the dashboard never shows a source
+        // that doesn't match actual gate behavior.
+        if (key === CC_DISCOVERY_ALIASES_FLAG_KEY) {
+          const gateState = await getCcAliasGlobalState();
+          return flagPayload(definition, gateState.enabled ? "true" : "false", gateState.source);
+        }
+        // #9654 U7: the adaptive virtual-lanes gate reads env at runtime
+        // construction — env wins over any DB override, and a DB override gates
+        // at next boot (see lib/admissionVirtualLanes.ts).
+        if (key === ADAPTIVE_VIRTUAL_LANES_FLAG_KEY) {
+          const state = await resolveAdaptiveVirtualLanesFlag();
+          return flagPayload(definition, state.enabled ? "true" : "false", state.source);
+        }
+        return { ...flagPayload(definition, effectiveValue, source), ...provenance };
       })
     );
 
@@ -96,12 +97,12 @@ export async function GET(request: NextRequest) {
       (f, i) => (f.configuredSource ?? flags[i].source) === "env"
     ).length;
 
-    return NextResponse.json({
+    return Response.json({
       flags,
       summary: { total, active, inactive, overriddenByDb, overriddenByEnv },
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -116,21 +117,34 @@ const putFeatureFlagSchema = z.object({
  * Body: { key: string; value?: string }
  * If value is omitted, the override is removed.
  */
-export async function PUT(request: NextRequest) {
+/**
+ * Protected flags keep needing a credential when login is disabled: isAuthenticated is true
+ * for everyone then, and a DB override beats the env value immediately. Returns the refusal
+ * response, or null when the caller may write.
+ */
+async function authorizeProtectedFeatureFlagWrite(
+  request: Request,
+  keys: readonly string[]
+): Promise<Response | null> {
+  if (!keys.some((key) => isProtectedFeatureFlag(key))) return null;
+  return requireManagementAuth(request, { alwaysRequireAuth: true });
+}
+
+export async function PUT(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(putFeatureFlagSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { key, value } = validation.data;
@@ -138,13 +152,16 @@ export async function PUT(request: NextRequest) {
   // Validate key against known definitions
   const definition = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === key);
   if (!definition) {
-    return NextResponse.json({ error: `Unknown feature flag key: ${key}` }, { status: 400 });
+    return Response.json({ error: `Unknown feature flag key: ${key}` }, { status: 400 });
   }
+
+  const authError = await authorizeProtectedFeatureFlagWrite(request, [key]);
+  if (authError) return authError;
 
   // Validate enum values
   if (value !== undefined && definition.type === "enum" && definition.enumValues) {
     if (!definition.enumValues.includes(value)) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: `Invalid value "${value}" for enum flag ${key}. Allowed: ${definition.enumValues.join(", ")}`,
         },
@@ -184,7 +201,7 @@ export async function PUT(request: NextRequest) {
       reportedSource = state.source;
     }
 
-    return NextResponse.json({
+    return Response.json({
       key,
       effectiveValue: reportedEffectiveValue,
       source: reportedSource,
@@ -201,7 +218,7 @@ export async function PUT(request: NextRequest) {
       requiresRestart: definition.requiresRestart,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -209,22 +226,26 @@ export async function PUT(request: NextRequest) {
  * DELETE /api/settings/feature-flags
  * Clear all feature flag overrides.
  */
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const overrides = await getFeatureFlagOverrides();
     const count = Object.keys(overrides).length;
 
+    // Clearing all overrides also drops any security flag the operator set here.
+    const authError = await authorizeProtectedFeatureFlagWrite(request, Object.keys(overrides));
+    if (authError) return authError;
+
     await clearAllFeatureFlagOverrides();
 
-    return NextResponse.json({
+    return Response.json({
       cleared: count,
       message: `Cleared ${count} feature flag override${count !== 1 ? "s" : ""}`,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

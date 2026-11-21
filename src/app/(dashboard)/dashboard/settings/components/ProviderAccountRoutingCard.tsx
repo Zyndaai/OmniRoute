@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
 import { Input, Select } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ACCOUNT_FALLBACK_STRATEGY_VALUES } from "@/shared/constants/routingStrategies";
 
 type ProviderStrategyOverride = {

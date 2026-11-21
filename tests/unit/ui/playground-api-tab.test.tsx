@@ -6,25 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
-}));
-
-vi.mock("next/dynamic", () => ({
-  default: (
-    fn: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>,
-    _opts?: unknown
-  ) => {
-    let Component: React.ComponentType<Record<string, unknown>> | null = null;
-    fn().then((m) => {
-      Component = m.default;
-    });
-    return function DynamicWrapper(props: Record<string, unknown>) {
-      if (!Component) return <div data-testid="monaco-loading" />;
-      return React.createElement(Component, props);
-    };
-  },
 }));
 
 vi.mock("@/shared/components/MonacoEditor", () => ({

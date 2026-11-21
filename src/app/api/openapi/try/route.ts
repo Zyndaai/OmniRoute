@@ -4,7 +4,6 @@
  */
 
 import { z } from "zod";
-import { NextRequest, NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -45,8 +44,8 @@ const tryRequestSchema = z.object({
   body: z.any().optional(),
 });
 
-function getRequestOrigin(request: NextRequest) {
-  return request.nextUrl?.origin || new URL(request.url).origin;
+function getRequestOrigin(request: Request) {
+  return new URL(request.url).origin;
 }
 
 function buildForwardHeaders(headers: Record<string, string>) {
@@ -61,7 +60,7 @@ function buildForwardHeaders(headers: Record<string, string>) {
   return forwardHeaders;
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -69,7 +68,7 @@ export async function POST(request: NextRequest) {
     const rawBody = await request.json();
     const validation = validateBody(tryRequestSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const { method, path, headers, body: reqBody } = validation.data;
@@ -77,7 +76,7 @@ export async function POST(request: NextRequest) {
     const origin = getRequestOrigin(request);
     const targetUrl = new URL(path, origin);
     if (targetUrl.origin !== origin) {
-      return NextResponse.json({ error: "Path must be same-origin" }, { status: 400 });
+      return Response.json({ error: "Path must be same-origin" }, { status: 400 });
     }
 
     const start = performance.now();
@@ -125,7 +124,7 @@ export async function POST(request: NextRequest) {
       responseHeaders[key] = value;
     });
 
-    return NextResponse.json({
+    return Response.json({
       status: res.status,
       statusText: res.statusText,
       headers: responseHeaders,
@@ -134,7 +133,7 @@ export async function POST(request: NextRequest) {
       contentType,
     });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       {
         status: 0,
         statusText: "Network Error",

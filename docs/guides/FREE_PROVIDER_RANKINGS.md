@@ -173,7 +173,7 @@ stale data.
 The sync runs **on by default**:
 
 - It runs once at server startup and then on a periodic timer
-  (`src/lib/arenaEloSync.ts`, wired from `src/instrumentation-node.ts`).
+  (`src/lib/arenaEloSync.ts`, wired from `src/server/boot.ts`).
 - It is **non-blocking and never fatal** — if the upstream fetch fails, OmniRoute keeps
   running and the rankings simply show the last good data (or an empty state).
 

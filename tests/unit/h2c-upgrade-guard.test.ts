@@ -331,19 +331,13 @@ describe("h2c upgrade guard — wiring", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const read = (rel: string) => fs.readFileSync(path.resolve(here, "../..", rel), "utf8");
 
-  it("standalone-server-ws.mjs consults the guard first in its upgrade wrapper", () => {
-    const source = read("scripts/dev/standalone-server-ws.mjs");
+  it("run-server.mjs consults the guard before any WebSocket routing", () => {
+    const source = read("scripts/dev/run-server.mjs");
     assert.match(source, /from\s+["']\.\/h2c-upgrade-guard\.cjs["']/);
-    const wrapper = source.slice(source.indexOf("function wrapUpgradeListener"));
-    const guardAt = wrapper.indexOf("handleH2cUpgrade(");
-    const liveWsAt = wrapper.indexOf("LIVE_WS_PORT");
-    assert.ok(guardAt > 0, "wrapUpgradeListener must call handleH2cUpgrade");
+    const dispatcher = source.slice(source.indexOf('server.on("upgrade"'));
+    const guardAt = dispatcher.indexOf("handleH2cUpgrade(server, req, socket, head)");
+    const liveWsAt = dispatcher.indexOf("proxyLiveWs(");
+    assert.ok(guardAt > 0, "the upgrade dispatcher must call handleH2cUpgrade");
     assert.ok(guardAt < liveWsAt, "the h2c guard must run before any WebSocket routing");
-  });
-
-  it("run-next.mjs (npm start / dev) consults the same guard", () => {
-    const source = read("scripts/dev/run-next.mjs");
-    assert.match(source, /from\s+["']\.\/h2c-upgrade-guard\.cjs["']/);
-    assert.match(source, /handleH2cUpgrade\(server,\s*req,\s*socket,\s*head\)/);
   });
 });

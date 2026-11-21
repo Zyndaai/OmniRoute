@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getApiKeyById } from "@/lib/db/apiKeys";
@@ -78,7 +77,7 @@ export async function POST(request: Request) {
   const { model, effort, thinkingBudgetTokens, apiKeyId, requestTags, transport } = parsed.data;
   const apiKey = apiKeyId ? await getApiKeyById(apiKeyId) : null;
   if (apiKeyId && !apiKey) {
-    return NextResponse.json(buildErrorBody(404, "API key not found"), { status: 404 });
+    return Response.json(buildErrorBody(404, "API key not found"), { status: 404 });
   }
   const combo = await getComboForModel(model);
   const { decision } = await resolveSimulationDecision(
@@ -101,7 +100,7 @@ export async function POST(request: Request) {
       )
     : null;
   const permissionError = await readPermissionError(targetRejection);
-  return NextResponse.json({
+  return Response.json({
     matched: !!decision,
     decision,
     errors: simulationErrors(decision, transportError, permissionError),

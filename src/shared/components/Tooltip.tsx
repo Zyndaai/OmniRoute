@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Tooltip — adapter over the kit Tooltip (Radix, KEA-7886).
  *

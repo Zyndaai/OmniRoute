@@ -162,7 +162,7 @@ test("route source: imports and uses buildErrorBody (Hard Rule #12)", async () =
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/console\.(error|warn|log|debug|info)/.test(line)) continue;
-    if (/err\.stack/.test(line) && /NextResponse\.json|return.*json\(/.test(line)) {
+    if (/err\.stack/.test(line) && /Response.json|return.*json\(/.test(line)) {
       assert.fail(`line ${i + 1}: raw err.stack found in response body:\n  ${line.trim()}`);
     }
   }

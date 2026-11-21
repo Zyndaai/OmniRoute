@@ -1,4 +1,3 @@
-"use client";
 /**
  * CompatibleModelsSection — Issue #3501 Phase 1e
  *

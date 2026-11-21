@@ -19,11 +19,9 @@ import { getCallLogRetentionDays } from "@/lib/logEnv";
  * unavailable so callers can degrade deliberately.
  */
 const isCloud = typeof globalThis.caches === "object" && globalThis.caches !== null;
-const isBuildPhase =
-  process.env.NEXT_PHASE === "phase-production-build" || process.env.OMNIROUTE_BUILDING === "1";
 const DATA_DIR = resolveDataDir({ isCloud });
 
-export const MEDIA_DIR = isCloud || isBuildPhase ? null : path.join(DATA_DIR, "media");
+export const MEDIA_DIR = isCloud ? null : path.join(DATA_DIR, "media");
 
 /**
  * Owner tag for media written with no owner key (a dashboard-session request with no API key).

@@ -25,7 +25,7 @@ test("MAX_ANTIGRAVITY_OUTPUT_TOKENS is fixed at 16384 (upstream-accepted ceiling
   assert.equal(MAX_ANTIGRAVITY_OUTPUT_TOKENS, 16384);
 });
 
-test("Copilot-style oversized maxOutputTokens is clamped to 16384 to avoid Antigravity 400 'Invalid Argument'", () => {
+test("Copilot-style oversized maxOutputTokens is clamped to 16384 to avoid Antigravity 400 'Invalid Argument'", async () => {
   // Reproduces the upstream-rejected envelope: VS Code GitHub Copilot Chat in
   // Agent mode commonly requests 32K–65K output tokens.
   const request: Record<string, unknown> = {
@@ -34,43 +34,43 @@ test("Copilot-style oversized maxOutputTokens is clamped to 16384 to avoid Antig
     },
   };
 
-  applyAntigravityGenerationDefaults(request);
+  await applyAntigravityGenerationDefaults(request);
 
   const gc = request.generationConfig as Record<string, unknown>;
   assert.equal(gc.maxOutputTokens, MAX_ANTIGRAVITY_OUTPUT_TOKENS);
 });
 
-test("maxOutputTokens at or below the cap is left untouched", () => {
+test("maxOutputTokens at or below the cap is left untouched", async () => {
   const request: Record<string, unknown> = {
     generationConfig: {
       maxOutputTokens: 8192,
     },
   };
 
-  applyAntigravityGenerationDefaults(request);
+  await applyAntigravityGenerationDefaults(request);
 
   const gc = request.generationConfig as Record<string, unknown>;
   assert.equal(gc.maxOutputTokens, 8192);
 });
 
-test("maxOutputTokens exactly at the cap is left untouched (boundary)", () => {
+test("maxOutputTokens exactly at the cap is left untouched (boundary)", async () => {
   const request: Record<string, unknown> = {
     generationConfig: {
       maxOutputTokens: MAX_ANTIGRAVITY_OUTPUT_TOKENS,
     },
   };
 
-  applyAntigravityGenerationDefaults(request);
+  await applyAntigravityGenerationDefaults(request);
 
   const gc = request.generationConfig as Record<string, unknown>;
   assert.equal(gc.maxOutputTokens, MAX_ANTIGRAVITY_OUTPUT_TOKENS);
 });
 
-test("Cap is applied even when no generationConfig is provided initially", () => {
+test("Cap is applied even when no generationConfig is provided initially", async () => {
   // The defaults helper synthesises generationConfig — the cap must not crash
   // and must leave a well-formed object behind.
   const request: Record<string, unknown> = {};
-  applyAntigravityGenerationDefaults(request);
+  await applyAntigravityGenerationDefaults(request);
 
   const gc = request.generationConfig as Record<string, unknown>;
   assert.equal(typeof gc, "object");
@@ -78,7 +78,7 @@ test("Cap is applied even when no generationConfig is provided initially", () =>
   assert.equal(gc.maxOutputTokens, undefined);
 });
 
-test("Cap interacts safely with thinkingBudget bump: bump still wins when budget exceeds tokens, then the cap still clamps the bumped value", () => {
+test("Cap interacts safely with thinkingBudget bump: bump still wins when budget exceeds tokens, then the cap still clamps the bumped value", async () => {
   // thinkingBudget bumps maxOutputTokens to floor(budget)+1 when it exceeds
   // the requested ceiling; if the bump itself overshoots the AG cap, the cap
   // must still apply.
@@ -89,7 +89,7 @@ test("Cap interacts safely with thinkingBudget bump: bump still wins when budget
     },
   };
 
-  applyAntigravityGenerationDefaults(request);
+  await applyAntigravityGenerationDefaults(request);
 
   const gc = request.generationConfig as Record<string, unknown>;
   assert.equal(gc.maxOutputTokens, MAX_ANTIGRAVITY_OUTPUT_TOKENS);

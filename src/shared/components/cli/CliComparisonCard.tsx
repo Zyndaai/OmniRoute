@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import Card from "@/shared/components/Card";
 import { cn } from "@/shared/utils/cn";
@@ -53,7 +51,7 @@ export default function CliComparisonCard({ currentType }: CliComparisonCardProp
                   </Badge>
                 ) : (
                   <Link
-                    href={TYPE_HREFS[type]}
+                    to={TYPE_HREFS[type]}
                     className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-bg-subtle text-text-muted hover:text-primary hover:bg-primary/10 transition-colors whitespace-nowrap"
                   >
                     {t("comparison.open")}

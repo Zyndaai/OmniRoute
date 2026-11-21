@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useRef } from "react";
 import { Card, Button } from "@/shared/components";
 // Direct adapter imports (not the barrel): the tab's tests stub the barrel with Card/Button only.
@@ -8,7 +6,7 @@ import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import Textarea from "@/shared/components/Textarea";
 import Toggle from "@/shared/components/Toggle";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import CompressionTokenSaverCard, {
   type CompressionTokenSaverConfig,
 } from "./CompressionTokenSaverCard";

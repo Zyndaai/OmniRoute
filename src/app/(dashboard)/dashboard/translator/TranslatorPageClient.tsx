@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { Suspense, useCallback, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Badge, Card, SegmentedControl } from "@/shared/components";
 // Imported from its module (not the barrel) so the page's barrel stubs in tests stay as they were.
 import KitButton from "@/shared/components/Button";

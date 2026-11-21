@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── i18n stub ─────────────────────────────────────────────────────────────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
@@ -22,9 +22,10 @@ let mockGetImpl: (key: string) => string | null = (key) => {
   return null;
 };
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mockReplace }),
-  useSearchParams: () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => mockReplace,
+  useSearchParams: () => [({
     get: (key: string) => mockGetImpl(key),
     toString: () => {
       const tab = mockGetImpl("tab") ?? "translate";
@@ -32,7 +33,16 @@ vi.mock("next/navigation", () => ({
       const adv = mockGetImpl("advanced");
       return adv ? `tab=${tab}&mode=${mode}&advanced=${adv}` : `tab=${tab}&mode=${mode}`;
     },
-  }),
+  }), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 // ── Shared component stubs ────────────────────────────────────────────────────

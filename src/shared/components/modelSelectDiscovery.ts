@@ -1,5 +1,3 @@
-"use client";
-
 import { readDiscoveryDegradation } from "@/shared/discovery/degradedCause";
 
 /**

@@ -1,9 +1,6 @@
-"use server";
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import pino from "pino";
-import { NextResponse } from "next/server";
 
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
@@ -86,7 +83,7 @@ export async function GET(request: Request): Promise<Response> {
       readSettings(configPaths.settings),
     ]);
 
-    return NextResponse.json({
+    return Response.json({
       ...runtime,
       settings,
       hasOmniRoute: hasOmniRouteQwenCodeConfig(settings),
@@ -95,7 +92,7 @@ export async function GET(request: Request): Promise<Response> {
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to read Qwen Code settings");
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
@@ -110,7 +107,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -123,11 +120,11 @@ export async function POST(request: Request): Promise<Response> {
 
   const validation = validateBody(cliModelConfigSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const writeGuard = ensureCliConfigWriteAllowed();
-  if (writeGuard) return NextResponse.json({ error: writeGuard }, { status: 403 });
+  if (writeGuard) return Response.json({ error: writeGuard }, { status: 403 });
 
   try {
     const configPaths = getPaths();
@@ -161,7 +158,7 @@ export async function POST(request: Request): Promise<Response> {
       logger.warn({ err: error }, "Failed to save Qwen Code configuration timestamp");
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Qwen Code now routes through OmniRoute",
       settingsPath: configPaths.settings,
@@ -169,7 +166,7 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to update Qwen Code settings");
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
@@ -181,7 +178,7 @@ export async function DELETE(request: Request): Promise<Response> {
   if (authError) return authError;
 
   const writeGuard = ensureCliConfigWriteAllowed();
-  if (writeGuard) return NextResponse.json({ error: writeGuard }, { status: 403 });
+  if (writeGuard) return Response.json({ error: writeGuard }, { status: 403 });
 
   try {
     const configPaths = getPaths();
@@ -208,13 +205,13 @@ export async function DELETE(request: Request): Promise<Response> {
       logger.warn({ err: error }, "Failed to clear Qwen Code configuration timestamp");
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute settings removed from Qwen Code",
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to reset Qwen Code settings");
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );

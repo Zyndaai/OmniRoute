@@ -4,8 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// Skip CloudSyncStatus entirely (it polls /api/sync/cloud + uses next/navigation's
-// useRouter, which we don't otherwise need to mock for this component).
+// Skip CloudSyncStatus entirely (it polls /api/sync/cloud + uses react-router's
+// useNavigate, which we don't otherwise need to mock for this component).
 process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 // Render budget, not an import budget. Measured in review: the kit Sidebar mounts about 1.3–2×
 // slower than the legacy one (SidebarMenuButton asChild wrapping, a Radix tooltip per rail item);
@@ -13,7 +13,7 @@ process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 // that load, not a mask for an eager-render bug.
 vi.setConfig({ testTimeout: 30_000 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const translate = (key: string) => key;
     translate.has = () => false;
@@ -21,8 +21,18 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/combos",
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard/combos" }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
+      {children}
+    </a>
+  ),
 }));
 
 const cleanupCallbacks: Array<() => void> = [];

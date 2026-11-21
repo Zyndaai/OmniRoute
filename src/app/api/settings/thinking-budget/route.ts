@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import {
   setThinkingBudgetConfig,
@@ -14,10 +13,10 @@ export async function GET(request: Request) {
   if (authError) return authError;
   try {
     const config = getThinkingBudgetConfig();
-    return NextResponse.json(config);
+    return Response.json(config);
   } catch (error) {
     console.error("Error reading thinking budget config:", error);
-    return NextResponse.json({ error: "Failed to read thinking budget config" }, { status: 500 });
+    return Response.json({ error: "Failed to read thinking budget config" }, { status: 500 });
   }
 }
 
@@ -28,7 +27,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -42,7 +41,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateThinkingBudgetSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
@@ -52,9 +51,9 @@ export async function PUT(request: Request) {
     // Persist to settings DB
     await updateSettings({ thinkingBudget: body });
 
-    return NextResponse.json(getThinkingBudgetConfig());
+    return Response.json(getThinkingBudgetConfig());
   } catch (error) {
     console.error("Error updating thinking budget config:", error);
-    return NextResponse.json({ error: "Failed to update thinking budget config" }, { status: 500 });
+    return Response.json({ error: "Failed to update thinking budget config" }, { status: 500 });
   }
 }

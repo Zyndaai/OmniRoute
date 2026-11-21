@@ -5,7 +5,7 @@ import ExclusionsPanel from "@/app/(dashboard)/dashboard/compression/exclusions/
 
 // next-intl echoes the key and ignores params, so t("saveFailed") renders "saveFailed".
 // One shared t keeps the same identity on every render, as the real hook does.
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const t = (key: string) => key;
   return { useTranslations: () => t, useLocale: () => "en" };
 });

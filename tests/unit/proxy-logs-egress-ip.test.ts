@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 // Persistence to the database only runs when shouldPersistToDisk is true
-// (local mode: !isCloud && !isBuildPhase). Setting DATA_DIR to a fresh temp
+// (local mode: !isCloud). Setting DATA_DIR to a fresh temp
 // dir keeps the test in local mode; the assertions below would otherwise fail
 // with no explanatory guard.
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-egress-ip-"));

@@ -137,7 +137,7 @@ test("resolveEndpointCategory: maps /v1/batches/delete-completed to 'batches' (b
   assert.equal(resolveEndpointCategory("/v1/batches/delete-completed"), "batches");
 });
 
-// ─── resolveCanonicalEndpointPath: alias spellings from next.config.mjs ───
+// ─── resolveCanonicalEndpointPath: alias spellings from src/server/http/rewrites.ts ───
 // A route handler sees the client's original URL, so an alias spelling has to
 // be mapped onto the canonical `/v1/…` path or the category check is skipped
 // altogether (#13685).

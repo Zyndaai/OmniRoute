@@ -12,7 +12,7 @@ import { dirname, resolve } from "node:path";
 // (instrumentation-node.ts), which is the module that actually runs in the
 // packaged bin. This test asserts that wiring stays in place.
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const instrumentationPath = resolve(__dirname, "../../src/instrumentation-node.ts");
+const instrumentationPath = resolve(__dirname, "../../src/server/boot.ts");
 const source = readFileSync(instrumentationPath, "utf8");
 
 describe("standalone runtime wires the live-dashboard WebSocket daemon", () => {

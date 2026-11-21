@@ -1,7 +1,7 @@
 import React from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../src/i18n/messages/en.json";
 import { OAuthExportImportModal } from "../../src/app/(dashboard)/dashboard/providers/components/OAuthExportImportModal";
 
@@ -12,9 +12,9 @@ afterEach(() => {
 
 function show(onImported = vi.fn(async () => {}), onClose = vi.fn()) {
   const view = render(
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       <OAuthExportImportModal isOpen onClose={onClose} onImported={onImported} />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return { ...view, onImported, onClose };
 }

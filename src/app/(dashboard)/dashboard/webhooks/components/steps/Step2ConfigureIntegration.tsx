@@ -1,5 +1,3 @@
-"use client";
-
 import { SlackConfigForm, type SlackConfig } from "./integrations/SlackConfigForm";
 import { TelegramConfigForm, type TelegramConfig } from "./integrations/TelegramConfigForm";
 import { DiscordConfigForm, type DiscordConfig } from "./integrations/DiscordConfigForm";

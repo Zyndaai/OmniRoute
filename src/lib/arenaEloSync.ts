@@ -781,7 +781,7 @@ export async function getArenaEloSyncStatus(): Promise<SyncStatus> {
   };
 }
 
-// ─── Init (called from instrumentation-node.ts) ───────────────────
+// ─── Init (called from src/server/boot.ts) ───────────────────
 
 /**
  * Initialize Arena ELO sync if enabled via feature flag configuration.

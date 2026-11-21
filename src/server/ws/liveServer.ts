@@ -1,7 +1,7 @@
 /**
  * Live Dashboard WebSocket Server
  *
- * Separate process (runs alongside Next.js on port 20132).
+ * Separate listener (runs alongside the main HTTP server on port 20132).
  * Forwards EventBus events to subscribed dashboard clients.
  *
  * Protocol:
@@ -34,9 +34,9 @@ import { emit, on, onAny, getEventHistory, type HistoryEntry } from "@/lib/event
 import type { DashboardEventName, DashboardEventMap, DashboardChannel } from "@/lib/events/types";
 
 import { CHANNEL_EVENTS, getChannelForEvent } from "@/lib/events/types";
-import { isAutomatedTestProcess, isBuildProcess } from "@/shared/utils/testProcess";
+import { isAutomatedTestProcess } from "@/shared/utils/testProcess";
 import { hasProxyHopHeader } from "@/server/authz/proxyHeaders";
-// Pure constant module (no DB / Next.js imports) — safe to load statically here.
+// Pure constant module (no DB / request-handler imports) — safe to load statically here.
 import { hasManageScope } from "@/shared/constants/managementScopes";
 import { warnIfNonLoopbackWithoutApiKey } from "@/lib/startup/nonLoopbackApiKeyGuard";
 
@@ -166,7 +166,7 @@ function isLocalWsPeer(request: import("http").IncomingMessage): boolean {
  * has explicitly disabled login (requireLogin=false) or this is a fresh
  * single-user install with no password configured running on the default
  * loopback interface. Mirrors the semantics of isAuthRequired() from
- * shared/utils/apiAuth.ts without importing Next.js-only modules.
+ * shared/utils/apiAuth.ts without importing request-scoped modules.
  */
 async function isLiveWsAuthRequired(request: import("http").IncomingMessage): Promise<boolean> {
   try {
@@ -178,7 +178,7 @@ async function isLiveWsAuthRequired(request: import("http").IncomingMessage): Pr
 
     // Fresh install: no password, no OIDC, no INITIAL_PASSWORD, and the server
     // is loopback-bound (default) → allow unauthenticated dashboard access just
-    // like the Next.js routes do in this mode.
+    // like the HTTP routes do in this mode.
     const hasPassword = typeof settings.password === "string" && settings.password.length > 0;
     const hasOidc =
       settings.oidcEnabled === true &&
@@ -219,7 +219,7 @@ async function authorizeConnection(request: import("http").IncomingMessage): Pro
   // Browser WebSocket clients cannot set custom Authorization headers. When
   // LiveWS is exposed same-origin through a reverse proxy, accept the existing
   // dashboard session cookie before falling back to API-key authentication. Keep
-  // the check local to this sidecar so it does not import Next.js-only modules.
+  // the check local to this sidecar so it does not import request-scoped modules.
   if (!token) {
     if (await isDashboardCookieAuthenticated(request)) {
       return { authorized: true, sessionId };
@@ -725,11 +725,7 @@ export async function startLiveDashboardServer(
 // LAN exposure remains opt-in via LIVE_WS_HOST=0.0.0.0 combined with
 // LIVE_WS_ALLOWED_ORIGINS. DEFAULT_HOST stays "127.0.0.1".
 //
-// Build/test environments never auto-start regardless of the flag.
-
-function isBuildOrTest(): boolean {
-  return isBuildProcess() || isAutomatedTestProcess();
-}
+// Test processes never auto-start regardless of the flag.
 
 export function isLiveWsEnabled(): boolean {
   const v = process.env.OMNIROUTE_ENABLE_LIVE_WS;
@@ -737,7 +733,7 @@ export function isLiveWsEnabled(): boolean {
   return v === "1" || v.toLowerCase() === "true";
 }
 
-if (!isBuildOrTest() && isLiveWsEnabled()) {
+if (!isAutomatedTestProcess() && isLiveWsEnabled()) {
   const port = parseInt(process.env.LIVE_WS_PORT || String(DEFAULT_PORT), 10);
   const host = process.env.LIVE_WS_HOST || DEFAULT_HOST;
   warnIfNonLoopbackWithoutApiKey("Live dashboard WebSocket", host);

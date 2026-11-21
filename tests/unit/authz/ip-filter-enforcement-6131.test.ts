@@ -8,7 +8,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-ipenforce-6131-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -40,7 +39,7 @@ const BLOCKED = "203.0.113.9";
 const CLEAN = "203.0.113.10";
 
 function req(xff: string, extraHeaders: Record<string, string> = {}) {
-  return new NextRequest("http://localhost/v1/models", {
+  return new Request("http://localhost/v1/models", {
     headers: { "x-forwarded-for": xff, ...extraHeaders },
   });
 }

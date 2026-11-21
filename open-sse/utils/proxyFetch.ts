@@ -350,7 +350,8 @@ const TLS_ALLOWED_OPTION_KEYS: Record<string, true> = {
   method: true,
   redirect: true,
   signal: true,
-  // Next.js cache/revalidation metadata. It is not forwarded to wreq.
+  // Next.js-style fetch cache/revalidation metadata that callers may still pass.
+  // It is accepted but not forwarded to wreq.
   next: true,
 };
 

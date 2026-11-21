@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCachedCursorAgentAvailability } from "@/lib/cursor/renewal";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
@@ -31,13 +30,13 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 export async function GET() {
   try {
     const { available } = await getCachedCursorAgentAvailability();
-    return NextResponse.json({ cursorAgentAvailable: available });
+    return Response.json({ cursorAgentAvailable: available });
   } catch (error) {
     // checkCursorAgentAvailability() currently swallows all realistic errors
     // internally (spawn failures, unparseable output) — this catch is
     // defense-in-depth consistency with the rest of this plan's routes, not
     // a currently-reachable path.
-    return NextResponse.json(
+    return Response.json(
       {
         cursorAgentAvailable: false,
         error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),

@@ -1,9 +1,7 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/ProviderMetrics.tsx
 
 import type { StreamMetrics } from "@/shared/schemas/playground";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 interface ProviderMetricsProps {
   metrics: StreamMetrics;

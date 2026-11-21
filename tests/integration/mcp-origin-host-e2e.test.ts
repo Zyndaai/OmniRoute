@@ -1,13 +1,12 @@
 /**
- * MCP Origin guard on OmniRoute's own custom server (scripts/dev/run-next.mjs).
+ * MCP Origin guard on OmniRoute's own server (scripts/dev/run-server.mjs).
  *
- * The unit suite (tests/unit/mcp-origin-validation.test.ts) builds NextRequests by
+ * The unit suite (tests/unit/mcp-origin-validation.test.ts) builds requests by
  * hand, so it cannot show what the real server puts in `request.url`. That matters:
  * `request.url` is one of the Origin candidates, so if the server derived it from
  * the client's Host header a DNS-rebinding page (`Host: evil.test` +
- * `Origin: http://evil.test`) would match itself. run-next.mjs passes an explicit
- * `hostname` to next(), which keeps `request.url` on the bound address; this test
- * pins that end to end, through the real TCP peer stamp.
+ * `Origin: http://evil.test`) would match itself. The request URL must stay on the
+ * bound address; this test pins that end to end, through the real TCP peer stamp.
  *
  * Boots a fresh install in open bootstrap mode, so a loopback caller reaches
  * `/api/mcp/*` without credentials and MCP is disabled: a request the Origin guard
@@ -52,9 +51,9 @@ function sleep(ms: number) {
 function createServerProcess() {
   const output: string[] = [];
   let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
-  // The custom server, not bare `next dev`: only run-next.mjs stamps the real TCP
-  // peer that makes this a loopback caller (#11535, #14403).
-  const child = spawn(process.execPath, ["scripts/dev/run-next.mjs", "dev"], {
+  // The launcher stamps the real TCP peer that makes this a loopback caller
+  // (#11535, #14403).
+  const child = spawn(process.execPath, ["scripts/dev/run-server.mjs", "dev"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,

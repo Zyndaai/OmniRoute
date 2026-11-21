@@ -3,7 +3,6 @@ import assert from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 // Hermetic auth context (6A re-wire fix): without a configured password,
 // isAuthRequired() is false on a fresh DB (CI) and the route answers 200 —
@@ -35,14 +34,14 @@ describe("GET /api/cli-tools/detect", () => {
 
   it("returns 401 without authorization", async () => {
     // @ts-ignore - we can call the handler directly
-    const req = new NextRequest("http://localhost:3000/api/cli-tools/detect");
+    const req = new Request("http://localhost:3000/api/cli-tools/detect");
     const res = await GET(req);
     assert.strictEqual(res.status, 401);
   });
 
   it("returns 403 with wrong authorization (invalid API key)", async () => {
     // @ts-ignore
-    const req = new NextRequest("http://localhost:3000/api/cli-tools/detect", {
+    const req = new Request("http://localhost:3000/api/cli-tools/detect", {
       headers: { authorization: "Bearer wrong-key" },
     });
     const res = await GET(req);

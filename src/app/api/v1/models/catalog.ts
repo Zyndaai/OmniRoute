@@ -174,10 +174,8 @@ export type { CachedCatalog, BackgroundRefreshScheduler } from "./catalogCache";
 /**
  * Per-call options for {@link getUnifiedModelsResponse}.
  *
- * Restored in #11551: `/v1/models` passes Next's `after()` so the stale-while-
- * revalidate rebuild is deferred until after the response flush. #9199 had removed
- * the injection point while the route kept passing it, so the argument was silently
- * dropped and the refresh ran on a plain `setTimeout`.
+ * `scheduleBackgroundRefresh` overrides when the stale-while-revalidate rebuild starts; the
+ * default starts it once the response to the current request has been sent.
  */
 export type CatalogResponseOptions = {
   scheduleBackgroundRefresh?: BackgroundRefreshScheduler;
@@ -213,10 +211,9 @@ function resolveCombosOnly(
  * Build unified OpenAI-compatible model catalog response.
  * Reused by `/api/v1/models` and `/api/v1` to avoid semantic drift (T09).
  *
- * `options.scheduleBackgroundRefresh` is the App Router's injection point for the
- * stale-while-revalidate rebuild (#8728): the route passes Next's `after()` so the
- * rebuild starts only once the stale body has been flushed. Omitted by non-route
- * callers, which fall back to the cache module's own default.
+ * `options.scheduleBackgroundRefresh` is the injection point for the stale-while-revalidate
+ * rebuild (#8728). Omitted by most callers, which fall back to the cache module's default
+ * (`afterResponse`).
  */
 export async function getUnifiedModelsResponse(
   request: Request,

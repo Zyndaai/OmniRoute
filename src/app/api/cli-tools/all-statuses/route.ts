@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import pino from "pino";
 
@@ -237,14 +234,11 @@ export async function GET(request: Request): Promise<Response> {
       logger.warn({ err: dbErr }, "Failed to fetch lastConfiguredAt timestamps");
     }
 
-    return NextResponse.json(statuses);
+    return Response.json(statuses);
   } catch (err) {
     logger.error({ err }, "Unexpected error in /api/cli-tools/all-statuses");
-    return NextResponse.json(
-      buildErrorBody(500, err instanceof Error ? err.message : String(err)),
-      {
-        status: 500,
-      }
-    );
+    return Response.json(buildErrorBody(500, err instanceof Error ? err.message : String(err)), {
+      status: 500,
+    });
   }
 }

@@ -1,11 +1,9 @@
-"use client";
-
 // Header toggle imports the Button module directly so tests can keep stubbing the barrel.
 import HeaderButton from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Select } from "@/shared/components";
 import { cn } from "@/shared/utils/cn";
 

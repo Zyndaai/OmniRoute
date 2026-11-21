@@ -1,5 +1,3 @@
-"use client";
-
 import { Fragment, useState, useEffect, useCallback } from "react";
 import {
   Table,
@@ -15,7 +13,7 @@ import EmptyState from "@/shared/components/EmptyState";
 import Icon from "@/shared/components/Icon";
 import { Skeleton } from "@/shared/components/Loading";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 // ──────────────── Types ────────────────
 

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { saveCustomEvalSuite } from "@/lib/db/evals";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -12,7 +11,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -25,14 +24,14 @@ export async function POST(request: Request) {
 
   const validation = validateBody(evalSuiteSaveSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
     const suite = await saveCustomEvalSuite(validation.data);
-    return NextResponse.json({ suite }, { status: 201 });
+    return Response.json({ suite }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: error?.message || "Failed to create eval suite" },
       { status: 500 }
     );

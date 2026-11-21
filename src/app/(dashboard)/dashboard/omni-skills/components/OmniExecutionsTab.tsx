@@ -1,7 +1,5 @@
-"use client";
-
 import type { JSX } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   Table,
   TableBody,

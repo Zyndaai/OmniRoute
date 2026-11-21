@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { createErrorResponseFromUnknown } from "@/lib/api/errorResponse";
 import {
@@ -25,7 +24,7 @@ export async function GET(request: Request) {
       diagnoseAllEgressIps(),
       getRecentEgressSharingSummary(),
     ]);
-    return NextResponse.json({ ...diagnostic, summary });
+    return Response.json({ ...diagnostic, summary });
   } catch (error) {
     return createErrorResponseFromUnknown(error, "Failed to diagnose egress IPs");
   }
@@ -37,7 +36,7 @@ export async function POST(request: Request) {
   try {
     const report = await validateProxyPool();
     const dead = report.filter((r) => !r.alive);
-    return NextResponse.json({
+    return Response.json({
       validated: report.length,
       alive: report.length - dead.length,
       dead: dead.length,

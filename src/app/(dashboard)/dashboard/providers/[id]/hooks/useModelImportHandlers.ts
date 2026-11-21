@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useModelImportHandlers — Issue #3501 Phase 1k
  *

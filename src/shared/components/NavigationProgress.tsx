@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { useLocation, useSearchParams } from "react-router";
 
 const TICK_MS = 150;
 const STEP_MAX = 12;
@@ -10,8 +8,8 @@ const FINISH_DELAY_MS = 220;
 const RESET_DELAY_MS = 320;
 
 export default function NavigationProgress() {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { pathname } = useLocation();
+  const [searchParams] = useSearchParams();
   const [active, setActive] = useState(false);
   const [progress, setProgress] = useState(0);
   const lastKeyRef = useRef<string>(`${pathname}?${searchParams?.toString() ?? ""}`);

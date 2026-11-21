@@ -19,18 +19,18 @@ describe("browserPool optional cloakbrowser import", () => {
       assert.equal(
         /import\(\s*["']cloakbrowser["']\s*\)/.test(source),
         false,
-        "cloakbrowser must remain runtime-optional; static dynamic import triggers Turbopack resolution"
+        "cloakbrowser must remain runtime-optional; a literal dynamic import makes the bundler resolve it"
       );
       assert.match(
         source,
-        /Turbopack resolve it during route compilation/,
+        /makes the bundler try to resolve it at build time/,
         "the computed import rationale should stay documented near the helper"
       );
       assert.match(source, /return \["cloak", "browser"\]\.join\(""\);/);
       assert.match(
         source,
-        /\/\* webpackIgnore: true \*\//,
-        "Webpack must leave the optional runtime import unresolved"
+        /\/\* @vite-ignore \*\//,
+        "Vite must leave the optional runtime import unresolved without warning"
       );
     }
   });

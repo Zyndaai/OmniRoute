@@ -96,13 +96,11 @@ let lastAppliedSnapshot: RuntimeSettingsSnapshot | null = null;
 
 // Shared bypass-policy store, read by the route guard on every non-loopback hit
 // to a LOCAL_ONLY path via `getAuthzBypassSnapshot`. Backed by `globalThis` —
-// NOT a plain module-local `let` — so every Next.js standalone-build webpack
-// chunk that imports this module (e.g. the settings-PATCH route's bundle vs.
-// the proxy route-guard's bundle) shares one object. A module-local `let`
-// would leave a manage-scope-configured bypass prefix invisible to whichever
-// bundle evaluates the route guard (#13995), the same class of defect
-// previously fixed via globalThis in systemPrompt.ts (#2470) and
-// modelDeprecation.ts (#5777).
+// NOT a plain module-local `let` — so the settings-PATCH route and the route
+// guard share one object even when the dev server re-evaluates this module. A
+// module-local `let` would leave a manage-scope-configured bypass prefix
+// invisible to whichever copy evaluates the route guard (#13995); same pattern
+// as systemPrompt.ts (#2470) and modelDeprecation.ts (#5777).
 const AUTHZ_BYPASS_GLOBAL_KEY = "__omniroute_authzBypass_config__";
 const _authzBypassStore = globalThis as unknown as Record<string, AuthzBypassSnapshot | undefined>;
 

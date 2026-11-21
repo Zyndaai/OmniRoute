@@ -20,8 +20,8 @@ import * as nodeModule from "node:module";
 const runtimeRequire = nodeModule.createRequire(process.argv[1] || process.cwd());
 
 function loadRuntimeModule(moduleName: string): unknown {
-  // Keep the specifier dynamic. Turbopack rewrites a literal createRequire call
-  // to a hashed external name that is absent from the standalone Docker runtime.
+  // Keep the specifier dynamic. A bundler can rewrite a literal createRequire call
+  // to a bundled name that is absent from the Docker runtime image.
   return Reflect.apply(runtimeRequire, undefined, [moduleName]);
 }
 

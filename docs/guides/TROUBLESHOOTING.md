@@ -106,13 +106,13 @@ npm warn install-scripts 6 packages had install scripts blocked because they are
 
 ### Can this warning be ignored?
 
-**Partially, but running without scripts is not recommended.** OmniRoute includes graceful fallbacks: if native `better-sqlite3` bindings cannot be loaded from the standalone bundle, the application falls back through alternative drivers such as `node:sqlite` or `sql.js` (see [SQLite Runtime Resolution](../ops/SQLITE_RUNTIME.md)). The server will still start, but running on WASM fallbacks like `sql.js` disables SQLite WAL (Write-Ahead Logging) mode and increases memory and disk-sync overhead.
+**Partially, but running without scripts is not recommended.** OmniRoute includes graceful fallbacks: if native `better-sqlite3` bindings cannot be loaded from the installed bundle, the application falls back through alternative drivers such as `node:sqlite` or `sql.js` (see [SQLite Runtime Resolution](../ops/SQLITE_RUNTIME.md)). The server will still start, but running on WASM fallbacks like `sql.js` disables SQLite WAL (Write-Ahead Logging) mode and increases memory and disk-sync overhead.
 
 ### Which scripts are actually required?
 
 Not all blocked scripts are essential for running OmniRoute:
 
-- **Essential (`omniroute`, `better-sqlite3`):** OmniRoute runs from a Next.js standalone application bundle (`dist/`). During installation, npm downloads or compiles the host-specific native SQLite driver in the top-level `node_modules/better-sqlite3/`. OmniRoute's `postinstall` script (`scripts/build/postinstall.mjs`) then verifies and copies these host-specific binaries into `dist/node_modules/` so the standalone server can access them. If `omniroute`'s postinstall script is blocked, this copy step is skipped.
+- **Essential (`omniroute`, `better-sqlite3`):** OmniRoute runs from a prebuilt application build (`.build/app/`) that loads its packages from the top-level `node_modules/`. During installation, npm downloads or compiles the host-specific native SQLite driver in `node_modules/better-sqlite3/`; if its install script is blocked, the driver is missing. OmniRoute's own `postinstall` script (`scripts/build/postinstall.mjs`) reports missing native modules, patches Playwright for Android/Termux, syncs `.env` and warms up the native runtimes; blocking it loses those steps, not the server.
 - **Optional/transitive (`keytar`, `@parcel/watcher`, `@swc/core`, `protobufjs`, `esbuild`):** These are build helpers, watcher tools, or system keychain utilities. Allowing them prevents build warnings, but they are not required for core routing functionality.
 
 ### Recommended fix
@@ -236,7 +236,7 @@ desktop app, for example:
 installer has zero reputation and behavioral heuristics run at maximum aggression. Combined
 with a bundled native DLL and hundreds of `.js` files written under
 `%LOCALAPPDATA%\Programs\OmniRoute` (including hash-suffixed package directories from the
-Next.js standalone build), that is enough to trip the heuristic. Code signing is planned;
+bundled application), that is enough to trip the heuristic. Code signing is planned;
 until it lands, new releases can repeat this.
 
 **What to do:**

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAllModelLockouts } from "@omniroute/open-sse/services/accountFallback.ts";
 import { getCacheStats } from "@omniroute/open-sse/services/signatureCache.ts";
 import { getProviderConnections, updateProviderConnection } from "@/lib/db/providers";
@@ -52,7 +51,7 @@ export async function GET() {
     const lockouts = getAllModelLockouts();
     const cacheStats = getCacheStats();
 
-    return NextResponse.json({
+    return Response.json({
       connections: statuses,
       overview: getAllRateLimitStatus(),
       lockouts,
@@ -60,7 +59,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[API ERROR] /api/rate-limits GET:", error);
-    return NextResponse.json({ error: "Failed to get rate limit status" }, { status: 500 });
+    return Response.json({ error: "Failed to get rate limit status" }, { status: 500 });
   }
 }
 
@@ -73,7 +72,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -87,7 +86,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(toggleRateLimitSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { connectionId, enabled } = validation.data;
 
@@ -103,9 +102,9 @@ export async function POST(request) {
       rateLimitProtection: !!enabled,
     });
 
-    return NextResponse.json({ success: true, connectionId, enabled: !!enabled });
+    return Response.json({ success: true, connectionId, enabled: !!enabled });
   } catch (error) {
     console.error("[API ERROR] /api/rate-limits POST:", error);
-    return NextResponse.json({ error: "Failed to toggle rate limit" }, { status: 500 });
+    return Response.json({ error: "Failed to toggle rate limit" }, { status: 500 });
   }
 }

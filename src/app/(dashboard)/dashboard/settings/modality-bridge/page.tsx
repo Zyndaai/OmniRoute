@@ -1,8 +1,6 @@
-"use client";
-
 import { Suspense, useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 
@@ -21,9 +19,7 @@ const TABS: ReadonlyArray<{ id: TabId; labelKey: string }> = [
 function ModalityBridgePageContent() {
   const t = useTranslations("settings");
   const tSidebar = useTranslations("sidebar");
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const activeTab = useMemo<TabId>(() => {
     const requested = searchParams.get("tab") as TabId | null;
@@ -33,7 +29,7 @@ function ModalityBridgePageContent() {
   const handleTabChange = (tab: TabId) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    setSearchParams(params, { replace: true, preventScrollReset: true });
   };
 
   return (

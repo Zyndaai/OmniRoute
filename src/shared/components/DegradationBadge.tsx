@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Badge as KitBadge } from "@omniroute/ui-kit/badge";
 import Icon from "@/shared/components/Icon";
 
@@ -41,7 +39,7 @@ export default function DegradationBadge() {
       icon={<Icon name="healing" size={14} />}
       className="whitespace-nowrap no-underline"
     >
-      <Link href="/dashboard/health" title={t("warning")}>
+      <Link to="/dashboard/health" title={t("warning")}>
         {t("degraded")}
       </Link>
     </KitBadge>

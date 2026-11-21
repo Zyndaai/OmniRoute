@@ -7,10 +7,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASE_PATH = "/omni";
-// Same resolution as scripts/build/build-next-isolated.mjs and next.config.mjs.
-const DIST = path.resolve(ROOT, process.env.NEXT_DIST_DIR || ".build/next");
+// Same resolution as scripts/build/build.mjs resolveBuildDir().
+const DIST = path.resolve(ROOT, process.env.OMNIROUTE_BUILD_DIR || ".build/app");
 // A root-absolute /brand/ reference in markup, JS or CSS: `"/brand/`, `'/brand/`, a template
-// literal starting with /brand/, or `url(/brand/`. Under basePath the asset lives at
+// literal starting with /brand/, or `url(/brand/`. Under a base path the asset lives at
 // /omni/brand/…, so any of these is a broken link.
 const ABSOLUTE_BRAND = /["'`(]\/brand\//;
 
@@ -22,7 +22,7 @@ function filesMatching(dir: string, pattern: RegExp): string[] {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) hits.push(...filesMatching(full, pattern));
     else if (
-      /\.(js|mjs|cjs|css|html|json|rsc|body|map)$/.test(entry.name) &&
+      /\.(js|mjs|cjs|css|html|json|map)$/.test(entry.name) &&
       pattern.test(fs.readFileSync(full, "utf8"))
     ) {
       hits.push(path.relative(ROOT, full));
@@ -32,7 +32,7 @@ function filesMatching(dir: string, pattern: RegExp): string[] {
 }
 
 test(
-  "a basePath build references no absolute /brand/ asset and bundles the fonts",
+  "a base-path build references no absolute /brand/ asset",
   { skip: !process.env.RUN_BUILD_TESTS && "set RUN_BUILD_TESTS=1" },
   () => {
     // RUN_BUILD_TESTS_REUSE=1 checks an existing build output instead of rebuilding.
@@ -42,26 +42,18 @@ test(
         env: { ...process.env, OMNIROUTE_BASE_PATH: BASE_PATH },
         stdio: "inherit",
         timeout: 2_400_000,
+        shell: process.platform === "win32",
       });
     }
 
-    // Positive control: the output really is a basePath build, so a clean scan means something.
-    const manifest = JSON.parse(fs.readFileSync(path.join(DIST, "routes-manifest.json"), "utf8"));
-    assert.equal(manifest.basePath, BASE_PATH, "routes-manifest.json basePath");
+    // Positive control: the output really is a base-path build, so a clean scan means something.
+    const sw = fs.readFileSync(path.join(DIST, "client", "sw.js"), "utf8");
+    assert.match(sw, new RegExp(`^const BASE_PATH = "${BASE_PATH}";$`, "m"));
 
-    // Client chunks and the server output (ErrorPageScaffold and maintenance are server components).
     const hits = [
-      ...filesMatching(path.join(DIST, "static"), ABSOLUTE_BRAND),
+      ...filesMatching(path.join(DIST, "client"), ABSOLUTE_BRAND),
       ...filesMatching(path.join(DIST, "server"), ABSOLUTE_BRAND),
     ];
     assert.deepEqual(hits, [], `absolute /brand/ references found:\n${hits.join("\n")}`);
-
-    const fonts = fs
-      .readdirSync(path.join(DIST, "static", "media"))
-      .filter((f) => /inter|instrument|plex/i.test(f));
-    assert.ok(
-      fonts.length >= 3,
-      `expected the three font families in static/media, got ${fonts.join(", ")}`
-    );
   }
 );

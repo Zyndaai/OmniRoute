@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { rankCandidates } from "@/lib/routing/adaptiveRouting";
@@ -24,10 +23,10 @@ export async function POST(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  if (!parsed.success) return Response.json({ error: parsed.error.message }, { status: 400 });
 
   const result = rankCandidates(parsed.data.candidates);
-  return NextResponse.json({
+  return Response.json({
     request: { candidateCount: parsed.data.candidates.length },
     ...result,
     selected: result.selected?.providerId ?? null,

@@ -1,5 +1,3 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/ReasoningControls.tsx
 //
 // #6241: effort selector + thinking toggle for the Playground. Rendered only when the selected
@@ -8,7 +6,7 @@
 
 import type { PlaygroundParams } from "./ParamSliders";
 import type { ReasoningControlSpec } from "./reasoningControlUtils";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Select from "@/shared/components/Select";
 import Toggle from "@/shared/components/Toggle";
 

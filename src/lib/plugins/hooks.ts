@@ -302,10 +302,9 @@ export async function runOnStreamComplete(payload: PluginOnStreamCompletePayload
  * after a reboot while the UI still reports it as active. Hooks are fail-open, so a
  * plugin that exists to *block* traffic fails open.
  *
- * This lives on the request path on purpose. Booting it from instrumentation-node.ts
- * does not work: Next.js gives instrumentation its own module graph, so its `hooks` map
- * is a different instance from the one route handlers read. Verified — plugins loaded
- * there register into a copy nothing consults, and leak an unused child process.
+ * This lives on the request path on purpose: the first request that needs hooks loads the
+ * active plugins into this module's `hooks` map, and a failed load is retried on the next
+ * request instead of being cached.
  *
  * The import is dynamic because manager.ts imports this module.
  */

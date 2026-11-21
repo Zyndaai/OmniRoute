@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useProviderSettings — Phase 1f extraction for Issue #3501.
  *
@@ -12,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useNotificationStore } from "@/store/notificationStore";
 import {
   CODEX_FAST_TIER_DEFAULT_SUPPORTED_MODELS,

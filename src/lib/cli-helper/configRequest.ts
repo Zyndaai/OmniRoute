@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 
@@ -27,10 +26,10 @@ export function defaultConfigBaseUrl(): string {
   return process.env.OMNIROUTE_BASE_URL || process.env.BASE_URL || `http://localhost:${port}/v1`;
 }
 
-export function privateConfigResponse(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
+export function privateConfigResponse(body: unknown, status = 200): Response {
+  return Response.json(body, { status, headers: { "cache-control": "no-store" } });
 }
 
-export function configError(status: number, message: string): NextResponse {
+export function configError(status: number, message: string): Response {
   return privateConfigResponse(buildErrorBody(status, message), status);
 }

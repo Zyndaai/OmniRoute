@@ -1,7 +1,4 @@
-"use client";
-
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +8,7 @@ import {
 } from "@omniroute/ui-kit/dropdown-menu";
 import { LANGUAGES } from "@/i18n/config";
 import type { Locale } from "@/i18n/config";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { persistLocale } from "@/shared/lib/persistLocale";
 import Button from "./Button";
 import Icon from "./Icon";
@@ -43,7 +40,6 @@ function CountryFlag({ emoji, alt }: { emoji: string; alt: string }) {
 
 export default function LanguageSelector() {
   const locale = useLocale();
-  const router = useRouter();
 
   const t = useTranslations("header");
   const currentLang = LANGUAGES.find((l) => l.code === locale) || LANGUAGES[0];
@@ -53,7 +49,8 @@ export default function LanguageSelector() {
   const handleSelect = (code: Locale) => {
     if (code === locale) return;
     persistLocale(code);
-    router.refresh();
+    // The catalog is loaded once per document, so a reload applies the new locale.
+    window.location.reload();
   };
 
   return (

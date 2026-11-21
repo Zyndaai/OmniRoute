@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@/shared/components";
 import { CHART_SERIES, getSeriesColor } from "@/shared/components/analytics/chartColors";
 import {

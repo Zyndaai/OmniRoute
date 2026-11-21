@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { getInstalledVersion, getLatestVersion } from "@/lib/services/installers/cliproxy";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -15,7 +12,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const toolParam = searchParams.get("tool") ?? "cliproxy";
     if (toolParam !== "cliproxy" && toolParam !== "cliproxyapi") {
-      return NextResponse.json({ error: `Unknown tool: ${toolParam}` }, { status: 400 });
+      return Response.json({ error: `Unknown tool: ${toolParam}` }, { status: 400 });
     }
 
     const [installedVersion, latestVersion] = await Promise.all([
@@ -24,7 +21,7 @@ export async function GET(request: Request) {
     ]);
 
     const latest = latestVersion ?? null;
-    return NextResponse.json({
+    return Response.json({
       current: installedVersion,
       latest,
       updateAvailable: !!installedVersion && !!latest && installedVersion !== latest,
@@ -34,6 +31,6 @@ export async function GET(request: Request) {
       error instanceof Error ? error.message : "Failed to check for updates"
     );
     console.error("[version-manager] check-update error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

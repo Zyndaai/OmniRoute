@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { updateSettings } from "@/lib/db/settings";
 import {
   getPayloadRulesConfig,
@@ -13,10 +12,10 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    return NextResponse.json(await getPayloadRulesConfig());
+    return Response.json(await getPayloadRulesConfig());
   } catch (error) {
     console.error("Error reading payload rules config:", error);
-    return NextResponse.json({ error: "Failed to read payload rules config" }, { status: 500 });
+    return Response.json({ error: "Failed to read payload rules config" }, { status: 500 });
   }
 }
 
@@ -28,7 +27,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -42,15 +41,15 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updatePayloadRulesSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const normalizedConfig = normalizePayloadRulesConfig(validation.data);
     await updateSettings({ payloadRules: normalizedConfig });
 
-    return NextResponse.json(normalizedConfig);
+    return Response.json(normalizedConfig);
   } catch (error) {
     console.error("Error updating payload rules config:", error);
-    return NextResponse.json({ error: "Failed to update payload rules config" }, { status: 500 });
+    return Response.json({ error: "Failed to update payload rules config" }, { status: 500 });
   }
 }

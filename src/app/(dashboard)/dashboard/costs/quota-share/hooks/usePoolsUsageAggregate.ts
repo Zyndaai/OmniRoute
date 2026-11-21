@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import type { QuotaPool } from "@/lib/quota/dimensions";
 import type { PoolUsageSnapshot } from "@/lib/quota/types";

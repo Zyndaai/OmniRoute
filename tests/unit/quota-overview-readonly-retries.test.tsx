@@ -1,10 +1,10 @@
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ProviderLimits from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 vi.mock("@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCard", () => ({
   default: ({ onRefresh }: { onRefresh: () => void }) => (
     <button onClick={onRefresh}>Synthetic card refresh</button>
@@ -107,13 +107,13 @@ function setup({ layout = "overview", cold = true, stale = false, deferred = fal
 }
 async function mount(interval = 0) {
   const view = render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale="en"
       timeZone="UTC"
       messages={{ usage: en.usage, common: en.common }}
     >
       <ProviderLimits autoRefreshInterval={interval} />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   await advance();
   return view;

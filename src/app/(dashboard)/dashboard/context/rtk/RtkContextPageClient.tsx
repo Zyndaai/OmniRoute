@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader, SectionHeader } from "@omniroute/ui-kit/page-header";
 import { Collapsible, SegmentedControl } from "@/shared/components";

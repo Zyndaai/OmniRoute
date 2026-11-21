@@ -7,7 +7,6 @@
  */
 import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getEnvSyncPlan, syncEnv } from "../../../../../../scripts/dev/sync-env.mjs";
 
@@ -42,11 +41,9 @@ function createEnvBackup() {
   return backupPath;
 }
 
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -57,7 +54,7 @@ export async function GET(request: Request) {
     // `.env` target used by createEnvBackup() above.
     const plan = getEnvSyncPlan({ scope: "oauth", rootDir: process.cwd() });
 
-    return NextResponse.json({
+    return Response.json({
       available: plan.available,
       created: plan.created,
       added: plan.added,
@@ -65,7 +62,7 @@ export async function GET(request: Request) {
       missingKeys: plan.missingEntries.map((entry: { key: string }) => entry.key),
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: (error as Error)?.message || "Failed to inspect env defaults" },
       { status: 500 }
     );
@@ -74,7 +71,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -84,7 +81,7 @@ export async function POST(request: Request) {
     const result = syncEnv({ scope: "oauth", quiet: true, rootDir: process.cwd() });
     const plan = getEnvSyncPlan({ scope: "oauth", rootDir: process.cwd() });
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       backupPath,
       created: result.created,
@@ -93,7 +90,7 @@ export async function POST(request: Request) {
       missingKeys: plan.missingEntries.map((entry: { key: string }) => entry.key),
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: (error as Error)?.message || "Failed to repair env defaults" },
       { status: 500 }
     );

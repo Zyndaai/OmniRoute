@@ -3,7 +3,6 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NextResponse } from "next/server";
 
 const dataDir = mkdtempSync(join(tmpdir(), "omni-discovery-producers-"));
 process.env.DATA_DIR = dataDir;
@@ -59,7 +58,7 @@ function stubOptions(provider: string, overrides: Record<string, unknown> = {}) 
       localWarning?: string;
       failure?: Failure;
     }) =>
-      NextResponse.json(
+      Response.json(
         applyDiscoveryDegradation({
           provider,
           connectionId: "conn-1",
@@ -70,9 +69,9 @@ function stubOptions(provider: string, overrides: Record<string, unknown> = {}) 
         })
       ),
     buildResponse: (payload: Record<string, unknown>) =>
-      NextResponse.json(applyDiscoveryDegradation(payload)),
+      Response.json(applyDiscoveryDegradation(payload)),
     buildApiDiscoveryResponse: async (models: unknown[]) =>
-      NextResponse.json(
+      Response.json(
         applyDiscoveryDegradation({
           provider,
           connectionId: "conn-1",

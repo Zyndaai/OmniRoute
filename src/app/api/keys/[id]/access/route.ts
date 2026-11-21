@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   assignApiKeyAccess,
   KeyAllowsAllModelsError,
@@ -27,7 +26,7 @@ export async function POST(
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -40,7 +39,7 @@ export async function POST(
 
   const validation = validateBody(apiKeyAccessAssignSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -48,14 +47,14 @@ export async function POST(
     const result = await assignApiKeyAccess(id, validation.data);
 
     if (!result) {
-      return NextResponse.json({ error: "Key not found" }, { status: 404 });
+      return Response.json({ error: "Key not found" }, { status: 404 });
     }
 
     if (result.changed) {
       await syncKeysToCloudIfEnabled();
     }
 
-    return NextResponse.json({
+    return Response.json({
       id: result.id,
       modelAccessMode: result.modelAccessMode,
       allowedModels: result.allowedModels,
@@ -64,7 +63,7 @@ export async function POST(
     });
   } catch (error) {
     if (error instanceof KeyAllowsAllModelsError || error instanceof KeyAllowsAllCombosError) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(409, error.message, null, {
           type: "invalid_request_error",
           code: error.code,
@@ -77,7 +76,7 @@ export async function POST(
       error instanceof EmptyRestrictedAccessListError ||
       error instanceof KeyAccessCapExceededError
     ) {
-      return NextResponse.json(buildErrorBody(400, error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, error.message), { status: 400 });
     }
 
     if (
@@ -85,7 +84,7 @@ export async function POST(
       (error instanceof Error && (error as { code?: string }).code === "LEASE_KEY_POLICY_INVALID")
     ) {
       const err = error as Error & { code?: string };
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, err.message, null, {
           type: "lease_error",
           code: err.code || "LEASE_KEY_POLICY_INVALID",
@@ -95,7 +94,7 @@ export async function POST(
     }
 
     log.error("keys", "Error assigning key access", error);
-    return NextResponse.json({ error: "Failed to assign key access" }, { status: 500 });
+    return Response.json({ error: "Failed to assign key access" }, { status: 500 });
   }
 }
 

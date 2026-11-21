@@ -1,7 +1,14 @@
-import { fixupConfigRules } from "@eslint/compat";
-import nextVitals from "eslint-config-next/core-web-vitals";
+import { createRequire } from "node:module";
+import { fixupPluginRules } from "@eslint/compat";
 import * as espree from "espree";
+import importPlugin from "eslint-plugin-import";
+import jsxA11y from "eslint-plugin-jsx-a11y";
+import react from "eslint-plugin-react";
+import reactHooks from "eslint-plugin-react-hooks";
+import globals from "globals";
 import tseslint from "typescript-eslint";
+
+const require = createRequire(import.meta.url);
 
 // #7879: bar NEW local `toNumber` definitions outside the canonical helper.
 // Pre-existing definitions (~51 across the codebase) are frozen via
@@ -40,10 +47,52 @@ const IMPORT_BOUNDARY_RESTRICTIONS = {
 
 /** @type {import("eslint").Linter.Config[]} */
 const eslintConfig = [
-  ...fixupConfigRules(nextVitals),
-  // eslint-config-next's Babel parser has not adopted ESLint 10's ScopeManager
-  // finalize contract yet. Plain JS/JSX does not need that parser, so use the
-  // ESLint-native parser while retaining Next's plugins and rules.
+  // React, React Hooks, import and jsx-a11y for every source file. eslint-plugin-react and
+  // eslint-plugin-import still call context methods ESLint 10 removed, hence fixupPluginRules.
+  {
+    name: "omniroute/react",
+    files: ["**/*.{js,jsx,mjs,ts,tsx,mts,cts}"],
+    plugins: {
+      react: fixupPluginRules(react),
+      "react-hooks": reactHooks,
+      import: fixupPluginRules(importPlugin),
+      "jsx-a11y": jsxA11y,
+    },
+    languageOptions: {
+      sourceType: "module",
+      parserOptions: { ecmaFeatures: { jsx: true } },
+      globals: { ...globals.browser, ...globals.node },
+    },
+    settings: {
+      react: { version: "detect" },
+      "import/parsers": {
+        "@typescript-eslint/parser": [".ts", ".mts", ".cts", ".tsx", ".d.ts"],
+      },
+      // Resolvers by absolute path: eslint-plugin-import otherwise loads them by name
+      // relative to the linted file.
+      "import/resolver": {
+        [require.resolve("eslint-import-resolver-node")]: {
+          extensions: [".js", ".jsx", ".ts", ".tsx"],
+        },
+        [require.resolve("eslint-import-resolver-typescript")]: { alwaysTryTypes: true },
+      },
+    },
+    rules: {
+      ...react.configs.recommended.rules,
+      ...reactHooks.configs.recommended.rules,
+      "import/no-anonymous-default-export": "warn",
+      "react/no-unknown-property": "off",
+      "react/react-in-jsx-scope": "off",
+      "react/prop-types": "off",
+      "jsx-a11y/alt-text": ["warn", { elements: ["img"], img: ["Image"] }],
+      "jsx-a11y/aria-props": "warn",
+      "jsx-a11y/aria-proptypes": "warn",
+      "jsx-a11y/aria-unsupported-elements": "warn",
+      "jsx-a11y/role-has-required-aria-props": "warn",
+      "jsx-a11y/role-supports-aria-props": "warn",
+      "react/jsx-no-target-blank": "off",
+    },
+  },
   {
     files: ["**/*.{js,jsx,mjs,cjs}"],
     languageOptions: {
@@ -51,9 +100,13 @@ const eslintConfig = [
     },
   },
   {
-    files: ["**/*.{mts,cts}"],
+    files: ["**/*.{ts,tsx,mts,cts}"],
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
     languageOptions: {
       parser: tseslint.parser,
+      parserOptions: { sourceType: "module" },
     },
   },
   // Pacote 4 (plano mestre testes+CI, 2026-07-04) — zero-warning policy: TODA regra roda
@@ -64,12 +117,9 @@ const eslintConfig = [
   // PR que o introduz. Aperto do baseline: npx eslint . --prune-suppressions
   // --suppressions-location config/quality/eslint-suppressions.json (na release).
   {
-    // Escopo = onde os presets do next registram estes plugins (bloco global sem `files`
-    // atingiria scripts/*.mjs sem o plugin react-hooks e explodiria o flat config).
     files: ["src/**/*.{ts,tsx,js,jsx}"],
     rules: {
       "react-hooks/exhaustive-deps": "error",
-      "@next/next/no-img-element": "error",
       "import/no-anonymous-default-export": "error",
       // window.alert/confirm/prompt are suppressed in embedded browsers (the action then
       // silently does nothing). Use useConfirmDialog / usePromptDialog or a toast instead.
@@ -83,10 +133,6 @@ const eslintConfig = [
       "no-implied-eval": "error",
       "no-new-func": "error",
       "no-restricted-imports": ["error", IMPORT_BOUNDARY_RESTRICTIONS],
-      // New rule shipped by the eslint-config-next bump (#10043); flags 6 pre-existing
-      // window.location.href navigations, several of which are deliberate full-page
-      // reloads (login/logout state reset). Off pending per-case review — issue #10292.
-      "@next/next/no-location-assign-relative-destination": "off",
     },
   },
   // G14: DB internals may use the compatibility barrel while it is decomposed; all
@@ -105,7 +151,7 @@ const eslintConfig = [
   // G14: App routes/components must delegate provider execution through handlers or
   // services instead of reaching into executor implementations.
   {
-    files: ["src/app/**/*.{ts,tsx,js,jsx}"],
+    files: ["src/app/**/*.{js,jsx}"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -113,6 +159,17 @@ const eslintConfig = [
           ...IMPORT_BOUNDARY_RESTRICTIONS,
           patterns: [LOCAL_DB_IMPORT_RESTRICTION, EXECUTOR_IMPORT_RESTRICTION],
         },
+      ],
+    },
+  },
+  // TypeScript routes may import executor *types* (e.g. ProviderCredentials); only value
+  // imports cross the boundary.
+  {
+    files: ["src/app/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        { patterns: [{ ...EXECUTOR_IMPORT_RESTRICTION, allowTypeImports: true }] },
       ],
     },
   },
@@ -156,13 +213,12 @@ const eslintConfig = [
     },
   },
   // Relaxed rules for TypeScript in open-sse and tests (incremental adoption).
-  // eslint-config-next already registers @typescript-eslint for every TS file;
+  // The TypeScript block above already registers @typescript-eslint for every TS file;
   // registering a second plugin object is rejected by ESLint 10.
   {
     files: ["open-sse/**/*.ts", "tests/**/*.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
-      "@next/next/no-assign-module-variable": "off",
       "react-hooks/rules-of-hooks": "off",
     },
   },
@@ -172,13 +228,12 @@ const eslintConfig = [
       "@typescript-eslint": tseslint.plugin,
     },
     rules: {
-      "@next/next/no-assign-module-variable": "off",
       "react-hooks/rules-of-hooks": "off",
     },
   },
-  // JS/JSX files do not match eslint-config-next's TypeScript block. Register
-  // the plugin only for that disjoint scope so the shared unused-vars ratchet
-  // works without redefining the plugin for TS/TSX under ESLint 10.
+  // JS/JSX files do not match the TypeScript block. Register the plugin only for
+  // that disjoint scope so the shared unused-vars ratchet works without
+  // redefining the plugin for TS/TSX under ESLint 10.
   {
     files: ["src/**/*.{js,jsx}"],
     plugins: {
@@ -190,7 +245,7 @@ const eslintConfig = [
   // (same pattern as #7879 toNumber); only genuinely NEW unused bindings fail
   // lint. `args: "all"` (not `after-used`) so a leading unused param is never
   // silently skipped, e.g. `function handle(req, _opts, next)` must flag `req`.
-  // eslint-config-next already registers @typescript-eslint; registering it again
+  // @typescript-eslint is registered by the blocks above; registering it again
   // in this block is rejected by ESLint 10.
   {
     files: ["src/**/*.{ts,tsx,js,jsx}", "open-sse/**/*.ts", "tests/**/*.{ts,tsx,mjs}"],
@@ -212,15 +267,13 @@ const eslintConfig = [
   // Global ignores — keep ESLint scoped to source files only
   {
     ignores: [
-      // Next.js build output (distDir now .build/next; keep .next for legacy)
-      ".next/**",
+      // Build output and generated route types
       ".build/**",
-      "src/.next/**",
+      ".react-router/**",
       "out/**",
       "build/**",
       "dist/**",
       "coverage/**",
-      "next-env.d.ts",
       // Scripts and binaries
       "scripts/**",
       "bin/**",

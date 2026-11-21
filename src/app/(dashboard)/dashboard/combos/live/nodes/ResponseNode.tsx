@@ -1,5 +1,3 @@
-"use client";
-
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { FLOW_EDGE_COLORS, flowColorAlpha } from "@/shared/components/flow/edgeStyles";
 import type { ComboRunModel } from "../comboFlowModel";

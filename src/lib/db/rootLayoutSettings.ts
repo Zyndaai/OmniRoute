@@ -1,4 +1,3 @@
-import { isBuildPhase } from "./core";
 import { db } from "./pg";
 
 export interface RootLayoutSettings {
@@ -23,11 +22,9 @@ const DEFAULT_ROOT_LAYOUT_SETTINGS: RootLayoutSettings = {
   customFaviconBase64: "",
 };
 
-/** Read only the settings needed while compiling and rendering the root layout. */
+/** Read only the settings the root layout renders (instance name and favicon). */
 export async function getRootLayoutSettings(): Promise<RootLayoutSettings> {
   const settings = { ...DEFAULT_ROOT_LAYOUT_SETTINGS };
-  // `next build` renders the layout without a database; never open a connection for it.
-  if (isBuildPhase) return settings;
 
   let rows: Array<{ key: string; value: unknown }>;
   try {

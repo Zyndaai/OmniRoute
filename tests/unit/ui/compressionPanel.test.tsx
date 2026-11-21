@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { fireEvent } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ENGINE_IDS } from "../../../open-sse/services/compression/engineCatalog.ts";
@@ -8,7 +9,7 @@ import { ENGINE_IDS } from "../../../open-sse/services/compression/engineCatalog
 // i18n does not resolve to a real locale in vitest/jsdom, so mock next-intl to echo
 // the key. This test therefore asserts on translation keys, engine ids,
 // data-testid hooks, and the PUT request body.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values ? `${key} ${Object.values(values).join(" ")}` : key,
   useLocale: () => "en",
@@ -26,7 +27,7 @@ function mount(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(ui);
+    root.render(<MemoryRouter>{ui}</MemoryRouter>);
   });
   return container;
 }

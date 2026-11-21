@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   createCompressionCombo,
@@ -32,7 +31,7 @@ export const compressionComboCreateSchema = z
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json({ combos: await listCompressionCombos() });
+  return Response.json({ combos: await listCompressionCombos() });
 }
 
 export async function POST(request: Request) {
@@ -43,14 +42,14 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(compressionComboCreateSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const combo = await createCompressionCombo(validation.data as Partial<CompressionCombo>);
-  return NextResponse.json(combo, { status: 201 });
+  return Response.json(combo, { status: 201 });
 }

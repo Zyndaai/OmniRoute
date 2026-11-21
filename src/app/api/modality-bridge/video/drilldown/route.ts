@@ -18,9 +18,6 @@ import { createLogger } from "@/shared/utils/logger";
 
 const log = createLogger("video-bridge-drilldown");
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export { VIDEO_BRIDGE_DRILLDOWN_PATH };
 export const VIDEO_DRILLDOWN_MAX_BODY_BYTES =
   Math.ceil(VIDEO_DRILLDOWN_MAX_ENTRY_BYTES / 3) * 4 + 64 * 1024;

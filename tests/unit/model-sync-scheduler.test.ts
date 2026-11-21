@@ -273,14 +273,9 @@ test("modelSyncScheduler pins HTTPS transport to IPv4 while retaining localhost 
 });
 
 test("runtime launchers publish the actual internal listener scheme", () => {
-  const runNext = fs.readFileSync(path.join(process.cwd(), "scripts/dev/run-next.mjs"), "utf8");
-  const standalone = fs.readFileSync(
-    path.join(process.cwd(), "scripts/dev/standalone-server-ws.mjs"),
-    "utf8"
-  );
+  const launcher = fs.readFileSync(path.join(process.cwd(), "scripts/dev/run-server.mjs"), "utf8");
 
-  assert.match(runNext, /OMNIROUTE_INTERNAL_SCHEME\s*=\s*["']http["']/);
-  assert.match(standalone, /OMNIROUTE_INTERNAL_SCHEME\s*=\s*tlsOptions\s*\?\s*["']https["']/);
+  assert.match(launcher, /OMNIROUTE_INTERNAL_SCHEME\s*=\s*tlsOptions\s*\?\s*["']https["']/);
 });
 
 test("initCloudSync: startup initialization also starts model sync scheduler", () => {
@@ -291,9 +286,9 @@ test("initCloudSync: startup initialization also starts model sync scheduler", (
 });
 
 test("cloud sync bootstrap is wired to server startup, not app layout imports", () => {
-  const layoutSource = fs.readFileSync(path.join(process.cwd(), "src/app/layout.tsx"), "utf8");
+  const layoutSource = fs.readFileSync(path.join(process.cwd(), "src/app/root.tsx"), "utf8");
   const instrumentationSource = fs.readFileSync(
-    path.join(process.cwd(), "src/instrumentation-node.ts"),
+    path.join(process.cwd(), "src/server/boot.ts"),
     "utf8"
   );
 
@@ -301,13 +296,7 @@ test("cloud sync bootstrap is wired to server startup, not app layout imports", 
   assert.match(instrumentationSource, /ensureCloudSyncInitialized/);
 });
 
-test("initCloudSync skips auto initialization during build and test processes unless explicitly re-enabled", () => {
-  assert.equal(
-    initCloudSync.shouldSkipCloudSyncInitialization({ NEXT_PHASE: "phase-production-build" }, [
-      "node",
-    ]),
-    true
-  );
+test("initCloudSync skips auto initialization in test processes unless explicitly re-enabled", () => {
   assert.equal(
     initCloudSync.shouldSkipCloudSyncInitialization({ NODE_ENV: "test" }, ["node", "--test"]),
     true

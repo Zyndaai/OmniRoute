@@ -1,5 +1,3 @@
-"use client";
-
 import Textarea from "@/shared/components/Textarea";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -8,7 +6,7 @@ import { cn } from "@/shared/utils/cn";
 // src/app/(dashboard)/dashboard/playground/components/tabs/build/BuildWizard.tsx
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import ToolsBuilder from "../../ToolsBuilder";
 import StructuredOutputEditor from "../../StructuredOutputEditor";
 import { useToolsBuilder } from "../../../hooks/useToolsBuilder";

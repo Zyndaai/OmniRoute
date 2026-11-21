@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Toggle } from "@/shared/components";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 

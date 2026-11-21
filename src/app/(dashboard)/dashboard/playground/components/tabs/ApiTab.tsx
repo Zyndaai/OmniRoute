@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // src/app/(dashboard)/dashboard/playground/components/tabs/ApiTab.tsx
@@ -8,14 +6,14 @@ import Icon from "@/shared/components/Icon";
 // Zero logic changes — just moved into this tab component.
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 // Barrel import kept on purpose: tests/unit/ui/playground-api-tab.test.tsx mocks "@/shared/components".
 import { Card, Button, Select, Badge } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import { ALIAS_TO_ID } from "@/shared/constants/providers";
 import { pickDisplayValue } from "@/shared/utils/maskEmail";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
-import dynamic from "next/dynamic";
+import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 import {
   PLAYGROUND_IMAGE_STREAM_HEADER,
   restorePlaygroundImageResponse,
@@ -25,8 +23,8 @@ import ImageResultsInline, {
   type PlaygroundImageResult,
 } from "../ImageResultsInline";
 
-// Monaco editor lazy-loaded (ssr: false) to avoid SSR issues (F10 requirement)
-const Editor = dynamic(() => import("@/shared/components/MonacoEditor"), { ssr: false });
+// Monaco editor lazy-loaded and rendered in the browser only, to avoid SSR issues (F10 requirement)
+const Editor = clientOnlyLazy(() => import("@/shared/components/MonacoEditor"));
 
 interface ModelInfo {
   id: string;
@@ -649,7 +647,6 @@ export default function ApiTab(_props: ApiTabProps) {
                         key={i}
                         className="relative group size-16 rounded overflow-hidden border border-border"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={src}
                           alt={`Attached ${i + 1}`}

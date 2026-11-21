@@ -179,7 +179,7 @@ test("checkRequestIP: all-invalid XFF falls back to x-real-ip", async () => {
   assert.equal((await checkRequestIP(req)).allowed, true);
 });
 
-test("checkRequestIP: empty headers fall back to request.ip", async () => {
+test("checkRequestIP: empty headers fall back to the trusted peer IP, else unknown", async () => {
   await configureIPFilter({ enabled: true, mode: "whitelist", whitelist: ["7.7.7.7"] });
   const req = {
     headers: {
@@ -187,9 +187,9 @@ test("checkRequestIP: empty headers fall back to request.ip", async () => {
         return null;
       },
     },
-    ip: "7.7.7.7",
   };
-  assert.equal((await checkRequestIP(req)).allowed, true);
+  assert.equal((await checkRequestIP(req, "7.7.7.7")).allowed, true);
+  assert.equal((await checkRequestIP(req)).allowed, false);
 });
 
 // ─── Config API ─────────────────────────────────────────────────────────────

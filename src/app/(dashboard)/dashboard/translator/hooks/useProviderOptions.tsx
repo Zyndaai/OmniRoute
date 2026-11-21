@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   AI_PROVIDERS,
   CLAUDE_CODE_COMPATIBLE_PREFIX,

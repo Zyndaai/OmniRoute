@@ -59,7 +59,6 @@ spawn-capable prefixes and fails CI if any is not classified local-only.
 | `/api/issue-agent/`                                                                                      | Issue agent — spawns local tooling against the repo                                             |
 | `/api/plugins/`, `/api/plugins`                                                                          | Plugins — load/execute via `worker_threads` + `child_process`                                   |
 | `/api/middleware/`                                                                                       | User middleware — loads/executes operator code in-process                                       |
-| `/api/system/version`                                                                                    | Auto-update (POST only; GET/HEAD/OPTIONS exempt) — spawns `git checkout` + `npm install`        |
 | `/api/db-backups/exportAll`                                                                              | Spawns `tar` for the export archive                                                             |
 | `/api/local/`                                                                                            | 1-click local launchers (Redis today) — spawns podman/docker                                    |
 | `/api/headroom/start`, `/api/headroom/stop`                                                              | Headroom proxy lifecycle — spawns python CLI / signals PID                                      |
@@ -207,7 +206,7 @@ server process.
 **Response on violation:** `401 Authentication required`
 
 `/api/settings/obsidian` covers its `/webdav` child: `POST` points the WebDAV file service —
-served by the custom Node layer before Next.js, outside this pipeline — at a caller-chosen root
+served by the launcher (`scripts/dev/run-server.mjs`) before the app, outside this pipeline — at a caller-chosen root
 and echoes freshly minted Basic credentials, `DELETE` rotates them, and the parent `POST` stores
 the Obsidian REST API token. GHSA-62vw only masked the `GET` password reveal; the issuance was
 still on the fail-open tier (GHSA-7pq4-8pvv-rx7r). `enableObsidianVaultSync()` additionally

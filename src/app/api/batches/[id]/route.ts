@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { getBatch } from "@/lib/db/batches";
 import { getApiKeyRequestScope, canAccessOwnedRecord } from "@/app/api/v1/_helpers/apiKeyScope";
 
@@ -14,11 +12,11 @@ export async function GET(request: Request, { params }: { params: { id: string }
     // cannot leak a foreign tenant's batch metadata to an unauthenticated
     // caller (#13882).
     if (!batch || !canAccessOwnedRecord(scope, batch.apiKeyId)) {
-      return NextResponse.json({ error: "Batch not found" }, { status: 404 });
+      return Response.json({ error: "Batch not found" }, { status: 404 });
     }
-    return NextResponse.json({ batch });
+    return Response.json({ batch });
   } catch (error) {
     console.log("Error fetching batch:", error);
-    return NextResponse.json({ error: "Failed to fetch batch" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch batch" }, { status: 500 });
   }
 }

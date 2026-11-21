@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { parse } from "@formatjs/icu-messageformat-parser";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
@@ -12,7 +12,7 @@ import i18nConfig from "../../config/i18n.json";
 import HealthAccountTooltip from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/HealthAccountTooltip";
 import { buildHealthAccount } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 import { parseQuotaData } from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/quotaParsing";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 afterEach(cleanup);
 const now = Date.parse("2099-01-01T00:00:00Z");
 const cases = [
@@ -64,7 +64,7 @@ for (const locale of ["en", "ar"])
         }
       );
       render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale={locale}
           messages={{ usage: messages.usage, common: messages.common }}
           timeZone="UTC"
@@ -79,7 +79,7 @@ for (const locale of ["en", "ar"])
             label="Synthetic account"
             anchor={document.body}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
       expect(typeof messages.usage[row.key]).toBe("string");
       expect(screen.getByText(messages.usage[row.key])).toBeTruthy();

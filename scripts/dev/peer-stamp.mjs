@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 /**
  * Trusted peer-IP stamping for the custom Node HTTP servers.
  *
- * The Next.js middleware runtime (proxy.ts → runAuthzPipeline) exposes NO socket
+ * The authz pipeline (src/server/authz/pipeline.ts → runAuthzPipeline) sees NO socket
  * or peer IP — only request headers, ALL of which are client-controlled. The
  * LOCAL_ONLY route guard (spawn-capable routes) must decide locality from the
  * real TCP peer, never from the spoofable Host header.

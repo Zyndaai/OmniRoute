@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
@@ -1203,7 +1202,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     const validation = validateBody(providerConnectionTestBodySchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { validationModelId } = validation.data;
 
@@ -1213,14 +1212,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
 
     if (data.error === "Connection not found") {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
-    return NextResponse.json(data);
+    return Response.json(data);
   } catch (error) {
     const retired = retirement.responseForError(error);
     if (retired) return retired;
     console.log("Error testing connection:", toSafeMessage(error, "Connection test failed"));
-    return NextResponse.json({ error: "Test failed" }, { status: 500 });
+    return Response.json({ error: "Test failed" }, { status: 500 });
   }
 }

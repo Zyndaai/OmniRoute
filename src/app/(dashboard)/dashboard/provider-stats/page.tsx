@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Provider Stats Dashboard
  *
@@ -8,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, Fragment } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import { formatComboSuccessRate } from "@/lib/usage/providerStatsFormatters";

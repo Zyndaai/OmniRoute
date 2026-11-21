@@ -1,5 +1,3 @@
-"use client";
-
 interface PayloadPreviewProps {
   payload: Record<string, unknown> | null;
   label?: string;

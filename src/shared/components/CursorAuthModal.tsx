@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useId, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import Icon from "./Icon";
 import Modal from "./Modal";

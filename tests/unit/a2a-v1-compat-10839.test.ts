@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-a2a-v1-compat-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -16,24 +15,20 @@ const agentCardRoute = await import("../../src/app/.well-known/agent-card.json/r
 const { resetTestDb } = await import("../helpers/postgres.ts");
 
 /**
- * The agent-card routes derive their base URL from `request.nextUrl.origin`
+ * The agent-card routes derive their base URL from the request's own origin
  * (S2 topology sanitisation, #11418), so the handler must be invoked with a
- * request the way Next.js does — a bare `GET()` throws on `nextUrl`.
+ * real request.
  */
-function makeCardRequest(
-  url = "https://gateway.example.com/.well-known/agent-card.json"
-): NextRequest {
-  const request = new Request(url) as unknown as NextRequest;
-  Object.defineProperty(request, "nextUrl", { value: new URL(url), configurable: true });
-  return request;
+function makeCardRequest(url = "https://gateway.example.com/.well-known/agent-card.json"): Request {
+  return new Request(url);
 }
 
-function makeJsonRpcRequest(body: unknown): NextRequest {
+function makeJsonRpcRequest(body: unknown): Request {
   return new Request("http://localhost/a2a", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  }) as unknown as NextRequest;
+  }) as unknown as Request;
 }
 
 test.beforeEach(async () => {

@@ -1,16 +1,13 @@
-"use client";
-
-import Icon from "@/shared/components/Icon";
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { Link, useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
+import Icon from "@/shared/components/Icon";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
 
 export default function Navigation() {
   const t = useTranslations("landing");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const router = useRouter();
+  const navigate = useNavigate();
 
   return (
     <nav className="fixed top-0 z-50 w-full bg-[#0B0E14]/80 backdrop-blur-md border-b border-[#2D333B]">
@@ -19,7 +16,7 @@ export default function Navigation() {
         <button
           type="button"
           className="flex items-center gap-3 cursor-pointer bg-transparent border-none p-0 min-w-0"
-          onClick={() => router.push("/")}
+          onClick={() => navigate("/")}
           aria-label={t("navigateHome")}
         >
           {/* Fixed dark surface: white ink in both themes (the kit wordmark sets its own color). */}
@@ -42,7 +39,7 @@ export default function Navigation() {
           </a>
           <Link
             className="text-gray-300 hover:text-white text-sm font-medium transition-colors"
-            href="/docs"
+            to="/docs"
           >
             {t("docsLink")}
           </Link>
@@ -60,7 +57,7 @@ export default function Navigation() {
         {/* CTA + Mobile menu */}
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => navigate("/dashboard")}
             className="hidden sm:flex h-9 items-center justify-center rounded-lg px-4 bg-[#E54D5E] hover:bg-[#C93D4E] transition-all text-white text-sm font-bold shadow-[0_0_15px_rgba(229,77,94,0.4)] hover:shadow-[0_0_20px_rgba(229,77,94,0.6)]"
           >
             {t("getStarted")}
@@ -95,7 +92,7 @@ export default function Navigation() {
             </a>
             <Link
               className="text-gray-300 hover:text-white text-sm font-medium transition-colors"
-              href="/docs"
+              to="/docs"
               onClick={() => setMobileMenuOpen(false)}
             >
               {t("docsLink")}
@@ -109,7 +106,7 @@ export default function Navigation() {
               {t("github")}
             </a>
             <button
-              onClick={() => router.push("/dashboard")}
+              onClick={() => navigate("/dashboard")}
               className="h-9 rounded-lg bg-[#E54D5E] hover:bg-[#C93D4E] text-white text-sm font-bold"
             >
               {t("getStarted")}

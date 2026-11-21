@@ -15,18 +15,24 @@ const routerControl = vi.hoisted(() => ({
   bumpPageRender: () => {},
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    replace: (url: string) => {
-      routerControl.pendingUrl = url;
-      routerControl.bumpPageRender();
-    },
-    push: vi.fn(),
-    prefetch: vi.fn(),
-    refresh: vi.fn(),
-  }),
-  usePathname: () => "/dashboard/logs/timeline",
-  useSearchParams: () => new URLSearchParams(globalThis.location.search),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => (to: string | { search?: string }) => {
+    routerControl.pendingUrl =
+      typeof to === "string" ? to : globalThis.location.pathname + (to.search ?? "");
+    routerControl.bumpPageRender();
+  },
+  useLocation: () => ({ pathname: "/dashboard/logs/timeline", search: "", hash: "" }),
+  useSearchParams: () => [new URLSearchParams(globalThis.location.search), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 const { default: LogsTimelinePage } = await import(

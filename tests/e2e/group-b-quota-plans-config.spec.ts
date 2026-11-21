@@ -158,7 +158,7 @@ test.describe("Group B — Quota Plans Config", () => {
     //
     // Assert on RENDERED TEXT, not on page.content(). The raw HTML always contains
     // the string, on every route, so the old assertion could never pass: layout.tsx
-    // hands the whole message catalogue to NextIntlClientProvider, React serialises
+    // hands the whole message catalogue to IntlProvider, React serialises
     // that prop into the RSC payload, and en.json carries "Internal Server Error"
     // twice (publicSystem.error.title and errors.500.title). Probing /dashboard,
     // /dashboard/costs, /dashboard/settings and even /login all showed the string

@@ -4,10 +4,14 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const nav = vi.hoisted(() => ({ pathname: "/dashboard/providers/openai" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...p }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...p}>
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: nav.pathname }),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),

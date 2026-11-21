@@ -1,5 +1,3 @@
-"use client";
-
 import { Input } from "@/shared/components";
 import { getProviderConnectionFamilyIds } from "@/shared/constants/providers";
 import { providerText, type ProviderMessageTranslator } from "../../providerPageHelpers";

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { providerText } from "../providerPageHelpers";
 

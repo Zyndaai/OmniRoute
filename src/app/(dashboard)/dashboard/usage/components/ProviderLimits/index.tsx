@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { buildCacheHealthResponse } from "@/lib/usage/cacheHealth";
@@ -17,17 +16,17 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         { error: parsed.error.issues[0]?.message ?? "Invalid query parameters" },
         { status: 400 }
       );
     }
 
-    return NextResponse.json(await buildCacheHealthResponse(parsed.data));
+    return Response.json(await buildCacheHealthResponse(parsed.data));
   } catch (error) {
     // Never echo the error: the message can carry the DATA_DIR path and the
     // SQL text. Details go to the server log, the caller gets a fixed string.
     console.error("Error building cache health summary:", error);
-    return NextResponse.json({ error: "Failed to build cache health summary" }, { status: 500 });
+    return Response.json({ error: "Failed to build cache health summary" }, { status: 500 });
   }
 }

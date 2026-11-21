@@ -212,7 +212,7 @@ test("STATUS_HEX mirrors the kit status palette (ReactFlow/SVG need hex)", async
 });
 
 test("<html> opts into the kit theme surface", () => {
-  assert.match(read("src/app/layout.tsx"), /<html[^>]*className="ci-theme"/);
+  assert.match(read("src/app/root.tsx"), /<html[^>]*className="ci-theme"/);
 });
 
 // Guards kept from design-grid-background.test.ts that are still true after the bridge

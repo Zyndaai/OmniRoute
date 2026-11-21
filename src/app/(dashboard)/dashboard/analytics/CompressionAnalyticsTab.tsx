@@ -5,10 +5,8 @@
  * mode breakdown, provider breakdown, and cost/token savings summary.
  */
 
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import Icon from "@/shared/components/Icon";

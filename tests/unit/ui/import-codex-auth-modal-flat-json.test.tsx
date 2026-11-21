@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // next-intl is only used by the component body; the preview helper under test is pure.
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 const { previewCodexJson } =
   await import("@/app/(dashboard)/dashboard/providers/[id]/components/modals/ImportCodexAuthModal");

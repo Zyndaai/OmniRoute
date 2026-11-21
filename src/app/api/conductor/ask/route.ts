@@ -5,7 +5,6 @@
  * oferece Sim/Não (a trava de confirmação é do motor do Faro; nunca contornada).
  */
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createErrorResponse } from "@/lib/api/errorResponse";
@@ -33,5 +32,5 @@ export async function POST(request: Request) {
   if (!answer.ok) {
     return createErrorResponse({ status: 503, message: "Faro (spokesperson) is offline or refused the request" });
   }
-  return NextResponse.json({ text: answer.text, pending: answer.pending });
+  return Response.json({ text: answer.text, pending: answer.pending });
 }

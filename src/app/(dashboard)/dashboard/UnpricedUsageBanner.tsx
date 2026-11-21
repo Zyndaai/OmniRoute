@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import Icon from "@/shared/components/Icon";
 
@@ -89,7 +87,7 @@ export default function UnpricedUsageBanner() {
             )}
           </ul>
           <Link
-            href="/dashboard/costs/pricing"
+            to="/dashboard/costs/pricing"
             className="mt-1.5 inline-block font-medium underline"
           >
             {t("unpricedUsageConfigure")}

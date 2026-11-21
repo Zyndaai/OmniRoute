@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { detectAllTools, detectTool } from "@/lib/cli-helper/tool-detector";
 
@@ -14,15 +13,15 @@ export async function GET(request: Request) {
     if (toolId) {
       const tool = await detectTool(toolId);
       if (!tool) {
-        return NextResponse.json({ error: `Unknown tool: ${toolId}` }, { status: 400 });
+        return Response.json({ error: `Unknown tool: ${toolId}` }, { status: 400 });
       }
-      return NextResponse.json(tool);
+      return Response.json(tool);
     }
 
     const tools = await detectAllTools();
-    return NextResponse.json({ tools });
+    return Response.json({ tools });
   } catch (error) {
     console.log("Error detecting tools:", error);
-    return NextResponse.json({ error: "Failed to detect tools" }, { status: 500 });
+    return Response.json({ error: "Failed to detect tools" }, { status: 500 });
   }
 }

@@ -1,5 +1,5 @@
 /**
- * The `/v1/ws` bridge (run-next: `npm start` / `npm run dev`) returns
+ * The `/v1/ws` bridge (run-server.mjs, every mode) returns
  * `/v1/chat/completions`, `/v1/messages` and `/v1/responses` output as WebSocket frames.
  * Browsers skip CORS for WebSocket, so the `/api/v1/ws?handshake=1` route must check the
  * browser's `Origin` (forwarded by the bridge) the same way `/v1/responses` does, and the

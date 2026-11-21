@@ -81,10 +81,6 @@ export function shouldShowFirstProviderHint(
   return connectionCount === 0 && !searchQuery?.trim();
 }
 
-export function syncSearchToUrl(searchQuery: string): void {
-  syncProviderFiltersToUrl({ searchQuery });
-}
-
 /** All dashboard summary-chip category keys that are valid in `?cat=`. */
 const PROVIDER_CATEGORY_URL_VALUES = new Set([
   "oauth",
@@ -122,8 +118,8 @@ export interface ProviderFilterUrlState {
 }
 
 /**
- * Reflect the providers dashboard filters in the URL query string via
- * history.replaceState so a filtered view can be bookmarked/shared:
+ * The query string that reflects the providers dashboard filters, so a filtered view can be
+ * bookmarked/shared (the caller applies it with `setSearchParams(next, { replace: true })`):
  *
  *   ?search=<name>  provider-name / id search (#8624)
  *   ?model=<name>   model-name search
@@ -132,13 +128,14 @@ export interface ProviderFilterUrlState {
  *   ?media=<key>    media/service-kind filter (image, video, music, …)
  *
  * "Free Tier" is encoded as `?cat=free` (showFreeOnly). Params carrying no
- * filter are removed so the URL stays canonical and shareable.
+ * filter are removed so the URL stays canonical and shareable; unrelated params
+ * of `current` are kept. Returns `null` when `current` already matches.
  */
-export function syncProviderFiltersToUrl(state: ProviderFilterUrlState): void {
-  if (typeof window === "undefined") return;
-
-  const url = new URL(window.location.href);
-  const params = url.searchParams;
+export function providerFiltersToSearchParams(
+  current: URLSearchParams,
+  state: ProviderFilterUrlState
+): URLSearchParams | null {
+  const params = new URLSearchParams(current);
   let changed = false;
 
   const setOrRemove = (key: string, value: string | null | undefined) => {
@@ -156,9 +153,7 @@ export function syncProviderFiltersToUrl(state: ProviderFilterUrlState): void {
   setOrRemove("cat", state.showFreeOnly ? "free" : state.category || null);
   setOrRemove("media", state.mediaKind || null);
 
-  if (changed) {
-    window.history.replaceState(window.history.state, "", url.toString());
-  }
+  return changed ? params : null;
 }
 
 /** Parse the provider dashboard filters back out of URL query params. */

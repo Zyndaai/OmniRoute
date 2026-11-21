@@ -1,7 +1,6 @@
-"use client";
 import { useMemo } from "react";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import GlobalConfigTab from "./proxy/GlobalConfigTab";
 import ProxyPoolTab from "./proxy/ProxyPoolTab";
@@ -21,9 +20,7 @@ const TABS: Array<{ id: TabId; labelKey: string; fallback: string }> = [
 
 export default function ProxyTab() {
   const t = useTranslations("settings");
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [searchParams, setSearchParams] = useSearchParams();
   const translateOrFallback = (key: string, fallback: string) =>
     typeof t.has === "function" && !t.has(key) ? fallback : t(key);
 
@@ -35,7 +32,7 @@ export default function ProxyTab() {
   const handleTabChange = (tab: TabId) => {
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    setSearchParams(params, { replace: true, preventScrollReset: true });
   };
 
   return (

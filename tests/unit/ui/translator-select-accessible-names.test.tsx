@@ -17,7 +17,7 @@ const LABELS: Record<string, string> = {
   targetProvider: "Target Provider",
 };
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => LABELS[key] ?? key,
 }));
 

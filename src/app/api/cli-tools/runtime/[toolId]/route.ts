@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import {
   CLI_TOOL_IDS,
@@ -19,11 +16,11 @@ export async function GET(request, { params }) {
       .toLowerCase();
 
     if (!CLI_TOOL_IDS.includes(normalizedToolId)) {
-      return NextResponse.json({ error: "Unsupported CLI tool" }, { status: 404 });
+      return Response.json({ error: "Unsupported CLI tool" }, { status: 404 });
     }
 
     const runtime = await getCliRuntimeStatus(normalizedToolId);
-    return NextResponse.json({
+    return Response.json({
       ...runtime,
       toolId: normalizedToolId,
       configPath: getCliPrimaryConfigPath(normalizedToolId),
@@ -38,6 +35,6 @@ export async function GET(request, { params }) {
     });
   } catch (error) {
     console.log("Error checking CLI runtime:", error);
-    return NextResponse.json({ error: "Failed to check CLI runtime" }, { status: 500 });
+    return Response.json({ error: "Failed to check CLI runtime" }, { status: 500 });
   }
 }

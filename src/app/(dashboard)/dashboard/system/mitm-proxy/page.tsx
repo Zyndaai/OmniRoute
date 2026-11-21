@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -12,16 +10,16 @@ import Icon from "@/shared/components/Icon";
  * Shows a "page moved" banner for 2.5 s then redirects.
  */
 export default function MitmProxyMovedPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("agentBridge.pageMoved");
   const tc = useTranslations("common");
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      router.replace("/dashboard/tools/agent-bridge");
+      navigate("/dashboard/tools/agent-bridge", { replace: true });
     }, 2500);
     return () => clearTimeout(timer);
-  }, [router]);
+  }, [navigate]);
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-8">
@@ -33,7 +31,7 @@ export default function MitmProxyMovedPage() {
         description={t("message")}
         dismissLabel={tc("close")}
         actions={
-          <Button variant="outline" onClick={() => router.replace("/dashboard/tools/agent-bridge")}>
+          <Button variant="outline" onClick={() => navigate("/dashboard/tools/agent-bridge", { replace: true })}>
             {t("goNow")}
           </Button>
         }

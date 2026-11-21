@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import React from "react";
 import { renderToStaticMarkup as reactRenderToStaticMarkup } from "react-dom/server";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 
 const { default: RequestLoggerDetail } =
   await import("../../src/shared/components/RequestLoggerDetail.tsx");
 
 // #9245 localized RequestLoggerDetail (useTranslations("requestLogger.detail")), so the
-// component must render inside NextIntlClientProvider. Use the REAL English messages —
+// component must render inside IntlProvider. Use the REAL English messages —
 // the assertions below pin the actual en.json copy, not a stub.
 const here = dirname(fileURLToPath(import.meta.url));
 const enMessages = JSON.parse(
@@ -21,7 +21,7 @@ const enMessages = JSON.parse(
 function renderToStaticMarkup(element: React.ReactElement) {
   return reactRenderToStaticMarkup(
     React.createElement(
-      NextIntlClientProvider,
+      IntlProvider,
       { locale: "en", timeZone: "UTC", messages: { requestLogger: enMessages.requestLogger } },
       element
     )

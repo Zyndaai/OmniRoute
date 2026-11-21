@@ -1,36 +1,19 @@
 /**
- * Decide whether the Next.js build should alias `better-sqlite3` to the
- * build-time stub (src/lib/db/better-sqlite3.stub.js).
+ * Decide whether the build should alias `better-sqlite3` to the build-time stub
+ * (src/lib/db/better-sqlite3.stub.js); vite.config.ts adds the alias when this returns true.
  *
- * History (#11343): the alias was UNCONDITIONAL, added to keep the bundler from
- * tracing the native addon into a Next.js build worker, whose thread teardown
- * can abort with SIGABRT (assertion in node::RemoveEnvironmentCleanupHook) and
- * leave the build without standalone output (#10060).
+ * History (#11343): the alias was UNCONDITIONAL, added to keep a build worker from loading the
+ * native addon, whose thread teardown can abort with SIGABRT (#10060). An alias rewrites the
+ * request before the bundler decides what stays external, so the stub was baked into the
+ * server bundle and every route answered HTTP 500: the stub's default export is not a
+ * constructor and boot aborted.
  *
- * The premise recorded next to that alias — "runtime still uses the real
- * package via serverExternalPackages" — does not hold. A Turbopack
- * `resolveAlias` rewrites the request BEFORE the externals check runs, so
- * `better-sqlite3` becomes a relative path, no longer matches the
- * `serverExternalPackages` entry, and the stub is baked into the bundle. Every
- * artifact built from that config answered HTTP 500 on every route: the stub's
- * default export is not a constructor, the sync driver chain fell through to
- * `node:sqlite` and then sql.js, and the instrumentation hook aborted at boot.
+ * Same failure shape as #6344 (the @/mitm/manager stub shipping to every artifact), same
+ * treatment: opt-in, and a default build gets the real, external native package.
  *
- * This is the same failure shape as #6344 (the @/mitm/manager stub shipping to
- * every npm/Electron/VPS artifact), so it gets the same treatment: the alias is
- * opt-in, and a default build gets the real, externalized native package.
- *
- * Set OMNIROUTE_BETTER_SQLITE3_STUB=1 ONLY on a build host that actually hits
- * the SIGABRT worker teardown, and never for an artifact that will be run —
- * the resulting bundle cannot open a database.
+ * Set OMNIROUTE_BETTER_SQLITE3_STUB=1 ONLY on a build host that actually hits the SIGABRT, and
+ * never for an artifact that will be run: the resulting bundle cannot open a database.
  */
 export function shouldStubBetterSqlite3(env = process.env) {
   return env.OMNIROUTE_BETTER_SQLITE3_STUB === "1";
-}
-
-/** Turbopack resolveAlias fragment for `better-sqlite3`, derived from the env. */
-export function betterSqlite3AliasFor(env = process.env) {
-  return shouldStubBetterSqlite3(env)
-    ? { "better-sqlite3": "./src/lib/db/better-sqlite3.stub.js" }
-    : {};
 }

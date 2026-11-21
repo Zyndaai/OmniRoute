@@ -1,9 +1,7 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
 import { Card, Input, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 type RoutingSettings = {
   fallbackStrategy?: string;

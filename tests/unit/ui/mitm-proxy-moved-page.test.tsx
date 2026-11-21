@@ -2,7 +2,7 @@
  * Tests for the MITM Proxy "page moved" banner (C4).
  * Validates:
  * - Banner renders with pageMoved.title text
- * - "Go now" button triggers router.replace
+ * - "Go now" button triggers navigate(replace)
  * - Auto-redirect is set up via setTimeout
  */
 // @vitest-environment jsdom
@@ -13,11 +13,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockReplace = vi.fn();
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mockReplace }),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => mockReplace,
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }));
 
@@ -74,7 +84,7 @@ describe("MitmProxyMovedPage — page-moved banner (C4)", { timeout: 30000 }, ()
     expect(container.textContent).toContain("agentBridge.pageMoved.message");
   });
 
-  it("clicking goNow button calls router.replace with agent-bridge path", async () => {
+  it("clicking goNow button calls navigate(replace) with agent-bridge path", async () => {
     const { default: MitmProxyMovedPage } = await import(
       "../../../src/app/(dashboard)/dashboard/system/mitm-proxy/page"
     );
@@ -94,7 +104,7 @@ describe("MitmProxyMovedPage — page-moved banner (C4)", { timeout: 30000 }, ()
       goNowBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(mockReplace).toHaveBeenCalledWith("/dashboard/tools/agent-bridge");
+    expect(mockReplace).toHaveBeenCalledWith("/dashboard/tools/agent-bridge", { replace: true });
   });
 
   it("auto-redirect fires after 2500ms via setTimeout", async () => {
@@ -116,6 +126,6 @@ describe("MitmProxyMovedPage — page-moved banner (C4)", { timeout: 30000 }, ()
       vi.advanceTimersByTime(2600);
     });
 
-    expect(mockReplace).toHaveBeenCalledWith("/dashboard/tools/agent-bridge");
+    expect(mockReplace).toHaveBeenCalledWith("/dashboard/tools/agent-bridge", { replace: true });
   });
 });

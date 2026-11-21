@@ -1,13 +1,20 @@
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { getTranslator } from "@/i18n/request.server";
+import { pageMeta } from "@/shared/utils/pageMeta";
 import TranslatorPageClient from "./TranslatorPageClient";
-import { getTranslations } from "next-intl/server";
 
-export async function generateMetadata() {
-  const t = await getTranslations("translator");
-  return {
-    title: t("metaTitle"),
-    description: t("metaDescription"),
-  };
+export async function loader({ request }: LoaderFunctionArgs) {
+  const t = await getTranslator("translator", request);
+  return { title: t("metaTitle"), description: t("metaDescription") };
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
+  pageMeta(
+    matches,
+    loaderData
+      ? [{ title: loaderData.title }, { name: "description", content: loaderData.description }]
+      : []
+  );
 
 export default function TranslatorPage() {
   return <TranslatorPageClient />;

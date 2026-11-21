@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getMultiTurnConversationById } from "@/lib/db/agenticConversations";
 import { annotateConversationRow, buildActiveCallLogIdByConversation } from "../route";
-
-export const dynamic = "force-dynamic";
 
 /**
  * Single-conversation summary — used by the dashboard's conversation modal
@@ -20,17 +17,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   try {
     const { id } = await params;
-    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
     const row = await getMultiTurnConversationById(id);
-    if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!row) return Response.json({ error: "Not found" }, { status: 404 });
 
     const activeCallLogIdByConversation = buildActiveCallLogIdByConversation();
     const conversation = await annotateConversationRow(row, activeCallLogIdByConversation);
 
-    return NextResponse.json({ conversation });
+    return Response.json({ conversation });
   } catch (err) {
     console.error("[API ERROR] /api/conversations/[id] failed:", err);
-    return NextResponse.json({ error: "Failed to fetch conversation" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch conversation" }, { status: 500 });
   }
 }

@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── i18n stub ─────────────────────────────────────────────────────────────────
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
@@ -19,12 +19,22 @@ const mockGet = vi.fn((key: string) => {
   return null;
 });
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: mockReplace }),
-  useSearchParams: () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => mockReplace,
+  useSearchParams: () => [({
     get: mockGet,
     toString: () => "tab=translate&mode=send",
-  }),
+  }), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
 // ── Shared component stubs ────────────────────────────────────────────────────
@@ -266,7 +276,7 @@ describe("TranslatorPageClient", () => {
     expect(cards.length).toBeGreaterThan(0);
   });
 
-  it("clicking Monitor tab calls router.replace with tab=monitor", async () => {
+  it("clicking Monitor tab navigates with tab=monitor", async () => {
     const container = makeContainer();
     await mount(<TranslatorPageClient />, container);
 

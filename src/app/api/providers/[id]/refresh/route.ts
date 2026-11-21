@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import * as passive from "@omniroute/open-sse/services/tokenRefresh/passiveCodex.ts";
 import * as passiveRefresh from "@omniroute/open-sse/services/tokenRefresh/passiveRefresh.ts";
 import { getCachedProviderConnectionById } from "@/lib/db/readCache";
@@ -35,25 +34,25 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
     const connection = await getCachedProviderConnectionById(id);
     if (!connection) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     if (connection.authType !== "oauth") {
-      return NextResponse.json(
+      return Response.json(
         { error: "Only OAuth connections support manual token refresh" },
         { status: 400 }
       );
     }
 
     if (!connection.refreshToken && !connection.accessToken) {
-      return NextResponse.json(
+      return Response.json(
         { error: "No token credentials available for refresh" },
         { status: 422 }
       );
     }
 
     if (typeof connection.provider !== "string" || connection.provider.length === 0) {
-      return NextResponse.json({ error: "Connection provider is invalid" }, { status: 422 });
+      return Response.json({ error: "Connection provider is invalid" }, { status: 422 });
     }
 
     const provider = connection.provider;
@@ -61,7 +60,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       const message = passive.isPassiveCodex(provider)
         ? passive.PASSIVE_REFRESH_MESSAGE
         : passiveRefresh.PASSIVE_CLUSTER_MESSAGE;
-      return NextResponse.json({ error: message, code: "refresh_disabled" }, { status: 409 });
+      return Response.json({ error: message, code: "refresh_disabled" }, { status: 409 });
     }
 
     // Codex/OpenAI multi-account family-revocation cascade guard.
@@ -71,7 +70,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     // the serializer only prevents concurrent sibling refreshes.
     const rotationGroup = rotationGroupFor(provider);
     if (rotationGroup === "openai-auth0") {
-      return NextResponse.json({
+      return Response.json({
         success: true,
         skipped: true,
         connectionId: id,
@@ -119,7 +118,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         resolveCopilotTokenBaseUrl(provider, credentials)
       );
       if (!copilotResult?.token) {
-        return NextResponse.json(
+        return Response.json(
           { error: "Token refresh failed — provider returned no new token" },
           { status: 502 }
         );
@@ -147,7 +146,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
             ? new Date(copilotResult.expiresAt).getTime()
             : (copilotResult.expiresAt as number | undefined);
 
-      return NextResponse.json({
+      return Response.json({
         success: true,
         connectionId: id,
         provider,
@@ -189,7 +188,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
             ? { lastErrorType: "provider_deprecated", errorCode: "provider_deprecated" }
             : {}),
         });
-        return NextResponse.json(
+        return Response.json(
           {
             error: isDeprecated
               ? "This provider was deprecated and can no longer be refreshed"
@@ -203,7 +202,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     }
 
     if (!newCredentials?.accessToken) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Token refresh failed — provider returned no new token" },
         { status: 502 }
       );
@@ -221,7 +220,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         ? new Date(Date.now() + resolvedCreds.expiresIn * 1000).toISOString()
         : null;
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connectionId: id,
       provider,
@@ -230,7 +229,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     });
   } catch (error) {
     console.error("[T12] Token refresh failed:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: "Token refresh failed", details: (error as Error).message },
       { status: 500 }
     );

@@ -38,14 +38,13 @@ describe("globals.css — no leftover hooks of the removed hand-rolled drawer", 
 
 // ─── persistLocale.ts ───────────────────────────────────────────────────────
 
-describe("persistLocale — flips <html> direction immediately on switch", () => {
+describe("persistLocale — direction comes from the server render, not from the writer", () => {
   const code = src("src/shared/lib/persistLocale.ts");
 
-  it("sets document.documentElement.dir from the RTL locale list", () => {
-    // router.refresh() never re-renders <html dir>, so the writer itself must
-    // flip direction or Arabic text renders inside a stale dir="ltr" tree.
-    expect(code).toContain("document.documentElement.dir");
-    expect(code).toContain("RTL_LOCALES");
+  it("only writes the cookie and storage; the caller reloads so <html dir> is re-rendered", () => {
+    expect(code).not.toContain("document.documentElement");
+    expect(code).toContain("document.cookie");
+    expect(src("src/shared/components/LanguageSelector.tsx")).toContain("window.location.reload()");
   });
 });
 

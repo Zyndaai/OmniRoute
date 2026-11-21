@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import type { MultiTurnConversationRow } from "@/lib/db/agenticConversations";
 import { listMultiTurnConversations } from "@/lib/db/agenticConversations";
@@ -7,8 +6,6 @@ import {
   isGenuineContinuationTurn,
   resolveConversationStalledState,
 } from "@/lib/db/responsesContinuationStore";
-
-export const dynamic = "force-dynamic";
 
 /**
  * Shared row -> API-shape annotation for both the list route and the
@@ -81,9 +78,9 @@ export async function GET(req: Request) {
       rows.map((row) => annotateConversationRow(row, activeCallLogIdByConversation))
     );
 
-    return NextResponse.json({ conversations, total });
+    return Response.json({ conversations, total });
   } catch (err) {
     console.error("[API ERROR] /api/conversations failed:", err);
-    return NextResponse.json({ error: "Failed to fetch conversations" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch conversations" }, { status: 500 });
   }
 }

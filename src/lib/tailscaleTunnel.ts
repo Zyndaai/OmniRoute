@@ -16,7 +16,7 @@ const execFileAsync = promisify(execFile);
 const WINDOWS_TAILSCALE_BIN = "C:\\Program Files\\Tailscale\\tailscale.exe";
 const WINDOWS_TAILSCALED_BIN = "C:\\Program Files\\Tailscale\\tailscaled.exe";
 
-// Runtime platform getter. A bundler (Turbopack in `next build`) constant-folds
+// Runtime platform getter. A bundler (Vite/Rollup in the production build) can constant-fold
 // `process.platform` to the BUILD machine's value on a non-Windows runner and prunes
 // the other branches as dead code (#10293). `os.platform()` is a runtime call a
 // bundler cannot fold, so Windows/macOS/Linux branches survive on any build machine.

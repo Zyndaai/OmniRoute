@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback } from "react";
 
 export function useSaveQuotaWindowThresholds(refresh: () => Promise<void>) {

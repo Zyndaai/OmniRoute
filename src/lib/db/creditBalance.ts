@@ -6,7 +6,7 @@
  * primary source at runtime; this module provides the fallback read/write layer.
  */
 
-import { isBuildPhase, isCloud } from "./core";
+import { isCloud } from "./core";
 import { getConfigEntries, getConfigValue, setConfigValue } from "./configEntries";
 
 interface CreditBalanceEntry {
@@ -28,7 +28,7 @@ function readBalance(value: unknown): number | null {
  * Returns the balance number, or null if not found.
  */
 export async function getPersistedCreditBalance(accountId: string): Promise<number | null> {
-  if (isBuildPhase || isCloud) return null;
+  if (isCloud) return null;
   return readBalance(await getConfigValue(NAMESPACE, accountId));
 }
 
@@ -38,7 +38,7 @@ export async function getPersistedCreditBalance(accountId: string): Promise<numb
  */
 export async function getAllPersistedCreditBalances(): Promise<Map<string, number>> {
   const result = new Map<string, number>();
-  if (isBuildPhase || isCloud) return result;
+  if (isCloud) return result;
   for (const row of await getConfigEntries(NAMESPACE)) {
     const balance = readBalance(row.value);
     if (balance !== null) result.set(row.key, balance);
@@ -50,7 +50,7 @@ export async function getAllPersistedCreditBalances(): Promise<Map<string, numbe
  * Persist a credit balance for an accountId.
  */
 export async function persistCreditBalance(accountId: string, balance: number): Promise<void> {
-  if (isBuildPhase || isCloud) return;
+  if (isCloud) return;
   const entry: CreditBalanceEntry = {
     balance,
     updatedAt: new Date().toISOString(),

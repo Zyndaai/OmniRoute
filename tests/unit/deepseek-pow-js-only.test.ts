@@ -101,7 +101,7 @@ test("DeepSeek PoW remains functional without redistributing extracted solver ar
     "open-sse/lib/deepseek-pow-hash.js",
     "open-sse/lib/deepseek-pow.ts",
     "open-sse/lib/deepseek-pow-worker.mjs",
-    "next.config.mjs",
+    "vite.config.ts",
     "package.json",
     "open-sse/package.json",
   ]) {
@@ -125,10 +125,6 @@ test("DeepSeek PoW remains functional without redistributing extracted solver ar
       `${relativePath} must not dynamically load a binary solver`
     );
   }
-
-  const nextConfig = readFileSync(new URL("../../next.config.mjs", import.meta.url), "utf8");
-  assert.match(nextConfig, /\.\/open-sse\/lib\/deepseek-pow-hash\.js/);
-  assert.match(nextConfig, /\.\/open-sse\/lib\/deepseek-pow-worker\.mjs/);
 });
 
 test("DeepSeek PoW rejects malformed or unsafe challenges before hashing", async () => {

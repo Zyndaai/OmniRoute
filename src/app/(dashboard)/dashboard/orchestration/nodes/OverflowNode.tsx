@@ -1,7 +1,6 @@
-"use client";
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ORCH_STATES, orchStateColor, type OrchNode } from "../model/orchestrationTypes";
 const HANDLE = "!bg-transparent !border-0 !w-0 !h-0";
 

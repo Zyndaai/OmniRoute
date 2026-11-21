@@ -4,7 +4,7 @@
 // ever issued without a login flow.
 //
 // Importing liveServer.ts is safe: the module-level auto-start guard is
-// short-circuited by isBuildOrTest() because the Node test runner passes
+// short-circuited by isAutomatedTestProcess() because the Node test runner passes
 // "--test" in process.argv.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";

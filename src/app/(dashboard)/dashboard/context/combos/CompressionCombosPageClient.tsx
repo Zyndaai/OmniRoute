@@ -1,10 +1,8 @@
-"use client";
-
 // Combos screen = Compression Hub (top) + named-combos manager (below).
 //
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { STACKED_PIPELINE_ENGINE_INTENSITIES } from "@/shared/validation/compressionConfigSchemas";
 import { CompressionPipelineEditor } from "@/shared/components/compression/CompressionPipelineEditor";
 import {
@@ -275,7 +273,7 @@ function NamedCombosManager() {
           className="[&>.ci-alert__dismiss]:hidden"
         >
           {t("activeProfileMasterSwitchOffWarning")}{" "}
-          <Link href="/dashboard/context/settings" className="font-medium underline">
+          <Link to="/dashboard/context/settings" className="font-medium underline">
             {t("activeProfileMasterSwitchOffCta")}
           </Link>
         </Alert>

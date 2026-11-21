@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import { Field } from "@omniroute/ui-kit/field";
 import { RadioGroup, RadioGroupItem } from "@omniroute/ui-kit/radio-group";

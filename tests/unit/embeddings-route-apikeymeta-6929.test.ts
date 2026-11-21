@@ -71,7 +71,7 @@ test("#6929: playground-test-key request forwards pre-fetched policy.apiKeyInfo 
   const created = await apiKeysDb.createApiKey("embed-6929-playground-key", "machine-6929", []);
 
   await createProviderNode({
-    type: "openai-compatible-embeddings",
+    type: "openai-compatible",
     name: "LAN Embed 6929",
     prefix: "lanembed6929",
     apiType: "embeddings",

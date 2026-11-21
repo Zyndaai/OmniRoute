@@ -24,8 +24,6 @@ export default defineConfig({
       "src/app/**/dashboard/webhooks/__tests__/**/*.test.tsx",
       "src/app/**/dashboard/discovery/__tests__/**/*.test.tsx",
       "src/shared/hooks/__tests__/**/*.test.tsx",
-      "src/lib/memory/__tests__/**/*.test.ts",
-      "src/lib/skills/__tests__/**/*.test.ts",
       "tests/unit/encryption.test.ts",
       "tests/unit/**/*.test.tsx",
       "open-sse/**/__tests__/**/*.test.ts",
@@ -43,6 +41,14 @@ export default defineConfig({
       // in this jsdom job. They have their own runners + vitest.e2e-live.config.ts.
       "tests/e2e/ecosystem.test.ts",
       "tests/e2e/protocol-clients.test.ts",
+      // Suites that need a PostgreSQL database run under vitest.mcp.config.ts, which gives
+      // each file its own database. This config has none, so they would fail here.
+      "open-sse/mcp-server/__tests__/**",
+      "open-sse/services/autoCombo/__tests__/**",
+      "open-sse/services/combo/__tests__/**",
+      "open-sse/services/__tests__/antigravity-quota-family.test.ts",
+      "open-sse/services/__tests__/fail-fast-concurrency-gate.test.ts",
+      "tests/unit/api-key-redis-auth-cache.test.tsx",
     ],
 
     coverage: {

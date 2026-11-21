@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "../Card";
 import { CHART_SERIES, getSeriesColor } from "./chartColors";
 import { fmtCompact as fmt, fmtCost } from "@/shared/utils/formatting";

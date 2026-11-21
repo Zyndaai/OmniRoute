@@ -21,11 +21,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CoolingConnectionsPanel from "../CoolingConnectionsPanel";
 import type { ConnectionRowConnection } from "../ConnectionRow";
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "zai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const t = ((key: string) => key) as ((key: string) => string) & {
       has?: (key: string) => boolean;

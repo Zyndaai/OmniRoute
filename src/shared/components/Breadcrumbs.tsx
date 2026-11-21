@@ -1,20 +1,17 @@
-"use client";
-
 /**
  * Breadcrumbs — FASE-07 UX
  *
  * Dashboard breadcrumb navigation component. Automatically generates
  * breadcrumbs from the current path with friendly labels.
- * Uses usePathname() internally — no props needed.
+ * Uses useLocation() internally — no props needed.
  *
  * Usage:
  *   <Breadcrumbs />
  */
 
 import { Fragment } from "react";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link, useLocation } from "react-router";
+import { useTranslations } from "use-intl";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -119,7 +116,7 @@ const PATH_LABELS = {
  */
 function getLabel(segment, t) {
   const key = PATH_LABELS[segment];
-  // usePathname() returns url.pathname verbatim — the URL's single encoding
+  // useLocation().pathname is url.pathname verbatim — the URL's single encoding
   // layer (auto%2Ffast) — so one decode yields the display label.
   const decoded = decodeRouteParam(segment);
   const fallback = decoded.charAt(0).toUpperCase() + decoded.slice(1);
@@ -127,7 +124,7 @@ function getLabel(segment, t) {
 }
 
 export default function Breadcrumbs() {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const t = useTranslations("breadcrumbs");
   const tTeams = useTranslations("teamCosts");
   if (!pathname || pathname === "/dashboard") return null;
@@ -150,9 +147,9 @@ export default function Breadcrumbs() {
               {crumb.isLast ? (
                 <BreadcrumbPage aria-current="page">{crumb.label}</BreadcrumbPage>
               ) : (
-                // The kit BreadcrumbLink is a plain <a> (no asChild); next/link keeps client-side
+                // The kit BreadcrumbLink is a plain <a> (no asChild); the router Link keeps client-side
                 // navigation, so it carries the kit link slot + class itself.
-                <Link href={crumb.href} data-slot="breadcrumb-link" className="ci-breadcrumb__link">
+                <Link to={crumb.href} data-slot="breadcrumb-link" className="ci-breadcrumb__link">
                   {crumb.label}
                 </Link>
               )}

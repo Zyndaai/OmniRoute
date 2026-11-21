@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { CodePreview } from "@omniroute/ui-kit/code-preview";
 import Badge from "@/shared/components/Badge";

@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Phase 1t.1 extraction — Issue #3501
-import Link from "next/link";
+import { Link } from "react-router";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Button } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
@@ -91,7 +89,7 @@ export default function ProviderPageHeader({
       compact
       breadcrumbs={
         <Link
-          href="/dashboard/providers"
+          to="/dashboard/providers"
           className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-primary transition-colors"
         >
           <Icon name="arrow_back" size={18} />

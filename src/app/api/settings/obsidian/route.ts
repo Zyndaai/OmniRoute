@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
@@ -43,40 +42,40 @@ const setTokenSchema = z
   })
   .strict();
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const config = await getObsidianConfig();
-    return NextResponse.json({
+    return Response.json({
       connected: config.connected,
       hasToken: config.token !== null,
       baseUrl: config.baseUrl,
       vaultPath: config.vaultPath,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const parsed = setTokenSchema.safeParse(rawBody);
   if (!parsed.success) {
     const baseUrlIssue = parsed.error.issues.find((issue) => issue.path[0] === "baseUrl");
-    return NextResponse.json(
+    return Response.json(
       {
         error: baseUrlIssue
           ? `Invalid baseUrl: ${baseUrlIssue.message}`
@@ -94,7 +93,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (urlToUse && /:27124(?:\/|$)/.test(urlToUse)) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           "URL uses port 27124, which is the MCP endpoint (HTTPS, self-signed cert). " +
@@ -111,7 +110,7 @@ export async function POST(request: NextRequest) {
     const result = await client.checkStatus();
     const authResult = result as Record<string, unknown>;
     if (authResult?.authenticated === false) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Token validation failed: invalid token", connected: false },
         { status: 400 }
       );
@@ -122,31 +121,28 @@ export async function POST(request: NextRequest) {
       await setObsidianBaseUrl(parsed.data.baseUrl);
     }
 
-    return NextResponse.json({
+    return Response.json({
       connected: true,
       message: "Obsidian API token saved and validated",
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      { error: sanitizeErrorMessage(msg), connected: false },
-      { status: 400 }
-    );
+    return Response.json({ error: sanitizeErrorMessage(msg), connected: false }, { status: 400 });
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     await clearObsidianToken();
-    return NextResponse.json({
+    return Response.json({
       connected: false,
       message: "Obsidian integration disconnected",
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

@@ -10,7 +10,6 @@
  *   - component: filter by component/module name
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import { getAppLogFilePath } from "@/lib/logEnv";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -205,7 +204,7 @@ function stringifyLogValue(value: unknown): string {
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   const authError = await requireManagementAuth(req);
   if (authError) return authError;
 
@@ -219,7 +218,7 @@ export async function GET(req: NextRequest) {
     const logPath = getLogFilePath();
 
     if (!fs.existsSync(logPath)) {
-      return NextResponse.json([], { status: 200 });
+      return Response.json([], { status: 200 });
     }
 
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
@@ -275,14 +274,14 @@ export async function GET(req: NextRequest) {
     // Return last N entries (most recent)
     const result = entries.slice(-limit);
 
-    return NextResponse.json(result, {
+    return Response.json(result, {
       status: 200,
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
       },
     });
   } catch (err: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(err?.message) || "Failed to read logs" },
       { status: 500 }
     );

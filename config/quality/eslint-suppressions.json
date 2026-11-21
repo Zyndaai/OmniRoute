@@ -783,11 +783,6 @@
       "count": 1
     }
   },
-  "src/app/(dashboard)/dashboard/settings/components/AppearanceTab.tsx": {
-    "@next/next/no-img-element": {
-      "count": 4
-    }
-  },
   "src/app/(dashboard)/dashboard/settings/components/AuthzSection.tsx": {
     "no-restricted-syntax": {
       "count": 1
@@ -883,18 +878,13 @@
       "count": 2
     }
   },
-  "src/app/api/compression/compare/verify/route.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    }
-  },
   "src/app/api/github-skills/route.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
   "src/app/api/internal/codex-responses-ws/route.ts": {
-    "no-restricted-imports": {
+    "@typescript-eslint/no-restricted-imports": {
       "count": 1
     }
   },
@@ -974,7 +964,7 @@
     }
   },
   "src/app/api/settings/route.ts": {
-    "no-restricted-imports": {
+    "@typescript-eslint/no-restricted-imports": {
       "count": 1
     }
   },
@@ -1014,7 +1004,7 @@
     }
   },
   "src/app/api/v1/images/edits/route.ts": {
-    "no-restricted-imports": {
+    "@typescript-eslint/no-restricted-imports": {
       "count": 1
     }
   },
@@ -1024,7 +1014,7 @@
     }
   },
   "src/app/api/v1/messages/count_tokens/route.ts": {
-    "no-restricted-imports": {
+    "@typescript-eslint/no-restricted-imports": {
       "count": 1
     }
   },
@@ -1538,11 +1528,6 @@
   },
   "src/shared/components/KiroAuthModal.tsx": {
     "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/shared/components/LanguageSelector.tsx": {
-    "@next/next/no-img-element": {
       "count": 1
     }
   },

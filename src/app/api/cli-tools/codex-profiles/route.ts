@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -65,7 +62,7 @@ export async function GET(request: Request) {
     try {
       entries = await fs.readdir(PROFILES_DIR);
     } catch {
-      return NextResponse.json({ profiles: [] });
+      return Response.json({ profiles: [] });
     }
 
     const profileFiles = entries.filter((e) => e.endsWith(".json"));
@@ -90,10 +87,10 @@ export async function GET(request: Request) {
 
     // Sort by name
     profiles.sort((a, b) => compareTr(a.name, b.name));
-    return NextResponse.json({ profiles });
+    return Response.json({ profiles });
   } catch (error) {
     console.log("Error listing codex profiles:", error.message);
-    return NextResponse.json({ error: "Failed to list profiles" }, { status: 500 });
+    return Response.json({ error: "Failed to list profiles" }, { status: 500 });
   }
 }
 
@@ -106,7 +103,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -120,18 +117,18 @@ export async function POST(request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const validation = validateBody(codexProfileNameSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { name } = validation.data;
 
     const paths = getCliConfigPaths("codex");
     if (!paths) {
-      return NextResponse.json({ error: "Codex config paths not found" }, { status: 500 });
+      return Response.json({ error: "Codex config paths not found" }, { status: 500 });
     }
 
     // Read current files
@@ -151,7 +148,7 @@ export async function POST(request) {
     }
 
     if (!configToml && !authJson) {
-      return NextResponse.json(
+      return Response.json(
         { error: "No Codex configuration files found to save" },
         { status: 400 }
       );
@@ -175,14 +172,14 @@ export async function POST(request) {
     const profilePath = safeProfilePath(`${profileId}.json`);
     await fs.writeFile(profilePath, JSON.stringify(profile, null, 2));
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: `Profile "${name}" saved successfully`,
       profileId,
     });
   } catch (error) {
     console.log("Error saving codex profile:", error.message);
-    return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
+    return Response.json({ error: "Failed to save profile" }, { status: 500 });
   }
 }
 
@@ -195,7 +192,7 @@ export async function PUT(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -209,12 +206,12 @@ export async function PUT(request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const validation = validateBody(codexProfileIdSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { profileId } = validation.data;
 
@@ -224,12 +221,12 @@ export async function PUT(request) {
       const raw = await fs.readFile(profilePath, "utf-8");
       profile = JSON.parse(raw);
     } catch {
-      return NextResponse.json({ error: `Profile "${profileId}" not found` }, { status: 404 });
+      return Response.json({ error: `Profile "${profileId}" not found` }, { status: 404 });
     }
 
     const paths = getCliConfigPaths("codex");
     if (!paths) {
-      return NextResponse.json({ error: "Codex config paths not found" }, { status: 500 });
+      return Response.json({ error: "Codex config paths not found" }, { status: 500 });
     }
 
     // Create backup of current config before switching
@@ -247,7 +244,7 @@ export async function PUT(request) {
       await fs.writeFile(paths.auth, profile.authJson);
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: `Profile "${profile.name}" activated`,
       profileId,
@@ -256,7 +253,7 @@ export async function PUT(request) {
     });
   } catch (error) {
     console.log("Error activating codex profile:", error.message);
-    return NextResponse.json({ error: "Failed to activate profile" }, { status: 500 });
+    return Response.json({ error: "Failed to activate profile" }, { status: 500 });
   }
 }
 
@@ -269,7 +266,7 @@ export async function DELETE(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -283,7 +280,7 @@ export async function DELETE(request) {
   try {
     const validation = validateBody(codexProfileIdSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { profileId } = validation.data;
 
@@ -292,17 +289,17 @@ export async function DELETE(request) {
       await fs.unlink(profilePath);
     } catch (err) {
       if (err.code === "ENOENT") {
-        return NextResponse.json({ error: `Profile "${profileId}" not found` }, { status: 404 });
+        return Response.json({ error: `Profile "${profileId}" not found` }, { status: 404 });
       }
       throw err;
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: `Profile "${profileId}" deleted`,
     });
   } catch (error) {
     console.log("Error deleting codex profile:", error.message);
-    return NextResponse.json({ error: "Failed to delete profile" }, { status: 500 });
+    return Response.json({ error: "Failed to delete profile" }, { status: 500 });
   }
 }

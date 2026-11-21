@@ -13,7 +13,6 @@
  * routeGuard.ts already classifies LOCAL_ONLY.
  */
 
-import { NextResponse } from "next/server";
 import { getServiceRow } from "@/lib/db/versionManager";
 import { decrypt } from "@/lib/db/encryption";
 import { isAuthRequired, isAuthenticated } from "@/shared/utils/apiAuth";
@@ -30,7 +29,7 @@ export function darioBaseUrl(): string {
 export async function requireAdminAuth(request: Request): Promise<Response | null> {
   if (!(await isAuthRequired(request))) return null;
   if (await isAuthenticated(request)) return null;
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 /** Read the stored (decrypted) DARIO_ADMIN_TOKEN, or null if unavailable. */
@@ -49,14 +48,14 @@ type ForwardOptions = {
 
 /**
  * Forward a call to the running Dario instance's /admin/* endpoint with the
- * stored admin bearer token attached. Returns a NextResponse mirroring Dario's
+ * stored admin bearer token attached. Returns a Response mirroring Dario's
  * status + JSON body, or a friendly error when Dario is unreachable / the token
  * is missing.
  */
 export async function forwardToDarioAdmin(opts: ForwardOptions): Promise<Response> {
   const token = await getDarioAdminToken();
   if (!token) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Dario admin token unavailable — is Dario installed and started?" },
       { status: 409 }
     );
@@ -82,9 +81,9 @@ export async function forwardToDarioAdmin(opts: ForwardOptions): Promise<Respons
     } catch {
       payload = { error: text };
     }
-    return NextResponse.json(payload, { status: res.status });
+    return Response.json(payload, { status: res.status });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: `Could not reach Dario admin API at ${url}: ${sanitizeErrorMessage(
           err instanceof Error ? err.message : String(err)

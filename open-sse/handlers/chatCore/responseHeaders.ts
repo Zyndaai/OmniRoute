@@ -172,20 +172,20 @@ function getForwardingPriority(headerName: string): number {
  * `x-middleware-next`, `x-middleware-override-headers`,
  * `x-middleware-set-cookie`, and the `x-middleware-request-*` family.
  *
- * If OmniRoute re-emits those headers from an App Router route handler, Next
- * 16's `app-route` runtime
- * interprets `x-middleware-rewrite` as a `NextResponse.rewrite()` call and
- * throws `NextResponse.rewrite() was used in a app route handler` — turning a
- * successful upstream call into a 500. This is provider-agnostic proxy
- * hygiene: any upstream behind Next middleware can leak these headers.
+ * These are internal control headers of the upstream's stack, not data for our
+ * clients: re-emitting them would leak the upstream's routing internals and could
+ * make a downstream Next.js-based client or proxy act on them (rewrite, override
+ * request headers, set cookies). This is provider-agnostic proxy hygiene: any
+ * upstream behind Next middleware can leak these headers, so they are stripped.
  *
  * See issue #5849.
  */
 const NEXTJS_MIDDLEWARE_HEADER_PREFIX = "x-middleware-";
 
 /**
- * True when `headerName` is a Next.js internal middleware control header that
- * must never be forwarded from a proxied upstream response.
+ * True when `headerName` is an `x-middleware-*` control header (set by upstreams
+ * hosted behind Next.js middleware) that must never be forwarded from a proxied
+ * upstream response.
  */
 export function isNextMiddlewareControlHeader(headerName: string): boolean {
   return headerName.toLowerCase().startsWith(NEXTJS_MIDDLEWARE_HEADER_PREFIX);

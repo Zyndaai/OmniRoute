@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState, useEffect } from "react";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   deleteCompressionCombo,
@@ -35,8 +34,8 @@ export async function GET(request: Request, { params }) {
   if (authError) return authError;
   const { id } = await params;
   const combo = await getCompressionCombo(id);
-  if (!combo) return NextResponse.json({ error: "Compression combo not found" }, { status: 404 });
-  return NextResponse.json(combo);
+  if (!combo) return Response.json({ error: "Compression combo not found" }, { status: 404 });
+  return Response.json(combo);
 }
 
 export async function PUT(request: Request, { params }) {
@@ -48,23 +47,22 @@ export async function PUT(request: Request, { params }) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(compressionComboUpdateSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   if (validation.data.isDefault === true) {
     const changed = await setDefaultCompressionCombo(id);
-    if (!changed)
-      return NextResponse.json({ error: "Compression combo not found" }, { status: 404 });
+    if (!changed) return Response.json({ error: "Compression combo not found" }, { status: 404 });
   }
 
   const combo = await updateCompressionCombo(id, validation.data as Partial<CompressionCombo>);
-  if (!combo) return NextResponse.json({ error: "Compression combo not found" }, { status: 404 });
-  return NextResponse.json(combo);
+  if (!combo) return Response.json({ error: "Compression combo not found" }, { status: 404 });
+  return Response.json(combo);
 }
 
 export async function DELETE(request: Request, { params }) {
@@ -73,10 +71,10 @@ export async function DELETE(request: Request, { params }) {
   const { id } = await params;
   const deleted = await deleteCompressionCombo(id);
   if (!deleted) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Compression combo not found or cannot delete default combo" },
       { status: 404 }
     );
   }
-  return NextResponse.json({ ok: true });
+  return Response.json({ ok: true });
 }

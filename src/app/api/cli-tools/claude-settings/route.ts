@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -38,7 +35,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus("claude");
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -56,7 +53,7 @@ export async function GET(request: Request) {
     const settings = await readSettings();
     const hasOmniRoute = !!settings?.env?.ANTHROPIC_BASE_URL;
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -69,7 +66,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error checking claude settings:", error);
-    return NextResponse.json({ error: "Failed to check claude settings" }, { status: 500 });
+    return Response.json({ error: "Failed to check claude settings" }, { status: 500 });
   }
 }
 
@@ -82,7 +79,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -96,7 +93,7 @@ export async function POST(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // (#523/#526) Extract keyId BEFORE validation — Zod strips unknown fields!
@@ -107,7 +104,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliSettingsEnvSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { env } = validation.data;
 
@@ -167,13 +164,13 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Settings updated successfully",
     });
   } catch (error) {
     console.log("Error updating claude settings:", error);
-    return NextResponse.json({ error: "Failed to update claude settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update claude settings" }, { status: 500 });
   }
 }
 
@@ -196,7 +193,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const settingsPath = getClaudeSettingsPath();
@@ -208,7 +205,7 @@ export async function DELETE(request: Request) {
       currentSettings = JSON.parse(content);
     } catch (error: any) {
       if (error.code === "ENOENT") {
-        return NextResponse.json({
+        return Response.json({
           success: true,
           message: "No settings file to reset",
         });
@@ -241,12 +238,12 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Settings reset successfully",
     });
   } catch (error) {
     console.log("Error resetting claude settings:", error);
-    return NextResponse.json({ error: "Failed to reset claude settings" }, { status: 500 });
+    return Response.json({ error: "Failed to reset claude settings" }, { status: 500 });
   }
 }

@@ -1,5 +1,3 @@
-"use client";
-
 import { ChevronDown, Search, X } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import type { ReactNode } from "react";

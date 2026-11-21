@@ -1,11 +1,8 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { RESET_USAGE_HISTORY_PERIODS, resetUsageHistory } from "@/lib/db/cleanup";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
-
-export const runtime = "nodejs";
 
 const resetUsageHistorySchema = z.object({
   period: z.enum(RESET_USAGE_HISTORY_PERIODS),
@@ -13,14 +10,14 @@ const resetUsageHistorySchema = z.object({
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -33,12 +30,12 @@ export async function POST(request: Request) {
 
   const validation = validateBody(resetUsageHistorySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
     const result = await resetUsageHistory(validation.data.period);
-    return NextResponse.json(
+    return Response.json(
       {
         deleted: result.deleted,
         deletedUsageHistory: result.deletedUsageHistory,
@@ -61,7 +58,7 @@ export async function POST(request: Request) {
       { status: result.errors > 0 ? 500 : 200 }
     );
   } catch {
-    return NextResponse.json(buildErrorBody(500, "Failed to reset usage history"), {
+    return Response.json(buildErrorBody(500, "Failed to reset usage history"), {
       status: 500,
     });
   }

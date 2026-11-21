@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   setSystemPromptConfig,
   getSystemPromptConfig,
@@ -12,10 +11,10 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json(getSystemPromptConfig());
+    return Response.json(getSystemPromptConfig());
   } catch (error) {
     console.error("Error reading system prompt config:", error);
-    return NextResponse.json({ error: "Failed to read system prompt config" }, { status: 500 });
+    return Response.json({ error: "Failed to read system prompt config" }, { status: 500 });
   }
 }
 
@@ -26,7 +25,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -40,16 +39,16 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateSystemPromptSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
     setSystemPromptConfig(body);
     await updateSettings({ systemPrompt: body });
 
-    return NextResponse.json(getSystemPromptConfig());
+    return Response.json(getSystemPromptConfig());
   } catch (error) {
     console.error("Error updating system prompt config:", error);
-    return NextResponse.json({ error: "Failed to update system prompt config" }, { status: 500 });
+    return Response.json({ error: "Failed to update system prompt config" }, { status: 500 });
   }
 }

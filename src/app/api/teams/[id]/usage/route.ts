@@ -1,12 +1,9 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getTeam } from "@/lib/db/teams";
 import { getTeamUsageReport } from "@/lib/db/teamUsageAnalytics";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 
 type RouteParams = { params: Promise<{ id: string }> };
-export const dynamic = "force-dynamic";
-
 function parseIso(value: string | null, field: string): string | null {
   if (!value) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
@@ -23,19 +20,19 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
   try {
     const { id } = await params;
     if (!(await getTeam(id)))
-      return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const search = new URL(request.url).searchParams;
     const startIso = parseIso(search.get("startDate"), "startDate");
     const endIso = parseIso(search.get("endDate"), "endDate");
     if (startIso && endIso && startIso > endIso) {
-      return NextResponse.json(buildErrorBody(400, "startDate must not be after endDate"), {
+      return Response.json(buildErrorBody(400, "startDate must not be after endDate"), {
         status: 400,
       });
     }
-    return NextResponse.json({ report: await getTeamUsageReport(id, { startIso, endIso }) });
+    return Response.json({ report: await getTeamUsageReport(id, { startIso, endIso }) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to get team usage";
     const status = /valid ISO timestamp/i.test(message) ? 400 : 500;
-    return NextResponse.json(buildErrorBody(status, message), { status });
+    return Response.json(buildErrorBody(status, message), { status });
   }
 }

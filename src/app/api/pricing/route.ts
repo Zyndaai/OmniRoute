@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   getPricing,
@@ -25,14 +24,14 @@ export async function GET(request: Request) {
   try {
     const includeSources = new URL(request.url).searchParams.get("includeSources") === "1";
     if (includeSources) {
-      return NextResponse.json(await getPricingWithSources());
+      return Response.json(await getPricingWithSources());
     }
 
     const pricing = await getPricing();
-    return NextResponse.json(pricing);
+    return Response.json(pricing);
   } catch (error) {
     console.error("Error fetching pricing:", error);
-    return NextResponse.json({ error: "Failed to fetch pricing" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch pricing" }, { status: 500 });
   }
 }
 
@@ -49,7 +48,7 @@ export async function PATCH(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -68,18 +67,15 @@ export async function PATCH(request) {
       // object rendered as "Falha ao salvar preços: [object Object]". Send a string.
       // `formatValidationMessage` names the offending field ("field: reason") instead
       // of the bare "Invalid request" constant, so the toast stays actionable (#10849).
-      return NextResponse.json(
-        { error: formatValidationMessage(validation.error) },
-        { status: 400 }
-      );
+      return Response.json({ error: formatValidationMessage(validation.error) }, { status: 400 });
     }
     const body = validation.data;
 
     const updatedPricing = await updatePricing(body);
-    return NextResponse.json(updatedPricing);
+    return Response.json(updatedPricing);
   } catch (error) {
     console.error("Error updating pricing:", error);
-    return NextResponse.json({ error: "Failed to update pricing" }, { status: 500 });
+    return Response.json({ error: "Failed to update pricing" }, { status: 500 });
   }
 }
 
@@ -109,9 +105,9 @@ export async function DELETE(request) {
     }
 
     const pricing = await getPricing();
-    return NextResponse.json(pricing);
+    return Response.json(pricing);
   } catch (error) {
     console.error("Error resetting pricing:", error);
-    return NextResponse.json({ error: "Failed to reset pricing" }, { status: 500 });
+    return Response.json({ error: "Failed to reset pricing" }, { status: 500 });
   }
 }

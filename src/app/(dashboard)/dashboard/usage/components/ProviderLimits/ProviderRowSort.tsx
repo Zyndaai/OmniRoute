@@ -1,4 +1,3 @@
-"use client";
 import { useId, type ReactNode } from "react";
 import {
   DndContext,
@@ -17,7 +16,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 export function ProviderSortContext({

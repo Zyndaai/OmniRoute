@@ -1,7 +1,9 @@
-import { redirect } from "next/navigation";
+import { redirect } from "react-router";
 
-export const dynamic = "force-dynamic";
+export function loader() {
+  throw redirect("/home");
+}
 
 export default function DashboardPage() {
-  redirect("/home");
+  return null;
 }

@@ -1,5 +1,3 @@
-"use client";
-
 import { Input } from "@/shared/components";
 import { providerText, type ProviderMessageTranslator } from "../../providerPageHelpers";
 import type { GlmTeamQuotaFieldValues } from "./glmTeamQuotaProviderData";

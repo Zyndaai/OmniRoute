@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCostSummary, checkBudget } from "@/domain/costRules";
 import { getApiKeys } from "@/lib/db/apiKeys";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -30,9 +29,9 @@ export async function GET(request: Request) {
       const summary = await getCostSummary(id);
       budgets[id] = { ...summary, budgetCheck: await checkBudget(id) };
     }
-    return NextResponse.json({ budgets });
+    return Response.json({ budgets });
   } catch (error) {
     console.error("Error fetching bulk budget summary:", error);
-    return NextResponse.json({ error: "Failed to fetch bulk budget summary" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch bulk budget summary" }, { status: 500 });
   }
 }

@@ -8,7 +8,7 @@ import { sanitizeErrorMessage } from "../../utils/errorSanitization.ts";
  * pulls the engines, while the pool/worker must be importable from underneath it.
  *
  * The catch around runCompressionInWorker used to be fully silent, which made
- * a structurally broken worker pool (issue #2: Turbopack MODULE_NOT_FOUND)
+ * a structurally broken worker pool (issue #2: MODULE_NOT_FOUND on the worker entry)
  * leak GBs of heap for hours with zero log evidence. Logs at most once per
  * window per distinct detail, so a recurring new failure mode is never
  * swallowed by an earlier, different one.

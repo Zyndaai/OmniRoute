@@ -1,5 +1,3 @@
-"use client";
-
 import { SortableTableHead } from "@omniroute/ui-kit/data-table-shell";
 
 /**
@@ -9,7 +7,7 @@ import { SortableTableHead } from "@omniroute/ui-kit/data-table-shell";
  */
 
 import { useCallback, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "../Card";
 import { getSeriesColor } from "./chartColors";
 import { fmtCompact as fmt, fmtFull, fmtCost } from "@/shared/utils/formatting";

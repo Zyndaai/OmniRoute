@@ -66,8 +66,6 @@ import { createPlaygroundImageStreamResponse } from "@/lib/playground/imageGener
 import { getImageLongJobOptions } from "@/lib/images/imageGenerationLongJobs";
 import { isImageGenerationLongJobsEnabled } from "@/shared/utils/featureFlags";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Handle CORS preflight
  */

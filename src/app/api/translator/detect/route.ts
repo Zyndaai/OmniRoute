@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { detectFormat } from "@omniroute/open-sse/services/provider.ts";
 import { translatorDetectSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -14,7 +13,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: {
@@ -29,18 +28,18 @@ export async function POST(request) {
   try {
     const validation = validateBody(translatorDetectSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ success: false, error: validation.error }, { status: 400 });
+      return Response.json({ success: false, error: validation.error }, { status: 400 });
     }
     const { body } = validation.data;
 
     const format = detectFormat(body);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       format,
     });
   } catch (error) {
     console.error("Error detecting format:", error);
-    return NextResponse.json({ success: false, error: "Failed to detect format" }, { status: 500 });
+    return Response.json({ success: false, error: "Failed to detect format" }, { status: 500 });
   }
 }

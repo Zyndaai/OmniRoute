@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Button, Input } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { isHttpUrl } from "@/shared/validation/schemas/misc";

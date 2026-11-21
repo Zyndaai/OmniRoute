@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   deleteModelAliasesForProvider,
   deleteProviderConnectionsByProvider,
@@ -39,7 +38,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -54,14 +53,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const validation = validateBody(updateProviderNodeSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { name, prefix, apiType, baseUrl, chatPath, modelsPath, customHeaders, iconUrl, dailyQuotaResetTimezone, dailyQuotaResetHour } =
       validation.data;
     const node: any = await getProviderNodeById(id);
 
     if (!node) {
-      return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
+      return Response.json({ error: "Provider node not found" }, { status: 404 });
     }
 
     // Only validate apiType for OpenAI Compatible nodes
@@ -74,7 +73,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       "images-generations",
     ];
     if (node.type === "openai-compatible" && (!apiType || !validApiTypes.includes(apiType))) {
-      return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
+      return Response.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
     }
 
     let sanitizedBaseUrl = baseUrl.trim();
@@ -156,10 +155,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       })
     );
 
-    return NextResponse.json({ node: updated });
+    return Response.json({ node: updated });
   } catch (error) {
     console.log("Error updating provider node:", error);
-    return NextResponse.json({ error: "Failed to update provider node" }, { status: 500 });
+    return Response.json({ error: "Failed to update provider node" }, { status: 500 });
   }
 }
 
@@ -170,7 +169,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     const node = await getProviderNodeById(id);
 
     if (!node) {
-      return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
+      return Response.json({ error: "Provider node not found" }, { status: 404 });
     }
 
     await deleteProviderConnectionsByProvider(id);
@@ -179,9 +178,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     // so re-importing the same provider isn't blocked by stale "already exists" aliases.
     await deleteModelAliasesForProvider(id);
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     console.log("Error deleting provider node:", error);
-    return NextResponse.json({ error: "Failed to delete provider node" }, { status: 500 });
+    return Response.json({ error: "Failed to delete provider node" }, { status: 500 });
   }
 }

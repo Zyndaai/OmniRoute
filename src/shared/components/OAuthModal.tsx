@@ -1,9 +1,7 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Icon from "./Icon";
 import { isCallbackStateAcceptable } from "./oauthCallbackState";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 
 import Modal from "./Modal";

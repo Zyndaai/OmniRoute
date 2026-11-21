@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/db/settings";
 import { isAuthRequired, isDashboardSessionAuthenticated } from "@/shared/utils/apiAuth";
 import { createErrorResponse } from "@/lib/api/errorResponse";
@@ -149,7 +148,7 @@ export async function GET(request: Request) {
       ? bypassPrefixesRaw.filter((p): p is string => typeof p === "string")
       : [...LOCAL_ONLY_MANAGE_SCOPE_BYPASS_PREFIXES];
 
-    return NextResponse.json({
+    return Response.json({
       tiers,
       bypassEnabled,
       bypassPrefixes,
@@ -160,6 +159,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error loading authz inventory:", error);
-    return NextResponse.json({ error: "Failed to load authz inventory" }, { status: 500 });
+    return Response.json({ error: "Failed to load authz inventory" }, { status: 500 });
   }
 }

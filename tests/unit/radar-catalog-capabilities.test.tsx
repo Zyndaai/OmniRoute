@@ -3,9 +3,10 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("next/link", () => ({
-  default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
     <a {...props}>{children}</a>
   ),
 }));

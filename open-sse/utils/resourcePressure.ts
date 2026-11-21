@@ -461,15 +461,13 @@ export function createResourcePressureRuntime(
   };
 }
 
-// Turbopack compiles this module once per entry graph: `open-sse/` imports it
-// by relative specifier while `src/` imports it via the `@omniroute/open-sse`
-// alias, so the packaged build ships two live copies (module ids 7186 and
-// 51118 in the 2026-10-09 `.build/next` evidence, issue #13621) with disjoint
-// import graphs. A bare module-level singleton would split per copy and a
-// reload through one copy would leave the other serving a stale runtime;
-// keying the singleton on globalThis via Symbol.for keeps exactly one live
-// runtime process-wide. Same idiom as proxyRefusalMemory.ts (duplicate-copy
-// alarm) and providerRequestLogging.ts (shared capture state).
+// `open-sse/` imports this module by relative specifier while `src/` imports it via the
+// `@omniroute/open-sse` alias, and the dev server re-evaluates edited modules, so more than
+// one live copy can exist (issue #13621). A bare module-level singleton would split per copy
+// and a reload through one copy would leave the other serving a stale runtime; keying the
+// singleton on globalThis via Symbol.for keeps exactly one live runtime process-wide. Same
+// idiom as proxyRefusalMemory.ts (duplicate-copy alarm) and providerRequestLogging.ts
+// (shared capture state).
 const RESOURCE_PRESSURE_RUNTIME_KEY = Symbol.for("omniroute.resourcePressure.runtime");
 // Symbol-keyed globalThis indexing needs the cast — the globalThis type has no
 // symbol index signature (mirror of proxyRefusalMemory.ts's holder cast).

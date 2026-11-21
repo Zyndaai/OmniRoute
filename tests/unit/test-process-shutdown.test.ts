@@ -10,8 +10,7 @@ test("batch HTTP fixture uses the peer-stamping server entrypoint", () => {
     new URL("../integration/batch-e2e-rate-limit.test.ts", import.meta.url),
     "utf8"
   );
-  assert.ok(source.includes('["scripts/dev/run-next.mjs", "dev"]'));
-  assert.ok(!source.includes('["scripts/dev/run-next-playwright.mjs", "dev"]'));
+  assert.ok(source.includes('["scripts/dev/run-server.mjs", "dev"]'));
   assert.ok(source.includes('HOST: "127.0.0.1"'));
 });
 

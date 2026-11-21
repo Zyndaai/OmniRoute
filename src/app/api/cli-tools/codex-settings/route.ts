@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { parse as parseStrictToml } from "smol-toml";
@@ -174,7 +171,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus("codex");
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -191,7 +188,7 @@ export async function GET(request: Request) {
 
     const config = await readConfig();
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -204,7 +201,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error checking codex settings:", error);
-    return NextResponse.json({ error: "Failed to check codex settings" }, { status: 500 });
+    return Response.json({ error: "Failed to check codex settings" }, { status: 500 });
   }
 }
 
@@ -217,7 +214,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -231,7 +228,7 @@ export async function POST(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // (#549) Extract keyId BEFORE validation — Zod strips unknown fields!
@@ -241,7 +238,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(codexSettingsConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, model, reasoningEffort, wireApi, modelMappings, modelCatalog } =
       validation.data;
@@ -338,7 +335,7 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Codex settings applied successfully!",
       configPath,
@@ -351,7 +348,7 @@ export async function POST(request: Request) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
     console.log("Error updating codex settings:", error);
-    return NextResponse.json({ error: "Failed to update codex settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update codex settings" }, { status: 500 });
   }
 }
 
@@ -363,7 +360,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const configPath = getCodexConfigPath();
@@ -378,7 +375,7 @@ export async function DELETE(request: Request) {
       parsed = parseToml(existingConfig);
     } catch (error: any) {
       if (error.code === "ENOENT") {
-        return NextResponse.json({
+        return Response.json({
           success: true,
           message: "No config file to reset",
         });
@@ -440,12 +437,12 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute settings removed successfully",
     });
   } catch (error) {
     console.log("Error resetting codex settings:", error);
-    return NextResponse.json({ error: "Failed to reset codex settings" }, { status: 500 });
+    return Response.json({ error: "Failed to reset codex settings" }, { status: 500 });
   }
 }

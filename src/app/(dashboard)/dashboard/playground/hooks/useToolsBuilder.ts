@@ -1,6 +1,4 @@
 // src/app/(dashboard)/dashboard/playground/hooks/useToolsBuilder.ts
-"use client";
-
 import { useState, useCallback } from "react";
 import { ToolDefinitionSchema } from "@/shared/schemas/playground";
 import type { ToolDefinition } from "@/lib/playground/codeExport";

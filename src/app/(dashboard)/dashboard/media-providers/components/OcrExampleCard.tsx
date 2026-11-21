@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import { useApiKey } from "../../providers/hooks/useApiKey";

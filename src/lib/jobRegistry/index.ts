@@ -1,4 +1,4 @@
-/** JobRegistry singleton - survives Next.js HMR via globalThis. */
+/** JobRegistry singleton - survives dev-server module re-evaluation via globalThis. */
 
 import { JobRegistry } from "./registry";
 import type { JobDefinition } from "./core";

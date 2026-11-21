@@ -4,21 +4,21 @@
 // `CanvasRenderingContext2D` in Node.
 //
 // Deliberately NOT a module-load side effect: importing this file must not leak
-// `global.window` into unrelated tests or Next.js SSR. Call `setupDomMocks()`
+// `global.window` into unrelated tests or server-side rendering. Call `setupDomMocks()`
 // (or the with-* wrappers) around WASM init / payload generation.
 //
 // Why this is load-bearing for the OmniRoute process:
-// Next.js SSR uses `typeof window !== "undefined"` as a browser check and then
+// Server-side rendering uses `typeof window !== "undefined"` as a browser check and then
 // `getLocationOrigin()` does `const { protocol, hostname, port } = window.location`.
-// The previous shim did `g.window = g` (alias window to the Node global) without
-// installing `location`. After TinyCMS ran once, every route crashed with
+// Aliasing `g.window = g` (window to the Node global) without installing `location`
+// breaks that: after TinyCMS ran once, every route crashed with
 // `TypeError: Cannot destructure property 'protocol' of 'window.location' as it
 // is undefined` until the process restarted.
 //
 // Belt-and-suspenders:
 // 1. Never alias `window` to the Node global. Use a dedicated stub object.
 // 2. Always attach a Location-shaped object (`protocol`, `hostname`, `port`,
-//    `href`, `origin`, …) so even a leftover `window` cannot poison Next.
+//    `href`, `origin`, …) so even a leftover `window` cannot poison rendering.
 // 3. Production callers restore via `withTinyCmsDomMocks*` so a successful
 //    TinyCMS request does not leave `window` installed for the process lifetime.
 

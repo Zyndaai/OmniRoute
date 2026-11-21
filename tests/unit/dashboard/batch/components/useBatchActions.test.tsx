@@ -27,7 +27,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 // next-intl mock: return the key as-is for easy assertion
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

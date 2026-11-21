@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * ProviderCliVersionSection — operator control for the CLI client version
  * OmniRoute advertises for the Claude Code and Codex identity presets.
@@ -14,7 +12,7 @@
  * into the override store (open-sse/config/cliVersions.ts).
  */
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";

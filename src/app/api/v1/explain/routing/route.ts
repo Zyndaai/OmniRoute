@@ -13,7 +13,6 @@
  * REQUIRE_API_KEY=false (single-user local deployments) anonymous read is
  * allowed, matching /v1/models behavior.
  */
-import { NextResponse } from "next/server";
 import { errorResponse } from "@omniroute/open-sse/utils/error.ts";
 import { HTTP_STATUS } from "@omniroute/open-sse/config/constants.ts";
 import { extractApiKey, isValidApiKey } from "@/sse/services/auth";
@@ -55,7 +54,7 @@ export async function GET(request: Request) {
       ...q,
       classification: classifyQuality(q),
     }));
-    return NextResponse.json(
+    return Response.json(
       {
         object: "routing_explain",
         sinks,

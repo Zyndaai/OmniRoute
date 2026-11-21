@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getModelAliases, setModelAlias, deleteModelAlias, isCloudEnabled } from "@/models";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { syncToCloud } from "@/lib/cloudSync";
@@ -27,7 +26,7 @@ export async function GET(request) {
     if (alias) {
       const resolved = await resolveModelAliasLookup(alias);
       if (resolved.ok === false) {
-        return NextResponse.json(
+        return Response.json(
           {
             error: {
               message: resolved.error.message,
@@ -42,7 +41,7 @@ export async function GET(request) {
         );
       }
 
-      return NextResponse.json(
+      return Response.json(
         {
           alias: resolved.value.alias,
           resolved: {
@@ -66,7 +65,7 @@ export async function GET(request) {
     }
 
     const aliases = await getModelAliases();
-    return NextResponse.json(
+    return Response.json(
       {
         aliases,
         catalogVersion: getCatalogDiagnosticsHeaders({ request })["X-Model-Catalog-Version"],
@@ -77,7 +76,7 @@ export async function GET(request) {
     );
   } catch (error) {
     console.log("Error fetching aliases:", error);
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Failed to fetch aliases",
@@ -99,7 +98,7 @@ export async function PUT(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -121,7 +120,7 @@ export async function PUT(request) {
 
     const validation = validateBody(cloudModelAliasUpdateSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(
+      return Response.json(
         { error: validation.error },
         { status: 400, headers: diagnosticHeaders }
       );
@@ -131,7 +130,7 @@ export async function PUT(request) {
     await setModelAlias(alias, model);
     await syncToCloudIfEnabled();
 
-    return NextResponse.json(
+    return Response.json(
       { success: true, model, alias },
       {
         headers: getCatalogDiagnosticsHeaders({ request, resolvedAlias: alias }),
@@ -139,7 +138,7 @@ export async function PUT(request) {
     );
   } catch (error) {
     console.log("Error updating alias:", error);
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Failed to update alias",
@@ -167,7 +166,7 @@ export async function DELETE(request) {
     const alias = searchParams.get("alias");
 
     if (!alias) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Alias required" },
         { status: 400, headers: diagnosticHeaders }
       );
@@ -176,7 +175,7 @@ export async function DELETE(request) {
     await deleteModelAlias(alias);
     await syncToCloudIfEnabled();
 
-    return NextResponse.json(
+    return Response.json(
       { success: true },
       {
         headers: getCatalogDiagnosticsHeaders({ request, resolvedAlias: alias }),
@@ -184,7 +183,7 @@ export async function DELETE(request) {
     );
   } catch (error) {
     console.log("Error deleting alias:", error);
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Failed to delete alias",

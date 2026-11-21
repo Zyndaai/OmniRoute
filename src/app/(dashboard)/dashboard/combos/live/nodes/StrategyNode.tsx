@@ -1,5 +1,3 @@
-"use client";
-
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { flowColorAlpha } from "@/shared/components/flow/edgeStyles";
 import { strategyColorVar } from "../../strategyPalette";

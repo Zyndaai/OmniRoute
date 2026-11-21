@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect } from "react";
 
 export function PwaRegister() {
@@ -34,7 +32,7 @@ export function PwaRegister() {
     // A changed query string only busts the HTTP cache; the browser installs a
     // new worker generation only when the script bytes differ. A deploy that
     // ships sw.js with the same bytes leaves the previous worker in place, and
-    // that worker keeps answering /_next/static/<old-build>/ from its cache
+    // that worker keeps answering /assets/<old-build-hash> files from its cache
     // long after those files are gone — the page renders blank and a reload
     // hangs, because the worker intercepts the navigation again. The cache name
     // is the build identity, so when a cache from another build is still

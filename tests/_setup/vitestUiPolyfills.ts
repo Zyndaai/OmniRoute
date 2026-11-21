@@ -35,18 +35,18 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-// #7935 wired `useTranslations`/`useLocale` (next-intl) into ~180 dashboard/shared
+// #7935 wired `useTranslations`/`useLocale` (use-intl) into ~180 dashboard/shared
 // components (Button, Modal, Select, EmptyState, ProviderIcon, ...). Any UI test that
 // mounts a component depending on one of those — directly or transitively — without its
-// own `vi.mock("next-intl", ...)` now crashes with "context from NextIntlClientProvider
-// was not found". Rather than repeat a next-intl mock in dozens of test files, register
-// one globally here, backed by the REAL `en.json` messages via next-intl's own
-// `createTranslator` (imported from `use-intl/core`, which next-intl re-exports it from,
-// so this module is never self-referential with the "next-intl" mock below). This makes
+// own `vi.mock("use-intl", ...)` now crashes with "context from IntlProvider
+// was not found". Rather than repeat a use-intl mock in dozens of test files, register
+// one globally here, backed by the REAL `en.json` messages via use-intl's own
+// `createTranslator` (imported from `use-intl/core`, a separate module id from the
+// "use-intl" entry mocked below, so this file is never self-referential). This makes
 // `t(key, params)` render the actual production English copy — including ICU plural/
 // select and ${param} interpolation — instead of a placeholder, so assertions on
 // rendered text keep testing real behavior. A test file that declares its own
-// `vi.mock("next-intl", ...)` still overrides this default for that file (Vitest applies
+// `vi.mock("use-intl", ...)` still overrides this default for that file (Vitest applies
 // the most specific / last-registered factory per module id).
 import type { ReactNode } from "react";
 import { vi } from "vitest";
@@ -65,7 +65,7 @@ type Messages = Record<string, unknown>;
 // stable, matching production.
 const translatorCache = new Map<string, ReturnType<typeof createTranslator>>();
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace?: string) => {
     const cacheKey = namespace ?? "";
     const cached = translatorCache.get(cacheKey);
@@ -85,11 +85,11 @@ vi.mock("next-intl", () => ({
   },
   useLocale: () => "en",
   // A handful of tests (e.g. compressionCockpit.test.tsx, compressionHub*.test.tsx)
-  // import the REAL `NextIntlClientProvider` to wrap the component under test — because
-  // this file mocks the whole "next-intl" module, that import would otherwise resolve to
+  // import the REAL `IntlProvider` to wrap the component under test — because
+  // this file mocks the whole "use-intl" module, that import would otherwise resolve to
   // `undefined` and crash with "X is not a function". `useTranslations`/`useLocale` above
   // never read from React context (they call `createTranslator` directly), so the
   // provider only needs to render its children through — the `locale`/`messages` props
   // passed to it are inert here.
-  NextIntlClientProvider: ({ children }: { children?: ReactNode }) => children,
+  IntlProvider: ({ children }: { children?: ReactNode }) => children,
 }));

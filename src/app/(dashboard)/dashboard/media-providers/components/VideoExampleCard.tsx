@@ -1,7 +1,5 @@
-"use client";
-
 import { useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import Select from "@/shared/components/Select";
 import Textarea from "@/shared/components/Textarea";

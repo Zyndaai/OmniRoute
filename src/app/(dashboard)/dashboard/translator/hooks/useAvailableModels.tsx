@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { compareTr } from "@/shared/utils/turkishText";
 import type { ModelReasoningCapabilities } from "@/app/(dashboard)/dashboard/playground/components/reasoningControlUtils";

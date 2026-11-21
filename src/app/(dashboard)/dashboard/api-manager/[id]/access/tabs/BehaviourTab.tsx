@@ -1,10 +1,8 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import Toggle from "@/shared/components/Toggle";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ApiKeyCompressionToggle } from "@/app/(dashboard)/dashboard/api-manager/components/ApiKeyCompressionToggle";
 import { ChaosModeAccessToggle } from "@/app/(dashboard)/dashboard/api-manager/components/ChaosModeAccessToggle";
 import { BypassProviderQuotaToggle } from "@/app/(dashboard)/dashboard/api-manager/components/BypassProviderQuotaToggle";

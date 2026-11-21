@@ -42,8 +42,3 @@ export function isAutomatedTestProcess(
   if (!Array.isArray(argv)) return false;
   return argv.some((arg) => typeof arg === "string" && (TEST_TOKEN_RE.test(arg) || TEST_RUNNER_RE.test(arg)));
 }
-
-/** Next.js production build phase — several call sites pair this with the test check. */
-export function isBuildProcess(env: NodeJS.ProcessEnv = process.env): boolean {
-  return typeof process !== "undefined" && env.NEXT_PHASE === "phase-production-build";
-}

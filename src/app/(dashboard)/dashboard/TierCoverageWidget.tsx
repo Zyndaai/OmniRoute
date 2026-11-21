@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { NOAUTH_PROVIDERS, OAUTH_PROVIDERS } from "@/shared/constants/providers";
 import type { ProviderTier } from "@omniroute/open-sse/services/tierTypes";
 
@@ -97,7 +95,7 @@ export function TierCoverageWidget() {
           <p className="text-xs text-text-muted mt-0.5">{t("tierCoverageSubtitle")}</p>
         </div>
         <Link
-          href="/dashboard/providers"
+          to="/dashboard/providers"
           className="text-xs text-text-muted hover:text-text-main transition-colors"
         >
           Manage →
@@ -114,7 +112,7 @@ export function TierCoverageWidget() {
             )}
             {configured === 0 && (
               <Link
-                href="/dashboard/providers/new"
+                to="/dashboard/providers/new"
                 className="text-xs text-info underline mt-0.5 block"
               >
                 {t("add")}

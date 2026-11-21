@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PipelineStep } from "@/app/(dashboard)/dashboard/translator/components/advanced/PipelineView";
 
 // Minimal i18n stub
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

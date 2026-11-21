@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/shared/utils/cn";
 import { isVisionModelId } from "@/shared/constants/visionModels";
 import { fetchModelSelection } from "@/shared/utils/fetchModelSelection";

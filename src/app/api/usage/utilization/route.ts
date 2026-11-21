@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAggregatedSnapshots } from "@/lib/db/quotaSnapshots";
 import { getProviderConnectionById } from "@/lib/db/providers";
 import type {
@@ -43,7 +42,7 @@ export async function GET(request: Request) {
     const providerParam = searchParams.get("provider");
 
     if (!rangeParam || !VALID_RANGES.includes(rangeParam as UtilizationTimeRange)) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Invalid range. Must be one of: 1h, 24h, 7d, 30d" },
         { status: 400 }
       );
@@ -88,9 +87,9 @@ export async function GET(request: Request) {
       connectionMeta,
     };
 
-    return NextResponse.json(response);
+    return Response.json(response);
   } catch (error) {
     console.error("Error fetching utilization data:", error);
-    return NextResponse.json({ error: "Failed to fetch utilization data" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch utilization data" }, { status: 500 });
   }
 }

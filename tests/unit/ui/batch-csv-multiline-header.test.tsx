@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WizardCsvMapping } from "@/lib/batches/types";
 import CsvMappingStep from "@/app/(dashboard)/dashboard/batch/components/wizard/CsvMappingStep";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useState } from "react";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useDisplayBaseUrl } from "@/shared/hooks";
@@ -122,7 +120,7 @@ export default function VscodeTokenAliasCard({
           </h3>
           <div className="flex-1 h-px bg-border/30" />
           <Link
-            href="/dashboard/cli-tools"
+            to="/dashboard/cli-tools"
             className="shrink-0 text-[11px] font-medium text-primary hover:underline"
           >
             {t("vscodeAliasManage")}
@@ -159,7 +157,7 @@ export default function VscodeTokenAliasCard({
           </p>
           <p className="mt-1 text-xs text-text-muted">{description}</p>
         </div>
-        <Link href="/dashboard/cli-tools" className="shrink-0 text-xs text-primary hover:underline">
+        <Link to="/dashboard/cli-tools" className="shrink-0 text-xs text-primary hover:underline">
           {t("vscodeAliasManage")}
         </Link>
       </div>

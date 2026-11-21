@@ -6,8 +6,9 @@
  * catch answers 500, so a body that is not JSON came back as a 500. A well-formed body keeps its
  * existing behavior.
  *
- * Setup mirrors tests/unit/skills-skillssh.test.ts: a temp DATA_DIR, `requireLogin: false` so
- * the handlers run unauthenticated, and the skills provider set to the one each route needs.
+ * Setup mirrors tests/unit/skills-skillssh.test.ts: a temp DATA_DIR, `requireLogin: false`, and the
+ * skills provider set to the one each route needs. The install routes still need a management
+ * credential with login off, so each request carries a dashboard session.
  */
 
 import test from "node:test";
@@ -21,6 +22,9 @@ const originalDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = tmpDir;
 
 import { resetTestDb } from "../helpers/postgres.ts";
+const { createManagementSessionHeaders } = await import("../helpers/managementSession.ts");
+// The install routes require management auth even when login is off.
+const SESSION_HEADERS = Object.fromEntries(await createManagementSessionHeaders());
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
@@ -43,7 +47,7 @@ async function resetStorage() {
 function postRequest(url: string, body: string): Request {
   return new Request(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...SESSION_HEADERS },
     body,
   });
 }

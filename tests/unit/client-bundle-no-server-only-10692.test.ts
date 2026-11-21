@@ -6,7 +6,7 @@ import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 
 /**
- * #10692: a `"use client"` page reached the SQLite driver through
+ * #10692: a client page reached the SQLite driver through
  * `serviceKindIndex → mediaServiceKinds → imageRegistry → aihorde/imageModels →
  * aihordeImageCatalog → safeOutboundFetch → proxyFetch → featureFlags → db/core`, so the
  * production build tried to bundle `fs`/`net`/`tls` for the browser and failed with 28
@@ -17,35 +17,27 @@ import { fileURLToPath } from "node:url";
  * and a comment cannot fail a build, so #10542 broke it unnoticed.
  *
  * This walks the real static-import graph, the same edges the bundler follows, from EVERY
- * `"use client"` file in the repo rather than a hand-picked pair.
+ * component file (`.tsx` under `src/` that is not a route module) rather than a hand-picked
+ * pair: a component file can always end up in the browser bundle. Route modules (`page.tsx`,
+ * `layout.tsx`, `root.tsx`, `entry.*`) are not entries: they may import server code for their
+ * `loader`/`action`, which the React Router build strips from the browser bundle and fails on
+ * if the component reaches it.
  *
  * First-party dynamic `import()` with a static string specifier IS followed. The
- * bundler resolves those edges into the client chunk just like static imports
- * (a `"use client"` page reaching a server-only module through `await import()`
- * fails the production build with `Module not found`), so a guard that ignores
- * them stays green on a broken build. Only specifiers that resolve through the
+ * bundler resolves those edges into the client chunk just like static imports, so a guard
+ * that ignores them stays green on a broken build. Only specifiers that resolve through the
  * same first-party resolver as static imports are followed — npm packages and
  * non-literal specifiers are ignored exactly like their static counterparts.
  *
- * Two deliberate exclusions, both load-bearing:
+ * `import type` is not an edge: TypeScript erases it before the bundler sees it. A scan
+ * that counts type imports reports 26 phantom leaks against 2 real ones here — a guard that
+ * cries wolf gets switched off.
  *
- *  - **`import type` is not an edge.** TypeScript erases it before the bundler sees it. A scan
- *    that counts type imports reports 26 phantom leaks against 2 real ones here — a guard that
- *    cries wolf gets switched off.
- *
- * A reached module counts as server-only when it statically imports a Node builtin the
- * production bundler cannot resolve for the browser. The pinned list below (the original
- * #10692 chain) stays explicit so it keeps failing loudly even if the discovery logic
- * changes; everything else is found by walking the graph and checking each visited file
- * for a builtin import.
- *
- * Builtins Next ships a browser polyfill for are tolerated when imported by their BARE name
- * (`path`, `os`, `crypto`, `buffer`, …): Next's client build maps exactly those names to
- * `next/dist/compiled/*` shims (`resolve.fallback` for the client compiler in
- * `node_modules/next/dist/build/webpack-config.js`), so flagging them would cry wolf the
- * same way counting `import type` did. The `node:` scheme is never tolerated — the client
- * build has no fallback for it (`UnhandledSchemeError` on `node:fs` / `node:os` / `node:path`
- * is what broke the build this guard was widened for).
+ * A reached module counts as server-only when it statically imports a Node builtin, bare or
+ * with the `node:` scheme: the browser build ships no polyfill for any of them. The pinned
+ * list below (the original #10692 chain) stays explicit so it keeps failing loudly even if the
+ * discovery logic changes; everything else is found by walking the graph and checking each
+ * visited file for a builtin import.
  */
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -59,47 +51,18 @@ const SERVER_ONLY = new Set([
   "open-sse/utils/tlsClient.ts",
 ]);
 
-/**
- * Bare builtin names Next's client build polyfills (the client `resolve.fallback` map in
- * `next/dist/build/webpack-config.js`). Kept in sync by the drift test at the bottom.
- */
-const NEXT_CLIENT_POLYFILLED_BUILTINS = new Set([
-  "assert",
-  "buffer",
-  "constants",
-  "crypto",
-  "domain",
-  "events",
-  "http",
-  "https",
-  "os",
-  "path",
-  "process",
-  "punycode",
-  "querystring",
-  "stream",
-  "string_decoder",
-  "sys",
-  "timers",
-  "tty",
-  "util",
-  "vm",
-  "zlib",
-]);
-
 const NODE_BUILTINS = new Set(
   builtinModules.map((name) => name.replace(/^node:/, "")).filter((bare) => !bare.startsWith("_"))
 );
 
 /** True when `specifier` names a Node builtin the browser bundle cannot resolve. */
 function isBrowserForbiddenBuiltin(specifier: string): boolean {
-  if (specifier.startsWith("node:")) return true; // no client fallback for the scheme
-  const root = specifier.split("/")[0]; // `fs/promises` → `fs`
-  return NODE_BUILTINS.has(root) && !NEXT_CLIENT_POLYFILLED_BUILTINS.has(root);
+  if (specifier.startsWith("node:")) return true;
+  return NODE_BUILTINS.has(specifier.split("/")[0]); // `fs/promises` → `fs`
 }
 
 /**
- * Non-`"use client"` entry points that still end up in a client bundle because client
+ * Non-component entry points that still end up in a client bundle because client
  * components import them. Kept explicit so the original #10692 chain stays pinned even if the
  * page that exposed it is refactored.
  */
@@ -266,12 +229,18 @@ function walk(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/** Route modules: their server-only imports are loader-only, which the route build enforces. */
+const ROUTE_MODULE = /(?:^|\/)(?:page|layout|root|entry\.client|entry\.server)\.tsx$/;
+
+/** Tests live next to components but never ship. */
+const TEST_FILE = /(?:^|\/)__tests__\/|\.test\.tsx?$/;
+
+/** Every component file: it can be part of a browser bundle. */
 function clientEntryPoints(): string[] {
-  return walk(path.join(REPO_ROOT, "src")).filter((file) =>
-    /^\s*["']use client["']/m.test(
-      fs.readFileSync(path.join(REPO_ROOT, file), "utf8").slice(0, 200)
-    )
-  );
+  return walk(path.join(REPO_ROOT, "src")).filter((file) => {
+    const normalized = file.split(path.sep).join("/");
+    return file.endsWith(".tsx") && !ROUTE_MODULE.test(normalized) && !TEST_FILE.test(normalized);
+  });
 }
 
 test("no client entry point statically reaches server-only code", () => {
@@ -309,7 +278,7 @@ test("dynamic import specifiers: literals are followed, variables and npm packag
     "src/lib/db/readCache.ts"
   );
 });
-test("builtin classification: node: scheme always forbidden, bare polyfilled names tolerated", () => {
+test("builtin classification: every Node builtin is forbidden, bare or with the node: scheme", () => {
   for (const specifier of ["node:fs", "node:path", "node:os", "node:crypto", "fs", "fs/promises"]) {
     assert.equal(isBrowserForbiddenBuiltin(specifier), true, specifier);
   }
@@ -317,23 +286,9 @@ test("builtin classification: node: scheme always forbidden, bare polyfilled nam
     assert.equal(isBrowserForbiddenBuiltin(specifier), true, specifier);
   }
   for (const specifier of ["path", "os", "crypto", "buffer", "events", "util", "stream"]) {
-    assert.equal(isBrowserForbiddenBuiltin(specifier), false, specifier);
+    assert.equal(isBrowserForbiddenBuiltin(specifier), true, specifier);
   }
   for (const specifier of ["react", "@/lib/db/core", "./local", "zod"]) {
     assert.equal(isBrowserForbiddenBuiltin(specifier), false, specifier);
-  }
-});
-
-test("the polyfilled-builtin allowlist matches Next's client resolve.fallback", () => {
-  const webpackConfig = fs.readFileSync(
-    path.join(REPO_ROOT, "node_modules/next/dist/build/webpack-config.js"),
-    "utf8"
-  );
-  for (const name of NEXT_CLIENT_POLYFILLED_BUILTINS) {
-    assert.match(
-      webpackConfig,
-      new RegExp(`\\b${name}: require\\.resolve\\(`),
-      `Next no longer polyfills "${name}" for the client — drop it from the allowlist`
-    );
   }
 });

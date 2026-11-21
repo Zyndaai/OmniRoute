@@ -1,4 +1,3 @@
-"use client";
 import { useSyncExternalStore } from "react";
 import { PROVIDER_ORDER } from "./constants";
 import {

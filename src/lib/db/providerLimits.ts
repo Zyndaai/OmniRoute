@@ -2,7 +2,7 @@ import {
   sanitizeProviderBillingStatus,
   type ProviderBillingStatus,
 } from "@/shared/utils/providerBilling";
-import { isBuildPhase, isCloud } from "./core";
+import { isCloud } from "./core";
 import { db, type DbExecutor } from "./pg";
 import { jsonValueParam } from "./pgJsonText";
 import { parseCodexPaidCredits, type CodexPaidCredits } from "@/lib/providers/codexPaidCredits";
@@ -78,7 +78,7 @@ function normalizeCacheEntry(value: unknown): ProviderLimitsCacheEntry | null {
 export async function getProviderLimitsCache(
   connectionId: string
 ): Promise<ProviderLimitsCacheEntry | null> {
-  if (isBuildPhase || isCloud) return null;
+  if (isCloud) return null;
   const row = await db().queryOne<{ data: unknown }>(
     "SELECT data FROM connection_limits_cache WHERE connection_id = $1",
     [connectionId]
@@ -87,7 +87,7 @@ export async function getProviderLimitsCache(
 }
 
 export async function getAllProviderLimitsCache(): Promise<Record<string, ProviderLimitsCacheEntry>> {
-  if (isBuildPhase || isCloud) return {};
+  if (isCloud) return {};
   const rows = await db().query<{ connection_id: string; data: unknown }>(
     "SELECT connection_id, data FROM connection_limits_cache"
   );
@@ -125,7 +125,7 @@ export async function setProviderLimitsCache(
   entry: ProviderLimitsCacheEntry
 ): Promise<ProviderLimitsCacheEntry> {
   const sanitized = sanitizeCacheEntryForStorage(entry);
-  if (isBuildPhase || isCloud) return sanitized;
+  if (isCloud) return sanitized;
   await upsertEntry(db(), connectionId, sanitized);
   return sanitized;
 }
@@ -133,7 +133,7 @@ export async function setProviderLimitsCache(
 export async function setProviderLimitsCacheBatch(
   entries: Array<{ connectionId: string; entry: ProviderLimitsCacheEntry }>
 ): Promise<number> {
-  if (isBuildPhase || isCloud || entries.length === 0) return 0;
+  if (isCloud || entries.length === 0) return 0;
   await db().transaction(async (tx) => {
     for (const item of entries) {
       await upsertEntry(tx, item.connectionId, sanitizeCacheEntryForStorage(item.entry));
@@ -143,7 +143,7 @@ export async function setProviderLimitsCacheBatch(
 }
 
 export async function deleteProviderLimitsCache(connectionId: string): Promise<void> {
-  if (isBuildPhase || isCloud) return;
+  if (isCloud) return;
   await db().execute("DELETE FROM connection_limits_cache WHERE connection_id = $1", [
     connectionId,
   ]);

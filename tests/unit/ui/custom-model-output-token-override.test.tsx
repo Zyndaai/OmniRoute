@@ -16,7 +16,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 const notify = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

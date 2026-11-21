@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import Input from "@/shared/components/Input";
@@ -144,7 +142,7 @@ export default function ScrapeTab({ configState, onMetrics }: ScrapeTabProps) {
           <p className="text-sm text-text-muted mb-1">{t("scrapeEmptyState")}</p>
           <p className="text-xs text-text-muted">
             {t("scrapeProvidersAvailable")}{" "}
-            <Link href="/dashboard/providers" className="text-accent hover:underline">
+            <Link to="/dashboard/providers" className="text-accent hover:underline">
               {t("configureProvider")}
             </Link>
           </p>

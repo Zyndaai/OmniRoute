@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -44,7 +41,7 @@ export async function GET(request: Request) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -56,7 +53,7 @@ export async function GET(request: Request) {
       hasOmniRoute: Boolean(content && /\[providers\.omniroute\]/i.test(content)),
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -69,13 +66,13 @@ async function readSettingsBody(
   try {
     rawBody = await request.json();
   } catch {
-    return { error: NextResponse.json({ error: "Invalid JSON" }, { status: 400 }) };
+    return { error: Response.json({ error: "Invalid JSON" }, { status: 400 }) };
   }
 
   const parsed = settingsSchema.safeParse(rawBody);
   if (!parsed.success) {
     return {
-      error: NextResponse.json(
+      error: Response.json(
         { error: parsed.error.issues[0]?.message ?? "Invalid request" },
         { status: 400 }
       ),
@@ -83,7 +80,7 @@ async function readSettingsBody(
   }
   if (!validateBaseUrl(parsed.data.baseUrl)) {
     return {
-      error: NextResponse.json({ error: "baseUrl must be a valid http(s) URL" }, { status: 400 }),
+      error: Response.json({ error: "baseUrl must be a valid http(s) URL" }, { status: 400 }),
     };
   }
   return { data: parsed.data };
@@ -112,7 +109,7 @@ export async function POST(request: Request) {
   const { baseUrl, keyId, apiKey, model, dryRun, preview } = body.data;
   const resolvedApiKey = await resolveApiKey(keyId, apiKey);
   if (!resolvedApiKey) {
-    return NextResponse.json({ error: "API key is required" }, { status: 400 });
+    return Response.json({ error: "API key is required" }, { status: 400 });
   }
 
   const configPath = getConfigPath();
@@ -125,11 +122,11 @@ export async function POST(request: Request) {
       configPath,
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 400 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 400 });
   }
 
   if (dryRun || preview) {
-    return NextResponse.json({
+    return Response.json({
       dryRun: true,
       configPath,
       content: redactWhyCodesApiKey(content),
@@ -145,13 +142,13 @@ export async function POST(request: Request) {
   try {
     await fs.mkdir(path.dirname(configPath), { recursive: true });
     await fs.writeFile(configPath, content, { encoding: "utf8", mode: 0o600 });
-    return NextResponse.json({
+    return Response.json({
       success: true,
       configPath,
       content: redactWhyCodesApiKey(content),
       message: "WhyCodes config written",
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EmptyState as KitEmptyState } from "@omniroute/ui-kit/empty-state";
 import Button from "./Button";
 import Icon from "./Icon";
@@ -17,7 +15,7 @@ import Icon from "./Icon";
  *     title="No providers yet"
  *     description="Add your first API provider to get started."
  *     actionLabel="Add Provider"
- *     onAction={() => router.push('/providers/add')}
+ *     onAction={() => navigate('/providers/add')}
  *   />
  */
 

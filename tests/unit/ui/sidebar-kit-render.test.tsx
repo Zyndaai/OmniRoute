@@ -17,10 +17,15 @@ process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 // that load, not a mask for an eager-render bug.
 vi.setConfig({ testTimeout: 30_000 });
 const nav = vi.hoisted(() => ({ pathname: "/home" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
-vi.mock("next/link", () => ({
-  default: ({ href, children, prefetch: _p, ...p }: any) => (
-    <a href={href} {...p}>
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: nav.pathname }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),

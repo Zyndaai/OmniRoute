@@ -13,8 +13,8 @@
  *   return comboErrorResponse("COMBO_002", 400, { issues: validation.issues });
  *   return comboErrorResponse("COMBO_005", 400, { reason: "cycle-detected" });
  *
- * The response is a plain `Response` (not `NextResponse.json`) so it can
- * be used from both Next.js route handlers and server-side callers. The
+ * The response is a plain `Response` so it can be used from both route
+ * handlers and server-side callers. The
  * `x-request-id` header is also attached for downstream log correlation.
  */
 

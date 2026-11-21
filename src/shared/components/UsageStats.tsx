@@ -1,9 +1,7 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "react-router";
 import Card from "./Card";
 import Badge from "./Badge";
 import SegmentedControl from "./SegmentedControl";
@@ -37,8 +35,7 @@ function MiniBarGraph({
 
 export default function UsageStats() {
   const t = useTranslations("stats");
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const sortBy = searchParams.get("sortBy") || "rawModel";
   const sortOrder = searchParams.get("sortOrder") || "asc";
@@ -56,7 +53,7 @@ export default function UsageStats() {
     const params = new URLSearchParams(searchParams.toString());
     params.set("sortBy", field);
     params.set("sortOrder", direction);
-    router.replace(`?${params.toString()}`, { scroll: false });
+    setSearchParams(params, { replace: true, preventScrollReset: true });
   };
 
   const sortData = useCallback(

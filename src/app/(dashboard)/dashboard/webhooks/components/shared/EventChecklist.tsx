@@ -1,5 +1,3 @@
-"use client";
-
 import { CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import Checkbox from "@/shared/components/Checkbox";
 

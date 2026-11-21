@@ -1,6 +1,6 @@
 // Hard Rule #12 / CodeQL js/stack-trace-exposure + js/xss-through-exception on
-// scripts/dev/responses-ws-proxy.mjs (shipped as dist/responses-ws-proxy.mjs, a
-// server-ws.mjs dependency): an exception during the WebSocket upgrade was written
+// scripts/dev/responses-ws-proxy.mjs (a launcher dependency, run-server.mjs): an
+// exception during the WebSocket upgrade was written
 // verbatim into the 500 body. The client gets a fixed message and the code only.
 import test from "node:test";
 import assert from "node:assert/strict";

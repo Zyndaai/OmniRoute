@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { tryAgentAuth, tryIdeAuth } from "@/lib/cursor/tokenExtractor";
 
@@ -19,7 +18,7 @@ export async function GET(request: Request) {
     // Try Cursor IDE first (has both accessToken and machineId)
     const ideResult = await tryIdeAuth();
     if (ideResult.found) {
-      return NextResponse.json({
+      return Response.json({
         found: true,
         accessToken: ideResult.accessToken,
         refreshToken: ideResult.refreshToken,
@@ -31,19 +30,19 @@ export async function GET(request: Request) {
     // Fall back to cursor-agent CLI auth (accessToken only, no machineId)
     const agentResult = await tryAgentAuth();
     if (agentResult.found) {
-      return NextResponse.json({
+      return Response.json({
         found: true,
         accessToken: agentResult.accessToken,
         source: agentResult.source,
       });
     }
 
-    return NextResponse.json({
+    return Response.json({
       found: false,
       error: "No Cursor credentials found. Install Cursor IDE or login with cursor-agent.",
     });
   } catch (error) {
     console.error("Cursor auto-import error:", error);
-    return NextResponse.json({ found: false, error: "Internal server error" }, { status: 500 });
+    return Response.json({ found: false, error: "Internal server error" }, { status: 500 });
   }
 }

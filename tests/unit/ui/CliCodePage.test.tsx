@@ -9,13 +9,14 @@ import enMessages from "@/i18n/messages/en.json";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),

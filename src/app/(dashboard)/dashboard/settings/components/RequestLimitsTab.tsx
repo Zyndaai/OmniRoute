@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, Input } from "@/shared/components";
 import {
@@ -7,7 +5,7 @@ import {
   MAX_REQUEST_BODY_LIMIT_MB,
   MIN_REQUEST_BODY_LIMIT_MB,
 } from "@/shared/constants/bodySize";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 type Message = { type: "success" | "error"; text: string };
 

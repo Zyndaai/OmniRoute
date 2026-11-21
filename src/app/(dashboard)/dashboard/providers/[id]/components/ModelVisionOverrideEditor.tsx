@@ -1,5 +1,3 @@
-"use client";
-
 import Checkbox from "@/shared/components/Checkbox";
 
 export default function ModelVisionOverrideEditor({

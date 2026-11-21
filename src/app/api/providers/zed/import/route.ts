@@ -15,7 +15,7 @@
  * back to the v3.8.5 one-step "import everything" behaviour. Default is off.
  *
  * SECURITY-AUDITOR-NOTE: This endpoint is referenced by Socket.dev finding for
- * `app/.next/server/app/api/providers/zed/import/route.js`. The 2-step
+ * the bundled `api/providers/zed/import` route. The 2-step
  * confirmation flow added in v3.8.6 ensures the operator explicitly authorizes
  * every individual credential before it is persisted to the local SQLite
  * store. See docs/security/SOCKET_DEV_FINDINGS.md §2.
@@ -23,7 +23,6 @@
  * Security: protected by requireManagementAuth.
  */
 
-import { NextResponse } from "next/server";
 import { discoverZedCredentials, isZedInstalled } from "@/lib/zed-oauth/keychain-reader";
 import { partitionZedCredentials } from "@/lib/zed-oauth/importUtils";
 import {
@@ -51,7 +50,9 @@ interface ImportResponse {
   zedDockerEnvironment?: boolean;
 }
 
-export async function POST(request: Request): Promise<NextResponse<ImportResponse> | Response> {
+const json = (body: ImportResponse, init?: ResponseInit) => Response.json(body, init);
+
+export async function POST(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
@@ -66,7 +67,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
   const confirmed = parseConfirmedAccounts(body);
 
   if (!LEGACY_ONE_STEP_ENABLED && confirmed === null) {
-    return NextResponse.json(
+    return json(
       {
         success: false,
         error:
@@ -80,7 +81,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
 
   try {
     if (isRunningInDocker()) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error:
@@ -95,7 +96,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
 
     const zedInstalled = await isZedInstalled();
     if (!zedInstalled) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error: "Zed IDE does not appear to be installed on this system.",
@@ -132,7 +133,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
           allCredentials.length
         );
       }
-      return NextResponse.json({
+      return json({
         success: true,
         count: 0,
         providers: [],
@@ -183,7 +184,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
       uniqueProviders.length
     );
 
-    return NextResponse.json({
+    return json({
       success: true,
       count: savedCount,
       providers: uniqueProviders,
@@ -194,7 +195,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
     console.error("[Zed Import] Error importing credentials:", error);
 
     if (error?.message?.includes("User canceled") || error?.message?.includes("denied")) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error: "Keychain access denied. Please grant permission when prompted by your OS.",
@@ -204,7 +205,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
     }
 
     if (error?.message?.includes("not found") || error?.message?.includes("ENOENT")) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error:
@@ -214,7 +215,7 @@ export async function POST(request: Request): Promise<NextResponse<ImportRespons
       );
     }
 
-    return NextResponse.json(
+    return json(
       {
         success: false,
         error: "Failed to import credentials",

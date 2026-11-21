@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -36,7 +35,7 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         { error: parsed.error.issues[0]?.message ?? "Invalid query parameters" },
         { status: 400 }
       );
@@ -44,13 +43,13 @@ export async function GET(request: Request) {
 
     const report = await buildComboHealthAutopilotReport(parsed.data);
     if (parsed.data.comboId && report.summary.comboCount === 0) {
-      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+      return Response.json({ error: "Combo not found" }, { status: 404 });
     }
 
-    return NextResponse.json(report);
+    return Response.json(report);
   } catch (error) {
     console.error("[API] GET /api/usage/combo-health-autopilot error:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: "Failed to build combo health autopilot report" },
       { status: 500 }
     );

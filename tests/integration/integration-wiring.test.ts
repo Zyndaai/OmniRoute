@@ -54,10 +54,10 @@ function listProjectFiles(relPath: string): string[] {
 // wiring into the dead module caused.
 
 describe("Pipeline Wiring — instrumentation-node.ts", () => {
-  const src = readProjectFile("src/instrumentation-node.ts");
+  const src = readProjectFile("src/server/boot.ts");
 
   it("should seed default model aliases during startup restore", () => {
-    assert.ok(src, "src/instrumentation-node.ts should exist");
+    assert.ok(src, "src/server/boot.ts should exist");
     assert.match(src, /seedDefaultModelAliases/);
   });
 
@@ -124,11 +124,11 @@ describe("Pipeline Wiring — sse chat handler", () => {
 });
 
 describe("Pipeline Wiring — middleware proxy", () => {
-  const proxySrc = readProjectFile("src/proxy.ts");
+  const proxySrc = readProjectFile("src/server/http/handler.ts");
   const pipelineSrc = readProjectFile("src/server/authz/pipeline.ts");
 
   it("should exist and delegate to authz pipeline", () => {
-    assert.ok(proxySrc, "src/proxy.ts should exist");
+    assert.ok(proxySrc, "src/server/http/handler.ts should exist");
     assert.match(proxySrc, /runAuthzPipeline/);
   });
 

@@ -9,7 +9,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   // identity translator with no `has`, so translateOrFallback uses the English fallbacks
   useTranslations: () => (key: string) => key,
 }));

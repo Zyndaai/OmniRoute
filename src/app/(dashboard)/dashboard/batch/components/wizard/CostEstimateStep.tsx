@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import Button from "@/shared/components/Button";
 import { estimateBatchCost } from "@/lib/batches/costEstimator";

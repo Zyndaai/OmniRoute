@@ -11,7 +11,6 @@ const originalBasePath = process.env.OMNIROUTE_BASE_PATH;
 // process.env.DATA_DIR at evaluation time. The specifiers are literals.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NextRequest } from "next/server";
 
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("@/lib/db/settings");
@@ -20,9 +19,9 @@ const { GET } = await import("../../src/app/api/settings/favicon/route.ts");
 
 const originalFetch = globalThis.fetch;
 
-function buildRequest(url: string, headers?: Record<string, string>): NextRequest {
+function buildRequest(url: string, headers?: Record<string, string>): Request {
   const parsed = new URL(url);
-  return new NextRequest(new Request(url, { headers: { host: parsed.host, ...headers } }));
+  return new Request(new Request(url, { headers: { host: parsed.host, ...headers } }));
 }
 
 function mockUpstreamFetch(handler: (url: string) => Promise<Response>): void {
@@ -119,7 +118,7 @@ test("direct request without forwarded protocol keeps a valid scheme", async () 
 });
 
 test("failed default icon redirect serves the default icon file directly", async () => {
-  const res = await GET(undefined as unknown as NextRequest);
+  const res = await GET(undefined as unknown as Request);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "image/svg+xml");
   const body = await res.text();
@@ -144,7 +143,7 @@ test("unreadable default icon file answers 404 instead of failing", async () => 
   const previousCwd = process.cwd();
   try {
     process.chdir(emptyDir);
-    const res = await GET(undefined as unknown as NextRequest);
+    const res = await GET(undefined as unknown as Request);
     assert.notEqual(res.status, 500);
     assert.equal(res.status, 404);
     assert.equal(await res.text(), "Not found");

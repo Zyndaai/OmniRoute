@@ -1,11 +1,10 @@
-"use client";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 
 export default function HeroSection() {
   const t = useTranslations("landing");
-  const router = useRouter();
+  const navigate = useNavigate();
 
   return (
     <section className="relative pt-32 pb-20 px-4 sm:px-6 min-h-[90vh] flex flex-col items-center justify-center overflow-hidden">
@@ -33,7 +32,7 @@ export default function HeroSection() {
         {/* CTA Buttons */}
         <div className="flex flex-wrap items-center justify-center gap-4 w-full">
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => navigate("/dashboard")}
             className="w-full sm:w-auto h-12 px-8 rounded-lg bg-[#E54D5E] hover:bg-[#C93D4E] text-white text-base font-bold transition-all shadow-[0_0_15px_rgba(229,77,94,0.4)] flex items-center justify-center gap-2"
           >
             <Icon name="rocket_launch" size={20} />

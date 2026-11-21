@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 
 /** Reads only the authenticated boolean; the server never returns CLI account PII. */

@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Phase 1t.2 extraction — Issue #3501
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router";
 import { Card, Button } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
@@ -43,7 +41,7 @@ export default function CompatibleNodeCard({
   onOpenEditNodeModal,
   t,
 }: CompatibleNodeCardProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirmDialog();
 
   return (
@@ -109,8 +107,7 @@ export default function CompatibleNodeCard({
                   method: "DELETE",
                 });
                 if (res.ok) {
-                  router.push("/dashboard/providers");
-                  router.refresh();
+                  navigate("/dashboard/providers");
                 }
               } catch (error) {
                 console.error("Error deleting provider node:", error);

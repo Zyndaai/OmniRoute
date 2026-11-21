@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   assignApiKeyBillingTeam,
@@ -11,19 +10,17 @@ import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance";
 
 type RouteParams = { params: Promise<{ id: string }> };
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request, { params }: RouteParams): Promise<Response> {
   const authError = await requireManagementAuth(request, { alwaysRequireAuth: true });
   if (authError) return authError;
   try {
     const { id } = await params;
     if (!(await getTeam(id)))
-      return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
-    return NextResponse.json({ members: await listTeamMembers(id) });
+      return Response.json(buildErrorBody(404, "Team not found"), { status: 404 });
+    return Response.json({ members: await listTeamMembers(id) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list team members";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -33,15 +30,15 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
   try {
     const { id } = await params;
     const team = await getTeam(id);
-    if (!team) return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
+    if (!team) return Response.json(buildErrorBody(404, "Team not found"), { status: 404 });
     if (team.status === "archived") {
-      return NextResponse.json(buildErrorBody(409, "Archived teams cannot accept API keys"), {
+      return Response.json(buildErrorBody(409, "Archived teams cannot accept API keys"), {
         status: 409,
       });
     }
     const parsed = TeamMemberAssignmentSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
     const assignment = await assignApiKeyBillingTeam(
       parsed.data.apiKeyId,
@@ -58,7 +55,7 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
       ipAddress: ctx.ipAddress ?? undefined,
       requestId: ctx.requestId,
     });
-    return NextResponse.json({ assignment });
+    return Response.json({ assignment });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to assign API key";
     const status = /not found/i.test(message)
@@ -66,7 +63,7 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
       : /assignment time|changed concurrently/i.test(message)
         ? 409
         : 500;
-    return NextResponse.json(buildErrorBody(status, message), { status });
+    return Response.json(buildErrorBody(status, message), { status });
   }
 }
 
@@ -76,15 +73,15 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
   try {
     const { id } = await params;
     if (!(await getTeam(id)))
-      return NextResponse.json(buildErrorBody(404, "Team not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Team not found"), { status: 404 });
     const apiKeyId = new URL(request.url).searchParams.get("apiKeyId");
     const parsed = TeamMemberAssignmentSchema.safeParse({ apiKeyId });
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
     const removed = await unassignApiKeyBillingTeam(parsed.data.apiKeyId, undefined, id);
     if (!removed) {
-      return NextResponse.json(buildErrorBody(404, "Active team assignment not found"), {
+      return Response.json(buildErrorBody(404, "Active team assignment not found"), {
         status: 404,
       });
     }
@@ -97,10 +94,10 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
       ipAddress: ctx.ipAddress ?? undefined,
       requestId: ctx.requestId,
     });
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to unassign API key";
     const status = /assignment time|changed concurrently/i.test(message) ? 409 : 500;
-    return NextResponse.json(buildErrorBody(status, message), { status });
+    return Response.json(buildErrorBody(status, message), { status });
   }
 }

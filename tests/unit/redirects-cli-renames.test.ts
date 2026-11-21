@@ -1,58 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
-const repoRoot = join(import.meta.dirname, "../..");
-const configSource = await readFile(join(repoRoot, "next.config.mjs"), "utf8");
+import { REDIRECT_STATUS, REDIRECTS, resolveRedirect } from "../../src/server/http/redirects.ts";
 
-test("next.config.mjs has permanent redirect from /dashboard/cli-tools to /dashboard/cli-code", () => {
-  assert.ok(
-    configSource.includes('source: "/dashboard/cli-tools"') &&
-      configSource.includes('destination: "/dashboard/cli-code"'),
-    "expected /dashboard/cli-tools → /dashboard/cli-code redirect in next.config.mjs"
-  );
+test("renamed pages redirect permanently (308)", () => {
+  assert.equal(REDIRECT_STATUS, 308);
 });
 
-test("next.config.mjs has permanent wildcard redirect from /dashboard/cli-tools/:path* to /dashboard/cli-code/:path*", () => {
-  assert.ok(
-    configSource.includes('source: "/dashboard/cli-tools/:path*"') &&
-      configSource.includes('destination: "/dashboard/cli-code/:path*"'),
-    "expected /dashboard/cli-tools/:path* → /dashboard/cli-code/:path* redirect in next.config.mjs"
-  );
+test("/dashboard/cli-tools redirects to /dashboard/cli-code, with and without a tail", () => {
+  assert.equal(resolveRedirect("/dashboard/cli-tools"), "/dashboard/cli-code");
+  assert.equal(resolveRedirect("/dashboard/cli-tools/claude"), "/dashboard/cli-code/claude");
+  assert.equal(resolveRedirect("/dashboard/cli-tools/a/b"), "/dashboard/cli-code/a/b");
 });
 
-test("next.config.mjs has permanent redirect from /dashboard/agents to /dashboard/acp-agents", () => {
-  assert.ok(
-    configSource.includes('source: "/dashboard/agents"') &&
-      configSource.includes('destination: "/dashboard/acp-agents"'),
-    "expected /dashboard/agents → /dashboard/acp-agents redirect in next.config.mjs"
-  );
+test("/dashboard/agents redirects to /dashboard/acp-agents, with and without a tail", () => {
+  assert.equal(resolveRedirect("/dashboard/agents"), "/dashboard/acp-agents");
+  assert.equal(resolveRedirect("/dashboard/agents/x"), "/dashboard/acp-agents/x");
 });
 
-test("next.config.mjs has permanent wildcard redirect from /dashboard/agents/:path* to /dashboard/acp-agents/:path*", () => {
-  assert.ok(
-    configSource.includes('source: "/dashboard/agents/:path*"') &&
-      configSource.includes('destination: "/dashboard/acp-agents/:path*"'),
-    "expected /dashboard/agents/:path* → /dashboard/acp-agents/:path* redirect in next.config.mjs"
-  );
+test("other dashboard renames", () => {
+  assert.equal(resolveRedirect("/dashboard/providers/freepik"), "/dashboard/providers/magnific");
+  assert.equal(resolveRedirect("/dashboard/skills"), "/dashboard/omni-skills");
+  assert.equal(resolveRedirect("/dashboard/skills/x"), null);
 });
 
-test("next.config.mjs has permanent redirect from /dashboard/providers/freepik to /dashboard/providers/magnific", () => {
-  assert.ok(
-    configSource.includes('source: "/dashboard/providers/freepik"') &&
-      configSource.includes('destination: "/dashboard/providers/magnific"'),
-    "expected /dashboard/providers/freepik → /dashboard/providers/magnific redirect in next.config.mjs"
-  );
+test("58 rules: 52 docs pages plus 6 dashboard renames", () => {
+  assert.equal(REDIRECTS.length, 58);
+  assert.equal(REDIRECTS.filter((rule) => rule.source.startsWith("/docs/")).length, 52);
+  assert.equal(resolveRedirect("/docs/features"), "/docs/guides/features");
+  assert.equal(resolveRedirect("/docs/architecture"), "/docs/architecture/architecture");
+  assert.equal(resolveRedirect("/docs/architecture/architecture"), null);
 });
 
-test("all 4 CLI redirect entries use permanent: true", () => {
-  // Extract the CLI Pages block
-  const cliBlock = configSource.slice(configSource.indexOf("// CLI Pages — Plano 14 (F9)"));
-  assert.ok(cliBlock.length > 0, "expected CLI Pages block to be present");
-  const permanentCount = (cliBlock.match(/permanent: true/g) || []).length;
-  assert.ok(
-    permanentCount >= 4,
-    `expected at least 4 'permanent: true' entries in CLI Pages block, found ${permanentCount}`
-  );
+test("matching is case-insensitive and a trailing slash is removed first", () => {
+  assert.equal(resolveRedirect("/Docs/Features"), "/docs/guides/features");
+  assert.equal(resolveRedirect("/api/v1/models/"), "/api/v1/models");
+  assert.equal(resolveRedirect("/"), null);
+  assert.equal(resolveRedirect("/dashboard"), null);
 });

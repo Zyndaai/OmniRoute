@@ -2,12 +2,12 @@ import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import ProviderLimits from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits";
 
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 // Only the detail renderer is replaced. The real container, projection, filters,
 // layout switcher and read-only summary hook all execute together.
 vi.mock("@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCard", () => ({
@@ -117,7 +117,7 @@ function fixture(failCooldowns = false, malformed = false) {
 function mount(locale: string) {
   const m = locale === "en" ? en : ar;
   render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale={locale}
       messages={{ usage: m.usage, common: m.common }}
       timeZone="UTC"
@@ -126,7 +126,7 @@ function mount(locale: string) {
       }}
     >
       <ProviderLimits />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return m;
 }

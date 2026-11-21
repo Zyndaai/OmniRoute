@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SignJWT } from "jose";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omr-authz-pipeline-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -58,8 +57,8 @@ async function dashboardCookie(expiresIn = "1h"): Promise<string> {
   return `auth_token=${token}`;
 }
 
-function request(url: string, init?: RequestInit): NextRequest {
-  return new NextRequest(url, init);
+function request(url: string, init?: RequestInit): Request {
+  return new Request(url, init);
 }
 
 test.beforeEach(async () => {
@@ -100,7 +99,7 @@ test("runAuthzPipeline redirects root to dashboard before management auth", asyn
   const response = await pipeline.runAuthzPipeline(request("http://localhost/"), { enforce: true });
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/dashboard");
+  assert.equal(response.headers.get("location"), "/dashboard");
 });
 
 test("runAuthzPipeline forwards zed-hosted native-app callback from root to /callback preserving the query string (#13140)", async () => {
@@ -112,10 +111,7 @@ test("runAuthzPipeline forwards zed-hosted native-app callback from root to /cal
   );
 
   assert.equal(response.status, 307);
-  assert.equal(
-    response.headers.get("location"),
-    "http://localhost/callback?user_id=abc123&access_token=tok-xyz"
-  );
+  assert.equal(response.headers.get("location"), "/callback?user_id=abc123&access_token=tok-xyz");
 });
 
 test("runAuthzPipeline still redirects root to dashboard when only one native-app callback param is present (#13140)", async () => {
@@ -126,7 +122,7 @@ test("runAuthzPipeline still redirects root to dashboard when only one native-ap
   });
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/dashboard");
+  assert.equal(response.headers.get("location"), "/dashboard");
 });
 
 test("runAuthzPipeline redirects unauthenticated dashboard pages to login", async () => {
@@ -137,7 +133,7 @@ test("runAuthzPipeline redirects unauthenticated dashboard pages to login", asyn
   });
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/login");
+  assert.equal(response.headers.get("location"), "/login");
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
   assert.ok(response.headers.get("x-request-id"));
 });
@@ -150,7 +146,7 @@ test("runAuthzPipeline redirects unauthenticated /home to login (#2712)", async 
   });
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/login");
+  assert.equal(response.headers.get("location"), "/login");
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
 });
 
@@ -162,52 +158,50 @@ test("runAuthzPipeline redirects unauthenticated /home/* nested paths to login (
   });
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/login");
+  assert.equal(response.headers.get("location"), "/login");
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
 });
 
 // PR #1810 (upstream 9router): reverse-proxy subpath deployment via
-// OMNIROUTE_BASE_PATH. Next.js strips the basePath from nextUrl.pathname
-// before route classification, so the redirect targets must re-add it via
-// request.nextUrl.basePath to stay inside the deployed subpath.
+// OMNIROUTE_BASE_PATH. The server strips the base path before route
+// classification and passes it in, so the redirect targets must re-add it
+// to stay inside the deployed subpath.
 test("runAuthzPipeline prefixes the root-to-dashboard redirect with basePath when set", async () => {
   await forceAuthRequired();
 
-  const req = new NextRequest("http://localhost/omniroute/", {
-    nextConfig: { basePath: "/omniroute" },
+  const response = await pipeline.runAuthzPipeline(request("http://localhost/omniroute/"), {
+    enforce: true,
+    pathname: "/",
+    basePath: "/omniroute",
   });
 
-  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
-
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/omniroute/dashboard");
+  assert.equal(response.headers.get("location"), "/omniroute/dashboard");
 });
 
 test("runAuthzPipeline prefixes the dashboard login redirect with basePath when set", async () => {
   await forceAuthRequired();
 
-  const req = new NextRequest("http://localhost/omniroute/dashboard", {
-    nextConfig: { basePath: "/omniroute" },
-  });
-
-  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
+  const response = await pipeline.runAuthzPipeline(
+    request("http://localhost/omniroute/dashboard"),
+    { enforce: true, pathname: "/dashboard", basePath: "/omniroute" }
+  );
 
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/omniroute/login");
+  assert.equal(response.headers.get("location"), "/omniroute/login");
   assert.equal(response.headers.get("x-omniroute-route-class"), "MANAGEMENT");
 });
 
 test("runAuthzPipeline leaves redirect targets unprefixed when basePath is empty", async () => {
   await forceAuthRequired();
 
-  const req = new NextRequest("http://localhost/dashboard", {
-    nextConfig: { basePath: "" },
+  const response = await pipeline.runAuthzPipeline(request("http://localhost/dashboard"), {
+    enforce: true,
+    basePath: "",
   });
 
-  const response = await pipeline.runAuthzPipeline(req, { enforce: true });
-
   assert.equal(response.status, 307);
-  assert.equal(response.headers.get("location"), "http://localhost/login");
+  assert.equal(response.headers.get("location"), "/login");
 });
 
 test("runAuthzPipeline allows onboarding when login is required but no password exists", async () => {

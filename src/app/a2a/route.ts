@@ -10,12 +10,26 @@
  * Auth: Bearer token via Authorization header
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { getTaskManager } from "@/lib/a2a/taskManager";
 import { logRoutingDecision } from "@/lib/a2a/routingLogger";
 import { resolveA2AComboAttribution } from "@/lib/a2a/resolveComboAttribution";
 import { createA2AStream, SSE_HEADERS } from "@/lib/a2a/streaming";
-import { A2A_SKILL_HANDLERS, executeA2ATaskWithState } from "@/lib/a2a/taskExecution";
+import {
+  A2A_SKILL_HANDLERS,
+  executeA2ATaskWithState,
+  type A2ASkillHandler,
+} from "@/lib/a2a/taskExecution";
+import type { A2ACallerContext } from "@/lib/a2a/selfLoopAuth";
+import { extractApiKey } from "@/sse/services/auth";
+
+/**
+ * Explicit allowlist of dispatchable skills. `params.skill` is caller-controlled, so it is
+ * looked up in a Map rather than as an object index: a name such as "constructor" or
+ * "toString" must never resolve to an Object.prototype member and be invoked as a handler.
+ */
+const SKILL_HANDLERS: ReadonlyMap<string, A2ASkillHandler> = new Map(
+  Object.entries(A2A_SKILL_HANDLERS)
+);
 import { getSettings } from "@/lib/db/settings";
 import { authenticateA2ARequest, resolveA2AOwner } from "@/lib/a2a/authenticate";
 
@@ -123,7 +137,7 @@ function toMessageArray(raw: unknown): A2AMessage[] | null {
 
 // ============ Auth ============
 
-async function authenticate(req: NextRequest): Promise<boolean> {
+async function authenticate(req: Request): Promise<boolean> {
   // /a2a is outside the authz proxy matcher, so the REQUIRE_API_KEY posture the
   // pipeline enforces for /v1 never ran here — the route accepted every caller
   // whenever OMNIROUTE_API_KEY was unset, which is the shipped default
@@ -135,20 +149,20 @@ async function authenticate(req: NextRequest): Promise<boolean> {
 // ============ JSON-RPC Helpers ============
 
 function jsonRpcError(id: string | number | null, code: number, message: string, data?: unknown) {
-  return NextResponse.json(
+  return Response.json(
     { jsonrpc: "2.0", id, error: { code, message, data } },
     { status: code === -32600 ? 400 : code === -32601 ? 404 : code === -32603 ? 500 : 200 }
   );
 }
 
 function jsonRpcResult(id: string | number | null, result: unknown) {
-  return NextResponse.json({ jsonrpc: "2.0", id, result });
+  return Response.json({ jsonrpc: "2.0", id, result });
 }
 
 async function rejectIfA2ADisabled(id: string | number | null) {
   const settings = await getSettings();
   if (settings.a2aEnabled === true) return null;
-  return NextResponse.json(
+  return Response.json(
     {
       jsonrpc: "2.0",
       id,
@@ -163,11 +177,14 @@ async function rejectIfA2ADisabled(id: string | number | null) {
 
 // ============ Route Handler ============
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   // Auth check
   if (!(await authenticate(req))) {
     return jsonRpcError(null, -32600, "Unauthorized: missing or invalid API key");
   }
+  // Skills that call back into OmniRoute send this caller's API key. Only a caller without one
+  // (a dashboard session) gets OMNIROUTE_API_KEY instead.
+  const caller: A2ACallerContext = { apiKey: extractApiKey(req) };
 
   // Parse JSON-RPC body
   let body: any;
@@ -207,7 +224,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const handler = A2A_SKILL_HANDLERS[skill];
+      const handler = SKILL_HANDLERS.get(skill);
       if (!handler) {
         return jsonRpcError(id, -32601, `Unknown skill: ${skill}`);
       }
@@ -215,7 +232,7 @@ export async function POST(req: NextRequest) {
       const task = tm.createTask({ skill, messages, metadata: params?.metadata }, callerOwner);
       try {
         tm.updateTask(task.id, "working");
-        const result = await handler(task);
+        const result = await handler(task, caller);
         tm.updateTask(task.id, "completed", result.artifacts);
 
         // Log routing decision
@@ -283,7 +300,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const handler = A2A_SKILL_HANDLERS[skill];
+      const handler = SKILL_HANDLERS.get(skill);
       if (!handler) {
         return jsonRpcError(id, -32601, `Unknown skill: ${skill}`);
       }
@@ -293,7 +310,7 @@ export async function POST(req: NextRequest) {
 
       const stream = createA2AStream(
         task,
-        async (t) => executeA2ATaskWithState(tm, t, handler),
+        async (t) => executeA2ATaskWithState(tm, t, (st) => handler(st, caller)),
         req.signal,
         {
           onStart: () => tm.beginStream(),
@@ -336,7 +353,7 @@ export async function POST(req: NextRequest) {
 
 // Agent Card discovery via OPTIONS
 export async function OPTIONS() {
-  return new NextResponse(null, {
+  return new Response(null, {
     status: 204,
     headers: {
       Allow: "POST, OPTIONS",

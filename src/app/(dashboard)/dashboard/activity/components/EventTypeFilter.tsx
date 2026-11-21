@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import FilterPills from "@/shared/components/FilterPills";
 
 export type EventCategory =

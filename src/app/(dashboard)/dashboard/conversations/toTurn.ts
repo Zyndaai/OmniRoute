@@ -20,7 +20,7 @@ export interface ConversationTurn {
  * tripped through JSON for a structured tool_use/tool_result turn; parse it
  * best-effort so the block gets a real object, not a JSON string.
  *
- * Kept out of page.tsx (a "use client" component that pulls in ChatBubble/
+ * Kept out of page.tsx (a component that pulls in ChatBubble/
  * MarkdownMessage's dependency tree) so this pure ConversationTurn ->
  * NormalizedTurn mapping stays unit-testable on its own.
  */

@@ -1,5 +1,3 @@
-"use client";
-
 import { useId, useState } from "react";
 import type { ReactNode, MouseEventHandler } from "react";
 import { Copy, ExternalLink, FileText, Sparkles, ArrowUpRight } from "lucide-react";

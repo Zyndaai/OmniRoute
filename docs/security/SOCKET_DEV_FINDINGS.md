@@ -218,7 +218,7 @@ For users who need a Socket-friendly artifact, build with:
 OMNIROUTE_BUILD_PROFILE=minimal npm run build
 ```
 
-The webpack `NormalModuleReplacementPlugin` aliases four modules to stubs:
+The Vite `resolve.alias` entries in `vite.config.ts` (`moduleStubs()`) replace four modules with stubs:
 
 | Module                                              | Stub                                                         |
 | --------------------------------------------------- | ------------------------------------------------------------ |

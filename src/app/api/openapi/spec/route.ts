@@ -3,7 +3,6 @@
  * GET — returns the parsed openapi.yaml as structured JSON catalog
  */
 
-import { NextResponse } from "next/server";
 import { access, readFile, stat } from "fs/promises";
 import path from "path";
 import * as yaml from "js-yaml";
@@ -126,7 +125,7 @@ export async function GET() {
     }
 
     if (!specPath) {
-      return NextResponse.json({ error: "openapi.yaml not found" }, { status: 404 });
+      return Response.json({ error: "openapi.yaml not found" }, { status: 404 });
     }
 
     const specStat = await stat(specPath);
@@ -134,7 +133,7 @@ export async function GET() {
 
     // Use cache if file hasn't changed
     if (cachedSpec && cachedSpec.mtime === mtime) {
-      return NextResponse.json(cachedSpec.data);
+      return Response.json(cachedSpec.data);
     }
 
     const content = await readFile(specPath, "utf-8");
@@ -188,9 +187,9 @@ export async function GET() {
 
     cachedSpec = { data: catalog, mtime };
 
-    return NextResponse.json(catalog);
+    return Response.json(catalog);
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to parse OpenAPI spec" },
       { status: 500 }
     );

@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { useState } from "react";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 import { Button, Checkbox, Input, Modal, SegmentedControl, Textarea } from "@/shared/components";
 interface ImportClaudeAuthModalProps {

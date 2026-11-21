@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader, SectionHeader } from "@omniroute/ui-kit/page-header";
 import { SegmentedControl } from "@/shared/components";

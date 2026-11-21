@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -31,7 +30,7 @@ export async function GET(request: Request) {
       },
     ];
   });
-  return NextResponse.json({ leftovers: listDeprecatedProviderLeftovers(connections) });
+  return Response.json({ leftovers: listDeprecatedProviderLeftovers(connections) });
 }
 
 export async function POST(request: Request) {
@@ -44,17 +43,17 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(purgeSchema, body);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { provider } = validation.data;
   if (!isDeprecatedProvider(provider)) {
-    return NextResponse.json({ error: "Provider is not deprecated" }, { status: 400 });
+    return Response.json({ error: "Provider is not deprecated" }, { status: 400 });
   }
 
   const deleted = Number(await deleteProviderConnectionsByProvider(provider) || 0);
@@ -74,5 +73,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return NextResponse.json({ deleted });
+  return Response.json({ deleted });
 }

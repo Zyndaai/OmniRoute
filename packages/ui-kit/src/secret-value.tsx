@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Alert } from "./alert";

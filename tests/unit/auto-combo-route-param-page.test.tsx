@@ -5,7 +5,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Root } from "react-dom/client";
 
-import ComboControlCenterPage from "../../src/app/(dashboard)/dashboard/combos/[id]/page";
+import ComboControlCenterPage, {
+  loader,
+} from "../../src/app/(dashboard)/dashboard/combos/[id]/page";
 import ComboControlCenterClient from "@/app/(dashboard)/dashboard/combos/ComboControlCenterClient";
 import Breadcrumbs from "@/shared/components/Breadcrumbs";
 
@@ -17,11 +19,7 @@ vi.mock("@/app/(dashboard)/dashboard/combos/ComboControlCenterClient", () => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/combos/auto%2Ffast",
-}));
-
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const t = (key: string) => key;
     t.has = () => false;
@@ -29,41 +27,44 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ href, children }: { href: string; children: React.ReactNode }) => (
-    <a href={href}>{children}</a>
+const loaderState = vi.hoisted(() => ({ data: { id: "" } }));
+
+vi.mock("react-router", () => ({
+  useLoaderData: () => loaderState.data,
+  useLocation: () => ({ pathname: "/dashboard/combos/auto%2Ffast" }),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
+      {children}
+    </a>
   ),
 }));
 
 describe("combos/[id] page param boundary", () => {
-  it("decodes the percent-encoded auto/* id before delegating", async () => {
-    const element = await ComboControlCenterPage({
-      params: Promise.resolve({ id: "auto%2Ffast" }),
-    });
+  it("forwards the already-decoded auto/* id from the loader to the client component", () => {
+    // React Router percent-decodes route params before the loader sees them.
+    const data = loader({ params: { id: "auto/fast" } });
+    expect(data).toEqual({ id: "auto/fast" });
+    loaderState.data = data;
+    const element = ComboControlCenterPage();
     expect(element.type).toBe(ComboControlCenterClient);
     expect(element.props.comboId).toBe("auto/fast");
-    // The client gate that picks the virtual-combo path must now see the prefix.
     const { comboId } = element.props;
     expect(comboId === "auto" || comboId.startsWith("auto/")).toBe(true);
   });
 
-  it("decodes compound ids and leaves persisted ids untouched", async () => {
-    const compound = await ComboControlCenterPage({
-      params: Promise.resolve({ id: "auto%2Fcoding%3Afast" }),
+  it("keeps compound and persisted ids untouched", () => {
+    expect(loader({ params: { id: "auto/coding:fast" } })).toEqual({ id: "auto/coding:fast" });
+    expect(loader({ params: { id: "fecdd784-7b6b-4e59-9812-d74650d263ff" } })).toEqual({
+      id: "fecdd784-7b6b-4e59-9812-d74650d263ff",
     });
-    expect(compound.props.comboId).toBe("auto/coding:fast");
-
-    const persisted = await ComboControlCenterPage({
-      params: Promise.resolve({ id: "fecdd784-7b6b-4e59-9812-d74650d263ff" }),
-    });
-    expect(persisted.props.comboId).toBe("fecdd784-7b6b-4e59-9812-d74650d263ff");
   });
 
-  it("decodes a single layer only", async () => {
-    const element = await ComboControlCenterPage({
-      params: Promise.resolve({ id: "auto%252Ffast" }),
-    });
-    expect(element.props.comboId).toBe("auto%2Ffast");
+  it("does not decode a second layer", () => {
+    expect(loader({ params: { id: "auto%2Ffast" } })).toEqual({ id: "auto%2Ffast" });
   });
 });
 

@@ -1,7 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Button, Card, ConfirmModal, EmptyState, Skeleton } from "@/shared/components";
@@ -66,32 +65,15 @@ const PAGE_SIZE = 50;
 type PendingBulkRun =
   { kind: "models"; targets: ModelTestTarget[] } | { kind: "combos"; targets: ComboTestTarget[] };
 
-/**
- * Mirror the filters into the URL. Browsers rate-limit history updates (Safari throws a
- * SecurityError after 100 calls in 10 s), so unchanged URLs are skipped and a refused update is
- * ignored: the URL is a shareable convenience, never worth taking the page down.
- */
-function setUrlParams(params: URLSearchParams) {
-  if (typeof window === "undefined") return;
-  const query = params.toString();
-  const { pathname, search } = window.location;
-  const nextUrl = query ? `${pathname}?${query}` : pathname;
-  if (nextUrl === `${pathname}${search}`) return;
-  try {
-    window.history.replaceState(null, "", nextUrl);
-  } catch {
-    // Rate-limited or refused: keep the current URL; the next change retries.
-  }
-}
-
 function useCatalogPageState() {
   const t = useTranslations("modelCatalog");
 
-  // URL-driven state starts from the defaults the server renders; the mount effect below
-  // applies the real query string, so hydration never sees browser-only values.
-  const [activeTab, setActiveTab] = useState<CatalogTab>("models");
-  /** True once the query string has been read; the URL is never written before that. */
-  const [urlApplied, setUrlApplied] = useState(false);
+  // The tab and the filters live in the query string (a shareable view); changes go through
+  // `setSearchParams` in `useCatalogPageActions`.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = useMemo(() => parseCatalogTab(searchParams), [searchParams]);
+  const rawModelFilters = useMemo(() => parseModelFilters(searchParams), [searchParams]);
+  const rawComboFilters = useMemo(() => parseComboFilters(searchParams), [searchParams]);
   const [pendingBulkRun, setPendingBulkRun] = useState<PendingBulkRun | null>(null);
 
   // Models State
@@ -117,16 +99,12 @@ function useCatalogPageState() {
     Record<string, "healthy" | "degraded" | "down">
   >({});
 
-  const [rawModelFilters, setModelFilters] = useState<CatalogFilters>(DEFAULT_MODEL_FILTERS);
-  const [rawComboFilters, setComboFilters] = useState<ComboCatalogFilters>(DEFAULT_COMBO_FILTERS);
-
   const runner = useCatalogTestRunner();
   return {
     ...runner,
     activeTab,
-    setActiveTab,
-    urlApplied,
-    setUrlApplied,
+    searchParams,
+    setSearchParams,
     pendingBulkRun,
     setPendingBulkRun,
     models,
@@ -160,9 +138,7 @@ function useCatalogPageState() {
     providerHealthMap,
     setProviderHealthMap,
     rawModelFilters,
-    setModelFilters,
     rawComboFilters,
-    setComboFilters,
     t,
   };
 }
@@ -432,35 +408,14 @@ function useCatalogPageSelection(
   };
 }
 
-function useCatalogUrlRead(state: ReturnType<typeof useCatalogPageState>) {
-  const { setActiveTab, setComboFilters, setModelFilters, setUrlApplied } = state;
-  // Deep links and Back/Forward: read the query string after mount (DashboardLayout pattern).
-  useEffect(() => {
-    const applyUrlState = () => {
-      const params = new URLSearchParams(window.location.search);
-      setActiveTab(parseCatalogTab(params));
-      setModelFilters(parseModelFilters(params));
-      setComboFilters(parseComboFilters(params));
-      setUrlApplied(true);
-    };
-    const timer = window.setTimeout(applyUrlState, 0);
-    window.addEventListener("popstate", applyUrlState);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("popstate", applyUrlState);
-    };
-  }, [setActiveTab, setComboFilters, setModelFilters, setUrlApplied]);
-}
 function useCatalogPageActions(
   state: ReturnType<typeof useCatalogPageState>,
   options: ReturnType<typeof useCatalogPageOptions>
 ) {
   const {
     activeTab,
-    urlApplied,
-    setActiveTab,
-    setModelFilters,
-    setComboFilters,
+    searchParams,
+    setSearchParams,
     setRequestedModelPage,
     setRequestedComboPage,
     models,
@@ -475,34 +430,47 @@ function useCatalogPageActions(
     requestedComboPage,
   } = state;
   const { modelFilters, comboFilters } = options;
-  // The only URL writer: one write per change of tab or (normalised) filters, never before the
-  // query string has been read, and skipped when the URL already matches.
+  // The query string follows the tab and the filters (a replace, so filtering does not fill the
+  // history). The filters are the normalised ones, so a value the catalog does not know (a stale
+  // bookmark) is dropped from the URL once the options are loaded; an equal URL is left alone.
   useEffect(() => {
-    if (!urlApplied) return;
-    setUrlParams(buildCatalogSearchParams(activeTab, modelFilters, comboFilters));
-  }, [urlApplied, activeTab, modelFilters, comboFilters]);
+    const next = buildCatalogSearchParams(activeTab, modelFilters, comboFilters);
+    if (next.toString() === searchParams.toString()) return;
+    setSearchParams(next, { replace: true, preventScrollReset: true });
+  }, [activeTab, modelFilters, comboFilters, searchParams, setSearchParams]);
+
+  const writeUrl = (
+    tab: CatalogTab,
+    nextModelFilters: CatalogFilters,
+    nextComboFilters: ComboCatalogFilters
+  ) => {
+    setSearchParams(buildCatalogSearchParams(tab, nextModelFilters, nextComboFilters), {
+      replace: true,
+      preventScrollReset: true,
+    });
+  };
 
   const switchTab = (tab: CatalogTab) => {
-    setActiveTab(tab);
+    writeUrl(tab, modelFilters, comboFilters);
   };
 
   const updateModelFilters = (patch: Partial<CatalogFilters>) => {
-    setModelFilters({ ...modelFilters, ...patch });
+    writeUrl(activeTab, { ...modelFilters, ...patch }, comboFilters);
     setRequestedModelPage(0);
   };
 
   const clearModelFilters = () => {
-    setModelFilters(DEFAULT_MODEL_FILTERS);
+    writeUrl(activeTab, DEFAULT_MODEL_FILTERS, comboFilters);
     setRequestedModelPage(0);
   };
 
   const updateComboFilters = (patch: Partial<ComboCatalogFilters>) => {
-    setComboFilters({ ...comboFilters, ...patch });
+    writeUrl(activeTab, modelFilters, { ...comboFilters, ...patch });
     setRequestedComboPage(0);
   };
 
   const clearComboFilters = () => {
-    setComboFilters(DEFAULT_COMBO_FILTERS);
+    writeUrl(activeTab, modelFilters, DEFAULT_COMBO_FILTERS);
     setRequestedComboPage(0);
   };
 
@@ -662,7 +630,6 @@ function useCatalogPageVisibility(
 }
 function useCatalogPageContext() {
   const state = useCatalogPageState();
-  useCatalogUrlRead(state);
   const loading = useCatalogPageLoading(state);
   const options = useCatalogPageOptions(state);
   const actions = useCatalogPageActions(state, options);

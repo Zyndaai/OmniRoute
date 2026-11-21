@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { CORS_HEADERS, handleCorsOptions } from "@/shared/utils/cors";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { listPlugins } from "@/lib/db/plugins";
@@ -15,13 +14,13 @@ export async function OPTIONS() {
  */
 const StatusSchema = z.enum(["installed", "active", "inactive", "error"]).optional();
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const url = new URL(request.url);
   const statusResult = StatusSchema.safeParse(url.searchParams.get("status") ?? undefined);
   if (!statusResult.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid status value", details: statusResult.error.issues },
       { status: 400, headers: CORS_HEADERS }
     );
@@ -29,10 +28,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const plugins = await listPlugins(statusResult.data || undefined);
-    return NextResponse.json({ plugins: plugins.map(formatPlugin) }, { headers: CORS_HEADERS });
+    return Response.json({ plugins: plugins.map(formatPlugin) }, { headers: CORS_HEADERS });
   } catch (err: unknown) {
     console.error("[plugins] Failed to list plugins:", err);
-    return NextResponse.json(buildErrorBody(500, "Failed to list plugins"), {
+    return Response.json(buildErrorBody(500, "Failed to list plugins"), {
       status: 500,
       headers: CORS_HEADERS,
     });
@@ -42,14 +41,14 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/plugins — Install a plugin from a local path
  */
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid JSON body" },
       { status: 400, headers: CORS_HEADERS }
     );
@@ -63,7 +62,7 @@ export async function POST(request: NextRequest) {
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid request", details: parsed.error.issues },
       { status: 400, headers: CORS_HEADERS }
     );
@@ -71,13 +70,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const plugin = await pluginManager.install(parsed.data.path);
-    return NextResponse.json(
+    return Response.json(
       { plugin: formatPlugin(plugin) },
       { status: 201, headers: CORS_HEADERS }
     );
   } catch (err: unknown) {
     console.error("[plugins] Failed to install plugin:", err);
-    return NextResponse.json(buildErrorBody(400, "Failed to install plugin"), {
+    return Response.json(buildErrorBody(400, "Failed to install plugin"), {
       status: 400,
       headers: CORS_HEADERS,
     });

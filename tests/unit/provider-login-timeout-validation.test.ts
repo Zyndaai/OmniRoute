@@ -28,7 +28,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-login-timeout-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -90,12 +89,12 @@ test("clampLoginTimeoutMs mirrors the sibling browser-login clamps", () => {
 
 // ── The route applies it before the value reaches the service ───────────────
 
-function makeRequest(id: string, body: unknown): NextRequest {
+function makeRequest(id: string, body: unknown): Request {
   return new Request(`http://localhost/api/providers/${id}/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  }) as unknown as NextRequest;
+  }) as unknown as Request;
 }
 
 /** Drive the real POST handler and return the `timeout` startLogin actually saw. */

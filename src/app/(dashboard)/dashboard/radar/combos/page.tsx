@@ -1,10 +1,8 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
-import Link from "next/link";
-import { notFound } from "next/navigation";
+import { Link } from "react-router";
+import RadarNotFound from "../RadarNotFound";
 
 import type { ComboBuilderOptionsPayload } from "@/lib/combos/builderOptions";
 import type { MergedEntry } from "@/lib/radar/applyFeed";
@@ -116,7 +114,7 @@ export default function RadarCombosPage() {
     [refreshExistingName, t]
   );
 
-  if (flagOff) notFound();
+  if (flagOff) return <RadarNotFound />;
 
   return (
     <div className="flex flex-col gap-6">
@@ -124,7 +122,7 @@ export default function RadarCombosPage() {
         compact
         breadcrumbs={
           <Link
-            href="/dashboard/radar"
+            to="/dashboard/radar"
             className="text-sm text-text-muted hover:text-text-main transition-colors"
           >
             ← {t("backToRadar")}

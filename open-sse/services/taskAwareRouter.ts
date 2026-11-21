@@ -194,11 +194,10 @@ const DEFAULT_TASK_MODEL_MAP: Record<TaskType, string> = {
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-// #8601: the config MUST live on globalThis, NOT in a module-level `let`. A plain
-// module-level binding is DUPLICATED per module graph, so the boot hydration in
-// src/instrumentation-node.ts would land on the instrumentation graph's copy and
-// never reach the copy src/sse/handlers/chat.ts reads — exactly the #5312 fix-A
-// break proven on the VPS. Mirrors thinkingBudget.ts (#5312) and systemPrompt.ts (#2470).
+// #8601: the config lives on globalThis, NOT in a module-level `let`. A plain module-level
+// binding is reset when the dev server re-evaluates an edited module, so the boot hydration
+// in src/server/boot.ts would be lost before src/sse/handlers/chat.ts reads it (the #5312
+// fix-A break). Mirrors thinkingBudget.ts (#5312) and systemPrompt.ts (#2470).
 const GLOBAL_KEY = "__omniroute_taskRouting_config__";
 const _store = globalThis as unknown as Record<string, TaskRoutingConfig | undefined>;
 

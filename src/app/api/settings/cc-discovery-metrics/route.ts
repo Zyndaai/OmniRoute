@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { getCcDiscoveryMetrics } from "@/lib/db/ccDiscoveryMetrics";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -15,9 +14,9 @@ export async function GET(request: Request) {
 
   try {
     const metrics = await getCcDiscoveryMetrics();
-    return NextResponse.json(metrics);
+    return Response.json(metrics);
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(
         500,
         error instanceof Error ? error.message : "Failed to load cc-discovery metrics"

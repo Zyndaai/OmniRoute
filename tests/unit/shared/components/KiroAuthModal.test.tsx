@@ -2,7 +2,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The shared Select renders the kit (Radix) Select for `options` since KEA-7886: no DOM
 // <select>/<option>; the helpers read the menu items (data-value) and the controlled value.
@@ -34,9 +34,9 @@ function setInputValue(input: HTMLInputElement, value: string): void {
 
 function withIntl(children: React.ReactNode) {
   return (
-    <NextIntlClientProvider locale="en" messages={{ common: { close: "Close" } }}>
+    <IntlProvider locale="en" messages={{ common: { close: "Close" } }}>
       {children}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 

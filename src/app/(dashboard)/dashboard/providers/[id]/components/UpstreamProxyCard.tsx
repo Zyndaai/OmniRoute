@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Phase 1t.7 extraction — Issue #3501
-import Link from "next/link";
+import { Link } from "react-router";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { Card } from "@/shared/components";
 import { providerText } from "../providerPageHelpers";
@@ -30,11 +28,11 @@ export default function UpstreamProxyCard({ t }: UpstreamProxyCardProps) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/dashboard/cli-code" className={buttonVariants({ variant: "outline" })}>
+          <Link to="/dashboard/cli-code" className={buttonVariants({ variant: "outline" })}>
             <Icon name="terminal" size={16} />
             {t("openCliTools")}
           </Link>
-          <Link href="/dashboard/settings" className={buttonVariants({ variant: "outline" })}>
+          <Link to="/dashboard/settings" className={buttonVariants({ variant: "outline" })}>
             <Icon name="settings" size={16} />
             {t("openSettings")}
           </Link>

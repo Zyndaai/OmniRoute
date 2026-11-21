@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModalityBridgePage from "@/app/(dashboard)/dashboard/settings/modality-bridge/page";
-import SettingsPage from "@/app/(dashboard)/dashboard/settings/page";
+import { loader as settingsLoader } from "@/app/(dashboard)/dashboard/settings/page";
 import {
   getSectionItems,
   SIDEBAR_PRESETS,
@@ -13,8 +13,7 @@ import {
 
 const navigation = vi.hoisted(() => ({
   search: "",
-  replace: vi.fn(),
-  redirect: vi.fn(),
+  setSearchParams: vi.fn(),
 }));
 
 const messages = vi.hoisted(() => ({
@@ -22,14 +21,12 @@ const messages = vi.hoisted(() => ({
   values: {} as Record<string, string>,
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: navigation.replace }),
-  useSearchParams: () => new URLSearchParams(navigation.search),
-  usePathname: () => "/dashboard/settings/modality-bridge",
-  redirect: navigation.redirect,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useSearchParams: () => [new URLSearchParams(navigation.search), navigation.setSearchParams],
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () =>
     Object.assign((key: string) => messages.values[key] ?? key, { has: () => messages.has }),
 }));
@@ -58,8 +55,7 @@ describe("Modality Bridge settings page", () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     navigation.search = "";
-    navigation.replace.mockReset();
-    navigation.redirect.mockReset();
+    navigation.setSearchParams.mockReset();
     messages.has = true;
     messages.values = {};
   });
@@ -116,17 +112,26 @@ describe("Modality Bridge settings page", () => {
       button.textContent?.includes("modalityBridgeVideoTab")
     ) as HTMLButtonElement | undefined;
     act(() => videoTab?.click());
-    expect(navigation.replace).toHaveBeenCalledWith(
-      "/dashboard/settings/modality-bridge?tab=video&source=sidebar",
-      { scroll: false }
-    );
+    expect(navigation.setSearchParams).toHaveBeenCalledTimes(1);
+    const [params, options] = navigation.setSearchParams.mock.calls[0];
+    expect(params.toString()).toBe("tab=video&source=sidebar");
+    expect(options).toEqual({ replace: true, preventScrollReset: true });
   });
 
-  it("redirects both legacy tab spellings to the dedicated page", async () => {
-    await SettingsPage({ searchParams: Promise.resolve({ tab: "modality-bridge" }) });
-    await SettingsPage({ searchParams: Promise.resolve({ tab: "modalityBridge" }) });
-    expect(navigation.redirect).toHaveBeenNthCalledWith(1, "/dashboard/settings/modality-bridge");
-    expect(navigation.redirect).toHaveBeenNthCalledWith(2, "/dashboard/settings/modality-bridge");
+  it("redirects both legacy tab spellings to the dedicated page", () => {
+    for (const tab of ["modality-bridge", "modalityBridge"]) {
+      let thrown: unknown;
+      try {
+        settingsLoader({ request: new Request(`http://localhost/dashboard/settings?tab=${tab}`) });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Response);
+      expect((thrown as Response).status).toBe(307);
+      expect((thrown as Response).headers.get("Location")).toBe(
+        "/dashboard/settings/modality-bridge"
+      );
+    }
   });
 
   it("registers the sidebar item and exposes it in developer/admin presets", () => {

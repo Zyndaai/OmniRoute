@@ -1,16 +1,17 @@
+import { Link, type LoaderFunctionArgs, type MetaFunction } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
-import type { Metadata } from "next";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { getTranslations } from "next-intl/server";
+import { getTranslator } from "@/i18n/request.server";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("legal");
-  return {
-    title: t("termsMetadataTitle"),
-    description: t("termsMetadataDescription"),
-  };
+export async function loader({ request }: LoaderFunctionArgs) {
+  const t = await getTranslator("legal", request);
+  return { title: t("termsMetadataTitle"), description: t("termsMetadataDescription") };
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
+  loaderData
+    ? [{ title: loaderData.title }, { name: "description", content: loaderData.description }]
+    : (matches.find((match) => match?.id === "root")?.meta ?? []);
 
 export default function TermsPage() {
   const t = useTranslations("legal");
@@ -19,7 +20,7 @@ export default function TermsPage() {
     <main className="min-h-screen text-text-main">
       <div className="max-w-3xl mx-auto px-6 py-16">
         <Link
-          href="/"
+          to="/"
           className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-primary transition-colors mb-8"
         >
           <Icon name="arrow_back" size={18} />

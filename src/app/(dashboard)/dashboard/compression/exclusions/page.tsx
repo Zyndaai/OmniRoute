@@ -1,5 +1,3 @@
-"use client";
-
 import ExclusionsPanel from "./ExclusionsPanel";
 
 export default function CompressionExclusionsPage() {

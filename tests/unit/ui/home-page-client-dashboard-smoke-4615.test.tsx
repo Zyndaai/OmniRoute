@@ -10,32 +10,20 @@ function makeTranslator() {
   return t;
 }
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => makeTranslator(),
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    refresh: vi.fn(),
-  }),
-}));
-
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(to)} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next/dynamic", () => ({
-  default: () =>
-    function DynamicStub() {
-      return <div data-testid="dynamic-component" />;
-    },
-}));
 
 vi.mock("@/shared/components", () => ({
   Card: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
@@ -115,17 +103,6 @@ beforeEach(() => {
       }
       if (url === "/api/models") {
         return Promise.resolve(jsonResponse({ models: [] }));
-      }
-      if (url === "/api/system/version") {
-        return Promise.resolve(
-          jsonResponse({
-            current: "0.0.0-test",
-            latest: "0.0.0-test",
-            updateAvailable: false,
-            channel: "test",
-            autoUpdateSupported: false,
-          })
-        );
       }
       if (url === "/api/provider-nodes") {
         return Promise.resolve(jsonResponse({ nodes: [] }));

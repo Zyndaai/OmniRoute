@@ -1,9 +1,7 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { Badge, Card, Skeleton } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 interface CompressionStats {
   originalTokens: number;

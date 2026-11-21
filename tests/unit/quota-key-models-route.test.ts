@@ -15,7 +15,6 @@
  *   - Quota model resolution imports (resolveQuotaKeyScope, filterModelsToQuotaPools)
  *   - Response shape ({ models })
  *   - 404 on missing key (buildErrorBody(404, ...))
- *   - force-dynamic export
  *   - await params (Next 16 async params pattern)
  *   - DB imports sourced from @/lib/localDb
  *
@@ -86,9 +85,9 @@ test("quota/keys/[id]/models: does NOT leak raw err.stack in response", () => {
 
 test("quota/keys/[id]/models: does NOT leak raw err.message outside buildErrorBody", () => {
   // The only use of err.message must be inside the buildErrorBody(...) call, never
-  // passed raw to NextResponse.json() or similar.
-  const rawMessageLeak = /NextResponse\.json\s*\(\s*err\.message/.test(src);
-  assert.ok(!rawMessageLeak, "route must not pass raw err.message to NextResponse.json");
+  // passed raw to Response.json() or similar.
+  const rawMessageLeak = /Response.json\s*\(\s*err\.message/.test(src);
+  assert.ok(!rawMessageLeak, "route must not pass raw err.message to Response.json");
 });
 
 // ── Quota resolution imports ──────────────────────────────────────────────────
@@ -160,15 +159,6 @@ test("quota/keys/[id]/models: returns buildErrorBody(404, ...) when key not foun
     "route must use buildErrorBody(404, ...) when the API key is not found"
   );
   assert.ok(src.includes("404"), "route must return HTTP 404 on missing key");
-});
-
-// ── force-dynamic ─────────────────────────────────────────────────────────────
-
-test("quota/keys/[id]/models: has dynamic = 'force-dynamic' export", () => {
-  assert.ok(
-    src.includes('dynamic = "force-dynamic"') || src.includes("dynamic = 'force-dynamic'"),
-    "route must export dynamic = 'force-dynamic'"
-  );
 });
 
 // ── Next 16 async params ──────────────────────────────────────────────────────

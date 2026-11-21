@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getCombos, createCombo } from "@/lib/db/combos";
 import { normalizeSnapshotWeights } from "@/lib/combos/snapshotWeights";
@@ -25,12 +24,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(duplicateAutoComboSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           validation.error.details[0]?.message ||
@@ -79,10 +78,7 @@ export async function POST(request: Request) {
 
     // Reject unknown templates early instead of silently passing bad data downstream.
     if (!variant && !spec) {
-      return NextResponse.json(
-        { error: `Unknown auto-combo template: "${name}"` },
-        { status: 422 }
-      );
+      return Response.json({ error: `Unknown auto-combo template: "${name}"` }, { status: 422 });
     }
 
     // Materialize the virtual auto-combo to get resolved models.
@@ -98,7 +94,7 @@ export async function POST(request: Request) {
     const virtualCombo = await createVirtualAutoComboFromPrepared(prepared, variant, spec);
 
     if (!Array.isArray(virtualCombo.models) || virtualCombo.models.length === 0) {
-      return NextResponse.json(
+      return Response.json(
         { error: "No connected providers/models match this auto-combo template" },
         { status: 422 }
       );
@@ -124,7 +120,7 @@ export async function POST(request: Request) {
     });
 
     if (normalizedModels.length === 0) {
-      return NextResponse.json(
+      return Response.json(
         { error: "No valid models resolved from this auto-combo template" },
         { status: 422 }
       );
@@ -158,10 +154,10 @@ export async function POST(request: Request) {
       version: 2,
     });
 
-    return NextResponse.json(comboData, { status: 201 });
+    return Response.json(comboData, { status: 201 });
   } catch (error) {
     console.error("Error duplicating auto-combo:", error);
     const body = buildErrorBody(500, "Failed to duplicate auto-combo");
-    return NextResponse.json({ error: body.error.message }, { status: 500 });
+    return Response.json({ error: body.error.message }, { status: 500 });
   }
 }

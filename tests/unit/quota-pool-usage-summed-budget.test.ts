@@ -66,7 +66,7 @@ test("usage route scales every dimension limit by accountCount before calling th
 test("usage endpoint still wraps the snapshot as { usage: snapshot }", () => {
   const src = read(ROUTE);
   assert.ok(
-    /NextResponse\.json\(\s*\{\s*usage:/.test(src),
+    /Response.json\(\s*\{\s*usage:/.test(src),
     "endpoint contract from quota-pool-usage-shape.test.ts must survive the fix"
   );
 });

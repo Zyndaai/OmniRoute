@@ -3,7 +3,6 @@
  * GET — List recent deliveries for a webhook
  */
 
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { getWebhook } from "@/lib/db/webhooks";
 import { getDeliveries } from "@/lib/db/webhookDeliveries";
@@ -17,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const webhook = await getWebhook(id);
     if (!webhook) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
 
     const url = new URL(request.url);
@@ -25,9 +24,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const limit = Math.min(Math.max(1, parseInt(limitParam ?? "20", 10) || 20), 100);
 
     const deliveries = await getDeliveries(id, limit);
-    return NextResponse.json({ deliveries });
+    return Response.json({ deliveries });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to fetch deliveries" },
       { status: 500 }
     );

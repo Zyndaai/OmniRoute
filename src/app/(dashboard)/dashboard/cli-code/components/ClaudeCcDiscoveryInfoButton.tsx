@@ -1,8 +1,6 @@
-"use client";
-
 import { useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import Button from "@/shared/components/Button";
 
@@ -37,7 +35,7 @@ export default function ClaudeCcDiscoveryInfoButton() {
         <div className="absolute z-10 mt-2 w-80 rounded-lg border border-border bg-surface p-3 text-xs shadow-lg">
           <p className="text-text-muted mb-2">{t("ccDiscoveryInfoTooltip")}</p>
           <Link
-            href="/dashboard/settings/feature-flags"
+            to="/dashboard/settings/feature-flags"
             className="font-medium text-primary hover:underline"
           >
             {t("ccDiscoveryInfoLink")}

@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { getBarColor } from "../utils";
 import { translateUsageOrFallback } from "../i18nFallback";
 import Icon from "@/shared/components/Icon";

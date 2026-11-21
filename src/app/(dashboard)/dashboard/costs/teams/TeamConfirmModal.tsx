@@ -1,5 +1,4 @@
-"use client";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ConfirmModal } from "@/shared/components/Modal";
 import type { Confirmation } from "./useTeamMutations";
 

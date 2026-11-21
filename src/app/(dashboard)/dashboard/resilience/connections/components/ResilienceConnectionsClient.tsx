@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ResilienceConnectionsResponse } from "@/types/resilience";
 import { Alert } from "@omniroute/ui-kit/alert";
 import Button from "@/shared/components/Button";

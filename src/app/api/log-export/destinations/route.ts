@@ -5,7 +5,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -38,11 +37,11 @@ export async function GET(request: Request) {
 
   try {
     const destinations = await getLogExportDestinations();
-    return NextResponse.json({
+    return Response.json({
       destinations: await Promise.all(destinations.map((row) => toDestinationView(row))),
     });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to list log export destinations" },
       { status: 500 }
     );
@@ -56,13 +55,13 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(createDestinationSchema, await request.json());
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { data } = validation;
 
     const destinationType = getLogExportDestinationType(data.type);
     if (!destinationType) {
-      return NextResponse.json(
+      return Response.json(
         { error: `Unknown log export destination type "${data.type}"` },
         { status: 400 }
       );
@@ -70,7 +69,7 @@ export async function POST(request: Request) {
 
     const parsedConfig = destinationType.configSchema.safeParse(data.config);
     if (!parsedConfig.success) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: {
             message: "Invalid destination configuration",
@@ -86,7 +85,7 @@ export async function POST(request: Request) {
 
     const config = destinationType.initializeConfig?.(parsedConfig.data) ?? parsedConfig.data;
     if (requiresEncryptionKey(data.type, config as Record<string, unknown>)) {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "This destination stores a credential, which requires STORAGE_ENCRYPTION_KEY to be " +
@@ -113,9 +112,9 @@ export async function POST(request: Request) {
     const view = data.startFromCurrentPosition
       ? (await getLogExportDestination(created.id))!
       : created;
-    return NextResponse.json({ destination: await toDestinationView(view) }, { status: 201 });
+    return Response.json({ destination: await toDestinationView(view) }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to create log export destination" },
       { status: 500 }
     );

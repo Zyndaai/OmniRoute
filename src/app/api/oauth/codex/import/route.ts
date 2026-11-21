@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   normalizeCodexImportRecord,
@@ -104,12 +103,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid or empty JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid or empty JSON body" }, { status: 400 });
   }
 
   const parsed = bodySchema.safeParse(rawBody);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid request body" },
       { status: 400 }
     );
@@ -117,10 +116,10 @@ export async function POST(request: Request) {
 
   const flat = flattenCodexImportPayload(parsed.data.accounts);
   if (flat.ok === false) {
-    return NextResponse.json({ error: flat.error }, { status: 400 });
+    return Response.json({ error: flat.error }, { status: 400 });
   }
   if (flat.records.length === 0) {
-    return NextResponse.json({ error: "No accounts found in payload" }, { status: 400 });
+    return Response.json({ error: "No accounts found in payload" }, { status: 400 });
   }
 
   const results: Array<
@@ -175,7 +174,7 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({
+  return Response.json({
     success: failed === 0,
     imported,
     failed,

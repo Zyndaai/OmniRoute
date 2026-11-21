@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { JsonView } from "@/shared/components/jsonView";
 import { PROVIDER_COLORS, getProtocolColor } from "@/shared/constants/colors";
 import { formatDuration, formatApiKeyLabel, maskAccount } from "@/shared/utils/formatting";

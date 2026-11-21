@@ -179,7 +179,7 @@ declare global {
     | undefined;
 }
 
-// Reuse the SAME object/Map across Next.js dev HMR module re-evaluations —
+// Reuse the SAME object/Map across dev-server module re-evaluations —
 // same pattern (and reason) as src/lib/db/core.ts's `globalThis.__omnirouteDb`.
 // Without this, an edit anywhere in this module's dependency graph resets
 // in-flight request tracking to empty mid-stream, so a live poll against

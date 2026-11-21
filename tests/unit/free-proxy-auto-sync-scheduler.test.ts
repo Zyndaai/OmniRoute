@@ -25,7 +25,6 @@ const { resetTestDb } = await import("../helpers/postgres.ts");
 const ENV_KEYS = [
   "FREE_PROXY_AUTO_SYNC_ENABLED",
   "FREE_PROXY_AUTO_SYNC_INTERVAL_MS",
-  "NEXT_PHASE",
   "OMNIROUTE_DISABLE_BACKGROUND_SERVICES",
   "FREE_PROXY_1PROXY_ENABLED",
   "FREE_PROXY_PROXIFLY_ENABLED",
@@ -130,15 +129,6 @@ test("an unset/invalid interval falls back to the 30-minute default", () => {
 
   process.env.FREE_PROXY_AUTO_SYNC_INTERVAL_MS = "not-a-number";
   assert.equal(scheduler.getFreeProxyAutoSyncIntervalMs(), 1_800_000);
-});
-
-test("isBuildProcess() (NEXT_PHASE=phase-production-build) suppresses scheduling", () => {
-  process.env.FREE_PROXY_AUTO_SYNC_ENABLED = "true";
-  process.env.NEXT_PHASE = "phase-production-build";
-
-  scheduler.initFreeProxyAutoSync();
-
-  assert.equal(globalThis.__freeProxyAutoSyncStartupTimer, undefined);
 });
 
 test("OMNIROUTE_DISABLE_BACKGROUND_SERVICES=true suppresses scheduling", () => {

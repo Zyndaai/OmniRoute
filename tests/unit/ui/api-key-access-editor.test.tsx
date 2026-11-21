@@ -3,36 +3,27 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 import ApiKeyAccessEditorClient from "../../../src/app/(dashboard)/dashboard/api-manager/[id]/access/ApiKeyAccessEditorClient";
 import { useNotificationStore } from "../../../src/store/notificationStore";
 
-const mockRouter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  prefetch: vi.fn(),
-};
-
 let currentSearch = "";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => mockRouter,
-  useSearchParams: () => new URLSearchParams(currentSearch),
-}));
-
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(currentSearch), vi.fn()],
+  Link: ({
+    to,
     children,
     ...props
   }: {
-    href: string;
+    to: string;
     children: React.ReactNode;
     [key: string]: unknown;
   }) => (
-    <a href={href} {...props}>
+    <a href={to} {...props}>
       {children}
     </a>
   ),
@@ -156,9 +147,9 @@ describe("ApiKeyAccessEditorClient", () => {
 
   function renderEditor() {
     return render(
-      <NextIntlClientProvider locale="en" messages={messages}>
+      <IntlProvider locale="en" messages={messages}>
         <ApiKeyAccessEditorClient apiKeyId="test-key-id" />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
   }
 

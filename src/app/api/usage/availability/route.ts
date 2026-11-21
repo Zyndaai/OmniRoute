@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCachedRawProviderConnections, getCachedSettings } from "@/lib/db/readCache";
 import { getAllProviderLimitsCache } from "@/lib/db/providerLimits";
 import { resolveResilienceSettings } from "@/lib/resilience/settings";
@@ -13,7 +12,7 @@ export async function GET() {
     ]);
     const caches = await getAllProviderLimitsCache();
     const policy = resolveResilienceSettings(settings).quotaPreflight;
-    return NextResponse.json(
+    return Response.json(
       {
         generatedAt: new Date().toISOString(),
         connections: await Promise.all(
@@ -30,9 +29,6 @@ export async function GET() {
     );
   } catch (error) {
     console.error("[API] GET /api/usage/availability error:", error);
-    return NextResponse.json(
-      { error: "Failed to read cached quota availability" },
-      { status: 500 }
-    );
+    return Response.json({ error: "Failed to read cached quota availability" }, { status: 500 });
   }
 }

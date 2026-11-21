@@ -1,8 +1,6 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, Badge, EmptyState } from "@/shared/components";
 import {

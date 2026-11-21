@@ -131,12 +131,12 @@ first.
 4. **Summarise it:** `node scripts/ops/load-test/analyze-profile.mjs omniroute.cpuprofile 40`
    prints CPU by area and the top functions by self and inclusive time.
 5. **Map minified frames to source.** Production frames point into bundled chunks such as
-   `/app/.build/next/server/chunks/707.js` at a line and column. Print the code around one and
+   `/app/.build/app/server/assets/<name>-<hash>.js` at a line and column. Print the code around one and
    recognise it by its SQL, strings or names:
 
    ```bash
    docker exec -i omniroute node --input-type=module - \
-     /app/.build/next/server/chunks/707.js 35 11628 < scripts/ops/load-test/code-at.mjs
+     /app/.build/app/server/assets/<name>-<hash>.js 35 11628 < scripts/ops/load-test/code-at.mjs
    ```
 
 ## Cleanup

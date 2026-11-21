@@ -480,7 +480,7 @@ For host-integrated mode with CLI binaries, see the Docker section in the main d
 
 ### Void Linux (xbps-src)
 
-Void Linux users can package and install OmniRoute natively using the `xbps-src` cross-compilation framework. This automates the Node.js standalone build along with the required `better-sqlite3` native bindings.
+Void Linux users can package and install OmniRoute natively using the `xbps-src` cross-compilation framework. This automates the React Router + Vite build (`npm run build`) along with the required `better-sqlite3` native bindings.
 
 <details>
 <summary><b>View xbps-src template</b></summary>
@@ -519,29 +519,19 @@ do_build() {
 	# 1) Install all deps – skip scripts
 	NODE_ENV=development npm ci --ignore-scripts
 
-	# 2) Build the Next.js standalone bundle
-	npm run build
-
-	# 3) Copy static assets into standalone
-	cp -r .next/static .next/standalone/.next/static
-	[ -d public ] && cp -r public .next/standalone/public || true
-
-	# 4) Compile better-sqlite3 native binding
+	# 2) Compile better-sqlite3 native binding
 	local _node_gyp=/usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js
 	(cd node_modules/better-sqlite3 && node "$_node_gyp" rebuild --arch="$_gyp_arch")
 
-	# 5) Place the compiled binding into the standalone bundle
-	local _bs3_release=.next/standalone/node_modules/better-sqlite3/build/Release
-	mkdir -p "$_bs3_release"
-	cp node_modules/better-sqlite3/build/Release/better_sqlite3.node "$_bs3_release/"
+	# 3) React Router + Vite build into .build/app (client/, server/, app-root/)
+	npm run build
 
-	# 6) Remove arch-specific sharp bundles
-	rm -rf .next/standalone/node_modules/@img
+	# 4) Worker bundles that the server starts by file path go to their fixed locations
+	cp -R .build/app/app-root/. ./
+	rm -rf .build/app/app-root
 
-	# 7) Copy pino runtime deps omitted by Next.js static analysis:
-	for _mod in pino-abstract-transport split2 process-warning; do
-		cp -r "node_modules/$_mod" .next/standalone/node_modules/
-	done
+	# 5) Drop the build-only packages
+	npm prune --omit=dev --ignore-scripts
 }
 
 do_check() {
@@ -549,16 +539,10 @@ do_check() {
 }
 
 do_install() {
-	vmkdir usr/lib/omniroute/.next
-	vcopy .next/standalone/. usr/lib/omniroute/.next/standalone
-
-	# Prevent removal of empty Next.js app router dirs by the post-install hook
-	for _d in \
-		.next/standalone/.next/server/app/dashboard \
-		.next/standalone/.next/server/app/dashboard/settings \
-		.next/standalone/.next/server/app/dashboard/providers; do
-		touch "${DESTDIR}/usr/lib/omniroute/${_d}/.keep"
-	done
+	# The whole application directory: the launcher reads migrations, docs and
+	# public files relative to the app root, next to .build/app and node_modules
+	vmkdir usr/lib/omniroute
+	vcopy ./. usr/lib/omniroute
 
 	cat > "${WRKDIR}/omniroute" <<'EOF'
 #!/bin/sh
@@ -566,7 +550,7 @@ export PORT="${PORT:-20128}"
 export DATA_DIR="${DATA_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/omniroute}"
 export APP_LOG_TO_FILE="${APP_LOG_TO_FILE:-false}"
 mkdir -p "${DATA_DIR}"
-exec node /usr/lib/omniroute/.next/standalone/server.js "$@"
+exec node /usr/lib/omniroute/scripts/dev/run-server.mjs start
 EOF
 	vbin "${WRKDIR}/omniroute"
 }

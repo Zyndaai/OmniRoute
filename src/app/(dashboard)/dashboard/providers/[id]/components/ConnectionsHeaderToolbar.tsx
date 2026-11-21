@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { ActionBar, Button, DistributeProxiesButton, Select, Toggle } from "@/shared/components";

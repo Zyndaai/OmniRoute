@@ -189,14 +189,14 @@ test("legacy dashboard routes redirect to their consolidated surfaces", async ()
     "utf8"
   );
 
-  assert.match(autoComboPage, /redirect\("\/dashboard\/combos\?filter=intelligent"\)/);
-  assert.match(usagePage, /redirect\("\/dashboard\/logs"\)/);
-  assert.match(settingsPage, /redirect\(resolveSettingsRoute\(tab\)\)/);
+  assert.match(autoComboPage, /redirect\("\/dashboard\/combos\?filter=intelligent"/);
+  assert.match(usagePage, /redirect\("\/dashboard\/logs"/);
+  assert.match(settingsPage, /redirect\(resolveSettingsRoute\(/);
   assert.match(settingsPage, /\/dashboard\/settings\/general/);
 
   const compressionPage = await readFile(
     join(repoRoot, "src/app/(dashboard)/dashboard/compression/page.tsx"),
     "utf8"
   );
-  assert.match(compressionPage, /redirect\("\/dashboard\/context\/caveman"\)/);
+  assert.match(compressionPage, /redirect\("\/dashboard\/context\/caveman"/);
 });

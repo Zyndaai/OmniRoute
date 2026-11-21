@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranslateNarratedResult } from "@/app/(dashboard)/dashboard/translator/types";
 
 // --- Mock next-intl ---
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, string | number>) => {
     if (!params) return key;
     return Object.entries(params).reduce((acc, [k, v]) => acc.replace(`{${k}}`, String(v)), key);

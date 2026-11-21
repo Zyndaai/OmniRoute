@@ -5,7 +5,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const t = Object.assign((key: string) => key, {
     rich: (key: string) => key,
     has: () => true,

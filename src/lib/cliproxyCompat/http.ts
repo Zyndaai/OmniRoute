@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
 
@@ -18,11 +16,11 @@ export function requireCliProxyManagementAuth(request: Request): Promise<Respons
 
 export function cliProxyErrorResponse(error: unknown, route: string): Response {
   if (error instanceof CliProxyCompatError) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error.message) || "Request failed.", code: error.code },
       { status: error.status }
     );
   }
   console.error(`[API] ${route} error: ${sanitizeErrorMessage(error)}`);
-  return NextResponse.json(buildErrorBody(500, "Internal server error"), { status: 500 });
+  return Response.json(buildErrorBody(500, "Internal server error"), { status: 500 });
 }

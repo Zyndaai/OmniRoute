@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 // renderToString mirrors that SSR path exactly (no effects, no fetches) and is
 // synchronous — this test fails-without-the-fix at the first render.
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

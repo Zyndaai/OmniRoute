@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { finalizeTokens } from "@/lib/oauth/providers";
 import { persistOAuthConnection } from "@/lib/oauth/connectionPersistence";
 import { parsePastedCredentials } from "@/lib/oauth/pasteCredentials";
@@ -38,12 +37,12 @@ export async function POST(
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
     const validation = validateBody(oauthPasteCredentialsSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { blob, connectionId } = validation.data;
 
@@ -52,7 +51,7 @@ export async function POST(
     try {
       pasted = parsePastedCredentials(provider, blob);
     } catch (gateErr: any) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: sanitizeErrorMessage(gateErr?.message) || "Invalid credentials" },
         { status: 400 }
       );
@@ -62,7 +61,7 @@ export async function POST(
     try {
       tokenData = await finalizeTokens(provider, pasted.tokens);
     } catch (finalizeErr: any) {
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: sanitizeErrorMessage(finalizeErr?.message) || "Failed to finalize tokens",
@@ -73,7 +72,7 @@ export async function POST(
 
     const connection = await persistOAuthConnection(provider, tokenData, connectionId);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: {
         id: connection.id,
@@ -84,6 +83,6 @@ export async function POST(
     });
   } catch (error) {
     console.error("OAuth paste-credentials error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

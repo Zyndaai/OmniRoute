@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 

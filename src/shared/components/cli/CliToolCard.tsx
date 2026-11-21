@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import Badge from "@/shared/components/Badge";
 import type { CliCatalogEntry } from "@/shared/schemas/cliCatalog";
@@ -39,11 +37,8 @@ export default function CliToolCard({
     <div className="flex items-center gap-2.5">
       {/* Icon / image */}
       {imageSrc ? (
-        // Plain <img> (not next/image): tool SVGs are non-square (opencode
-        // 234×42, cursor 467×532) and next/image's dev check warns whenever the
-        // rendered aspect-ratio size differs from the square width/height
-        // attributes. object-contain + max caps keep the logo at its true ratio.
-        // eslint-disable-next-line @next/next/no-img-element -- local static SVG asset
+        // Tool SVGs are non-square (opencode 234×42, cursor 467×532).
+        // object-contain + max caps keep the logo at its true ratio.
         <img
           src={imageSrc}
           alt={tool.name}
@@ -76,7 +71,7 @@ export default function CliToolCard({
 
   return (
     <Link
-      href={detailHref}
+      to={detailHref}
       className={cn(
         // Kit card surface on the link itself (the whole card is the navigation target).
         "ci-card block min-h-[180px]",

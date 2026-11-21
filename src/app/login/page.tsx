@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { useState, useEffect } from "react";
 // Direct module imports, not the "@/shared/components" barrel: the barrel
@@ -14,7 +12,7 @@ import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";
 import { Spinner } from "@/shared/components/Loading";
 import { AlertDescription, AlertTitle } from "@omniroute/ui-kit/alert";
-import { useRouter } from "next/navigation";
+import { Link, useNavigate } from "react-router";
 import { withBasePath } from "@/shared/utils/basePath";
 
 export default function LoginPage() {
@@ -29,7 +27,7 @@ export default function LoginPage() {
   const [mounted, setMounted] = useState(false);
   const [nodeVersion, setNodeVersion] = useState(null);
   const [nodeCompatible, setNodeCompatible] = useState(true);
-  const router = useRouter();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMounted(true));
@@ -70,7 +68,7 @@ export default function LoginPage() {
       }
     }
     checkAuth();
-  }, [router]);
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -177,7 +175,7 @@ export default function LoginPage() {
               <Button
                 variant="primary"
                 className="w-full h-11 text-sm font-medium"
-                onClick={() => router.push("/dashboard/onboarding")}
+                onClick={() => navigate("/dashboard/onboarding")}
               >
                 {t("startOnboarding")}
               </Button>
@@ -213,7 +211,7 @@ export default function LoginPage() {
               <Button
                 variant="primary"
                 className="w-full h-11 text-sm font-medium"
-                onClick={() => router.push("/dashboard/onboarding")}
+                onClick={() => navigate("/dashboard/onboarding")}
               >
                 {t("configurePassword")}
               </Button>
@@ -307,12 +305,12 @@ export default function LoginPage() {
 
               {!oidcEnabled && (
                 <div className="mt-6 pt-6 border-t border-border">
-                  <a
-                    href="/forgot-password"
+                  <Link
+                    to="/forgot-password"
                     className="text-sm text-text-muted hover:text-primary transition-colors"
                   >
                     {t("forgotPassword")}
-                  </a>
+                  </Link>
                 </div>
               )}
             </Card>

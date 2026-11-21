@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { getWebhook, updateWebhook as updateWebhookRecord, deleteWebhook } from "@/lib/db/webhooks";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -40,15 +39,15 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const { id } = await params;
     const webhook = await getWebhook(id);
     if (!webhook) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
     const masked = {
       ...webhook,
       secret: webhook.secret ? `${webhook.secret.slice(0, 10)}...` : null,
     };
-    return NextResponse.json({ webhook: masked });
+    return Response.json({ webhook: masked });
   } catch (error: any) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -61,7 +60,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const rawBody = await request.json();
     const validation = validateBody(updateWebhookSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const { metadata, ...rest } = validation.data as typeof validation.data & {
@@ -70,11 +69,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const existingWebhook = await getWebhook(id);
     if (!existingWebhook) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
     const effectiveKind = rest.kind ?? existingWebhook.kind;
     if (effectiveKind === "telegram" && metadata?.botToken && !isEncryptionEnabled()) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Telegram webhooks require STORAGE_ENCRYPTION_KEY to be configured" },
         { status: 400 }
       );
@@ -84,7 +83,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       try {
         parseAndValidateWebhookUrl(rest.url);
       } catch (err: any) {
-        return NextResponse.json(
+        return Response.json(
           { error: err?.message || "Blocked private or invalid webhook URL" },
           { status: 400 }
         );
@@ -98,11 +97,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const webhook = await updateWebhookRecord(id, updateData);
     if (!webhook) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
-    return NextResponse.json({ webhook });
+    return Response.json({ webhook });
   } catch (error: any) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -114,10 +113,10 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     const { id } = await params;
     const deleted = await deleteWebhook(id);
     if (!deleted) {
-      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
+      return Response.json({ error: "Webhook not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

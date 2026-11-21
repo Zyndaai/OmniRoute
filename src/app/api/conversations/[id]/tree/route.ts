@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getConversationTurnPage } from "@/lib/db/agenticConversations";
 import { resolveTurnDisplayContent } from "@omniroute/open-sse/services/conversationTurnContent.ts";
-
-export const dynamic = "force-dynamic";
 
 // Number(null) is 0, not NaN — so naively doing Number(searchParams.get(x))
 // turns an ABSENT query param into a real 0 instead of "not provided",
@@ -32,7 +29,7 @@ export async function GET(
 
   try {
     const { id } = await params;
-    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
     const { searchParams } = new URL(req.url);
     const limitParam = parseSeqParam(searchParams.get("limit"));
@@ -52,7 +49,7 @@ export async function GET(
     // even when the display content underneath it aged out.
     const displayContent = await resolveTurnDisplayContent(nodes);
 
-    return NextResponse.json({
+    return Response.json({
       nodes: nodes.map((n) => {
         const content = displayContent.get(n.contentHash);
         return {
@@ -70,6 +67,6 @@ export async function GET(
     });
   } catch (err) {
     console.error("[API ERROR] /api/conversations/[id]/tree failed:", err);
-    return NextResponse.json({ error: "Failed to fetch conversation" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch conversation" }, { status: 500 });
   }
 }

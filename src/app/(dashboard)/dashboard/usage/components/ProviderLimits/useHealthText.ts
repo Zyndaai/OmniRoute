@@ -1,6 +1,4 @@
-"use client";
-
-import { useFormatter, useNow, useTranslations } from "next-intl";
+import { useFormatter, useNow, useTranslations } from "use-intl";
 import type { HealthAccount, HealthCell, HealthReason } from "./healthOverview";
 import { formatQuotaLabel } from "./utils";
 import { parseRuntimeTimestamp } from "./runtimeCooldown";

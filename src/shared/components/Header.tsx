@@ -1,7 +1,6 @@
-"use client";
-
 import { useSyncExternalStore } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useLocation } from "react-router";
+import { withBasePath } from "@/shared/utils/basePath";
 import { SidebarTrigger, useSidebar } from "@omniroute/ui-kit/sidebar";
 
 const subscribePlatform = () => () => {};
@@ -43,7 +42,7 @@ import TokenHealthBadge from "./TokenHealthBadge";
 import DegradationBadge from "./DegradationBadge";
 import LanguageSelector from "./LanguageSelector";
 import ProviderIcon from "./ProviderIcon";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   OAUTH_PROVIDERS,
   APIKEY_PROVIDERS,
@@ -218,8 +217,7 @@ export default function Header({ onOpenCommandPalette }: HeaderProps) {
     getPageHasHeader,
     getPageHasHeaderServer
   );
-  const pathname = usePathname();
-  const router = useRouter();
+  const { pathname } = useLocation();
   const t = useTranslations("header");
   const tc = useTranslations("common");
   const ts = useTranslations("sidebar");
@@ -238,8 +236,8 @@ export default function Header({ onOpenCommandPalette }: HeaderProps) {
     try {
       const res = await fetch("/api/auth/logout", { method: "POST" });
       if (res.ok) {
-        router.push("/login");
-        router.refresh();
+        // A document navigation drops every piece of session data held in memory.
+        window.location.assign(withBasePath("/login"));
       }
     } catch (err) {
       console.error("Failed to logout:", err);

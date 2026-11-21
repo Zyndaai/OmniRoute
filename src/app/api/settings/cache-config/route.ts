@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getDatabaseSettingsSection } from "@/lib/db/databaseSettingsSections";
 import { setConfigValue } from "@/lib/db/configEntries";
 import { invalidateDbCache } from "@/lib/db/readCache";
@@ -103,9 +102,9 @@ const DEFAULTS = {
   modelCatalogCacheTtlMs: 60_000,
 };
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -131,15 +130,15 @@ export async function GET(request: NextRequest) {
       }
     }
     config.embeddingOptions = embeddingOptions;
-    return NextResponse.json(redactCacheSecrets(config));
+    return Response.json(redactCacheSecrets(config));
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
-export async function PUT(request: NextRequest) {
+export async function PUT(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -147,12 +146,12 @@ export async function PUT(request: NextRequest) {
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
     const validation = validateBody(cacheConfigUpdateSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     await ensureSemanticCacheDbBridge();
@@ -162,7 +161,7 @@ export async function PUT(request: NextRequest) {
       try {
         validateEmbeddingEndpoint(body.semanticCacheEmbeddingBaseUrl);
       } catch {
-        return NextResponse.json(
+        return Response.json(
           { error: "Embedding endpoint is invalid or blocked" },
           { status: 400 }
         );
@@ -245,11 +244,11 @@ export async function PUT(request: NextRequest) {
       await updateSettings(flatUpdates);
     }
 
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof CacheCredentialEndpointError) {
-      return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 400 });
+      return Response.json({ error: sanitizeErrorMessage(error) }, { status: 400 });
     }
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { Dialog, DialogContent, DialogTitle } from "@omniroute/ui-kit/dialog";
 import {
   SIDEBAR_SECTIONS,
@@ -62,7 +60,7 @@ interface PaletteGroup {
 }
 
 function CommandPaletteDialog({ onClose }: { onClose: () => void }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("sidebar");
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -223,10 +221,10 @@ function CommandPaletteDialog({ onClose }: { onClose: () => void }) {
       if (external) {
         window.open(href, "_blank", "noopener,noreferrer");
       } else {
-        router.push(href);
+        navigate(href);
       }
     },
-    [onClose, router]
+    [onClose, navigate]
   );
 
   useEffect(() => {

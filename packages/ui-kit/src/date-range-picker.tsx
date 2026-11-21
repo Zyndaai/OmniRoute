@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ComponentProps } from "react";
 import {

@@ -41,7 +41,7 @@ test("the caveman prompt preview is a focusable scroll region (§6.7)", () => {
 test("the inline Settings → Routing link on acp-agents is underlined (§6.8 link-in-text-block)", () => {
   assert.match(
     read("src/app/(dashboard)/dashboard/acp-agents/page.tsx"),
-    /href="\/dashboard\/settings\?tab=routing" className="text-primary underline"/
+    /to="\/dashboard\/settings\?tab=routing" className="text-primary underline"/
   );
 });
 

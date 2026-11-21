@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   createReasoningRoutingRule,
@@ -12,7 +11,7 @@ import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json({ rules: await getReasoningRoutingRules() });
+  return Response.json({ rules: await getReasoningRoutingRules() });
 }
 
 export async function POST(request: Request) {
@@ -22,9 +21,9 @@ export async function POST(request: Request) {
   if (parsed.success === false) return parsed.response;
   try {
     const rule = await createReasoningRoutingRule(reasoningRuleDataToInput(parsed.data));
-    return NextResponse.json({ rule }, { status: 201 });
+    return Response.json({ rule }, { status: 201 });
   } catch (error) {
     const message = sanitizeErrorMessage(error instanceof Error ? error.message : String(error));
-    return NextResponse.json(buildErrorBody(400, message), { status: 400 });
+    return Response.json(buildErrorBody(400, message), { status: 400 });
   }
 }

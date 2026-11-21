@@ -12,7 +12,7 @@ function src(): string {
 
 test("client fala SÓ com o OmniRoute: /api/conductor/ask + /api/v1/audio/* (nunca Faro/hub direto)", () => {
   const s = src();
-  assert.match(s, /"use client"/);
+  assert.doesNotMatch(s, /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"/, "client code imports no server module");
   assert.match(s, /\/api\/conductor\/ask/);
   assert.match(s, /\/api\/v1\/audio\/transcriptions/);
   assert.match(s, /\/api\/v1\/audio\/speech/);

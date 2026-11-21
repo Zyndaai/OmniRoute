@@ -1,12 +1,9 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   getAutoRoutingTotalCount,
   getAutoRoutingVariantBreakdown,
   getAutoRoutingTopProviders,
 } from "@/lib/db/usageLogs";
-
-export const dynamic = "force-dynamic";
 
 /**
  * GET /api/analytics/auto-routing
@@ -29,14 +26,14 @@ export async function GET(request: Request) {
     // Top providers (from LKGP cache or usage logs)
     const topProviders = await getAutoRoutingTopProviders();
 
-    return NextResponse.json({
+    return Response.json({
       totalRequests: totalRequests.count,
       variantBreakdown,
       topProviders,
     });
   } catch (error) {
     console.error("Auto-routing analytics error:", error);
-    return NextResponse.json({
+    return Response.json({
       totalRequests: 0,
       variantBreakdown: {},
       topProviders: [],

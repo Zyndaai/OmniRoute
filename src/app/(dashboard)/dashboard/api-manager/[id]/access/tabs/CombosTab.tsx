@@ -1,5 +1,3 @@
-"use client";
-
 import { AllowedCombosSection } from "@/app/(dashboard)/dashboard/api-manager/components/AllowedCombosSection";
 import { ApiKeyAutoCombosToggle } from "@/app/(dashboard)/dashboard/api-manager/components/ApiKeyAutoCombosToggle";
 import { ApiKeyCcDiscoveryAliasesToggle } from "@/app/(dashboard)/dashboard/api-manager/components/ApiKeyCcDiscoveryAliasesToggle";

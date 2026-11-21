@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAuditStats, queryAuditEntries } from "@omniroute/open-sse/mcp-server/audit";
 import {
   isMcpHeartbeatOnline,
@@ -54,7 +53,7 @@ export async function GET(request: Request) {
         ? Math.max(0, now - startedAtMs)
         : null;
 
-    return NextResponse.json({
+    return Response.json({
       status: online ? "online" : "offline",
       online,
       enabled: mcpEnabled,
@@ -81,6 +80,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load MCP status";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

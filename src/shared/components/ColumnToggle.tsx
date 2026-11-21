@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * ColumnToggle — table column visibility menu over the kit `DropdownMenu` (KEA-7886).
  * Used by RequestLoggerV2, ProxyLogger, etc.
@@ -12,7 +10,7 @@
  *   />
  */
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,

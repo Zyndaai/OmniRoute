@@ -1,7 +1,5 @@
-"use client";
-
 import { memo, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox } from "@omniroute/ui-kit/checkbox";
 import { getProviderDisplayName } from "@/lib/display/names";
 import Button from "@/shared/components/Button";

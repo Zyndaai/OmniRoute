@@ -1,5 +1,3 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";
 import Modal from "@/shared/components/Modal";
@@ -8,7 +6,7 @@ import Select from "@/shared/components/Select";
 // src/app/(dashboard)/dashboard/playground/components/PresetPicker.tsx
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { usePresets } from "../hooks/usePresets";
 import type { ConfigState, ConfigStateSetter } from "./StudioConfigPane";
 

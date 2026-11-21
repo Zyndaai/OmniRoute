@@ -1,13 +1,13 @@
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import HealthAccountTooltip from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/HealthAccountTooltip";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 import type { QuotaAvailabilityDecision } from "@/lib/usage/availabilityTypes";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 afterEach(cleanup);
 for (const locale of ["en", "ar"]) {
   for (const [reason, key] of [
@@ -38,7 +38,7 @@ for (const locale of ["en", "ar"]) {
         }
       );
       render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale={locale}
           messages={{ usage: messages.usage, common: messages.common }}
           timeZone="UTC"
@@ -50,7 +50,7 @@ for (const locale of ["en", "ar"]) {
             label="Synthetic account"
             anchor={document.body}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
       expect(screen.getByText(messages.usage[key])).toBeTruthy();
       expect(account.reasons.some((r) => r.type === "cutoffNotEvaluated")).toBe(

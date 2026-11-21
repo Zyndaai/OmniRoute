@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // closure each render would flip AuthzSection's `useCallback([t])` dep and loop
 // its mount fetch forever, so we return the SAME reference every call.
 const translate = (key: string) => key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translate,
 }));
 

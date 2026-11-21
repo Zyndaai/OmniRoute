@@ -1,8 +1,5 @@
-"use client";
-
 import { Fragment, useState, useEffect, useCallback, useSyncExternalStore, useId } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link, useLocation } from "react-router";
 import { cn } from "@/shared/utils/cn";
 import { getActiveSidebarHref } from "@/shared/utils/sidebarRouteMatch";
 import { filterSidebarSectionsByQuery } from "@/shared/utils/sidebarSearch";
@@ -33,7 +30,7 @@ import Button from "./Button";
 import Input from "./Input";
 import Modal, { ConfirmModal } from "./Modal";
 import CloudSyncStatus from "./CloudSyncStatus";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   HIDDEN_SIDEBAR_GROUP_LABELS_SETTING_KEY,
   normalizeHiddenSidebarGroupLabels,
@@ -139,7 +136,7 @@ function readStoredPinnedItemsRaw() {
 export default function Sidebar(_props: SidebarProps) {
   const navigationId = useId();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const [groupPathname, setGroupPathname] = useState(pathname);
   if (groupPathname !== pathname) {
     setGroupPathname(pathname);
@@ -557,13 +554,7 @@ export default function Sidebar(_props: SidebarProps) {
               {content}
             </a>
           ) : (
-            <Link
-              href={item.href}
-              prefetch={false}
-              aria-label={item.label}
-              title={title}
-              className={linkClassName}
-            >
+            <Link to={item.href} aria-label={item.label} title={title} className={linkClassName}>
               {content}
             </Link>
           )}
@@ -651,8 +642,7 @@ export default function Sidebar(_props: SidebarProps) {
       <SidebarHeader>
         <div className={cn("flex items-center gap-2", collapsed && "flex-col")}>
           <Link
-            href="/home"
-            prefetch={false}
+            to="/home"
             aria-label={brandName}
             title={`${brandName} v${APP_CONFIG.version}`}
             className={cn(
@@ -662,7 +652,7 @@ export default function Sidebar(_props: SidebarProps) {
           >
             {collapsed ? (
               customLogo ? (
-                // eslint-disable-next-line @next/next/no-img-element -- operator-supplied white-label logo (data: or remote URL), not a static/known asset
+                // Operator-supplied white-label logo (data: or remote URL).
                 <img src={customLogo} alt="" className="size-6 object-contain" />
               ) : (
                 <OmniRouteLogo size={22} />

@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card } from "@/shared/components";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 
@@ -11,7 +9,7 @@ const NAME = "9router";
 
 /**
  * G-10: iframe points to our reverse proxy, NOT directly to 127.0.0.1:port.
- * CSP exception (`frame-ancestors 'self'`) is applied to this proxy path in next.config.mjs.
+ * CSP exception (`frame-ancestors 'self'`) is applied to this proxy path by the security headers (`src/server/http/securityHeaders.ts`).
  */
 export function NinerouterEmbedFrame() {
   const t = useTranslations("embeddedServices");

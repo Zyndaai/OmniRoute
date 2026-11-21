@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { judgeFidelityBatch } from "@omniroute/open-sse/services/compression/eval/fidelityCheck";
@@ -6,8 +5,6 @@ import { createPricedJudgeClient } from "@/lib/compression/judgeModelClient";
 import type { ProviderCredentials } from "@omniroute/open-sse/executors/base";
 import { getProviderCredentials } from "@/sse/services/auth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
-
-export const dynamic = "force-dynamic";
 
 const VerifyRequestSchema = z.object({
   items: z
@@ -26,11 +23,11 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const parsed = VerifyRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid request", details: parsed.error.issues },
       { status: 400 }
     );
@@ -39,7 +36,7 @@ export async function POST(req: Request) {
   try {
     const rawCredentials = await getProviderCredentials(provider);
     if (!rawCredentials) {
-      return NextResponse.json(
+      return Response.json(
         { error: `No credentials configured for provider "${provider}"` },
         { status: 400 }
       );
@@ -55,7 +52,7 @@ export async function POST(req: Request) {
       "connectionId" in rawCredentials &&
       ("apiKey" in rawCredentials || "accessToken" in rawCredentials);
     if (!looksLikeCredentials) {
-      return NextResponse.json(
+      return Response.json(
         { error: `Provider "${provider}" credentials are unavailable` },
         { status: 503 }
       );
@@ -63,11 +60,11 @@ export async function POST(req: Request) {
     const credentials = rawCredentials as unknown as ProviderCredentials;
     const client = createPricedJudgeClient(provider, credentials);
     const result = await judgeFidelityBatch(client, judgeModel, items, costCapUsd);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/compression/compare/verify]", msg);
-    return NextResponse.json(
+    return Response.json(
       { error: "Verify failed", details: sanitizeErrorMessage(msg) },
       { status: 500 }
     );

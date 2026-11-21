@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { InterceptedRequest } from "@/mitm/inspector/types";
 import { normalizeConversation } from "@/mitm/inspector/conversationNormalizer";
 import { ChatBubble } from "../chat/ChatBubble";

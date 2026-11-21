@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 type IntegerParam = { ok: true; value: number } | { ok: false; response: Response };
 
 /**
@@ -20,7 +18,7 @@ export function parseIntegerQueryParam(
   if (!Number.isSafeInteger(value)) {
     return {
       ok: false,
-      response: NextResponse.json(
+      response: Response.json(
         { error: { message: `${name} must be an integer`, type: "invalid_request_error" } },
         { status: 400 }
       ),

@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { parse as parseToml } from "smol-toml";
@@ -90,7 +87,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus(TOOL_ID);
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -107,7 +104,7 @@ export async function GET(request: Request) {
 
     const config = await readConfig();
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -119,7 +116,7 @@ export async function GET(request: Request) {
       configPath: getJcodeConfigPath(),
     });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -132,13 +129,13 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // Extract keyId BEFORE Zod validation — Zod strips unknown fields
@@ -146,7 +143,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, model } = validation.data;
     const apiKey = await resolveApiKey(keyId, validation.data.apiKey);
@@ -173,7 +170,7 @@ export async function POST(request: Request) {
       if (unmanaged.trim()) {
         const parsed = parseToml(unmanaged) as { providers?: Record<string, unknown> };
         if (parsed.providers && Object.hasOwn(parsed.providers, "omniroute")) {
-          return NextResponse.json(
+          return Response.json(
             {
               error: {
                 message:
@@ -185,7 +182,7 @@ export async function POST(request: Request) {
         }
       }
     } catch {
-      return NextResponse.json(
+      return Response.json(
         {
           error: {
             message:
@@ -209,14 +206,14 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message:
         "jcode settings applied! Start jcode with `jcode --provider-profile omniroute` or pick the profile with /model.",
       configPath,
     });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }
 
@@ -228,7 +225,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const configPath = getJcodeConfigPath();
@@ -241,7 +238,7 @@ export async function DELETE(request: Request) {
       existing = await fs.readFile(configPath, "utf-8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        return NextResponse.json({ success: true, message: "No config file to reset" });
+        return Response.json({ success: true, message: "No config file to reset" });
       }
       throw err;
     }
@@ -261,8 +258,8 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({ success: true, message: "jcode OmniRoute settings removed" });
+    return Response.json({ success: true, message: "jcode OmniRoute settings removed" });
   } catch (err) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(err) } }, { status: 500 });
   }
 }

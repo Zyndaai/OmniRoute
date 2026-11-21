@@ -15,7 +15,7 @@ import ModelsDevSyncTab from "@/app/(dashboard)/dashboard/settings/components/Mo
 // magnetically onto a checkpoint when dropped within threshold of one,
 // otherwise keeps the freely chosen (interpolated) hour value.
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

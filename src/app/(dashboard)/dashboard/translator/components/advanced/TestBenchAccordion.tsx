@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Collapsible from "@/shared/components/Collapsible";
 import { Card, Button, Select, Badge } from "@/shared/components";
 import Input from "@/shared/components/Input";

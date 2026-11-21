@@ -1,5 +1,3 @@
-import { after } from "next/server";
-
 import { getUnifiedModelsResponse } from "./catalog";
 import { getFilteredCatalogResponse } from "./catalogDiscovery";
 import { hasCatalogDiscoveryParams } from "./catalogFilters";
@@ -19,9 +17,9 @@ export async function OPTIONS() {
 /**
  * HEAD /v1/models - availability probe (RFC 9110 §9.3.2: HEAD returns headers only)
  *
- * Explicit handler prevents Next.js auto-derived HEAD from streaming the full
- * GET body (200+ providers enumerated on-demand), which caused ~6s hang for
- * clients like the OpenAI SDK that use HEAD as a health/preflight probe.
+ * Explicit handler: without it HEAD falls back to GET (src/server/routing/apiResource.ts),
+ * which builds the full catalog (200+ providers enumerated on-demand) only to drop the
+ * body — a ~6s hang for clients like the OpenAI SDK that use HEAD as a health probe.
  * See: https://github.com/cheaper-inference/OmniRoute/issues/6400
  */
 export async function HEAD() {
@@ -40,18 +38,8 @@ export async function HEAD() {
 export async function GET(request: Request) {
   if (hasCatalogDiscoveryParams(new URL(request.url).searchParams)) {
     return getFilteredCatalogResponse(request, (catalogRequest) =>
-      getUnifiedModelsResponse(
-        catalogRequest,
-        {},
-        { scheduleBackgroundRefresh: (task) => after(task) }
-      )
+      getUnifiedModelsResponse(catalogRequest)
     );
   }
-  return getUnifiedModelsResponse(
-    request,
-    {},
-    {
-      scheduleBackgroundRefresh: (task) => after(task),
-    }
-  );
+  return getUnifiedModelsResponse(request);
 }

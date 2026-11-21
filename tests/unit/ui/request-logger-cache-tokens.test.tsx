@@ -13,7 +13,7 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const cacheLabels: Record<string, string> = {
     cachedTokensCol: "Cache Read",
     cacheCreation: "Cache Write",
@@ -40,9 +40,7 @@ vi.mock("next-intl", () => {
   };
 });
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("react-router", () => ({ useNavigate: () => vi.fn() }));
 
 vi.mock("@/store/emailPrivacyStore", () => ({
   default: () => ({ emailsVisible: true }),

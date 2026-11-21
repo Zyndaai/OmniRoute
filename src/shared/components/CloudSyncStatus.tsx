@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * CloudSyncStatus — Compact sync status indicator for the sidebar
  *
@@ -11,8 +9,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import Button from "./Button";
 import Icon from "./Icon";
 
@@ -33,7 +31,7 @@ export default function CloudSyncStatus({ collapsed = false }) {
   const [status, setStatus] = useState("disabled");
   const [lastSync, setLastSync] = useState(null);
   const mountedRef = useRef(true);
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const poll = useCallback(async () => {
     try {
@@ -88,7 +86,7 @@ export default function CloudSyncStatus({ collapsed = false }) {
       variant="ghost"
       size="sm"
       fullWidth
-      onClick={() => router.push("/dashboard/endpoint")}
+      onClick={() => navigate("/dashboard/endpoint")}
       className="justify-start gap-2 px-3 text-xs"
       title={
         lastSync

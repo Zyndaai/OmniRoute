@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { createErrorResponse } from "@/lib/api/errorResponse";
@@ -25,7 +24,7 @@ const MACHINE_CREDENTIAL_MINT_CEILING: AccessScope = "write";
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
-  return NextResponse.json({ tokens: await listAccessTokens() });
+  return Response.json({ tokens: await listAccessTokens() });
 }
 
 const createSchema = z.object({
@@ -42,12 +41,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(createSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
   const { name, scope, expiresInDays } = validation.data;
   const requestedScope: AccessScope = scope ?? "read";
@@ -81,7 +80,7 @@ export async function POST(request: Request) {
   const { record, secret } = await createAccessToken({ name, scope: requestedScope, expiresAt });
 
   // `token` (the plaintext secret) is returned ONCE here and never again.
-  return NextResponse.json({
+  return Response.json({
     success: true,
     token: secret,
     id: record.id,

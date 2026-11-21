@@ -1,8 +1,6 @@
-"use client";
-
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import Icon from "@/shared/components/Icon";
 import { UsageAnalytics, CardSkeleton } from "@/shared/components";
@@ -66,25 +64,34 @@ function normalizeTab(tab: string | null): AnalyticsTab {
 
 function AnalyticsPageContent() {
   const t = useTranslations("analytics") as AnalyticsTranslator;
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<AnalyticsTab>(normalizeTab(searchParams.get("tab")));
   const [initialRequestId] = useState(searchParams.get("id") || "");
 
   useEffect(() => {
     if (searchParams.get("tab") !== "route-explain") return;
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", "route-trace");
-    window.history.replaceState(null, "", url.toString());
-  }, [searchParams]);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("tab", "route-trace");
+        return next;
+      },
+      { replace: true, preventScrollReset: true }
+    );
+  }, [searchParams, setSearchParams]);
 
   const handleTabChange = (tab: AnalyticsTab) => {
     setActiveTab(tab);
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (tab === "overview") url.searchParams.delete("tab");
-    else url.searchParams.set("tab", tab);
-    if (tab !== "route-trace") url.searchParams.delete("id");
-    window.history.replaceState(null, "", url.toString());
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (tab === "overview") next.delete("tab");
+        else next.set("tab", tab);
+        if (tab !== "route-trace") next.delete("id");
+        return next;
+      },
+      { replace: true, preventScrollReset: true }
+    );
   };
 
   return (

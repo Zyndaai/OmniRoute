@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect } from "react";
 import type { QuotaPool, PoolAllocation, Policy } from "@/lib/quota/dimensions";
 

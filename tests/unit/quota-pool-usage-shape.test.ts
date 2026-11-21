@@ -23,7 +23,7 @@ const BAR = "src/app/(dashboard)/dashboard/costs/quota-share/components/StackedA
 test("usage endpoint wraps the snapshot as { usage: snapshot }", () => {
   const src = read("src/app/api/quota/pools/[id]/usage/route.ts");
   assert.ok(
-    /NextResponse\.json\(\s*\{\s*usage:/.test(src),
+    /Response.json\(\s*\{\s*usage:/.test(src),
     "endpoint must return { usage: snapshot }"
   );
 });

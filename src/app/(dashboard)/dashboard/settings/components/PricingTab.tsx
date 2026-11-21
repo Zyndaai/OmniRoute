@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { EmptyState } from "@omniroute/ui-kit/empty-state";
 import {
   Table,

@@ -18,14 +18,11 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { GroupRenameSchema } from "@/shared/schemas/quota";
 import { renameGroup, deleteGroup, getGroup } from "@/lib/db/quotaGroups";
 import { getPoolsByGroup } from "@/lib/db/quotaPools";
-
-export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -38,12 +35,12 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     const body = await request.json().catch(() => null);
     const parsed = GroupRenameSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     const updated = await renameGroup(id, parsed.data.name);
     if (!updated) {
-      return NextResponse.json(buildErrorBody(404, "Group not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Group not found"), { status: 404 });
     }
 
     // Re-sync combos for all pools in the group — combo names embed the group
@@ -61,10 +58,10 @@ export async function PATCH(request: Request, { params }: RouteParams): Promise<
     }
 
     const group = await getGroup(id);
-    return NextResponse.json({ group });
+    return Response.json({ group });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to rename group";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -81,16 +78,16 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
       // deleteGroup throws when the group is protected ('group-demo') or when
       // pools still reference it — both map to 409 Conflict.
       const message = err instanceof Error ? err.message : "Cannot delete group";
-      return NextResponse.json(buildErrorBody(409, message), { status: 409 });
+      return Response.json(buildErrorBody(409, message), { status: 409 });
     }
 
     if (!existed) {
-      return NextResponse.json(buildErrorBody(404, "Group not found"), { status: 404 });
+      return Response.json(buildErrorBody(404, "Group not found"), { status: 404 });
     }
 
     return new Response(null, { status: 204 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete group";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

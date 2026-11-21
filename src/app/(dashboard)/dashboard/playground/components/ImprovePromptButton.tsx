@@ -1,9 +1,7 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/ImprovePromptButton.tsx
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import { ConfirmModal } from "@/shared/components/Modal";
 import { useImprovePrompt } from "../hooks/useImprovePrompt";

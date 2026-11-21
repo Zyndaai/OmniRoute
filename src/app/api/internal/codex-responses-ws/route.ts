@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { newestChromeProfile } from "@omniroute/open-sse/utils/browserProfiles.ts";
 import {
   applyApiKeyCodexServiceMode,
@@ -151,7 +150,7 @@ function getAuthRequest(body: JsonRecord): Request {
 }
 
 function jsonError(status: number, code: string, message: string) {
-  return NextResponse.json(
+  return Response.json(
     {
       error: {
         code,
@@ -211,7 +210,7 @@ async function authenticate(body: JsonRecord, { checkOrigin = false } = {}) {
     return jsonError(403, "ws_origin_forbidden", "WebSocket origin not allowed");
   }
 
-  return NextResponse.json({
+  return Response.json({
     ok: true,
     authenticated: auth.authenticated,
     authType: auth.authType,
@@ -643,7 +642,7 @@ async function prepare(body: JsonRecord) {
     );
   }
 
-  return NextResponse.json({
+  return Response.json({
     ok: true,
     upstreamUrl: CODEX_RESPONSES_WS_URL,
     browser,
@@ -686,7 +685,7 @@ export async function POST(request: Request) {
     return prepare(body);
   }
   if (action === "release") {
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       released: releaseCodexWsLease(toStringOrNull(body.leaseId)),
     });

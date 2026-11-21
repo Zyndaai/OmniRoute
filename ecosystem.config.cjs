@@ -6,7 +6,8 @@
  * Fork mode, one PM2 app per process, each on its own port (not PM2 cluster mode): a load
  * balancer in front (Caddy) can then health-check every process separately and keep a
  * conversation on one process with `x-session-affinity`. The app script is the same
- * dev/run-standalone.mjs the image already runs, so env bootstrap and heap sizing do not change.
+ * scripts/dev/run-standalone.mjs the image already runs, so env bootstrap and heap sizing do
+ * not change.
  *
  * Roles (src/lib/cluster/role.ts): exactly one `leader` (migrations, background jobs, token
  * refresh for rotating OAuth providers); every other process is a `worker` (serves requests,
@@ -22,7 +23,8 @@
  *   OMNIROUTE_WORKER_BASE_PORT   first worker port (default 20200; worker i uses base + i)
  *   OMNIROUTE_LEADER_MEMORY_MB   leader heap in MB (default 1024)
  *   OMNIROUTE_WORKER_MEMORY_MB   worker heap in MB (default 768)
- *   OMNIROUTE_APP_DIR            directory holding dev/run-standalone.mjs (default: this file's)
+ *   OMNIROUTE_APP_DIR            the application directory, holding scripts/ and the build in
+ *                                .build/app (default: this file's directory)
  *
  * Operations: restart the leader with `pm2 restart leader`, never `pm2 reload leader` (reload
  * starts the new process before stopping the old one; the new leader would hit the leader
@@ -53,7 +55,7 @@ const host = os
 function app(name, port, memoryMb, env) {
   return {
     name,
-    script: "dev/run-standalone.mjs",
+    script: "scripts/dev/run-standalone.mjs",
     cwd,
     exec_mode: "fork",
     instances: 1,

@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Issue #3501 Phase 1c — extracted from the god-component.

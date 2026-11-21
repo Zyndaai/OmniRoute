@@ -30,7 +30,7 @@ for (const path of ROUTES) {
     );
   });
 
-  test(`${path} does not return raw error?.message in NextResponse.json`, () => {
+  test(`${path} does not return raw error?.message in Response.json`, () => {
     const source = readFileSync(path, "utf8");
     assert.ok(
       !/error\?\.message\s*\|\|/.test(source),

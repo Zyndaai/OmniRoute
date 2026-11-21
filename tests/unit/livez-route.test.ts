@@ -7,12 +7,12 @@ import {
   markServerReady,
   markServerStopping,
 } from "../../src/lib/serverLifecycle.ts";
+import { isAuthzPath } from "../../src/server/http/authzPaths.ts";
 
 const livez = await import("../../src/app/livez/route.ts");
 const healthz = await import("../../src/app/healthz/route.ts");
 
 test("/livez is 200 while starting and stopping; /healthz stays lifecycle", async () => {
-  assert.equal(livez.dynamic, "force-dynamic");
   markServerStarting();
 
   const startingLive = await livez.GET();
@@ -46,10 +46,7 @@ test("/livez source does not import monitoring or sqlite helpers", () => {
   assert.equal(source.includes("getServerLifecyclePhase"), false);
 });
 
-test("/livez is omitted from the centralized auth proxy matcher", () => {
-  const proxySource = fs.readFileSync("src/proxy.ts", "utf8");
-  const matcherBlock = proxySource.match(/matcher:\s*\[([\s\S]*?)\]/)?.[1];
-  assert.ok(matcherBlock, "proxy matcher configuration must remain discoverable");
-  assert.equal(/["']\/livez/.test(matcherBlock), false);
-  assert.equal(/["']\/healthz/.test(matcherBlock), false);
+test("/livez is omitted from the centralized authz pipeline", () => {
+  assert.equal(isAuthzPath("/livez"), false);
+  assert.equal(isAuthzPath("/healthz"), false);
 });

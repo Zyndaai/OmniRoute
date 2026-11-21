@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCostSummary, setBudget, checkBudget } from "@/domain/costRules";
 import { setBudgetSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -12,11 +11,11 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const apiKeyId = searchParams.get("apiKeyId");
     if (!apiKeyId) {
-      return NextResponse.json({ error: "apiKeyId query param is required" }, { status: 400 });
+      return Response.json({ error: "apiKeyId query param is required" }, { status: 400 });
     }
     const summary = await getCostSummary(apiKeyId);
     const budgetCheck = await checkBudget(apiKeyId);
-    return NextResponse.json({
+    return Response.json({
       ...summary,
       budgetCheck,
       dailyLimitUsd: summary.dailyLimitUsd,
@@ -36,7 +35,7 @@ export async function GET(request) {
     });
   } catch (error) {
     console.error("Error fetching budget summary:", error);
-    return NextResponse.json({ error: "Failed to fetch budget summary" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch budget summary" }, { status: 500 });
   }
 }
 
@@ -48,7 +47,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -62,7 +61,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(setBudgetSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const {
       apiKeyId,
@@ -82,9 +81,9 @@ export async function POST(request) {
       resetInterval,
       resetTime,
     });
-    return NextResponse.json({ success: true, apiKeyId, budget });
+    return Response.json({ success: true, apiKeyId, budget });
   } catch (error) {
     console.error("Error setting budget:", error);
-    return NextResponse.json({ error: "Failed to set budget" }, { status: 500 });
+    return Response.json({ error: "Failed to set budget" }, { status: 500 });
   }
 }

@@ -14,8 +14,6 @@
  * function under the complexity/size ratchet
  * (config/quality/complexity-baseline.json).
  */
-"use client";
-
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Spinner } from "@/shared/components/Loading";
 import { useChaosConfigPage } from "./useChaosConfigPage";

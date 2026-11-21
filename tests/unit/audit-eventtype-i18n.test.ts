@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { normalizeComplianceEventTypes } from "../../src/i18n/request";
+import { normalizeComplianceEventTypes } from "../../src/i18n/messages";
 
 const root = join(import.meta.dirname, "../..");
 const read = (p: string) => readFileSync(join(root, p), "utf8");

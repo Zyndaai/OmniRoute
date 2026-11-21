@@ -7,24 +7,19 @@
  * GET would, with ZERO body, and the connection should not leave the client
  * guessing about when the (bodyless) response is actually finished.
  *
- * Next.js 16 handles this correctly for App Router *route handlers*
- * (`route.ts` exporting `GET`) — `next/dist/server/send-response.js` explicitly
- * skips piping the `Response.body` when `req.method === 'HEAD'`. But Next's
- * *page*-rendering pipeline (`next/dist/server/pipe-readable.js` ->
- * `pipeToNodeResponse`, used for every app-router page/layout render — the
- * root page, the `not-found` boundary that unmatched paths fall through to,
- * dashboard pages, etc.) has NO such check: it always pipes the fully
- * rendered body to the HTTP response regardless of method. Combined with
- * Node's default keep-alive framing, a HEAD request to any page-rendered path
- * ends up with the socket only settling once that render finishes — on a
- * client that doesn't special-case a HEAD response's implicit zero-length
- * body (observed on Windows/curl in #6400), this reads as "headers arrive,
- * then it hangs" instead of the RFC-mandated "closes immediately".
+ * Route handlers and page renders (the root page, the not-found fallback for
+ * unmatched paths, dashboard pages, etc.) write response bodies without regard
+ * to the request method. Combined with Node's default keep-alive framing, a
+ * HEAD request to a rendered path ends up with the socket only settling once
+ * that render finishes — on a client that doesn't special-case a HEAD
+ * response's implicit zero-length body (observed on Windows/curl in #6400),
+ * this reads as "headers arrive, then it hangs" instead of the RFC-mandated
+ * "closes immediately".
  *
- * Fix: for every inbound HEAD request, before Next ever sees it, wrap the
- * Node `ServerResponse` so:
- *   - Any body bytes written by Next (route handler OR page render) are
- *     discarded — status code and headers Next computed (auth 401s, 404s,
+ * Fix: for every inbound HEAD request, before the app handler sees it, wrap
+ * the Node `ServerResponse` so:
+ *   - Any body bytes written by the handler (route handler OR page render) are
+ *     discarded — status code and headers it computed (auth 401s, 404s,
  *     200s, etc.) are preserved untouched.
  *   - The connection is force-closed right after headers flush
  *     (`Connection: close`), removing any keep-alive ambiguity a client could
@@ -33,7 +28,7 @@
  * This applies globally (valid routes, unmatched/404 paths, authed and
  * unauthed) because it operates at the Node HTTP transport layer shared by
  * every request — the same tier as the existing `http-method-guard.cjs` /
- * `peer-stamp.mjs` wrappers — never inside Next's per-route code.
+ * `peer-stamp.mjs` wrappers — never inside per-route code.
  * See: https://github.com/cheaper-inference/OmniRoute/issues/6400
  */
 
@@ -63,8 +58,8 @@ function suppressBodyAndForceClose(res) {
 
   res.write = function headSuppressedWrite(_chunk, encodingOrCb, cb) {
     // Discard the body but keep the writable-stream contract: report the
-    // write as flushed (no backpressure) so callers like Next's
-    // `pipeToNodeResponse` never block waiting on a `drain` that would
+    // write as flushed (no backpressure) so stream-piping callers
+    // never block waiting on a `drain` that would
     // otherwise never fire, and invoke whichever callback form was passed.
     if (typeof encodingOrCb === "function") encodingOrCb();
     else if (typeof cb === "function") cb();
@@ -84,7 +79,7 @@ function suppressBodyAndForceClose(res) {
 /**
  * Wrap a Node request listener so every inbound HEAD request gets the
  * body-suppression + forced-close treatment before the wrapped listener
- * (eventually Next.js) runs.
+ * (the app handler) runs.
  *
  * @param {(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => unknown} listener
  */

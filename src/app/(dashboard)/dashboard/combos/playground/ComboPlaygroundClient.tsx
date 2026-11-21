@@ -1,8 +1,6 @@
-"use client";
-
-import Link from "next/link";
+import { Link } from "react-router";
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Slider } from "@omniroute/ui-kit/slider";
 import Button from "@/shared/components/Button";
@@ -316,7 +314,7 @@ export default function ComboPlaygroundClient() {
           <div className="p-8 text-center">
             <p className="text-text-muted">
               {t("playgroundNoCombosYet")}{" "}
-              <Link href="/dashboard/combos" className="text-primary hover:underline">
+              <Link to="/dashboard/combos" className="text-primary hover:underline">
                 {t("playgroundCreateFirst")}
               </Link>
               .

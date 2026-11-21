@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useId, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { Button, Checkbox, Modal } from "@/shared/components";
 import type { RiskNoticeVariant } from "@/shared/constants/providers";

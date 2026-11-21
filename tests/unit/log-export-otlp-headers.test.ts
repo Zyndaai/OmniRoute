@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { build } from "esbuild";
-import { writeEsmWorkerScopes } from "../../scripts/build/colocate-standalone.mjs";
+import { writeEsmWorkerScopes } from "../../scripts/build/build.mjs";
 import { db as pgDb } from "../../src/lib/db/pg.ts";
 import { resetTestDb } from "../helpers/postgres.ts";
 import {

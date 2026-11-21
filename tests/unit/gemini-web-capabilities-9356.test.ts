@@ -286,16 +286,20 @@ test("#9356 registry advertises no native tool calling and no reasoning for gemi
   }
 });
 
-test("#9356 resolved capabilities — not just the raw registry — report no reasoning/tools", () => {
+test("#9356 resolved capabilities — not just the raw registry — report no reasoning/tools", async () => {
   // The registry literal is only the input; `getResolvedModelCapabilities` is what
   // the catalog, the combo compatibility filter and the thinking-budget translator
   // actually read. Assert the resolved view so a downstream default cannot quietly
   // re-advertise a capability the executor does not have.
   for (const model of gemini_webProvider.models) {
     const input = { provider: "gemini-web", model: model.id };
-    assert.equal(supportsReasoning(input), false, `${model.id} resolved reasoning must be false`);
     assert.equal(
-      supportsToolCalling(input),
+      await supportsReasoning(input),
+      false,
+      `${model.id} resolved reasoning must be false`
+    );
+    assert.equal(
+      await supportsToolCalling(input),
       false,
       `${model.id} resolved NATIVE tool calling must be false — prompt emulation is advertised ` +
         'separately as toolCalling:"emulated" on the provider constant'

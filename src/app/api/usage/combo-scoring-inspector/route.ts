@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -28,7 +27,7 @@ export async function GET(request: Request) {
     });
 
     if (!parsed.success) {
-      return NextResponse.json(
+      return Response.json(
         { error: parsed.error.issues[0]?.message ?? "Invalid query parameters" },
         { status: 400 }
       );
@@ -36,12 +35,12 @@ export async function GET(request: Request) {
 
     const response = await buildComboScoringInspectorResponse(parsed.data);
     if (parsed.data.comboId && response.combos.length === 0) {
-      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+      return Response.json({ error: "Combo not found" }, { status: 404 });
     }
 
-    return NextResponse.json(response);
+    return Response.json(response);
   } catch (error) {
     console.error("[API] GET /api/usage/combo-scoring-inspector error:", error);
-    return NextResponse.json({ error: "Failed to build combo scoring inspector" }, { status: 500 });
+    return Response.json({ error: "Failed to build combo scoring inspector" }, { status: 500 });
   }
 }

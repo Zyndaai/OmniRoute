@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 
 /**
@@ -23,7 +22,7 @@ export function buildStaleEncryptionKeyResponse(
       }
     | null
     | undefined
-): NextResponse | null {
+): Response | null {
   if (!connection || connection.credentialDecryptFailed !== true) return null;
 
   // #9927 — surface WHICH credential failed plus the recovery path so the
@@ -42,5 +41,5 @@ export function buildStaleEncryptionKeyResponse(
 
   // buildErrorBody sanitizes the message and projects the client-visible classification.
   const body = buildErrorBody(424, message, undefined, { type: "storage_encryption_stale" });
-  return NextResponse.json(body, { status: 424 });
+  return Response.json(body, { status: 424 });
 }

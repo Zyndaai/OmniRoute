@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { DataTableFooter, DataTableShell } from "@omniroute/ui-kit/data-table-shell";
 import { PageHeader } from "@omniroute/ui-kit/page-header";

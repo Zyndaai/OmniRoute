@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 
 // One-cycle migration notice. Settings → AI no longer renders or writes the
@@ -22,7 +20,7 @@ export default function ModalityBridgeMovedCard() {
       </div>
 
       <div className="mt-4 border-t border-border pt-3 text-sm">
-        <Link href="/dashboard/settings/modality-bridge" className="text-primary hover:underline">
+        <Link to="/dashboard/settings/modality-bridge" className="text-primary hover:underline">
           {t("modalityBridgeMovedCta")}
         </Link>
       </div>

@@ -8,7 +8,7 @@ import KiloPassMeter, {
   buildKiloPassMeterModel,
 } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/parts/KiloPassMeter";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en-US",
   useTranslations: () =>
     Object.assign(

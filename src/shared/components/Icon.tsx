@@ -1,5 +1,3 @@
-"use client";
-
 import { createElement } from "react";
 import { SquareDashedBottom, type LucideIcon, type LucideProps } from "lucide-react";
 import { cn } from "@/shared/utils/cn";

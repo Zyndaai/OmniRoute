@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate, useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 
 import { useTeamCosts, useTeamList } from "./teams/useTeamCosts";
@@ -65,18 +63,17 @@ function TeamsAlert({ error }: { error: string }) {
 }
 
 function useTeamSelection() {
-  const router = useRouter();
-  const params = useSearchParams();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const select = useCallback(
     (id: string, replace = false) => {
       const next = new URLSearchParams(params.toString());
       if (id) next.set("team", id);
       else next.delete("team");
       const url = `/dashboard/costs/teams${next.size ? "?" + next.toString() : ""}`;
-      if (replace) router.replace(url);
-      else router.push(url);
+      navigate(url, { replace });
     },
-    [params, router]
+    [params, navigate]
   );
   return { requestedId: params.get("team") ?? "", select };
 }

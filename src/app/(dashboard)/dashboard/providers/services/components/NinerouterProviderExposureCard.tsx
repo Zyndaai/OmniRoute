@@ -3,13 +3,11 @@
  * Persists the `providerExpose` field via POST /api/services/9router/provider-expose.
  * When enabled, 9Router models appear as `9router/...` in OmniRoute's model selection.
  */
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Toggle } from "@/shared/components";
 import { useServiceStatus } from "../hooks/useServiceStatus";
 

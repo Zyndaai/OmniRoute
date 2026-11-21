@@ -4,7 +4,6 @@
  * conhece a task — o corpo do hub nunca é repassado.
  */
 
-import { NextResponse } from "next/server";
 
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -18,5 +17,5 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   if (!detail) {
     return createErrorResponse({ status: 404, message: "Conductor task not found (or hub offline)" });
   }
-  return NextResponse.json(detail);
+  return Response.json(detail);
 }

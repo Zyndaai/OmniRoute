@@ -4,22 +4,22 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { notFoundMock, translationMock } = vi.hoisted(() => ({
-  notFoundMock: vi.fn(),
+const { translationMock } = vi.hoisted(() => ({
   translationMock: (key: string) => key,
 }));
 
-vi.mock("next/navigation", () => ({
-  notFound: notFoundMock,
-}));
-
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translationMock,
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),
@@ -63,7 +63,6 @@ describe("Radar opt-in page", () => {
   let root: Root;
 
   beforeEach(() => {
-    notFoundMock.mockReset();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -101,7 +100,7 @@ describe("Radar opt-in page", () => {
     });
     await settle();
 
-    expect(notFoundMock).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("notFound.title");
     expect(container.textContent).toContain("activateTitle");
     expect(container.textContent).toContain("activateButton");
     const activationIcon = container.querySelector(
@@ -157,7 +156,7 @@ describe("Radar opt-in page", () => {
     });
     await settle();
 
-    expect(notFoundMock).toHaveBeenCalled();
+    expect(container.textContent).toContain("notFound.title");
     expect(container.textContent).not.toContain("activateTitle");
   });
 });

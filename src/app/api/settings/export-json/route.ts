@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/db/settings";
 import { getProviderConnections } from "@/lib/db/providers";
 import { getCachedProviderNodes } from "@/lib/db/readCache";
@@ -110,7 +109,7 @@ export async function GET(request: Request) {
       exportData.domainBudgets = await getAllDomainBudgets();
     }
 
-    return new NextResponse(JSON.stringify(exportData, null, 2), {
+    return new Response(JSON.stringify(exportData, null, 2), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -119,6 +118,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[API] Error exporting JSON backup:", error);
-    return NextResponse.json({ error: "Failed to export JSON" }, { status: 500 });
+    return Response.json({ error: "Failed to export JSON" }, { status: 500 });
   }
 }

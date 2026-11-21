@@ -4,12 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProviderCard from "../ProviderCard";
 import NoAuthProvidersSection from "../NoAuthProvidersSection";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (k: string) => k,
 }));
 vi.mock("@/shared/components/ProviderTestSlideOver", () => ({ default: () => null }));
 vi.mock("@/shared/components/ProviderIcon", () => ({ default: () => null }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => {} }) }));
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
 
 describe("NoAuth Providers — inline toggle & bulk disable/enable", () => {
   let container: HTMLDivElement | null = null;

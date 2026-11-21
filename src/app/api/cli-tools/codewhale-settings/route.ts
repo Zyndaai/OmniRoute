@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -80,7 +77,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus(TOOL_ID);
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -97,7 +94,7 @@ export async function GET(request: Request) {
 
     const config = await readConfig();
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -109,7 +106,7 @@ export async function GET(request: Request) {
       configPath: getPrimaryConfigPath(),
     });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: sanitizeErrorMessage(err) } },
       { status: 500 }
     );
@@ -127,7 +124,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Invalid JSON body" } },
       { status: 400 }
     );
@@ -136,7 +133,7 @@ export async function POST(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // Extract keyId BEFORE Zod validation — Zod strips unknown fields
@@ -144,7 +141,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, model } = validation.data;
     const apiKey = await resolveApiKey(keyId, validation.data.apiKey);
@@ -175,13 +172,13 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "CodeWhale settings applied successfully!",
       configPath: primaryPath,
     });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: sanitizeErrorMessage(err) } },
       { status: 500 }
     );
@@ -196,7 +193,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const primaryPath = getPrimaryConfigPath();
@@ -222,12 +219,12 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "CodeWhale settings removed successfully",
     });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: sanitizeErrorMessage(err) } },
       { status: 500 }
     );

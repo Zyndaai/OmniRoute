@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 const push = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, refresh: vi.fn() }),
-  usePathname: () => "/dashboard",
+vi.mock("react-router", () => ({
+  useNavigate: () => push,
+  useLocation: () => ({ pathname: "/dashboard" }),
 }));
 
 const { default: CommandPalette } = await import("@/shared/components/CommandPalette");

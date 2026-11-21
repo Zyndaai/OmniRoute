@@ -6,7 +6,7 @@ import { inferRequiredScope } from "@/server/authz/accessScopes";
  * Shared evaluation of a scoped CLI access token (`oma_...`) for remote mode.
  *
  * Used by BOTH the central authz pipeline (`managementPolicy` — the authoritative
- * gate wired through `src/proxy.ts`) and the route-level `requireManagementAuth`
+ * gate wired through `src/server/http/handler.ts`) and the route-level `requireManagementAuth`
  * (defense-in-depth + lets `/api/cli/whoami` learn its own scope). Keeping the
  * logic here means the two gates can never drift.
  *

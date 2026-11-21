@@ -11,8 +11,6 @@ import {
 } from "@/shared/constants/callLogSizeLimitMarkers";
 
 const isCloud = typeof globalThis.caches === "object" && globalThis.caches !== null;
-const isBuildPhase =
-  process.env.NEXT_PHASE === "phase-production-build" || process.env.OMNIROUTE_BUILDING === "1";
 
 /**
  * Directory holding per-request artifact files. Resolved lazily on every call
@@ -321,7 +319,7 @@ export function writeCallArtifact(
   relativePath = buildArtifactRelativePath(artifact.summary.timestamp, artifact.summary.id)
 ): CallLogArtifactWriteResult | null {
   const logsDir = getCallLogsDir();
-  if (!logsDir || isBuildPhase) return null;
+  if (!logsDir) return null;
 
   const absPath = path.join(logsDir, relativePath);
   const tmpPath = `${absPath}.${process.pid}.${Date.now()}.tmp`;

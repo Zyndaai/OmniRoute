@@ -1,4 +1,3 @@
-"use client";
 import { useHealthText } from "./useHealthText";
 import {
   countDisplay,

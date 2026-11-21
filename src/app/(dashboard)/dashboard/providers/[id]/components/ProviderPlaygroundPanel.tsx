@@ -1,12 +1,10 @@
-"use client";
-
 // Phase 1g extraction — Issue #3501
 // Renders a playground section on the individual provider page.
 // Shows ServiceKindTabs if the provider declares multiple kinds; falls back to
 // a single-kind panel or the LlmChatCard for standard LLM providers.
 
 import { useState, type JSX } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { LlmChatCard } from "@/app/(dashboard)/dashboard/media-providers/components/LlmChatCard";
 import { ServiceKindTabs } from "@/app/(dashboard)/dashboard/media-providers/components/ServiceKindTabs";
 import { EmbeddingExampleCard } from "@/app/(dashboard)/dashboard/media-providers/components/EmbeddingExampleCard";

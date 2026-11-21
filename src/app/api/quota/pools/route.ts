@@ -12,14 +12,11 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { PoolCreateSchema } from "@/shared/schemas/quota";
 import { listPools, createPool, ensurePool } from "@/lib/db/quotaPools";
 import { logAuditEvent, getAuditRequestContext } from "@/lib/compliance/index";
-
-export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
@@ -30,10 +27,10 @@ export async function GET(request: Request): Promise<Response> {
     const limit = searchParams.has("limit") ? Number(searchParams.get("limit")) : undefined;
     const offset = searchParams.has("offset") ? Number(searchParams.get("offset")) : 0;
     const result = await listPools(limit !== undefined ? { limit, offset } : undefined);
-    return NextResponse.json({ pools: result.items, total: result.total });
+    return Response.json({ pools: result.items, total: result.total });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to list pools";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -45,7 +42,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = await request.json().catch(() => null);
     const parsed = PoolCreateSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     const ensure = new URL(request.url).searchParams.get("ensure") === "true";
@@ -66,12 +63,12 @@ export async function POST(request: Request): Promise<Response> {
       requestId: ctx.requestId,
     });
 
-    return NextResponse.json(
+    return Response.json(
       { pool, ...(ensured ? { created: ensured.created, updated: ensured.updated } : {}) },
       { status: ensured?.created === false ? 200 : 201 }
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to create pool";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

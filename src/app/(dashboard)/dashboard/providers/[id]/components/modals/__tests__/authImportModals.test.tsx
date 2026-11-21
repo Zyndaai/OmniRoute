@@ -10,11 +10,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportCodexAuthModal } from "../ImportCodexAuthModal";
 import { ImportClaudeAuthModal } from "../ImportClaudeAuthModal";
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns?: string) => (k: string) => (ns ? `${ns}.${k}` : k),
 }));
 

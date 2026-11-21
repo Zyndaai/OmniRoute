@@ -1,9 +1,7 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Badge, Button, Card } from "@/shared/components";
 import type { AdvancedSlug, TranslateNarratedResult } from "../types";
 import { FORMAT_META } from "../exampleTemplates";

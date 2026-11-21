@@ -1,5 +1,3 @@
-"use client";
-
 import { Children, cloneElement, isValidElement, useEffect, useState } from "react";
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { cn } from "./lib/utils";

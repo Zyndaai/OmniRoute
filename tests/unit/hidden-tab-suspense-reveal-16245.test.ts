@@ -62,8 +62,8 @@ test("#16245 shipped HIDDEN_TAB_REVEAL_SCRIPT reveals content in a hidden tab", 
   assert.equal(doc.getElementById("fb"), null);
 });
 
-test("#16245 root layout injects the script via dangerouslySetInnerHTML", () => {
-  const src = fs.readFileSync("src/app/layout.tsx", "utf8");
+test("#16245 root document injects the script via dangerouslySetInnerHTML", () => {
+  const src = fs.readFileSync("src/app/root.tsx", "utf8");
   assert.match(src, /import \{ HIDDEN_TAB_REVEAL_SCRIPT \}/);
   assert.match(
     src,

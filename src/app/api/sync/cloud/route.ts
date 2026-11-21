@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getApiKeys, createApiKey, pickApiKeyForInternalUse } from "@/lib/db/apiKeys";
 import { updateSettings } from "@/lib/db/settings";
@@ -21,7 +20,7 @@ export async function GET() {
     const enabled = await isCloudEnabled();
 
     if (!enabled) {
-      return NextResponse.json({ enabled: false });
+      return Response.json({ enabled: false });
     }
 
     // Cloud is enabled — try to verify connection
@@ -31,7 +30,7 @@ export async function GET() {
     const apiKey = await pickApiKeyForInternalUse("cloud-sync-verify");
 
     if (!apiKey || !CLOUD_URL) {
-      return NextResponse.json({ enabled: true, connected: false });
+      return Response.json({ enabled: true, connected: false });
     }
 
     try {
@@ -46,19 +45,16 @@ export async function GET() {
         },
         5000
       );
-      return NextResponse.json({
+      return Response.json({
         enabled: true,
         connected: pingRes.ok,
         lastSync: new Date().toISOString(),
       });
     } catch {
-      return NextResponse.json({ enabled: true, connected: false });
+      return Response.json({ enabled: true, connected: false });
     }
   } catch (error: unknown) {
-    return NextResponse.json(
-      { enabled: false, error: sanitizeErrorMessage(error) },
-      { status: 500 }
-    );
+    return Response.json({ enabled: false, error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -68,13 +64,13 @@ export async function GET() {
  */
 export async function POST(request: any) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   let rawBody;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -88,7 +84,7 @@ export async function POST(request: any) {
   try {
     const validation = validateBody(cloudSyncActionSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { action } = validation.data;
 
@@ -118,19 +114,19 @@ export async function POST(request: any) {
       case "sync": {
         const syncResult: any = await syncToCloud(machineId);
         if (syncResult.error) {
-          return NextResponse.json(syncResult, { status: 502 });
+          return Response.json(syncResult, { status: 502 });
         }
-        return NextResponse.json(syncResult);
+        return Response.json(syncResult);
       }
       case "disable":
         await updateSettings({ cloudEnabled: false });
         return handleDisable(machineId, request);
       default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+        return Response.json({ error: "Invalid action" }, { status: 400 });
     }
   } catch (error: unknown) {
     console.log("Cloud sync error:", error);
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
@@ -141,7 +137,7 @@ async function syncAndVerify(machineId: string, createdKey: any, existingKeys: a
   // Step 1: Sync data to cloud
   const syncResult: any = await syncToCloud(machineId, createdKey, { explicitEnable: true });
   if (syncResult.error) {
-    return NextResponse.json({ error: `Cloud sync failed: ${syncResult.error}` }, { status: 502 });
+    return Response.json({ error: `Cloud sync failed: ${syncResult.error}` }, { status: 502 });
   }
 
   // Build the cloud URL for the frontend to use
@@ -150,7 +146,7 @@ async function syncAndVerify(machineId: string, createdKey: any, existingKeys: a
   // Step 2: Verify connection by pinging the cloud (with retry)
   const apiKey = createdKey || existingKeys[0]?.key;
   if (!apiKey) {
-    return NextResponse.json({
+    return Response.json({
       ...syncResult,
       cloudUrl,
       verified: false,
@@ -178,7 +174,7 @@ async function syncAndVerify(machineId: string, createdKey: any, existingKeys: a
       );
 
       if (pingResponse.ok) {
-        return NextResponse.json({
+        return Response.json({
           ...syncResult,
           cloudUrl,
           verified: true,
@@ -196,7 +192,7 @@ async function syncAndVerify(machineId: string, createdKey: any, existingKeys: a
   }
 
   // Sync succeeded but verify failed — still return success with warning
-  return NextResponse.json({
+  return Response.json({
     ...syncResult,
     cloudUrl,
     verified: false,
@@ -209,7 +205,7 @@ async function syncAndVerify(machineId: string, createdKey: any, existingKeys: a
  */
 async function handleDisable(machineId: string, request: any) {
   if (!CLOUD_URL) {
-    return NextResponse.json({ error: "NEXT_PUBLIC_CLOUD_URL is not configured" }, { status: 500 });
+    return Response.json({ error: "NEXT_PUBLIC_CLOUD_URL is not configured" }, { status: 500 });
   }
 
   let response;
@@ -219,7 +215,7 @@ async function handleDisable(machineId: string, request: any) {
     });
   } catch (error: any) {
     const isTimeout = error?.name === "AbortError";
-    return NextResponse.json(
+    return Response.json(
       {
         error: isTimeout ? "Cloud disable timeout" : "Failed to reach cloud service",
       },
@@ -230,7 +226,7 @@ async function handleDisable(machineId: string, request: any) {
   if (!response.ok) {
     const errorText = await response.text();
     console.log("Cloud disable failed:", errorText);
-    return NextResponse.json({ error: "Failed to disable cloud" }, { status: 502 });
+    return Response.json({ error: "Failed to disable cloud" }, { status: 502 });
   }
 
   // Update Claude CLI settings to use local endpoint
@@ -238,7 +234,7 @@ async function handleDisable(machineId: string, request: any) {
   const host = request.headers.get("host") || `localhost:${defaultPort}`;
   await updateClaudeSettingsToLocal(machineId, host);
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     message: "Cloud disabled",
   });

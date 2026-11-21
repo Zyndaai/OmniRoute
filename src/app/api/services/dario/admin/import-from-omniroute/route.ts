@@ -29,7 +29,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -75,7 +74,7 @@ export async function GET(request: Request): Promise<Response> {
           organizationRateLimitTier: psd.organizationRateLimitTier || null,
         };
       });
-    return NextResponse.json({ connections: eligible });
+    return Response.json({ connections: eligible });
   } catch (err) {
     return createErrorResponse({
       status: 500,
@@ -170,7 +169,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     await sup.start();
 
-    return NextResponse.json({
+    return Response.json({
       alias,
       imported: true,
       sourceConnectionId: connectionId,

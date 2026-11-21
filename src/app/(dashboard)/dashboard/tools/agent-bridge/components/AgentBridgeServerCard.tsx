@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";

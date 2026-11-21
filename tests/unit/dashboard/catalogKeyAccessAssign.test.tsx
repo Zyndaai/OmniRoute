@@ -1,21 +1,23 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { BrowserRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/i18n/messages/en.json";
 
 // next-intl comes from the shared vitest setup (real ICU formatting over en.json).
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     ...rest
   }: {
-    href: string;
+    to: string;
     children: React.ReactNode;
   } & React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={href} {...rest}>
+    <a href={to} {...rest}>
       {children}
     </a>
   ),
@@ -263,7 +265,11 @@ describe("Catalog: assign models and combos to API keys", () => {
 
   async function renderPage() {
     await act(async () => {
-      root.render(<ModelCatalogPage />);
+      root.render(
+        <BrowserRouter>
+          <ModelCatalogPage />
+        </BrowserRouter>
+      );
     });
     await flush();
   }

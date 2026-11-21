@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   configureIPFilter,
   getIPFilterConfig,
@@ -17,10 +16,10 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json(await getIPFilterConfig());
+    return Response.json(await getIPFilterConfig());
   } catch (error) {
     console.error("Error getting IP filter config:", error);
-    return NextResponse.json({ error: "Failed to get IP filter config" }, { status: 500 });
+    return Response.json({ error: "Failed to get IP filter config" }, { status: 500 });
   }
 }
 
@@ -31,7 +30,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -45,7 +44,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateIpFilterSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
@@ -70,9 +69,9 @@ export async function PUT(request: Request) {
     }
     if (body.removeBan) removeTempBan(body.removeBan);
 
-    return NextResponse.json(await getIPFilterConfig());
+    return Response.json(await getIPFilterConfig());
   } catch (error) {
     console.error("Error updating IP filter config:", error);
-    return NextResponse.json({ error: "Failed to update IP filter config" }, { status: 500 });
+    return Response.json({ error: "Failed to update IP filter config" }, { status: 500 });
   }
 }

@@ -67,8 +67,10 @@ test("#15172 concurrent Codex usage fetches start at least one interval apart", 
   const { starts, restore } = installUsageFetch(null);
 
   try {
+    // No connection id: with one, the fetch first goes through the per-connection proxy
+    // lookup (a PostgreSQL read whose latency varies, and is slow on the first call),
+    // which shifts fetch start times independently of the gate this test is measuring.
     const connections = ["a", "b", "c", "d"].map((id) => ({
-      id,
       provider: "codex",
       accessToken: `token-${id}`,
       providerSpecificData: { workspaceId: `ws-${id}` },

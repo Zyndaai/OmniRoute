@@ -12,7 +12,7 @@ _Last updated: 2026-06-28_
 
 ## Executive Summary
 
-OmniRoute is a local AI routing gateway and dashboard built on Next.js.
+OmniRoute is a local AI routing gateway and dashboard built on React Router (framework mode) and Vite, served by an Express app.
 It provides a single OpenAI-compatible endpoint (`/v1/*`) and routes traffic across multiple upstream providers with translation, fallback, token refresh, and usage tracking.
 
 Core capabilities:
@@ -81,7 +81,7 @@ Core capabilities:
 
 Primary runtime model:
 
-- Next.js app routes under `src/app/api/*` implement both dashboard APIs and compatibility APIs
+- Route files (`route.ts`) under `src/app/api/*` implement both dashboard APIs and compatibility APIs; they are generated into React Router resource routes by `src/app/routes.ts` and served through `src/server/routing/apiResource.ts`
 - A shared SSE/routing core in `src/sse/*` + `open-sse/*` handles provider execution, translation, streaming, fallback, and usage
 
 ## Reference Diagrams
@@ -212,13 +212,13 @@ flowchart LR
 
 ## Core Runtime Components
 
-## 1) API and Routing Layer (Next.js App Routes)
+## 1) API and Routing Layer (React Router resource routes)
 
 Main directories:
 
 - `src/app/api/v1/*` and `src/app/api/v1beta/*` for compatibility APIs
 - `src/app/api/*` for management/configuration APIs
-- Next rewrites in `next.config.mjs` map `/v1/*` to `/api/v1/*`
+- URL rewrites in `src/server/http/rewrites.ts` map `/v1/*` to `/api/v1/*` (and the other root-level aliases); `src/server/http/handler.ts` runs redirects, the headless gate, authz and then these rewrites for every request
 
 Important compatibility routes:
 
@@ -551,7 +551,7 @@ Domain State DB (SQLite):
 
 ## 4) Auth + Security Surfaces
 
-- Dashboard cookie auth: `src/proxy.ts`, `src/app/api/auth/login/route.ts`
+- Dashboard cookie auth: `src/server/authz/pipeline.ts`, `src/app/api/auth/login/route.ts`
 - API key generation/verification: `src/shared/utils/apiKey.ts`
 - Provider secrets persisted in `providerConnections` entries
 - Outbound proxy support via `open-sse/utils/proxyFetch.ts` (env vars) and `open-sse/utils/networkProxy.ts` (configurable per-provider or global)
@@ -831,7 +831,7 @@ flowchart LR
     end
 
     subgraph ContainerOrProcess[OmniRoute Runtime]
-        Next[Next.js Server\nPORT=20128]
+        Next[Express + React Router Server\nPORT=20128]
         Core[SSE Core + Executors]
         MainDB[(storage.sqlite)]
         UsageDB[(usage tables + log artifacts)]
@@ -1161,7 +1161,7 @@ Environment variables actively used by code:
 2. `/api/v1/route.ts` delegates to the same unified catalog builder used by `/api/v1/models` (`src/app/api/v1/models/catalog.ts`) to avoid semantic drift.
 3. Request logger writes full headers/body when enabled; treat log directory as sensitive.
 4. Cloud behavior depends on correct `NEXT_PUBLIC_BASE_URL` and cloud endpoint reachability.
-5. The `open-sse/` directory is published as the `@omniroute/open-sse` **npm workspace package**. Source code imports it via `@omniroute/open-sse/...` (resolved by Next.js `transpilePackages`). File paths in this document still use the directory name `open-sse/` for consistency.
+5. The `open-sse/` directory is published as the `@omniroute/open-sse` **npm workspace package**. Source code imports it via `@omniroute/open-sse/...` (resolved by Vite through the `tsconfig.json` paths). File paths in this document still use the directory name `open-sse/` for consistency.
 6. Charts in the dashboard use **Recharts** (SVG-based) for accessible, interactive analytics visualizations (model usage bar charts, provider breakdown tables with success rates).
 7. E2E tests use **Playwright** (`tests/e2e/`), run via `npm run test:e2e`. Unit tests use **Node.js test runner** (`tests/unit/`), run via `npm run test:unit`. Source code under `src/` is **TypeScript** (`.ts`/`.tsx`); the `open-sse/` workspace remains JavaScript (`.js`).
 8. Settings page is organized into 7 tabs: General, Appearance, AI, Security, Routing, Resilience, Advanced. The Resilience page only configures request queue, connection cooldown, provider breaker, and wait-for-cooldown behavior; live breaker runtime state is shown on the Health page.

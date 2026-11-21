@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { updateSettings } from "@/lib/db/settings";
 import {
   CLI_VERSION_KEYS,
@@ -68,10 +67,10 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json({ items: buildView() });
+    return Response.json({ items: buildView() });
   } catch (error) {
     console.error("Error reading CLI version overrides:", error);
-    return NextResponse.json({ error: "Failed to read CLI version overrides" }, { status: 500 });
+    return Response.json({ error: "Failed to read CLI version overrides" }, { status: 500 });
   }
 }
 
@@ -104,7 +103,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -118,7 +117,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateCliVersionSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     // applyOverridePatch already swapped the in-memory map (so the very next
@@ -127,9 +126,9 @@ export async function PUT(request: Request) {
     const applied = applyOverridePatch(getCliVersionOverrides(), validation.data);
     await updateSettings({ cliVersionOverrides: applied });
 
-    return NextResponse.json({ items: buildView() });
+    return Response.json({ items: buildView() });
   } catch (error) {
     console.error("Error updating CLI version overrides:", error);
-    return NextResponse.json({ error: "Failed to update CLI version overrides" }, { status: 500 });
+    return Response.json({ error: "Failed to update CLI version overrides" }, { status: 500 });
   }
 }

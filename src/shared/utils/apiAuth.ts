@@ -23,17 +23,13 @@ import {
   DASHBOARD_SESSION_COOKIE,
 } from "@/shared/utils/dashboardSessionToken";
 import { extractApiKey } from "@/sse/services/auth";
+import { requestCookie } from "@/server/requestContext";
 
 type RequestLike = {
-  cookies?: {
-    get?: (name: string) => { value?: string } | undefined;
-  };
   headers?: Headers;
   method?: string;
-  nextUrl?: { hostname?: string | null; pathname?: string | null } | null;
   url?: string;
-  /** Real socket peer, present only for direct Node / test callers (never in the proxy runtime). */
-  ip?: string;
+  /** Real socket peer, present only for direct Node / test callers (never on a fetch Request). */
   socket?: { remoteAddress?: string };
 };
 
@@ -71,17 +67,6 @@ export function hasConfiguredOidc(settings: Record<string, unknown>): boolean {
 }
 
 function getRequestPathname(request: RequestLike | Request | null | undefined): string | null {
-  const nextPathname =
-    request &&
-    typeof request === "object" &&
-    "nextUrl" in request &&
-    request.nextUrl &&
-    typeof request.nextUrl.pathname === "string"
-      ? request.nextUrl.pathname
-      : null;
-
-  if (nextPathname) return nextPathname;
-
   const rawUrl =
     request && typeof request === "object" && "url" in request && typeof request.url === "string"
       ? request.url
@@ -164,16 +149,14 @@ function getHeaderValue(
 
 function getSocketPeerAddress(request: RequestLike | Request | null | undefined): string | null {
   if (!request || typeof request !== "object") return null;
-  const candidate = request as RequestLike;
-  if (typeof candidate.ip === "string" && candidate.ip) return candidate.ip;
-  const remoteAddress = candidate.socket?.remoteAddress;
+  const remoteAddress = (request as RequestLike).socket?.remoteAddress;
   return typeof remoteAddress === "string" && remoteAddress ? remoteAddress : null;
 }
 
 /**
  * Trusted peer locality for the fresh-install bootstrap gate.
  *
- * NEVER derived from `Host` / `nextUrl.hostname` / the request URL — all three
+ * NEVER derived from `Host` / the request URL — both
  * are client-controlled, so a remote caller sending `Host: localhost` used to be
  * treated as the local operator (GHSA-7pq4-8pvv-rx7r). The verdict comes from
  * the same primitives the authz pipeline already trusts, in this order:
@@ -187,12 +170,12 @@ function getSocketPeerAddress(request: RequestLike | Request | null | undefined)
  *   2. The pipeline's own locality verdict (`AUTHZ_HEADER_PEER_LOCALITY`), which
  *      route handlers see after `runAuthzPipeline` stripped every client-supplied
  *      copy and re-stamped it from (1). Trusted only while the per-process stamp
- *      token exists — i.e. a stamping server is actually in front of Next, in
+ *      token exists — i.e. a stamping server is actually in front of the app, in
  *      which case every request that reached the policy carried (1) and this
  *      branch can only be the post-strip route-handler view.
- *   3. A real socket peer (`request.ip` / `request.socket.remoteAddress`) for
- *      direct Node / unit-test callers that never went through the pipeline.
- *      The proxy runtime exposes neither, so nothing here is client-reachable.
+ *   3. A real socket peer (`request.socket.remoteAddress`) for direct Node /
+ *      unit-test callers that never went through the pipeline. A fetch
+ *      `Request` has no socket, so nothing here is client-reachable.
  *
  * Anything else → not loopback (fail closed), matching
  * `src/server/authz/peerContext.ts::isLoopbackRequest`.
@@ -232,14 +215,13 @@ export function getRequestPeerLocality(
   const socketPeer = getSocketPeerAddress(request);
   if (socketPeer) return classifyHostLocality(socketPeer);
 
-  // A stamping server is in front (every supported runtime — run-next dev/start and
-  // standalone-server-ws for Docker, the npm CLI and Electron — calls
+  // A stamping server is in front (every supported launcher calls
   // ensurePeerStampToken() at boot) but neither trusted signal is on this request:
   // fail closed. The Host header is never consulted in that process.
   if (stampToken) return "remote";
 
   // No stamping server in this process at all: route handlers invoked directly (the
-  // unit-test harness) or a raw `next` launch that also bypasses every LOCAL_ONLY
+  // unit-test harness) or a launch without the stamp that also bypasses every LOCAL_ONLY
   // gate in peerContext. There is no real peer to read, so keep the historical
   // URL/Host verdict rather than turning every direct handler call into a remote one.
   return isLegacyHostLoopback(request) ? "loopback" : "remote";
@@ -248,9 +230,7 @@ export function getRequestPeerLocality(
 function isLegacyHostLoopback(request: RequestLike | Request): boolean {
   let hostname: string | null = null;
   const candidate = request as RequestLike;
-  if (candidate.nextUrl && typeof candidate.nextUrl.hostname === "string") {
-    hostname = candidate.nextUrl.hostname;
-  } else if (typeof candidate.url === "string" && candidate.url) {
+  if (typeof candidate.url === "string" && candidate.url) {
     try {
       hostname = new URL(candidate.url, "http://localhost").hostname;
     } catch {
@@ -385,33 +365,14 @@ export async function isDashboardSessionAuthenticated(
 ): Promise<boolean> {
   if (!process.env.JWT_SECRET) return false;
 
-  let token =
-    request &&
-    typeof request === "object" &&
-    "cookies" in request &&
-    request.cookies?.get?.(DASHBOARD_SESSION_COOKIE)?.value
-      ? request.cookies.get(DASHBOARD_SESSION_COOKIE)?.value || null
-      : null;
-
   const requestHeaders =
     request && typeof request === "object" && "headers" in request ? request.headers : undefined;
 
-  if (!token) {
-    token = getCookieValueFromHeader(requestHeaders, DASHBOARD_SESSION_COOKIE);
-  }
-
-  if (!token) {
-    try {
-      // Lazy: `next/headers` only resolves inside the Next.js runtime. The MCP server
-      // bundle now reaches this module through keyConnectionScope → comboTargetKeyPolicy
-      // → apiKeyPolicy (#16499) and must stay importable on plain Node.
-      const { cookies } = await import("next/headers");
-      const cookieStore = await cookies();
-      token = cookieStore.get(DASHBOARD_SESSION_COOKIE)?.value || null;
-    } catch {
-      token = null;
-    }
-  }
+  // Without a cookie on the request passed in, fall back to the request being handled.
+  const token =
+    getCookieValueFromHeader(requestHeaders, DASHBOARD_SESSION_COOKIE) ||
+    requestCookie(DASHBOARD_SESSION_COOKIE) ||
+    null;
 
   if (!token) return false;
 
@@ -449,7 +410,7 @@ export async function verifyAuth(request: any): Promise<string | null> {
 /**
  * Check if a request is authenticated — boolean convenience wrapper for route handlers.
  *
- * Uses `cookies()` from next/headers (App Router compatible) and Bearer API key.
+ * Uses the dashboard session cookie and the Bearer API key.
  * Returns true if authenticated, false otherwise.
  *
  * Unlike `verifyAuth`, this does NOT check `isAuthRequired()` — callers that

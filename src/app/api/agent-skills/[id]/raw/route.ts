@@ -11,8 +11,6 @@
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 import { getSkillById, fetchSkillMarkdown } from "@/lib/agentSkills/catalog";
 
-export const dynamic = "force-dynamic";
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },

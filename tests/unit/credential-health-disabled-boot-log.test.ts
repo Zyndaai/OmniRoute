@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 // 1. Runtime: spawn a subprocess that imports the real scheduler with the disable
 //    env set, calls initCredentialHealthCheck(), and logs the result using the
 //    same conditional from instrumentation-node.ts — verifying the actual output.
-// 2. Static: read src/instrumentation-node.ts and assert the boot wiring still
+// 2. Static: read src/server/boot.ts and assert the boot wiring still
 //    uses initCredentialHealthCheck()'s return value to select the log message.
 //    This breaks if the production conditional is removed or refactored away.
 
@@ -76,7 +76,7 @@ test("disabled scheduler emits [STARTUP] Credential health scheduler disabled vi
 
 test("instrumentation-node.ts wires initCredentialHealthCheck return to the log conditional", () => {
   const src = readFileSync(
-    resolve(projectRoot, "src/instrumentation-node.ts"),
+    resolve(projectRoot, "src/server/boot.ts"),
     "utf8"
   ).replace(/\r\n/g, "\n");
 

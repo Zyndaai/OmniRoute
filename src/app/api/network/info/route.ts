@@ -1,13 +1,10 @@
 import os from "os";
-import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getRuntimePorts } from "@/lib/runtime/ports";
 
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { apiPort } = getRuntimePorts();
@@ -29,5 +26,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ localUrl, lanUrls, tailscaleIpUrl });
+  return Response.json({ localUrl, lanUrls, tailscaleIpUrl });
 }

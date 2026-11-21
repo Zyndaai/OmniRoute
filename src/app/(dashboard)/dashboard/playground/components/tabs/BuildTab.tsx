@@ -1,5 +1,3 @@
-"use client";
-
 import Textarea from "@/shared/components/Textarea";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -7,7 +5,7 @@ import Icon from "@/shared/components/Icon";
 // src/app/(dashboard)/dashboard/playground/components/tabs/BuildTab.tsx
 
 import { useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useToolsBuilder } from "../../hooks/useToolsBuilder";
 import { useStructuredOutput } from "../../hooks/useStructuredOutput";
 import MarkdownMessage from "../MarkdownMessage";

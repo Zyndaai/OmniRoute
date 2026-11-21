@@ -2,6 +2,7 @@
 
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 (
@@ -9,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const translate = (key: string) => key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useLocale: () => "en",
   useTranslations: () => Object.assign(translate, { has: () => false, rich: translate }),
 }));
@@ -24,7 +25,13 @@ function mountPage() {
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push({ root, container });
-  act(() => root.render(<ApiManagerPageClient />));
+  act(() =>
+    root.render(
+      <MemoryRouter>
+        <ApiManagerPageClient />
+      </MemoryRouter>
+    )
+  );
   return container;
 }
 

@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
 import { startTailscaleLogin } from "@/lib/tailscaleTunnel";
 import { toPublicSafeTunnelError } from "@/lib/api/publicSafeTunnelError";
 import { parseOptionalJsonBody, requireTailscaleAuth, tailscaleLoginSchema } from "../routeUtils";
-
-export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const authError = await requireTailscaleAuth(request);
@@ -14,9 +11,9 @@ export async function POST(request: Request) {
 
   try {
     const result = await startTailscaleLogin(parsed.data);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(
         error,
         "Failed to start the Tailscale login.",

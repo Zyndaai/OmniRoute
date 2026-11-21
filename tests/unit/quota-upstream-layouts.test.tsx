@@ -3,10 +3,10 @@ import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 // The existing live-probe button has its own namespace and is outside this layout test.
 vi.mock("@/shared/components/ConnectionTestButton", () => ({ default: () => null }));
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import QuotaCardGrid from "../../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCardGrid";
@@ -61,7 +61,7 @@ for (const locale of ["en", "ar"]) {
       const onHideQuota = vi.fn(),
         onShowQuota = vi.fn();
       const { container } = render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale={locale}
           messages={{ usage: messages.usage, common: messages.common }}
           now={now}
@@ -86,7 +86,7 @@ for (const locale of ["en", "ar"]) {
             onHideQuota={onHideQuota}
             onShowQuota={onShowQuota}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
       if (layout === "overview") {
         expect(container.querySelector('[data-account="a"]')).toHaveAttribute("data-kind", "cdw");

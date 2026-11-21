@@ -6,7 +6,6 @@
 
 import { z } from "zod";
 import { parseIntegerQueryParam } from "@/lib/api/queryIntegerParam";
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { getWebhooks, createWebhook } from "@/lib/db/webhooks";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
@@ -63,9 +62,9 @@ export async function GET(request: Request) {
       ...w,
       secret: w.secret ? `${w.secret.slice(0, 10)}...` : null,
     }));
-    return NextResponse.json({ webhooks: masked, total: result.total });
+    return Response.json({ webhooks: masked, total: result.total });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to list webhooks" },
       { status: 500 }
     );
@@ -80,13 +79,13 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(createWebhookSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const { data } = validation;
 
     if (data.kind === "telegram" && !isEncryptionEnabled()) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Telegram webhooks require STORAGE_ENCRYPTION_KEY to be configured" },
         { status: 400 }
       );
@@ -102,9 +101,9 @@ export async function POST(request: Request) {
       metadataEncrypted,
     });
 
-    return NextResponse.json({ webhook }, { status: 201 });
+    return Response.json({ webhook }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to create webhook" },
       { status: 500 }
     );

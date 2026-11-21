@@ -50,14 +50,11 @@ describe("File structure — omni-skills directory", () => {
 
 // ─── page.tsx — server component ─────────────────────────────────────────────
 
-describe("page.tsx — server component", () => {
+describe("page.tsx — thin route module", () => {
   const src = readFileSync(resolve(join(base, "page.tsx")), "utf-8");
 
-  it("is a server component (no 'use client' directive)", () => {
-    expect(
-      !src.includes('"use client"') && !src.includes("'use client'"),
-      "page.tsx must not have 'use client'"
-    ).toBe(true);
+  it("imports no server module (it ships in the browser bundle)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("imports and renders OmniSkillsPageClient", () => {
@@ -80,11 +77,8 @@ describe("page.tsx — server component", () => {
 describe("OmniSkillsPageClient.tsx", () => {
   const src = readFileSync(resolve(join(base, "OmniSkillsPageClient.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(
-      src.startsWith('"use client"'),
-      "OmniSkillsPageClient must start with 'use client'"
-    ).toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("has all 4 tab IDs", () => {
@@ -148,8 +142,8 @@ describe("OmniSkillsPageClient.tsx", () => {
 describe("OmniSkillCard.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniSkillCard.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(src.startsWith('"use client"'), "must be a client component").toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("accepts skill, selected, onClick props", () => {
@@ -182,8 +176,8 @@ describe("OmniSkillCard.tsx", () => {
 describe("SkillInspectorPane.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/SkillInspectorPane.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(src.startsWith('"use client"'), "must be a client component").toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("has all 4 sub-tab IDs", () => {
@@ -251,8 +245,8 @@ describe("OmniSkillsList.tsx", () => {
 describe("OmniExecutionsTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniExecutionsTab.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(src.startsWith('"use client"'), "must be a client component").toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("renders a table with skill/status/duration/time columns", () => {
@@ -272,8 +266,8 @@ describe("OmniExecutionsTab.tsx", () => {
 describe("OmniSandboxTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniSandboxTab.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(src.startsWith('"use client"'), "must be a client component").toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("shows sandbox config values", () => {
@@ -288,8 +282,8 @@ describe("OmniSandboxTab.tsx", () => {
 describe("OmniMarketplaceTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniMarketplaceTab.tsx")), "utf-8");
 
-  it("starts with 'use client'", () => {
-    expect(src.startsWith('"use client"'), "must be a client component").toBe(true);
+  it("imports no server module (it runs in the browser)", () => {
+    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
   });
 
   it("has marketplace search logic", () => {

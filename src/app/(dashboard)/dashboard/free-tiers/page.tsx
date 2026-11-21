@@ -1,5 +1,3 @@
-"use client";
-
 import FreeBudgetCard from "@/app/(dashboard)/dashboard/usage/components/FreeBudgetCard";
 
 export default function FreeTiersPage() {

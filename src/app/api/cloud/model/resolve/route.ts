@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { validateApiKey, getModelAliases } from "@/models";
 import { cloudResolveAliasSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -9,7 +8,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Invalid request", details: [{ field: "body", message: "Invalid JSON body" }] } },
       { status: 400 }
     );
@@ -18,20 +17,20 @@ export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Missing API key" }, { status: 401 });
+      return Response.json({ error: "Missing API key" }, { status: 401 });
     }
 
     const apiKey = authHeader.slice(7);
     const validation = validateBody(cloudResolveAliasSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { alias } = validation.data;
 
     // Validate API key
     const isValid = await validateApiKey(apiKey);
     if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+      return Response.json({ error: "Invalid API key" }, { status: 401 });
     }
 
     // Get model aliases
@@ -43,7 +42,7 @@ export async function POST(request: Request) {
       // Parse provider/model
       const firstSlash = resolved.indexOf("/");
       if (firstSlash > 0) {
-        return NextResponse.json({
+        return Response.json({
           alias,
           provider: resolved.slice(0, firstSlash),
           model: resolved.slice(firstSlash + 1),
@@ -52,9 +51,9 @@ export async function POST(request: Request) {
     }
 
     // Not found
-    return NextResponse.json({ error: "Alias not found" }, { status: 404 });
+    return Response.json({ error: "Alias not found" }, { status: 404 });
   } catch (error) {
     console.log("Model resolve error:", error);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return Response.json({ error: "Internal error" }, { status: 500 });
   }
 }

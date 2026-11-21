@@ -90,7 +90,7 @@ export interface ReverseProxyConfig {
  * service's own API key, and returns the upstream response with
  * security-conflicting headers stripped.
  *
- * @param request      The incoming Next.js route Request.
+ * @param request      The incoming route Request.
  * @param pathSegments The `[[...path]]` catch-all segments, e.g. `["ui", "index.html"]` or `[]`.
  * @param config       Proxy configuration (service name + public prefix).
  */
@@ -153,7 +153,7 @@ export async function proxyRequest(
         responseHeaders.set(k, v);
       }
     }
-    // Prevent Next.js from caching the proxied response.
+    // Prevent clients and intermediaries from caching the proxied response.
     responseHeaders.set("cache-control", "no-store");
 
     const contentType = upstream.headers.get("content-type") ?? "";

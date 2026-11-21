@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import { createErrorResponse, createErrorResponseFromUnknown } from "@/lib/api/errorResponse";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -46,7 +45,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       },
     });
 
-    return NextResponse.json({
+    return Response.json({
       message: "Sync token revoked successfully",
       syncToken: revoked,
     });

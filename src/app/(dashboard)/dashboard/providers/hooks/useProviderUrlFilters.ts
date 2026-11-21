@@ -1,15 +1,16 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import type { ReadonlyURLSearchParams } from "next/navigation";
-import { readProviderFiltersFromUrl, syncProviderFiltersToUrl } from "../providerPageUtils";
+import { useLocation, type SetURLSearchParams } from "react-router";
+import { providerFiltersToSearchParams, readProviderFiltersFromUrl } from "../providerPageUtils";
 import {
   readProviderDisplayModePreference,
   type ProviderDisplayMode,
 } from "../providerPageStorage";
 
+const WRITTEN_BY_FILTERS = "providerFiltersWrite";
+
 interface UseProviderUrlFiltersArgs {
-  searchParams: ReadonlyURLSearchParams;
+  searchParams: URLSearchParams;
+  setSearchParams: SetURLSearchParams;
   providerDisplayMode: ProviderDisplayMode;
   setProviderDisplayMode: (mode: ProviderDisplayMode) => void;
   searchQuery: string;
@@ -38,6 +39,7 @@ interface UseProviderUrlFiltersArgs {
  */
 export function useProviderUrlFilters({
   searchParams,
+  setSearchParams,
   providerDisplayMode,
   setProviderDisplayMode,
   searchQuery,
@@ -57,30 +59,39 @@ export function useProviderUrlFilters({
   const [storedDisplayModePreference] = useState<ProviderDisplayMode>(() =>
     readProviderDisplayModePreference()
   );
-  const [hydratedFromParams, setHydratedFromParams] = useState<ReadonlyURLSearchParams | null>(
-    null
-  );
+  const [hydratedFromParams, setHydratedFromParams] = useState<URLSearchParams | null>(null);
+  // Locations this hook writes carry WRITTEN_BY_FILTERS in their history state, so the
+  // router handing back our own write is not mistaken for a new input.
+  const location = useLocation();
+  const ownWrite =
+    (location.state as { [WRITTEN_BY_FILTERS]?: boolean } | null)?.[WRITTEN_BY_FILTERS] === true;
 
   // URL → state hydration as a render-phase adjustment guarded by the
   // previously hydrated params object (react.dev "adjusting state when a prop
   // changes") — replaces the two synchronous setState effects keyed on
-  // searchParams, and removes the transient default-state first paint.
+  // searchParams, and removes the transient default-state first paint. The
+  // first pass and any location this hook did not write (a link, Back/Forward)
+  // are read; the router handing back our own write is skipped, because the
+  // URL omits defaults (display mode "all") that hydration would turn into the
+  // stored preference.
   if (hydratedFromParams !== searchParams) {
     setHydratedFromParams(searchParams);
-    const urlFilters = readProviderFiltersFromUrl(searchParams);
-    setProviderDisplayMode(urlFilters.displayMode ?? storedDisplayModePreference);
-    setSearchQuery(urlFilters.searchQuery ?? "");
-    setModelSearchQuery(urlFilters.modelSearchQuery ?? "");
-    setActiveCategory(urlFilters.category ?? null);
-    setShowFreeOnly(urlFilters.showFreeOnly ?? false);
-    setActiveServiceKind(urlFilters.mediaKind ?? null);
+    if (hydratedFromParams === null || !ownWrite) {
+      const urlFilters = readProviderFiltersFromUrl(searchParams);
+      setProviderDisplayMode(urlFilters.displayMode ?? storedDisplayModePreference);
+      setSearchQuery(urlFilters.searchQuery ?? "");
+      setModelSearchQuery(urlFilters.modelSearchQuery ?? "");
+      setActiveCategory(urlFilters.category ?? null);
+      setShowFreeOnly(urlFilters.showFreeOnly ?? false);
+      setActiveServiceKind(urlFilters.mediaKind ?? null);
+    }
   }
   const displayModePreferenceReady = hydratedFromParams !== null;
   const filtersHydrated = displayModePreferenceReady;
 
   useEffect(() => {
     if (!filtersHydrated || !displayModePreferenceReady) return;
-    syncProviderFiltersToUrl({
+    const next = providerFiltersToSearchParams(searchParams, {
       searchQuery,
       modelSearchQuery,
       displayMode: providerDisplayMode,
@@ -88,9 +99,17 @@ export function useProviderUrlFilters({
       showFreeOnly,
       mediaKind: activeServiceKind,
     });
+    if (!next) return;
+    setSearchParams(next, {
+      replace: true,
+      preventScrollReset: true,
+      state: { [WRITTEN_BY_FILTERS]: true },
+    });
   }, [
     filtersHydrated,
     displayModePreferenceReady,
+    searchParams,
+    setSearchParams,
     searchQuery,
     modelSearchQuery,
     providerDisplayMode,

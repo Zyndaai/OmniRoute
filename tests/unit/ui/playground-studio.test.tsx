@@ -2,46 +2,19 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-// The next/dynamic mock below starts each tab's import without awaiting it. A
-// tab module graph (BuildTab → useToolsBuilder → schemas) can still be loading
-// when the synchronous tests finish, and vitest then reports an unhandled
-// EnvironmentTeardownError ("Cannot load … after the environment was torn
-// down"). Every started import is tracked and awaited in afterAll.
-const dynamicImports = vi.hoisted(() => [] as Promise<unknown>[]);
-
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}(${JSON.stringify(params)})` : key,
   useLocale: () => "en",
 }));
 
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(""),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/playground",
-}));
-
-vi.mock("next/dynamic", () => ({
-  default: (
-    fn: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>,
-    _opts?: unknown
-  ) => {
-    // Eagerly resolve the dynamic import in tests
-    let Component: React.ComponentType<Record<string, unknown>> | null = null;
-    dynamicImports.push(
-      fn().then((m) => {
-        Component = m.default;
-      })
-    );
-    return function DynamicWrapper(props: Record<string, unknown>) {
-      if (!Component) return <div data-testid="dynamic-loading" />;
-      return React.createElement(Component, props);
-    };
-  },
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useSearchParams: () => [new URLSearchParams(""), vi.fn()],
 }));
 
 vi.mock("@/shared/components", () => ({
@@ -130,11 +103,22 @@ vi.mock("react-markdown", () => ({
 const { PlaygroundStudio } =
   await import("../../../src/app/(dashboard)/dashboard/playground/PlaygroundStudio");
 
-// Let every tab import started by the next/dynamic mock settle while the jsdom
-// environment is still alive (see dynamicImports above).
-afterAll(async () => {
-  await Promise.all(dynamicImports);
-});
+// jsdom does not implement scrollIntoView, which the chat tab calls once it has rendered.
+if (typeof Element.prototype.scrollIntoView === "undefined") {
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    value: () => {},
+    writable: true,
+    configurable: true,
+  });
+}
+
+// The tabs are lazy-loaded; load their modules up front so the lazy imports resolve from the module
+// cache while the jsdom environment is still alive.
+await Promise.all([
+  import("../../../src/app/(dashboard)/dashboard/playground/components/tabs/ChatTab"),
+  import("../../../src/app/(dashboard)/dashboard/playground/components/tabs/ApiTab"),
+  import("../../../src/app/(dashboard)/dashboard/playground/components/tabs/BuildTab"),
+]);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -294,10 +278,9 @@ describe("PlaygroundStudio — deep-link ?tab=chat", () => {
 
   it("activates Chat tab from URL search param", async () => {
     // Override useSearchParams to return ?tab=chat
-    vi.doMock("next/navigation", () => ({
-      useSearchParams: () => new URLSearchParams("tab=chat"),
-      useRouter: () => ({ push: vi.fn() }),
-      usePathname: () => "/dashboard/playground",
+    vi.doMock("react-router", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("react-router")>()),
+      useSearchParams: () => [new URLSearchParams("tab=chat"), vi.fn()],
     }));
 
     const el = renderStudio();

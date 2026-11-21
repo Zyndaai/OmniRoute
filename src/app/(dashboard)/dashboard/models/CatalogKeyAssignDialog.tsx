@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { RadioGroup, RadioGroupItem } from "@omniroute/ui-kit/radio-group";
 import { Button, Checkbox, Input, Modal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";

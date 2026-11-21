@@ -3,7 +3,7 @@ import { getSettings } from "@/lib/db/settings";
 export type HomeSettings = { setupComplete?: unknown };
 
 /**
- * Settings read for the Home Server Component (#14060).
+ * Settings read for the Home page loader (#14060).
  *
  * A corrupted `key_value` table makes getSettings() throw, which used to crash the
  * whole Home render with a 500. The degradation lives HERE, in the display-only

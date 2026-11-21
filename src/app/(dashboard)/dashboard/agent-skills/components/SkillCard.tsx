@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, type JSX } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import Badge from "@/shared/components/Badge";
 import type { AgentSkill } from "@/lib/agentSkills/types";

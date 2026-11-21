@@ -15,7 +15,7 @@
  *  (c) This file (providerPageUtils.ts) imports NO @/lib/radar or
  *      @/lib/db/* symbol — asserted by source inspection so a future edit
  *      cannot silently reintroduce a DB-touching import into a module a
- *      "use client" component depends on.
+ *      browser component depends on.
  *  (d) When a referral applies, isReferralLink=true (the header uses this to
  *      show a discreet note, reusing the existing `kimiPartnerLinkNote` key).
  */

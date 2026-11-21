@@ -6,7 +6,7 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../src/i18n/messages/en.json";
 import PreferredConnectionsSection from "../../src/app/(dashboard)/dashboard/api-manager/components/PreferredConnectionsSection";
 import type { ProviderConnection } from "../../src/app/(dashboard)/dashboard/api-manager/components/ProviderConnectionPermissionList";
@@ -24,7 +24,7 @@ function renderSection(props: Partial<React.ComponentProps<typeof PreferredConne
     onClearPreferred: vi.fn(),
   };
   render(
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       <PreferredConnectionsSection
         connections={connections}
         allowAllConnections={true}
@@ -33,7 +33,7 @@ function renderSection(props: Partial<React.ComponentProps<typeof PreferredConne
         {...handlers}
         {...props}
       />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
   return handlers;
 }

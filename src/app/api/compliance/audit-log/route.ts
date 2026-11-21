@@ -1,10 +1,7 @@
-import { NextResponse } from "next/server";
 import { countAuditLog, getAuditLog } from "@/lib/compliance/index";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { AuditLogQuerySchema } from "@/shared/schemas/quota";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
-
-export const dynamic = "force-dynamic";
 
 function parsePagination(value: string | null, fallback: number, min: number, max: number) {
   const parsed = Number.parseInt(value || "", 10);
@@ -42,7 +39,7 @@ export async function GET(request: Request) {
     };
 
     const [logs, total] = await Promise.all([getAuditLog(filters), countAuditLog(filters)]);
-    return NextResponse.json(logs, {
+    return Response.json(logs, {
       headers: {
         "x-total-count": String(total),
         "x-page-limit": String(filters.limit),
@@ -51,6 +48,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch audit log";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

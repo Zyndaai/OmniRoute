@@ -27,7 +27,6 @@
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
-import { NextResponse } from "next/server";
 import { load as yamlLoad } from "js-yaml";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
@@ -120,9 +119,9 @@ export function parseYamlObject(raw: string): Record<string, any> {
  * (callers keep their generic 500 for that). The message is fixed text plus a
  * home-relative path, routed through `sanitizeErrorMessage` (Hard Rule #12).
  */
-export function configClobberRefusalResponse(error: unknown): NextResponse | null {
+export function configClobberRefusalResponse(error: unknown): Response | null {
   if (!(error instanceof ConfigClobberRefusedError)) return null;
-  return NextResponse.json(
+  return Response.json(
     {
       error: {
         message: sanitizeErrorMessage(error.message),

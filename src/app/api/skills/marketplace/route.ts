@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/db/settings";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getSkillsProviderSetting } from "@/lib/skills/providerSettings";
@@ -11,7 +10,7 @@ const POPULAR_BY_PROVIDER = {
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
     const { searchParams } = new URL(request.url);
@@ -26,7 +25,7 @@ export async function GET(request: Request) {
         description: `Popular skill: ${name}`,
         installCount: 0,
       }));
-      return NextResponse.json({ skills });
+      return Response.json({ skills });
     }
 
     // Search SkillsMP for non-empty queries
@@ -34,7 +33,7 @@ export async function GET(request: Request) {
     const apiKey = (settings as Record<string, unknown>).skillsmpApiKey;
 
     if (!apiKey) {
-      return NextResponse.json(
+      return Response.json(
         { error: "SkillsMP API key not configured. Add it in Settings → AI." },
         { status: 400 }
       );
@@ -47,16 +46,16 @@ export async function GET(request: Request) {
 
     if (!res.ok) {
       const body = await res.text();
-      return NextResponse.json(
+      return Response.json(
         { error: `SkillsMP error: ${res.status} ${body}` },
         { status: res.status }
       );
     }
 
     const data = await res.json();
-    return NextResponse.json({ skills: data.data?.skills || data.skills || [] });
+    return Response.json({ skills: data.data?.skills || data.skills || [] });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

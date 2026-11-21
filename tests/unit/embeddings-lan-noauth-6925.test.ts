@@ -1,20 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-// Isolate the DB to a temp dir BEFORE importing any module that opens it.
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-embed-lan-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const { createProviderNode } = await import("../../src/lib/db/providers/nodes.ts");
 const { createEmbeddingResponse } = await import("../../src/lib/embeddings/service.ts");
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 // #6925: a keyless LAN OpenAI-compatible embeddings provider (e.g. Ollama at
@@ -23,7 +15,7 @@ test.after(() => {
 // credentials exist for a provider that was never meant to need any).
 test("#6925: 10.x LAN embeddings provider is treated as no-auth (no Authorization header, no 401)", async () => {
   await createProviderNode({
-    type: "openai-compatible-embeddings",
+    type: "openai-compatible",
     name: "LAN Ollama",
     prefix: "lanollama6925",
     apiType: "embeddings",
@@ -71,7 +63,7 @@ test("#6925: 10.x LAN embeddings provider is treated as no-auth (no Authorizatio
 
 test("#6925: 192.168.x LAN embeddings provider is also treated as no-auth", async () => {
   await createProviderNode({
-    type: "openai-compatible-embeddings",
+    type: "openai-compatible",
     name: "LAN Ollama 192",
     prefix: "lanollama6925b",
     apiType: "embeddings",
@@ -107,7 +99,7 @@ test("#6925: 192.168.x LAN embeddings provider is also treated as no-auth", asyn
 
 test("#6925: cloud-metadata endpoint (169.254.169.254) stays blocked, does not become a bare no-auth provider", async () => {
   await createProviderNode({
-    type: "openai-compatible-embeddings",
+    type: "openai-compatible",
     name: "Metadata Probe",
     prefix: "metadataprobe6925",
     apiType: "embeddings",

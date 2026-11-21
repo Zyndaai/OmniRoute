@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Card from "../Card";
 import Icon from "../Icon";
 import Input from "../Input";

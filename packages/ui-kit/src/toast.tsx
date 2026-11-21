@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";

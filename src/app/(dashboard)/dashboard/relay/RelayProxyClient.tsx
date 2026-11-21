@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";

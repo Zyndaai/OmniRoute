@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/models";
 import {
   AI_PROVIDERS,
@@ -74,7 +73,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -88,7 +87,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(providersBatchTestSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { mode, providerId, connectionIds } = validation.data;
 
@@ -142,7 +141,7 @@ export async function POST(request) {
     } else if (mode === "all") {
       connectionsToTest = allConnections;
     } else {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "Invalid mode. Use: provider, oauth, free, no-auth, apikey, compatible, all, web-cookie, search, audio, local, upstream-proxy, cloud-agent, ide, selected",
@@ -154,7 +153,7 @@ export async function POST(request) {
     if (connectionsToTest.length === 0) {
       // Include a summary so consumers gated on `summary` still get feedback
       // (e.g. mode=selected where the chosen ids were deleted before testing).
-      return NextResponse.json({
+      return Response.json({
         mode,
         providerId: providerId || null,
         results: [],
@@ -251,7 +250,7 @@ export async function POST(request) {
       }
     }
 
-    return NextResponse.json({
+    return Response.json({
       mode,
       providerId: providerId || null,
       results,
@@ -264,6 +263,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.log("Error in batch test:", error);
-    return NextResponse.json({ error: "Batch test failed" }, { status: 500 });
+    return Response.json({ error: "Batch test failed" }, { status: 500 });
   }
 }

@@ -1,8 +1,6 @@
-"use client";
-
 import { Button } from "@/shared/components";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 /**

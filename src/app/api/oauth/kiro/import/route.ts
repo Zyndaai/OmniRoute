@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import {
   createProviderConnection,
@@ -72,7 +71,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -88,7 +87,7 @@ export async function POST(request: Request) {
     const targetProvider = searchParams.get("targetProvider") === "amazon-q" ? "amazon-q" : "kiro";
     const validation = validateBody(kiroImportSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { refreshToken, region, clientId, clientSecret, authMethod, profileArn } =
       validation.data;
@@ -142,7 +141,7 @@ export async function POST(request: Request) {
         email,
       });
       await syncToCloudIfEnabled();
-      return NextResponse.json({
+      return Response.json({
         success: true,
         connection: { id: connection.id, provider: connection.provider, email: connection.email },
       });
@@ -230,7 +229,7 @@ export async function POST(request: Request) {
     // Auto sync to Cloud if enabled
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: {
         id: connection.id,
@@ -240,7 +239,7 @@ export async function POST(request: Request) {
     });
   } catch (error: any) {
     console.error("Kiro-compatible import token error:", error);
-    return NextResponse.json({ error: buildKiroImportError(error) }, { status: 500 });
+    return Response.json({ error: buildKiroImportError(error) }, { status: 500 });
   }
 }
 

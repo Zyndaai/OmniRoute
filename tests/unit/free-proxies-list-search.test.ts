@@ -1,27 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type { FreeProxyItem } from "@/lib/freeProxyProviders/types";
-
-// DATA_DIR must be set before the DB core module evaluates its singleton, so we
-// make the temp dir + env assignment first, then dynamic-import the modules.
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-free-list-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const freeProxiesDb = await import("../../src/lib/db/freeProxies.ts");
+const proxiesDb = await import("../../src/lib/db/proxies.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function reset() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 function make(host: string, quality: number, latency: number): FreeProxyItem {
@@ -106,7 +97,16 @@ test("list and count share combined filters, zero quality and pool exclusions", 
     countryCode: "DE",
   });
   await freeProxiesDb.upsertFreeProxy({ ...make("gamma.example", 70, 300), countryCode: "DE" });
-  await freeProxiesDb.markFreeProxyInPool(first.id, "test-pool");
+  // free_proxies.pool_proxy_id is a foreign key to proxy_registry, so link a real row.
+  const poolProxy = await proxiesDb.createProxy({
+    name: "test-pool",
+    type: "http",
+    host: "pool.registry.example",
+    port: 8080,
+    status: "active",
+  });
+  assert.ok(poolProxy?.id);
+  await freeProxiesDb.markFreeProxyInPool(first.id, poolProxy.id);
   const cases: Array<[Parameters<typeof freeProxiesDb.countFreeProxies>[0], string[]]> = [
     [{ sources: [] }, ["alpha.example", "gamma.example", "beta.example"]],
     [

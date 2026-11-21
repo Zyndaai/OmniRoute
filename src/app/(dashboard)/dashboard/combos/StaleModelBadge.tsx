@@ -1,5 +1,3 @@
-"use client";
-
 import { getComboModelString } from "@/lib/combos/steps";
 import Badge from "@/shared/components/Badge";
 import Icon from "@/shared/components/Icon";

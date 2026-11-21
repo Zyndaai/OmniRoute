@@ -5,7 +5,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   updateModelComboMapping,
@@ -30,12 +29,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const mapping = await getModelComboMappingById(id);
     if (!mapping) {
-      return NextResponse.json({ error: "Mapping not found" }, { status: 404 });
+      return Response.json({ error: "Mapping not found" }, { status: 404 });
     }
-    return NextResponse.json({ mapping });
+    return Response.json({ mapping });
   } catch (error: any) {
     console.error("Failed to get mapping:", error);
-    return NextResponse.json({ error: "Failed to get mapping" }, { status: 500 });
+    return Response.json({ error: "Failed to get mapping" }, { status: 500 });
   }
 }
 
@@ -48,19 +47,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const rawBody = await request.json();
     const validation = validateBody(updateMappingSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const mapping = await updateModelComboMapping(id, validation.data);
 
     if (!mapping) {
-      return NextResponse.json({ error: "Mapping not found" }, { status: 404 });
+      return Response.json({ error: "Mapping not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ mapping });
+    return Response.json({ mapping });
   } catch (error: any) {
     console.error("Failed to update mapping:", error);
-    return NextResponse.json({ error: "Failed to update mapping" }, { status: 500 });
+    return Response.json({ error: "Failed to update mapping" }, { status: 500 });
   }
 }
 
@@ -73,12 +72,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const deleted = await deleteModelComboMapping(id);
 
     if (!deleted) {
-      return NextResponse.json({ error: "Mapping not found" }, { status: 404 });
+      return Response.json({ error: "Mapping not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error: any) {
     console.error("Failed to delete mapping:", error);
-    return NextResponse.json({ error: "Failed to delete mapping" }, { status: 500 });
+    return Response.json({ error: "Failed to delete mapping" }, { status: 500 });
   }
 }

@@ -2,8 +2,8 @@
  * #5242 (Bug 1C) — opt-in native HTTPS/TLS serving for `omniroute serve`.
  *
  * `resolveTlsOptions` + `createServerListener` (scripts/dev/tls-options.mjs) are
- * the pure decision helpers the CLI (serve.mjs) and the standalone server
- * wrapper (standalone-server-ws.mjs) share. TLS is strictly opt-in:
+ * the pure decision helpers the CLI (serve.mjs) and the launcher
+ * (run-server.mjs) share. TLS is strictly opt-in:
  *   - both cert+key present & readable → TLS options → https.Server
  *   - neither present → null → http.Server (byte-identical to today)
  *   - only one of the pair → null + warning (never half-enable TLS)

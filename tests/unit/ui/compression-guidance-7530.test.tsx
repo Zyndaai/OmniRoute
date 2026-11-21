@@ -6,6 +6,7 @@
 // engines, and links out to the full compression guide.
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   ENGINE_IDS,
@@ -13,7 +14,7 @@ import {
   isSafeDefault,
 } from "../../../open-sse/services/compression/engineCatalog.ts";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));
@@ -28,7 +29,7 @@ function mount(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(ui);
+    root.render(<MemoryRouter>{ui}</MemoryRouter>);
   });
   return container;
 }

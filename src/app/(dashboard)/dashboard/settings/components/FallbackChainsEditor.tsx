@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * FallbackChainsEditor — Batch D
  *
@@ -9,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Button, Input, EmptyState, Skeleton } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { useNotificationStore } from "@/store/notificationStore";

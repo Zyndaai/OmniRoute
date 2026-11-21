@@ -15,7 +15,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-obsidian-webdav-route-"));
@@ -42,12 +41,14 @@ async function resetStorage() {
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
-function makeRequest(url: string, options?: RequestInit): NextRequest {
+function makeRequest(url: string, options?: RequestInit): Request {
   // These tests exercise the handler in the fresh-install open mode (no password
   // configured, requireLogin default). That mode is loopback-only, and loopback is
   // decided from the real peer — never from the `http://localhost` URL
   // (GHSA-7pq4-8pvv-rx7r) — so give the direct-call Request a loopback socket peer.
-  return Object.assign(new Request(url, options), { ip: "127.0.0.1" }) as unknown as NextRequest;
+  return Object.assign(new Request(url, options), {
+    socket: { remoteAddress: "127.0.0.1" },
+  }) as unknown as Request;
 }
 
 function postVault(vaultPath: string): Promise<Response> {
@@ -179,7 +180,7 @@ test("GET masks the WebDAV password for anonymous callers but reveals it to a ma
     // Genuine management session: the operator's reveal-password view still works.
     const sessionReq = (await makeManagementSessionRequest(
       "http://localhost/api/settings/obsidian/webdav"
-    )) as unknown as NextRequest;
+    )) as unknown as Request;
     const sessionBody = (await (await route.GET(sessionReq)).json()) as Record<string, unknown>;
     assert.ok(
       typeof sessionBody.webdavPassword === "string" &&

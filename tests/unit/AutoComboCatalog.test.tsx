@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { AUTO_COMBO_TEMPLATES } from "@/domain/assessment/types";
 
 // Minimal i18n stub — return interpolated value so {count} works.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) => {
     if (values && typeof values.count !== "undefined") {
       return `${values.count} ${key}`;
@@ -15,10 +15,17 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-// Minimal next/link stub — renders as a plain anchor element.
-vi.mock("next/link", () => ({
-  default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a {...props}>{children}</a>
+// Minimal Link stub — renders as a plain anchor element.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    children,
+    to,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
   ),
 }));
 

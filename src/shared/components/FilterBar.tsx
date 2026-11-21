@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * FilterBar — search input + one select per filter + "clear filters" (KEA-7886 adapters).
  * Used by RequestLoggerV2, ProxyLogger, and similar data tables.
@@ -19,7 +17,7 @@
  */
 
 import { useCallback, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "./Button";
 import Input from "./Input";
 import Select from "./Select";

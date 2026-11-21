@@ -6,7 +6,6 @@
  * applies migrations, keeps the log partitions current, and closes the pool on shutdown.
  */
 
-import { isNextBuildPhase } from "../buildPhase";
 import { isWorker } from "../cluster/role";
 import { resolveWritableDataDir } from "../dataPaths";
 import {
@@ -25,10 +24,6 @@ export { toSnakeCase, toCamelCase, objToSnake, rowToCamel, cleanNulls } from "./
 // ──────────────── Environment ────────────────
 
 export const isCloud = typeof globalThis.caches === "object" && globalThis.caches !== null;
-
-// Next.js build workers sometimes drop NEXT_PHASE from their env; see src/lib/buildPhase.ts.
-// No database is opened during the build.
-export const isBuildPhase = isNextBuildPhase();
 
 /** Files that stay on disk (call-log artifacts, service installs, uploads). */
 export const DATA_DIR = resolveWritableDataDir({ isCloud });
@@ -111,7 +106,6 @@ export async function waitForMigrationHead(
  * Idempotent per process.
  */
 export function ensureDbInitialized(): Promise<void> {
-  if (isBuildPhase) return Promise.resolve();
   initPromise ??= (async () => {
     const backend = await initDbBackend();
     if (isWorker()) {

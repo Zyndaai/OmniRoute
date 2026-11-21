@@ -1,9 +1,7 @@
-"use client";
-
 import Toggle from "@/shared/components/Toggle";
 
 import Input from "@/shared/components/Input";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export function UsageLimitSettings({
   enabled,

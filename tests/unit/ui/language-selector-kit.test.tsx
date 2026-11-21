@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const refresh = vi.fn();
+const reload = vi.fn();
 const persistLocale = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
 vi.mock("@/shared/lib/persistLocale", () => ({
   persistLocale: (code: string) => persistLocale(code),
 }));
@@ -29,15 +28,23 @@ vi.mock("@/i18n/config", () => ({
 
 const { default: LanguageSelector } = await import("@/shared/components/LanguageSelector");
 
+beforeEach(() => {
+  // jsdom's location is read-only: swap in a copy whose reload is a spy.
+  Object.defineProperty(window, "location", {
+    value: { ...window.location, reload },
+    configurable: true,
+  });
+});
+
 afterEach(() => {
   cleanup();
-  refresh.mockClear();
+  reload.mockClear();
   persistLocale.mockClear();
 });
 
 describe("LanguageSelector on the kit DropdownMenu", () => {
   it(
-    "opens a menu of radio items with the current locale checked; picking one persists and refreshes",
+    "opens a menu of radio items with the current locale checked; picking one persists and reloads",
     { timeout: 20_000 },
     async () => {
       render(<LanguageSelector />);
@@ -57,7 +64,7 @@ describe("LanguageSelector on the kit DropdownMenu", () => {
       fireEvent.keyDown(trigger, { key: "Enter" });
       fireEvent.click((await screen.findAllByRole("menuitemradio"))[1]);
       expect(persistLocale).toHaveBeenCalledWith("pt-BR");
-      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(reload).toHaveBeenCalledTimes(1);
     }
   );
 });

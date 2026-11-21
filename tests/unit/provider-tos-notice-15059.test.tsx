@@ -18,17 +18,22 @@ Object.assign(process.env, {
 const navigation = vi.hoisted(() => ({
   providerId: "kiro",
   search: new URLSearchParams(),
-  router: { push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn() },
+  navigate: vi.fn(),
+  setSearch: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", () => ({
   useParams: () => ({ id: navigation.providerId }),
-  useSearchParams: () => navigation.search,
-  usePathname: () => `/dashboard/providers/${navigation.providerId}`,
-  useRouter: () => navigation.router,
-}));
-vi.mock("next/link", () => ({
-  default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a {...props}>{children}</a>
+  useSearchParams: () => [navigation.search, navigation.setSearch],
+  useLocation: () => ({ pathname: `/dashboard/providers/${navigation.providerId}` }),
+  useNavigate: () => navigation.navigate,
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
   ),
 }));
 

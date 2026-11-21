@@ -15,17 +15,18 @@ const translate = Object.assign(
   { has: vi.fn((key: string) => key in labels) }
 );
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/radar/setup",
-}));
-
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translate,
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard/radar/setup" }),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),

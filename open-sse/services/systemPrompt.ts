@@ -8,7 +8,7 @@
  * This gives the user full control over instruction priority (#2468):
  *   prefix → agent/provider instructions → suffix (highest recency priority)
  *
- * Uses globalThis to share config across Turbopack module instances (#2470).
+ * Uses globalThis so the config survives dev-server module re-evaluation (#2470).
  */
 
 const GLOBAL_KEY = "__omniroute_systemPrompt_config__";

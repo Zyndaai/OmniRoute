@@ -5,10 +5,10 @@ import { resolve } from "node:path";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard",
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard" }),
+  useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 vi.mock("@/shared/components/Sidebar", () => ({
   default: () => <nav data-testid="kit-sidebar" />,

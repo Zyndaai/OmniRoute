@@ -1,5 +1,4 @@
-"use client";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import { CardSkeleton } from "@/shared/components/Loading";

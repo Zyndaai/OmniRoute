@@ -1,7 +1,6 @@
 import { Buffer } from "node:buffer";
 import { randomBytes } from "crypto";
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hashCommandCodeAuthState } from "@/lib/db/commandCodeAuth";
@@ -42,8 +41,8 @@ export function stateHashFromState(state: string): string {
   return hashCommandCodeAuthState(state);
 }
 
-export function noStoreJson(body: unknown, init: ResponseInit = {}): NextResponse {
-  return NextResponse.json(body, {
+export function noStoreJson(body: unknown, init: ResponseInit = {}): Response {
+  return Response.json(body, {
     ...init,
     headers: {
       "Cache-Control": "no-store",

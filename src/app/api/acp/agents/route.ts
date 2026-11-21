@@ -1,7 +1,5 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
-export const dynamic = "force-dynamic";
 import {
   type CliAgentInfo,
   detectInstalledAgents,
@@ -27,7 +25,7 @@ const customAgentBodySchema = z.object({
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -41,7 +39,7 @@ export async function GET(request: Request) {
     const installed = agents.filter((a: CliAgentInfo) => a.installed).length;
     const total = agents.length;
 
-    return NextResponse.json({
+    return Response.json({
       agents,
       summary: {
         total,
@@ -53,25 +51,25 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Error detecting agents:", error);
-    return NextResponse.json({ error: "Failed to detect agents" }, { status: 500 });
+    return Response.json({ error: "Failed to detect agents" }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(customAgentBodySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -79,13 +77,13 @@ export async function POST(request: Request) {
 
     if (body.action === "refresh") {
       const agents = refreshAgentCache();
-      return NextResponse.json({ agents, refreshed: true });
+      return Response.json({ agents, refreshed: true });
     }
 
     // Add custom agent
     const { id, name, binary, versionCommand, providerAlias, spawnArgs, protocol } = body;
     if (!id || !name || !binary || !versionCommand) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Missing required fields: id, name, binary, versionCommand" },
         { status: 400 }
       );
@@ -102,7 +100,7 @@ export async function POST(request: Request) {
     };
 
     if (!resolveVersionProbe(newAgent.binary, newAgent.versionCommand, true)) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Invalid versionCommand: use the configured binary with plain arguments only" },
         { status: 400 }
       );
@@ -114,7 +112,7 @@ export async function POST(request: Request) {
 
     // Avoid duplicates
     if (current.some((a) => a.id === newAgent.id)) {
-      return NextResponse.json(
+      return Response.json(
         { error: `Agent with id '${newAgent.id}' already exists` },
         { status: 409 }
       );
@@ -126,16 +124,16 @@ export async function POST(request: Request) {
 
     // Refresh cache to detect the new agent
     const agents = refreshAgentCache();
-    return NextResponse.json({ agents, added: newAgent });
+    return Response.json({ agents, added: newAgent });
   } catch (error) {
     console.error("Error adding custom agent:", error);
-    return NextResponse.json({ error: "Failed to add agent" }, { status: 500 });
+    return Response.json({ error: "Failed to add agent" }, { status: 500 });
   }
 }
 
 export async function DELETE(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -143,7 +141,7 @@ export async function DELETE(request: Request) {
     const agentId = searchParams.get("id");
 
     if (!agentId) {
-      return NextResponse.json({ error: "Missing agent id" }, { status: 400 });
+      return Response.json({ error: "Missing agent id" }, { status: 400 });
     }
 
     const settings = await getSettings();
@@ -151,7 +149,7 @@ export async function DELETE(request: Request) {
     const updated = current.filter((a) => a.id !== agentId);
 
     if (updated.length === current.length) {
-      return NextResponse.json(
+      return Response.json(
         { error: `Agent '${agentId}' not found in custom agents` },
         { status: 404 }
       );
@@ -161,9 +159,9 @@ export async function DELETE(request: Request) {
     setCustomAgents(updated);
     const agents = refreshAgentCache();
 
-    return NextResponse.json({ agents, removed: agentId });
+    return Response.json({ agents, removed: agentId });
   } catch (error) {
     console.error("Error removing custom agent:", error);
-    return NextResponse.json({ error: "Failed to remove agent" }, { status: 500 });
+    return Response.json({ error: "Failed to remove agent" }, { status: 500 });
   }
 }

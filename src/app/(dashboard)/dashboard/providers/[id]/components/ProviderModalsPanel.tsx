@@ -1,5 +1,3 @@
-"use client";
-
 // Phase 1t.5 extraction — Issue #3501
 // Pure composition of all modal elements rendered by ProviderDetailPageClient.
 import type { ComponentProps } from "react";

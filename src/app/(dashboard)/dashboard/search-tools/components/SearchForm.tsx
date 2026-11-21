@@ -1,8 +1,6 @@
-"use client";
-
 import { useId, useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Field } from "@omniroute/ui-kit/field";
 // Button/Select stay on the barrel (the search-tab test mocks it); the newly used adapters are
 // imported from their own modules.
@@ -182,7 +180,7 @@ export default function SearchForm({
                       : "● missing"}
                 </span>
                 {catalogInfo.status === "missing" && (
-                  <Link href={catalogInfo.configureHref} className="text-accent hover:underline">
+                  <Link to={catalogInfo.configureHref} className="text-accent hover:underline">
                     Configure →
                   </Link>
                 )}

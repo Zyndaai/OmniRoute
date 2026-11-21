@@ -9,11 +9,11 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => Object.assign((key: string) => key, { has: () => false }),
 }));
 const push = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
+vi.mock("react-router", () => ({ useNavigate: () => push }));
 
 const json = (body: unknown, ok = true) =>
   ({ ok, status: ok ? 200 : 500, json: async () => body }) as Response;

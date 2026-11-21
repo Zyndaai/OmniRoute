@@ -348,15 +348,10 @@ function isEnvFlagEnabled(name: string): boolean {
   return !!value && TRUE_ENV_VALUES.has(value.trim().toLowerCase());
 }
 
-function isBuildProcess(): boolean {
-  return typeof process !== "undefined" && process.env.NEXT_PHASE === "phase-production-build";
-}
-
 function isRecoverySchedulerDisabled(): boolean {
   return (
     isEnvFlagEnabled("OMNIROUTE_DISABLE_CONNECTION_RECOVERY") ||
     isEnvFlagEnabled("OMNIROUTE_DISABLE_BACKGROUND_SERVICES") ||
-    isBuildProcess() ||
     isAutomatedTestProcess()
   );
 }

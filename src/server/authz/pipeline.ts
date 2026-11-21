@@ -1,4 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { stringifySetCookie } from "cookie";
+
+import { rebuildRequest } from "../http/rebuildRequest";
+import { requestCookie } from "../requestContext";
 import { getCachedSettings } from "../../lib/db/readCache";
 import { isDraining } from "../../lib/gracefulShutdown";
 import { checkBodySize, getBodySizeLimit } from "../../shared/middleware/bodySizeGuard";
@@ -46,8 +49,62 @@ import {
 import type { AuthSubject, RouteClass, RouteClassification } from "./types";
 import type { AuthOutcome, RoutePolicy } from "./context";
 
+/** The rest of the request pipeline: called with the request the route must receive. */
+export type AuthzNext = (request: Request) => Response | Promise<Response>;
+
 export interface AuthzPipelineOptions {
   enforce?: boolean;
+  /**
+   * Path to classify: base path stripped, percent-decoded, without a data suffix. Defaults to
+   * the request URL's path.
+   */
+  pathname?: string;
+  /** Base path the redirects it answers with are prefixed with (`""` at the root). */
+  basePath?: string;
+  /**
+   * Continues an allowed request. It receives the request with the trusted headers stripped
+   * and re-stamped; the headers the pipeline adds to its response are merged into the result,
+   * a header the route set itself winning. Defaults to an empty 200 response.
+   */
+  next?: AuthzNext;
+}
+
+const emptyNext: AuthzNext = () => new Response(null, { status: 200 });
+
+function jsonResponse(body: unknown, status: number): Response {
+  return Response.json(body, { status });
+}
+
+/**
+ * Same-origin redirects carry a path, not an absolute URL: `request.url` holds the address the
+ * server is bound to, which a client behind a proxy or on the LAN cannot reach.
+ */
+function redirectResponse(location: string): Response {
+  return new Response(null, { status: 307, headers: { Location: location } });
+}
+
+/**
+ * Headers the pipeline set on `stamped` are added to `response` unless the route set the same
+ * header; `Set-Cookie` values are appended. The response is copied because some have
+ * immutable headers (`fetch()`, `Response.redirect()`); the body keeps streaming.
+ */
+function mergeResponseHeaders(response: Response, stamped: Headers): Response {
+  const nullBody = [101, 103, 204, 205, 304].includes(response.status);
+  const target = new Response(nullBody ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: new Headers(response.headers),
+  });
+  for (const [name, value] of stamped) {
+    if (name === "set-cookie") continue;
+    if (!target.headers.has(name)) target.headers.set(name, value);
+  }
+  for (const cookie of stamped.getSetCookie()) target.headers.append("Set-Cookie", cookie);
+  return target;
+}
+
+function deleteCookieHeader(name: string): string {
+  return stringifySetCookie({ name, value: "", path: "/", expires: new Date(0) });
 }
 
 const POLICIES: Record<RouteClass, RoutePolicy> = {
@@ -69,8 +126,8 @@ function rejectionResponse(
   outcome: Extract<AuthOutcome, { allow: false }>,
   classification: RouteClassification,
   requestId: string
-): NextResponse {
-  const response = NextResponse.json(
+): Response {
+  const response = jsonResponse(
     {
       error: {
         code: outcome.code,
@@ -78,7 +135,7 @@ function rejectionResponse(
         correlation_id: requestId,
       },
     },
-    { status: outcome.status }
+    outcome.status
   );
   response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
   response.headers.set(AUTHZ_HEADER_ROUTE_CLASS, classification.routeClass);
@@ -101,29 +158,13 @@ function isManagementDashboardRoute(
   return classification.routeClass === "MANAGEMENT" && isDashboardPath(pathname);
 }
 
-function getCookieValue(request: NextRequest, name: string): string | null {
-  const fromCookies = request.cookies.get(name)?.value;
-  if (fromCookies) return fromCookies;
-
-  const cookieHeader = request.headers.get("cookie") || request.headers.get("Cookie");
-  if (!cookieHeader) return null;
-
-  for (const segment of cookieHeader.split(";")) {
-    const [rawKey, ...rawValue] = segment.split("=");
-    if (!rawKey || rawValue.length === 0) continue;
-    if (rawKey.trim() === name) return rawValue.join("=").trim() || null;
-  }
-
-  return null;
-}
-
-function shouldUseSecureCookie(request: NextRequest): boolean {
+function shouldUseSecureCookie(request: Request): boolean {
   if (process.env.AUTH_COOKIE_SECURE === "true") return true;
   const forwardedProto = (request.headers.get("x-forwarded-proto") || "")
     .split(",")[0]
     .trim()
     .toLowerCase();
-  return forwardedProto === "https" || request.nextUrl.protocol === "https:";
+  return forwardedProto === "https" || new URL(request.url).protocol === "https:";
 }
 
 // Module-level (not per-call): throttles the stale-cookie warning below to once per
@@ -132,13 +173,13 @@ function shouldUseSecureCookie(request: NextRequest): boolean {
 let staleDashboardJwtWarningEmitted = false;
 
 async function refreshDashboardSessionIfNeeded(
-  response: NextResponse,
-  request: NextRequest
+  response: Response,
+  request: Request
 ): Promise<void> {
   const secret = getDashboardJwtSecret();
   if (!secret) return;
 
-  const token = getCookieValue(request, DASHBOARD_SESSION_COOKIE);
+  const token = requestCookie(DASHBOARD_SESSION_COOKIE, request);
   if (!token) return;
 
   try {
@@ -146,7 +187,7 @@ async function refreshDashboardSessionIfNeeded(
     if (!payload) {
       // Not a dashboard session (foreign/expired/claim-less token): drop it so a
       // Cursor CLI token can never ride along as the cookie (#13298).
-      response.cookies.delete(DASHBOARD_SESSION_COOKIE);
+      response.headers.append("Set-Cookie", deleteCookieHeader(DASHBOARD_SESSION_COOKIE));
       if (!staleDashboardJwtWarningEmitted) {
         staleDashboardJwtWarningEmitted = true;
         console.warn("[Authz] Dropped stale dashboard session cookie during auto-refresh");
@@ -162,27 +203,32 @@ async function refreshDashboardSessionIfNeeded(
 
     const freshToken = await mintDashboardSessionToken(secret);
 
-    response.cookies.set(DASHBOARD_SESSION_COOKIE, freshToken, {
-      httpOnly: true,
-      secure: shouldUseSecureCookie(request),
-      sameSite: "lax",
-      path: "/",
-    });
+    response.headers.append(
+      "Set-Cookie",
+      stringifySetCookie({
+        name: DASHBOARD_SESSION_COOKIE,
+        value: freshToken,
+        httpOnly: true,
+        secure: shouldUseSecureCookie(request),
+        sameSite: "lax",
+        path: "/",
+      })
+    );
   } catch (error) {
     console.error("[Authz] JWT auto-refresh failed:", error);
   }
 }
 
-function dashboardLoginRedirect(request: NextRequest, requestId: string): NextResponse {
-  const response = NextResponse.redirect(new URL(`${request.nextUrl.basePath}/login`, request.url));
-  response.cookies.delete(DASHBOARD_SESSION_COOKIE);
+function dashboardLoginRedirect(request: Request, basePath: string, requestId: string): Response {
+  const response = redirectResponse(`${basePath}/login`);
+  response.headers.append("Set-Cookie", deleteCookieHeader(DASHBOARD_SESSION_COOKIE));
   stampRouteResponse(response, requestId, "MANAGEMENT");
   applyCorsHeaders(response, request);
   return response;
 }
 
-function drainingResponse(requestId: string): NextResponse {
-  const response = NextResponse.json(
+function drainingResponse(requestId: string): Response {
+  const response = jsonResponse(
     {
       error: {
         code: "SERVICE_UNAVAILABLE",
@@ -190,15 +236,15 @@ function drainingResponse(requestId: string): NextResponse {
         correlation_id: requestId,
       },
     },
-    { status: 503 }
+    503
   );
   response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
   response.headers.set("Retry-After", "5");
   return response;
 }
 
-function invalidOriginResponse(requestId: string): NextResponse {
-  const response = NextResponse.json(
+function invalidOriginResponse(requestId: string): Response {
+  const response = jsonResponse(
     {
       error: {
         code: "INVALID_ORIGIN",
@@ -208,14 +254,14 @@ function invalidOriginResponse(requestId: string): NextResponse {
         correlation_id: requestId,
       },
     },
-    { status: 403 }
+    403
   );
   response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
   return response;
 }
 
-function mcpInvalidOriginResponse(requestId: string): NextResponse {
-  const response = NextResponse.json(buildMcpInvalidOriginBody(requestId), { status: 403 });
+function mcpInvalidOriginResponse(requestId: string): Response {
+  const response = jsonResponse(buildMcpInvalidOriginBody(requestId), 403);
   response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
   return response;
 }
@@ -247,10 +293,13 @@ async function getBodySizeSettings(): Promise<Record<string, unknown> | undefine
 }
 
 export async function runAuthzPipeline(
-  request: NextRequest,
+  request: Request,
   options: AuthzPipelineOptions = {}
 ): Promise<Response> {
-  const { pathname } = request.nextUrl;
+  const url = new URL(request.url);
+  const pathname = options.pathname ?? url.pathname;
+  const basePath = options.basePath ?? "";
+  const next = options.next ?? emptyNext;
   const method = request.method;
 
   const requestId = generateRequestId();
@@ -261,20 +310,15 @@ export async function runAuthzPipeline(
     // path. When the dashboard's own loopback port is reused as native_app_port
     // (see src/lib/oauth/providers/zed-hosted.ts), that redirect lands HERE. The
     // root page (src/app/page.tsx) is meant to forward the payload to the
-    // /callback relay, but this middleware runs first and the redirect below
+    // /callback relay, but this pipeline runs first and the redirect below
     // only built `basePath + "/dashboard"` — dropping the query string and
     // silently losing the zed-hosted / native_app_signin result. Detect the
     // native callback and forward it straight to /callback preserving the
     // params, mirroring page.tsx.
-    const { searchParams, search } = request.nextUrl;
+    const { searchParams, search } = url;
     const hasNativeCallback = searchParams.get("user_id") && searchParams.get("access_token");
-    const response = NextResponse.redirect(
-      new URL(
-        hasNativeCallback
-          ? `${request.nextUrl.basePath}/callback${search}`
-          : `${request.nextUrl.basePath}/dashboard`,
-        request.url
-      )
+    const response = redirectResponse(
+      hasNativeCallback ? `${basePath}/callback${search}` : `${basePath}/dashboard`
     );
     return stampRouteResponse(response, requestId, "MANAGEMENT");
   }
@@ -373,7 +417,7 @@ export async function runAuthzPipeline(
   requestHeaders.delete(CLI_TOKEN_HEADER);
 
   if (method === "OPTIONS") {
-    const preflight = new NextResponse(null, { status: 204 });
+    const preflight = new Response(null, { status: 204 });
     preflight.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
     preflight.headers.set(AUTHZ_HEADER_ROUTE_CLASS, classification.routeClass);
     applyCorsHeaders(preflight, request, corsRelaxOrigin);
@@ -381,11 +425,14 @@ export async function runAuthzPipeline(
   }
 
   if (!options.enforce) {
-    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    const response = new Response(null);
     response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
     response.headers.set(AUTHZ_HEADER_ROUTE_CLASS, classification.routeClass);
     applyCorsHeaders(response, request, corsRelaxOrigin);
-    return response;
+    return mergeResponseHeaders(
+      await next(rebuildRequest(request, { headers: requestHeaders })),
+      response.headers
+    );
   }
 
   // IP filter (#6131): enforce the operator's IP blacklist/whitelist on the
@@ -393,9 +440,9 @@ export async function runAuthzPipeline(
   // themselves out of the dashboard (they can always fix the list from
   // localhost). checkIP is a no-op when the filter is disabled.
   //
-  // D1 (#9033): on a direct connection the proxy runtime has no socket, so
-  // checkRequestIP reads only forwarding headers + undefined request.ip and
-  // falls to "unknown", never blocking the blacklisted client. Resolve the
+  // D1 (#9033): a fetch `Request` carries no socket, so checkRequestIP alone
+  // reads only forwarding headers and falls to "unknown", never blocking the
+  // blacklisted client on a direct connection. Resolve the
   // trusted peer IP from the authenticated stamp and pass it to checkRequestIP,
   // but only when NOT behind a reverse proxy (the via-proxy marker means the
   // peer IP is the proxy hop, e.g. 127.0.0.1, and the real client is in XFF).
@@ -415,10 +462,7 @@ export async function runAuthzPipeline(
       stampedClientIp ?? (viaProxy ? null : trustedPeerIp)
     );
     if (!ipVerdict.allowed) {
-      const blocked = NextResponse.json(
-        { error: ipVerdict.reason || "Access denied" },
-        { status: 403 }
-      );
+      const blocked = jsonResponse({ error: ipVerdict.reason || "Access denied" }, 403);
       stampRouteResponse(blocked, requestId, classification.routeClass);
       applyCorsHeaders(blocked, request, corsRelaxOrigin);
       return blocked;
@@ -430,7 +474,7 @@ export async function runAuthzPipeline(
 
   if (outcome.allow === false) {
     if (managementDashboardRoute) {
-      return dashboardLoginRedirect(request, requestId);
+      return dashboardLoginRedirect(request, basePath, requestId);
     }
 
     const rejection = rejectionResponse(outcome, classification, requestId);
@@ -481,7 +525,7 @@ export async function runAuthzPipeline(
 
   stampSubject(requestHeaders, outcome.subject);
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const response = new Response(null);
   response.headers.set(AUTHZ_HEADER_REQUEST_ID, requestId);
   response.headers.set(AUTHZ_HEADER_ROUTE_CLASS, classification.routeClass);
   // Only relax CORS for a CLIENT_API request whose credential actually
@@ -501,5 +545,8 @@ export async function runAuthzPipeline(
   if (managementDashboardRoute) {
     await refreshDashboardSessionIfNeeded(response, request);
   }
-  return response;
+  return mergeResponseHeaders(
+    await next(rebuildRequest(request, { headers: requestHeaders })),
+    response.headers
+  );
 }

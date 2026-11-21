@@ -4,9 +4,9 @@
 // the client:
 //
 //   if (error instanceof AgyAuthFileError) {
-//     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+//     return Response.json({ error: error.message, code: error.code }, { status: error.status });
 //   }
-//   return NextResponse.json({ error: sanitizeErrorMessage(error) || "…" }, …);
+//   return Response.json({ error: sanitizeErrorMessage(error) || "…" }, …);
 //
 // The generic branch sanitizes; the typed branch does not. That is safe ONLY because
 // every message those classes are constructed with is a static app-authored literal —

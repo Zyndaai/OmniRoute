@@ -1,11 +1,8 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { Link, useSearchParams } from "react-router";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
@@ -442,7 +439,7 @@ function AccessHeader({ context }: { context: AccessFormContext }) {
       breadcrumbs={
         <div className="flex items-center gap-2 text-xs text-text-muted">
           <Link
-            href="/dashboard/api-manager"
+            to="/dashboard/api-manager"
             className="hover:text-primary transition-colors inline-flex items-center gap-1"
           >
             <Icon name="arrow_back" size={14} />
@@ -808,12 +805,21 @@ function useAccessEditorTab(tabParam: AccessEditorTab | null) {
 
   const activeTab = localTab;
 
-  const switchTab = useCallback((tab: AccessEditorTab) => {
-    setLocalTab(tab);
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", tab);
-    window.history.replaceState({}, "", url.toString());
-  }, []);
+  const [, setSearchParams] = useSearchParams();
+  const switchTab = useCallback(
+    (tab: AccessEditorTab) => {
+      setLocalTab(tab);
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set("tab", tab);
+          return next;
+        },
+        { replace: true, preventScrollReset: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   return { activeTab, switchTab };
 }
@@ -823,7 +829,7 @@ interface ApiKeyAccessEditorClientProps {
 
 export default function ApiKeyAccessEditorClient({ apiKeyId }: ApiKeyAccessEditorClientProps) {
   const t = useTranslations("apiManager");
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const { activeTab, switchTab } = useAccessEditorTab(
     searchParams.get("tab") as AccessEditorTab | null
@@ -851,7 +857,7 @@ export default function ApiKeyAccessEditorClient({ apiKeyId }: ApiKeyAccessEdito
           <h2 className="text-xl font-bold text-text-main">{t("keyNotFound")}</h2>
           <p className="text-sm text-text-muted">{t("keyNotFoundDesc")}</p>
         </div>
-        <Link href="/dashboard/api-manager" className={buttonVariants({ variant: "outline" })}>
+        <Link to="/dashboard/api-manager" className={buttonVariants({ variant: "outline" })}>
           <Icon name="arrow_back" size={16} />
           {t("backToApiKeys")}
         </Link>
@@ -869,7 +875,7 @@ export default function ApiKeyAccessEditorClient({ apiKeyId }: ApiKeyAccessEdito
         <div className="flex flex-col gap-1">
           <h2 className="text-xl font-bold text-text-main">{fetchError || t("failedLoadKey")}</h2>
         </div>
-        <Link href="/dashboard/api-manager" className={buttonVariants({ variant: "outline" })}>
+        <Link to="/dashboard/api-manager" className={buttonVariants({ variant: "outline" })}>
           <Icon name="arrow_back" size={16} />
           {t("backToApiKeys")}
         </Link>

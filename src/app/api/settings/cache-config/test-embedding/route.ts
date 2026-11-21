@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { createDefaultEmbeddingGenerator } from "@omniroute/open-sse/services/cache/embeddingClient.ts";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -19,14 +18,14 @@ const testEmbeddingSchema = z.object({
 
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(testEmbeddingSchema, rawBody);
@@ -34,7 +33,7 @@ export async function POST(request: Request) {
     // `validateBody()` returns `{ success, error }` — there is no `.response`
     // (that shape belongs to `validatedJsonBody()`); returning `undefined` here
     // crashed the route on any invalid payload (TS2339 caught by api-typecheck).
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { provider, model, baseUrl, apiKey } = validation.data;
@@ -70,7 +69,7 @@ export async function POST(request: Request) {
     const latencyMs = Date.now() - start;
 
     if (!result || !Array.isArray(result.embedding)) {
-      return NextResponse.json(
+      return Response.json(
         {
           ok: false,
           error: "Failed to generate embedding (empty response or unsupported endpoint)",
@@ -79,7 +78,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       latencyMs,
       dimensions: result.embedding.length,
@@ -87,7 +86,7 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     const message = sanitizeErrorMessage(error);
-    return NextResponse.json(
+    return Response.json(
       { ok: false, error: message },
       { status: 200 } // Return 200 with ok: false so the UI can display test error cleanly
     );

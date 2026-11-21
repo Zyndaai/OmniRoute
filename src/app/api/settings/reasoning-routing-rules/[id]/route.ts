@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   deleteReasoningRoutingRule,
@@ -14,14 +13,14 @@ import { reasoningRuleDataToInput } from "@/lib/reasoningRouting/input";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
 
 function errorResponse(status: number, message: string) {
-  return NextResponse.json(buildErrorBody(status, message), { status });
+  return Response.json(buildErrorBody(status, message), { status });
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const rule = await getReasoningRoutingRuleById((await params).id);
-  return rule ? NextResponse.json({ rule }) : errorResponse(404, "Rule not found");
+  return rule ? Response.json({ rule }) : errorResponse(404, "Rule not found");
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -39,7 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   try {
     const rule = await updateReasoningRoutingRule(id, reasoningRuleDataToInput(validated.data));
-    return NextResponse.json({ rule });
+    return Response.json({ rule });
   } catch (error) {
     return errorResponse(
       400,
@@ -52,5 +51,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   const deleted = await deleteReasoningRoutingRule((await params).id);
-  return deleted ? NextResponse.json({ success: true }) : errorResponse(404, "Rule not found");
+  return deleted ? Response.json({ success: true }) : errorResponse(404, "Rule not found");
 }

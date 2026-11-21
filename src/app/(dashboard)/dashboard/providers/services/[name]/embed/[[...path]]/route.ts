@@ -19,8 +19,6 @@
 
 import { proxyRequest } from "@/lib/services/reverseProxy";
 
-export const dynamic = "force-dynamic";
-
 // Optional catch-all: `path` is `undefined` for the segment-less `/embed/` root.
 type RouteParams = { name: string; path?: string[] };
 

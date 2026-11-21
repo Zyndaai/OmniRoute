@@ -1,7 +1,5 @@
-"use client";
-
 import { memo, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { Field } from "@omniroute/ui-kit/field";
 import {

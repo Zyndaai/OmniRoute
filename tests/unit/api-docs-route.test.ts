@@ -18,7 +18,3 @@ test("GET /api/docs returns a 200 text/html Redoc shell", async () => {
   // No stack traces / secrets leaked into the static shell.
   assert.ok(!body.includes("at /"), "static shell must not leak stack-trace frames");
 });
-
-test("GET /api/docs is statically renderable (no per-request work)", () => {
-  assert.equal(docsRoute.dynamic, "force-static");
-});

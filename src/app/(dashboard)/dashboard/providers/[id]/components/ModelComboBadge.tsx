@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * ModelComboBadge — the small "used in combo X" tag rendered behind a model row
  * on the provider detail page. One badge per combo; rows used by several combos
@@ -9,7 +7,7 @@
  * from the page client.
  */
 
-import Link from "next/link";
+import { Link } from "react-router";
 
 import Icon from "@/shared/components/Icon";
 import { providerText, type ProviderMessageTranslator } from "../providerPageHelpers";
@@ -33,7 +31,7 @@ export default function ModelComboBadge({ combos, t }: ModelComboBadgeProps) {
       {combos.map((name) => (
         <Link
           key={name}
-          href="/dashboard/combos"
+          to="/dashboard/combos"
           onClick={(e) => e.stopPropagation()}
           className="inline-flex items-center gap-0.5 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-wide leading-none text-primary hover:border-primary/60 hover:bg-primary/20 transition-colors"
           title={providerText(t, "openComboTooltip", "Open Combos — used by {combo}", {

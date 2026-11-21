@@ -5,7 +5,7 @@
  * Supports macOS (Keychain), Windows (Credential Manager), and Linux (libsecret).
  *
  * `keytar` is a native module (e.g. libsecret on Linux). Load it only via dynamic import
- * so `next build` / CI without those libs does not fail when this module is analyzed.
+ * so the production build / CI without those libs does not fail when this module is analyzed.
  *
  * @see https://zed.dev/docs/ai/llm-providers - Official Zed documentation confirming keychain storage
  */
@@ -103,7 +103,7 @@ function extractProviderFromService(service: string): string {
  * Discovers all Zed OAuth credentials stored in the system keychain.
  *
  * SECURITY-AUDITOR-NOTE: This function appears in Socket.dev finding for
- * `app/.next/server/app/api/providers/zed/import/route.js`. Behaviour:
+ * the bundled `api/providers/zed/import` route. Behaviour:
  *   - Called from `POST /api/providers/zed/discover` and `POST /api/providers/zed/import`,
  *     which are gated by `requireManagementAuth`.
  *   - From v3.8.6 onward, `/import` requires `confirmedAccounts` (per-account
@@ -222,7 +222,7 @@ export async function isZedInstalled(): Promise<boolean> {
   ];
 
   for (const configPath of zedConfigPaths) {
-    if (fs.existsSync(/* turbopackIgnore: true */ configPath)) {
+    if (fs.existsSync(configPath)) {
       return true;
     }
   }

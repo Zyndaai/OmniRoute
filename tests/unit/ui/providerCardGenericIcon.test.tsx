@@ -4,18 +4,16 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: () => {} }) }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => vi.fn(),
+  Link: ({ to, children }: { to: string; children?: React.ReactNode }) => <a href={to}>{children}</a>,
+}));
 vi.mock("@/shared/components/ProviderTestSlideOver", () => ({ default: () => null }));
 vi.mock("@/shared/components/ProviderIcon", () => ({
   default: ({ src }: { src?: string }) => (
     <span data-provider-icon="dynamic" data-provider-icon-src={src || ""} />
-  ),
-}));
-vi.mock("next/image", () => ({
-  default: ({ src, alt }: { src: string; alt: string }) => (
-    // eslint-disable-next-line @next/next/no-img-element -- deterministic next/image test double
-    <img data-testid="next-image" src={src} alt={alt} />
   ),
 }));
 
@@ -69,7 +67,7 @@ describe("ProviderCard — compatible-provider generic icon", () => {
   ])("uses the bundled generic asset for %s", (providerId, apiType) => {
     const rendered = renderCard(providerId, { apiType });
 
-    expect(rendered.querySelector('[data-testid="next-image"]')?.getAttribute("src")).toBe(
+    expect(rendered.querySelector("img")?.getAttribute("src")).toBe(
       "/providers/cli-generic.svg"
     );
     expect(rendered.querySelector('[data-provider-icon="dynamic"]')).toBeNull();
@@ -79,7 +77,7 @@ describe("ProviderCard — compatible-provider generic icon", () => {
     const iconUrl = "https://example.com/operator-compatible.svg";
     const rendered = renderCard("openai-compatible-custom", { iconUrl });
 
-    expect(rendered.querySelector('[data-testid="next-image"]')).toBeNull();
+    expect(rendered.querySelector("img")).toBeNull();
     expect(
       rendered
         .querySelector('[data-provider-icon="dynamic"]')

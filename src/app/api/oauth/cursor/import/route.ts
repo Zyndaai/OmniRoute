@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { CursorService } from "@/lib/oauth/services/cursor";
 import { credentialsFromCursorTokens } from "@/lib/oauth/services/cursorLogin";
 import { persistCursorConnection } from "@/lib/oauth/services/persistCursorConnection";
@@ -29,7 +28,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -43,7 +42,7 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(cursorImportSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { accessToken, machineId, refreshToken } = validation.data;
 
@@ -99,7 +98,7 @@ export async function POST(request: Request) {
 
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: {
         id: connection.id,
@@ -109,7 +108,7 @@ export async function POST(request: Request) {
     });
   } catch (error: unknown) {
     console.error("Cursor import token error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -124,7 +123,7 @@ export async function GET(request: Request) {
   const cursorService = new CursorService();
   const instructions = cursorService.getTokenStorageInstructions();
 
-  return NextResponse.json({
+  return Response.json({
     provider: "cursor",
     method: "import_token",
     instructions,

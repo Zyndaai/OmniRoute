@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/db/settings";
 import { updateComboDefaultsSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -42,7 +41,7 @@ export async function GET(request: Request) {
     const settings: any = await getSettings();
     const comboDefaults = sanitizeComboRuntimeConfig(settings.comboDefaults);
     const providerOverrides = sanitizeProviderOverrides(settings.providerOverrides);
-    return NextResponse.json({
+    return Response.json({
       comboDefaults:
         Object.keys(comboDefaults).length > 0
           ? comboDefaults
@@ -63,7 +62,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error fetching combo defaults:", error);
-    return NextResponse.json({ error: "Failed to fetch combo defaults" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch combo defaults" }, { status: 500 });
   }
 }
 
@@ -79,7 +78,7 @@ export async function PATCH(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -93,7 +92,7 @@ export async function PATCH(request: Request) {
   try {
     const validation = validateBody(updateComboDefaultsSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body = validation.data;
 
@@ -107,7 +106,7 @@ export async function PATCH(request: Request) {
       const currentSettings: any = await getSettings();
       if (currentSettings?.hidePaidModels === true) {
         if (isPaidModelTarget(body.comboDefaults.handoffModel) === "paid") {
-          return NextResponse.json(
+          return Response.json(
             {
               error: {
                 code: "PAID_MODEL_TARGET_BLOCKED",
@@ -131,12 +130,12 @@ export async function PATCH(request: Request) {
     }
 
     const settings: any = await updateSettings(updates);
-    return NextResponse.json({
+    return Response.json({
       comboDefaults: sanitizeComboRuntimeConfig(settings.comboDefaults),
       providerOverrides: sanitizeProviderOverrides(settings.providerOverrides),
     });
   } catch (error) {
     console.log("Error updating combo defaults:", error);
-    return NextResponse.json({ error: "Failed to update combo defaults" }, { status: 500 });
+    return Response.json({ error: "Failed to update combo defaults" }, { status: 500 });
   }
 }

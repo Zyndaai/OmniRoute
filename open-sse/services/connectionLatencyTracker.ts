@@ -45,7 +45,7 @@ export interface ConnectionLatencyStats {
 
 type LatencyStore = Map<string, LatencySample[]>;
 
-// globalThis survives Next.js dev module reloads, so every importer shares one store.
+// globalThis survives dev-server module re-evaluation, so every importer shares one store.
 const STORE_KEY = "__omnirouteConnectionLatencyStore";
 const globalScope = globalThis as typeof globalThis & { [STORE_KEY]?: LatencyStore };
 

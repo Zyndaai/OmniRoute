@@ -22,7 +22,7 @@ globalThis.ResizeObserver ??= class {
 } as unknown as typeof ResizeObserver;
 
 const stableT = (key: string) => key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => stableT,
 }));
 

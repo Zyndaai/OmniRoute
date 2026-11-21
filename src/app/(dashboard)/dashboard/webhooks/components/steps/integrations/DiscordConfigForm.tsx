@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import Input from "@/shared/components/Input";
 

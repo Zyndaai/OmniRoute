@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { BrowserRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -15,7 +16,7 @@ beforeAll(() => {
 
 import enMessages from "@/i18n/messages/en.json";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns: string = "common") => {
     const bag = ((enMessages as Record<string, unknown>)[ns] || {}) as Record<string, string>;
     const translate = (key: string, params?: Record<string, unknown>) => {
@@ -99,7 +100,11 @@ describe("ModelCatalogPage", () => {
     );
 
     act(() => {
-      root.render(<ModelCatalogPage />);
+      root.render(
+        <BrowserRouter>
+          <ModelCatalogPage />
+        </BrowserRouter>
+      );
     });
     await flush();
 
@@ -138,7 +143,11 @@ describe("ModelCatalogPage", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
 
     act(() => {
-      root.render(<ModelCatalogPage />);
+      root.render(
+        <BrowserRouter>
+          <ModelCatalogPage />
+        </BrowserRouter>
+      );
     });
     await flush();
 

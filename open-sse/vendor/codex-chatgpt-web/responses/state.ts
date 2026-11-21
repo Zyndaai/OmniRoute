@@ -464,7 +464,7 @@ export function rememberResponseState(
   dirtyStateIds.add(response.id);
   pruneResponses();
   // Forced ChatGPT Web Codex continuations chain on the next HTTP request within
-  // milliseconds. Debouncing that write left other Next.js isolates (and the next
+  // milliseconds. Debouncing that write left other server processes (and the next
   // hop) looking at an empty snapshot and 409ing a valid previous_response_id.
   if (opts?.force) persistNow(snapshotPath());
   else schedulePersist();

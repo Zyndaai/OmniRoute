@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 // proxy_logs keeps the HTTP status the provider actually returned, next to the textual
-// status column. Persistence only runs in local mode (!isCloud && !isBuildPhase), which a
+// status column. Persistence only runs in local mode (!isCloud), which a
 // fresh DATA_DIR keeps.
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-proxy-upstream-status-"));
 process.env.DATA_DIR = TEST_DATA_DIR;

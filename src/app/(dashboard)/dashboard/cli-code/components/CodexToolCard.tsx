@@ -1,12 +1,10 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
 import CliStatusBadge from "./CliStatusBadge";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { normalizeCodexBaseUrl, type CodexWireApi } from "@/shared/utils/codexBaseUrl";

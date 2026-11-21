@@ -5,7 +5,6 @@
  *       new destination needs no UI change.
  */
 
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { describeLogExportDestinationTypes } from "@/lib/logExport/registry";
@@ -15,9 +14,9 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    return NextResponse.json({ types: describeLogExportDestinationTypes() });
+    return Response.json({ types: describeLogExportDestinationTypes() });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to list log export destination types" },
       { status: 500 }
     );

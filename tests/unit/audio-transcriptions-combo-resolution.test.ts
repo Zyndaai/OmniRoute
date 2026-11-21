@@ -120,6 +120,8 @@ test("an unknown bare name is still rejected with the format hint", async () => 
 
 const { updateSettings } = await import("../../src/lib/db/settings.ts");
 
+let aliasAudioNodeCreated = false;
+
 for (const [name, settings, requested] of [
   ["exact", { modelAliases: { "client-stt": "alias-audio/whisper-1" } }, "client-stt"],
   [
@@ -129,14 +131,18 @@ for (const [name, settings, requested] of [
   ],
 ] as const) {
   test(`settings ${name} alias preserves the multipart upload`, async () => {
-    await createProviderNode({
-      type: "openai-compatible",
-      name: "Alias audio",
-      prefix: "alias-audio",
-      apiType: "audio-transcriptions",
-      authType: "none",
-      baseUrl: "http://localhost:19999/v1",
-    });
+    // provider_nodes_prefix_uq: the shared node may only be created once per database.
+    if (!aliasAudioNodeCreated) {
+      await createProviderNode({
+        type: "openai-compatible",
+        name: "Alias audio",
+        prefix: "alias-audio",
+        apiType: "audio-transcriptions",
+        authType: "none",
+        baseUrl: "http://localhost:19999/v1",
+      });
+      aliasAudioNodeCreated = true;
+    }
     await updateSettings({ modelAliases: {}, wildcardAliases: [], ...settings });
     let sent: FormData | undefined;
     globalThis.fetch = (async (_input, init) => {

@@ -2,7 +2,7 @@
  * Static guard tests for Hard Rule #12 — error sanitization in /api/plugins routes.
  *
  * Every `/api/plugins/**` route MUST:
- *   1. NOT return raw `err.message` / `err.stack` in any NextResponse.json body.
+ *   1. NOT return raw `err.message` / `err.stack` in any Response.json body.
  *   2. Import and use `buildErrorBody` from `@omniroute/open-sse/utils/error`.
  *
  * See docs/security/ERROR_SANITIZATION.md and CLAUDE.md hard rule #12.
@@ -49,13 +49,13 @@ const PLUGIN_ROUTES: Array<{ rel: string; label: string }> = [
 ];
 
 for (const { rel, label } of PLUGIN_ROUTES) {
-  test(`${label}: does NOT contain raw err.message in NextResponse.json body`, () => {
+  test(`${label}: does NOT contain raw err.message in Response.json body`, () => {
     const src = readRoute(rel);
 
-    // Pattern: NextResponse.json({ error: err.message } — the raw anti-pattern
+    // Pattern: Response.json({ error: err.message } — the raw anti-pattern
     assert.ok(
-      !/NextResponse\.json\(\s*\{[^}]*error:\s*err\.message/.test(src),
-      `${rel}: must not contain NextResponse.json({ error: err.message, ... })`
+      !/Response.json\(\s*\{[^}]*error:\s*err\.message/.test(src),
+      `${rel}: must not contain Response.json({ error: err.message, ... })`
     );
 
     // Broader check: err.message must not appear anywhere in a response body context
@@ -69,7 +69,7 @@ for (const { rel, label } of PLUGIN_ROUTES) {
       if (/log\.(error|warn|info|debug)/.test(line)) continue;
 
       // Flag err.message appearing on non-log lines inside response-building context
-      if (/err\.message/.test(line) && /NextResponse\.json|return.*json\(/.test(line)) {
+      if (/err\.message/.test(line) && /Response.json|return.*json\(/.test(line)) {
         assert.fail(
           `${rel} line ${i + 1}: raw err.message found in response body:\n  ${line.trim()}`
         );
@@ -85,7 +85,7 @@ for (const { rel, label } of PLUGIN_ROUTES) {
       if (/console\.(error|warn|log|debug|info)/.test(line)) continue;
       if (/logger\.(error|warn|log|debug|info)/.test(line)) continue;
       if (/log\.(error|warn|info|debug)/.test(line)) continue;
-      if (/err\.stack/.test(line) && /NextResponse\.json|return.*json\(/.test(line)) {
+      if (/err\.stack/.test(line) && /Response.json|return.*json\(/.test(line)) {
         assert.fail(
           `${rel} line ${i + 1}: raw err.stack found in response body:\n  ${line.trim()}`
         );

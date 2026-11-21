@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, type LoaderFunctionArgs } from "react-router";
 
 /**
  * Root entry. Zed's native-app sign-in always redirects the browser to the
@@ -8,24 +8,14 @@ import { redirect } from "next/navigation";
  * /callback relay (which postMessages it to the waiting OAuth modal) instead of
  * the plain /dashboard redirect below, which would drop the query string.
  */
-export default async function InitPage({
-  searchParams,
-}: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const params = (await searchParams) || {};
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string") {
-      query.set(key, value);
-    } else if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === "string") query.append(key, item);
-      }
-    }
-  }
+export function loader({ request }: LoaderFunctionArgs) {
+  const query = new URL(request.url).searchParams;
   if (query.get("user_id") && query.get("access_token")) {
-    redirect(`/callback?${query.toString()}`);
+    throw redirect(`/callback?${query.toString()}`, 307);
   }
-  redirect("/dashboard");
+  throw redirect("/dashboard", 307);
+}
+
+export default function InitPage() {
+  return null;
 }

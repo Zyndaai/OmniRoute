@@ -6,7 +6,7 @@ import arMessages from "../../../src/i18n/messages/ar.json";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => Object.assign((key: string) => key, { has: () => false }),
 }));
 

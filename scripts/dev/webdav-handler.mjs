@@ -494,8 +494,7 @@ function buildEntryHref(baseHref, relativePath, isDir) {
 function handleOptions(req, res) {
   res.writeHead(200, {
     DAV: "1, 2",
-    Allow:
-      "OPTIONS, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY, PROPFIND, LOCK, UNLOCK",
+    Allow: "OPTIONS, GET, HEAD, PUT, DELETE, MKCOL, MOVE, COPY, PROPFIND, LOCK, UNLOCK",
     "MS-Author-Via": "DAV",
     "Content-Length": "0",
   });
@@ -897,11 +896,11 @@ function handleUnlock(req, res) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Entry point called from standalone-server-ws.mjs before forwarding to Next.
+ * Entry point called by the launcher (run-server.mjs) before forwarding to the app.
  *
  * @param {import("node:http").IncomingMessage} req
  * @param {import("node:http").ServerResponse} res
- * @returns {boolean}  true if the request was handled (stop); false to forward to Next.
+ * @returns {boolean}  true if the request was handled (stop); false to forward to the app.
  */
 export async function maybeHandleWebdav(req, res) {
   const url = req.url || "";

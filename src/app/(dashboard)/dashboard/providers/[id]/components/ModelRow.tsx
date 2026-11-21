@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 /**
  * ModelRow — Issue #3501 Phase 1e

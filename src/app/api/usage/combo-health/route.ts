@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { buildComboHealthResponse } from "@/lib/usage/comboHealth";
@@ -20,7 +19,7 @@ export async function GET(request: Request) {
     });
 
     if (!parsedQuery.success) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: parsedQuery.error.issues[0]?.message ?? "Invalid query parameters",
         },
@@ -30,12 +29,12 @@ export async function GET(request: Request) {
 
     const response = await buildComboHealthResponse(parsedQuery.data);
     if (parsedQuery.data.comboId && response.combos.length === 0) {
-      return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+      return Response.json({ error: "Combo not found" }, { status: 404 });
     }
 
-    return NextResponse.json(response);
+    return Response.json(response);
   } catch (error) {
     console.error("Error fetching combo health:", error);
-    return NextResponse.json({ error: "Failed to fetch combo health" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch combo health" }, { status: 500 });
   }
 }

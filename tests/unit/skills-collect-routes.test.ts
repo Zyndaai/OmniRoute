@@ -21,7 +21,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 // ── DB / auth setup ───────────────────────────────────────────────────────────
 
@@ -87,14 +86,6 @@ function makeRequest(
   });
 }
 
-// GET/POST /api/github-skills and GET /api/skills/collect/detect are typed as
-// NextRequest; POST /api/skills/collect/install is typed as plain Request. A
-// standard Request satisfies every property NextRequest handlers actually read
-// (method/url/headers/json()) — the same cast pattern as tests/unit/a2a-enabled-route.test.ts.
-function asNextRequest(req: Request): NextRequest {
-  return req as unknown as NextRequest;
-}
-
 function assertNoStackTrace(message: string) {
   assert.ok(
     !message.match(/\bat \/|\bat file:\/\//),
@@ -114,7 +105,7 @@ test("GET /api/github-skills — 401/403 when auth is required and no token prov
   process.env.INITIAL_PASSWORD = "test-password-requires-login";
 
   const req = makeRequest("GET", "http://localhost/api/github-skills");
-  const res = await githubSkillsRoute.GET(asNextRequest(req));
+  const res = await githubSkillsRoute.GET(req);
 
   assert.ok(
     res.status === 401 || res.status === 403,
@@ -132,7 +123,7 @@ test("POST /api/github-skills — 401/403 when auth is required and no token pro
   const req = makeRequest("POST", "http://localhost/api/github-skills", {
     repoName: "user/repo",
   });
-  const res = await githubSkillsRoute.POST(asNextRequest(req));
+  const res = await githubSkillsRoute.POST(req);
 
   assert.ok(
     res.status === 401 || res.status === 403,
@@ -142,7 +133,7 @@ test("POST /api/github-skills — 401/403 when auth is required and no token pro
 
 test("GET /api/github-skills — 200 happy path when auth is not required", async () => {
   const req = makeRequest("GET", "http://localhost/api/github-skills?minStars=1&maxResults=5");
-  const res = await githubSkillsRoute.GET(asNextRequest(req));
+  const res = await githubSkillsRoute.GET(req);
 
   assert.equal(res.status, 200);
   const body = (await res.json()) as { skills: unknown[]; total: number };
@@ -152,7 +143,7 @@ test("GET /api/github-skills — 200 happy path when auth is not required", asyn
 
 test("POST /api/github-skills — 400 when repoName is missing", async () => {
   const req = makeRequest("POST", "http://localhost/api/github-skills", {});
-  const res = await githubSkillsRoute.POST(asNextRequest(req));
+  const res = await githubSkillsRoute.POST(req);
   assert.equal(res.status, 400);
 });
 
@@ -161,7 +152,7 @@ test("POST /api/github-skills — 200 plans install for a valid repoName", async
     repoName: "user/skill-example",
     targets: ["claude"],
   });
-  const res = await githubSkillsRoute.POST(asNextRequest(req));
+  const res = await githubSkillsRoute.POST(req);
   assert.equal(res.status, 200);
   const body = (await res.json()) as { results: { target: string; action: string }[] };
   assert.equal(body.results[0].action, "planned");
@@ -175,7 +166,7 @@ test("GET /api/skills/collect/detect — 401/403 when auth is required and no to
   process.env.INITIAL_PASSWORD = "test-password-requires-login";
 
   const req = makeRequest("GET", "http://localhost/api/skills/collect/detect");
-  const res = await detectRoute.GET(asNextRequest(req));
+  const res = await detectRoute.GET(req);
 
   assert.ok(
     res.status === 401 || res.status === 403,
@@ -189,7 +180,7 @@ test("GET /api/skills/collect/detect — 401/403 when auth is required and no to
 
 test("GET /api/skills/collect/detect — 200 happy path when auth is not required", async () => {
   const req = makeRequest("GET", "http://localhost/api/skills/collect/detect");
-  const res = await detectRoute.GET(asNextRequest(req));
+  const res = await detectRoute.GET(req);
 
   assert.equal(res.status, 200);
   const body = (await res.json()) as {

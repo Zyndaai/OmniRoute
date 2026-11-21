@@ -335,6 +335,10 @@ async function syncProjectEnv() {
  * No-op unless the optionals were installed (`--include=optional`). See colocateOptionals.mjs.
  */
 async function ensureOptionalPackages() {
+  // Only a published dist/ bundle has its own node_modules to fill. The React Router build
+  // (.build/app) resolves packages from the root node_modules, so a source checkout or the
+  // Docker image must not grow a stray dist/ here.
+  if (!hasStandaloneAppBundle(ROOT)) return;
   try {
     colocateOptionalPackages({ rootDir: ROOT, log: (m) => console.log(m) });
   } catch (err) {
@@ -374,6 +378,8 @@ async function verifyDevNativeModules() {
 }
 
 async function ensureStandaloneRuntimePackages() {
+  // Same as ensureOptionalPackages: without a dist/ bundle there is nothing to copy into.
+  if (!hasStandaloneAppBundle(ROOT)) return;
   for (const packageName of ["sql.js", "node-machine-id"]) {
     let source;
     try {

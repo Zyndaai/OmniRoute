@@ -11,7 +11,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-oauth-region-ssrf-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -29,7 +28,7 @@ async function deviceCode(provider: string, region: string) {
     `http://localhost/api/oauth/${provider}/device-code` +
     `?startUrl=${encodeURIComponent("https://d-1234567890.awsapps.com/start")}` +
     `&region=${encodeURIComponent(region)}`;
-  return route.GET(new Request(url) as unknown as NextRequest, {
+  return route.GET(new Request(url) as unknown as Request, {
     params: Promise.resolve({ provider, action: "device-code" }),
   });
 }

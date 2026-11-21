@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useModelVisibilityHandlers — Issue #3501 Phase 1l
  *

@@ -1,7 +1,5 @@
-"use client";
-
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import {
   Table,
@@ -100,7 +98,7 @@ interface BatchListTabProps {
 // A-1 / R2 — Derive Provider label from model id (no provider field on BatchRecord).
 // Heuristic-only display; no filter side-effect. Vendor names are proper nouns and
 // stay un-translated; "other" / "unknown" return discriminators so the call-site can
-// translate via t() — keeps function pure & free of next-intl coupling.
+// translate via t() — keeps function pure & free of translation-library coupling.
 type ProviderLabel = "OpenAI" | "Anthropic" | "Gemini" | "other" | "unknown";
 function deriveProvider(model: string | null | undefined): ProviderLabel {
   if (!model) return "unknown";
@@ -350,7 +348,6 @@ export default function BatchListTab({
 
     try {
       while (hasMore && iterations < MAX_DELETE_ITERATIONS) {
-        // Use the correct /api/ prefix for Next.js routes
         const res = await fetch("/api/v1/batches/delete-completed", { method: "DELETE" });
 
         if (!res.ok) {

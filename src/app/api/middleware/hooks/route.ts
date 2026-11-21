@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   getAllMiddlewareHooks,
@@ -44,20 +43,20 @@ export async function GET(request: Request) {
     if (hookName) {
       const hook = await getMiddlewareHook(hookName);
       if (!hook) {
-        return NextResponse.json({ error: "Hook not found" }, { status: 404 });
+        return Response.json({ error: "Hook not found" }, { status: 404 });
       }
 
       const result: Record<string, unknown> = { hook };
       if (includeLogs) {
         result.logs = getHookLogs(hookName, logLimit);
       }
-      return NextResponse.json(result);
+      return Response.json(result);
     }
 
     const hooks = await getAllMiddlewareHooks();
     const registryHooks = getAllHooks();
 
-    return NextResponse.json({
+    return Response.json({
       hooks,
       registryStats: {
         dbCount: hooks.length,
@@ -66,7 +65,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[API] GET /api/middleware/hooks error:", error);
-    return NextResponse.json({ error: "Failed to list hooks" }, { status: 500 });
+    return Response.json({ error: "Failed to list hooks" }, { status: 500 });
   }
 }
 
@@ -83,14 +82,14 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(createHookSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const body: CreateHookRequest = validation.data;
 
     // Check for duplicate
     const existing = await getMiddlewareHook(body.name);
     if (existing) {
-      return NextResponse.json({ error: `Hook "${body.name}" already exists` }, { status: 409 });
+      return Response.json({ error: `Hook "${body.name}" already exists` }, { status: 409 });
     }
 
     const hookConfig: HookConfig = {
@@ -111,10 +110,10 @@ export async function POST(request: Request) {
     // Register in runtime registry
     registerHook(saved);
 
-    return NextResponse.json({ hook: saved }, { status: 201 });
+    return Response.json({ hook: saved }, { status: 201 });
   } catch (error: any) {
     console.error("[API] POST /api/middleware/hooks error:", error);
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to create hook" },
       { status: 500 }
     );

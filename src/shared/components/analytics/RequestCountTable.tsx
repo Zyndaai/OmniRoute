@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * RequestCountTable — pure presentational table for #4009.
  * Split out of RequestCountByProviderDateTable to keep that container under

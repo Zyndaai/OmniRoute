@@ -73,14 +73,11 @@ function solveSynchronously({ challenge, prefix, difficulty }: ValidatedChalleng
   return findDeepSeekPowNonce(prefix, challenge, difficulty);
 }
 
-// Anchored on process.cwd(), never import.meta.url: the production standalone bundle
-// freezes import.meta.url to the build-machine path (an app-wide gotcha), so an
-// import.meta.url-relative fallback here was silently dead in production. It also gave
-// this function two return branches, one of which contained a `new URL(literal,
-// import.meta.url)` construct -- Turbopack's dev-mode static worker-chunk detector
-// partially resolves that pattern independent of which branch actually runs, producing
-// an inconsistent module-graph node and crashing turbo-tasks on startup (bisected to
-// 657d3a484). A single non-branching path resolution avoids both problems.
+// Anchored on process.cwd(), never import.meta.url: the production bundle places this
+// module in a build output directory, so import.meta.url-relative paths do not point at
+// the source tree. A `new URL(literal, import.meta.url)` construct would also be picked
+// up by the bundler's static worker/asset detection regardless of which branch runs.
+// A single non-branching path resolution avoids both problems.
 function resolveWorkerPath(): string {
   const workerPath = path.join(process.cwd(), "open-sse/lib/deepseek-pow-worker.mjs");
   if (!existsSync(workerPath)) {

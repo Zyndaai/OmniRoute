@@ -97,14 +97,14 @@ Simple Browser instead of an external browser. Embedding is **opt-in on the serv
 `X-Frame-Options: DENY`. The API surface (`/api`, `/v1`, `/v1beta`, `/a2a`, `/healthz`) keeps the
 strict headers either way.
 
-> ⚠️ **It is a build-time flag, not a runtime one.** Next.js compiles `headers()` into the route
-> manifest, so `next.config.mjs` reads the variable while the bundle is built
-> (`next.config.mjs` → `resolveDashboardEmbedMode`, `scripts/build/dashboardEmbed.mjs`).
+> ⚠️ **It is a build-time flag, not a runtime one.** `vite.config.ts` inlines the variable into
+> the server bundle while it is built, and `src/server/http/securityHeaders.ts` reads that
+> inlined value.
 > Exporting it in front of an already-built server changes nothing — the headers are baked.
 
 ```bash
 # the variable has to be present on the BUILD command
-DASHBOARD_ALLOW_EMBED=vscode npm run build        # or npm run build:release
+DASHBOARD_ALLOW_EMBED=vscode npm run build
 npm start
 ```
 

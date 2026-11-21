@@ -81,7 +81,6 @@ export const LOCAL_ONLY_API_PREFIXES: ReadonlyArray<string> = [
   "/api/plugins/", // plugins: load/execute via worker_threads + child_process (Hard Rules #15 + #17)
   "/api/plugins", // bare path: GET list + POST install also trigger plugin loading
   "/api/middleware/", // SECURITY_AUDIT M8: middleware hooks compile+run arbitrary JS via new vm.Script (src/lib/middleware/registry.ts) on the request hot path — same code-exec class as /api/plugins/, so loopback-gate it for parity (Hard Rules #15 + #17)
-  "/api/system/version", // auto-update: spawns git checkout + npm install — RCE-via-tunnel surface (Hard Rules #15 + #17, found by 6A.8 route-guard gate)
   "/api/db-backups/exportAll", // spawns tar for export archive (Hard Rules #15 + #17, found by 6A.8 route-guard gate)
   "/api/db/health", // runManagedDbHealthCheck() forks native diagnostics into a child process via healthCheckRunner.ts (Hard Rules #15 + #17, #13717)
   "/api/local/", // T-12: 1-click local service launchers (Redis today; spawns podman/docker) — loopback-enforced by isLocalRequestAllowed() in src/lib/security/localEndpoints.ts (Hard Rules #15 + #17)
@@ -109,11 +108,11 @@ export const LOCAL_ONLY_API_PREFIXES: ReadonlyArray<string> = [
  * parameter, so a flat prefix in `LOCAL_ONLY_API_PREFIXES` cannot target them
  * without over-broadening (e.g. locking the entire `/api/providers/` subtree,
  * which remote dashboards legitimately use for provider CRUD). These are matched
- * by regex instead against the concrete resolved path — which is already
- * `request.nextUrl.pathname` (see `runAuthzPipeline`/`classifyRoute`), the
- * SAME string Next.js's own file-based router uses to resolve the `[id]`
- * dynamic segment, so there is no decode/normalization mismatch between what
- * this regex sees and what actually gets dispatched to the route handler.
+ * by regex instead against the concrete resolved path — the decoded path
+ * `src/server/http/requestPath.ts` hands to `runAuthzPipeline`/`classifyRoute`,
+ * the SAME string React Router matches to resolve the `[id]` dynamic segment,
+ * so there is no decode/normalization mismatch between what this regex sees
+ * and what actually gets dispatched to the route handler.
  *
  *   - `POST /api/providers/{id}/login` launches a headful Playwright Chromium
  *     (a child process) to drive a web-cookie login. Loopback enforcement must
@@ -207,7 +206,7 @@ export const ALWAYS_PROTECTED_API_PATHS: ReadonlyArray<string> = [
   // it carries no dynamic segment.
   "/api/providers/agy-auth/apply-local",
   // Obsidian integration. POST /webdav points the WebDAV file service — served by
-  // the custom Node layer BEFORE Next.js, outside this pipeline — at a
+  // the launcher's Node layer BEFORE the request handler, outside this pipeline — at a
   // caller-chosen root and echoes freshly minted, reusable Basic credentials;
   // DELETE /webdav rotates/clears them; the parent POST stores the Obsidian REST
   // API token. GHSA-62vw only masked the GET password reveal, leaving credential
@@ -362,9 +361,6 @@ export function isPrivateLanHost(hostHeader: string | null): boolean {
  * gate that probe at its call site on `getRequestPeerLocality()`.
  *
  * Current exemptions:
- *   /api/system/version — GET reads package.json + npm registry; only POST
- *   triggers the auto-update flow (spawns git checkout + npm install + pm2).
- *   Hard Rules #15/#17 still apply to POST.
  *   /api/tunnels/cloudflared — GET reports tunnel status; only POST starts/stops
  *   the cloudflared process (#11531). The status read resolves the binary with a
  *   PATH lookup (`which cloudflared`), which runs only for loopback/LAN callers:
@@ -379,7 +375,6 @@ export function isPrivateLanHost(hostHeader: string | null): boolean {
  *   and 9router also supports `?reveal=key` (plaintext service credential).
  */
 export const LOCAL_ONLY_API_GET_EXEMPTIONS: ReadonlySet<string> = new Set([
-  "/api/system/version",
   // The two read-only version-manager routes only report state; every other route under
   // /api/version-manager/ installs or spawns the CLIProxyAPI binary.
   "/api/version-manager/status",

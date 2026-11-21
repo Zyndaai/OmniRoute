@@ -2,8 +2,8 @@
  * Static assertions for the /dashboard/resilience/connections page.
  *
  * Source-text greps enforce the plan's structural invariants without spinning
- * up the Next.js runtime — these are the "must hold by construction" facts:
- * force-dynamic rendering, LOCAL_ONLY gating, i18n-only labels, DataTable
+ * up a server — these are the "must hold by construction" facts:
+ * LOCAL_ONLY gating, i18n-only labels, DataTable
  * usage, stoppedRef pattern, optional-chaining on breaker, single-provider
  * data ownership, and the absence of banned patterns (ErrorBanner, rowClassName,
  * getJobRegistry coupling).
@@ -33,13 +33,10 @@ const componentFiles = [
   "src/app/(dashboard)/dashboard/resilience/connections/components/ConnectionDetail.tsx",
 ];
 
-test("page.tsx exports force-dynamic (no stale prerender)", () => {
+test("page.tsx exports only the default component (route modules ship to the browser)", () => {
   const src = read(componentFiles[0]);
-  assert.match(
-    src,
-    /export\s+const\s+dynamic\s*=\s*"force-dynamic"/,
-    "force-dynamic export missing"
-  );
+  assert.doesNotMatch(src, /export\s+const\s+dynamic\b/, "segment config must not be exported");
+  assert.match(src, /export\s+default\s+function\s+ResilienceConnectionsPage\b/);
 });
 
 test("no getJobRegistry import in resilience page (wrong domain coupling)", () => {

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/db/providers";
 import { getCachedSettings } from "@/lib/db/readCache";
 import { buildHealthPayload } from "@/lib/monitoring/observability";
@@ -62,7 +61,7 @@ function publicHealthView(payload: unknown): Record<string, unknown> {
 }
 
 function serveHealthPayload(fullView: boolean, payload: unknown) {
-  return NextResponse.json(fullView ? payload : publicHealthView(payload));
+  return Response.json(fullView ? payload : publicHealthView(payload));
 }
 
 function scheduleHealthPayloadRefresh(): void {
@@ -144,7 +143,7 @@ export async function GET(request: Request) {
     return serveHealthPayload(fullView, withDeepHealth(payload, wantDeep));
   } catch (error) {
     console.error("[API] GET /api/monitoring/health error:", error);
-    return NextResponse.json({
+    return Response.json({
       status: "degraded",
       error: "Health check partially unavailable",
       timestamp: new Date().toISOString(),
@@ -358,7 +357,7 @@ async function rebuildHealthPayload(generation: number): Promise<unknown> {
  */
 export async function DELETE(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -373,13 +372,13 @@ export async function DELETE(request: Request) {
 
     console.log(`[API] DELETE /api/monitoring/health — Reset ${resetCount} circuit breakers`);
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: `Reset ${resetCount} circuit breaker(s) to healthy state`,
       resetCount,
     });
   } catch (error) {
     console.error("[API] DELETE /api/monitoring/health error:", error);
-    return NextResponse.json({ error: "Failed to reset circuit breakers" }, { status: 500 });
+    return Response.json({ error: "Failed to reset circuit breakers" }, { status: 500 });
   }
 }

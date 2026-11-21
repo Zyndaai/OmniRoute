@@ -7,11 +7,11 @@ test("login page performs full window.location navigation after authentication t
   const loginPagePath = path.resolve(process.cwd(), "src/app/login/page.tsx");
   const content = fs.readFileSync(loginPagePath, "utf8");
 
-  // Ensure router.push("/dashboard") is replaced with window.location.href
+  // A client-side navigation to /dashboard would race the new session cookie.
   assert.equal(
-    content.includes('router.push("/dashboard")'),
+    content.includes('navigate("/dashboard")'),
     false,
-    "LoginPage should not use router.push('/dashboard') after login"
+    "LoginPage should not use navigate('/dashboard') after login"
   );
   assert.equal(
     content.includes('window.location.href = withBasePath("/dashboard")'),

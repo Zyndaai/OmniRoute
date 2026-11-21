@@ -1,5 +1,3 @@
-"use client";
-
 import { Avatar as KitAvatar, type AvatarSize } from "@omniroute/ui-kit/avatar";
 
 interface AvatarProps {

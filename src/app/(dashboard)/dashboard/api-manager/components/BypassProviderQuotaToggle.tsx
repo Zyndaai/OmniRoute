@@ -1,8 +1,6 @@
-"use client";
-
 import Toggle from "@/shared/components/Toggle";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /**
  * "Bypass provider quota cutoffs" toggle for the API Key permissions modal.

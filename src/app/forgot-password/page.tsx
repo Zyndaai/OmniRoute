@@ -1,8 +1,6 @@
-"use client";
-
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
-
-import { useTranslations } from "next-intl";
 
 /**
  * Forgot Password Page — Phase 8.2
@@ -11,7 +9,6 @@ import { useTranslations } from "next-intl";
  * database reset.
  */
 
-import Link from "next/link";
 // Direct module imports, not the "@/shared/components" barrel (it ships the dashboard shell).
 import Card from "@/shared/components/Card";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
@@ -81,7 +78,7 @@ export default function ForgotPasswordPage() {
 
         <div className="text-center">
           <Link
-            href="/login"
+            to="/login"
             className="text-sm text-primary hover:underline inline-flex items-center gap-1"
           >
             <Icon name="arrow_back" size={16} />

@@ -1,10 +1,8 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { Button } from "@/shared/components";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 const DISMISS_STORAGE_KEY = "omniroute.cursorAgentNudgeDismissed";
 // Same-tab signal for the dismiss button, since writing localStorage doesn't

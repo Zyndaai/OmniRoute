@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 const read = (rel: string) =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 
-const instrumentation = read("../../src/instrumentation-node.ts");
+const instrumentation = read("../../src/server/boot.ts");
 
 test("credential health scheduler is started from the real Next.js instrumentation startup", () => {
   assert.match(

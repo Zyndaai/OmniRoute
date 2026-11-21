@@ -8,7 +8,7 @@ import { kitSelectOptions, kitSelectTriggers } from "../../helpers/kitSelect";
 
 import ModalityBridgeVideoTab from "@/app/(dashboard)/dashboard/settings/components/modalityBridge/ModalityBridgeVideoTab";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace?: string) => (key: string) =>
     namespace === "settings" && key === "degradationFull"
       ? "MISSING:settings.degradationFull"

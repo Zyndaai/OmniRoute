@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import { Card, Toggle } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export default function DebugModeCard() {
   const [debugMode, setDebugMode] = useState(true);

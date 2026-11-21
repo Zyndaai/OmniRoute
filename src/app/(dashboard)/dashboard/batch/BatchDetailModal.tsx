@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Icon from "@/shared/components/Icon";
 import Badge from "@/shared/components/Badge";
@@ -289,7 +287,7 @@ export default function BatchDetailModal({
               {actionError && (
                 <div role="alert" className="basis-full mt-1 text-xs text-error">
                   {/* actionError is an i18n key from the hook (e.g. "batchActionCancel").
-                    Cast is needed because next-intl types its arg as a specific union;
+                    Cast is needed because the translator types its arg as a specific union;
                     the hook guarantees this is always a valid message key. */}
                   {t(actionError as Parameters<typeof t>[0])}
                 </div>

@@ -11,7 +11,6 @@
  *   event: heartbeat — keep-alive, no meaningful data
  */
 
-import type { NextRequest } from "next/server";
 import { getSupervisor } from "@/lib/services/registry";
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import type { LogLine } from "@/lib/services/types";
@@ -57,7 +56,7 @@ function sseChunk(event: string, data: unknown): Uint8Array {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ name: string }> }) {
   const { name } = await params;
 
   const supervisor = await getOrInitNamedSupervisor(name);

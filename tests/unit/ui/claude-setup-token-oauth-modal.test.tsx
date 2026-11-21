@@ -14,7 +14,7 @@ const MESSAGES = vi.hoisted<Record<string, string>>(() => ({
   cancel: "Cancel",
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () =>
     Object.assign((key: string) => MESSAGES[key] ?? key, {
       rich: (key: string) => MESSAGES[key] ?? key,

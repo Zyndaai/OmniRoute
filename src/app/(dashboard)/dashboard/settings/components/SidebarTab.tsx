@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useCallback, useId } from "react";
 import {
   DndContext,
@@ -27,7 +25,7 @@ import { RadioGroup, RadioGroupItem } from "@omniroute/ui-kit/radio-group";
 import { Badge, Button, Card, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import { cn } from "@/shared/utils/cn";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   HIDDEN_SIDEBAR_GROUP_LABELS_SETTING_KEY,
   HIDEABLE_SIDEBAR_GROUP_IDS,

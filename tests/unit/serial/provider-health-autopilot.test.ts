@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 import { makeManagementSessionRequest } from "../../helpers/managementSession.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-health-autopilot-"));
@@ -420,7 +419,7 @@ test("provider health autopilot action rejects cross-site mutations", async () =
       },
     }
   );
-  const response = await authzPipeline.runAuthzPipeline(new NextRequest(rawRequest), {
+  const response = await authzPipeline.runAuthzPipeline(new Request(rawRequest), {
     enforce: true,
   });
 

@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import Icon from "@/shared/components/Icon";
 
@@ -47,7 +45,7 @@ function SummaryRow({
       <div className="flex items-center gap-2">
         {title}
         <Link
-          href={href}
+          to={href}
           className="rounded border border-border bg-bg-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:border-primary/40 hover:text-primary"
         >
           {badge}
@@ -122,7 +120,7 @@ export default function CompressionTokenSaverCard({
         <Icon name="info" size={16} className="mt-px" />
         <p>
           Turn these layers on/off and set their level in{" "}
-          <Link href="/dashboard/context/settings" className="text-primary hover:underline">
+          <Link to="/dashboard/context/settings" className="text-primary hover:underline">
             Compression Settings
           </Link>
           .

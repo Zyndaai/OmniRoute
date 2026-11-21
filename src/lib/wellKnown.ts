@@ -1,11 +1,9 @@
-import type { NextRequest } from "next/server";
-
 import { configuredPublicOrigins, resolvePublicOrigin } from "@/server/origin/publicOrigin";
 
 /**
  * Bind hosts that must never be advertised as a public address. A server
- * commonly binds `0.0.0.0` (all interfaces) / `::`, and Next.js standalone then
- * reports that wildcard host in `request.nextUrl.origin`. Advertising
+ * commonly binds `0.0.0.0` (all interfaces) / `::`, and the request URL then
+ * reports that wildcard host. Advertising
  * `http://0.0.0.0:20128/a2a` on the Agent Card hands peers an address they can
  * never route to (S2 follow-up — the request-origin fix previously still let a
  * `Host: 0.0.0.0` request leak the bind host into the card).
@@ -50,7 +48,7 @@ function stripTrailingSlash(value: string): string {
  * falls through to the next candidate, so the card can never advertise the bind
  * address even if the client supplied `Host: 0.0.0.0:20128`.
  */
-export function getBaseUrl(request?: NextRequest | null): string {
+export function getBaseUrl(request?: Request | null): string {
   const override = process.env.OMNIROUTE_BASE_URL?.trim();
   if (override && isRoutableOrigin(override)) return stripTrailingSlash(override);
 

@@ -8,7 +8,7 @@
 import React from "react";
 import axe from "axe-core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { JsonTreeExpandControls } from "@/shared/components/JsonTreeExpandControls";
 import { CallContentProvenanceBadges } from "@/shared/components/CallContentProvenanceBadges";
@@ -31,9 +31,9 @@ afterEach(() => {
 
 const wrap = (ui: React.ReactElement) =>
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+    <IntlProvider locale="en" timeZone="UTC" messages={messages}>
       {ui}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 
 async function runAxe(root: HTMLElement) {

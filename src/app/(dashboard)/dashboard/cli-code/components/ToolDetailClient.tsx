@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Skeleton } from "@omniroute/ui-kit/skeleton";
 import Badge from "@/shared/components/Badge";
@@ -298,7 +296,7 @@ export default function ToolDetailClient({ toolId, category }: ToolDetailClientP
         compact
         eyebrow={
           <Link
-            href={backCategory}
+            to={backCategory}
             className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-primary transition-colors"
           >
             <Icon name="arrow_back" size={16} />

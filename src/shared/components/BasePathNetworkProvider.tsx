@@ -1,5 +1,3 @@
-"use client";
-
 import { useInsertionEffect, type ReactNode } from "react";
 import { installBasePathFetch } from "@/shared/utils/basePathFetch";
 

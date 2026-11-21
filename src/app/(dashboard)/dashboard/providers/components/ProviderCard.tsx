@@ -1,13 +1,9 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { Link, useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 
 import { Badge, Button, Card, Modal, Toggle } from "@/shared/components";
 import ProviderTestSlideOver from "@/shared/components/ProviderTestSlideOver";
@@ -261,7 +257,7 @@ const ProviderCard = forwardRef<ProviderCardHandle, ProviderCardProps>(function 
   const t = useTranslations("providers");
   const tc = useTranslations("common");
   const tp = useTranslations("miniPlayground");
-  const router = useRouter();
+  const navigate = useNavigate();
   const kindLabel = (kind: string) => {
     const entry = KIND_LABEL_KEYS[kind];
     return entry ? providerText(t, entry.key, entry.fallback) : kind;
@@ -324,8 +320,8 @@ const ProviderCard = forwardRef<ProviderCardHandle, ProviderCardProps>(function 
     setRiskDetailsOpen(true);
   };
   const handleWarningBadgeActivate = useCallback(() => {
-    router.push(`/dashboard/providers/${providerId}`);
-  }, [router, providerId]);
+    navigate(`/dashboard/providers/${providerId}`);
+  }, [navigate, providerId]);
   const connected = Number(stats.connected || 0);
   const devinAgenticAuthenticated = useDevinAgenticAuthStatus(providerId === "devin-cli-agentic");
   const error = Number(stats.error || 0);
@@ -466,7 +462,7 @@ const ProviderCard = forwardRef<ProviderCardHandle, ProviderCardProps>(function 
     <div ref={innerRef} id={`provider-${providerId}`} className="flex flex-col h-full">
       <Link
         ref={linkElementRef}
-        href={`/dashboard/providers/${providerId}`}
+        to={`/dashboard/providers/${providerId}`}
         className="group flex-1 flex flex-col focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
         onClick={handleCardClick}
       >
@@ -507,13 +503,12 @@ const ProviderCard = forwardRef<ProviderCardHandle, ProviderCardProps>(function 
                     fallbackColor={provider.color}
                   />
                 ) : staticIconPath ? (
-                  <Image
+                  <img
                     src={staticIconPath}
                     alt={provider.name}
                     width={26}
                     height={26}
                     className="object-contain rounded-lg max-w-[26px] max-h-[26px]"
-                    sizes="26px"
                   />
                 ) : (
                   <ProviderIcon providerId={provider.id || providerId} size={24} type="color" />

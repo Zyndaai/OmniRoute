@@ -1,6 +1,5 @@
-"use client";
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { DataTableShell } from "@omniroute/ui-kit/data-table-shell";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@omniroute/ui-kit/table";
 import { TableLoadingState } from "@omniroute/ui-kit/table-loading";

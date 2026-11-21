@@ -1,5 +1,3 @@
-"use client";
-
 // CompressionPanel — the single-source engine-grid UI for compression.
 //
 // Renders the master on/off switch, one row per catalog engine (on/off + level +
@@ -8,12 +6,12 @@
 // a derived-pipeline preview, and the general settings (auto-trigger tokens +
 // preserve-system-prompt).
 //
-import Link from "next/link";
+import { Link } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations, useLocale } from "use-intl";
 // Import Card/Toggle/Button from their direct module paths rather than the @/shared/components
 // barrel: the barrel transitively pulls a heavy/Node-only module that hangs the
-// vitest/jsdom component test. Direct imports resolve identically under Next.js.
+// vitest/jsdom component test. Direct imports resolve identically in the app.
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Icon from "@/shared/components/Icon";
@@ -656,7 +654,7 @@ export default function CompressionPanel() {
                 <div className="flex items-center gap-2 text-sm font-medium text-text-main">
                   {engineLabel}
                   <Link
-                    href={`/dashboard/context/${id}`}
+                    to={`/dashboard/context/${id}`}
                     className="rounded border border-border bg-bg-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:border-primary/40 hover:text-primary"
                   >
                     {id}

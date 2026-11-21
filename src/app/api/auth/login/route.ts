@@ -1,8 +1,6 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import { getCachedSettings } from "@/lib/db/settings";
-import { cookies } from "next/headers";
+import { ResponseCookieJar, applyCookies, type CookieStore } from "@/lib/api/cookieJar";
 import {
   ensurePersistentManagementPasswordHash,
   getStoredManagementPassword,
@@ -10,7 +8,6 @@ import {
   verifyManagementPassword,
 } from "@/lib/auth/managementPassword";
 import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags";
-import { isNextBuildPhase } from "@/lib/buildPhase";
 import { loginSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import {
@@ -32,14 +29,11 @@ import {
 import { getRequestPeerLocality } from "@/shared/utils/apiAuth";
 
 /**
- * Whether the module-level missing-JWT_SECRET warning should fire. It is
- * suppressed while `next build` imports this route to collect page data, where
- * the secret is legitimately absent (the operator supplies it at container
- * start) and the FATAL wording is misleading rather than actionable (#16320).
- * The POST handler still fails closed when the secret is missing at runtime.
+ * Whether the module-level missing-JWT_SECRET warning should fire. The POST handler
+ * fails closed when the secret is missing.
  */
 function shouldWarnMissingJwtSecret(): boolean {
-  return !process.env.JWT_SECRET && !isNextBuildPhase();
+  return !process.env.JWT_SECRET;
 }
 
 // SECURITY: No hardcoded fallback — JWT_SECRET must be configured.
@@ -49,12 +43,13 @@ if (shouldWarnMissingJwtSecret()) {
 
 // Test seam for cookie store injection without affecting runtime behavior.
 export const authRouteInternals = {
-  getCookieStore: cookies,
+  getCookieStore: (request: Request): CookieStore | Promise<CookieStore> =>
+    new ResponseCookieJar(request),
   /** True when the module-level missing-JWT_SECRET warning should fire (#16320). */
   shouldWarnMissingJwtSecret,
 };
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const auditContext = getAuditRequestContext(request);
   // Slot reserved by the guard while the password is verified; released on every exit.
   let heldSlotKey: string | null | undefined;
@@ -73,7 +68,7 @@ export async function POST(request: NextRequest) {
         requestId: auditContext.requestId,
         metadata: { reason: "missing_jwt_secret" },
       });
-      return NextResponse.json(
+      return Response.json(
         { error: "Server misconfigured: JWT_SECRET not set. Contact administrator." },
         { status: 500 }
       );
@@ -83,7 +78,7 @@ export async function POST(request: NextRequest) {
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json(
+      return Response.json(
         {
           error: {
             message: "Invalid request",
@@ -97,11 +92,11 @@ export async function POST(request: NextRequest) {
     // Zod validation
     const validation = validateBody(loginSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const password = typeof validation.data.password === "string" ? validation.data.password : "";
     if (!password) {
-      return NextResponse.json({ error: "Invalid password payload" }, { status: 400 });
+      return Response.json({ error: "Invalid password payload" }, { status: 400 });
     }
     const settings = await getCachedSettings();
     const trustedPeerIp = process.env.OMNIROUTE_PEER_STAMP_TOKEN
@@ -127,7 +122,7 @@ export async function POST(request: NextRequest) {
         requestId: auditContext.requestId,
         metadata: { reason: "password_login_disabled_when_oidc_active" },
       });
-      return NextResponse.json(
+      return Response.json(
         { error: "Password login is disabled when OIDC is active. Please sign in with OIDC." },
         { status: 403 }
       );
@@ -147,7 +142,7 @@ export async function POST(request: NextRequest) {
         requestId: auditContext.requestId,
         metadata: { retryAfterSeconds: guardCheck.retryAfterSeconds || 0 },
       });
-      return NextResponse.json(
+      return Response.json(
         { error: "Too many failed attempts. Try again later." },
         {
           status: 429,
@@ -176,7 +171,7 @@ export async function POST(request: NextRequest) {
         requestId: auditContext.requestId,
         metadata: { reason: "missing_persisted_password" },
       });
-      return NextResponse.json(
+      return Response.json(
         { error: "No password configured. Complete onboarding first.", needsSetup: true },
         { status: 403 }
       );
@@ -214,7 +209,7 @@ export async function POST(request: NextRequest) {
           peerLocality: getRequestPeerLocality(request),
         },
       });
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "The management password is still set to the well-known default. " +
@@ -228,12 +223,13 @@ export async function POST(request: NextRequest) {
       const forceSecureCookie = process.env.AUTH_COOKIE_SECURE === "true";
       const forwardedProtoHeader = request.headers.get("x-forwarded-proto") || "";
       const forwardedProto = forwardedProtoHeader.split(",")[0].trim().toLowerCase();
-      const isHttpsRequest = forwardedProto === "https" || request.nextUrl?.protocol === "https:";
+      const isHttpsRequest =
+        forwardedProto === "https" || new URL(request.url).protocol === "https:";
       const useSecureCookie = forceSecureCookie || isHttpsRequest;
 
       const token = await mintDashboardSessionToken(getDashboardJwtSecret()!);
 
-      const cookieStore = await authRouteInternals.getCookieStore();
+      const cookieStore = await authRouteInternals.getCookieStore(request);
       cookieStore.set("auth_token", token, {
         httpOnly: true,
         secure: useSecureCookie,
@@ -260,7 +256,7 @@ export async function POST(request: NextRequest) {
       });
 
       clearLoginAttempts(lockoutKey);
-      return NextResponse.json({ success: true });
+      return applyCookies(cookieStore, Response.json({ success: true }));
     }
 
     const failureDecision = recordLoginFailure(lockoutKey, { enabled: bruteForceEnabled });
@@ -282,7 +278,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!failureDecision.allowed) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Too many failed attempts. Try again later." },
         {
           status: 429,
@@ -291,7 +287,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+    return Response.json({ error: "Invalid password" }, { status: 401 });
   } catch (error) {
     console.error("[AUTH] Login failed:", error);
     await logAuditEvent({
@@ -306,7 +302,7 @@ export async function POST(request: NextRequest) {
         message: error instanceof Error ? error.message : "unknown_error",
       },
     });
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   } finally {
     if (holdsSlot) endLoginAttempt(heldSlotKey);
   }

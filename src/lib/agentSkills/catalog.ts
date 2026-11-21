@@ -198,15 +198,13 @@ export async function fetchSkillMarkdown(id: string): Promise<SkillMarkdown> {
     // File not present locally — fall through to GitHub
   }
 
-  // 2. Fetch from GitHub raw (with Next.js revalidate cache if available)
+  // 2. Fetch from GitHub raw
   const skill = getSkillById(id);
   if (!skill) {
     throw new Error(`Skill not found in catalog: ${id}`);
   }
 
-  const response = await fetch(skill.rawUrl, {
-    next: { revalidate: 3600 },
-  } as unknown as RequestInit);
+  const response = await fetch(skill.rawUrl);
 
   if (!response.ok) {
     throw new Error(`GitHub raw fetch failed: HTTP ${response.status} for ${skill.rawUrl}`);

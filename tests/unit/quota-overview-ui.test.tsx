@@ -3,12 +3,12 @@ import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 const now = Date.parse("2099-01-01T00:00:00Z");
 const connections = ["codex", "claude", "antigravity"].map((provider, i) => ({
   id: `a${i}`,
@@ -62,7 +62,7 @@ const accounts = Object.fromEntries(
 function mount(locale: string, cs = connections, projected = accounts) {
   const m = locale === "en" ? en : ar;
   return render(
-    <NextIntlClientProvider
+    <IntlProvider
       locale={locale}
       messages={{ usage: m.usage, common: m.common }}
       timeZone="UTC"
@@ -79,7 +79,7 @@ function mount(locale: string, cs = connections, projected = accounts) {
         emailsVisible
         renderCard={(c) => <button>{c.id} detail action</button>}
       />
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 afterEach(() => {

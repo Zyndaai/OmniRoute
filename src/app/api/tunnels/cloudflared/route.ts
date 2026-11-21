@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getRequestPeerLocality, isAuthenticated } from "@/shared/utils/apiAuth";
 import {
@@ -13,17 +12,15 @@ import {
 } from "@/lib/cloudflaredTunnel";
 import { toPublicSafeTunnelError } from "@/lib/api/publicSafeTunnelError";
 
-export const dynamic = "force-dynamic";
-
 const actionSchema = z.object({
   action: z.enum(["enable", "disable"]),
 });
 
 function unauthorized() {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return Response.json({ error: "Unauthorized" }, { status: 401 });
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
     return unauthorized();
   }
@@ -35,9 +32,9 @@ export async function GET(request: NextRequest) {
     const status = await getCloudflaredTunnelStatus({
       allowLocalProbe: getRequestPeerLocality(request) !== "remote",
     });
-    return NextResponse.json(status);
+    return Response.json(status);
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(
         error,
         "Failed to load the cloudflared tunnel status.",
@@ -48,7 +45,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
     return unauthorized();
   }
@@ -57,7 +54,7 @@ export async function POST(request: NextRequest) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(actionSchema, rawBody);
@@ -65,7 +62,7 @@ export async function POST(request: NextRequest) {
     // validateBody() returns { success, error } — it has no `response` field, so
     // the previous `return validation.response` returned undefined and Next
     // answered with a framework 500 instead of this 400.
-    return NextResponse.json({ error: formatValidationMessage(validation.error) }, { status: 400 });
+    return Response.json({ error: formatValidationMessage(validation.error) }, { status: 400 });
   }
 
   const parsed = validation.data;
@@ -74,13 +71,13 @@ export async function POST(request: NextRequest) {
     const status =
       parsed.action === "enable" ? await startCloudflaredTunnel() : await stopCloudflaredTunnel();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       action: parsed.action,
       status,
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       toPublicSafeTunnelError(
         error,
         "Failed to update the cloudflared tunnel.",

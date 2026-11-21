@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "../../../src/i18n/messages/en.json";
 import ar from "../../../src/i18n/messages/ar.json";
@@ -10,7 +10,7 @@ import type {
   Team,
   Report,
 } from "../../../src/app/(dashboard)/dashboard/costs/teams/helpers";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 
 const nav = vi.hoisted(() => ({
   query: "?team=a",
@@ -18,9 +18,11 @@ const nav = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/costs/teams",
-  useRouter: () => ({ push: nav.push, replace: nav.replace }),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useLocation: () => ({ pathname: "/dashboard/costs/teams", search: "", hash: "" }),
+  useNavigate: () => (url: string, options?: { replace?: boolean }) =>
+    (options?.replace ? nav.replace : nav.push)(url),
   useSearchParams: () => {
     const query = useSyncExternalStore(
       (listener) => {
@@ -29,8 +31,17 @@ vi.mock("next/navigation", () => ({
       },
       () => nav.query
     );
-    return new URLSearchParams(query);
+    return [new URLSearchParams(query), vi.fn()];
   },
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 import TeamCostsPage from "../../../src/app/(dashboard)/dashboard/costs/teams-page";
 import Breadcrumbs from "../../../src/shared/components/Breadcrumbs";
@@ -115,9 +126,9 @@ async function flush() {
 async function render(locale = "en") {
   await act(async () => {
     root.render(
-      <NextIntlClientProvider locale={locale} messages={locale === "en" ? en : ar}>
+      <IntlProvider locale={locale} messages={locale === "en" ? en : ar}>
         <TeamCostsPage />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
   });
   await flush();
@@ -238,9 +249,9 @@ describe("real team costs components", () => {
   it("localizes the actual team-cost breadcrumb", async () => {
     await act(async () =>
       root.render(
-        <NextIntlClientProvider locale="ar" messages={ar}>
+        <IntlProvider locale="ar" messages={ar}>
           <Breadcrumbs />
-        </NextIntlClientProvider>
+        </IntlProvider>
       )
     );
     expect(container.querySelector('[aria-current="page"]')?.textContent).toBe(

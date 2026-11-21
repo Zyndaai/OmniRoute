@@ -1,7 +1,5 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { TierFlowDiagram } from "../components/TierFlowDiagram";
 
 type TierCardProps = {
@@ -61,7 +59,7 @@ export function TierTour() {
       </div>
 
       <p className="text-xs text-text-muted/60 text-center">
-        <Link href="/dashboard/providers/new" className="underline hover:text-text-muted">
+        <Link to="/dashboard/providers/new" className="underline hover:text-text-muted">
           {t("configure")}
         </Link>{" "}
         {t("afterSetup")}

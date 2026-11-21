@@ -11,7 +11,6 @@ import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/errorSanitizatio
 import { sanitizeTimingMs } from "@omniroute/open-sse/utils/timingMs.ts";
 import { db, ts } from "./db/pg";
 import { stripNul } from "./db/pgJsonText";
-import { isNextBuildPhase } from "./buildPhase";
 import { normalizeProxyHostForLog } from "./proxyLogHost";
 
 // Re-exported for existing callers; the helper lives in a zero-import leaf so DB modules
@@ -19,7 +18,7 @@ import { normalizeProxyHostForLog } from "./proxyLogHost";
 export { normalizeProxyHostForLog };
 
 const isCloud = typeof globalThis.caches === "object" && globalThis.caches !== null;
-const shouldPersistToDisk = !isCloud && !isNextBuildPhase();
+const shouldPersistToDisk = !isCloud;
 
 const MAX_IN_MEMORY_ENTRIES = 200;
 

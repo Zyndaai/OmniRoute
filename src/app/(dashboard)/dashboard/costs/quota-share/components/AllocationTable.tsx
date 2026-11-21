@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { PoolAllocation } from "@/lib/quota/dimensions";
 import type { PoolUsageSnapshot } from "@/lib/quota/types";
 import {

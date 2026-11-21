@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
@@ -61,7 +59,7 @@ function renderPlayground(
         <div className="flex flex-col gap-3">
           <SttExampleCard providerId={providerId} />
           <Link
-            href="/dashboard/settings/modality-bridge?tab=audio"
+            to="/dashboard/settings/modality-bridge?tab=audio"
             className="text-xs text-primary hover:underline"
           >
             {bridgeCopy.sttCta}
@@ -88,7 +86,7 @@ function renderPlayground(
           </div>
           <p className="text-xs text-text-muted">{bridgeCopy.imageToText.description}</p>
           <Link
-            href="/dashboard/settings/modality-bridge?tab=vision"
+            to="/dashboard/settings/modality-bridge?tab=vision"
             className="text-xs text-primary hover:underline"
           >
             {bridgeCopy.imageToText.cta}

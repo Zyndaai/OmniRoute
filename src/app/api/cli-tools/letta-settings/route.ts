@@ -1,6 +1,3 @@
-export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -105,7 +102,7 @@ export async function GET(request: Request) {
     const isInstalled = await checkLettaInstalled();
 
     if (!isInstalled) {
-      return NextResponse.json({
+      return Response.json({
         installed: false,
         config: null,
         message: "Letta CLI is not installed",
@@ -122,7 +119,7 @@ export async function GET(request: Request) {
       lmstudioConflict = true;
     }
 
-    return NextResponse.json({
+    return Response.json({
       installed: true,
       config: authFile,
       hasOmniRoute: hasOmniRouteConfig(authFile),
@@ -134,7 +131,7 @@ export async function GET(request: Request) {
       backendMode: settings.preferredBackendMode || "api",
     });
   } catch (error) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -159,7 +156,7 @@ function parseLettaAuthFile(raw: string): { version: number; providers: Record<s
 async function prepareLettaAuthFile(
   overwrite: boolean | undefined
 ): Promise<
-  | { conflictResponse: NextResponse }
+  | { conflictResponse: Response }
   | { authFile: { version: number; providers: Record<string, any> }; authPath: string }
 > {
   const localBackendDir = getLocalBackendDir();
@@ -177,7 +174,7 @@ async function prepareLettaAuthFile(
   if (existingProvider && !isOmniRouteUrl(existingProvider.base_url) && !overwrite) {
     // User has lmstudio configured for actual LM Studio — refuse to overwrite
     return {
-      conflictResponse: NextResponse.json(
+      conflictResponse: Response.json(
         {
           error: `lmstudio provider is already configured for ${existingProvider.base_url}. Overwriting will break your existing LM Studio connection. Apply again to overwrite.`,
           conflict: true,
@@ -204,13 +201,13 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   try {
     const validation = validateBody(cliAuthOnlyConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { baseUrl, apiKey, overwrite } = validation.data;
 
@@ -257,7 +254,7 @@ export async function POST(request: Request) {
 
     await fs.writeFile(authPath, JSON.stringify(authFile, null, 2));
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Settings applied. Restart Letta CLI, then use /model to select a OmniRoute model.",
       needsRestart: true,
@@ -265,7 +262,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -331,12 +328,12 @@ export async function DELETE(request: Request) {
       ? "OmniRoute config removed. Your original LM Studio provider has been restored. Restart Letta CLI to take effect."
       : "OmniRoute config removed. Restart Letta CLI to take effect.";
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message,
       needsRestart: true,
     });
   } catch (error) {
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }

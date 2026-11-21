@@ -33,8 +33,9 @@ for (const route of discoverRoutes(BASE)) {
     await page.waitForLoadState("load", { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(1_500);
 
-    // Error boundary do Next: nunca pode aparecer
-    await expect(page.locator("text=Application error")).toHaveCount(0);
+    // The root error boundary (src/app/root.tsx: 404 or error page, both titled
+    // #boundary-title) must never appear on these routes, in any locale.
+    await expect(page.locator("#boundary-title")).toHaveCount(0);
     expect(pageErrors, `pageerror em ${route}: ${pageErrors.join(" | ")}`).toHaveLength(0);
   });
 }

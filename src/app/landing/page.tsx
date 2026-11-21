@@ -1,6 +1,5 @@
-"use client";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import Navigation from "./components/Navigation";
 import HeroSection from "./components/HeroSection";
 import FlowAnimation from "./components/FlowAnimation";
@@ -11,7 +10,7 @@ import Footer from "./components/Footer";
 
 export default function LandingPage() {
   const t = useTranslations("landing");
-  const router = useRouter();
+  const navigate = useNavigate();
   return (
     <div className="relative text-white font-sans overflow-x-hidden antialiased selection:bg-[#E54D5E] selection:text-white">
       {/* Animated Background */}
@@ -74,13 +73,13 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <button
-                  onClick={() => router.push("/dashboard")}
+                  onClick={() => navigate("/dashboard")}
                   className="w-full sm:w-auto h-14 px-10 rounded-lg bg-[#E54D5E] hover:bg-[#C93D4E] text-white text-lg font-bold transition-all shadow-[0_0_20px_rgba(229,77,94,0.5)]"
                 >
                   {t("startFree")}
                 </button>
                 <button
-                  onClick={() => router.push("/docs")}
+                  onClick={() => navigate("/docs")}
                   className="w-full sm:w-auto h-14 px-10 rounded-lg border border-[#2D333B] hover:bg-[#111520] text-white text-lg font-bold transition-all"
                 >
                   {t("readDocumentation")}
@@ -93,38 +92,40 @@ export default function LandingPage() {
         <Footer />
       </div>
 
-      {/* Global styles for keyframes */}
-      <style jsx global>{`
-        @keyframes float {
-          0%,
-          100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
-        }
-        @keyframes dash {
-          to {
-            stroke-dashoffset: -20;
-          }
-        }
-        @keyframes blob {
-          0%,
-          100% {
-            transform: translate(0, 0) scale(1);
-          }
-          33% {
-            transform: translate(30px, -50px) scale(1.1);
-          }
-          66% {
-            transform: translate(-20px, 20px) scale(0.9);
-          }
-        }
-        .animate-blob {
-          animation: blob 20s ease-in-out infinite;
-        }
-      `}</style>
+      <style>{LANDING_KEYFRAMES}</style>
     </div>
   );
 }
+
+// Keyframes used only by the landing page, so they live here instead of globals.css.
+const LANDING_KEYFRAMES = `
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -20;
+    }
+  }
+  @keyframes blob {
+    0%,
+    100% {
+      transform: translate(0, 0) scale(1);
+    }
+    33% {
+      transform: translate(30px, -50px) scale(1.1);
+    }
+    66% {
+      transform: translate(-20px, 20px) scale(0.9);
+    }
+  }
+  .animate-blob {
+    animation: blob 20s ease-in-out infinite;
+  }
+`;

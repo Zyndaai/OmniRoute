@@ -1,16 +1,11 @@
-"use client";
-
-import { useCallback, type JSX } from "react";
-import dynamic from "next/dynamic";
-import { useTranslations } from "next-intl";
+import { lazy, Suspense, useCallback, type JSX } from "react";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Icon from "@/shared/components/Icon";
 import Button from "@/shared/components/Button";
 
 // Lazy-load react-markdown to reduce initial bundle size.
-const ReactMarkdown = dynamic(() => import("react-markdown"), {
-  loading: () => <SkeletonLines lines={6} />,
-});
+const ReactMarkdown = lazy(() => import("react-markdown"));
 
 // remark-gfm loaded lazily alongside ReactMarkdown via remarkPlugins prop.
 // We avoid rehype-raw to prevent XSS (Hard Rule #7 context).
@@ -133,7 +128,9 @@ export function SkillPreviewPane({
             className="prose prose-sm dark:prose-invert max-w-none text-text-main"
             data-testid="skill-preview-markdown"
           >
-            <ReactMarkdown>{markdown}</ReactMarkdown>
+            <Suspense fallback={<SkeletonLines lines={6} />}>
+              <ReactMarkdown>{markdown}</ReactMarkdown>
+            </Suspense>
           </div>
         ) : (
           <div

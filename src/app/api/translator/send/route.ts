@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   buildProviderUrl,
   buildProviderHeaders,
@@ -23,7 +22,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: {
@@ -39,7 +38,7 @@ export async function POST(request) {
     const startedAt = Date.now();
     const validation = validateBody(translatorSendSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ success: false, error: validation.error }, { status: 400 });
+      return Response.json({ success: false, error: validation.error }, { status: 400 });
     }
     const { provider, body } = validation.data;
 
@@ -68,7 +67,7 @@ export async function POST(request) {
         latency: Date.now() - startedAt,
         endpoint: "/api/translator/send",
       });
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error: `No active connection found for provider: ${provider}. Available connections: ${connections.length}`,
@@ -118,7 +117,7 @@ export async function POST(request) {
         latency: Date.now() - startedAt,
         endpoint: "/api/translator/send",
       });
-      return NextResponse.json(
+      return Response.json(
         {
           success: false,
           error:
@@ -151,6 +150,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error sending request:", error);
-    return NextResponse.json({ success: false, error: "Failed to send request" }, { status: 500 });
+    return Response.json({ success: false, error: "Failed to send request" }, { status: 500 });
   }
 }

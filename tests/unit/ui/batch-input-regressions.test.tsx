@@ -6,7 +6,7 @@ import type { WizardDestination, WizardInput } from "@/lib/batches/types";
 import NewBatchWizard from "@/app/(dashboard)/dashboard/batch/components/NewBatchWizard";
 import InputStep from "@/app/(dashboard)/dashboard/batch/components/wizard/InputStep";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 const roots: Array<ReturnType<typeof createRoot>> = [];
 const destination: WizardDestination = {

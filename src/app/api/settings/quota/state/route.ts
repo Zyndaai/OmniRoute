@@ -11,7 +11,6 @@
  * Part of: Quota-aware provider scheduling (Phase 2).
  */
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
@@ -29,8 +28,6 @@ const QuotaStateActionSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-export const dynamic = "force-dynamic";
-
 export async function OPTIONS() {
   return handleCorsOptions();
 }
@@ -45,7 +42,7 @@ export async function GET(request: Request) {
       getActiveQuotaResetItems(),
     ]);
 
-    return NextResponse.json(
+    return Response.json(
       {
         success: true,
         analytics,
@@ -56,7 +53,7 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read quota state";
-    return NextResponse.json(buildErrorBody(500, message), {
+    return Response.json(buildErrorBody(500, message), {
       status: 500,
       headers: CORS_HEADERS,
     });
@@ -71,7 +68,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null);
     const parsed = QuotaStateActionSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), {
+      return Response.json(buildErrorBody(400, parsed.error.message), {
         status: 400,
         headers: CORS_HEADERS,
       });
@@ -81,7 +78,7 @@ export async function POST(request: Request) {
 
     if (action === "reset_expired") {
       const resetCount = await resetExpiredQuotaWindows();
-      return NextResponse.json(
+      return Response.json(
         { success: true, resetCount, message: `Reset ${resetCount} expired quota windows.` },
         { headers: CORS_HEADERS }
       );
@@ -90,13 +87,13 @@ export async function POST(request: Request) {
     // action === "clear_connection"
     const { connectionId, model } = parsed.data;
     await clearProviderQuota(connectionId);
-    return NextResponse.json(
+    return Response.json(
       { success: true, message: `Cleared quota state for connection ${connectionId} (${model}).` },
       { headers: CORS_HEADERS }
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update quota state";
-    return NextResponse.json(buildErrorBody(500, message), {
+    return Response.json(buildErrorBody(500, message), {
       status: 500,
       headers: CORS_HEADERS,
     });

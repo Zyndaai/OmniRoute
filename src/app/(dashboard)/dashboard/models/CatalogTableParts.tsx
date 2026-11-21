@@ -1,7 +1,5 @@
-"use client";
-
 import type { ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { DataTableFooter } from "@omniroute/ui-kit/data-table-shell";
 import { TableCell, TableHead } from "@omniroute/ui-kit/table";
 import { Button, Checkbox } from "@/shared/components";

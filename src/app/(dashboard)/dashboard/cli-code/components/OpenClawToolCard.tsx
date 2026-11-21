@@ -1,13 +1,10 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, ModelSelectModal, ManualConfigModal } from "@/shared/components";
 import Input from "@/shared/components/Input";
 import Select from "@/shared/components/Select";
-import Image from "next/image";
 import CliStatusBadge from "./CliStatusBadge";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { cn } from "@/shared/utils/cn";
 import { CARD_TOGGLE_CLASS, cardToggleProps } from "./cardToggle";
 
@@ -300,13 +297,12 @@ export default function OpenClawToolCard({
       >
         <div className="flex min-w-0 items-center gap-3">
           <div className="size-8 flex items-center justify-center shrink-0">
-            <Image
+            <img
               src="/providers/openclaw.svg"
               alt={tool.name}
               width={32}
               height={32}
               className="size-8 object-contain rounded-lg"
-              sizes="32px"
               onError={(e) => {
                 (e.currentTarget as HTMLElement).style.display = "none";
               }}

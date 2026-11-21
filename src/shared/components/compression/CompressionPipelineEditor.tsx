@@ -1,5 +1,3 @@
-"use client";
-
 // T06 — drag-to-reorder editor for the stacked-compression pipeline (gaps v3.8.42).
 //
 // A controlled component: it renders `steps` and reports every edit back through `onChange`
@@ -23,7 +21,7 @@ import {
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   allowedIntensities,
   addLayer,

@@ -14,9 +14,8 @@ test("standalone pages use the Keak lockup instead of the gradient hub glyph", (
     "src/app/status/page.tsx",
     "src/app/maintenance/page.tsx",
     "src/app/offline/page.tsx",
-    "src/app/not-found.tsx",
-    "src/app/error.tsx",
-    "src/app/global-error.tsx",
+    // The root error boundary: one lockup shared by the not-found and error pages.
+    "src/app/root.tsx",
     "src/app/forbidden/page.tsx",
     "src/app/forgot-password/page.tsx",
   ]) {

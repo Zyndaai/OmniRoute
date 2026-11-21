@@ -3,8 +3,8 @@
  *
  * #6408 — concurrent catalog requests used to serialize (~1.2 s each × N). The
  * builder walks 8 registries and hits SQLite for connections, combos, custom
- * models and aliases; under Next.js's single-threaded App Router request
- * handling, N concurrent calls execute back-to-back and the Nth completes at
+ * models and aliases; on the single-threaded event loop, N concurrent calls
+ * execute back-to-back and the Nth completes at
  * N × single-request latency. So identical concurrent requests are coalesced
  * onto one in-flight promise and the serialized body is memoized for a short
  * window.
@@ -14,10 +14,10 @@
  */
 import { createHmac } from "node:crypto";
 
-import { after } from "next/server";
 import { getCopilotRejectionCatalogVersion } from "@omniroute/open-sse/services/copilotModelRejections.ts";
 
 import { getModelCatalogCacheVersion as getDatabaseCatalogVersion } from "@/lib/db/readCache";
+import { afterResponse } from "@/server/requestContext";
 import { extractApiKey } from "@/sse/services/auth";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 
@@ -60,37 +60,30 @@ export type CatalogPayload = {
 export const CATALOG_STALE_WHILE_REVALIDATE_MS = 30_000;
 
 /**
- * Schedules the stale-while-revalidate rebuild. Injected so the App Router route can
- * hand over Next's `after()` and a test can hand over a deterministic hook.
+ * Schedules the stale-while-revalidate rebuild. Injected so a caller that knows when its
+ * response has been flushed (and a test with a deterministic hook) can choose the moment.
  *
- * The task returns a promise, so a scheduler that awaits it (as `after()` does) keeps
- * the runtime alive until the rebuild finishes.
+ * The task returns a promise, so a scheduler may await it.
  */
 export type BackgroundRefreshScheduler = (task: () => Promise<unknown>) => void;
 
 /**
- * Default scheduler: Next's `after()`, which runs the task once the response has been
- * flushed to the client.
- *
- * That flush guarantee is the whole point of #8728. The builder is overwhelmingly
- * synchronous under the single-threaded App Router, so a rebuild that starts before the
- * flush pins the event loop and the "served immediately" stale body only reaches the
- * client once the rebuild has finished — the stale path stops being cheap, which is what
- * it exists for. `setTimeout(…, 0)` defers by a macrotask but does not wait for the
- * flush, so it never delivered that guarantee.
- *
- * `after()` throws outside a Next request scope — the CLI/Electron server, unit tests —
- * so fall back to the macrotask there. Those callers have no response being flushed, so
- * the deferral is all they ever needed.
+ * Default scheduler: start the rebuild once the response to the current request has been
+ * sent (`afterResponse`), and on the next macrotask outside a request (startup warm-up,
+ * tests). The builder is overwhelmingly synchronous, so a rebuild that starts before the
+ * stale body has been written pins the event loop and the "served immediately" body only
+ * reaches the client once the rebuild finishes (#8728). A failed rebuild is logged because
+ * nothing awaits it.
  */
 export function defaultBackgroundRefreshScheduler(task: () => Promise<unknown>): void {
-  try {
-    after(task);
-  } catch {
-    setTimeout(() => {
-      void task();
-    }, 0);
-  }
+  afterResponse(() =>
+    task().catch((error) => {
+      console.error(
+        "[models] background catalog refresh failed:",
+        error instanceof Error ? error.name : typeof error
+      );
+    })
+  );
 }
 
 /**
@@ -131,10 +124,10 @@ export type CatalogCacheOptions = {
  * It was 1500 ms, which was shorter than a single build: measured 2026-07-28 on the
  * production VPS, the builder takes ~49 s for a 1.3 MB / 2645-model catalog. Any two
  * requests more than 1.5 s apart therefore both missed the fresh window, and the second
- * fell into stale-while-revalidate — which rebuilds via `setTimeout(…, 0)` and, because
- * the builder is overwhelmingly synchronous under the single-threaded App Router, pins
- * the event loop so even the "served immediately" stale body only reaches the client
- * once the rebuild finishes. Net effect: ~50 s on essentially every call.
+ * fell into stale-while-revalidate — which then rebuilt on the next macrotask and, because
+ * the builder is overwhelmingly synchronous on the single-threaded event loop, pinned
+ * the event loop so even the "served immediately" stale body only reached the client
+ * once the rebuild finished. Net effect: ~50 s on essentially every call.
  *
  * Held at 60 s to match the ceiling the settings schema already allows for the override
  * (`settingsSchemas.ts`, `.max(60000)`), so the default can never exceed what an

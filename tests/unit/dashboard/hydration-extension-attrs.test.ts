@@ -10,14 +10,14 @@ import { resolve, join } from "node:path";
 // DOM after SSR but before React hydrates. React's suppressHydrationWarning on
 // <html>/<body> only applies one level deep, so the mismatch still surfaces on
 // Next.js's internal elements. The fix adds a synchronous pre-hydration <script>
-// in src/app/layout.tsx that strips the known attributes from
+// in src/app/root.tsx that strips the known attributes from
 // document.documentElement and keeps stripping late injections via a
 // MutationObserver that auto-disconnects after 5s. These assertions fail on the
 // pre-fix tree (no such script present) and stay green afterwards, preventing a
-// future layout.tsx refactor from silently dropping this script.
+// future root.tsx refactor from silently dropping this script.
 
 const cwd = process.cwd();
-const layoutPath = resolve(join(cwd, "src/app/layout.tsx"));
+const layoutPath = resolve(join(cwd, "src/app/root.tsx"));
 
 const EXPECTED_ATTRS = [
   "bis_skin_checked",
@@ -28,27 +28,27 @@ const EXPECTED_ATTRS = [
   "data-lt-tmp-id",
 ];
 
-test("layout.tsx strips the full known browser-extension attribute list before hydration", () => {
+test("root.tsx strips the full known browser-extension attribute list before hydration", () => {
   const layout = readFileSync(layoutPath, "utf8");
   for (const attr of EXPECTED_ATTRS) {
     assert.ok(
       layout.includes(`"${attr}"`),
-      `layout.tsx must list "${attr}" among the pre-hydration extension attributes to strip`
+      `root.tsx must list "${attr}" among the pre-hydration extension attributes to strip`
     );
   }
   assert.match(
     layout,
     /removeAttribute\s*\(\s*ATTRS\s*\[\s*i\s*\]\s*\)/,
-    "layout.tsx must call removeAttribute for each known extension attribute"
+    "root.tsx must call removeAttribute for each known extension attribute"
   );
 });
 
-test("layout.tsx observes late attribute injections via MutationObserver and auto-disconnects", () => {
+test("root.tsx observes late attribute injections via MutationObserver and auto-disconnects", () => {
   const layout = readFileSync(layoutPath, "utf8");
   assert.match(
     layout,
     /new MutationObserver\s*\(/,
-    "layout.tsx must set up a MutationObserver to catch extension attributes injected after the initial strip"
+    "root.tsx must set up a MutationObserver to catch extension attributes injected after the initial strip"
   );
   assert.match(
     layout,
@@ -62,11 +62,11 @@ test("layout.tsx observes late attribute injections via MutationObserver and aut
   );
 });
 
-test("layout.tsx strips extension attributes from document.documentElement synchronously (before React hydrates)", () => {
+test("root.tsx strips extension attributes from document.documentElement synchronously (before React hydrates)", () => {
   const layout = readFileSync(layoutPath, "utf8");
   assert.match(
     layout,
     /strip\s*\(\s*document\.documentElement\s*\)/,
-    "layout.tsx must run the strip synchronously against document.documentElement on initial script execution"
+    "root.tsx must run the strip synchronously against document.documentElement on initial script execution"
   );
 });

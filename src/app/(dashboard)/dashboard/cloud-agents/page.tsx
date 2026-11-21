@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useCallback, useId } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, Input, Badge } from "@/shared/components";
@@ -7,7 +5,7 @@ import Checkbox from "@/shared/components/Checkbox";
 import EmptyState from "@/shared/components/EmptyState";
 import Select from "@/shared/components/Select";
 import Textarea from "@/shared/components/Textarea";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { Field } from "@omniroute/ui-kit/field";

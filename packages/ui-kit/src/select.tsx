@@ -1,5 +1,3 @@
-"use client";
-
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { forwardRef, useId } from "react";
 import type { ComponentProps, ReactNode } from "react";

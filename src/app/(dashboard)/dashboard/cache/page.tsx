@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { Progress } from "@omniroute/ui-kit/progress";
 import {
@@ -18,7 +16,7 @@ import Icon from "@/shared/components/Icon";
 import { Skeleton } from "@/shared/components/Loading";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import CacheEntriesTab from "./components/CacheEntriesTab";
 import ReasoningCacheTab from "./components/ReasoningCacheTab";

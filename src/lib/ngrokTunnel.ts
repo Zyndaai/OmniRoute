@@ -20,7 +20,7 @@ export type NgrokTunnelStatus = {
   lastError: string | null;
 };
 
-// Next.js hot-reloading safe global storage for the listener
+// Global storage for the listener, so it survives dev-server module re-evaluation
 const globalForNgrok = globalThis as unknown as {
   __ngrokListener: any;
 };

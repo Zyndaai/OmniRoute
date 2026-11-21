@@ -1,8 +1,6 @@
-"use client";
-
+import { Link } from "react-router";
 import Icon from "@/shared/components/Icon";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
 
 export default function Footer() {
@@ -62,7 +60,7 @@ export default function Footer() {
             <h4 className="font-bold text-white">{t("resources")}</h4>
             <Link
               className="text-gray-400 hover:text-[#E54D5E] text-sm transition-colors"
-              href="/docs"
+              to="/docs"
             >
               {t("documentation")}
             </Link>

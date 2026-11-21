@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCacheStats } from "@omniroute/open-sse/services/searchCache.ts";
 import { SEARCH_PROVIDERS } from "@omniroute/open-sse/config/searchRegistry.ts";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
@@ -6,7 +5,7 @@ import { getSearchProviderStats, getRecentSearchLogs } from "@/lib/db/callLogSta
 
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
     const cache = getCacheStats();
@@ -48,8 +47,8 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({ cache, providers, recent_searches });
+    return Response.json({ cache, providers, recent_searches });
   } catch (error) {
-    return NextResponse.json({ error: "Failed to get stats" }, { status: 500 });
+    return Response.json({ error: "Failed to get stats" }, { status: 500 });
   }
 }

@@ -7,7 +7,6 @@
  * default mode (parallel/collaborative), system prompt, timeout.
  */
 
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { buildErrorBody, sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import {
@@ -19,8 +18,6 @@ import {
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
 import * as log from "@/sse/utils/logger";
 
-export const dynamic = "force-dynamic";
-
 /**
  * GET /api/chaos/config
  * Returns the current chaos mode configuration.
@@ -31,11 +28,11 @@ export async function GET(request: Request) {
 
   try {
     const config = await getChaosConfig();
-    return NextResponse.json({ config });
+    return Response.json({ config });
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
     log.error("chaos", "Error fetching chaos config", err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }
 
@@ -51,17 +48,17 @@ export async function PUT(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(chaosConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(buildErrorBody(400, validation.error.message), {
+      return Response.json(buildErrorBody(400, validation.error.message), {
         status: 400,
       });
     }
 
     const config = await setChaosConfig(validation.data);
-    return NextResponse.json({ config, message: "Chaos config updated" });
+    return Response.json({ config, message: "Chaos config updated" });
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
     log.error("chaos", "Error updating chaos config", err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }
 
@@ -75,10 +72,10 @@ export async function DELETE(request: Request) {
 
   try {
     const config = await resetChaosConfig();
-    return NextResponse.json({ config, message: "Chaos config reset to defaults" });
+    return Response.json({ config, message: "Chaos config reset to defaults" });
   } catch (err) {
     const msg = sanitizeErrorMessage(err);
     log.error("chaos", "Error resetting chaos config", err);
-    return NextResponse.json(buildErrorBody(500, msg), { status: 500 });
+    return Response.json(buildErrorBody(500, msg), { status: 500 });
   }
 }

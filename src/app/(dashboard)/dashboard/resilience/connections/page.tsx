@@ -1,11 +1,9 @@
-import { getTranslations } from "next-intl/server";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import ResilienceConnectionsClient from "./components/ResilienceConnectionsClient";
 
-export const dynamic = "force-dynamic";
-
-export default async function ResilienceConnectionsPage() {
-  const t = await getTranslations("resilienceConnections");
+export default function ResilienceConnectionsPage() {
+  const t = useTranslations("resilienceConnections");
   return (
     <div className="flex flex-col gap-6">
       <div>

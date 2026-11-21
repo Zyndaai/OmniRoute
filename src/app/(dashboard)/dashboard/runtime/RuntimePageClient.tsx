@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { PageHeader, SectionHeader as KitSectionHeader } from "@omniroute/ui-kit/page-header";
 import {
   Table,
@@ -967,7 +965,7 @@ export default function RuntimePageClient() {
             title={t("quotaMonitorsTitle")}
             subtitle={t("quotaMonitorsSubtitle")}
             trailing={
-              <Link href="/dashboard/quota" className="text-[11px] text-primary hover:underline">
+              <Link to="/dashboard/quota" className="text-[11px] text-primary hover:underline">
                 {t("openQuota")} →
               </Link>
             }

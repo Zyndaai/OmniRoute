@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Toggle for "auto-restart an adopted process." When a supervisor's
  * probeBeforeSpawn finds a healthy instance already on its port, it adopts

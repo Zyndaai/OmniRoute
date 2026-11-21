@@ -1,5 +1,4 @@
-"use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import type { Detail } from "./helpers";
 import { money } from "./helpers";

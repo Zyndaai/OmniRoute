@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Toggle } from "@/shared/components";
 
 type FlagEntry = { key: string; effectiveValue: string };

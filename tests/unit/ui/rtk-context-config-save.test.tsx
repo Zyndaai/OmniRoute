@@ -11,7 +11,7 @@ import { useNotificationStore } from "@/store/notificationStore";
 // Keys from the settings namespace carry a "settings." prefix, so a test can tell which
 // namespace a message came from. One translator per namespace keeps a stable identity, as the
 // real hook does.
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const contextRtk = (key: string, params?: Record<string, unknown>) =>
     params ? [key, ...Object.values(params)].join(" ") : key;
   const settings = (key: string, params?: Record<string, unknown>) =>

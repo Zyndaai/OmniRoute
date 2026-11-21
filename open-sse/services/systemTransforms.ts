@@ -518,13 +518,11 @@ function resolveProviderConfig(
 // Runtime singleton.
 // ────────────────────────────────────────────────────────────────────────────
 
-// Backed by globalThis so the config is shared across the SEPARATE webpack module
-// graphs Next.js builds for `instrumentation.ts` (boot-time hydration via
-// applyRuntimeSettings → setSystemTransformsConfig) and the app-route / open-sse
-// executors (per-request reads in base.ts / claudeCodeCompatible.ts). A module-local
-// `let` is duplicated per graph, so a Settings-UI override applied at boot never
-// reaches the request path (the #5312-class module-graph bug; the protective
-// compiled default still runs, but operator customizations were silently dropped).
+// Backed by globalThis so the config survives dev-server module re-evaluation: boot-time
+// hydration (applyRuntimeSettings → setSystemTransformsConfig) and the per-request reads in
+// base.ts / claudeCodeCompatible.ts must see one config, and a module-local `let` would be
+// reset on re-evaluation, silently dropping a Settings-UI override (the protective compiled
+// default still runs, but operator customizations would be lost; #5312).
 // Mirrors systemPrompt.ts (#2470) and thinkingBudget.ts (#5312).
 const GLOBAL_KEY = "__omniroute_systemTransforms_config__";
 const _store = globalThis as unknown as Record<string, SystemTransformsConfig | undefined>;

@@ -16,8 +16,6 @@
  * `https://cdn.redocly.com/redoc/latest/bundles/redoc.standalone.js`
  * which is the SOTA choice for standalone OpenAPI renderers.
  */
-export const dynamic = "force-static";
-
 const REDOC_HTML = `<!DOCTYPE html>
 <html lang="en">
   <head>

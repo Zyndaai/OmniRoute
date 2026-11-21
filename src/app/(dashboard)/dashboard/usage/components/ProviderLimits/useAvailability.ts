@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { queueSummaryRefresh } from "./queueSummaryRefresh";
 import { fetchWithTimeout } from "@/shared/utils/fetchTimeout";

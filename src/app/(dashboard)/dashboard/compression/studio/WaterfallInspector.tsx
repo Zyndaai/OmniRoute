@@ -1,7 +1,5 @@
-"use client";
-
 import type { CompressionRunModel, CompressionEngineStep } from "./compressionFlowModel";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

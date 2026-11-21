@@ -3,7 +3,7 @@
  *
  * Extracted from `subscriptionService.startSubscriptionScheduler` so the
  * "is this subscription due for a refresh?" rule is unit-testable without the
- * full Next.js / better-sqlite3 stack.
+ * full server / database stack.
  */
 
 export interface DueCheckInput {

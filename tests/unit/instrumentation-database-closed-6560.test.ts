@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   normalizeBootError,
   ensureDbReadyForBoot,
-} from "../../src/instrumentation-node";
+} from "../../src/server/boot";
 
 // Regression guard for #6560: during an update/restart, sql.js's WASM adapter
 // can throw the bare string `"Database closed"` (not an Error instance) when a

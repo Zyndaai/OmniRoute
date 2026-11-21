@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import Button, { type ButtonVariant } from "@/shared/components/Button";
 import Input from "@/shared/components/Input";

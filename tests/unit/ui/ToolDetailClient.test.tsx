@@ -6,19 +6,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({
+    to,
     children,
     ...props
-  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
       {children}
     </a>
   ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));
@@ -29,13 +30,6 @@ const mockFetch = vi.fn().mockResolvedValue({
   json: async () => ({ connections: [], keys: [], data: [], cloudEnabled: false }),
 });
 vi.stubGlobal("fetch", mockFetch);
-
-// Stub next/navigation
-vi.mock("next/navigation", () => ({
-  notFound: () => {
-    throw new Error("NOT_FOUND");
-  },
-}));
 
 // Stub CLI_TOOLS catalog
 vi.mock("@/shared/constants/cliTools", () => ({

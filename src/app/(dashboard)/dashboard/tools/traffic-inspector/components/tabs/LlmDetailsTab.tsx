@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Table, TableBody, TableCell, TableRow } from "@omniroute/ui-kit/table";
 import type { InterceptedRequest } from "@/mitm/inspector/types";
 import { extractLlmMetadata } from "@/mitm/inspector/llmMetadataExtractor";

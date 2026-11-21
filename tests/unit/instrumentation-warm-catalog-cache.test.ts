@@ -1,5 +1,5 @@
 /**
- * Behavioral regression test for warmModelCatalogCache() (src/instrumentation-node.ts).
+ * Behavioral regression test for warmModelCatalogCache() (src/server/boot.ts).
  *
  * The original PR warmed getUnifiedModelsResponse()'s top-level Response
  * cache with an unauthenticated dummy request. That cache (`catalogCache` in
@@ -40,7 +40,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { warmModelCatalogCache, isBackgroundServicesDisabled } =
-  await import("../../src/instrumentation-node.ts");
+  await import("../../src/server/boot.ts");
 const { getUnifiedModelsResponse } = await import("../../src/app/api/v1/models/catalog.ts");
 
 async function resetStorage() {
@@ -208,7 +208,7 @@ test("isBackgroundServicesDisabled correctly parses environment flag values", ()
 // catalog network fetch at boot.
 test("registerNodejs only warms the model catalog when background services are enabled", () => {
   const source = fs.readFileSync(
-    path.join(import.meta.dirname, "../../src/instrumentation-node.ts"),
+    path.join(import.meta.dirname, "../../src/server/boot.ts"),
     "utf8"
   );
   const registerStart = source.indexOf("export async function registerNodejs(");

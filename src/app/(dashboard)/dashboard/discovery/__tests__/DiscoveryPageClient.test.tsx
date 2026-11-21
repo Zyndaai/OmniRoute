@@ -20,7 +20,7 @@ beforeAll(() => {
 const t = (key: string, vars?: Record<string, unknown>) =>
   vars ? `${key}:${JSON.stringify(vars)}` : key;
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => t,
 }));
 

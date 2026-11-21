@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 import { readJson, errorKey, type Detail, type Team, type TeamKeyOption } from "./helpers";
 import type { TeamPayload } from "./TeamForm";

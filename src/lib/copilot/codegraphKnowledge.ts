@@ -11,7 +11,6 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isNextBuildPhase } from "../buildPhase";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,12 +92,6 @@ function queryDb(query: string, params: unknown[] = []): CodeGraphQueryResult {
 
       // Use better-sqlite3 if available
       try {
-        // Never load the native better-sqlite3 addon during the Next.js build:
-        // its Statement destructor aborts with SIGABRT at build-worker teardown
-        // (node::RemoveEnvironmentCleanupHook). This path is not exercised during
-        // build, so failing closed to "not available" is safe. (#10060)
-        if (isNextBuildPhase()) throw new Error("Skip better-sqlite3 during build");
-
         const Database = require("better-sqlite3");
         _db = new Database(dbPath, { readonly: true });
       } catch {

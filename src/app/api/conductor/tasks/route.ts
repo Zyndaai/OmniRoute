@@ -5,7 +5,6 @@
  * body (never the raw upstream body — Hard Rule #12).
  */
 
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createErrorResponse } from "@/lib/api/errorResponse";
@@ -62,5 +61,5 @@ export async function POST(request: Request) {
       message: `Conductor hub refused the task creation (HTTP ${result.status})`,
     });
   }
-  return NextResponse.json({ task_id: result.task_id }, { status: 201 });
+  return Response.json({ task_id: result.task_id }, { status: 201 });
 }

@@ -28,9 +28,6 @@ import { createLogger } from "@/shared/utils/logger";
 
 const log = createLogger("video-bridge-broker");
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 const MAX_INPUT_BYTES = 50 * 1024 * 1024;
 const MAX_DURATION_SECONDS = 600;
 export const BROKER_TIMEOUT_MS = VIDEO_BRIDGE_TIMEOUT_MAX_MS;

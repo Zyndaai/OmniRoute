@@ -33,7 +33,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-tunnel-sanitize-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -171,8 +170,8 @@ test("classifyTunnelError maps causes without echoing them", () => {
 
 // ── Defect 1, end to end on a remotely reachable route ─────────────────────
 
-function makeRequest(url: string, init?: RequestInit): NextRequest {
-  return new Request(url, init) as unknown as NextRequest;
+function makeRequest(url: string, init?: RequestInit): Request {
+  return new Request(url, init) as unknown as Request;
 }
 
 test("GET /api/tunnels/ngrok does not leak a host path in its 500 body", async () => {

@@ -1,20 +1,18 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/PlaygroundStudio.tsx
 
-import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "react-router";
 import { useState } from "react";
+import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 import type { StreamMetrics } from "@/shared/schemas/playground";
 import StudioTopBar, { type StudioTab } from "./components/StudioTopBar";
 import StudioConfigPane, { type ConfigState } from "./components/StudioConfigPane";
 import { DEFAULT_PARAMS } from "./components/ParamSliders";
 import CompareTab from "./components/tabs/CompareTab";
 
-// Lazy-load tabs to reduce initial bundle size
-const ChatTab = dynamic(() => import("./components/tabs/ChatTab"), { ssr: false });
-const ApiTab = dynamic(() => import("./components/tabs/ApiTab"), { ssr: false });
-const BuildTab = dynamic(() => import("./components/tabs/BuildTab"), { ssr: false });
+// Lazy-load tabs to reduce initial bundle size; they render in the browser only.
+const ChatTab = clientOnlyLazy(() => import("./components/tabs/ChatTab"));
+const ApiTab = clientOnlyLazy(() => import("./components/tabs/ApiTab"));
+const BuildTab = clientOnlyLazy(() => import("./components/tabs/BuildTab"));
 
 const INITIAL_METRICS: StreamMetrics = {
   ttftMs: null,
@@ -51,7 +49,7 @@ function resolveTab(value: string | null): StudioTab {
  * - SLOT_IMPROVE: F7 will replace the comment in StudioConfigPane with ImprovePromptButton
  */
 export function PlaygroundStudio() {
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
   // Derive active tab from URL — no effect needed, avoids setState-in-effect lint violation.
   // When URL changes (client nav), searchParams updates, component re-renders with new tab.
   const activeTab: StudioTab = resolveTab(searchParams.get("tab"));

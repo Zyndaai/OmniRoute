@@ -39,7 +39,7 @@ x-omniroute: &omniroute
     options:
       max-size: 10m
       max-file: "3"
-  # Healthcheck comes from the image (node healthcheck.mjs, 30s interval).
+  # Healthcheck comes from the image (node scripts/dev/healthcheck.mjs, 30s interval).
 
 services:
   postgres:

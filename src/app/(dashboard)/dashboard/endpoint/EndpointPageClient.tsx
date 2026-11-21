@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 import { Alert } from "@omniroute/ui-kit/alert";
 
@@ -17,7 +15,7 @@ import Toggle from "@/shared/components/Toggle";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { isPublicDisplayBaseUrl, useDisplayBaseUrl } from "@/shared/hooks";
 import { extractApiErrorMessage } from "@/shared/http/apiErrorMessage";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import A2ADashboardPage from "./components/A2ADashboard";
 import McpDashboardPage from "./components/MCPDashboard";
 import NotionSourceCard from "./components/NotionSourceCard";

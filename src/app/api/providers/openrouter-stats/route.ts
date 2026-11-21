@@ -7,26 +7,25 @@
  *   ?refresh=true  — Force-refresh, ignores TTL
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
   getOpenRouterProviderStats,
   refreshOpenRouterProviderStats,
 } from "@/lib/catalog/openrouterProviderStats";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Authentication required", type: "invalid_request_error" } },
       { status: 401 }
     );
   }
 
-  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "true";
+  const forceRefresh = new URL(req.url).searchParams.get("refresh") === "true";
 
   if (forceRefresh) {
     const result = await refreshOpenRouterProviderStats();
-    return NextResponse.json({
+    return Response.json({
       object: "list",
       data: result.data,
       meta: {
@@ -38,7 +37,7 @@ export async function GET(req: NextRequest) {
   }
 
   const result = await getOpenRouterProviderStats();
-  return NextResponse.json({
+  return Response.json({
     object: "list",
     data: result.data,
     meta: {

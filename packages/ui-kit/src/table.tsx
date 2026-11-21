@@ -1,5 +1,3 @@
-"use client";
-
 import type { ComponentProps } from "react";
 import { ExternalLink } from "lucide-react";
 import { cn } from "./lib/utils";

@@ -5,9 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider } from "@omniroute/ui-kit/sidebar";
 
 process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
-vi.mock("next/navigation", () => ({
-  usePathname: () => "/dashboard/providers",
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard/providers" }),
 }));
 vi.mock("@/shared/components/LanguageSelector", () => ({
   default: () => <div data-testid="lang" />,

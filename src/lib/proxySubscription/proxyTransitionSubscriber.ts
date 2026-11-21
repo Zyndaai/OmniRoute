@@ -9,7 +9,7 @@
  * which owns the single throttle slot per (subscription, selector) — so the
  * synchronous quota path and this listener collapse to one control call.
  *
- * Registered once at server boot (see instrumentation-node); importing this
+ * Registered once at server boot (see src/server/boot.ts); importing this
  * module has no side effect. No extra store: bounded by the trigger's own
  * throttle map and the refusal memory bound.
  */

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { resolveDataDir } from "@/lib/dataPaths";
 import {
   getAppLogRetentionDays,
@@ -29,7 +28,7 @@ export async function GET() {
 
     const homeDir = process.env.HOME || process.env.USERPROFILE || "";
 
-    return NextResponse.json({
+    return Response.json({
       driver: "postgres",
       sizeBytes,
       retentionDays: {
@@ -44,6 +43,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[API] Error getting storage health:", error);
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

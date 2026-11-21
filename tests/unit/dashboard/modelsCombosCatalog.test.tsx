@@ -2,6 +2,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { BrowserRouter, MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -16,7 +17,7 @@ beforeAll(() => {
 
 import enMessages from "@/i18n/messages/en.json";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (ns: string = "common") => {
     const bag = ((enMessages as Record<string, unknown>)[ns] || {}) as Record<string, string>;
     const translate = (key: string, params?: Record<string, unknown>) => {
@@ -257,7 +258,11 @@ describe("Models and Combos Catalog Page UI", () => {
 
   async function renderPage() {
     await act(async () => {
-      root.render(<ModelCatalogPage />);
+      root.render(
+        <BrowserRouter>
+          <ModelCatalogPage />
+        </BrowserRouter>
+      );
     });
     await flush();
   }
@@ -334,9 +339,8 @@ describe("Models and Combos Catalog Page UI", () => {
     expect(container.textContent).not.toContain("First Combo");
   });
 
-  it("server-renders defaults without reading the URL or stored results", () => {
+  it("server-renders the tab from the router's URL, without reading stored results", () => {
     installFetch();
-    window.history.replaceState(null, "", "/dashboard/models?tab=combos&provider=beta");
     const key = getModelTestKey("alpha", "alpha-chat");
     localStorage.setItem(
       CATALOG_TEST_RESULTS_STORAGE_NAME,
@@ -346,11 +350,15 @@ describe("Models and Combos Catalog Page UI", () => {
     );
 
     const host = document.createElement("div");
-    host.innerHTML = renderToString(<ModelCatalogPage />);
+    host.innerHTML = renderToString(
+      <MemoryRouter initialEntries={["/dashboard/models?tab=combos&provider=beta"]}>
+        <ModelCatalogPage />
+      </MemoryRouter>
+    );
 
     const tabs = host.querySelectorAll('[role="tab"]');
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
-    expect(tabs[1].getAttribute("aria-selected")).toBe("false");
+    expect(tabs[0].getAttribute("aria-selected")).toBe("false");
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
     expect(host.querySelector("[data-testid='clear-test-results-btn']")).toBeNull();
   });
 
@@ -791,26 +799,6 @@ describe("Models and Combos Catalog Page UI", () => {
         ) ?? null
       );
     }
-
-    it("keeps the page usable and filtering when history.replaceState throws", async () => {
-      installFetch();
-      await renderPage();
-      // Safari throws a SecurityError after 100 history updates in 10 seconds.
-      const replaceState = vi.spyOn(window.history, "replaceState").mockImplementation(() => {
-        throw new DOMException("history.replaceState() called too often", "SecurityError");
-      });
-
-      const minOutput = inputByLabel("Min max output");
-      for (const value of ["8", "80", "800", "8000"]) {
-        await act(async () => setInputValue(minOutput, value));
-        await flush();
-      }
-
-      expect(replaceState).toHaveBeenCalled();
-      expect(query('[role="tablist"]')).not.toBeNull();
-      expect(bodyRows()).toHaveLength(1);
-      expect(query("tbody")?.textContent).toContain("Alpha Chat");
-    });
 
     it("does not rewrite the URL when it already matches the filters", async () => {
       installFetch();

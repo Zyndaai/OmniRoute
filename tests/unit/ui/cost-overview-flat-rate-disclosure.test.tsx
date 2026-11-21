@@ -31,11 +31,21 @@ beforeAll(() => {
 
 import en from "../../../src/i18n/messages/en.json";
 
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(""),
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useSearchParams: () => [new URLSearchParams(""), vi.fn()],
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-// The costs tab lazy-loads recharts cards via next/dynamic. They are unrelated
+// The costs tab lazy-loads recharts cards. They are unrelated
 // to the disclosure contract and are expensive to mount in jsdom.
 vi.mock("@/app/(dashboard)/dashboard/costs/components/CostCharts", () => ({
   CostTrendCard: () => <div data-testid="cost-trend-card" />,
@@ -114,25 +124,29 @@ function installFetch(payload: unknown) {
   );
 }
 
+let originalObjectUrl: { create: typeof URL.createObjectURL; revoke: typeof URL.revokeObjectURL };
+
 beforeEach(() => {
   downloadedBlobs = [];
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   // downloadFile() round-trips the export through an object URL; capture the Blob.
-  vi.stubGlobal("URL", {
-    ...URL,
-    createObjectURL: vi.fn((blob: Blob) => {
-      downloadedBlobs.push(blob);
-      return "blob:mock";
-    }),
-    revokeObjectURL: vi.fn(),
+  // Patch the two static methods in place: replacing the whole URL global would break the
+  // dynamic imports that build URLs while the lazy chart cards load.
+  originalObjectUrl = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  URL.createObjectURL = vi.fn((blob: Blob) => {
+    downloadedBlobs.push(blob);
+    return "blob:mock";
   });
+  URL.revokeObjectURL = vi.fn();
 });
 
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  URL.createObjectURL = originalObjectUrl.create;
+  URL.revokeObjectURL = originalObjectUrl.revoke;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });

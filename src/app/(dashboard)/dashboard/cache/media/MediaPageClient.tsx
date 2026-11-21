@@ -1,8 +1,6 @@
-"use client";
-
 import { useId, useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { useTranslations } from "use-intl";
+import { Link } from "react-router";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { Field } from "@omniroute/ui-kit/field";
 import Button from "@/shared/components/Button";
@@ -392,7 +390,6 @@ function ImageResults({ data }: { data: any }) {
         if (!src) return null;
         return (
           <div key={i} className="relative group rounded-lg overflow-hidden border border-border">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={src}
               alt={img.revised_prompt || t("generatedImageAlt", { index: i + 1 })}
@@ -735,7 +732,7 @@ export default function MediaPageClient() {
               provider: () => <strong className="capitalize">{selectedProvider}</strong>,
               providers: (chunks) => (
                 <Link
-                  href="/dashboard/providers"
+                  to="/dashboard/providers"
                   className="text-primary underline underline-offset-2 hover:text-primary/80"
                 >
                   {chunks}
@@ -909,7 +906,7 @@ export default function MediaPageClient() {
           actions={
             isCredentialsError ? (
               <Link
-                href="/dashboard/providers"
+                to="/dashboard/providers"
                 className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
               >
                 <Icon name="open_in_new" size={13} />

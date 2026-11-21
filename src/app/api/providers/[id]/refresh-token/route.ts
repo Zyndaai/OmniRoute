@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/lib/db/providers";
 import { refreshKimiProviderConnection } from "@/lib/kimi/tokenRefresh";
 import { parseKimiJwt } from "@omniroute/open-sse/utils/kimiJwt.ts";
@@ -15,7 +14,7 @@ export async function POST(
   const { id } = await props.params;
   const conn = await getProviderConnectionById(id);
   if (!conn) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(404, `Provider connection ${id} not found`),
       { status: 404 }
     );
@@ -25,14 +24,14 @@ export async function POST(
   if (provider === "kimi-web" || provider === "kimi_web") {
     const result = await refreshKimiProviderConnection(id);
     if (!result.success || !result.accessToken) {
-      return NextResponse.json(
+      return Response.json(
         buildErrorBody(400, result.error || "Failed to refresh Kimi token"),
         { status: 400 }
       );
     }
 
     const payload = parseKimiJwt(result.accessToken);
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Token refreshed successfully",
       expiresAt: result.expiresAtSec
@@ -46,7 +45,7 @@ export async function POST(
     });
   }
 
-  return NextResponse.json(
+  return Response.json(
     buildErrorBody(400, `Manual token refresh not supported for provider ${conn.provider}`),
     { status: 400 }
   );

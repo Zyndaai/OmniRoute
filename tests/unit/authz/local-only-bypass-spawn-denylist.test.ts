@@ -51,7 +51,6 @@ test.after(() => {
 const CODE_EXEC_ROUTES: ReadonlyArray<{ prefix: string; sample: string }> = [
   { prefix: "/api/middleware/", sample: "/api/middleware/hooks" }, // new vm.Script
   { prefix: "/api/acp/agents", sample: "/api/acp/agents" }, // execFileSync({ shell })
-  { prefix: "/api/system/version", sample: "/api/system/version" }, // git + npm install
   { prefix: "/api/db-backups/exportAll", sample: "/api/db-backups/exportAll" }, // tar
   { prefix: "/api/db/health", sample: "/api/db/health" }, // forked diagnostics
   { prefix: "/api/oauth/cursor/auto-import", sample: "/api/oauth/cursor/auto-import" },

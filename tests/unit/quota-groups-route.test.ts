@@ -15,7 +15,6 @@
  *   - POST Zod validation
  *   - PATCH rename + combo re-sync wiring
  *   - DELETE 409 logic for protected/in-use groups
- *   - force-dynamic export
  */
 
 import test from "node:test";
@@ -287,22 +286,6 @@ test("groups/[id]/route.ts: RouteParams typed as Promise<{ id: string }>", () =>
   assert.ok(
     idSrc.includes("Promise<") && idSrc.includes("id: string"),
     "params type must be Promise<{ id: string }> — matching pools/[id] pattern",
-  );
-});
-
-// ── force-dynamic ─────────────────────────────────────────────────────────────
-
-test("groups/route.ts: has dynamic = 'force-dynamic' export", () => {
-  assert.ok(
-    listSrc.includes('dynamic = "force-dynamic"') || listSrc.includes("dynamic = 'force-dynamic'"),
-    "route must export dynamic = 'force-dynamic'",
-  );
-});
-
-test("groups/[id]/route.ts: has dynamic = 'force-dynamic' export", () => {
-  assert.ok(
-    idSrc.includes('dynamic = "force-dynamic"') || idSrc.includes("dynamic = 'force-dynamic'"),
-    "route must export dynamic = 'force-dynamic'",
   );
 });
 

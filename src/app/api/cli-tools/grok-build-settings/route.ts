@@ -1,10 +1,7 @@
-"use server";
-
 import fs from "node:fs/promises";
 import path from "node:path";
 
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
-import { NextResponse } from "next/server";
 import pino from "pino";
 import { z } from "zod";
 
@@ -166,7 +163,7 @@ export async function GET(request: Request): Promise<Response> {
       GROK_SUBAGENT_TYPES.some((type) => settings.subagentModels[type]?.api_key)
     );
 
-    return NextResponse.json({
+    return Response.json({
       ...runtime,
       config: publicSettings,
       settings: publicSettings,
@@ -176,7 +173,7 @@ export async function GET(request: Request): Promise<Response> {
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to read Grok Build settings");
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -189,12 +186,12 @@ export async function POST(request: Request): Promise<Response> {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
 
   const validation = grokBuildConfigSchema.safeParse(rawBody);
   if (!validation.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Invalid request", details: validation.error.issues } },
       { status: 400 }
     );
@@ -220,7 +217,7 @@ export async function POST(request: Request): Promise<Response> {
       logger.warn("Failed to record Grok Build config time");
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Grok Build settings applied successfully!",
       configPath,
@@ -228,10 +225,10 @@ export async function POST(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof GrokBuildConfigConflictError) {
-      return NextResponse.json({ error: { message: error.message } }, { status: 409 });
+      return Response.json({ error: { message: error.message } }, { status: 409 });
     }
     logger.error({ err: error }, "Failed to apply Grok Build settings");
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }
 
@@ -247,7 +244,7 @@ export async function DELETE(request: Request): Promise<Response> {
 
     const current = await readConfigToml(configPath);
     if (!current) {
-      return NextResponse.json({ success: true, message: "No config file to reset" });
+      return Response.json({ success: true, message: "No config file to reset" });
     }
 
     await createBackup(TOOL_ID, configPath);
@@ -258,12 +255,12 @@ export async function DELETE(request: Request): Promise<Response> {
       logger.warn("Failed to clear Grok Build config time");
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute model slots removed from Grok Build",
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to reset Grok Build settings");
-    return NextResponse.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
+    return Response.json({ error: { message: sanitizeErrorMessage(error) } }, { status: 500 });
   }
 }

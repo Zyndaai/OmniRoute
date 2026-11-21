@@ -1,6 +1,4 @@
-"use client";
-
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import type { SearchProviderCatalogItem } from "@/shared/schemas/searchTools";
 import type { PlaygroundState } from "@/lib/playground/codeExport";
 
@@ -8,11 +6,11 @@ import SearchToolsTopBar, { type ActiveTab } from "./components/SearchToolsTopBa
 import SearchToolsConfigPane, { type ConfigState } from "./components/SearchToolsConfigPane";
 import SearchConceptCard from "./components/SearchConceptCard";
 
-import dynamic from "next/dynamic";
+import { ClientOnly } from "@/shared/components/ClientOnly";
 
-const SearchTab = dynamic(() => import("./components/tabs/SearchTab"), { ssr: false });
-const ScrapeTab = dynamic(() => import("./components/tabs/ScrapeTab"), { ssr: false });
-const CompareTab = dynamic(() => import("./components/tabs/CompareTab"), { ssr: false });
+const SearchTab = lazy(() => import("./components/tabs/SearchTab"));
+const ScrapeTab = lazy(() => import("./components/tabs/ScrapeTab"));
+const CompareTab = lazy(() => import("./components/tabs/CompareTab"));
 
 /** Minimal legacy-compatible shape used by SearchTab (fetched from /api/search/providers). */
 interface SearchProvider {
@@ -92,36 +90,47 @@ export default function SearchToolsClient() {
       {/* Main area: tab content + config pane */}
       <div className="flex flex-1 overflow-hidden">
         {/* Tab content */}
-        <div className="flex-1 overflow-y-auto" role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
-          {activeTab === "search" && (
-            <SearchTab
-              configState={configState}
-              providers={legacyProviders}
-              catalogProviders={catalogProviders}
-              onMetrics={(lMs, cUsd) => {
-                setLatencyMs(lMs);
-                setCostUsd(cUsd);
-              }}
-            />
-          )}
-          {activeTab === "scrape" && (
-            <ScrapeTab
-              configState={configState}
-              onMetrics={(lMs, cUsd) => {
-                setLatencyMs(lMs);
-                setCostUsd(cUsd);
-              }}
-            />
-          )}
-          {activeTab === "compare" && (
-            <CompareTab
-              providers={catalogProviders}
-              onMetrics={(lMs, cUsd) => {
-                setLatencyMs(lMs);
-                setCostUsd(cUsd);
-              }}
-            />
-          )}
+        <div
+          className="flex-1 overflow-y-auto"
+          role="tabpanel"
+          id={`tabpanel-${activeTab}`}
+          aria-labelledby={`tab-${activeTab}`}
+        >
+          <ClientOnly>
+            {() => (
+              <Suspense fallback={null}>
+                {activeTab === "search" && (
+                  <SearchTab
+                    configState={configState}
+                    providers={legacyProviders}
+                    catalogProviders={catalogProviders}
+                    onMetrics={(lMs, cUsd) => {
+                      setLatencyMs(lMs);
+                      setCostUsd(cUsd);
+                    }}
+                  />
+                )}
+                {activeTab === "scrape" && (
+                  <ScrapeTab
+                    configState={configState}
+                    onMetrics={(lMs, cUsd) => {
+                      setLatencyMs(lMs);
+                      setCostUsd(cUsd);
+                    }}
+                  />
+                )}
+                {activeTab === "compare" && (
+                  <CompareTab
+                    providers={catalogProviders}
+                    onMetrics={(lMs, cUsd) => {
+                      setLatencyMs(lMs);
+                      setCostUsd(cUsd);
+                    }}
+                  />
+                )}
+              </Suspense>
+            )}
+          </ClientOnly>
         </div>
 
         {/* Config pane */}

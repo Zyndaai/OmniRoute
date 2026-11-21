@@ -98,6 +98,42 @@ test("an SSE stream within the cap still drains normally", async () => {
   assert.ok(out.includes('"ok":1'));
 });
 
+// Content-Length is absent on chunked bodies and is the compressed size for gzip/br, so the
+// JSON path must count the bytes it actually reads.
+test("aborts a non-SSE body without Content-Length once it passes the cap", async () => {
+  const enc = new TextEncoder();
+  let cancelled = false;
+  const body = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(enc.encode("x".repeat(1024)));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const response = new Response(body, { headers: { "Content-Type": "application/json" } });
+
+  await assert.rejects(
+    () => readNonStreamingResponseBody(response, "application/json", false, 8 * 1024),
+    (err) => err instanceof NonStreamingResponseTooLargeError && err.bytesSeen > 8 * 1024
+  );
+  assert.equal(cancelled, true, "upstream body must be cancelled on cap exceed");
+});
+
+test("a non-SSE body without Content-Length within the cap is read whole", async () => {
+  const enc = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(enc.encode('{"choices":'));
+      controller.enqueue(enc.encode('[{"message":{"content":"ok"}}]}'));
+      controller.close();
+    },
+  });
+  const response = new Response(body, { headers: { "Content-Type": "application/json" } });
+  const out = await readNonStreamingResponseBody(response, "application/json", false, 1024);
+  assert.equal(out, '{"choices":[{"message":{"content":"ok"}}]}');
+});
+
 test("rejects a non-SSE response whose declared Content-Length exceeds the cap (no buffering)", async () => {
   const response = new Response("body-not-read", {
     headers: { "Content-Type": "application/json", "content-length": String(100 * 1024 * 1024) },

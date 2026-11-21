@@ -1,11 +1,9 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import { cn } from "@/shared/utils/cn";
 
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { listUnrenderableComboAccessRules } from "../apiManagerPageUtils";
 
 export interface AllowedComboOption {

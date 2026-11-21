@@ -47,7 +47,7 @@ test.after(async () => {
 });
 
 test("root layout imports the read-only settings leaf", () => {
-  const layoutSource = fs.readFileSync(path.join(process.cwd(), "src/app/layout.tsx"), "utf8");
+  const layoutSource = fs.readFileSync(path.join(process.cwd(), "src/app/root.tsx"), "utf8");
   const leafSource = fs.readFileSync(
     path.join(process.cwd(), "src/lib/db/rootLayoutSettings.ts"),
     "utf8"

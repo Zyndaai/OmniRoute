@@ -67,13 +67,12 @@ const DEFAULT_DEGRADATION_MAP: Record<string, string> = {
 
 // ── State ───────────────────────────────────────────────────────────────────
 
-// Backed by globalThis so the singleton is shared across the SEPARATE webpack
-// module graphs Next.js builds for `instrumentation.ts` (boot-time hydration via
-// applyRuntimeSettings → setBackgroundDegradationConfig) and the app-route /
-// open-sse executors (per-request reads in the chat handler). A module-local `let`
-// is duplicated per graph, so the operator's opt-in (`enabled:true`) applied at boot
-// never reaches the request path — the degradation silently never fires (the
-// #5312-class module-graph bug). Mirrors systemPrompt.ts (#2470) and thinkingBudget.ts.
+// Backed by globalThis so the singleton survives dev-server module re-evaluation: boot-time
+// hydration (applyRuntimeSettings → setBackgroundDegradationConfig) and the per-request
+// reads in the chat handler must see the same config, and a module-local `let` would be
+// reset when the dev server re-evaluates an edited module, silently dropping the operator's
+// opt-in (`enabled:true`) so the degradation never fires (#5312). Mirrors systemPrompt.ts
+// (#2470) and thinkingBudget.ts.
 const GLOBAL_KEY = "__omniroute_backgroundDegradation_config__";
 const _store = globalThis as unknown as Record<string, DegradationConfig | undefined>;
 

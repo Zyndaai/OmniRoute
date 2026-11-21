@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { CodePreview } from "@omniroute/ui-kit/code-preview";
 import { ChoiceCard } from "@omniroute/ui-kit/onboarding-patterns";
@@ -31,7 +29,7 @@ const COMMON_PROVIDERS = [
 ];
 
 export default function OnboardingWizard() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("onboarding");
   const tc = useTranslations("common");
   const baseUrl = useDisplayBaseUrl();
@@ -68,7 +66,7 @@ export default function OnboardingWizard() {
         if (res.ok) {
           const settings = await res.json();
           if (settings.setupComplete) {
-            router.replace("/dashboard");
+            navigate("/dashboard", { replace: true });
             return;
           }
         }
@@ -78,7 +76,7 @@ export default function OnboardingWizard() {
       setLoading(false);
     };
     checkSetup();
-  }, [router]);
+  }, [navigate]);
 
   const STEPS = STEP_IDS.map((id, i) => ({
     id,
@@ -264,7 +262,7 @@ export default function OnboardingWizard() {
       setErrorMessage(t("connectionError"));
       return;
     }
-    router.push("/dashboard");
+    navigate("/dashboard");
   };
 
   if (loading) {

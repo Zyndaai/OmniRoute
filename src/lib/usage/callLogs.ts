@@ -9,7 +9,6 @@ import type { RequestPipelinePayloads } from "@omniroute/open-sse/utils/requestL
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/errorSanitization.ts";
 import { db, ts } from "../db/pg";
 import { jsonTextParam, stripNul } from "../db/pgJsonText";
-import { isNextBuildPhase } from "../buildPhase";
 import { failPendingCallLogDetail, publishPendingCallLogDetail } from "../db/callLogDetails";
 import { applyNodePrefix, resolveProviderDisplay } from "./callLogDisplay";
 export { applyNodePrefix, resolveProviderDisplay } from "./callLogDisplay";
@@ -84,9 +83,6 @@ export {
 };
 
 type JsonRecord = Record<string, unknown>;
-
-// Persistence is always on; only the Next.js build phase has no database to write to.
-const persistCallLogs = !isNextBuildPhase();
 
 const pendingCallLogSaves = new Set<Promise<void>>();
 let callLogSavesClosing = false;
@@ -405,7 +401,8 @@ function mapSummaryRow(row: CallLogSummaryRow) {
     reasoningSource: row.reasoning_source ?? null,
     reasoningChars: row.reasoning_chars != null ? toNumber(row.reasoning_chars) : null,
     // Tri-state; consumers (CallContentProvenanceBadges) compare it to 0/1.
-    hasContent: row.has_content === null || row.has_content === undefined ? null : row.has_content ? 1 : 0,
+    hasContent:
+      row.has_content === null || row.has_content === undefined ? null : row.has_content ? 1 : 0,
     usageProvenance: row.usage_provenance ?? null,
     requestType: row.request_type,
     sourceFormat: row.source_format,
@@ -882,7 +879,7 @@ export function saveCallLog(entry: any): Promise<void> {
       compressed: typeof entry.tokensCompressed === "number" ? entry.tokensCompressed : null,
     });
   }
-  if (!persistCallLogs || callLogSavesClosing) return Promise.resolve();
+  if (callLogSavesClosing) return Promise.resolve();
 
   const operation = saveCallLogOperation(entry);
   pendingCallLogSaves.add(operation);
@@ -927,7 +924,7 @@ export async function closeCallLogSaves(timeoutMs = 2_000): Promise<void> {
   await closeCallLogArtifactWriter(0);
 }
 
-if (persistCallLogs && process.env.NODE_ENV !== "test") {
+if (process.env.NODE_ENV !== "test") {
   scheduleCallLogRotation();
 }
 
@@ -935,12 +932,7 @@ if (persistCallLogs && process.env.NODE_ENV !== "test") {
  * Pushes a `column LIKE %value%` condition (mirrors the correlationId/sessionTag substring-match
  * precedent). Extracted so getCallLogs stays under the max-lines-per-function ratchet — #8249.
  */
-function pushLikeFilter(
-  conditions: string[],
-  params: unknown[],
-  column: string,
-  value: unknown
-) {
+function pushLikeFilter(conditions: string[], params: unknown[], column: string, value: unknown) {
   if (!value) return;
   params.push(`%${value}%`);
   conditions.push(`cl.${column} ILIKE $${params.length}`);

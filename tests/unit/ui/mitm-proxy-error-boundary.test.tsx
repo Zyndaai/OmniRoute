@@ -4,6 +4,17 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const routeState = vi.hoisted(() => ({
+  error: undefined as (Error & { digest?: string }) | undefined,
+  revalidate: vi.fn(),
+}));
+
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useRouteError: () => routeState.error,
+  useRevalidator: () => ({ revalidate: routeState.revalidate, state: "idle" }),
+}));
+
 const cleanupCallbacks: Array<() => void> = [];
 
 function makeContainer(): HTMLElement {
@@ -27,31 +38,29 @@ describe("MitmProxyError boundary", () => {
   });
 
   it("renders a recoverable fallback instead of throwing", async () => {
-    const { default: MitmProxyError } =
-      await import("../../../src/app/(dashboard)/dashboard/system/mitm-proxy/error");
+    const { ErrorBoundary: MitmProxyError } =
+      await import("../../../src/app/(dashboard)/dashboard/system/mitm-proxy/layout");
     const container = makeContainer();
     const root = createRoot(container);
-    const reset = vi.fn();
-    const error = Object.assign(new Error("boom"), { digest: "abc123" });
+    routeState.error = Object.assign(new Error("boom"), { digest: "abc123" });
 
     await act(async () => {
-      root.render(<MitmProxyError error={error} reset={reset} />);
+      root.render(<MitmProxyError />);
     });
 
     expect(container.querySelector("[role='alert']")).toBeTruthy();
     expect(container.textContent).toContain("Failed to load MITM proxy");
   });
 
-  it("calls reset() exactly once when Try Again is clicked", async () => {
-    const { default: MitmProxyError } =
-      await import("../../../src/app/(dashboard)/dashboard/system/mitm-proxy/error");
+  it("revalidates exactly once when Try Again is clicked", async () => {
+    const { ErrorBoundary: MitmProxyError } =
+      await import("../../../src/app/(dashboard)/dashboard/system/mitm-proxy/layout");
     const container = makeContainer();
     const root = createRoot(container);
-    const reset = vi.fn();
-    const error = Object.assign(new Error("boom"), { digest: undefined });
+    routeState.error = Object.assign(new Error("boom"), { digest: undefined });
 
     await act(async () => {
-      root.render(<MitmProxyError error={error} reset={reset} />);
+      root.render(<MitmProxyError />);
     });
 
     const button = Array.from(container.querySelectorAll("button")).find(
@@ -63,6 +72,6 @@ describe("MitmProxyError boundary", () => {
       button?.click();
     });
 
-    expect(reset).toHaveBeenCalledTimes(1);
+    expect(routeState.revalidate).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,8 +1,6 @@
-"use client";
-
 import { useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 import { Handle, Position, type Node, type Edge, type NodeTypes } from "@xyflow/react";
 import Icon from "@/shared/components/Icon";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
@@ -330,7 +328,7 @@ export default function ProviderTopology({
     [providers]
   );
 
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
@@ -339,10 +337,10 @@ export default function ProviderTopology({
         (node.data as ProviderNodeData | undefined)?.providerId ||
         node.id.replace(/^provider-/, "");
       if (providerId) {
-        router.push(`/dashboard/providers/${providerId}`);
+        navigate(`/dashboard/providers/${providerId}`);
       }
     },
-    [router]
+    [navigate]
   );
 
   const containerClass =

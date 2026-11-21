@@ -1,6 +1,5 @@
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import { getBatch, updateBatch } from "@/lib/db/batches";
-import { NextResponse } from "next/server";
 import {
   getApiKeyRequestScope,
   canAccessOwnedRecord,
@@ -23,7 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -57,14 +56,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // key-owned batch (#13683) — a key cancels its own, and a null-owner batch
   // is denied to a foreign key and to an anonymous caller (GHSA-2jm2-mpx8-6523).
   if (!batch || !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, batch.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Batch not found", type: "invalid_request_error" } },
       { status: 404, headers: CORS_HEADERS }
     );
   }
 
   if (["completed", "failed", "cancelled", "expired"].includes(batch.status)) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: { message: `Batch ${id} is already ${batch.status}`, type: "invalid_request_error" },
       },
@@ -73,7 +72,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   if (batch.status === "cancelling") {
-    return NextResponse.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
+    return Response.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
   }
 
   await updateBatch(id, {
@@ -83,5 +82,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const updatedBatch = await getBatch(id);
 
-  return NextResponse.json(formatBatchResponse(updatedBatch), { headers: CORS_HEADERS });
+  return Response.json(formatBatchResponse(updatedBatch), { headers: CORS_HEADERS });
 }

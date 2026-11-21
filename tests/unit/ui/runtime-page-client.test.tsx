@@ -47,9 +47,10 @@ async function renderRuntimePage() {
   });
 }
 
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a href={String(href)} {...props}>
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ to, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+    <a href={String(to)} {...props}>
       {children}
     </a>
   ),
@@ -148,7 +149,7 @@ function runtimePageClientTranslate(key: string, values?: Record<string, unknown
   return message;
 }
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => runtimePageClientTranslate,
 }));
 

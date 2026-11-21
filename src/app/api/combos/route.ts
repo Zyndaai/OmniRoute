@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getCombos, getCombosCount, createCombo, getComboByName } from "@/lib/db/combos";
 import { isCloudEnabled } from "@/lib/db/settings";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
@@ -28,7 +27,7 @@ export async function GET(request: Request) {
     };
     const validation = validateBody(paginationSchema, raw);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
 
     const range = validation.data;
@@ -41,10 +40,10 @@ export async function GET(request: Request) {
         computed_context_length: await computeComboContextLength(combo, rawCombos, resolution),
       }))
     );
-    return NextResponse.json({ combos, total });
+    return Response.json({ combos, total });
   } catch (error) {
     console.log("Error fetching combos:", error);
-    return NextResponse.json({ error: "Failed to fetch combos" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch combos" }, { status: 500 });
   }
 }
 
@@ -59,7 +58,7 @@ export async function POST(request) {
     // Zod validation (covers name format, length, etc.)
     const validation = validateBody(createComboSchema, body);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const allCombos = await getCombos();
     const normalizedModels = normalizeComboModels(validation.data.models, {
@@ -95,7 +94,7 @@ export async function POST(request) {
     // Check if name already exists
     const existing = await getComboByName(name);
     if (existing) {
-      return NextResponse.json({ error: "Combo name already exists" }, { status: 400 });
+      return Response.json({ error: "Combo name already exists" }, { status: 400 });
     }
 
     // Validate nested combo DAG (no circular references, max depth)
@@ -115,7 +114,7 @@ export async function POST(request) {
         clampComboDepth((config as { maxComboDepth?: unknown } | undefined)?.maxComboDepth)
       );
     } catch (dagError) {
-      return NextResponse.json({ error: dagError.message }, { status: 400 });
+      return Response.json({ error: dagError.message }, { status: 400 });
     }
 
     const combo = await createCombo(comboInput);
@@ -128,13 +127,13 @@ export async function POST(request) {
     // Surface it as a non-blocking warning so the dashboard/API caller can
     // confirm it was intentional instead of silently shadowing the model.
     const warning = buildComboNameCollisionWarning(name);
-    return NextResponse.json(warning ? { ...combo, warning } : combo, { status: 201 });
+    return Response.json(warning ? { ...combo, warning } : combo, { status: 201 });
   } catch (error) {
     if (error instanceof ComboInvariantError) {
       return comboErrorResponse("COMBO_008", 400, { reason: error.message }, request);
     }
     console.log("Error creating combo:", error);
-    return NextResponse.json({ error: "Failed to create combo" }, { status: 500 });
+    return Response.json({ error: "Failed to create combo" }, { status: 500 });
   }
 }
 

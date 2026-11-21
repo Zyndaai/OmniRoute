@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InterceptedRequest, ListFilters, WsEvent } from "@/mitm/inspector/types";
 import { matchesTrafficFilter } from "@/lib/inspector/matchesTrafficFilter";

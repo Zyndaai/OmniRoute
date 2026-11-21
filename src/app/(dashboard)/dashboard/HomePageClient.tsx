@@ -1,10 +1,7 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Link, useNavigate } from "react-router";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
 import { WorkflowGuide } from "@omniroute/ui-kit/workflow-guide";
 import EmptyState from "@/shared/components/EmptyState";
@@ -17,29 +14,11 @@ import {
   isProviderConnectionErrored,
 } from "@/shared/utils/providerConnectionStatus";
 import { useNotificationStore } from "@/store/notificationStore";
-import { extractApiErrorMessage } from "@/shared/http/apiErrorMessage";
 import { copyToClipboard } from "@/shared/utils/clipboard";
 import { getProviderDisplayLabel } from "@/shared/utils/providerDisplayLabel";
 import { HomeProviderTopologySection } from "./HomeProviderTopologySection";
 import { shouldShowProviderTopologyOnHome } from "./homeAppearance";
-import ManualUpdateCommand from "./ManualUpdateCommand";
 import HomeRecentRequests from "../home/HomeRecentRequests";
-
-type UpdateStep = {
-  step: string;
-  status: string;
-  message: string;
-};
-
-type VersionInfo = {
-  current: string;
-  latest: string;
-  updateAvailable: boolean;
-  channel: string;
-  autoUpdateSupported: boolean;
-  autoUpdateError?: string | null;
-  manualUpdateCommand?: string | null;
-};
 
 type HomePageClientProps = {
   machineId?: string;
@@ -92,21 +71,7 @@ function normalizeProviderId(providerId?: string | null): string {
   return AI_PROVIDERS[normalized] ? normalized : PROVIDER_ALIAS_TO_ID.get(normalized) || normalized;
 }
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function mergeUpdateStep(steps: UpdateStep[], nextStep: UpdateStep) {
-  const idx = steps.findIndex((step) => step.step === nextStep.step);
-  if (idx === -1) {
-    return [...steps, nextStep];
-  }
-
-  const next = [...steps];
-  next[idx] = nextStep;
-  return next;
-}
-
-// Quick-start link classes, extracted so each <Link> still fits on one line with
-// prefetch={false} (#8281) — this file is size-frozen.
+// Quick-start link classes, shared by the quick-start <Link>s.
 const INLINE_LINK = "text-primary hover:underline";
 // The kit WorkflowGuide numbers its steps itself; the step titles carry a "1. " prefix.
 const stripStepNumber = (title: string) => title.replace(/^\s*\d+[.)]\s*/, "");
@@ -120,7 +85,7 @@ function emptySubscribe() {
 }
 
 export default function HomePageClient({ machineId }: HomePageClientProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("home");
   const tp = useTranslations("providers");
   const [providerConnections, setProviderConnections] = useState([]);
@@ -145,12 +110,6 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
   // only when the topology is actually shown. HomePageClient must NOT open its own
   // unconditional live socket: the binding here was unused (ReferenceError in prod,
   // #4759/#4745) and the socket opened even when topology was hidden (#4596).
-
-  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
-  const [updating, setUpdating] = useState(false);
-
-  const [updateSteps, setUpdateSteps] = useState<UpdateStep[]>([]);
-  const [updatePhase, setUpdatePhase] = useState<"idle" | "running" | "done" | "failed">("idle");
 
   // Appearance settings for home page pinning
   const [showQuickStartOnHome, setShowQuickStartOnHome] = useState(true); // default on
@@ -191,10 +150,9 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [provRes, modelsRes, versionRes] = await Promise.all([
+      const [provRes, modelsRes] = await Promise.all([
         fetch("/api/providers"),
         fetch("/api/models"),
-        fetch("/api/system/version"),
       ]);
       if (provRes.ok) {
         const provData = await provRes.json();
@@ -203,10 +161,6 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
       if (modelsRes.ok) {
         const modelsData = await modelsRes.json();
         setModels(modelsData.models || []);
-      }
-      if (versionRes.ok) {
-        const versionData = await versionRes.json();
-        setVersionInfo(versionData);
       }
     } catch (e) {
       console.log("Error fetching data:", e);
@@ -353,7 +307,7 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
           }),
           title: tp(hasWarning ? "apiKeyWarningAlertTitle" : "apiKeyInvalidAlertTitle"),
           duration: 10000,
-          onClick: () => router.push(navigateTo),
+          onClick: () => navigate(navigateTo),
         });
         // Mark all current unhealthy keys as notified
         newUnhealthyKeys.forEach((k) => notifiedUnhealthyKeys.current.add(k));
@@ -363,7 +317,7 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
     if (providerConnections.length > 0) {
       checkApiKeyHealth();
     }
-  }, [providerConnections, t, tp, router]);
+  }, [providerConnections, t, tp, navigate]);
 
   const providerStats = useMemo(() => {
     return Object.entries(AI_PROVIDERS).map(([providerId, providerInfo]) => {
@@ -464,262 +418,6 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
 
   const { lastProvider, errorProvider } = providerTopology;
 
-  const pollBackgroundUpdate = useCallback(
-    async ({
-      channel,
-      message,
-      targetVersion,
-    }: {
-      channel: string;
-      message: string;
-      targetVersion: string;
-    }) => {
-      const notify = useNotificationStore.getState();
-      const initialSteps =
-        channel === "docker-compose"
-          ? [
-              {
-                step: "install",
-                status: "done",
-                message: message || t("updateQueued", { version: targetVersion }),
-              },
-              {
-                step: "rebuild",
-                status: "running",
-                message: t("updateDockerRebuilding"),
-              },
-              {
-                step: "restart",
-                status: "pending",
-                message: t("updateWaitingRestart"),
-              },
-            ]
-          : [
-              {
-                step: "install",
-                status: "running",
-                message: message || t("updateInstalling", { version: targetVersion }),
-              },
-              {
-                step: "restart",
-                status: "pending",
-                message: t("updateWaitingRestart"),
-              },
-            ];
-
-      setUpdateSteps(initialSteps);
-
-      // Docker rebuilds and host-side image pulls (docker-trigger) take longer than npm.
-      const maxAttempts = channel.startsWith("docker") ? 72 : 36;
-
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        await wait(5000);
-
-        try {
-          const versionRes = await fetch("/api/system/version", { cache: "no-store" });
-          if (!versionRes.ok) {
-            throw new Error(`Version check returned ${versionRes.status}`);
-          }
-
-          const latestInfo = await versionRes.json();
-          setVersionInfo(latestInfo);
-
-          if (latestInfo.current === targetVersion) {
-            setUpdateSteps((prev) => {
-              let next = prev.map((step) => {
-                if (step.step === "install" || step.step === "rebuild" || step.step === "restart") {
-                  return { ...step, status: "done" };
-                }
-                return step;
-              });
-
-              next = mergeUpdateStep(next, {
-                step: "complete",
-                status: "done",
-                message: t("updateRunning", { version: targetVersion }),
-              });
-
-              return next;
-            });
-            setUpdating(false);
-            setUpdatePhase("done");
-            notify.success(t("updateCompleted", { version: targetVersion }));
-            await fetchData();
-            return;
-          }
-
-          setUpdateSteps((prev) => {
-            let next = prev;
-            if (channel === "docker-compose") {
-              next = mergeUpdateStep(next, {
-                step: "rebuild",
-                status: "running",
-                message: t("updateDockerStillRebuilding", { version: targetVersion }),
-              });
-            } else {
-              next = mergeUpdateStep(next, {
-                step: "install",
-                status: "running",
-                message: t("updateInstallingBackground", { version: targetVersion }),
-              });
-            }
-
-            next = mergeUpdateStep(next, {
-              step: "restart",
-              status: "pending",
-              message: t("updateWaitingVersion", { version: targetVersion }),
-            });
-
-            return next;
-          });
-        } catch {
-          setUpdateSteps((prev) => {
-            let next = prev;
-            if (channel === "docker-compose") {
-              next = mergeUpdateStep(next, {
-                step: "rebuild",
-                status: "running",
-                message: t("updateDockerStillInProgress"),
-              });
-            } else {
-              next = mergeUpdateStep(next, {
-                step: "install",
-                status: "running",
-                message: t("updateInstallingBackground", { version: targetVersion }),
-              });
-            }
-
-            next = mergeUpdateStep(next, {
-              step: "restart",
-              status: "running",
-              message: t("updateRestarting"),
-            });
-
-            return next;
-          });
-        }
-      }
-
-      setUpdateSteps((prev) =>
-        mergeUpdateStep(prev, {
-          step: "error",
-          status: "failed",
-          message: t("updateTimeout", { version: targetVersion }),
-        })
-      );
-      setUpdating(false);
-      setUpdatePhase("failed");
-      notify.error(t("updateTimedOut", { version: targetVersion }));
-    },
-    [fetchData, t]
-  );
-
-  const handleUpdate = async () => {
-    const notify = useNotificationStore.getState();
-    setUpdating(true);
-    setUpdatePhase("running");
-    setUpdateSteps([]);
-
-    try {
-      const res = await fetch("/api/system/version", { method: "POST" });
-
-      // If response is JSON (error/already up to date)
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          // #5991: the error envelope is `{ error: { code, message, correlation_id } }`.
-          // Passing the raw object to notify.error() rendered it as a React child →
-          // "Minified React error #31" crash ("Internal Server Error" screen), e.g. on
-          // the 403 from the loopback-only /api/system/version. Extract the string.
-          notify.error(extractApiErrorMessage(data, t("updateStartFailed")));
-          setUpdating(false);
-          setUpdatePhase("idle");
-          return;
-        }
-        notify.success(data.message || t("updateStarted"));
-        await pollBackgroundUpdate({
-          channel: data.channel || "docker-compose",
-          message: data.message || "",
-          targetVersion: data.to || data.latest,
-        });
-        return;
-      }
-
-      // SSE stream — read progress events
-      if (!res.body) {
-        notify.error(t("noResponseStream"));
-        setUpdating(false);
-        setUpdatePhase("idle");
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-
-            setUpdateSteps((prev) => {
-              return mergeUpdateStep(prev, event);
-            });
-
-            if (event.step === "complete") {
-              setUpdatePhase("done");
-              setUpdating(false);
-              notify.success(event.message || t("updateComplete"));
-            } else if (event.step === "error") {
-              setUpdatePhase("failed");
-              notify.error(event.message || t("updateFailed"));
-              setUpdating(false);
-            }
-          } catch {
-            // ignore parse errors
-          }
-        }
-      }
-    } catch {
-      setUpdatePhase("failed");
-      setUpdateSteps((prev) => [
-        ...prev,
-        {
-          step: "error",
-          status: "failed",
-          message: t("updateNetworkError"),
-        },
-      ]);
-      setUpdating(false);
-    }
-  };
-
-  // Auto-reload after successful update (service restarts, need new page)
-  useEffect(() => {
-    if (updatePhase !== "done") return;
-    const timer = setTimeout(() => {
-      globalThis.window.location.reload();
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [updatePhase]);
-  const stepLabels: Record<string, string> = {
-    install: t("stepInstallPackage"),
-    rebuild: t("stepRebuildNativeModules"),
-    restart: t("stepRestartService"),
-    complete: t("stepComplete"),
-    error: t("stepError"),
-  };
-  const showUpdateOverlay = updatePhase !== "idle";
-
   if (loading) {
     return (
       <div className="flex flex-col gap-8">
@@ -733,150 +431,6 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Update Progress Overlay */}
-      {showUpdateOverlay && (
-        <div className="fixed inset-0 z-[999] bg-[var(--ci-color-overlay)] backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-bg-main border border-border rounded-2xl shadow-2xl max-w-md w-full p-6">
-            <div className="flex items-center gap-3 mb-5">
-              <Icon name="progress_activity" size={28} className="text-primary animate-spin" />
-              <div>
-                <h3 className="text-lg font-bold">
-                  {updatePhase === "done"
-                    ? t("updateCompleteTitle")
-                    : updatePhase === "failed"
-                      ? t("updateFailedTitle")
-                      : t("updatingTitle")}
-                </h3>
-                <p className="text-xs text-text-muted mt-0.5">
-                  {updatePhase === "done"
-                    ? t("reloadNotice")
-                    : updatePhase === "failed"
-                      ? t("retryNotice")
-                      : t("restartNotice")}
-                </p>
-              </div>
-            </div>
-
-            {/* Step list */}
-            <div className="flex flex-col gap-2">
-              {updateSteps
-                .filter((s) => s.step !== "complete" && s.step !== "error")
-                .map((s) => (
-                  <div
-                    key={s.step}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
-                      s.status === "running"
-                        ? "border-primary/40 bg-primary/5"
-                        : s.status === "done"
-                          ? "border-success/30 bg-success/5"
-                          : s.status === "failed"
-                            ? "border-error/30 bg-error/5"
-                            : "border-border bg-bg-subtle"
-                    }`}
-                  >
-                    {s.status === "running" ? (
-                      <Icon
-                        name="progress_activity"
-                        size={18}
-                        className="text-primary animate-spin"
-                      />
-                    ) : s.status === "done" ? (
-                      <Icon name="check_circle" size={18} className="text-success" />
-                    ) : s.status === "failed" ? (
-                      <Icon name="error" size={18} className="text-error" />
-                    ) : (
-                      <Icon name="warning" size={18} className="text-warning" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{stepLabels[s.step] || s.step}</p>
-                      <p className="text-xs text-text-muted truncate">{s.message}</p>
-                    </div>
-                  </div>
-                ))}
-
-              {/* Error message */}
-              {updateSteps.find((s) => s.step === "error") && (
-                <div className="mt-1 px-3 py-2.5 rounded-lg border border-error/30 bg-error/5 text-error">
-                  <p className="text-xs font-mono break-all">
-                    {updateSteps.find((s) => s.step === "error")?.message}
-                  </p>
-                </div>
-              )}
-
-              {/* Completion message */}
-              {updatePhase === "done" && (
-                <div className="mt-1 px-3 py-2.5 rounded-lg border border-success/30 bg-success/5">
-                  <p className="text-sm font-semibold text-success flex items-center gap-2">
-                    <Icon name="check_circle" size={18} />
-                    {updateSteps.find((s) => s.step === "complete")?.message || t("updateComplete")}
-                  </p>
-                  <p className="text-xs text-text-muted mt-1">{t("reloadingPageAutomatically")}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            {(updatePhase === "failed" || updatePhase === "done") && (
-              <div className="flex gap-2 mt-4">
-                <Button
-                  size="sm"
-                  fullWidth
-                  onClick={() => {
-                    setUpdating(false);
-                    setUpdatePhase("idle");
-                    setUpdateSteps([]);
-                    if (updatePhase === "done") globalThis.window.location.reload();
-                  }}
-                >
-                  {updatePhase === "done" ? t("reloadNow") : t("closeUpdate")}
-                </Button>
-                {updatePhase === "failed" && (
-                  <Button size="sm" variant="secondary" fullWidth onClick={handleUpdate}>
-                    {t("retryUpdate")}
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Update Notification Banner */}
-      {versionInfo?.updateAvailable && !showUpdateOverlay && (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/10 px-5 py-4 text-primary">
-            <div className="flex min-h-[48px] items-center justify-between">
-              <div className="flex min-w-0 items-center gap-4">
-                <Icon name="system_update_alt" size={24} />
-                <div>
-                  <p className="font-semibold text-sm">
-                    {t("updateAvailableTitle", { version: versionInfo.latest, desktop: "" })}
-                  </p>
-                  <p className="text-xs opacity-80 mt-0.5">
-                    {versionInfo.autoUpdateSupported
-                      ? t("updateAvailableDesc")
-                      : versionInfo.autoUpdateError || t("manualUpdateRequired")}
-                  </p>
-                  {!versionInfo.autoUpdateSupported && versionInfo.manualUpdateCommand && (
-                    <ManualUpdateCommand command={versionInfo.manualUpdateCommand} />
-                  )}
-                </div>
-              </div>
-
-              <Button
-                size="sm"
-                onClick={versionInfo.autoUpdateSupported ? handleUpdate : undefined}
-                disabled={updating || !versionInfo.autoUpdateSupported}
-                className="ml-4 shrink-0 font-semibold"
-                title={versionInfo.autoUpdateError || ""}
-              >
-                {versionInfo.autoUpdateSupported ? t("updateNow") : t("manualUpdate")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Quick Start (controlled by Appearance setting, default on) */}
       {showQuickStartOnHome && (
         <section className="flex flex-col gap-3">
@@ -884,7 +438,7 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
             title={t("quickStart")}
             description={t("quickStartDesc")}
             actions={
-              <Link href="/docs" prefetch={false} className={DOCS_LINK}>
+              <Link to="/docs" className={DOCS_LINK}>
                 <Icon name="menu_book" size={14} />
                 {t("fullDocs")}
               </Link>
@@ -901,11 +455,7 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
                   <>
                     {t.rich("step1Desc", {
                       endpoint: (chunks) => (
-                        <Link
-                          href="/dashboard/api-manager"
-                          prefetch={false}
-                          className={INLINE_LINK}
-                        >
+                        <Link to="/dashboard/api-manager" className={INLINE_LINK}>
                           {chunks}
                         </Link>
                       ),
@@ -921,7 +471,7 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
                   <>
                     {t.rich("step2Desc", {
                       providers: (chunks) => (
-                        <Link href="/dashboard/providers" prefetch={false} className={INLINE_LINK}>
+                        <Link to="/dashboard/providers" className={INLINE_LINK}>
                           {chunks}
                         </Link>
                       ),
@@ -943,12 +493,12 @@ export default function HomePageClient({ machineId }: HomePageClientProps) {
                   <>
                     {t.rich("step4Desc", {
                       logs: (chunks) => (
-                        <Link href="/dashboard/logs" prefetch={false} className={INLINE_LINK}>
+                        <Link to="/dashboard/logs" className={INLINE_LINK}>
                           {chunks}
                         </Link>
                       ),
                       analytics: (chunks) => (
-                        <Link href="/dashboard/analytics" prefetch={false} className={INLINE_LINK}>
+                        <Link to="/dashboard/analytics" className={INLINE_LINK}>
                           {chunks}
                         </Link>
                       ),
@@ -1069,14 +619,14 @@ function ProviderModelsModal({
 }) {
   const [copiedModel, setCopiedModel] = useState(null);
   const notify = useNotificationStore();
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("home");
   const tc = useTranslations("common");
   const ts = useTranslations("sidebar");
 
   const navigateTo = (path) => {
     onClose();
-    router.push(path);
+    navigate(path);
   };
 
   const handleCopy = async (text) => {

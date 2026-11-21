@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Input, Select, Toggle } from "@/shared/components";
 import {
   PEAK_HOUR_PROTECTION_DAYS,

@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { chaosText, type ChaosTranslator } from "./chaosI18n";
 import type { ChaosPageConfig, ChaosPageMessage } from "./chaosPageTypes";
 

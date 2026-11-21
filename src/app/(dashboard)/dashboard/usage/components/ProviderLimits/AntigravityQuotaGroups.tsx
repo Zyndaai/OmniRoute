@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { formatCountdown, getBarColor } from "./utils";
 import Button from "@/shared/components/Button";

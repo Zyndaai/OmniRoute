@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 
 /**
  * Regression guard for next-intl INVALID_MESSAGE: UNCLOSED_TAG on CC

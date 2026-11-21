@@ -4,7 +4,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { OutboundUrlGuardError } from "@/shared/network/outboundUrlGuard";
 import { parseAndValidateWebhookUrl } from "@/shared/network/outboundUrlGuardPolicy";
@@ -22,23 +21,23 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(validateUrlSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { url } = validation.data;
 
   try {
     parseAndValidateWebhookUrl(url);
-    return NextResponse.json({ valid: true });
+    return Response.json({ valid: true });
   } catch (err) {
     if (err instanceof OutboundUrlGuardError) {
-      return NextResponse.json({ valid: false, reason: "blocked_private" });
+      return Response.json({ valid: false, reason: "blocked_private" });
     }
-    return NextResponse.json({ valid: false, reason: "invalid_url" });
+    return Response.json({ valid: false, reason: "invalid_url" });
   }
 }

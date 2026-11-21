@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
 import * as generator from "../../../src/lib/cli-helper/config-generator/index.ts";
 
-// The UI's HERMES_ROLES catalog (HermesAgentToolCard.tsx) is a "use client" component
+// The UI's HERMES_ROLES catalog (HermesAgentToolCard.tsx) is a browser component
 // module — importing it in the Node test runner would pull in React/JSX. Instead we
 // extract the id list straight from source text, which is enough to diff catalogs
 // without executing the component.

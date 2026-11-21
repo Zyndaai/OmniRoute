@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isAutoComboId, materializeAutoCombo } from "@/lib/combos/autoVirtual";
 import {
@@ -218,10 +217,10 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json({ combos });
+    return Response.json({ combos });
   } catch (error) {
     console.error("Error fetching auto combos:", error);
-    return NextResponse.json({ combos: [] });
+    return Response.json({ combos: [] });
   }
 }
 
@@ -234,12 +233,12 @@ export async function GET(request: Request) {
 async function getSingleAutoCombo(rawId: string) {
   const id = rawId.trim();
   if (!isAutoComboId(id)) {
-    return NextResponse.json({ error: `Not an auto combo id: "${id}"` }, { status: 400 });
+    return Response.json({ error: `Not an auto combo id: "${id}"` }, { status: 400 });
   }
   try {
     const virtual = await materializeAutoCombo(id);
     const models = Array.isArray(virtual.models) ? virtual.models : [];
-    return NextResponse.json({
+    return Response.json({
       id,
       name: id,
       strategy: "auto",
@@ -252,6 +251,6 @@ async function getSingleAutoCombo(rawId: string) {
       max_output_tokens: virtual.advertisedMaxOutputTokens || 8192,
     });
   } catch {
-    return NextResponse.json({ error: `Unknown auto combo: "${id}"` }, { status: 404 });
+    return Response.json({ error: `Unknown auto combo: "${id}"` }, { status: 404 });
   }
 }

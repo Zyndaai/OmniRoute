@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { install, InstallResult } from "@/lib/services/installers/cliproxy";
 import { InstallError, SERVICE_VERSION_PATTERN } from "@/lib/services/installers/utils";
@@ -30,31 +27,31 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(installBodySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { tool, version } = validation.data;
   if (!VERSION_MANAGER_SUPERVISOR_TOOLS.has(tool)) {
-    return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
+    return Response.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
   }
 
   try {
     const result: InstallResult = await install(version || "latest");
     // Preserve legacy response shape: { success: true, installedVersion, binaryPath }
-    return NextResponse.json({ success: true, ...result });
+    return Response.json({ success: true, ...result });
   } catch (error) {
     if (error instanceof InstallError) {
-      return NextResponse.json({ error: error.friendly }, { status: error.httpStatus });
+      return Response.json({ error: error.friendly }, { status: error.httpStatus });
     }
     const message = sanitizeErrorMessage(
       error instanceof Error ? error.message : "Installation failed"
     );
     console.error("[version-manager] install error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

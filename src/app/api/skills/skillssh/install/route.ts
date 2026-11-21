@@ -1,8 +1,7 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
 import { GLOBAL_SKILL_OWNER_ID, skillRegistry } from "@/lib/skills/registry";
-import { isAuthenticated } from "@/shared/utils/apiAuth";
+import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   fetchSkillMd,
   SkillsShSourceSchema,
@@ -21,13 +20,14 @@ const skillsshInstallSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // The installed skill is global and injected into every key's requests, so this stays
+  // authenticated when login is off.
+  const authError = await requireManagementAuth(request, { alwaysRequireAuth: true });
+  if (authError) return authError;
   try {
     const provider = await getSkillsProviderSetting();
     if (provider !== "skillssh") {
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "Active skills provider is not skills.sh. Switch provider in Settings → Memory & Skills.",
@@ -40,11 +40,11 @@ export async function POST(request: Request) {
     try {
       rawBody = await request.json();
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      return Response.json({ error: "Invalid JSON body" }, { status: 400 });
     }
     const validation = validateBody(skillsshInstallSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(validation.error, { status: 400 });
+      return Response.json(validation.error, { status: 400 });
     }
     const { name, description, source, skillId, version } = validation.data;
 
@@ -64,9 +64,9 @@ export async function POST(request: Request) {
       installCount: 1,
     });
 
-    return NextResponse.json({ success: true, id: skill.id });
+    return Response.json({ success: true, id: skill.id });
   } catch (err: unknown) {
     const error = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ error }, { status: 500 });
+    return Response.json({ error }, { status: 500 });
   }
 }

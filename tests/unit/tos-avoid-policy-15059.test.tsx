@@ -16,8 +16,9 @@ Object.assign(process.env, {
   JWT_SECRET: "synthetic-tos-ui-jwt-only-15059",
 });
 
-vi.mock("next/link", () => ({
-  default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
     <a {...props}>{children}</a>
   ),
 }));

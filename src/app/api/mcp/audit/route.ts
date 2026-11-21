@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { queryAuditEntries } from "@omniroute/open-sse/mcp-server/audit";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 
@@ -34,9 +33,9 @@ export async function GET(request: Request) {
       apiKeyId,
     });
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load MCP audit log";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

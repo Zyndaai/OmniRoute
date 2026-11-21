@@ -3,9 +3,9 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("react-router", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("@/store/emailPrivacyStore", () => ({ default: () => ({ emailsVisible: true }) }));
-vi.mock("next-intl", async () => {
+vi.mock("use-intl", async () => {
   const { default: en } = await import("../../../src/i18n/messages/en.json");
   return {
     useLocale: () => "en",

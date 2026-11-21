@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useCallback, useContext, useId, useState } from "react";
 import type { ComponentProps, KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Check } from "lucide-react";

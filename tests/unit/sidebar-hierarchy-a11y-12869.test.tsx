@@ -27,7 +27,7 @@ vi.setConfig({ testTimeout: 120_000 });
 
 const nav = vi.hoisted(() => ({ pathname: "/home" }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace: string) => {
     const dict = ((messages as Record<string, unknown>)[namespace] ?? {}) as Record<string, string>;
     const translate = (key: string) => dict[key] ?? key;
@@ -36,8 +36,18 @@ vi.mock("next-intl", () => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({
-  usePathname: () => nav.pathname,
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: nav.pathname }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
+      {children}
+    </a>
+  ),
 }));
 
 type Loaded = {

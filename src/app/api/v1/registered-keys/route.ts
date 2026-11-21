@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -37,10 +36,10 @@ export async function GET(request: Request) {
 
   try {
     const keys = await listRegisteredKeys({ provider, accountId });
-    return NextResponse.json({ keys, total: keys.length });
+    return Response.json({ keys, total: keys.length });
   } catch (err) {
     console.error("[registered-keys] GET failed:", err);
-    return NextResponse.json({ error: "Failed to list registered keys" }, { status: 500 });
+    return Response.json({ error: "Failed to list registered keys" }, { status: 500 });
   }
 }
 
@@ -61,12 +60,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(issueKeySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { provider, accountId } = validation.data;
@@ -75,14 +74,14 @@ export async function POST(request: Request) {
   try {
     const quota = await checkQuota(provider, accountId);
     if (!quota.allowed) {
-      return NextResponse.json(
+      return Response.json(
         { error: quota.errorMessage, errorCode: quota.errorCode },
         { status: 429 }
       );
     }
   } catch (err) {
     console.error("[registered-keys] quota check failed:", err);
-    return NextResponse.json({ error: "Quota check failed" }, { status: 500 });
+    return Response.json({ error: "Quota check failed" }, { status: 500 });
   }
 
   // ── Issue ──
@@ -90,7 +89,7 @@ export async function POST(request: Request) {
     const result = await issueRegisteredKey(validation.data);
 
     if ("idempotencyConflict" in result) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: "Idempotency key already used",
           errorCode: "IDEMPOTENCY_CONFLICT",
@@ -101,7 +100,7 @@ export async function POST(request: Request) {
     }
 
     const { rawKey, ...keyMeta } = result;
-    return NextResponse.json(
+    return Response.json(
       {
         key: rawKey, // ← shown ONCE only
         keyId: keyMeta.id,
@@ -117,6 +116,6 @@ export async function POST(request: Request) {
     );
   } catch (err) {
     console.error("[registered-keys] issue failed:", err);
-    return NextResponse.json({ error: "Failed to issue key" }, { status: 500 });
+    return Response.json({ error: "Failed to issue key" }, { status: 500 });
   }
 }

@@ -112,9 +112,9 @@ function buildFromEnv(): RotationConfig {
 }
 
 /**
- * The global (env-derived) rotation config, parsed once and cached on `globalThis` so the Next.js
- * app-route module graph and the startup graph share one instance (same pattern as the other
- * runtime-config singletons in this codebase).
+ * The global (env-derived) rotation config, parsed once and cached on `globalThis` so it
+ * survives dev-server module re-evaluation and every reader shares one instance (same pattern
+ * as the other runtime-config singletons in this codebase).
  */
 export function getGlobalRotationConfig(): RotationConfig {
   const g = globalThis as Record<string, unknown>;

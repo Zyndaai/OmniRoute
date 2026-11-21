@@ -5,22 +5,18 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Minimal next-intl stub — returns the translation key for inspection.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-// Minimal next/link stub — renders as a plain anchor element.
-vi.mock("next/link", () => ({
-  default: ({
-    href,
+// Minimal router Link stub — renders as a plain anchor element.
+vi.mock("react-router", () => ({
+  Link: ({
+    to,
     children,
-    className,
-  }: {
-    href: string;
-    children: React.ReactNode;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
       {children}
     </a>
   ),
@@ -53,9 +49,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("renders agent variant with correct i18n keys", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -69,9 +63,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("renders omni variant with correct i18n keys", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -84,9 +76,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("agent variant renders 5 comparison rows (whatIs, direction, executor, storage, tagline)", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -105,9 +95,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("omni variant renders 5 comparison rows", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -119,9 +107,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("renders data-testid for variant", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -133,9 +119,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("agent variant cross-link points to /dashboard/omni-skills", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -148,9 +132,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("omni variant cross-link points to /dashboard/agent-skills", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -163,9 +145,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("accepts optional className prop", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {
@@ -177,9 +157,7 @@ describe("SkillsConceptCard", () => {
   });
 
   it("renders without crashing when className is omitted", async () => {
-    const { SkillsConceptCard } = await import(
-      "../../src/shared/components/SkillsConceptCard.tsx"
-    );
+    const { SkillsConceptCard } = await import("../../src/shared/components/SkillsConceptCard.tsx");
     const container = makeContainer();
     const root = createRoot(container);
     await act(async () => {

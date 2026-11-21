@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { isLocalRequestAllowed } from "@/lib/security/localEndpoints";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
@@ -19,7 +17,7 @@ const IMAGE = process.env.OMNIROUTE_REDIS_IMAGE || "docker.io/redis:7-alpine";
 export async function POST() {
   const guard = isLocalRequestAllowed();
   if (guard.allowed === false) {
-    return NextResponse.json({ error: guard.reason }, { status: 403 });
+    return Response.json({ error: guard.reason }, { status: 403 });
   }
 
   const runtime = await detectRedisContainerRuntime();
@@ -44,7 +42,7 @@ export async function POST() {
       IMAGE,
     ];
     const { stdout, stderr } = await runRedisRuntimeCommand(runtime, args, 30_000);
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       runtime,
       name: REDIS_CONTAINER_NAME,
@@ -55,9 +53,6 @@ export async function POST() {
     });
   } catch (err) {
     // Hard Rule #12: never put a raw execFile error (command line + paths) in the body.
-    return NextResponse.json(
-      { ok: false, runtime, error: sanitizeErrorMessage(err) },
-      { status: 500 }
-    );
+    return Response.json({ ok: false, runtime, error: sanitizeErrorMessage(err) }, { status: 500 });
   }
 }

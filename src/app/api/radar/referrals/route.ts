@@ -27,7 +27,6 @@
  * — dashboard session or a management-scoped key).
  */
 
-import { NextResponse } from "next/server";
 import { CORS_HEADERS, handleCorsOptions } from "@/shared/utils/cors";
 import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
@@ -36,9 +35,6 @@ import { getRadarReferralsCache } from "@/lib/db/radar";
 import { syncRadarReferrals, shouldSyncReferralsOnRead } from "@/lib/radar/referralsSync";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 export async function OPTIONS() {
   return handleCorsOptions();
 }
@@ -46,14 +42,14 @@ export async function OPTIONS() {
 export async function GET(request: Request) {
   // Flag gate — surface doesn't exist when disabled. MUST run before auth.
   if (!isFeatureFlagEnabled("RADAR_ENABLED")) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(404, "Not found"),
       { status: 404, headers: CORS_HEADERS },
     );
   }
 
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(401, "Unauthorized"),
       { status: 401, headers: CORS_HEADERS },
     );
@@ -72,13 +68,13 @@ export async function GET(request: Request) {
 
     const { fixed, campaigns } = await getRadarReferrals();
     const cache = await getRadarReferralsCache();
-    return NextResponse.json(
+    return Response.json(
       { fixed, campaigns, tier: cache?.tier ?? null },
       { headers: { ...CORS_HEADERS, "Cache-Control": "no-store" } },
     );
   } catch (err: unknown) {
     const { sanitizeErrorMessage } = await import("@omniroute/open-sse/utils/error");
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(500, sanitizeErrorMessage(err) || "Failed to load Radar referrals"),
       { status: 500, headers: CORS_HEADERS },
     );

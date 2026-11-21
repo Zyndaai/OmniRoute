@@ -9,8 +9,6 @@
  *   const { comboEvents, lastComboEvent } = useLiveComboStatus();
  */
 
-"use client";
-
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { DashboardChannel, DashboardEventName } from "@/lib/events/types";
 import { deriveLiveWsPath, resolveLiveWsUrl, sanitizeLiveWsPort } from "@/shared/utils/wsPath";

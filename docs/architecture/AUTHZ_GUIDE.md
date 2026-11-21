@@ -154,8 +154,8 @@ are bound to the host that owns the data directory.
 ## Pipeline
 
 ```
-Incoming request → src/proxy.ts
-  → runAuthzPipeline() in src/server/authz/pipeline.ts
+Incoming request → src/server/http/handler.ts (redirects → headless gate → authz → rewrites → React Router)
+  → runAuthzPipeline() in src/server/authz/pipeline.ts (for the paths in AUTHZ_PATH_PATTERNS)
     1. Strip trusted internal headers (x-omniroute-auth-*, x-omniroute-route-class)
     2. Generate request id, classify route via classifyRoute()
     3. If pathname == "/" → redirect /dashboard
@@ -164,7 +164,7 @@ Incoming request → src/proxy.ts
     6. If OPTIONS → CORS preflight 204
     7. If options.enforce == false → pass-through with route-class headers
     8. Otherwise: POLICIES[routeClass].evaluate(ctx)
-       - allow  → stamp x-omniroute-auth-{kind,id,label,scopes} → NextResponse.next()
+       - allow  → stamp x-omniroute-auth-{kind,id,label,scopes} → options.next(request) (hands the request, trusted headers re-stamped, on to React Router)
        - reject → JSON error w/ correlation_id (dashboard pages → 302 /login)
 ```
 
@@ -187,7 +187,7 @@ A successful policy returns `AuthSubject` with `kind ∈ { client_api_key, dashb
 
 The list is split by **shape**, and the split is load-bearing (GHSA-74g9-q8f6-793h): a prefix is
 matched with `startsWith()`, so it also matches every adjacent path sharing its leading characters.
-`/api/usage/om-usage` as a prefix marked `/api/usage/om-usage<anything>` PUBLIC, and Next resolves
+`/api/usage/om-usage` as a prefix marked `/api/usage/om-usage<anything>` PUBLIC, and the router resolves
 that to `/api/usage/[connectionId]` — a handler with no auth of its own.
 
 ```ts
@@ -232,14 +232,13 @@ Read-only routes are public **only** for safe methods. Note: `classifyRoute()` e
 
 ### Pattern 1 — Public client API endpoint (Bearer-auth)
 
-Routes under `/api/v1/` and `/api/v1beta/` are classified `CLIENT_API` automatically. The middleware enforces the Bearer check; route handlers don't need to redo it but can read the subject if useful.
+Routes under `/api/v1/` and `/api/v1beta/` are classified `CLIENT_API` automatically. The authz pipeline enforces the Bearer check before the route runs; route handlers don't need to redo it but can read the subject if useful.
 
 ```typescript
 // src/app/api/v1/your-route/route.ts
-import { NextRequest, NextResponse } from "next/server";
 import { assertAuth } from "@/server/authz/assertAuth";
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const subject = assertAuth(req, "CLIENT_API");
   // subject.kind === "client_api_key" | "anonymous" | "dashboard_session"
   // ... handler logic
@@ -352,7 +351,7 @@ x-omniroute-auth-label:     (optional)
 x-omniroute-auth-scopes:    comma-separated list
 ```
 
-Use `assertAuth(req, expectedClass)` inside handlers — it throws `AuthzAssertionError` with code `AUTHZ_NOT_INITIALIZED` if the middleware was bypassed (helpful for catching configuration regressions in tests).
+Use `assertAuth(req, expectedClass)` inside handlers — it throws `AuthzAssertionError` with code `AUTHZ_NOT_INITIALIZED` if the authz pipeline was bypassed (helpful for catching configuration regressions in tests).
 
 ## See Also
 

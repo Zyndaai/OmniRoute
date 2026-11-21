@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import Icon from "./Icon";
 import type { GoogleLoopbackHint } from "@/lib/oauth/utils/googleLoopbackHint";
@@ -117,7 +115,7 @@ export function OAuthLoopbackMismatchPanel({
       body: t("loopbackMismatchStep1"),
       value: hint.tunnelCommand,
       copyId: "tunnel_cmd",
-      // "<user>" is passed as a VALUE, never inlined into the catalog: next-intl
+      // "<user>" is passed as a VALUE, never inlined into the catalog: use-intl
       // parses angle brackets in a message as rich-text tags and would throw.
       note: t("loopbackMismatchStep1Note", { userPlaceholder: "<user>" }),
     },
@@ -260,7 +258,7 @@ function OAuthGoogleLoopbackNotice({ hint }: { hint: GoogleLoopbackHint }) {
         {command(hint.tunnelCommand, "google_tunnel")}
         <p className="text-xs text-text-muted mt-1">
           {t("googleLoopbackTunnelNote", {
-            // Angle brackets must arrive as a VALUE — next-intl parses them as tags.
+            // Angle brackets must arrive as a VALUE — use-intl parses them as tags.
             userPlaceholder: "<user>",
             localUrl: hint.localDashboardUrl,
           })}

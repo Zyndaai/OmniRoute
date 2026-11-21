@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
  * Regression: issue #6405 follow-up — unknown root-level paths (/anthropic/*,
  * /openai/*, /metrics, /debug, /.env) previously fell through to the Next.js
  * app-router `not-found.tsx`, which returned the dashboard HTML shell (~200 KB)
- * to CLI/SDK callers. next.config.mjs now rewrites those prefixes under /api/*
+ * to CLI/SDK callers. src/server/http/rewrites.ts now rewrites those prefixes under /api/*
  * so they hit `/api/[...omnirouteApiCatchAll]` (#6424) — this suite verifies
  * that catch-all still responds with a JSON not_found body for those rewritten
  * paths (path assertion mirrors the URL the handler sees post-rewrite).

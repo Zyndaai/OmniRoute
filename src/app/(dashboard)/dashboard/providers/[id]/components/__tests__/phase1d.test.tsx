@@ -11,11 +11,21 @@ import ConnectionRow from "../ConnectionRow";
 import ModelCompatPopover from "../ModelCompatPopover";
 import SiliconFlowEndpointModal from "../SiliconFlowEndpointModal";
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "openai" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (k: string) => k,
   // ConnectionRow formats timestamps with the active locale since #16947.
   useLocale: () => "en",

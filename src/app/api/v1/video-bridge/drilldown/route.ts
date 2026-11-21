@@ -13,9 +13,6 @@ import {
 } from "@/lib/guardrails/videoBridgeDrilldownLifecycle";
 import { VideoDrilldownCache } from "@/lib/guardrails/videoBridgeDrilldown";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 // A single process-wide lifecycle backs both this authenticated consumer route and any
 // future in-process producer (the video bridge guardrail, once it threads a per-request
 // opt-in flag through). It is intentionally a *different* cache instance from the internal

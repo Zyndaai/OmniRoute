@@ -15,10 +15,8 @@ beforeAll(async () => {
 // next-intl: return the key so we can assert on stable strings. When options are
 // passed, append their JSON so interpolated values (e.g. the degraded banner's
 // `sources`) leave a distinctive trace the test can assert on.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, opts?: Record<string, any>) =>
-    opts ? `${key}${JSON.stringify(opts)}` : key,
-  getTranslations: async () => (key: string, opts?: Record<string, any>) =>
     opts ? `${key}${JSON.stringify(opts)}` : key,
 }));
 

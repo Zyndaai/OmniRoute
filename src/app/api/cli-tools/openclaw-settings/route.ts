@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -45,7 +42,7 @@ export async function GET(request: Request) {
     const runtime = await getCliRuntimeStatus("openclaw");
 
     if (!runtime.installed || !runtime.runnable) {
-      return NextResponse.json({
+      return Response.json({
         installed: runtime.installed,
         runnable: runtime.runnable,
         command: runtime.command,
@@ -62,7 +59,7 @@ export async function GET(request: Request) {
 
     const settings = await readSettings();
 
-    return NextResponse.json({
+    return Response.json({
       installed: runtime.installed,
       runnable: runtime.runnable,
       command: runtime.command,
@@ -75,7 +72,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.log("Error checking openclaw settings:", error);
-    return NextResponse.json({ error: "Failed to check openclaw settings" }, { status: 500 });
+    return Response.json({ error: "Failed to check openclaw settings" }, { status: 500 });
   }
 }
 
@@ -88,7 +85,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -102,7 +99,7 @@ export async function POST(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     // (#526) Extract keyId BEFORE validation — Zod strips unknown fields!
@@ -110,7 +107,7 @@ export async function POST(request: Request) {
 
     const validation = validateBody(cliModelConfigSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     let { baseUrl, model } = validation.data;
     let apiKey = await resolveApiKey(keyId, validation.data.apiKey);
@@ -165,7 +162,7 @@ export async function POST(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "Open Claw settings applied successfully!",
       settingsPath,
@@ -174,7 +171,7 @@ export async function POST(request: Request) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
     console.log("Error updating openclaw settings:", error);
-    return NextResponse.json({ error: "Failed to update openclaw settings" }, { status: 500 });
+    return Response.json({ error: "Failed to update openclaw settings" }, { status: 500 });
   }
 }
 
@@ -186,7 +183,7 @@ export async function DELETE(request: Request) {
   try {
     const writeGuard = ensureCliConfigWriteAllowed();
     if (writeGuard) {
-      return NextResponse.json({ error: writeGuard }, { status: 403 });
+      return Response.json({ error: writeGuard }, { status: 403 });
     }
 
     const settingsPath = getOpenClawSettingsPath();
@@ -201,7 +198,7 @@ export async function DELETE(request: Request) {
       settings = JSON.parse(existingSettings);
     } catch (error: any) {
       if (error.code === "ENOENT") {
-        return NextResponse.json({
+        return Response.json({
           success: true,
           message: "No settings file to reset",
         });
@@ -234,12 +231,12 @@ export async function DELETE(request: Request) {
       /* non-critical */
     }
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       message: "OmniRoute settings removed successfully",
     });
   } catch (error) {
     console.log("Error resetting openclaw settings:", error);
-    return NextResponse.json({ error: "Failed to reset openclaw settings" }, { status: 500 });
+    return Response.json({ error: "Failed to reset openclaw settings" }, { status: 500 });
   }
 }

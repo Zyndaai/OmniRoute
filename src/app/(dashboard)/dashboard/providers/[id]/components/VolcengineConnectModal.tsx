@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Modal } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
@@ -474,7 +472,6 @@ export default function VolcengineConnectModal({
                         "Image captcha (required by the console)"
                       )}
                     </p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={session.captchaImage}
                       alt="captcha"

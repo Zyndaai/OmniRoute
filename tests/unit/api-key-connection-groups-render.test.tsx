@@ -9,7 +9,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../src/i18n/messages/en.json";
 import ProviderConnectionPermissionList, {
   type ProviderConnection,
@@ -17,9 +17,9 @@ import ProviderConnectionPermissionList, {
 
 function withProviders(ui: React.ReactElement) {
   return (
-    <NextIntlClientProvider locale="en" messages={messages}>
+    <IntlProvider locale="en" messages={messages}>
       {ui}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 

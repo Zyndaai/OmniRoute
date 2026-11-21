@@ -1,5 +1,3 @@
-"use client";
-
 // EngineGuidanceDetail — per-engine expandable guidance block for CompressionPanel
 // (#7530). Surfaces the `guidance` metadata from engineCatalog.ts (tradeoffs, lossy
 // flag → "safe default" badge, cache impact) so operators can see quality/latency
@@ -10,7 +8,7 @@
 // English (not i18n) so it stays deterministic; only the surrounding chrome (toggle
 // button, badge, "cache impact" label) is translated.
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import type {

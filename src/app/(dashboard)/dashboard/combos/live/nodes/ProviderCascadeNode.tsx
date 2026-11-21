@@ -1,5 +1,3 @@
-"use client";
-
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { StatusDot } from "@/shared/components/flow/StatusDot";

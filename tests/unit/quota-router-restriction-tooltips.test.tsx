@@ -1,13 +1,13 @@
 import React from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import HealthAccountTooltip from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/HealthAccountTooltip";
 import { buildHealthAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 import { displayAccount } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/availabilityDisplay";
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 afterEach(cleanup);
 for (const locale of ["en", "ar"])
   for (const reason of ["scopeCooldown", "peakHour", "modelLockout"] as const) {
@@ -59,7 +59,7 @@ for (const locale of ["en", "ar"])
       );
       expect(displayAccount(account, now).partial).toBe(scoped);
       render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale={locale}
           messages={{ usage: messages.usage, common: messages.common }}
           timeZone="UTC"
@@ -71,7 +71,7 @@ for (const locale of ["en", "ar"])
             label="Synthetic"
             anchor={document.body}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
       const text = screen.getByRole("tooltip").textContent;
       expect(text).toContain(

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, runSingleModelTest } from "@/lib/api/modelTestRunner";
@@ -27,7 +26,7 @@ export async function POST(request: Request) {
     // Keep `error` a plain string — the dashboard renders it directly in a toast,
     // and an object here throws React #31 ("Objects are not valid as a React
     // child"), freezing the whole page instead of showing the message.
-    return NextResponse.json({ status: "error", error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ status: "error", error: "Invalid JSON body" }, { status: 400 });
   }
 
   try {
@@ -37,7 +36,7 @@ export async function POST(request: Request) {
       const detail = validation.error.issues
         .map((i) => `${i.path.join(".") || "body"}: ${i.message}`)
         .join("; ");
-      return NextResponse.json(
+      return Response.json(
         { status: "error", error: `Invalid request: ${detail}` },
         { status: 400 }
       );
@@ -56,7 +55,7 @@ export async function POST(request: Request) {
         // Fail open: a catalog read miss keeps the normal test dispatch.
       }
       if (unrunnable) {
-        return NextResponse.json(
+        return Response.json(
           { status: "error", error: "Provider has no runnable adapter for this model's endpoint." },
           { status: 422 }
         );
@@ -75,7 +74,7 @@ export async function POST(request: Request) {
       hidePaid &&
       !(providerHasFreeModels(providerId) && isFreeModel(providerId, { id: modelId }))
     ) {
-      return NextResponse.json(
+      return Response.json(
         {
           status: "error",
           error: "Paid model blocked while hidePaidModels is enabled",
@@ -96,7 +95,7 @@ export async function POST(request: Request) {
     });
 
     if (result.status === "ok") {
-      return NextResponse.json({
+      return Response.json({
         status: "ok",
         latencyMs: result.latencyMs,
         responseText: result.responseText,
@@ -113,9 +112,9 @@ export async function POST(request: Request) {
     if (result.retryAfter !== undefined) body.retryAfter = result.retryAfter;
     if (result.skipped) body.skipped = true;
 
-    return NextResponse.json(body, { status: result.httpStatus });
+    return Response.json(body, { status: result.httpStatus });
   } catch (error: unknown) {
-    return NextResponse.json(
+    return Response.json(
       {
         status: "error",
         error: sanitizeErrorMessage(error) || "Unknown error",

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   CREDENTIAL_EXPORT_FORBIDDEN_MESSAGE,
   requireOperatorCredential,
@@ -25,11 +24,11 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
+    return Response.json({ error: { message: "Invalid JSON body" } }, { status: 400 });
   }
   const validation = validateBody(providerTransferImportSchema, body);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -57,7 +56,7 @@ export async function POST(request: Request) {
         },
       });
     }
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     return transferErrorResponse(error, "Failed to import the transfer file");
   }

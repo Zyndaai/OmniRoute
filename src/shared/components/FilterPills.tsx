@@ -1,5 +1,3 @@
-"use client";
-
 import { cn } from "@/shared/utils/cn";
 import Badge from "./Badge";
 import Button from "./Button";

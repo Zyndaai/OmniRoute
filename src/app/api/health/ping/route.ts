@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { pingDb } from "@/lib/db/core";
 
 /**
@@ -13,19 +12,17 @@ import { pingDb } from "@/lib/db/core";
  * No auth required — this is a public liveness signal.
  */
 
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   const startedAt = Date.now();
   try {
     const alive = await pingDb();
     if (!alive) {
-      return NextResponse.json(
+      return Response.json(
         { status: "error", error: "db_query_failed" },
         { status: 503 }
       );
     }
-    return NextResponse.json(
+    return Response.json(
       {
         status: "ok",
         timestamp: new Date().toISOString(),
@@ -40,7 +37,7 @@ export async function GET() {
     );
   } catch (error) {
     console.error("[ping] Unexpected error in GET /api/health/ping:", error);
-    return NextResponse.json(
+    return Response.json(
       { status: "error", error: "ping_failed" },
       { status: 503 }
     );

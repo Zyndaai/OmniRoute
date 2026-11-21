@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderCardHandle } from "@/app/(dashboard)/dashboard/providers/components/ProviderCard";
 import {
+  readRecordedProvider,
   recordProviderNavigation,
   resolveHighlightedCard,
 } from "@/app/(dashboard)/dashboard/providers/providerPageHighlightUtils";
@@ -96,34 +97,37 @@ describe("resolveHighlightedCard", () => {
   });
 });
 
-describe("recordProviderNavigation", () => {
-  const originalReplaceState = window.history.replaceState;
-
+describe("recordProviderNavigation / readRecordedProvider", () => {
   afterEach(() => {
-    window.history.replaceState = originalReplaceState;
+    window.sessionStorage.clear();
   });
 
-  it("calls history.replaceState with the provider id", () => {
-    const replaceSpy = vi.fn();
-    window.history.replaceState = replaceSpy;
-
-    recordProviderNavigation("openai");
-
-    expect(replaceSpy).toHaveBeenCalledTimes(1);
-    expect(replaceSpy).toHaveBeenCalledWith({ providerId: "openai" }, "");
+  it("returns the provider recorded for the same history entry", () => {
+    recordProviderNavigation("entry-1", "openai");
+    expect(readRecordedProvider("entry-1")).toBe("openai");
   });
 
-  it("sets different provider ids on successive calls", () => {
-    const replaceSpy = vi.fn();
-    window.history.replaceState = replaceSpy;
+  it("returns null for a different history entry", () => {
+    recordProviderNavigation("entry-1", "openai");
+    expect(readRecordedProvider("entry-2")).toBeNull();
+  });
 
-    recordProviderNavigation("openai");
-    recordProviderNavigation("anthropic");
-    recordProviderNavigation("kimi-coding");
+  it("keeps only the latest record", () => {
+    recordProviderNavigation("entry-1", "openai");
+    recordProviderNavigation("entry-1", "anthropic");
+    recordProviderNavigation("entry-1", "kimi-coding");
+    expect(readRecordedProvider("entry-1")).toBe("kimi-coding");
+  });
 
-    expect(replaceSpy).toHaveBeenCalledTimes(3);
-    expect(replaceSpy.mock.calls[0][0]).toEqual({ providerId: "openai" });
-    expect(replaceSpy.mock.calls[1][0]).toEqual({ providerId: "anthropic" });
-    expect(replaceSpy.mock.calls[2][0]).toEqual({ providerId: "kimi-coding" });
+  it("does not touch history.state, which the router owns", () => {
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+    recordProviderNavigation("entry-1", "openai");
+    expect(replaceSpy).not.toHaveBeenCalled();
+    replaceSpy.mockRestore();
+  });
+
+  it("returns null when storage holds something unreadable", () => {
+    window.sessionStorage.setItem("omniroute.providers.lastOpened", "{not json");
+    expect(readRecordedProvider("entry-1")).toBeNull();
   });
 });

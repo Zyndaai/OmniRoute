@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card } from "@/shared/components";
 import { fmtCompact } from "@/shared/utils/formatting";
 import {

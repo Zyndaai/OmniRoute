@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getTaskRoutingConfig,
   setTaskRoutingConfig,
@@ -19,14 +18,14 @@ export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
   try {
-    return NextResponse.json({
+    return Response.json({
       ...getTaskRoutingConfig(),
       defaultTaskModelMap: getDefaultTaskModelMap(),
       defaultTaskPatterns: getDefaultTaskPatterns(),
     });
   } catch (error) {
     console.error("[API ERROR] /api/settings/task-routing GET:", error);
-    return NextResponse.json({ error: "Failed to get config" }, { status: 500 });
+    return Response.json({ error: "Failed to get config" }, { status: 500 });
   }
 }
 
@@ -43,7 +42,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -57,7 +56,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(updateTaskRoutingSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const config =
       validation.data as import("@omniroute/open-sse/services/taskAwareRouter.ts").TaskRoutingConfig;
@@ -68,10 +67,10 @@ export async function PUT(request: Request) {
     const { stats, ...persistable } = getTaskRoutingConfig();
     await updateSettings({ taskRouting: JSON.stringify(persistable) });
 
-    return NextResponse.json({ success: true, ...getTaskRoutingConfig() });
+    return Response.json({ success: true, ...getTaskRoutingConfig() });
   } catch (error) {
     console.error("[API ERROR] /api/settings/task-routing PUT:", error);
-    return NextResponse.json({ error: "Failed to update config" }, { status: 500 });
+    return Response.json({ error: "Failed to update config" }, { status: 500 });
   }
 }
 
@@ -87,7 +86,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -101,13 +100,13 @@ export async function POST(request: Request) {
   try {
     const validation = validateBody(taskRoutingActionSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const actionRequest = validation.data;
 
     if (actionRequest.action === "reset-stats") {
       resetTaskRoutingStats();
-      return NextResponse.json({
+      return Response.json({
         success: true,
         stats: getTaskRoutingConfig().stats,
       });
@@ -117,15 +116,15 @@ export async function POST(request: Request) {
       const { detectTaskType } = await import("@omniroute/open-sse/services/taskAwareRouter.ts");
       const taskType = detectTaskType(actionRequest.body || {});
       const config = getTaskRoutingConfig();
-      return NextResponse.json({
+      return Response.json({
         taskType,
         preferredModel: config.taskModelMap[taskType] || "(no override)",
       });
     }
 
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    return Response.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {
     console.error("[API ERROR] /api/settings/task-routing POST:", error);
-    return NextResponse.json({ error: "Failed to execute action" }, { status: 500 });
+    return Response.json({ error: "Failed to execute action" }, { status: 500 });
   }
 }

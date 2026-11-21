@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   detectFormat,
   getTargetFormat,
@@ -59,7 +58,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: {
@@ -74,7 +73,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(translatorTranslateSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ success: false, error: validation.error }, { status: 400 });
+      return Response.json({ success: false, error: validation.error }, { status: 400 });
     }
     const reqData = validation.data;
     const {
@@ -94,7 +93,7 @@ export async function POST(request) {
         reqTargetFormat || (provider ? getTargetFormat(provider, providerSpecificData) : "openai");
       const model = getModelId(asJsonRecord(body));
       const translated = await translateRequest(src, tgt, model, body, true, null, provider);
-      return NextResponse.json({
+      return Response.json({
         success: true,
         sourceFormat: src,
         targetFormat: tgt,
@@ -179,7 +178,7 @@ export async function POST(request) {
         const connection = await getUnmanagedActiveConnection(provider);
 
         if (!connection) {
-          return NextResponse.json(
+          return Response.json(
             {
               success: false,
               error: `No active connection found for provider: ${provider}`,
@@ -215,15 +214,12 @@ export async function POST(request) {
       }
 
       default:
-        return NextResponse.json({ success: false, error: "Invalid step" }, { status: 400 });
+        return Response.json({ success: false, error: "Invalid step" }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, result });
+    return Response.json({ success: true, result });
   } catch (error) {
     console.error("Error translating:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to translate request" },
-      { status: 500 }
-    );
+    return Response.json({ success: false, error: "Failed to translate request" }, { status: 500 });
   }
 }

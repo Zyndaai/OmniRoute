@@ -1,7 +1,5 @@
-"use client";
-
 import { memo, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { compareTr } from "@/shared/utils/turkishText";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";

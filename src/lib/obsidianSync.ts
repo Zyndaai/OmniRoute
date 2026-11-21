@@ -57,8 +57,8 @@ function isSameOrInside(parent: string, child: string): boolean {
 
 /**
  * GHSA-7pq4-8pvv-rx7r: the WebDAV file service (scripts/dev/webdav-handler.mjs)
- * serves the vault root to anyone holding the Basic credentials, before Next.js
- * and outside the authz pipeline. A vault that IS the data directory, sits
+ * serves the vault root to anyone holding the Basic credentials, before the request
+ * handler and outside the authz pipeline. A vault that IS the data directory, sits
  * inside it, or CONTAINS it turns that service into a reader for server.env
  * (JWT_SECRET / STORAGE_ENCRYPTION_KEY / API_KEY_SECRET) and storage.sqlite.
  * Both sides are realpath-resolved so a symlink cannot dodge the comparison.

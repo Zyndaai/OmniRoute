@@ -23,30 +23,12 @@
       "@omniroute/browser-pool": ["./packages/browser-pool/src"],
       "@omniroute/ui-kit": ["./packages/ui-kit/src"],
       "@omniroute/ui-kit/*": ["./packages/ui-kit/src/*"]
-    },
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+    }
   },
-  "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "**/*.js",
-    "**/*.jsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    ".next/dev/dev/types/**/*.ts",
-    ".next-playwright/types/**/*.ts",
-    ".next-playwright/dev/types/**/*.ts",
-    ".build/next/types/**/*.ts",
-    ".build/next/dev/types/**/*.ts",
-    ".build/next/dev/dev/types/**/*.ts"
-  ],
+  "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
   "exclude": [
     "node_modules",
+    ".react-router",
     ".build",
     "open-sse",
     "dist",
@@ -56,6 +38,7 @@
     ".claude",
     ".worktrees",
     "@omniroute",
+    "_artifacts",
     "_tasks",
     "_ideia",
     "_mono_repo",

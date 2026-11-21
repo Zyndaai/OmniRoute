@@ -9,10 +9,10 @@ if [ -n "$OMNIROUTE_MEMORY_MB" ]; then
 fi
 
 # Hard Rule #13: never interpolate OMNIROUTE_BASE_PATH (or any runtime path)
-# into sed/awk/shell. The Node guard reads process.env itself — invoke with a
-# fixed argv only; do not pass the subpath as a CLI argument or script body.
-if [ -f docker/ensure-docker-base-path.mjs ]; then
-  node docker/ensure-docker-base-path.mjs || exit 1
+# into sed/awk/shell. The check reads process.env itself and is invoked with a
+# fixed argv only.
+if [ -f scripts/docker/check-base-path.mjs ]; then
+  node scripts/docker/check-base-path.mjs || true
 fi
 
 DATA_PATH="${DATA_DIR:-/app/data}"

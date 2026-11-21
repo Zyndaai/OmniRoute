@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, NoAuthAccountCard, NoAuthProviderCard } from "@/shared/components";
 import { getProviderAlias, supportsNoAuthProviderProxy } from "@/shared/constants/providers";
 import { useNotificationStore } from "@/store/notificationStore";

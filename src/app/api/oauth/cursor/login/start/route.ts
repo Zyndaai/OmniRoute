@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import {
   createCursorLoginSession,
@@ -21,7 +20,7 @@ export async function POST(request: Request) {
   try {
     const params = await generateCursorAuthParams();
     const { sessionId, loginUrl } = createCursorLoginSession(params);
-    return NextResponse.json({
+    return Response.json({
       success: true,
       sessionId,
       loginUrl,
@@ -30,6 +29,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = sanitizeErrorMessage(error) || "Failed to start Cursor login";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

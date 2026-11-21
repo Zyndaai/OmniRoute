@@ -51,8 +51,8 @@ export async function requireManagementAuth(
   options: RequireManagementAuthOptions = {}
 ): Promise<Response | null> {
   // Direct in-process invocation without a Request (unit/integration tests call
-  // route handlers as plain functions) is a trusted local caller — Next.js always
-  // supplies a real Request on the HTTP path, so this branch is unreachable there.
+  // route handlers as plain functions) is a trusted local caller — the HTTP
+  // handler always supplies a real Request, so this branch is unreachable there.
   if (request === undefined || request === null) {
     return null;
   }

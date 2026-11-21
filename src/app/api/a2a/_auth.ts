@@ -27,9 +27,8 @@ export interface A2ARestAuth {
 
 /**
  * NOTE: the failure branch is whatever requireManagementAuth returns — today a
- * plain `Response` from createErrorResponse(), NOT a NextResponse. Callers must
- * test with `instanceof Response` (NextResponse extends Response), never
- * `instanceof NextResponse`, or the 401 silently falls through to the handler.
+ * plain `Response` from createErrorResponse(). Callers must test with
+ * `instanceof Response`, or the 401 silently falls through to the handler.
  */
 export async function authorizeA2ATaskRoute(request: Request): Promise<A2ARestAuth | Response> {
   const apiKey = extractApiKey(request);

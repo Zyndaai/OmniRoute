@@ -1,12 +1,9 @@
-import { NextResponse } from "next/server";
 import {
   CREDENTIAL_EXPORT_FORBIDDEN_MESSAGE,
   requireOperatorCredential,
 } from "@/lib/api/operatorCredential";
 import { getProviderTransferCatalog } from "@/lib/transfer/providerTransfer";
 import { transferErrorResponse } from "@/lib/transfer/transferRouteErrors";
-
-export const dynamic = "force-dynamic";
 
 /**
  * GET /api/settings/transfer/catalog
@@ -20,7 +17,7 @@ export async function GET(request: Request) {
   if (verdict.ok === false) return verdict.response;
 
   try {
-    return NextResponse.json(await getProviderTransferCatalog());
+    return Response.json(await getProviderTransferCatalog());
   } catch (error) {
     return transferErrorResponse(error, "Failed to load transferable accounts");
   }

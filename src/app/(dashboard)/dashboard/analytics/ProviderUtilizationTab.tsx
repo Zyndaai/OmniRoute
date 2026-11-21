@@ -1,16 +1,14 @@
-"use client";
-
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "use-intl";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { PROVIDER_COLORS as CHART_PROVIDER_COLORS } from "@/shared/components/analytics/chartColors";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import { getAccountDisplayName } from "@/lib/display/names";
-import dynamic from "next/dynamic";
+import { ClientOnly } from "@/shared/components/ClientOnly";
 
-const ProviderCharts = dynamic(() => import("./components/ProviderCharts"), { ssr: false });
+const ProviderCharts = lazy(() => import("./components/ProviderCharts"));
 import Card from "@/shared/components/Card";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import TimeRangeSelector from "@/shared/components/analytics/TimeRangeSelector";
@@ -277,17 +275,23 @@ export default function ProviderUtilizationTab() {
           </div>
         ) : (
           <div className="flex flex-col gap-5">
-            <ProviderCharts
-              chartData={chartData}
-              providers={data?.providers ?? []}
-              providerColors={providerColors}
-              range={range}
-              resolveProviderName={resolveDisplayName}
-              nodeMap={nodeMap}
-              formatTimestamp={formatTimestamp}
-              formatPercent={formatPercent}
-              formatTooltipTimestamp={formatTooltipTimestamp}
-            />
+            <ClientOnly>
+              {() => (
+                <Suspense fallback={null}>
+                  <ProviderCharts
+                    chartData={chartData}
+                    providers={data?.providers ?? []}
+                    providerColors={providerColors}
+                    range={range}
+                    resolveProviderName={resolveDisplayName}
+                    nodeMap={nodeMap}
+                    formatTimestamp={formatTimestamp}
+                    formatPercent={formatPercent}
+                    formatTooltipTimestamp={formatTooltipTimestamp}
+                  />
+                </Suspense>
+              )}
+            </ClientOnly>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {latestPoints.map((point) => {

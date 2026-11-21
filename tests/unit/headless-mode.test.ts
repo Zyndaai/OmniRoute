@@ -4,7 +4,7 @@
  * the optional boot subsystems are skipped and the dashboard answers 404.
  *
  * Covers the single source of truth (`src/lib/system/headless.ts`), the route
- * gate in `src/proxy.ts` and the boot gate in `src/instrumentation-node.ts`.
+ * gate in `src/server/http/handler.ts` and the boot gate in `src/server/boot.ts`.
  */
 
 import test from "node:test";
@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-headless-"));
 process.env.DATA_DIR = TEST_DATA_DIR;
@@ -20,8 +19,9 @@ delete process.env.OMNIROUTE_HEADLESS;
 
 const headless = await import("../../src/lib/system/headless.ts");
 const core = await import("../../src/lib/db/core.ts");
-const { proxy } = await import("../../src/proxy.ts");
-const instrumentationNode = await import("../../src/instrumentation-node.ts");
+const { createAppHandler } = await import("../../src/server/http/handler.ts");
+const handle = createAppHandler({ basePath: () => "", render: async () => new Response(null) });
+const instrumentationNode = await import("../../src/server/boot.ts");
 
 test.after(() => {
   delete process.env.OMNIROUTE_HEADLESS;
@@ -105,35 +105,35 @@ test("headlessGateResponse: null when headless is off or the path is not gated",
   assert.equal(headless.headlessGateResponse("/v1/models", { OMNIROUTE_HEADLESS: "1" }), null);
 });
 
-// ── src/proxy.ts ─────────────────────────────────────────────────────────────
+// ── request handler (src/server/http/handler.ts) ─────────────────────────────
 
-test("proxy (headless): /dashboard and /dashboard/* answer 404 JSON", async () => {
+test("handler (headless): /dashboard and /dashboard/* answer 404 JSON", async () => {
   await withHeadlessEnv("1", async () => {
     for (const p of ["/dashboard", "/dashboard/providers", "/home"]) {
-      const res = await proxy(new NextRequest(`http://localhost${p}`));
+      const res = await handle(new Request(`http://localhost${p}`));
       assert.equal(res.status, 404, p);
       assert.equal(await readHeadlessError(res), "dashboard disabled (headless)", p);
     }
   });
 });
 
-test("proxy (headless): /v1/models, /api/monitoring/health and /api/auth/* are not gated", async () => {
+test("handler (headless): /v1/models, /api/monitoring/health and /api/auth/* are not gated", async () => {
   await withHeadlessEnv("1", async () => {
     for (const p of ["/v1/models", "/api/monitoring/health", "/api/auth/login"]) {
-      const res = await proxy(new NextRequest(`http://localhost${p}`));
+      const res = await handle(new Request(`http://localhost${p}`));
       assert.equal(await readHeadlessError(res), null, `${p} must reach the authz pipeline`);
     }
   });
 });
 
-test("proxy (not headless): /dashboard is unchanged (no headless 404)", async () => {
+test("handler (not headless): /dashboard is unchanged (no headless 404)", async () => {
   await withHeadlessEnv(undefined, async () => {
-    const res = await proxy(new NextRequest("http://localhost/dashboard"));
+    const res = await handle(new Request("http://localhost/dashboard"));
     assert.equal(await readHeadlessError(res), null);
   });
 });
 
-// ── Boot gate (src/instrumentation-node.ts) ─────────────────────────────────
+// ── Boot gate (src/server/boot.ts) ─────────────────────────────────
 
 function fakeSubsystems(names: string[]) {
   const calls: string[] = [];
@@ -214,7 +214,7 @@ test("boot: the default optional table holds the optional subsystems, not the pr
 });
 
 test("boot wiring: registerNodejs routes optional inits through the headless gates", () => {
-  const source = fs.readFileSync("src/instrumentation-node.ts", "utf8");
+  const source = fs.readFileSync("src/server/boot.ts", "utf8");
   const body = source.slice(source.indexOf("export async function registerNodejs"));
   assert.match(body, /startOptionalBootSubsystems\(\)/);
   assert.match(body, /skipInHeadless\("free-proxy-sync"\)/);

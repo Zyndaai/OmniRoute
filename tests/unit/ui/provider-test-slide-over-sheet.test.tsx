@@ -5,13 +5,10 @@ import React, { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   const t = Object.assign((key: string) => key, { rich: (key: string) => key, has: () => true });
   return { useTranslations: () => t };
 });
-vi.mock("next/image", () => ({
-  default: ({ alt }: { alt?: string }) => <span data-testid="next-image">{alt}</span>,
-}));
 vi.mock("@/app/(dashboard)/dashboard/media-providers/components/LlmChatCard", () => ({
   LlmChatCard: () => <div data-testid="llm-chat-card" />,
 }));

@@ -6,7 +6,6 @@
  */
 
 import { z } from "zod";
-import { NextResponse } from "next/server";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -42,11 +41,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const destination = await getLogExportDestination(id);
     if (!destination) {
-      return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
+      return Response.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ destination: await toDestinationView(destination) });
+    return Response.json({ destination: await toDestinationView(destination) });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to read log export destination" },
       { status: 500 }
     );
@@ -61,12 +60,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     const existing = await getLogExportDestination(id);
     if (!existing) {
-      return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
+      return Response.json({ error: "Log export destination not found" }, { status: 404 });
     }
 
     const validation = validateBody(updateDestinationSchema, await request.json());
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { data } = validation;
 
@@ -74,7 +73,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (data.config) {
       const destinationType = getLogExportDestinationType(existing.type);
       if (!destinationType) {
-        return NextResponse.json(
+        return Response.json(
           { error: `Unknown log export destination type "${existing.type}"` },
           { status: 400 }
         );
@@ -89,7 +88,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       );
       const parsedConfig = destinationType.configSchema.safeParse(merged);
       if (!parsedConfig.success) {
-        return NextResponse.json(
+        return Response.json(
           {
             error: {
               message: "Invalid destination configuration",
@@ -103,7 +102,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         );
       }
       if (requiresEncryptionKey(existing.type, parsedConfig.data as Record<string, unknown>)) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "This destination stores a credential, which requires STORAGE_ENCRYPTION_KEY to be " +
@@ -129,11 +128,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       maxRowsPerRun: data.maxRowsPerRun,
     });
     if (!updated) {
-      return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
+      return Response.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ destination: await toDestinationView(updated) });
+    return Response.json({ destination: await toDestinationView(updated) });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to update log export destination" },
       { status: 500 }
     );
@@ -147,11 +146,11 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   try {
     const { id } = await params;
     if (!(await deleteLogExportDestination(id))) {
-      return NextResponse.json({ error: "Log export destination not found" }, { status: 404 });
+      return Response.json({ error: "Log export destination not found" }, { status: 404 });
     }
-    return NextResponse.json({ deleted: true });
+    return Response.json({ deleted: true });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error) || "Failed to delete log export destination" },
       { status: 500 }
     );

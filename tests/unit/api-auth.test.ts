@@ -55,17 +55,12 @@ function stampedPeerRequest(url: string, peerIp: string, init: RequestInit = {})
 
 /** A direct Node / non-pipeline caller carrying a real socket peer. */
 function socketPeerRequest(url: string, peerIp: string, init: RequestInit = {}): Request {
-  return Object.assign(new Request(url, init), { ip: peerIp }) as Request;
+  return Object.assign(new Request(url, init), { socket: { remoteAddress: peerIp } }) as Request;
 }
 
 function makeCookieRequest(token: string) {
   return {
-    cookies: {
-      get(name: string) {
-        return name === "auth_token" && token ? { value: token } : undefined;
-      },
-    },
-    headers: new Headers(),
+    headers: new Headers(token ? { cookie: `auth_token=${token}` } : {}),
   };
 }
 
@@ -124,12 +119,10 @@ test("verifyAuth falls back to bearer API key validation after a bad JWT", async
   process.env.JWT_SECRET = "jwt-secret-for-tests";
   const key = await apiKeysDb.createApiKey("integration", "machine1234567890");
   const request = {
-    cookies: {
-      get() {
-        return { value: "definitely-not-a-valid-jwt" };
-      },
-    },
-    headers: new Headers({ authorization: `Bearer ${key.key}` }),
+    headers: new Headers({
+      authorization: `Bearer ${key.key}`,
+      cookie: "auth_token=definitely-not-a-valid-jwt",
+    }),
     url: "https://example.com/api/v1/models",
   };
 
@@ -655,7 +648,7 @@ function managementCliRequest(token: string) {
   const request = new Request("http://localhost:20128/api/combos", {
     headers: { [CLI_TOKEN_HEADER]: token },
   });
-  return Object.assign(request, { ip: "127.0.0.1" }) as Request;
+  return Object.assign(request, { socket: { remoteAddress: "127.0.0.1" } }) as Request;
 }
 
 test("requireManagementAuth returns 401 with no credentials", async () => {
@@ -741,8 +734,7 @@ test("requireManagementAuth returns null for valid JWT cookie", async () => {
     .sign(secret);
 
   const request = {
-    cookies: { get: (name: string) => (name === "auth_token" ? { value: token } : undefined) },
-    headers: new Headers(),
+    headers: new Headers({ cookie: `auth_token=${token}` }),
     url: "https://example.com/api/combos",
   };
   const res = await requireManagementAuth(request as unknown as Request);

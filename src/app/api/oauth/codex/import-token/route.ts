@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { extractCodexAccountInfo } from "@/lib/oauth/services/codexImport";
 import { parseCodexSessionJson } from "@/lib/oauth/utils/codexSessionImport";
@@ -59,14 +58,14 @@ function resolveAccessToken(
  */
 async function parseRequestBody(
   request: Request
-): Promise<{ ok: true; resolved: ResolvedBody } | { ok: false; response: NextResponse }> {
+): Promise<{ ok: true; resolved: ResolvedBody } | { ok: false; response: Response }> {
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
     return {
       ok: false,
-      response: NextResponse.json(buildErrorBody(400, "Invalid or empty JSON body"), {
+      response: Response.json(buildErrorBody(400, "Invalid or empty JSON body"), {
         status: 400,
       }),
     };
@@ -76,7 +75,7 @@ async function parseRequestBody(
   if (!parsed.success) {
     return {
       ok: false,
-      response: NextResponse.json(
+      response: Response.json(
         buildErrorBody(400, parsed.error.issues[0]?.message ?? "Invalid request body"),
         { status: 400 }
       ),
@@ -87,7 +86,7 @@ async function parseRequestBody(
   if (resolved.ok === false) {
     return {
       ok: false,
-      response: NextResponse.json(buildErrorBody(400, resolved.error), { status: 400 }),
+      response: Response.json(buildErrorBody(400, resolved.error), { status: 400 }),
     };
   }
   return { ok: true, resolved: resolved.resolved };
@@ -111,7 +110,7 @@ export async function POST(request: Request) {
   const info = extractCodexAccountInfo(accessToken);
 
   if (!info.email && !info.chatgptAccountId && !name) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(
         400,
         "Could not decode any account info from the access token and no name was provided"
@@ -136,7 +135,7 @@ export async function POST(request: Request) {
       ...(Object.keys(providerSpecificData).length > 0 ? { providerSpecificData } : {}),
     });
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: {
         id: connection.id,
@@ -146,7 +145,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(
         500,
         sanitizeErrorMessage(error instanceof Error ? error.message : String(error))

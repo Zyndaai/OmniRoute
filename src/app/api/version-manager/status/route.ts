@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { getVersionManagerStatus } from "@/lib/db/versionManager";
 import { getSupervisor } from "@/lib/services/registry";
 import { projectStateWithoutSupervisor } from "@/lib/services/persistedState";
@@ -39,12 +36,12 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json(enriched);
+    return Response.json(enriched);
   } catch (error) {
     const message = sanitizeErrorMessage(
       error instanceof Error ? error.message : "Failed to get status"
     );
     console.error("[version-manager] status error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

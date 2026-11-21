@@ -1,4 +1,3 @@
-"use client";
 /** Fetches per-source task detail on drawer open + approve/cancel/repeat actions. */
 import { useEffect, useState } from "react";
 import type { OrchNode } from "../model/orchestrationTypes";

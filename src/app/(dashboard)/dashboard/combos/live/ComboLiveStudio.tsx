@@ -1,8 +1,6 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
 import type { NodeTypes } from "@xyflow/react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import Badge from "@/shared/components/Badge";
 import Select from "@/shared/components/Select";

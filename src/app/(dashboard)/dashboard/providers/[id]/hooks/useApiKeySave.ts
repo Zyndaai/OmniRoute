@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useApiKeySave — Issue #3501 Phase 1s
  *

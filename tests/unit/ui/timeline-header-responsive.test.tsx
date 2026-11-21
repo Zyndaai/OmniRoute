@@ -9,9 +9,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("react-router", () => ({ useNavigate: () => vi.fn() }));
 
 const { default: RequestTimeline } = await import("../../../src/shared/components/RequestTimeline");
 const { HEADER_HEIGHT } = await import("../../../src/shared/components/RequestTimeline.utils");

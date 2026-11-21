@@ -1,5 +1,3 @@
-"use client";
-
 // src/app/(dashboard)/dashboard/playground/components/MarkdownMessage.tsx
 import {
   Table,

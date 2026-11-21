@@ -11,7 +11,7 @@ import { PROVIDERS } from "../../src/lib/oauth/providers/index";
 // gets no Device Code tab. The modal then calls /authorize, receives `authUrl: null` and throws
 // `errorBrowserUnavailable`.
 //
-// DEVICE_CODE_PROVIDERS is a module-private const inside a "use client" component, so importing it
+// DEVICE_CODE_PROVIDERS is a module-private const inside a browser component, so importing it
 // would drag React/next-intl into a node test. The Set literal is read from the source instead and
 // compared against the real provider registry (no hardcoded copy of the provider list).
 const here = dirname(fileURLToPath(import.meta.url));

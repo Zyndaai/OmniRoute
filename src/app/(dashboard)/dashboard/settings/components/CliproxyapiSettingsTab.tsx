@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { Card, Button, Input, Toggle, Spinner } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 
@@ -158,7 +156,7 @@ export default function CliproxyapiSettingsTab() {
         <span>
           {t("cliproxyapiLifecycleNoticeBefore")}{" "}
           <Link
-            href="/dashboard/providers/services"
+            to="/dashboard/providers/services"
             className="underline underline-offset-2 hover:opacity-80"
           >
             {t("cliproxyapiLifecycleNoticeLink")}

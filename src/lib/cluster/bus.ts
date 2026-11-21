@@ -37,11 +37,11 @@ export type RefreshReason = "expired" | "rejected";
 type RefreshRequestHandler = (connectionId: string, reason: RefreshReason) => void;
 
 /**
- * Process-wide registry on globalThis. Next.js compiles the boot code (instrumentation) and
- * the route handlers into separate bundles, each with its own copy of this module: the bus
- * installed at boot and the handlers registered by route-side modules (readCache, apiKeys)
- * must be the same objects in every copy, or a route's publish finds no bus and a received
- * message reaches only the boot bundle's caches. Same reason as globalThis.__omnirouteDbBackend.
+ * Process-wide registry on globalThis. The bus installed at boot and the handlers registered
+ * by route-side modules (readCache, apiKeys) must be the same objects even if this module is
+ * evaluated more than once (the dev server re-evaluates edited modules), or a route's publish
+ * finds no bus and a received message reaches only the stale copy's caches. Same reason as
+ * globalThis.__omnirouteDbBackend.
  */
 interface BusRegistry {
   activeBus: ClusterBus | null;

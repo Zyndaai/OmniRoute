@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 import { ProxyHealthCell } from "../../../src/app/(dashboard)/dashboard/settings/components/ProxyHealthCell";
 
@@ -20,7 +20,7 @@ function render(ui: React.ReactElement): HTMLElement {
   roots.push(root);
   act(() => {
     root.render(
-      <NextIntlClientProvider
+      <IntlProvider
         locale="en"
         messages={{ proxyRegistry: messages.proxyRegistry }}
         onError={(error) => {
@@ -28,7 +28,7 @@ function render(ui: React.ReactElement): HTMLElement {
         }}
       >
         {ui}
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
   });
   return container;

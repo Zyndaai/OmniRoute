@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getFile, getFileContent } from "@/lib/db/files";
 import { getApiKeyRequestScope, canAccessOwnedRecord } from "@/app/api/v1/_helpers/apiKeyScope";
 
@@ -14,7 +13,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // (GHSA-2jm2-mpx8-6523) so this management sibling cannot leak a foreign
   // tenant's file content to an unauthenticated caller (#13882).
   if (!file || !canAccessOwnedRecord(scope, file.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "File not found", type: "invalid_request_error" } },
       { status: 404 }
     );
@@ -22,7 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const content = await getFileContent(id);
   if (!content) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "File content not found", type: "invalid_request_error" } },
       { status: 404 }
     );

@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useProviderQuota — data source for the per-account quota panel on the
  * provider detail page.

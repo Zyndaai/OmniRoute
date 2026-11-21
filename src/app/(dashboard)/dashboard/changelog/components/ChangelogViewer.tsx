@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { Button, Card } from "@/shared/components";

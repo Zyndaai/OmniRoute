@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useCallback, useRef } from "react";
 import { copyToClipboard } from "@/shared/utils/clipboard";
 

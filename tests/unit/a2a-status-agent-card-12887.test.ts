@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-a2a-status-card-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -11,7 +10,7 @@ const ORIGINAL_BASE_URL = process.env.OMNIROUTE_BASE_URL;
 
 process.env.DATA_DIR = TEST_DATA_DIR;
 // The bug only shows with no admin override: getBaseUrl() then reads
-// request.nextUrl.origin, which throws when the status route forgets to
+// the request's origin, which throws when the status route forgets to
 // forward its own request to the agent-card handler.
 delete process.env.OMNIROUTE_BASE_URL;
 
@@ -19,10 +18,8 @@ const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const statusRoute = await import("../../src/app/api/a2a/status/route.ts");
 
-function statusRequest(url: string): NextRequest {
-  // A real NextRequest: `nextUrl` is what getBaseUrl() reads, and a plain
-  // Request does not have it.
-  return new NextRequest(new Request(url, { method: "GET" }));
+function statusRequest(url: string): Request {
+  return new Request(url, { method: "GET" });
 }
 
 test.after(() => {

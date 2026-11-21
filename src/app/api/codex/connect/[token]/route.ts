@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { finalizeTokens } from "@/lib/oauth/providers";
 import { persistOAuthConnection } from "@/lib/oauth/connectionPersistence";
 import {
@@ -30,12 +29,12 @@ export async function GET(
   const { token } = await params;
   const ticket = peekDeviceFlowTicket(token);
   if (!ticket || ticket.provider !== PROVIDER || ticket.status !== "pending") {
-    return NextResponse.json(
+    return Response.json(
       { valid: false, error: "This link is invalid, already used, or expired." },
       { status: 404 }
     );
   }
-  return NextResponse.json({
+  return Response.json({
     valid: true,
     provider: ticket.provider,
     expiresAt: new Date(ticket.expiresAt).toISOString(),
@@ -53,12 +52,12 @@ export async function POST(
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(oauthDeviceCompleteSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   // Claim the ticket FIRST (single-use): an invalid/expired/already-used token
@@ -66,7 +65,7 @@ export async function POST(
   // concurrent/duplicate submissions.
   const ticket = claimDeviceFlowTicket(token, PROVIDER);
   if (!ticket) {
-    return NextResponse.json(
+    return Response.json(
       { success: false, error: "This link is invalid, already used, or expired." },
       { status: 410 }
     );
@@ -95,7 +94,7 @@ export async function POST(
       email: connection.email ?? null,
     });
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       connection: { id: connection.id, provider: connection.provider, email: connection.email },
     });
@@ -103,7 +102,7 @@ export async function POST(
     // Release the claim so the visitor can retry within the link's lifetime.
     releaseDeviceFlowTicket(token);
     console.error("Codex public device-flow completion error:", err);
-    return NextResponse.json(
+    return Response.json(
       { success: false, error: sanitizeErrorMessage(err?.message) || "Failed to save connection" },
       { status: 500 }
     );

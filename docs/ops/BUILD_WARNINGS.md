@@ -6,72 +6,33 @@ lastUpdated: 2026-10-18
 
 # Build Warnings Reference
 
-`npm run build` and `npm run build:release` print a handful of warnings that are
-**expected** and do not mean the artifact is broken. This page catalogs them, says
-whether each one is actionable, and points at the code that owns it — so an operator can
-tell known build-time noise from a real regression.
+`npm run build` (React Router + Vite, `scripts/build/build.mjs`) can print warnings that
+do not mean the artifact is broken. This page says which ones are known and what they mean,
+so an operator can tell known build-time noise from a real regression.
 
-If a message you see is not listed here, treat it as new and investigate it.
+> The build used to run on Next.js with webpack or Turbopack. The warnings that page
+> catalogued (webpack "Critical dependency" for the Codex executor, the Fumadocs MDX
+> `webpack.cache` message, and the log lines printed while Next collected page data) belong
+> to that toolchain, and `scripts/build/knownBuildWarnings.mjs` that suppressed one of them no
+> longer exists. The Vite build has no page-data collection step, so it does not import
+> application modules to run them. Whether a given message still appears has not been
+> re-catalogued: if you see one, treat it as new and investigate it.
 
-## Webpack "Critical dependency" for `open-sse/executors/codex.ts`
+## Dynamic `require` in `open-sse/executors/codex/wreqLoader.ts` is intentional
 
-```
-./open-sse/executors/codex.ts
-Critical dependency: require function is used in a way in which dependencies cannot be statically extracted
-```
-
-**Expected — intentional.** `open-sse/executors/codex/wreqLoader.ts` loads the optional
-`wreq-js` native helper through a `createRequire()`-returned function whose specifier is
-kept as a **variable** on purpose (`Reflect.apply(requireFn, undefined, [moduleName])`). A
-literal specifier is statically rewritten by Turbopack into a hashed `.next`-relative
-require that does not exist in the standalone Docker runtime, so the dynamic form is
-required (#12491). The warning is the price of that pattern; the module still resolves at
-runtime and is not a missing dependency.
-
-Because the loader is imported by the Codex quota service, instrumentation, and the
-internal Codex WebSocket route, webpack reports the same warning once per import path.
-
-## Fumadocs MDX "build dependencies" cache warning
-
-```
-[webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Parsing of
-.../fumadocs-mdx/dist/eval-*.js for build dependencies failed at 'import(pathToFileURL(outfile).href)'.
-Build dependencies behind this expression are ignored and might cause incorrect cache invalidation.
-```
-
-**Upstream `fumadocs-mdx`, not actionable.** The package emits a dynamic `import()` of a
-generated module that webpack's `FileSystemInfo` pass cannot statically follow. The only
-consequence is that webpack may invalidate its build cache more often for that dependency;
-the **emitted output is unaffected**. OmniRoute suppresses the known benign form in
-`next.config.mjs` via `scripts/build/knownBuildWarnings.mjs`, which allow-lists the whole
-`node_modules/fumadocs-mdx/dist/` directory (both the `load-from-file-*.js` and
-`eval-*.js` bundles).
-
-## Runtime configuration messages during static generation
-
-`next build` imports application modules while collecting page data, so a few
-runtime-oriented log lines appear during the build as well. They are **not** build errors.
-
-| Message                                                                                       | Owner                                 | Meaning                                                                                                                                          |
-| --------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `[DB] Build phase detected — using no-op SQLite stub (never queried)`                         | `src/lib/db/core.ts`                  | The build never opens the real database. Expected.                                                                                               |
-| `[REDIS] REDIS_URL is not set in production. Using in-memory rate limiting.`                  | `src/shared/utils/rateLimiter.ts`     | Redis is optional; without it rate limiting falls back to memory. Set it only if you run Redis in production — see `REDIS_PRODUCTION_CONFIG.md`. |
-| `[CREDENTIALS] No external credentials file found, using defaults.`                           | `open-sse/config/credentialLoader.ts` | Expected unless you ship an external credentials file.                                                                                           |
-| `[INFO] [PLUGIN_SCANNER] scanner.dir_resolved` / `[INFO] [MEMORY_MANAGER] Registered backend` | plugin + memory registries            | Informational.                                                                                                                                   |
+`open-sse/executors/codex/wreqLoader.ts` loads the optional `wreq-js` native helper through a
+`createRequire()`-returned function whose specifier is kept as a **variable** on purpose
+(`Reflect.apply(requireFn, undefined, [moduleName])`). A bundler that sees a literal specifier
+may rewrite the call into a bundled require target that is absent from the Docker runtime
+image, so the dynamic form is required (#12491). Do not "simplify" it to a string literal.
 
 ### `[SECURITY] FATAL: JWT_SECRET is not set`
 
 `JWT_SECRET` is **required at runtime** — without it, login fails closed and the dashboard
 is unreachable. Set it in your environment before starting the server (see
-`../reference/ENVIRONMENT.md`).
-
-During `next build` the login route module used to be imported while collecting page data
-with no `JWT_SECRET`, and printed the same `FATAL` line, which reads like a live security
-failure. That message is now skipped during the build phase: the module-level warning in
-`src/app/api/auth/login/route.ts` is gated on `isNextBuildPhase()`
-(`src/lib/buildPhase.ts`), which matches `NEXT_PHASE=phase-production-build`,
-`OMNIROUTE_BUILDING=1`, and `npm_lifecycle_event=build`. The request handler still returns
-`500` when the secret is missing at runtime, so runtime behavior is unchanged.
+`../reference/ENVIRONMENT.md`). The module-level warning in
+`src/app/api/auth/login/route.ts` fires whenever the variable is unset when that module
+loads, and the request handler returns `500` when the secret is missing.
 
 ## Bun and dependency installation
 
@@ -80,7 +41,7 @@ dependencies with `npm ci` (or `npm install`):
 
 ```bash
 npm ci
-npm run build:release
+npm run build
 ```
 
 **`bun install` is not a supported way to install OmniRoute's dependencies** for this

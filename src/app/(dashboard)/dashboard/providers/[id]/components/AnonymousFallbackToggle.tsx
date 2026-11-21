@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // Issue #8935 — per-provider opt-out for the synthetic anonymous (no-auth)
@@ -12,7 +10,7 @@ import Icon from "@/shared/components/Icon";
 // blockedProviders instead.
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card, Toggle } from "@/shared/components";
 import { getProviderAlias, getProviderById } from "@/shared/constants/providers";
 import { useNotificationStore } from "@/store/notificationStore";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { registerQuotaFetchers } from "../../src/instrumentation-node.ts";
+import { registerQuotaFetchers } from "../../src/server/boot.ts";
 import { getRegisteredQuotaFetchers } from "../../open-sse/services/quotaPreflight.ts";
 import { fetchGenericQuota } from "../../open-sse/services/genericQuotaFetcher.ts";
 import { evaluateCachedQuotaAvailability } from "../../src/lib/usage/availability.ts";

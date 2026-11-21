@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -50,7 +49,7 @@ export async function detectRedisContainerRuntime(
 }
 
 export function redisRuntimeUnavailableResponse() {
-  return NextResponse.json(
+  return Response.json(
     { ok: false, error: "No container runtime (podman or docker) found on PATH" },
     { status: 503 }
   );

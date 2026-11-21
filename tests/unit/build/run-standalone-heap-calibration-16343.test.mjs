@@ -12,11 +12,11 @@
 //
 // The launcher runs at import time, so it is exercised as a child process. Host physical RAM
 // is simulated so the expected values do not depend on the machine running the test. cwd and
-// DATA_DIR point at a throwaway directory holding a stub `server.js` that reports the
-// NODE_OPTIONS it was spawned with.
+// DATA_DIR point at a throwaway directory holding a stub server bundle whose boot() reports the
+// NODE_OPTIONS the launcher child was spawned with.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -30,9 +30,19 @@ const GiB = 1024 * 1024 * 1024;
 function runLauncher(envOverrides, { simulatedRamBytes = 8 * GiB } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omniroute-16343-"));
   try {
+    // Stub server bundle: boot() reports the heap flags the launcher child was spawned with.
+    mkdirSync(join(dir, ".build", "app", "server"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(
-      join(dir, "server.js"),
-      "process.stdout.write('NODE_OPTIONS=' + (process.env.NODE_OPTIONS ?? '') + '\\n');\n"
+      join(dir, ".build", "app", "server", "index.js"),
+      [
+        "export const app = (_req, res) => res.end();",
+        "export async function boot() {",
+        "  process.stdout.write('NODE_OPTIONS=' + (process.env.NODE_OPTIONS ?? '') + '\\n');",
+        "  process.exit(0);",
+        "}",
+        "",
+      ].join("\n")
     );
     const simulateRam = join(dir, "simulate-ram.mjs");
     writeFileSync(
@@ -48,7 +58,7 @@ function runLauncher(envOverrides, { simulatedRamBytes = 8 * GiB } = {}) {
     const env = { ...process.env };
     delete env.OMNIROUTE_MEMORY_MB;
     delete env.NODE_OPTIONS;
-    Object.assign(env, { DATA_DIR: join(dir, "data") }, envOverrides);
+    Object.assign(env, { DATA_DIR: join(dir, "data"), OMNIROUTE_APP_DIR: dir }, envOverrides);
     const result = spawnSync(
       process.execPath,
       ["--import", pathToFileURL(simulateRam).href, launcherPath],

@@ -3,7 +3,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 
 import messages from "../../../../src/i18n/messages/en.json";
 
@@ -47,7 +47,7 @@ describe("DistributeProxiesButton", () => {
     cleanupCallbacks.push(() => act(() => root.unmount()));
     await act(async () => {
       root.render(
-        <NextIntlClientProvider
+        <IntlProvider
           locale="en"
           messages={{ common: messages.common, sharedComponents: messages.sharedComponents }}
         >
@@ -55,7 +55,7 @@ describe("DistributeProxiesButton", () => {
             onDistribute={props.onDistribute ?? vi.fn().mockResolvedValue(undefined)}
             {...props}
           />
-        </NextIntlClientProvider>
+        </IntlProvider>
       );
     });
     return { container, root };

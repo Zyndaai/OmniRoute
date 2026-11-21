@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 
 export const DEFAULT_DISPLAY_BASE_URL = "http://localhost:20128";
@@ -11,7 +9,7 @@ function normalizeUrl(value?: string): string | null {
 }
 
 /**
- * Normalize a Next.js-style basePath to a leading-slash form without a trailing slash.
+ * Normalize a base path to a leading-slash form without a trailing slash.
  * Empty / root values become `""`.
  */
 export function normalizeBasePath(value?: string | null): string {
@@ -176,7 +174,7 @@ function joinOriginAndBasePath(origin: string, basePath: string): string {
  *
  * @param envValue          `NEXT_PUBLIC_BASE_URL` (may include a path for subpath deploys)
  * @param browserOrigin     `window.location.origin`
- * @param browserPathname   `window.location.pathname` (still includes Next basePath)
+ * @param browserPathname   `window.location.pathname` (still includes the base path)
  * @param envBasePath       `NEXT_PUBLIC_OMNIROUTE_BASE_PATH` / `OMNIROUTE_BASE_PATH`
  */
 export function resolveDisplayBaseUrl(

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getDefaultPricing } from "@/shared/constants/pricing";
 
 /**
@@ -8,9 +7,9 @@ import { getDefaultPricing } from "@/shared/constants/pricing";
 export async function GET() {
   try {
     const defaultPricing = getDefaultPricing();
-    return NextResponse.json(defaultPricing);
+    return Response.json(defaultPricing);
   } catch (error) {
     console.error("Error fetching default pricing:", error);
-    return NextResponse.json({ error: "Failed to fetch default pricing" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch default pricing" }, { status: 500 });
   }
 }

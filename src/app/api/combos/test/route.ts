@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
 import { getComboByName, getCombos } from "@/lib/db/combos";
 import { pickApiKeyForInternalUse } from "@/lib/db/apiKeys";
 import { buildComboTestRequestBody } from "@/lib/combos/testHealth";
@@ -35,9 +34,9 @@ type AutoTestComboResolution = { combo: ComboRecord; totalAutoCandidates: number
 // of its candidate pool instead of the (potentially huge) full set.
 async function resolveAutoTestCombo(
   comboName: string
-): Promise<AutoTestComboResolution | NextResponse> {
+): Promise<AutoTestComboResolution | Response> {
   if (!isAutoComboId(comboName)) {
-    return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    return Response.json({ error: "Combo not found" }, { status: 404 });
   }
   let virtual: Record<string, unknown>;
   try {
@@ -46,11 +45,11 @@ async function resolveAutoTestCombo(
     // get an implicit index signature.
     virtual = { ...(await materializeAutoCombo(comboName)) };
   } catch {
-    return NextResponse.json({ error: "Combo not found" }, { status: 404 });
+    return Response.json({ error: "Combo not found" }, { status: 404 });
   }
   const pool = Array.isArray(virtual.models) ? virtual.models : [];
   if (pool.length === 0) {
-    return NextResponse.json(
+    return Response.json(
       { error: `Auto combo has no connected candidates matching "${comboName}"` },
       { status: 400 }
     );
@@ -255,7 +254,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -269,7 +268,7 @@ export async function POST(request) {
   try {
     const validation = validateBody(testComboSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { comboName } = validation.data;
 
@@ -277,7 +276,7 @@ export async function POST(request) {
     let totalAutoCandidates: number | null = null;
     if (!combo) {
       const resolution = await resolveAutoTestCombo(comboName);
-      if (resolution instanceof NextResponse) return resolution;
+      if (resolution instanceof Response) return resolution;
       combo = resolution.combo;
       totalAutoCandidates = resolution.totalAutoCandidates;
     }
@@ -286,7 +285,7 @@ export async function POST(request) {
     const targets = resolveNestedComboTargets(combo as unknown as ComboLike, allCombos);
 
     if (targets.length === 0) {
-      return NextResponse.json({ error: "Combo has no models" }, { status: 400 });
+      return Response.json({ error: "Combo has no models" }, { status: 400 });
     }
 
     const baseInternalUrl = getInternalBaseUrl();
@@ -298,12 +297,10 @@ export async function POST(request) {
       request.signal ?? null
     );
 
-    return NextResponse.json(
-      buildComboTestResponse(comboName, combo, results, totalAutoCandidates)
-    );
+    return Response.json(buildComboTestResponse(comboName, combo, results, totalAutoCandidates));
   } catch (error) {
     console.log("Error testing combo:", error);
-    return NextResponse.json({ error: "Failed to test combo" }, { status: 500 });
+    return Response.json({ error: "Failed to test combo" }, { status: 500 });
   }
 }
 

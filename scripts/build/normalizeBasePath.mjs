@@ -1,5 +1,6 @@
 /**
- * Normalize OMNIROUTE_BASE_PATH for Next.js `basePath` and Docker sentinels.
+ * Normalize OMNIROUTE_BASE_PATH for the build (React Router `basename`, Vite `base`) and the
+ * runtime helpers that prefix app paths.
  *
  * Rules mirror src/shared/services/modelSyncScheduler.ts::normalizeInternalBasePath
  * so runtime self-fetches and the compiled bundle agree on the subpath shape.

@@ -47,7 +47,7 @@ If you are currently comparing 9router/CLIPROXYAPI:
 
 ## Backend boundary contract
 
-The stable product boundary is the OmniRoute relay API, not the dashboard implementation. The Next.js dashboard may install, configure, and supervise local services, but request routing should enter through the relay API and hand off behind that boundary.
+The stable product boundary is the OmniRoute relay API, not the dashboard implementation. The dashboard may install, configure, and supervise local services, but request routing should enter through the relay API and hand off behind that boundary.
 
 Long-term backend choices:
 

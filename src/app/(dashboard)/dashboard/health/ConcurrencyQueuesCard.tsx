@@ -1,6 +1,4 @@
-"use client";
-
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import { Card } from "@/shared/components";
 import { useConcurrencySnapshot } from "./useConcurrencySnapshot";

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { REGISTRY } from "@omniroute/open-sse/config/providerRegistry.ts";
 import { getAllCustomModels, getAllSyncedAvailableModels } from "@/lib/db/models";
 import { getPricing } from "@/lib/db/settings";
@@ -198,9 +197,9 @@ export async function GET() {
       entry.modelCount = entry.models.length;
     }
 
-    return NextResponse.json(catalog);
+    return Response.json(catalog);
   } catch (error) {
     console.error("Error fetching model catalog:", error);
-    return NextResponse.json({ error: "Failed to fetch model catalog" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch model catalog" }, { status: 500 });
   }
 }

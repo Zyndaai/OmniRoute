@@ -1,6 +1,3 @@
-"use server";
-
-import { NextResponse } from "next/server";
 import { getSupervisor } from "@/lib/services/registry";
 import { persistStoppedWithoutSupervisor } from "@/lib/services/persistedState";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
@@ -18,13 +15,13 @@ export async function POST(request: Request) {
     if (!sup) {
       // Already stopped in memory; reconcile any volatile state left in the DB.
       await persistStoppedWithoutSupervisor(parsed.tool);
-      return NextResponse.json({ success: true });
+      return Response.json({ success: true });
     }
     await sup.stop();
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     const message = sanitizeErrorMessage(error instanceof Error ? error.message : "Failed to stop");
     console.error("[version-manager] stop error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

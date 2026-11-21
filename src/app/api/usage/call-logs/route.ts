@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getCallLogs } from "@/lib/usageDb";
 import { getCompletedDetails, getPendingById } from "@/lib/usage/usageHistory";
@@ -279,9 +277,9 @@ export async function GET(request: Request) {
     });
 
     const filtered = rows.filter((r: any) => rowMatchesFilter(r, filter));
-    return NextResponse.json(filtered);
+    return Response.json(filtered);
   } catch (error) {
     console.error("[API ERROR] /api/usage/call-logs failed:", error);
-    return NextResponse.json({ error: "Failed to fetch call logs" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch call logs" }, { status: 500 });
   }
 }

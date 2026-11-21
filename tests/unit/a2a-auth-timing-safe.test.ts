@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-a2a-auth-"));
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
@@ -18,7 +17,7 @@ const { resetTestDb } = await import("../helpers/postgres.ts");
 
 const API_KEY = "test-secret";
 
-function makeJsonRpcRequest(token?: string): NextRequest {
+function makeJsonRpcRequest(token?: string): Request {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (token !== undefined) headers.authorization = `Bearer ${token}`;
   return new Request("http://localhost/a2a?trace=should-not-be-logged", {
@@ -30,7 +29,7 @@ function makeJsonRpcRequest(token?: string): NextRequest {
       method: "message/send",
       params: { message: { role: "user", content: "hello" } },
     }),
-  }) as unknown as NextRequest;
+  }) as unknown as Request;
 }
 
 test.beforeEach(async () => {

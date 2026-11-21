@@ -21,7 +21,6 @@
  * so it does NOT require isLocalOnlyPath() classification.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import { getAppLogFilePath } from "@/lib/logEnv";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
@@ -84,7 +83,7 @@ function matchesCliEntry(
 /**
  * GET /api/cli-tools/logs
  */
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const authError = await requireCliToolsAuth(request);
   if (authError) return authError;
 
@@ -108,7 +107,7 @@ export async function GET(request: NextRequest) {
     const logPath = getAppLogFilePath();
 
     if (!fs.existsSync(logPath)) {
-      return NextResponse.json([], { status: 200 });
+      return Response.json([], { status: 200 });
     }
 
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
@@ -170,7 +169,7 @@ export async function GET(request: NextRequest) {
     // Return last N entries (most recent)
     const result = entries.slice(-limit);
 
-    return NextResponse.json(result, {
+    return Response.json(result, {
       status: 200,
       headers: {
         "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -178,7 +177,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(message) || "Failed to read logs" },
       { status: 500 }
     );

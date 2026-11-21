@@ -1,5 +1,3 @@
-"use client";
-
 /** System health diagnostics and independently refreshed local concurrency gates. */
 
 import { useState, useEffect, useCallback } from "react";
@@ -14,7 +12,7 @@ import { getProviderDisplayName } from "@/lib/display/names";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import { compareTr } from "@/shared/utils/turkishText";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import TelemetryCard from "./TelemetryCard";
 import ProviderHealthAutopilotCard from "./ProviderHealthAutopilotCard";
 import ProviderHealthMatrixCard from "./ProviderHealthMatrixCard";

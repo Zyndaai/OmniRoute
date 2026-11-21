@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { NextRequest } from "next/server";
 import { wrapRequestListenerWithPeerStamp } from "../../../scripts/dev/peer-stamp.mjs";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-trusted-client-ip-"));
@@ -63,25 +62,26 @@ function stampedRequest(peer: string, headers: Record<string, string>) {
   wrapRequestListenerWithPeerStamp((req: { headers: Record<string, string> }) => {
     Object.assign(stamped, req.headers);
   })({ headers: { ...headers }, socket: { remoteAddress: peer } } as never, {} as never);
-  return new NextRequest(`http://localhost${RELAY_PATH}`, { method: "POST", headers: stamped });
+  return new Request(`http://localhost${RELAY_PATH}`, { method: "POST", headers: stamped });
 }
 
-// A request that never went through the custom server (plain `next dev`, or a forger that
-// skipped it): no stamps at all, only what the client sent.
+// A request that never went through the stamping server (or a forger that skipped it): no
+// stamps at all, only what the client sent.
 function unstampedRequest(headers: Record<string, string>) {
-  return new NextRequest(`http://localhost${RELAY_PATH}`, { method: "POST", headers });
+  return new Request(`http://localhost${RELAY_PATH}`, { method: "POST", headers });
 }
 
 // The headers the route handler receives after the pipeline ran.
-async function forwardedHeaders(request: NextRequest): Promise<Headers> {
-  const res = await pipeline.runAuthzPipeline(request, { enforce: true });
-  assert.equal(res.headers.get("x-middleware-next"), "1", `pipeline blocked: ${res.status}`);
-  const forwarded = new Headers();
-  for (const [name, value] of res.headers) {
-    if (name.startsWith("x-middleware-request-")) {
-      forwarded.set(name.slice("x-middleware-request-".length), value);
-    }
-  }
+async function forwardedHeaders(request: Request): Promise<Headers> {
+  let forwarded: Headers | null = null;
+  const res = await pipeline.runAuthzPipeline(request, {
+    enforce: true,
+    next: (routeRequest) => {
+      forwarded = routeRequest.headers;
+      return new Response(null);
+    },
+  });
+  assert.ok(forwarded, `pipeline blocked: ${res.status}`);
   return forwarded;
 }
 

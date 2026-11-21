@@ -6,16 +6,15 @@
  *   ?refresh=true  — Force-refresh, ignores TTL
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { getOpenRouterCatalog, refreshOpenRouterCatalog } from "@/lib/catalog/openrouterCatalog";
 import { getSettings } from "@/lib/db/settings";
 import { isFreeForProvider } from "@/shared/utils/freeModels";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   // Require authentication (dashboard/API key)
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Authentication required", type: "invalid_request_error" } },
       { status: 401 }
     );
@@ -33,12 +32,12 @@ export async function GET(req: NextRequest) {
       ? data.filter((m) => isFreeForProvider("openrouter", m as { id: string; pricing?: unknown }))
       : data;
 
-  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "true";
+  const forceRefresh = new URL(req.url).searchParams.get("refresh") === "true";
 
   if (forceRefresh) {
     const result = await refreshOpenRouterCatalog();
     const data = applyFilter(result.data);
-    return NextResponse.json({
+    return Response.json({
       object: "list",
       data,
       meta: {
@@ -51,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   const result = await getOpenRouterCatalog();
   const data = applyFilter(result.data);
-  return NextResponse.json({
+  return Response.json({
     object: "list",
     data,
     meta: {

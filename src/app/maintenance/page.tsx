@@ -1,13 +1,9 @@
-"use client";
-
-// Client component: the kit `buttonVariants` lives in a "use client" module and cannot be
-// called from a server component.
+import { Link } from "react-router";
 import Icon from "@/shared/components/Icon";
 import { OmniRouteLockup } from "@/shared/components/OmniRouteLogo";
-import Link from "next/link";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Card from "@/shared/components/Card";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export default function MaintenancePage() {
   const t = useTranslations("publicSystem");
@@ -34,11 +30,11 @@ export default function MaintenancePage() {
         </ul>
 
         <div className="mt-8 flex flex-col sm:flex-row gap-3">
-          <Link href="/status" className={buttonVariants({ size: "lg" })}>
+          <Link to="/status" className={buttonVariants({ size: "lg" })}>
             {t("maintenance.systemStatus")}
           </Link>
           <Link
-            href="/dashboard/health"
+            to="/dashboard/health"
             className={buttonVariants({ variant: "outline", size: "lg" })}
           >
             {t("maintenance.healthDashboard")}

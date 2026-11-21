@@ -15,7 +15,6 @@
  * raw token, only a 16-char fingerprint of `sha256(service|account|token)`.
  */
 
-import { NextResponse } from "next/server";
 import { discoverZedCredentials, isZedInstalled } from "@/lib/zed-oauth/keychain-reader";
 import { partitionZedCredentials } from "@/lib/zed-oauth/importUtils";
 import { fingerprintZedCredential } from "@/lib/zed-oauth/credentialFingerprint";
@@ -39,13 +38,15 @@ interface DiscoverResponse {
   error?: string;
 }
 
-export async function POST(request: Request): Promise<NextResponse<DiscoverResponse> | Response> {
+const json = (body: DiscoverResponse, init?: ResponseInit) => Response.json(body, init);
+
+export async function POST(request: Request): Promise<Response> {
   const authError = await requireManagementAuth(request);
   if (authError) return authError;
 
   try {
     if (isRunningInDocker()) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error:
@@ -60,7 +61,7 @@ export async function POST(request: Request): Promise<NextResponse<DiscoverRespo
 
     const zedInstalled = await isZedInstalled();
     if (!zedInstalled) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error: "Zed IDE does not appear to be installed on this system.",
@@ -81,7 +82,7 @@ export async function POST(request: Request): Promise<NextResponse<DiscoverRespo
       fingerprint: fingerprintZedCredential(cred.service, cred.account, cred.token),
     }));
 
-    return NextResponse.json({
+    return json({
       success: true,
       zedInstalled: true,
       count: candidates.length,
@@ -97,7 +98,7 @@ export async function POST(request: Request): Promise<NextResponse<DiscoverRespo
     console.error("[Zed Discover] Error reading keychain:", error);
 
     if (error?.message?.includes("User canceled") || error?.message?.includes("denied")) {
-      return NextResponse.json(
+      return json(
         {
           success: false,
           error: "Keychain access denied. Please grant permission when prompted by your OS.",
@@ -106,7 +107,7 @@ export async function POST(request: Request): Promise<NextResponse<DiscoverRespo
       );
     }
 
-    return NextResponse.json(
+    return json(
       {
         success: false,
         error: "Failed to discover Zed credentials",

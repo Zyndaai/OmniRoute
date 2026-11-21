@@ -235,7 +235,7 @@ export function evaluateTestAllEntry(
  * "Test all models" result toast. Centralises the i18n variable contract so the
  * call sites cannot drift from the `testAllResults` template again — the template
  * is `"{ok} of {total} models working"`, so it MUST receive `ok` and `total`
- * (passing `{ ok, error }` previously raised next-intl's FORMATTING_ERROR).
+ * (passing `{ ok, error }` previously raised use-intl's FORMATTING_ERROR).
  */
 export function testAllResultsText(
   t: ProviderMessageTranslator,

@@ -1,5 +1,3 @@
-"use client";
-
 import EmptyState from "@/shared/components/EmptyState";
 import { WebhookCard, type WebhookItem } from "./WebhookCard";
 

@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { foldModelHealth } from "@/domain/modelAvailability";
 import { getNoneHonoredSnapshot, readNoneHonored } from "@/lib/db/reasoningEffortCompliance";
 import { getModelCatalogAuthRejection } from "../catalogRequest";
@@ -87,9 +85,9 @@ export async function GET(request: Request) {
       readNoneHonored(noneHonored, id)
     );
 
-    return NextResponse.json({ object: "list", data }, { headers: { ...CORS_HEADERS } });
+    return Response.json({ object: "list", data }, { headers: { ...CORS_HEADERS } });
   } catch (error: unknown) {
-    return NextResponse.json(
+    return Response.json(
       buildErrorBody(500, error instanceof Error ? error.message : String(error)),
       { status: 500, headers: { ...CORS_HEADERS } }
     );

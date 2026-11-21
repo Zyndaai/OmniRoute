@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { revokeRegisteredKey } from "@/lib/db/registeredKeys";
 
@@ -15,10 +14,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const resolvedParams = await params;
   const revoked = await revokeRegisteredKey(resolvedParams.id);
   if (!revoked) {
-    return NextResponse.json({ error: "Key not found or already revoked" }, { status: 404 });
+    return Response.json({ error: "Key not found or already revoked" }, { status: 404 });
   }
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     id: resolvedParams.id,
     revokedAt: new Date().toISOString(),

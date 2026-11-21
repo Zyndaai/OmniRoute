@@ -13,7 +13,7 @@ import { buildPkceLoopbackMismatchWarning } from "../../src/lib/oauth/utils/pkce
 // dashboard, with zero warning — surfacing as a silent Auth0 `invalid_state` failure.
 //
 // Source-level guard (like the sibling oauth-modal-grok-cli-browser-login-7013.test.ts):
-// OAuthModal is a "use client" component with heavy runtime deps (next-intl,
+// OAuthModal is a browser component with heavy runtime deps (next-intl,
 // popup/fetch orchestration); pinning the fix by source inspection + a direct unit
 // test of the extracted warning-message helper is the reliable check here.
 const here = dirname(fileURLToPath(import.meta.url));

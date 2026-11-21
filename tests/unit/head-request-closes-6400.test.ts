@@ -32,8 +32,7 @@ const { wrapRequestListenerWithHeadResponseGuard, suppressBodyAndForceClose } = 
  * actually finished.
  *
  * Fix: `scripts/dev/head-response-guard.cjs` wraps the Node request listener
- * (wired into both the dev/start custom server `scripts/dev/run-next.mjs` and
- * the packaged standalone server `scripts/dev/standalone-server-ws.mjs`) so
+ * (wired into the launcher `scripts/dev/run-server.mjs` in every mode) so
  * that, for every inbound HEAD request, any body bytes the inner handler
  * tries to write are discarded (never blocking on backpressure) and the
  * connection is force-closed (`Connection: close`) as soon as `.end()` is

@@ -1,5 +1,3 @@
-"use client";
-
 // Deep import of the brand module only: the package barrel pulls all 73 kit files (Radix,
 // charts…) into every importer of the logo — Sidebar, landing, login, error pages.
 import { ProductIcon, ProductLockup } from "@omniroute/ui-kit/keak-brand";
@@ -41,7 +39,7 @@ export function OmniRouteLockup({ name, logoSrc, className }: OmniRouteLockupPro
         className={cn("inline-flex items-center gap-2", className)}
       >
         {logoSrc ? (
-          // eslint-disable-next-line @next/next/no-img-element -- operator-supplied white-label logo (data: or remote URL), not a static/known asset
+          // Operator-supplied white-label logo (data: or remote URL).
           <img src={logoSrc} alt="" className="size-6 object-contain" />
         ) : (
           <OmniRouteLogo size={24} />

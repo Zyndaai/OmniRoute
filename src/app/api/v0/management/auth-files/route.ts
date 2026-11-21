@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { cliProxyErrorResponse, requireCliProxyManagementAuth } from "@/lib/cliproxyCompat/http";
 import { listCliProxyAuthFiles } from "@/lib/cliproxyCompat/managementApi";
 
@@ -13,7 +11,7 @@ export async function GET(request: Request) {
   if (authError) return authError;
 
   try {
-    return NextResponse.json(await listCliProxyAuthFiles());
+    return Response.json(await listCliProxyAuthFiles());
   } catch (error) {
     return cliProxyErrorResponse(error, "GET /v0/management/auth-files");
   }

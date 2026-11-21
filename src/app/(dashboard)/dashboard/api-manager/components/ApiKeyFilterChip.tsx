@@ -1,5 +1,3 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import { cn } from "@/shared/utils/cn";
 

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/i18n/messages/en.json";
 
-vi.mock("next-intl", () => {
+vi.mock("use-intl", () => {
   // Stable per namespace, like the real hook: the page's refresh effect depends
   // on the translator identity, so a fresh function per render would loop.
   const stable = new Map<string, unknown>();

@@ -7,7 +7,6 @@
 // injectable resolver, so nothing here touches node_modules or the filesystem.
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 // @ts-expect-error — .mjs helper has no type declarations; runtime shape is known.
 import {
   extractServerExternalPackages,
@@ -29,11 +28,7 @@ test("extractServerExternalPackages: pulls the string literals in declaration or
       ],
     };
   `;
-  assert.deepEqual(extractServerExternalPackages(source), [
-    "pino",
-    "better-sqlite3",
-    "sql.js",
-  ]);
+  assert.deepEqual(extractServerExternalPackages(source), ["pino", "better-sqlite3", "sql.js"]);
 });
 
 test("extractServerExternalPackages: ignores comment lines between entries", () => {
@@ -85,12 +80,6 @@ test("extractServerExternalPackages: a quoted word in a trailing comment is not 
     ],
   `;
   assert.deepEqual(extractServerExternalPackages(source), ["ws", "bufferutil"]);
-});
-
-test("extractServerExternalPackages: finds the list in the real next.config.mjs", () => {
-  const source = fs.readFileSync(new URL("../../../next.config.mjs", import.meta.url), "utf8");
-  const externals = extractServerExternalPackages(source);
-  assert.ok(externals.length > 0, "should find serverExternalPackages in the real config");
 });
 
 // ---------------------------------------------------------------------------

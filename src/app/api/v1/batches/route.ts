@@ -2,7 +2,6 @@ import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/s
 import { createBatch, listBatches, countBatches } from "@/lib/db/batches";
 import { getFile } from "@/lib/db/files";
 import { v1BatchCreateSchema } from "@/shared/validation/schemas";
-import { NextResponse } from "next/server";
 import {
   getApiKeyRequestScope,
   canAccessOwnedRecord,
@@ -27,7 +26,7 @@ export async function POST(request: Request) {
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -58,7 +57,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const validation = v1BatchCreateSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: {
             message: validation.error.message,
@@ -79,7 +78,7 @@ export async function POST(request: Request) {
       !inputFile ||
       !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, inputFile.apiKeyId)
     ) {
-      return NextResponse.json(
+      return Response.json(
         { error: { message: "Input file not found", type: "invalid_request_error" } },
         { status: 400, headers: CORS_HEADERS }
       );
@@ -95,10 +94,10 @@ export async function POST(request: Request) {
       outputExpiresAfterAnchor: validated.output_expires_after?.anchor || null,
     });
 
-    return NextResponse.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
+    return Response.json(formatBatchResponse(batch), { headers: CORS_HEADERS });
   } catch (error) {
     console.error("[BATCHES] Create failed:", error);
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           // Hard Rule #12: never forward a raw Error message to the client —
@@ -124,7 +123,7 @@ export async function GET(request: Request) {
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -155,7 +154,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const parsedLimit = parseBatchListLimit(url.searchParams.get("limit"));
   if (parsedLimit.ok === false) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: parsedLimit.message, type: "invalid_request_error" } },
       { status: 400, headers: CORS_HEADERS }
     );
@@ -171,7 +170,7 @@ export async function GET(request: Request) {
 
   const totalCount = await countBatches(ownerFilter);
 
-  return NextResponse.json(
+  return Response.json(
     {
       object: "list",
       data: formattedData,

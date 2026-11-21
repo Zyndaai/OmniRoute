@@ -12,14 +12,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE = "1";
 vi.setConfig({ testTimeout: 30_000 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => {
     const translate = (key: string) => key;
     translate.has = () => false;
     return translate;
   },
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/dashboard/combos" }));
+vi.mock("react-router", () => ({
+  useLocation: () => ({ pathname: "/dashboard/combos" }),
+  useNavigate: () => vi.fn(),
+  Link: ({
+    to,
+    children,
+    ...p
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...p}>
+      {children}
+    </a>
+  ),
+}));
 
 async function loadSidebar() {
   const { SidebarProvider, Sidebar: KitSidebar } = await import("@omniroute/ui-kit/sidebar");

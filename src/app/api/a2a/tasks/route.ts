@@ -1,11 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getTaskManager, type TaskState } from "@/lib/a2a/taskManager";
 import { authorizeA2ATaskRoute } from "@/app/api/a2a/_auth";
 import { createConductorTask } from "@/lib/conductor/hubProxy";
 import { getSettings } from "@/lib/db/settings";
+import { isRequireApiKeyEnabled } from "@/shared/utils/featureFlags";
 
 const VALID_TASK_STATES = new Set<TaskState>([
   "submitted",
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const total = tm.countTasks({ state, skill });
     const tasks = tm.listTasks({ state, skill, limit, offset }, auth.owner);
 
-    return NextResponse.json({
+    return Response.json({
       tasks,
       total,
       limit,
@@ -52,7 +52,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to list A2A tasks";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
 
@@ -92,7 +92,9 @@ export function tokensMatch(provided: string, expected: string): boolean {
 }
 
 /**
- * Mesma semântica de auth do JSON-RPC A2A (src/app/a2a/route.ts): Bearer vs OMNIROUTE_API_KEY; aberto se não configurada.
+ * Legacy POST gate: Bearer vs OMNIROUTE_API_KEY; open when it is not set. POST applies it
+ * only when REQUIRE_API_KEY is off, on top of authorizeA2ATaskRoute, so that posture keeps
+ * requiring the env key.
  *
  * Exported as a test seam only — not part of the route contract.
  */
@@ -108,16 +110,27 @@ export function authenticateA2A(request: Request): boolean {
  * Só skills da frota (`conductor` / `conductor-cli-<profile>` — as anunciadas no
  * Agent Card) são delegáveis; os estados voltam pelo espelho SSE→A2A (RF1).
  */
-export async function POST(request: Request) {
-  if (!authenticateA2A(request)) {
-    return NextResponse.json(
-      { error: "Unauthorized: missing or invalid API key" },
-      { status: 401 }
-    );
+/**
+ * POST auth: the GET gate first, then the legacy OMNIROUTE_API_KEY check when REQUIRE_API_KEY
+ * is off. Returns a 401 Response, or null when the caller may continue.
+ */
+async function authorizeConductorTaskPost(request: Request): Promise<Response | null> {
+  // Checking only OMNIROUTE_API_KEY left POST open whenever that env key was unset, even with
+  // REQUIRE_API_KEY on.
+  const auth = await authorizeA2ATaskRoute(request);
+  if (auth instanceof Response) return auth;
+  if (!isRequireApiKeyEnabled() && !authenticateA2A(request)) {
+    return Response.json({ error: "Unauthorized: missing or invalid API key" }, { status: 401 });
   }
+  return null;
+}
+
+export async function POST(request: Request) {
+  const denied = await authorizeConductorTaskPost(request);
+  if (denied) return denied;
   const settings = await getSettings();
   if (settings.a2aEnabled !== true) {
-    return NextResponse.json(
+    return Response.json(
       { error: "A2A endpoint is disabled. Enable it from the Endpoints page." },
       { status: 503 }
     );
@@ -127,18 +140,18 @@ export async function POST(request: Request) {
   try {
     raw = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
   const parsed = delegationSchema.safeParse(raw);
   if (!parsed.success) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Invalid A2A task: provide messages[] (and metadata.conductor)" },
       { status: 400 }
     );
   }
   const { skill, messages, metadata } = parsed.data;
   if (skill !== "conductor" && !skill.startsWith("conductor-cli-")) {
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           "Only Conductor fleet skills are delegable here (conductor / conductor-cli-<profile>)",
@@ -148,7 +161,7 @@ export async function POST(request: Request) {
   }
   const conductor = metadata?.conductor;
   if (!conductor?.repo?.url) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Delegation requires metadata.conductor.repo.url (the fleet works on git repos)" },
       { status: 400 }
     );
@@ -166,12 +179,12 @@ export async function POST(request: Request) {
     model: conductor.model,
   });
   if (!created.ok) {
-    return NextResponse.json(
+    return Response.json(
       { error: `Conductor hub refused the delegation (HTTP ${created.status})` },
       { status: created.status }
     );
   }
-  return NextResponse.json(
+  return Response.json(
     {
       conductor_task_id: created.task_id,
       state: "submitted",

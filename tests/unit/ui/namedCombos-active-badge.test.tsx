@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const containers: HTMLElement[] = [];
@@ -13,7 +14,7 @@ function mount(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(ui);
+    root.render(<MemoryRouter>{ui}</MemoryRouter>);
   });
   return container;
 }

@@ -11,7 +11,7 @@ const notifications = {
   success: vi.fn(),
 };
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translate,
 }));
 

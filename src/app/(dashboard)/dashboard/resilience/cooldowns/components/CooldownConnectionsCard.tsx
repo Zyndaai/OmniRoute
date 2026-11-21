@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@omniroute/ui-kit/table";
 import Card from "@/shared/components/Card";
 import EmptyState from "@/shared/components/EmptyState";

@@ -5,13 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompatibleNodeCard from "../../../src/app/(dashboard)/dashboard/providers/[id]/components/CompatibleNodeCard";
 
-const router = vi.hoisted(() => ({
-  push: vi.fn(),
-  refresh: vi.fn(),
-}));
+const navigate = vi.hoisted(() => vi.fn());
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => router,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  useNavigate: () => navigate,
 }));
 
 vi.mock("@/shared/components", async () => ({
@@ -20,7 +18,7 @@ vi.mock("@/shared/components", async () => ({
   Card: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
@@ -41,8 +39,7 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
     (
       globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
-    router.push.mockClear();
-    router.refresh.mockClear();
+    navigate.mockClear();
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -96,7 +93,7 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
     return deleteButton;
   }
 
-  it("invalidates the cached providers page after a successful delete and navigation", async () => {
+  it("navigates back to the providers list after a successful delete", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true } as Response));
 
     await clickDelete();
@@ -104,39 +101,33 @@ describe("CompatibleNodeCard provider deletion (#12298)", () => {
     expect(fetch).toHaveBeenCalledWith("/api/provider-nodes/custom-node", {
       method: "DELETE",
     });
-    expect(router.push).toHaveBeenCalledWith("/dashboard/providers");
-    expect(router.refresh).toHaveBeenCalledTimes(1);
-    expect(router.push.mock.invocationCallOrder[0]).toBeLessThan(
-      router.refresh.mock.invocationCallOrder[0]
-    );
+    expect(navigate).toHaveBeenCalledWith("/dashboard/providers");
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 
-  it("does not navigate or refresh when the user cancels the confirm dialog", async () => {
+  it("does not navigate when the user cancels the confirm dialog", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true } as Response));
 
     await clickDelete("cancel");
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(router.push).not.toHaveBeenCalled();
-    expect(router.refresh).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("does not navigate or refresh when the DELETE response is not ok", async () => {
+  it("does not navigate when the DELETE response is not ok", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false } as Response));
 
     await clickDelete();
 
-    expect(router.push).not.toHaveBeenCalled();
-    expect(router.refresh).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("does not navigate or refresh when the DELETE request throws", async () => {
+  it("does not navigate when the DELETE request throws", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     await clickDelete();
 
-    expect(router.push).not.toHaveBeenCalled();
-    expect(router.refresh).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,8 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Card } from "@/shared/components";
 import TranslateFlowDiagram from "./TranslateFlowDiagram";
 

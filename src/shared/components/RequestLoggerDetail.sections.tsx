@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { JsonView } from "@/shared/components/jsonView";
 import { ChatBubble } from "@/app/(dashboard)/dashboard/tools/traffic-inspector/components/chat/ChatBubble";
 import { buildRequestTurns, buildResponseTurns } from "@/mitm/inspector/conversationNormalizer";

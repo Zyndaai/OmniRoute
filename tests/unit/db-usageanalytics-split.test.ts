@@ -151,18 +151,19 @@ describe("usageAnalytics queries use SUM(requests) not COUNT(*)", () => {
     assert.ok(src.includes("SUM(requests)"), "getWeeklyPatternRows inner subquery must use SUM(requests)");
   });
 
-  it("getUsageSummary uses SUM(CASE WHEN success=1 THEN requests ELSE 0 END) for successfulRequests", () => {
+  // `success` is a boolean column in PostgreSQL (it was 0/1 in SQLite), so the predicate is bare.
+  it("getUsageSummary uses SUM(CASE WHEN success THEN requests ELSE 0 END) for successfulRequests", () => {
     const src = host.getUsageSummary.toString();
     assert.ok(
-      src.includes("SUM(CASE WHEN success = 1 THEN requests ELSE 0 END)"),
+      src.includes("SUM(CASE WHEN success THEN requests ELSE 0 END)"),
       "successfulRequests must weight by requests, not count 1-per-row"
     );
   });
 
-  it("getModelUsageRows uses SUM(CASE WHEN success=1 THEN requests ELSE 0 END) for successfulRequests", () => {
+  it("getModelUsageRows uses SUM(CASE WHEN success THEN requests ELSE 0 END) for successfulRequests", () => {
     const src = host.getModelUsageRows.toString();
     assert.ok(
-      src.includes("SUM(CASE WHEN success = 1 THEN requests ELSE 0 END)"),
+      src.includes("SUM(CASE WHEN success THEN requests ELSE 0 END)"),
       "successfulRequests must weight by requests, not count 1-per-row"
     );
   });

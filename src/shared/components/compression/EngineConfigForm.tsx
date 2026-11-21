@@ -1,4 +1,3 @@
-"use client";
 import type { EngineConfigField } from "@omniroute/open-sse/services/compression/engines/types";
 import { Checkbox as KitCheckbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import Input from "../Input";

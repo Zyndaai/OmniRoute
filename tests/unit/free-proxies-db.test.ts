@@ -1,24 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-free-proxies-"));
-process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const freeProxiesDb = await import("../../src/lib/db/freeProxies.ts");
+const proxiesDb = await import("../../src/lib/db/proxies.ts");
+const { resetTestDb } = await import("../helpers/postgres.ts");
 
 async function reset() {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+  await resetTestDb();
 }
 
-test.after(() => {
-  core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+/** A real proxy_registry row: free_proxies.pool_proxy_id is a foreign key to it. */
+async function registryProxyId(name: string): Promise<string> {
+  const proxy = await proxiesDb.createProxy({
+    name,
+    type: "http",
+    host: `${name}.registry.example`,
+    port: 8080,
+    username: "",
+    password: "",
+    status: "active",
+  });
+  assert.ok(proxy?.id);
+  return proxy.id;
+}
+
+test.after(async () => {
+  await core.resetDbInstance();
 });
 
 test("upsertFreeProxy creates a new record", async () => {
@@ -161,7 +169,7 @@ test("listFreeProxies filters by onlyNotInPool", async () => {
     anonymity: null,
     lastValidated: null,
   });
-  await freeProxiesDb.markFreeProxyInPool(r1.id, "pool-proxy-id-1");
+  await freeProxiesDb.markFreeProxyInPool(r1.id, await registryProxyId("pool1"));
 
   const notInPool = await freeProxiesDb.listFreeProxies({ onlyNotInPool: true });
   assert.equal(notInPool.length, 1);
@@ -183,11 +191,12 @@ test("markFreeProxyInPool sets inPool=true and stores poolProxyId", async () => 
     lastValidated: null,
   });
 
-  await freeProxiesDb.markFreeProxyInPool(id, "pool-abc-123");
+  const poolId = await registryProxyId("pool-abc");
+  await freeProxiesDb.markFreeProxyInPool(id, poolId);
 
   const record = await freeProxiesDb.getFreeProxyById(id);
   assert.ok(record?.inPool);
-  assert.equal(record?.poolProxyId, "pool-abc-123");
+  assert.equal(record?.poolProxyId, poolId);
 });
 
 test("deleteFreeProxy removes record and returns true", async () => {
@@ -256,7 +265,7 @@ test("clearFreeProxiesBySource removes only not-in-pool entries for that source"
     lastValidated: null,
   });
 
-  await freeProxiesDb.markFreeProxyInPool(inPoolId, "pool-xyz");
+  await freeProxiesDb.markFreeProxyInPool(inPoolId, await registryProxyId("pool-xyz"));
 
   const cleared = await freeProxiesDb.clearFreeProxiesBySource("proxifly");
   assert.equal(cleared, 1);
@@ -293,7 +302,7 @@ test("getFreeProxyStats returns correct totals", async () => {
     anonymity: null,
     lastValidated: null,
   });
-  await freeProxiesDb.markFreeProxyInPool(id1, "pool-yyy");
+  await freeProxiesDb.markFreeProxyInPool(id1, await registryProxyId("pool-yyy"));
 
   const stats = await freeProxiesDb.getFreeProxyStats();
   assert.equal(stats.total, 2);

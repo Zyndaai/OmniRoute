@@ -1,6 +1,4 @@
 // src/app/(dashboard)/dashboard/playground/hooks/useImprovePrompt.ts
-"use client";
-
 import { useState, useCallback } from "react";
 import type { ImprovePromptResult } from "@/lib/playground/promptImprover";
 

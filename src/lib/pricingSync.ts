@@ -292,12 +292,10 @@ export async function clearSyncedPricing(): Promise<void> {
 
 // ─── DB: Sync status namespace ───────────────────────────
 //
-// Persisted separately from `pricing_synced` because Next.js standalone
-// builds load this module from independent webpack chunks (e.g. the
-// instrumentation hook vs an API route handler) — each gets its OWN
-// top-level module state. Module-level vars (`lastSyncTime`,
-// `lastSyncModelCount`) are therefore invisible across those instances;
-// persisting them to the DB lets any instance read the real status.
+// Persisted separately from `pricing_synced` so the last-sync status survives
+// restarts and is visible to every process in the cluster. Module-level vars
+// (`lastSyncTime`, `lastSyncModelCount`) only describe the process that ran the
+// sync; persisting them to the DB lets any process read the real status.
 
 const SYNC_STATUS_KEY = "pricing_sync_status.last_sync";
 
@@ -491,7 +489,7 @@ export async function getSyncStatus(): Promise<SyncStatus> {
   };
 }
 
-// ─── Init (called from instrumentation-node.ts) ───────────────────
+// ─── Init (called from src/server/boot.ts) ───────────────────
 
 /**
  * Initialize pricing sync if enabled.

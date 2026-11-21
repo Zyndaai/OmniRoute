@@ -11,15 +11,18 @@ test("obsidian DB module exports expected functions", async () => {
 
 test("getObsidianConfig returns expected shape", async () => {
   const { getObsidianConfig } = await import("../../../src/lib/db/obsidian.ts");
-  const config = getObsidianConfig();
+  const config = await getObsidianConfig();
   assert.ok(typeof config === "object");
   assert.ok("connected" in config);
   assert.ok("token" in config);
   assert.equal(typeof config.connected, "boolean");
 });
 
-test("setObsidianToken and clearObsidianToken are callable without DB", async () => {
-  const { setObsidianToken, clearObsidianToken } = await import("../../../src/lib/db/obsidian.ts");
-  assert.doesNotThrow(() => setObsidianToken("test"));
-  assert.doesNotThrow(() => clearObsidianToken());
+test("setObsidianToken and clearObsidianToken resolve and round-trip the token", async () => {
+  const { setObsidianToken, clearObsidianToken, getObsidianToken } =
+    await import("../../../src/lib/db/obsidian.ts");
+  await assert.doesNotReject(() => setObsidianToken("test"));
+  assert.equal(await getObsidianToken(), "test");
+  await assert.doesNotReject(() => clearObsidianToken());
+  assert.equal(await getObsidianToken(), null);
 });

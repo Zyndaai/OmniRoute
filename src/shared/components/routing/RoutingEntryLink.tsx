@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import Card from "@/shared/components/Card";
 import Icon from "@/shared/components/Icon";
@@ -15,7 +13,7 @@ export default function RoutingEntryLink({ apiKeyId }: { apiKeyId?: string }) {
         <p className="mt-1 text-sm text-text-muted">{t("entryHint")}</p>
       </div>
       <Link
-        href={
+        to={
           apiKeyId
             ? "/dashboard/api-manager/routing?apiKeyId=" + encodeURIComponent(apiKeyId)
             : "/dashboard/api-manager/routing"

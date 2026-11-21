@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { NormalizedBlock } from "@/mitm/inspector/types";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { ToolResultBlock } from "./ToolResultBlock";

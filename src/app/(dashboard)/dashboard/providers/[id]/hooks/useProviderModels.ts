@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * useProviderModels — Phase 1f extraction for Issue #3501.
  *
@@ -14,7 +12,7 @@
  */
 
 import { useState, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useNotificationStore } from "@/store/notificationStore";
 import { providerText, type CompatModelRow } from "../providerPageHelpers";
 

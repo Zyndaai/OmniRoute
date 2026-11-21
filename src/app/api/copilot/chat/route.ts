@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { processCopilotChat } from "@/lib/copilot/engine";
@@ -37,16 +36,16 @@ export async function POST(request: Request) {
     const rawBody = await request.json();
     const validation = validateBody(copilotRequestSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json(buildErrorBody(400, formatValidationMessage(validation.error)), {
+      return Response.json(buildErrorBody(400, formatValidationMessage(validation.error)), {
         status: 400,
       });
     }
 
     const response = await processCopilotChat(validation.data);
 
-    return NextResponse.json(response, { status: 200 });
+    return Response.json(response, { status: 200 });
   } catch (error) {
     const message = sanitizeErrorMessage(error);
-    return NextResponse.json(buildErrorBody(500, `Copilot error: ${message}`), { status: 500 });
+    return Response.json(buildErrorBody(500, `Copilot error: ${message}`), { status: 500 });
   }
 }

@@ -20,7 +20,7 @@ const notifications = {
   error: vi.fn(),
 };
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: (namespace?: string) => {
     const getMessage = (key: string) => {
       const fullKey = namespace ? `${namespace}.${key}` : key;

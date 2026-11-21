@@ -1,6 +1,5 @@
-"use client";
 import { useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Input from "@/shared/components/Input";

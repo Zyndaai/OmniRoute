@@ -1,6 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
 import { parseIntegerQueryParam } from "@/lib/api/queryIntegerParam";
-export const dynamic = "force-dynamic";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
   listSemanticCacheEntries,
@@ -9,9 +7,9 @@ import {
 } from "@/lib/db/semanticCache";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -36,7 +34,7 @@ export async function GET(req: NextRequest) {
       sortOrder,
     });
 
-    return NextResponse.json({
+    return Response.json({
       entries,
       pagination: {
         page,
@@ -46,13 +44,13 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
+export async function DELETE(req: Request) {
   if (!(await isAuthenticated(req))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -62,16 +60,16 @@ export async function DELETE(req: NextRequest) {
 
     if (signature) {
       const { deleted } = await deleteSemanticCacheBySignature(signature);
-      return NextResponse.json({ ok: true, deleted });
+      return Response.json({ ok: true, deleted });
     }
 
     if (model) {
       const { deleted } = await deleteSemanticCacheByModel(model);
-      return NextResponse.json({ ok: true, deleted });
+      return Response.json({ ok: true, deleted });
     }
 
-    return NextResponse.json({ error: "Provide signature or model parameter" }, { status: 400 });
+    return Response.json({ error: "Provide signature or model parameter" }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

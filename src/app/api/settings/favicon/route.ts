@@ -1,11 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getSettings } from "@/lib/db/settings";
 import { SAFE_OUTBOUND_FETCH_PRESETS, safeOutboundFetch } from "@/shared/network/safeOutboundFetch";
 import { normalizeBasePath } from "@/shared/utils/basePath";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-
-export const dynamic = "force-dynamic";
 
 const ALLOWED_IMAGE_TYPES = [
   "image/png",
@@ -37,7 +34,7 @@ function validateImageData(base64Data: string, contentType: string): boolean {
   return true;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
     const settings = await getSettings();
 
@@ -98,7 +95,7 @@ export async function GET(request: NextRequest) {
     const base64Data = match[2];
     const buffer = Buffer.from(base64Data, "base64");
 
-    return new NextResponse(buffer, {
+    return new Response(buffer, {
       headers: {
         "Content-Type": contentType,
         "Cache-Control": `public, max-age=${CACHE_DURATION}`,
@@ -114,12 +111,12 @@ function firstHeaderValue(value: string | null): string {
   return (value ?? "").split(",")[0].trim();
 }
 
-function resolveRequestScheme(request: NextRequest, rawProto: string): string {
+function resolveRequestScheme(request: Request, rawProto: string): string {
   if (rawProto === "http" || rawProto === "https") return rawProto;
   return new URL(request.url).protocol === "https:" ? "https" : "http";
 }
 
-function resolveDefaultIconTarget(request: NextRequest): { origin: string; target: string } {
+function resolveDefaultIconTarget(request: Request): { origin: string; target: string } {
   const headers = request.headers;
   const host =
     firstHeaderValue(headers.get("x-forwarded-host")) || firstHeaderValue(headers.get("host"));
@@ -127,30 +124,30 @@ function resolveDefaultIconTarget(request: NextRequest): { origin: string; targe
     request,
     firstHeaderValue(headers.get("x-forwarded-proto")).toLowerCase()
   );
-  const basePath = request.nextUrl?.basePath || normalizeBasePath(process.env.OMNIROUTE_BASE_PATH);
+  const basePath = normalizeBasePath(process.env.OMNIROUTE_BASE_PATH);
   if (!host) throw new Error("missing request origin");
   return { origin: `${scheme}://${host}`, target: `${basePath}/favicon.svg` };
 }
 
-function buildDefaultIconRedirect(request?: NextRequest): Promise<NextResponse> | NextResponse {
+function buildDefaultIconRedirect(request?: Request): Promise<Response> | Response {
   try {
     if (!request) throw new Error("missing request origin");
     const { origin, target } = resolveDefaultIconTarget(request);
-    return NextResponse.redirect(new URL(target, origin));
+    return Response.redirect(new URL(target, origin), 307);
   } catch {
     return serveDefaultIconFile();
   }
 }
 
-async function serveDefaultIconFile(): Promise<NextResponse> {
+async function serveDefaultIconFile(): Promise<Response> {
   try {
     const filePath = path.join(process.cwd(), "public", "favicon.svg");
     const body = await readFile(filePath);
-    return new NextResponse(body, {
+    return new Response(body, {
       headers: { "Content-Type": "image/svg+xml" },
     });
   } catch (error) {
     console.error("Favicon API error:", error);
-    return new NextResponse("Not found", { status: 404 });
+    return new Response("Not found", { status: 404 });
   }
 }

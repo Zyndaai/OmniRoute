@@ -1,10 +1,33 @@
-import path from "node:path";
-
 export const GITHUB_REPO_BLOB_URL = "https://github.com/Zyndaai/OmniRoute/blob/main";
+
+// Forward-slash path helpers. This module runs in the browser (the docs page resolves link
+// hrefs while rendering), so it must not import `node:path`; doc paths are always `/`-separated.
+
+/** Collapses `.` and `..` segments of a relative path; leading `..` segments are kept. */
+function normalizePath(input: string): string {
+  const out: string[] = [];
+  for (const segment of input.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === ".." && out.length > 0 && out[out.length - 1] !== "..") out.pop();
+    else out.push(segment);
+  }
+  const joined = out.join("/");
+  if (!joined) return ".";
+  return input.endsWith("/") ? `${joined}/` : joined;
+}
+
+function joinPath(...parts: string[]): string {
+  return normalizePath(parts.filter(Boolean).join("/"));
+}
+
+function dirnameOf(input: string): string {
+  const index = input.lastIndexOf("/");
+  return index === -1 ? "." : input.slice(0, index) || ".";
+}
 
 /**
  * Resolves a doc link (e.g. `../routing/AUTO-COMBO.md#14-factors`, `./RESILIENCE_GUIDE.md`,
- * or `../../src/lib/db/core.ts`) into a proper Next.js Fumadocs route path or GitHub blob URL.
+ * or `../../src/lib/db/core.ts`) into a Fumadocs route path or a GitHub blob URL.
  *
  * - Relative doc links within `docs/` -> `/docs/<section>/<slug>[#anchor]`
  * - Root-level doc paths (`/docs/...` or `docs/...`) -> `/docs/<section>/<slug>[#anchor]`
@@ -36,12 +59,12 @@ export function resolveDocHref(href: string, currentDocRelPath: string = ""): st
 
   // Relative links starting with ./ or ../
   if (rawPath.startsWith("./") || rawPath.startsWith("../")) {
-    const currentDir = currentDocRelPath ? path.dirname(currentDocRelPath) : "";
-    const resolvedInDocs = path.normalize(path.join(currentDir, rawPath)).replace(/\\/g, "/");
+    const currentDir = currentDocRelPath ? dirnameOf(currentDocRelPath) : "";
+    const resolvedInDocs = joinPath(currentDir, rawPath);
 
     // If the path escapes the docs/ tree into repo root (e.g. ../../src/... or ../../package.json)
     if (resolvedInDocs.startsWith("../") || resolvedInDocs === "..") {
-      const repoRel = path.normalize(path.join("docs", currentDir, rawPath)).replace(/\\/g, "/");
+      const repoRel = joinPath("docs", currentDir, rawPath);
       return `${GITHUB_REPO_BLOB_URL}/${repoRel}${anchorSuffix}`;
     }
 

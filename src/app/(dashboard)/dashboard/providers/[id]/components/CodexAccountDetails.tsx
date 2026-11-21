@@ -1,10 +1,8 @@
-"use client";
-
 import { Button } from "@/shared/components";
 
 import { useState } from "react";
 import type { CodexAccountPoolProjection } from "@omniroute/open-sse/services/codexAccount/index.ts";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 
 export interface CodexAccountDetailsProps {
   pool: CodexAccountPoolProjection;

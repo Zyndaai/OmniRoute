@@ -7,7 +7,7 @@
 import React from "react";
 import axe from "axe-core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import ApiKeyFilterDropdown from "@/shared/components/analytics/ApiKeyFilterDropdown";
 import CustomRangePicker from "@/shared/components/analytics/CustomRangePicker";
@@ -31,9 +31,9 @@ afterEach(() => {
 
 const wrap = (ui: React.ReactElement) =>
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+    <IntlProvider locale="en" timeZone="UTC" messages={messages}>
       {ui}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 
 async function runAxe(root: HTMLElement) {
@@ -63,9 +63,9 @@ describe("ApiKeyFilterDropdown", () => {
     );
     expect(screen.getByRole("button", { name: "All Keys" })).toBeTruthy();
     const withIntl = (selected: string[]) => (
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+      <IntlProvider locale="en" timeZone="UTC" messages={messages}>
         <ApiKeyFilterDropdown available={KEYS} selected={selected} onChange={() => {}} />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     rerender(withIntl(["k1"]));
     expect(screen.getByRole("button", { name: "alpha" })).toBeTruthy();
@@ -190,14 +190,14 @@ describe("RequestCountDateFilter", () => {
     expect(onChange).toHaveBeenLastCalledWith("2026-10-20");
 
     rerender(
-      <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
+      <IntlProvider locale="en" timeZone="UTC" messages={messages}>
         <RequestCountDateFilter
           title="Requests"
           dateLabel="Date"
           value="2026-10-20"
           onChange={onChange}
         />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(onChange).toHaveBeenLastCalledWith("");

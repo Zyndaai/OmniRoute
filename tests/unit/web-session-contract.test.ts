@@ -92,7 +92,7 @@ test("web-session contract route remains management-authenticated", () => {
   );
 
   const authCall = source.indexOf("requireManagementAuth(request)");
-  const responseCall = source.indexOf("NextResponse.json(buildWebSessionContract())");
+  const responseCall = source.indexOf("Response.json(buildWebSessionContract())");
 
   assert.ok(authCall >= 0, "route must require management authentication");
   assert.ok(responseCall > authCall, "authentication must run before contract publication");

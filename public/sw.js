@@ -1,4 +1,8 @@
 const CACHE_NAME = "omniroute-pwa-v3";
+// Deploy subpath ("/omniroute") or "" at the root; the build writes it into the built copy.
+const BASE_PATH = "";
+// Content-hashed build output: a URL here never changes content.
+const HASHED_ASSET_PREFIX = `${BASE_PATH}/assets/`;
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-512.png", "/apple-touch-icon.png"];
 // Never cache API / proxy surfaces: client-API aliases (/v1, /v1beta, /models, /chat,
 // /responses, /codex) return per-key data, and dashboard/auth pages are session-bound.
@@ -56,7 +60,7 @@ self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(event.request.url);
   const isSameOrigin = requestUrl.origin === self.location.origin;
   const excluded = pathIsExcluded(requestUrl.pathname);
-  const isNextAsset = requestUrl.pathname.startsWith("/_next/");
+  const isHashedAsset = requestUrl.pathname.startsWith(HASHED_ASSET_PREFIX);
   const destination = event.request.destination;
   const isStaticAsset = ["style", "script", "image", "font"].includes(destination);
   const isNavigateRequest = event.request.mode === "navigate";
@@ -75,7 +79,7 @@ self.addEventListener("fetch", (event) => {
         return fetch(event.request);
       }
 
-      if (isNextAsset) {
+      if (isHashedAsset) {
         try {
           const networkResponse = await fetch(event.request);
           if (networkResponse && networkResponse.status === 200) {

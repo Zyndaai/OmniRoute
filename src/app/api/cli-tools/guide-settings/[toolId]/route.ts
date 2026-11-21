@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -50,7 +49,7 @@ export async function GET(request, { params }) {
   const authError = await requireCliToolsAuth(request, { alwaysRequireAuth: true });
   if (authError) return authError;
   void params;
-  return NextResponse.json({ error: "GET not supported for this tool" }, { status: 400 });
+  return Response.json({ error: "GET not supported for this tool" }, { status: 400 });
 }
 
 export async function POST(request, { params }) {
@@ -61,7 +60,7 @@ export async function POST(request, { params }) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -75,7 +74,7 @@ export async function POST(request, { params }) {
   const { toolId } = await params;
   const validation = validateBody(guideSettingsSaveSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
   const { baseUrl, model, models, modelLabels, catalog } = validation.data;
   // (#523) Extract keyId BEFORE validation — Zod strips unknown fields!
@@ -106,7 +105,7 @@ export async function POST(request, { params }) {
         return await saveHermesConfig({ baseUrl, apiKey, model });
       // hermes-agent now uses the dedicated /api/cli-tools/hermes-agent-settings endpoint
       default:
-        return NextResponse.json(
+        return Response.json(
           { error: `Direct config save not supported for: ${toolId}` },
           { status: 400 }
         );
@@ -114,7 +113,7 @@ export async function POST(request, { params }) {
   } catch (error) {
     const refusal = configClobberRefusalResponse(error);
     if (refusal) return refusal;
-    return NextResponse.json(
+    return Response.json(
       { error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     );
@@ -197,7 +196,7 @@ async function saveContinueConfig({ baseUrl, apiKey, model }) {
   // Write back
   await fs.writeFile(configPath, JSON.stringify(existingConfig, null, 2), "utf-8");
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     message: `Continue config saved to ${configPath}`,
     configPath,
@@ -242,7 +241,7 @@ async function saveOpenCodeConfig({ baseUrl, apiKey, model, models, modelLabels,
 
   await fs.writeFile(configPath, nextConfigText, "utf-8");
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     message: `OpenCode config saved to ${configPath}`,
     configPath,
@@ -270,7 +269,7 @@ async function saveHermesConfig({ baseUrl, apiKey, model }) {
     : `${normalizedBaseUrl}/v1`;
 
   if (!model) {
-    return NextResponse.json({ error: "model is required for Hermes" }, { status: 400 });
+    return Response.json({ error: "model is required for Hermes" }, { status: 400 });
   }
   const selectedModel = model;
 
@@ -304,7 +303,7 @@ async function saveHermesConfig({ baseUrl, apiKey, model }) {
 
   await fs.writeFile(configPath, yaml.dump(nextConfig, { lineWidth: -1 }), "utf-8");
 
-  return NextResponse.json({
+  return Response.json({
     success: true,
     message: `Hermes config saved to ${configPath}`,
     configPath,

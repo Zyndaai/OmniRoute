@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
@@ -24,7 +22,7 @@ import { partitionNoAuthEntriesByBlocked } from "@/shared/utils/noAuthProviders"
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { EmptyState as KitEmptyState } from "@omniroute/ui-kit/empty-state";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useNavigate, useSearchParams } from "react-router";
 import { getErrorCode, getRelativeTime } from "@/shared/utils";
 import {
   isProviderConnectionConnected,
@@ -33,7 +31,7 @@ import {
 import { pickDisplayValue } from "@/shared/utils/maskEmail";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
 import { useNotificationStore } from "@/store/notificationStore";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useSyncedModelsByProvider } from "./hooks/useSyncedModelsByProvider";
 import { useProviderUrlFilters } from "./hooks/useProviderUrlFilters";
 import {
@@ -61,15 +59,13 @@ import {
   getCodexGlobalServiceMode,
   type CodexGlobalServiceMode,
 } from "@/lib/providers/codexFastTier";
-import dynamic from "next/dynamic";
-const AddCompatibleProviderModal = dynamic(
-  () => import("./components/AddCompatibleProviderModal"),
-  { ssr: false }
+import { clientOnlyLazy } from "@/shared/components/ClientOnly";
+const AddCompatibleProviderModal = clientOnlyLazy(
+  () => import("./components/AddCompatibleProviderModal")
 );
 import { CategoryDot } from "./components/CategoryDot";
-const ProviderImportModals = dynamic(
-  () => import("./components/ProviderImportModals").then((m) => m.ProviderImportModals),
-  { ssr: false }
+const ProviderImportModals = clientOnlyLazy(() =>
+  import("./components/ProviderImportModals").then((m) => ({ default: m.ProviderImportModals }))
 );
 import NoAuthProvidersSection from "./components/NoAuthProvidersSection";
 import HighlightableProviderCard from "./components/HighlightableProviderCard";
@@ -227,7 +223,7 @@ async function loadOauthEnvRepairStatus(): Promise<{
 }
 
 function ProvidersPageContent() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<any[]>([]);
   const [providerNodes, setProviderNodes] = useState<any[]>([]);
   const [ccCompatibleProviderEnabled, setCcCompatibleProviderEnabled] = useState(false);
@@ -280,10 +276,11 @@ function ProvidersPageContent() {
   );
   const ccCompatibleLabel = t("ccCompatibleLabel");
   const addCcCompatibleLabel = t("addCcCompatible");
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { displayModePreferenceReady } = useProviderUrlFilters({
     searchParams,
+    setSearchParams,
     providerDisplayMode,
     setProviderDisplayMode,
     searchQuery,
@@ -910,7 +907,7 @@ function ProvidersPageContent() {
               }
               actions={
                 <>
-                  <Button icon="add" onClick={() => router.push("/dashboard/providers/new")}>
+                  <Button icon="add" onClick={() => navigate("/dashboard/providers/new")}>
                     {providerText(t, "onboardingWizard", "Provider Onboarding Wizard")}
                   </Button>
                   <a
@@ -941,7 +938,7 @@ function ProvidersPageContent() {
             setActiveCategory(freeOnly ? null : category);
           }}
           onDisplayModeChange={setProviderDisplayMode}
-          onNewProvider={() => router.push("/dashboard/providers/new")}
+          onNewProvider={() => navigate("/dashboard/providers/new")}
           onImportFromFile={() => setOpenImportModal("file")}
           onImportOAuthExport={() => setOpenImportModal("oauth-export")}
           searchQuery={searchQuery}
@@ -1837,7 +1834,7 @@ function ProvidersPageContent() {
           onCreated={(node) => {
             setProviderNodes((prev) => upsertProviderNodeById(prev, node));
             setShowAddCompatibleModal(false);
-            router.push(`/dashboard/providers/${node.id}`);
+            navigate(`/dashboard/providers/${node.id}`);
           }}
         />
         <AddCompatibleProviderModal
@@ -1847,7 +1844,7 @@ function ProvidersPageContent() {
           onCreated={(node) => {
             setProviderNodes((prev) => upsertProviderNodeById(prev, node));
             setShowAddAnthropicCompatibleModal(false);
-            router.push(`/dashboard/providers/${node.id}`);
+            navigate(`/dashboard/providers/${node.id}`);
           }}
         />
         {ccCompatibleProviderEnabled && (
@@ -1859,7 +1856,7 @@ function ProvidersPageContent() {
             onCreated={(node) => {
               setProviderNodes((prev) => upsertProviderNodeById(prev, node));
               setShowAddCcCompatibleModal(false);
-              router.push(`/dashboard/providers/${node.id}`);
+              navigate(`/dashboard/providers/${node.id}`);
             }}
           />
         )}

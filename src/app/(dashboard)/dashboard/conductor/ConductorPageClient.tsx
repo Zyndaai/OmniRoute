@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Conductor panel (PRD Conductor RF3): fleet + task queue live view over the
  * /api/conductor proxy routes. The browser never talks to the hub — everything
@@ -7,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import {

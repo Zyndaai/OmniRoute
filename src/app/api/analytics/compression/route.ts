@@ -5,8 +5,6 @@
  * Supports ?since=24h|7d|30d|all (default: 24h).
  */
 
-import { NextResponse } from "next/server";
-export const dynamic = "force-dynamic";
 import { getCompressionAnalyticsSummary } from "@/lib/db/compressionAnalytics";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 
@@ -21,10 +19,10 @@ export async function GET(req: Request) {
 
     const summary = await getCompressionAnalyticsSummary(validSince === "all" ? undefined : validSince);
 
-    return NextResponse.json(summary);
+    return Response.json(summary);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[/api/analytics/compression]", msg);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

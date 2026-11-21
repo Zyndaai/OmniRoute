@@ -1,4 +1,3 @@
-"use client";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, LogOut, X } from "lucide-react";
 import { Button } from "./button";

@@ -3,12 +3,10 @@
  * Fetches GET /api/services/9router/models (with optional ?refresh=true).
  * Displays a paginated list (20 per page, client-side) with a "Refresh now" button.
  */
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Badge, Button, Card } from "@/shared/components";
 
 const NAME = "9router";

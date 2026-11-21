@@ -1,4 +1,3 @@
-"use client";
 import { useCallback, useEffect, useId, useRef } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import { CircleCheck } from "lucide-react";

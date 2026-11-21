@@ -1,5 +1,3 @@
-"use client";
-
 import { cloneElement, forwardRef, isValidElement } from "react";
 import type { ButtonHTMLAttributes, ReactElement, ReactNode } from "react";
 import { cn } from "./lib/utils";

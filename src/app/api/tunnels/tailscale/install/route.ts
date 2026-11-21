@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
 import { getTailscaleTunnelStatus, installTailscale } from "@/lib/tailscaleTunnel";
 import { toPublicSafeTunnelError } from "@/lib/api/publicSafeTunnelError";
 import { parseOptionalJsonBody, requireTailscaleAuth, tailscaleSudoSchema } from "../routeUtils";
-
-export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const authError = await requireTailscaleAuth(request);
@@ -46,7 +43,7 @@ export async function POST(request: Request) {
     },
   });
 
-  return new NextResponse(stream, {
+  return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",

@@ -4,8 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RequestLoggerV2, { type RequestLoggerV2Handle } from "@/shared/components/RequestLoggerV2";
 
-const { router } = vi.hoisted(() => ({ router: { replace: vi.fn() } }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
+vi.mock("react-router", () => ({ useNavigate: () => navigate }));
 vi.mock("@/shared/components/RequestLoggerDetail", () => ({
   default: ({ relatedLogs, onClose }) => (
     <div>

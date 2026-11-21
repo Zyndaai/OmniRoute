@@ -15,7 +15,7 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => translate,
   // #14466 / #14807: PoolSchedulesCard and ProxyHealthCell now call useLocale().
   useLocale: () => "en",

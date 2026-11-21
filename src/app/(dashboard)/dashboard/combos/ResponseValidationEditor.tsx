@@ -1,5 +1,3 @@
-"use client";
-
 import React, { useId } from "react";
 import { Field } from "@omniroute/ui-kit/field";
 import Button from "@/shared/components/Button";

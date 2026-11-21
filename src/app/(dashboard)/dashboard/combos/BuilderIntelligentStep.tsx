@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo } from "react";
 import { Slider } from "@omniroute/ui-kit/slider";
 import Badge from "@/shared/components/Badge";

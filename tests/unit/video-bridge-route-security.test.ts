@@ -189,9 +189,8 @@ test("configured base path preserves the exact self-hop without widening broker 
       request: {
         method: "POST",
         headers,
-        ip: "127.0.0.1",
+        socket: { remoteAddress: "127.0.0.1" },
         url: `http://localhost/omniroute${EXTRACT_PATH}`,
-        nextUrl: { pathname: `/omniroute${EXTRACT_PATH}` },
       },
       classification: {
         routeClass: "MANAGEMENT",

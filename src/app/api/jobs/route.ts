@@ -7,12 +7,9 @@
  * Response: { data: JobDto[] } - DTO whitelist (no handler/timer, which are
  * non-serializable live objects).
  */
-import { NextResponse } from "next/server";
 
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
 import { getJobRegistry } from "@/lib/jobRegistry";
-
-export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
@@ -31,9 +28,9 @@ export async function GET() {
         lastRun: (await registry.getRuns(job.id, 1))[0] ?? null,
       }))
     );
-    return NextResponse.json({ data: jobs });
+    return Response.json({ data: jobs });
   } catch (err) {
     console.error("[API] GET /api/jobs error:", err);
-    return NextResponse.json(buildErrorBody(500, "Failed to list jobs"), { status: 500 });
+    return Response.json(buildErrorBody(500, "Failed to list jobs"), { status: 500 });
   }
 }

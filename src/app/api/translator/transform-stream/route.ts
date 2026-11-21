@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { transformChatCompletionSseToResponses } from "@/lib/translator/streamTransform";
@@ -14,7 +13,7 @@ export async function POST(request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error: {
@@ -28,14 +27,14 @@ export async function POST(request) {
 
   const validation = validateBody(transformStreamSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ success: false, error: validation.error }, { status: 400 });
+    return Response.json({ success: false, error: validation.error }, { status: 400 });
   }
 
   try {
     const transformed = await transformChatCompletionSseToResponses(validation.data.rawSse);
-    return NextResponse.json({ success: true, transformed });
+    return Response.json({ success: true, transformed });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         success: false,
         error:

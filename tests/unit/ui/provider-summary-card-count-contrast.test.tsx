@@ -11,7 +11,7 @@ import ProviderSummaryCard, {
   type ProviderSummaryStats,
 } from "@/app/(dashboard)/dashboard/providers/components/ProviderSummaryCard";
 
-vi.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }));
+vi.mock("use-intl", () => ({ useTranslations: () => (k: string) => k }));
 
 const stat = { configured: 2, total: 9 };
 const stats = Object.fromEntries(

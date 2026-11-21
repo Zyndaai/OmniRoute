@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Session Info Card — P-3
  *
@@ -9,7 +7,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, Button, Skeleton } from "@/shared/components";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 
 interface SessionInfo {

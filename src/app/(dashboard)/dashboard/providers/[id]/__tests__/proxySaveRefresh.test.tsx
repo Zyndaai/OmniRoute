@@ -23,13 +23,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("next/navigation", () => ({
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   useParams: () => ({ id: "codex" }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/dashboard/providers/codex",
+  useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/dashboard/providers/codex", search: "", hash: "" }),
+  Link: ({
+    to,
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { to: string }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
 }));
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { Checkbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 import { Card, Button, Input, Toggle, Modal, Badge } from "@/shared/components";
@@ -10,7 +8,7 @@ import IPFilterSection from "./IPFilterSection";
 import PiiMaskingCard from "./PiiMaskingCard";
 import SessionInfoCard from "./SessionInfoCard";
 import AuthzSection from "./AuthzSection";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 export default function SecurityTab() {
   const [settings, setSettings] = useState<any>({ requireLogin: false, hasPassword: false });

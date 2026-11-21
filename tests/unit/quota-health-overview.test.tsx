@@ -3,7 +3,7 @@ import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import en from "../../src/i18n/messages/en.json";
 import ar from "../../src/i18n/messages/ar.json";
 import QuotaHealthOverview from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaHealthOverview";
@@ -17,7 +17,7 @@ import {
   type HealthData,
 } from "@/app/(dashboard)/dashboard/usage/components/ProviderLimits/healthOverview";
 // Real bilingual context, with synthetic identities only. No service or database imports.
-vi.unmock("next-intl");
+vi.unmock("use-intl");
 // Isolate the existing heavy detail card, not the overview or callback wiring.
 vi.mock("@/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaCard", () => ({
   default: (props: {
@@ -75,7 +75,7 @@ function project(c: HealthConnection, d = data) {
 function wrapper(ui: React.ReactNode, locale = "en") {
   const m = locale === "en" ? en : ar;
   return (
-    <NextIntlClientProvider
+    <IntlProvider
       locale={locale}
       messages={{ usage: m.usage, common: m.common }}
       timeZone="UTC"
@@ -85,7 +85,7 @@ function wrapper(ui: React.ReactNode, locale = "en") {
       }}
     >
       {ui}
-    </NextIntlClientProvider>
+    </IntlProvider>
   );
 }
 function localized(ui: React.ReactNode, locale = "en") {

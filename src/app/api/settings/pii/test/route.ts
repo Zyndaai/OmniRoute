@@ -1,11 +1,8 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { createErrorResponse } from "@/lib/api/errorResponse";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { testPiiPatternSchema } from "@/shared/validation/schemas/piiSettings";
 import { previewPiiCustomPattern } from "@/shared/utils/piiCustomPatterns";
-
-export const dynamic = "force-dynamic";
 
 /**
  * POST /api/settings/pii/test — dry-run one custom pattern against a sample
@@ -25,7 +22,7 @@ export async function POST(request: Request) {
 
   const validation = validateBody(testPiiPatternSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
@@ -33,7 +30,7 @@ export async function POST(request: Request) {
     if (!result.valid) {
       return createErrorResponse({ status: 400, message: "Pattern rejected" });
     }
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     console.error("[PII] Pattern test failed:", error);
     return createErrorResponse({ status: 500, message: "Pattern test failed" });

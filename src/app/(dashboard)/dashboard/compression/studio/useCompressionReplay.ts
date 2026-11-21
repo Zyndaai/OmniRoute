@@ -1,5 +1,3 @@
-"use client";
-
 import { useReducer, useEffect, useRef, useCallback } from "react";
 import { buildReplayFrames, type CompressionRunModel } from "./compressionFlowModel";
 

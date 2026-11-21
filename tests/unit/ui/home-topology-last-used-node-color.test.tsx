@@ -12,12 +12,12 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FLOW_EDGE_COLORS } from "../../../src/shared/components/flow/edgeStyles";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
-// ProviderTopology navigates on node click; jsdom has no Next router context.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() }),
+// ProviderTopology navigates on node click; the test renders it without a router.
+vi.mock("react-router", () => ({
+  useNavigate: () => vi.fn(),
 }));
 vi.mock("@/shared/components/ProviderIcon", () => ({
   default: () => <span data-testid="icon" />,

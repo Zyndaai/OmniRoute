@@ -1,7 +1,5 @@
-"use client";
-
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 
 import { MEDIA_KINDS, type MediaKind } from "./mediaKinds";
 
@@ -22,7 +20,7 @@ export default function MediaProviderKindNav({ activeKind }: MediaProviderKindNa
         return (
           <Link
             key={kind}
-            href={`/dashboard/media-providers/${kind}`}
+            to={`/dashboard/media-providers/${kind}`}
             className={`flex items-center px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
               isActive
                 ? "bg-primary text-accent-foreground border-primary"

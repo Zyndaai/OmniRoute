@@ -15,7 +15,6 @@
  * Part of: Group B — REST routes for Quota Sharing (plan 22, frente F8).
  */
 
-import { NextResponse } from "next/server";
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { PlanUpsertSchema } from "@/shared/schemas/quota";
@@ -27,8 +26,6 @@ import {
 import { resolvePlan } from "@/lib/quota/planResolver";
 import { resolveConnectionProvider } from "@/lib/quota/connectionProvider";
 import { logAuditEvent, getAuditRequestContext } from "@/lib/compliance/index";
-
-export const dynamic = "force-dynamic";
 
 type RouteParams = { params: Promise<{ connectionId: string }> };
 
@@ -42,16 +39,16 @@ export async function GET(request: Request, { params }: RouteParams): Promise<Re
     // Try DB override first, then fall back to resolved plan (catalog/empty)
     const dbPlan = await getProviderPlan(connectionId);
     if (dbPlan) {
-      return NextResponse.json({ plan: dbPlan });
+      return Response.json({ plan: dbPlan });
     }
 
     // Resolve via catalog (may return empty plan)
     const provider = await resolveConnectionProvider(connectionId);
     const plan = await resolvePlan(connectionId, provider);
-    return NextResponse.json({ plan });
+    return Response.json({ plan });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to get plan";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -64,7 +61,7 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
     const body = await request.json().catch(() => null);
     const parsed = PlanUpsertSchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json(buildErrorBody(400, parsed.error.message), { status: 400 });
+      return Response.json(buildErrorBody(400, parsed.error.message), { status: 400 });
     }
 
     // Derive provider for the connection
@@ -83,10 +80,10 @@ export async function PUT(request: Request, { params }: RouteParams): Promise<Re
 
     // Return the stored plan
     const plan = await getProviderPlan(connectionId);
-    return NextResponse.json({ plan });
+    return Response.json({ plan });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to upsert plan";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }
 
@@ -114,6 +111,6 @@ export async function DELETE(request: Request, { params }: RouteParams): Promise
     return new Response(null, { status: 204 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to delete plan";
-    return NextResponse.json(buildErrorBody(500, message), { status: 500 });
+    return Response.json(buildErrorBody(500, message), { status: 500 });
   }
 }

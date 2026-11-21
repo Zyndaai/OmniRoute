@@ -1,9 +1,8 @@
-// Main-server keepAlive/headers timeouts (#7003) — SIBLING module of
-// standalone-server-ws.mjs. The shipped server-ws.mjs may only import
-// siblings copied next to it by assembleStandalone (peer-stamp, tls-options,
-// the guards): a ../../src/... import resolves OUTSIDE the package after the
-// copy to the dist root and crashes boot with ERR_MODULE_NOT_FOUND (caught
-// live by check:pack-boot on 2026-07-15 — the #7065 class).
+// Main-server keepAlive/headers timeouts (#7003) — sibling module of the
+// launcher (run-server.mjs). The launcher runs as plain Node before any
+// TypeScript loads, so it cannot import the canonical TS implementation; a
+// ../../src/... import would also resolve outside an image that ships the
+// launcher files in one folder (the #7065 class: ERR_MODULE_NOT_FOUND at boot).
 // Parity with src/shared/utils/runtimeTimeouts.ts#getMainServerTimeoutConfig
 // is enforced by tests/unit/main-server-timeouts-parity.test.ts.
 

@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -24,19 +23,19 @@ const reportSchema = z.object({
  */
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: { message: "Authentication required" } }, { status: 401 });
+    return Response.json({ error: { message: "Authentication required" } }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(reportSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const {
@@ -78,7 +77,7 @@ export async function POST(request: Request) {
 
   if (!repo || !token) {
     // No GitHub config — log only
-    return NextResponse.json(
+    return Response.json(
       {
         logged: true,
         githubIssueCreated: false,
@@ -109,14 +108,14 @@ export async function POST(request: Request) {
     if (!ghRes.ok) {
       const errText = await ghRes.text();
       console.error(`[issues/report] GitHub API error ${ghRes.status}: ${errText}`);
-      return NextResponse.json(
+      return Response.json(
         { logged: true, githubIssueCreated: false, githubError: ghRes.status },
         { status: 207 }
       );
     }
 
     const ghData = await ghRes.json();
-    return NextResponse.json({
+    return Response.json({
       logged: true,
       githubIssueCreated: true,
       githubIssueUrl: ghData.html_url,
@@ -124,7 +123,7 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error("[issues/report] GitHub fetch failed:", err);
-    return NextResponse.json(
+    return Response.json(
       { logged: true, githubIssueCreated: false, error: "GitHub request failed" },
       { status: 207 }
     );

@@ -269,7 +269,7 @@ Administrative action tracking with filtering by action type, actor, target, IP 
 
 ## 🌐 V1 WebSocket Bridge _(v3.6.6+)_
 
-OmniRoute now supports **OpenAI-compatible WebSocket clients** via the `/v1/ws` upgrade endpoint. The custom `scripts/dev/v1-ws-bridge.mjs` server wraps Next.js and upgrades WS connections to full bidirectional streaming sessions. Authentication uses the same API key or session cookie as HTTP requests.
+OmniRoute supports **OpenAI-compatible WebSocket clients** via the `/v1/ws` upgrade endpoint. The server launcher (`scripts/dev/run-server.mjs`) hands those upgrades to `scripts/dev/v1-ws-bridge.mjs`, which turns them into full bidirectional streaming sessions. Authentication uses the same API key or session cookie as HTTP requests. The bridge is on in development; in production (`npm start`, the Docker image, PM2) set `OMNIROUTE_ENABLE_V1_WS=1` to enable it.
 
 Key behaviours:
 

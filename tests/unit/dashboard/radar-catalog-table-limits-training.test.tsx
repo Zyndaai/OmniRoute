@@ -15,12 +15,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The mock returns a distinguishable string rather than the key itself: asserting
 // that "trainsOnPrompts" appears in the DOM would also pass if the key leaked into
 // a title, a data attribute or another column, which proves nothing about the badge.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => `label:${key}`,
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
 }));
 
 import {

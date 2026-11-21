@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Dario account panel — drives the headless Claude OAuth login flow against the
  * server-side admin-proxy routes (/api/services/dario/admin/*). The real
@@ -25,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Button, Card, Input } from "@/shared/components";
 import Tooltip from "@/shared/components/Tooltip";
 

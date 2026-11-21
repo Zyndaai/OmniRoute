@@ -1,5 +1,3 @@
-"use client";
-
 import { Button, Card, Input } from "@/shared/components";
 import type { ProviderDisplayMode } from "../providerPageStorage";
 import { CategoryDot } from "./CategoryDot";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Table,
@@ -13,7 +11,7 @@ import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Select from "@/shared/components/Select";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 type A2ATaskState = "submitted" | "working" | "completed" | "failed" | "cancelled";
 

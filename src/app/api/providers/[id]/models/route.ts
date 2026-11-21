@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import {
   getProviderConnectionFamilyIds,
   isClaudeCodeCompatibleProvider,
@@ -214,7 +213,7 @@ export async function GET(
     }
 
     if (!connection) {
-      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+      return Response.json({ error: "Connection not found" }, { status: 404 });
     }
 
     if (await isConnectionUnavailableToAuxiliaryActivity(id))
@@ -229,7 +228,7 @@ export async function GET(
 
     const provider = connectionProvider;
     if (!provider) {
-      return NextResponse.json({ error: "Invalid connection provider" }, { status: 400 });
+      return Response.json({ error: "Invalid connection provider" }, { status: 400 });
     }
     const usesCuratedModelsOnly = providerUsesCuratedModelsOnly(provider);
 
@@ -298,7 +297,7 @@ export async function GET(
       // the next read. The outcome is read from the public payload, so it
       // carries the same reason the caller sees.
       void recordDiscoveryOutcome(publicPayload).catch(() => {});
-      return NextResponse.json(publicPayload, statusConfig);
+      return Response.json(publicPayload, statusConfig);
     };
 
     const connectionId = typeof connection.id === "string" ? connection.id : id;
@@ -740,7 +739,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -789,13 +788,10 @@ export async function GET(
             failure: { status },
           });
           if (fallback) return fallback;
-          return NextResponse.json({ error: `Auth failed: ${status}` }, { status });
+          return Response.json({ error: `Auth failed: ${status}` }, { status });
         }
         if (status === 400) {
-          return NextResponse.json(
-            { error: "Invalid Bedrock region or models request" },
-            { status }
-          );
+          return Response.json({ error: "Invalid Bedrock region or models request" }, { status });
         }
         const fallback = buildDiscoveryFallbackResponse({
           cacheWarning: "Bedrock models API unavailable — using cached catalog",
@@ -804,7 +800,7 @@ export async function GET(
         });
         if (fallback) return fallback;
         if (status) {
-          return NextResponse.json({ error: `Bedrock models API failed: ${status}` }, { status });
+          return Response.json({ error: `Bedrock models API failed: ${status}` }, { status });
         }
         throw error;
       }
@@ -836,7 +832,7 @@ export async function GET(
           failure: { code: "NO_ENDPOINT" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error: isOpenAICompatibleProvider(provider)
               ? "No base URL configured for OpenAI compatible provider"
@@ -948,7 +944,7 @@ export async function GET(
         if (fallback) return fallback;
 
         if (lastErrorStatus === 401 || lastErrorStatus === 403) {
-          return NextResponse.json(
+          return Response.json(
             { error: `Auth failed: ${lastErrorStatus}` },
             { status: lastErrorStatus }
           );
@@ -983,7 +979,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1020,7 +1016,7 @@ export async function GET(
           failure: { code: "NO_ENDPOINT" },
         });
         if (fallback) return fallback;
-        return NextResponse.json({ error: "Invalid DataRobot base URL" }, { status: 400 });
+        return Response.json({ error: "Invalid DataRobot base URL" }, { status: 400 });
       }
 
       let response: Response;
@@ -1048,7 +1044,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -1078,7 +1074,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1144,7 +1140,7 @@ export async function GET(
           lastStatus === 200 ? { code: "EMPTY_CATALOG" } : lastStatus ? { status: lastStatus } : {},
       });
       if (fallback) return fallback;
-      return NextResponse.json(
+      return Response.json(
         { error: `Failed to fetch models: ${lastStatus || "unknown"}` },
         { status: lastStatus || 502 }
       );
@@ -1159,7 +1155,7 @@ export async function GET(
 
       const token = accessToken || apiKey;
       if (!token) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1170,7 +1166,7 @@ export async function GET(
 
       const rawBaseUrl = getProviderBaseUrl(connection.providerSpecificData);
       if (!rawBaseUrl) {
-        return NextResponse.json(
+        return Response.json(
           { error: "No Azure OpenAI resource endpoint configured" },
           { status: 400 }
         );
@@ -1225,7 +1221,7 @@ export async function GET(
           lastStatus === 200 ? { code: "EMPTY_CATALOG" } : lastStatus ? { status: lastStatus } : {},
       });
       if (fallback) return fallback;
-      return NextResponse.json(
+      return Response.json(
         { error: `Failed to fetch models: ${lastStatus || "unknown"}` },
         { status: lastStatus || 502 }
       );
@@ -1246,7 +1242,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1283,7 +1279,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -1309,7 +1305,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1351,7 +1347,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -1377,7 +1373,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -1418,7 +1414,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -1552,10 +1548,7 @@ export async function GET(
         failure: token ? {} : { code: "NO_CREDENTIAL" },
       });
       if (fallback) return fallback;
-      return NextResponse.json(
-        { error: `Failed to fetch Cursor models: ${detail}` },
-        { status: 502 }
-      );
+      return Response.json({ error: `Failed to fetch Cursor models: ${detail}` }, { status: 502 });
     }
 
     if (provider === "glm" || provider === "glm-cn" || provider === "glmt") {
@@ -1615,7 +1608,7 @@ export async function GET(
 
       if (!response?.ok) {
         if (response?.status === 401 || response?.status === 403) {
-          return NextResponse.json(
+          return Response.json(
             { error: `Failed to fetch models: ${response.status}` },
             { status: response.status }
           );
@@ -1624,7 +1617,7 @@ export async function GET(
           failure: response?.status ? { status: response.status } : {},
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response?.status || 502}` },
           { status: response?.status || 502 }
         );
@@ -1898,7 +1891,7 @@ export async function GET(
       // the cached-discovery / auto-fetch fallbacks, which would otherwise
       // return a misleading 200 "no models" for a CC node (#10828 ordering).
       if (isClaudeCodeCompatibleProvider(provider)) {
-        return NextResponse.json(
+        return Response.json(
           { error: `Provider ${provider} does not support models listing` },
           { status: 400 }
         );
@@ -1918,7 +1911,7 @@ export async function GET(
           failure: { code: "NO_ENDPOINT" },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: "No base URL configured for Anthropic compatible provider" },
           { status: 400 }
         );
@@ -1964,7 +1957,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -1992,7 +1985,7 @@ export async function GET(
           failure: { code: "NO_CREDENTIAL" },
         });
         if (fallback) return fallback;
-        return NextResponse.json({ error: "Zed connection has no access token" }, { status: 400 });
+        return Response.json({ error: "Zed connection has no access token" }, { status: 400 });
       }
       let providerSpecificData: Record<string, unknown> = {};
       const rawPsd = (connection as { providerSpecificData?: unknown }).providerSpecificData;
@@ -2029,7 +2022,7 @@ export async function GET(
           failure: toDiscoveryFailure(error),
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${sanitizeErrorMessage(error)}` },
           { status: 502 }
         );
@@ -2257,7 +2250,7 @@ export async function GET(
       });
     }
     if (!config) {
-      return NextResponse.json(
+      return Response.json(
         { error: `Provider ${provider} does not support models listing` },
         { status: 400 }
       );
@@ -2275,7 +2268,7 @@ export async function GET(
         failure: { code: "NO_CREDENTIAL" },
       });
       if (fallback) return fallback;
-      return NextResponse.json(
+      return Response.json(
         {
           error:
             "No API key configured for this provider. Please add an API key in the provider settings.",
@@ -2355,7 +2348,7 @@ export async function GET(
         (typeof pData.accountId === "string" && pData.accountId) ||
         process.env.CLOUDFLARE_ACCOUNT_ID;
       if (!accountId) {
-        return NextResponse.json(
+        return Response.json(
           { error: "Cloudflare Workers AI requires an Account ID in provider settings." },
           { status: 400 }
         );
@@ -2413,7 +2406,7 @@ export async function GET(
           failure: { status: response.status },
         });
         if (fallback) return fallback;
-        return NextResponse.json(
+        return Response.json(
           { error: `Failed to fetch models: ${response.status}` },
           { status: response.status }
         );
@@ -2510,19 +2503,19 @@ export async function GET(
     return buildApiDiscoveryResponse(allModels);
   } catch (error) {
     if (error instanceof SafeOutboundFetchError && error.code === "URL_GUARD_BLOCKED") {
-      return NextResponse.json({ error: sanitizeErrorMessage(error.message) }, { status: 400 });
+      return Response.json({ error: sanitizeErrorMessage(error.message) }, { status: 400 });
     }
 
     const status = getSafeOutboundFetchErrorStatus(error);
     if (status) {
       const message = error instanceof Error ? error.message : "Failed to fetch models";
       // Timeout messages embed the request URL, which can carry a `?key=` credential.
-      return NextResponse.json({ error: sanitizeErrorMessage(message) }, { status });
+      return Response.json({ error: sanitizeErrorMessage(message) }, { status });
     }
     // #4843 — dead host / DNS / TLS failure with no cached or local catalog to
     // degrade to is an upstream outage, not an OmniRoute bug: answer 502.
     if (error instanceof SafeOutboundFetchError && error.code === "NETWORK_ERROR") {
-      return NextResponse.json(
+      return Response.json(
         {
           error: `Failed to fetch models: ${sanitizeErrorMessage(error.message) || "upstream unreachable"}`,
           code: "UPSTREAM_UNREACHABLE",
@@ -2531,6 +2524,6 @@ export async function GET(
       );
     }
     console.log("Error fetching provider models:", error);
-    return NextResponse.json({ error: "Failed to fetch models" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch models" }, { status: 500 });
   }
 }

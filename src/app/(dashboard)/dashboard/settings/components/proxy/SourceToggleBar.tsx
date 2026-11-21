@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Checkbox, CheckboxGroup } from "@omniroute/ui-kit/checkbox";
 
 export type SourceId = "1proxy" | "proxifly" | "iplocate" | "webshare";

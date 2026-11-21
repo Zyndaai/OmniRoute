@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, useCallback } from "react";
 import OAuthModal from "./OAuthModal";
 import KiroAuthModal from "./KiroAuthModal";

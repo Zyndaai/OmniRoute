@@ -1,5 +1,3 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Modal from "@/shared/components/Modal";
 import SegmentedControl from "@/shared/components/SegmentedControl";
@@ -7,7 +5,7 @@ import SegmentedControl from "@/shared/components/SegmentedControl";
 // src/app/(dashboard)/dashboard/playground/components/StudioTopBar.tsx
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import TokenCostCounter from "./TokenCostCounter";
 import ExportCodeModal from "./ExportCodeModal";
 import type { StreamMetrics } from "@/shared/schemas/playground";

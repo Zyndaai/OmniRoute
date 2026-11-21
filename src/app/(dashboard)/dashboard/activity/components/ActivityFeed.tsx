@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import EmptyState from "@/shared/components/EmptyState";
 import { groupByDay } from "@/lib/audit/timeline";
 import type { AuditLogEntry } from "@/lib/compliance/index";

@@ -1,8 +1,6 @@
-"use client";
-
 import Toggle from "@/shared/components/Toggle";
 
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 /**
  * Controls whether GET /v1/models adds `claude/...` compatibility mirrors for

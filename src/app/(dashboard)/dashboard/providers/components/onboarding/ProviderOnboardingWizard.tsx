@@ -1,11 +1,8 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { Link, useNavigate } from "react-router";
+import { useTranslations } from "use-intl";
 
 import {
   Badge,
@@ -280,7 +277,7 @@ function ResultSummary({
             return (
               detailsHref && (
                 <Link
-                  href={detailsHref}
+                  to={detailsHref}
                   className="inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-primary/90"
                 >
                   {providerText(t, "onboardingOpenProviderDetails", "Open provider details")}
@@ -289,13 +286,13 @@ function ResultSummary({
             );
           })()}
           <Link
-            href="/dashboard/providers"
+            to="/dashboard/providers"
             className="inline-flex items-center justify-center rounded-lg border border-border bg-bg-subtle px-4 py-2 text-sm font-medium text-text-main transition-colors hover:bg-bg-card"
           >
             {providerText(t, "backToProviders", "Back to providers")}
           </Link>
           <Link
-            href="/dashboard/playground"
+            to="/dashboard/playground"
             className="inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:bg-bg-subtle hover:text-text-main"
           >
             {providerText(t, "onboardingTryInPlayground", "Try in playground")}
@@ -307,7 +304,7 @@ function ResultSummary({
 }
 
 export default function ProviderOnboardingWizard() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const t = useTranslations("providers");
   const text = (key: string, fallback: string, values?: Record<string, unknown>) =>
     providerText(t, key, fallback, values);
@@ -535,7 +532,7 @@ export default function ProviderOnboardingWizard() {
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <Link
-            href="/dashboard/providers"
+            to="/dashboard/providers"
             className="text-sm text-text-muted hover:text-text-main"
           >
             ← {text("backToProviders", "Back to providers")}
@@ -550,7 +547,7 @@ export default function ProviderOnboardingWizard() {
             )}
           </p>
         </div>
-        <Button variant="ghost" onClick={() => router.push("/dashboard/providers")}>
+        <Button variant="ghost" onClick={() => navigate("/dashboard/providers")}>
           {text("close", "Close")}
         </Button>
       </div>

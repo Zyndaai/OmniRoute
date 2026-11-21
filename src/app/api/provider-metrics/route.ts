@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import pino from "pino";
 
 import { buildErrorBody } from "@omniroute/open-sse/utils/error.ts";
@@ -83,7 +82,7 @@ export async function GET() {
       foldMetricRowsByFamily(rows).map((row) => [row.provider, toProviderMetric(row)])
     );
 
-    return NextResponse.json({
+    return Response.json({
       metrics,
       familyMetrics,
       topology: {
@@ -94,7 +93,7 @@ export async function GET() {
     });
   } catch (error) {
     logger.error({ err: error }, "Failed to load provider metrics");
-    return NextResponse.json(buildErrorBody(500, "Failed to load provider metrics"), {
+    return Response.json(buildErrorBody(500, "Failed to load provider metrics"), {
       status: 500,
     });
   }

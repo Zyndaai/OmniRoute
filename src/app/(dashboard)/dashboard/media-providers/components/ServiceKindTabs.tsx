@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import type { ServiceKind } from "@/shared/constants/providers";
 

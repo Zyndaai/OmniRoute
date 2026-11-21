@@ -49,8 +49,8 @@ interface LogRotationState {
   timer: ReturnType<typeof setInterval> | null;
   /**
    * Rotation listeners live next to the timer on the process-wide state, so a
-   * logger subscribed from one HMR/server-chunk copy of this module is still
-   * notified by the timer another copy started.
+   * logger subscribed from one evaluation of this module (the dev server
+   * re-evaluates edited modules) is still notified by the timer another evaluation started.
    */
   listeners?: Set<LogRotationListener>;
 }
@@ -59,7 +59,7 @@ declare global {
   var __omnirouteLogRotationState: LogRotationState | undefined;
 }
 
-/** Process-wide state survives Next.js development HMR and split server chunks. */
+/** Process-wide state survives dev-server module re-evaluation. */
 function getLogRotationState(): LogRotationState {
   return (globalThis.__omnirouteLogRotationState ??= { timer: null });
 }

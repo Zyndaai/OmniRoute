@@ -8,7 +8,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, it, expect, vi, afterEach } from "vitest";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, unknown>) =>
     values && typeof values.count === "number" ? `${key}:${values.count}` : key,
 }));

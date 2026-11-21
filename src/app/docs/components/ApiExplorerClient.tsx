@@ -1,7 +1,5 @@
-"use client";
-
 import React, { useState, useCallback, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   OPENAPI_ENDPOINTS,
   OPENAPI_TAGS,
@@ -138,7 +136,7 @@ export function ApiExplorerClient() {
 
       // Strip the leading /api so callers can paste `http://localhost:20128`
       // as the base URL without doubling the prefix. The OpenAPI spec uses
-      // `/api/v1/...` because that is the Next.js route; the runtime client
+      // `/api/v1/...` because that is the route's real path; the runtime client
       // hits the same path.
       const res = await fetch(`${baseUrl}${selected.path}`, opts);
       const contentType = res.headers.get("content-type") || "";

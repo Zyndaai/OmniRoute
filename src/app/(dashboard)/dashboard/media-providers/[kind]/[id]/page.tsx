@@ -1,14 +1,10 @@
-import { notFound } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { data, useLoaderData } from "react-router";
+import { useTranslations } from "use-intl";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { resolveProviderServiceKinds } from "@omniroute/open-sse/config/mediaServiceKinds.ts";
 import type { MediaKind } from "../../components/mediaKinds";
 import { MEDIA_KINDS } from "../../components/mediaKinds";
 import MediaProviderPageClient from "./MediaProviderPageClient";
-
-interface PageProps {
-  params: Promise<{ kind: string; id: string }>;
-}
 
 /**
  * /dashboard/media-providers/[kind]/[id]
@@ -17,12 +13,13 @@ interface PageProps {
  * Validates both kind and id; 404 if either is unknown or the provider
  * does not declare the requested kind.
  */
-export default async function MediaProviderDetailPage({ params }: PageProps) {
-  const { kind, id } = await params;
+export function loader({ params }: { params: { kind?: string; id?: string } }) {
+  const kind = params.kind ?? "";
+  const id = params.id ?? "";
 
   // Validate kind
   if (!MEDIA_KINDS.includes(kind as MediaKind)) {
-    notFound();
+    throw data(null, { status: 404 });
   }
 
   const validKind = kind as MediaKind;
@@ -40,7 +37,7 @@ export default async function MediaProviderDetailPage({ params }: PageProps) {
     | undefined;
 
   if (!provider) {
-    notFound();
+    throw data(null, { status: 404 });
   }
 
   // Validate that the provider supports this kind — declared serviceKinds unioned
@@ -51,19 +48,33 @@ export default async function MediaProviderDetailPage({ params }: PageProps) {
     provider.serviceKinds as string[] | undefined
   );
   if (!serviceKinds.includes(validKind)) {
-    notFound();
+    throw data(null, { status: 404 });
   }
 
-  const t = await getTranslations("media");
-  const kindLabel = t(`kinds.${validKind}`);
+  return {
+    kind: validKind,
+    provider: {
+      id: provider.id,
+      name: provider.name,
+      color: provider.color,
+      website: provider.website,
+      hasFree: provider.hasFree,
+      freeNote: provider.freeNote,
+    },
+  };
+}
+
+export default function MediaProviderDetailPage() {
+  const { kind, provider } = useLoaderData<typeof loader>();
+  const t = useTranslations("media");
 
   return (
     <MediaProviderPageClient
       providerId={provider.id}
       providerName={provider.name}
       providerColor={provider.color}
-      kindLabel={kindLabel}
-      activeKind={validKind}
+      kindLabel={t(`kinds.${kind}`)}
+      activeKind={kind}
       website={provider.website}
       hasFree={provider.hasFree}
       freeNote={provider.freeNote}

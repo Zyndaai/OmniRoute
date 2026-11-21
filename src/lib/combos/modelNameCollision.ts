@@ -76,7 +76,7 @@ export interface ComboLike {
 }
 
 /**
- * Boot-time scan (see `src/instrumentation-node.ts`): enumerates existing
+ * Boot-time scan (see `src/server/boot.ts`): enumerates existing
  * combos whose name shadows a real model id, for a startup log — never a
  * hard failure, since the shadowing pattern is intentional per #6940.
  */

@@ -1,8 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import Image from "next/image";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 import { Sheet, SheetContent, SheetTitle } from "@omniroute/ui-kit/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
@@ -171,7 +168,7 @@ function SlideOverHeader({
         style={{ backgroundColor: `${color}15` }}
       >
         {staticIconPath ? (
-          <Image src={staticIconPath} alt={provider.name} width={22} height={22} />
+          <img src={staticIconPath} alt={provider.name} width={22} height={22} />
         ) : (
           <ProviderIcon providerId={provider.id || providerId} size={22} type="color" />
         )}

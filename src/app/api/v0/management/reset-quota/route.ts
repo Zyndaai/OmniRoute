@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { cliProxyErrorResponse, requireCliProxyManagementAuth } from "@/lib/cliproxyCompat/http";
 import { CliProxyResetQuotaSchema, resetCliProxyQuota } from "@/lib/cliproxyCompat/managementApi";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -17,15 +15,15 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
+    return Response.json(buildErrorBody(400, "Invalid JSON body"), { status: 400 });
   }
   const validation = validateBody(CliProxyResetQuotaSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   try {
-    return NextResponse.json(await resetCliProxyQuota(validation.data.auth_index));
+    return Response.json(await resetCliProxyQuota(validation.data.auth_index));
   } catch (error) {
     return cliProxyErrorResponse(error, "POST /v0/management/reset-quota");
   }

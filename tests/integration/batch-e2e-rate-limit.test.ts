@@ -167,10 +167,10 @@ function createServerProcess() {
   let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | null = null;
 
   // The management calls below (provider node + API key) only stay open in bootstrap mode for a
-  // loopback peer, and locality comes from the TCP-peer stamp that only the custom server in
-  // run-next.mjs writes. Bare `next dev` (run-next-playwright.mjs) has no stamp, so they fail
-  // closed with 401 — the same trap #11535 and #14403 fixed in the protocol and ecosystem harnesses.
-  const child = spawn(process.execPath, ["scripts/dev/run-next.mjs", "dev"], {
+  // loopback peer, and locality comes from the TCP-peer stamp that the launcher in
+  // run-server.mjs writes. Without the stamp they fail closed with 401 — the same trap #11535
+  // and #14403 fixed in the protocol and ecosystem harnesses.
+  const child = spawn(process.execPath, ["scripts/dev/run-server.mjs", "dev"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,

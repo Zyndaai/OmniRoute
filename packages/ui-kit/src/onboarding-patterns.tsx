@@ -1,5 +1,3 @@
-"use client";
-
 import { useId, type ReactNode } from "react";
 import { ArrowRight, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, Pencil, Sparkles, X } from "lucide-react";
 import { Button } from "./button";

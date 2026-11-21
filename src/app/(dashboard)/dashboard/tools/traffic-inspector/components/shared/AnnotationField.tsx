@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Textarea from "@/shared/components/Textarea";
 import { useAnnotations } from "../../hooks/useAnnotations";
 

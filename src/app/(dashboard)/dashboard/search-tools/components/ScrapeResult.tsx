@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, lazy, Suspense } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Modal from "@/shared/components/Modal";
 import Textarea from "@/shared/components/Textarea";

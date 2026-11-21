@@ -1,15 +1,24 @@
-import { Metadata } from "next";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { useTranslations } from "use-intl";
+import { getTranslator } from "@/i18n/request.server";
+import { pageMeta } from "@/shared/utils/pageMeta";
 import { ApiExplorerClient } from "../components/ApiExplorerClient";
-import { getTranslations } from "next-intl/server";
-import { useTranslations } from "next-intl";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const t = await getTranslations("docs");
+export async function loader({ request }: LoaderFunctionArgs) {
+  const t = await getTranslator("docs", request);
   return {
     title: t("apiExplorerMetadataTitle"),
     description: t("apiExplorerMetadataDescription"),
   };
 }
+
+export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
+  pageMeta(
+    matches,
+    loaderData
+      ? [{ title: loaderData.title }, { name: "description", content: loaderData.description }]
+      : []
+  );
 
 export default function ApiExplorerPage() {
   const t = useTranslations("docs");

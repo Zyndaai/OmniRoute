@@ -23,7 +23,7 @@ vi.mock("../ProviderCcAliasSection", () => ({ default: () => null }));
 // can match real English copy.
 const stableTranslate = (key: string, values?: Record<string, string>) =>
   values ? `${key}:${JSON.stringify(values)}` : key;
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => stableTranslate,
 }));
 

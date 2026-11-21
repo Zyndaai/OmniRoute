@@ -1,8 +1,6 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { Link } from "react-router";
+import { useTranslations } from "use-intl";
 import { AlertActions, AlertDescription, AlertTitle } from "@omniroute/ui-kit/alert";
 import { Badge as KitBadge } from "@omniroute/ui-kit/badge";
 import { buttonVariants } from "@omniroute/ui-kit/button";
@@ -133,14 +131,11 @@ export default function StatusPage() {
               </AlertTitle>
               <AlertDescription>{error}</AlertDescription>
               <AlertActions>
-                <Link
-                  href="/offline"
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
+                <Link to="/offline" className={buttonVariants({ variant: "outline", size: "sm" })}>
                   {t("status.openConnectivityHelp")}
                 </Link>
                 <Link
-                  href="/maintenance"
+                  to="/maintenance"
                   className={buttonVariants({ variant: "outline", size: "sm" })}
                 >
                   {t("status.maintenanceInfo")}

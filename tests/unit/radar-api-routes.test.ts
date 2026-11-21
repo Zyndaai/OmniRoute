@@ -62,7 +62,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Cookie: await authCookieHeader() };
 }
 
-// Helper to create a mock NextRequest-like object
+// Helper to create a mock Request-like object
 function mockGetRequest(
   url = "http://localhost:20128/api/radar/catalog",
   headers: Record<string, string> = {}

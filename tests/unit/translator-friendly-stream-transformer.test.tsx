@@ -20,7 +20,7 @@ beforeAll(() => {
 // The i18n mock returns the key unchanged. translateOrFallback() detects that
 // translated === key and returns the FALLBACK string instead. So in tests the
 // rendered text / aria-label equals the fallback string, not the key.
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

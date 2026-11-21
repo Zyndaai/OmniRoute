@@ -19,9 +19,9 @@ import { isLoopbackHost, isPrivateLanHost } from "./routeGuard";
  */
 
 export function requestPeerAddress(ctx: PolicyContext): string | null {
-  // The Next proxy runtime exposes no socket/.ip, so the only trustworthy
-  // locality signal is the token-stamped PEER_IP_HEADER our custom server writes
-  // from the real TCP peer (scripts/dev/peer-stamp.mjs). We NEVER read the Host
+  // A fetch `Request` carries no socket, so the only trustworthy locality
+  // signal is the token-stamped PEER_IP_HEADER our server writes from the real
+  // TCP peer (scripts/dev/peer-stamp.mjs). We NEVER read the Host
   // header here — it is client-controlled and spoofable. Absent/forged stamp →
   // null → isLoopbackRequest/isPrivateLanRequest return false → fail closed.
   const stamped = resolveStampedPeer(
@@ -30,7 +30,7 @@ export function requestPeerAddress(ctx: PolicyContext): string | null {
   );
   if (stamped) return stamped;
   // Non-proxy callers (tests / direct Node) may carry a real socket peer.
-  return ctx.request.ip ?? ctx.request.socket?.remoteAddress ?? null;
+  return ctx.request.socket?.remoteAddress ?? null;
 }
 
 /**

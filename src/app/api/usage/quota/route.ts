@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/db/providers";
 import {
   getLearnedLimits,
@@ -166,9 +165,9 @@ export async function GET(request: Request) {
       }
     );
 
-    return NextResponse.json(response);
+    return Response.json(response);
   } catch (error) {
     console.error("[API] GET /api/usage/quota error:", error);
-    return NextResponse.json({ error: "Failed to fetch quota data" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch quota data" }, { status: 500 });
   }
 }

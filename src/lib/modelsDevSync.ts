@@ -824,7 +824,7 @@ export function getSyncStatus(): SyncStatus {
   };
 }
 
-// ─── Init (called from instrumentation-node.ts) ───────────────────
+// ─── Init (called from src/server/boot.ts) ───────────────────
 
 /**
  * Initialize models.dev sync if enabled.

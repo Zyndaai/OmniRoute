@@ -79,7 +79,7 @@ All seven follow the same supervisory model:
 │    └── components/            ServiceStatusCard, ServiceLifecycleButtons,│
 │                               ServiceLogsPanel, ApiKeyCard, ...    │
 └──────────────────────┬─────────────────────────────────────────────┘
-                       │ HTTP (Next.js fetch)
+                       │ HTTP (fetch)        
 ┌──────────────────────▼─────────────────────────────────────────────┐
 │  Layer 2 — API (LOCAL_ONLY — loopback only)                        │
 │                                                                    │

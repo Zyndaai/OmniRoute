@@ -14,7 +14,6 @@
  *      as a chat prompt proxied through the OmniRoute pipeline.
  */
 import { timingSafeEqual } from "node:crypto";
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { validateBody, isValidationFailure } from "@/shared/validation/helpers";
 import type { TelegramUpdate } from "@/lib/telegram/botApi";
@@ -91,7 +90,7 @@ function warnOnceAboutAllowlistConfig(): void {
 
 export async function POST(request: Request) {
   if (!isTelegramEnabled()) {
-    return NextResponse.json({ ok: false, error: "Telegram not configured" }, { status: 503 });
+    return Response.json({ ok: false, error: "Telegram not configured" }, { status: 503 });
   }
   warnOnceAboutAllowlistConfig();
 
@@ -99,12 +98,12 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+    return Response.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
 
   const validation = validateBody(telegramBodySchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 });
+    return Response.json({ ok: false, error: "Invalid request" }, { status: 400 });
   }
   const body = validation.data as Record<string, unknown>;
 
@@ -118,11 +117,11 @@ export async function POST(request: Request) {
 async function handleMiniAppRequest(initData: string, body: Record<string, unknown>) {
   const botToken = getTelegramBotToken();
   if (!verifyInitData(initData, botToken)) {
-    return NextResponse.json({ ok: false, error: "Invalid initData signature" }, { status: 401 });
+    return Response.json({ ok: false, error: "Invalid initData signature" }, { status: 401 });
   }
   const message = typeof body.message === "string" ? body.message : "";
   if (!message.trim()) {
-    return NextResponse.json({ ok: false, error: "message is required" }, { status: 400 });
+    return Response.json({ ok: false, error: "message is required" }, { status: 400 });
   }
   // Resolve the Telegram user id from the verified initData for key mapping.
   const telegramUserId = extractInitDataUserId(initData);
@@ -130,11 +129,11 @@ async function handleMiniAppRequest(initData: string, body: Record<string, unkno
     log.warn("TELEGRAM", "Mini App user not in TELEGRAM_ALLOWED_USER_IDS", {
       userId: telegramUserId,
     });
-    return NextResponse.json({ ok: false, error: "Telegram user not allowed" }, { status: 403 });
+    return Response.json({ ok: false, error: "Telegram user not allowed" }, { status: 403 });
   }
   // Proxy synchronously and return the reply (Mini App awaits the fetch).
   const reply = await proxyChat(telegramUserId, message);
-  return NextResponse.json({ ok: true, reply: reply || "⚠️ Empty gateway response." });
+  return Response.json({ ok: true, reply: reply || "⚠️ Empty gateway response." });
 }
 
 /** Bot webhook path: TelegramUpdate. */
@@ -144,21 +143,21 @@ function handleWebhookUpdate(request: Request, body: Record<string, unknown>) {
   // reaches proxyChat(), which mints a real API key and spends upstream quota.
   // Telegram's `secret_token` echo is the only authentication available here.
   if (!isTelegramWebhookSecretConfigured()) {
-    return NextResponse.json(
+    return Response.json(
       { ok: false, error: "Telegram webhook secret not configured" },
       { status: 503 }
     );
   }
   const presentedSecret = request.headers.get("x-telegram-bot-api-secret-token") || "";
   if (!webhookSecretMatches(presentedSecret, getTelegramWebhookSecret())) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   const update = body as unknown as TelegramUpdate;
   const chat = extractChatMessage(update);
   if (!chat) {
     // Non-message updates (callback_query etc.) — acknowledge silently.
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   }
 
   // Authorize the *sender*, not the chat: in a group every member shares chatId.
@@ -168,14 +167,14 @@ function handleWebhookUpdate(request: Request, body: Record<string, unknown>) {
       userId: chat.fromId ?? null,
       chatId: chat.chatId,
     });
-    return NextResponse.json({ ok: true });
+    return Response.json({ ok: true });
   }
 
   // Fire-and-forget reply: Telegram retries on 5xx, so always 200 after
   // enqueueing the reply. Keep the handler non-blocking.
   void handleAndReply(chat.chatId, chat.text, chat.messageId);
 
-  return NextResponse.json({ ok: true });
+  return Response.json({ ok: true });
 }
 
 /**

@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
+import { Link } from "react-router";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Icon from "@/shared/components/Icon";
@@ -9,7 +7,7 @@ import { Card, Button, Input } from "@/shared/components";
 import Badge from "@/shared/components/Badge";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { CliConceptCard, CliComparisonCard } from "@/shared/components/cli";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 
 interface AgentInfo {
   id: string;
@@ -206,7 +204,7 @@ export default function AgentsPage() {
             <h3 className="text-lg font-semibold">{t("setupGuideTitle")}</h3>
           </div>
           <Link
-            href="/dashboard/cli-code"
+            to="/dashboard/cli-code"
             className={buttonVariants({ variant: "outline", size: "sm", className: "text-xs" })}
           >
             {t("cliCodeRedirectCta")}
@@ -239,7 +237,7 @@ export default function AgentsPage() {
           <Icon name="fingerprint" size={14} className="text-text-muted" />
           <p className="text-xs text-text-muted">
             {t("fingerprintSettingsHint")}{" "}
-            <Link href="/dashboard/settings?tab=routing" className="text-primary underline">
+            <Link to="/dashboard/settings?tab=routing" className="text-primary underline">
               {t("settingsRoutingLink")}
             </Link>
           </p>

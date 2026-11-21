@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   loadPlaygroundMessages,

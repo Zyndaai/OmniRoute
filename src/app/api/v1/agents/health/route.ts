@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getAgent, getAvailableAgents } from "@/lib/cloudAgent/registry";
 import { getCloudAgentCredentialFromDb } from "@/lib/cloudAgent/credentials";
 import { getCloudAgentCorsHeaders, requireCloudAgentManagementAuth } from "@/lib/cloudAgent/api";
@@ -63,11 +62,11 @@ async function checkProviderHealth(providerId: string): Promise<ProviderHealth> 
   }
 }
 
-export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, { headers: getCloudAgentCorsHeaders(request) });
+export async function OPTIONS(request: Request) {
+  return new Response(null, { headers: getCloudAgentCorsHeaders(request) });
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
     const authError = await requireCloudAgentManagementAuth(request);
     if (authError) return authError;
@@ -75,13 +74,10 @@ export async function GET(request: NextRequest) {
     const agentIds = getAvailableAgents();
     const results = await Promise.all(agentIds.map(checkProviderHealth));
 
-    return NextResponse.json(
-      { providers: results },
-      { headers: getCloudAgentCorsHeaders(request) }
-    );
+    return Response.json({ providers: results }, { headers: getCloudAgentCorsHeaders(request) });
   } catch (error) {
     logger.error({ err: error }, "Failed to check cloud agent health");
-    return NextResponse.json(
+    return Response.json(
       {
         error:
           sanitizeErrorMessage(error instanceof Error ? error.message : "Unknown error") ||

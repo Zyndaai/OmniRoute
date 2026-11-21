@@ -9,7 +9,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { NextRequest } from "next/server";
 import { makeManagementSessionRequest } from "../helpers/managementSession.ts";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omni-health-view-"));
@@ -38,7 +37,7 @@ test("anonymous health GET is reduced to liveness only (GHSA-mvf8)", async () =>
 test("management session sees the full health payload", async () => {
   const sessionReq = (await makeManagementSessionRequest(
     "http://localhost/api/monitoring/health"
-  )) as unknown as NextRequest;
+  )) as unknown as Request;
   const res = await route.GET(sessionReq as never);
   const body = (await res.json()) as Record<string, unknown>;
   assert.ok(

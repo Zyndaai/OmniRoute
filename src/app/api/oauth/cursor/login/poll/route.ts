@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
@@ -44,7 +43,7 @@ export async function POST(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       {
         error: {
           message: "Invalid request",
@@ -57,13 +56,13 @@ export async function POST(request: Request) {
 
   const validation = validateBody(pollSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
 
   const { sessionId } = validation.data;
   const session = peekCursorLoginSession(sessionId);
   if (!session) {
-    return NextResponse.json(
+    return Response.json(
       { status: "expired", error: "Login session expired or not found. Start again." },
       { status: 410 }
     );
@@ -72,10 +71,10 @@ export async function POST(request: Request) {
   try {
     const result = await pollCursorAuthOnce(session.uuid, session.verifier);
     if (result.status === "pending") {
-      return NextResponse.json({ status: "pending" });
+      return Response.json({ status: "pending" });
     }
     if (result.status === "error") {
-      return NextResponse.json(
+      return Response.json(
         { status: "error", error: result.message },
         { status: result.httpStatus && result.httpStatus >= 400 ? result.httpStatus : 502 }
       );
@@ -94,7 +93,7 @@ export async function POST(request: Request) {
 
     await syncToCloudIfEnabled(machineId);
 
-    return NextResponse.json({
+    return Response.json({
       status: "ok",
       success: true,
       connection: {
@@ -105,6 +104,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     const message = sanitizeErrorMessage(error) || "Failed to poll Cursor login";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }

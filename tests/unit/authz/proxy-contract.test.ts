@@ -1,88 +1,98 @@
 /**
- * Next.js 16 Proxy File Contract — Lockdown Test
+ * Request pipeline contract — lockdown test.
  *
- * Next.js 16 deprecated `middleware.ts` in favour of `proxy.ts` (commit
- * 3fb72b973 renamed our copy to match the new convention). The framework
- * only invokes this file when ALL of the following hold:
+ * The authz pipeline only protects routes when ALL of the following hold:
  *
- *   1. The file lives at `src/proxy.ts` (since `src/app` is the app dir).
- *   2. It exports a function named exactly `proxy` (or default).
- *   3. The function delegates to `runAuthzPipeline` with `enforce: true`.
- *   4. The `config.matcher` covers every prefix routes are mounted under,
- *      so unauthenticated requests cannot slip past the centralized
- *      authorization tiers (PUBLIC / CLIENT_API / MANAGEMENT).
+ *   1. The server's request handler (`src/server/http/handler.ts`) calls
+ *      `runAuthzPipeline` with `enforce: true`.
+ *   2. It does so for every path in `AUTHZ_PATH_PATTERNS`, and those patterns cover every
+ *      prefix routes are mounted under, so unauthenticated requests cannot slip past the
+ *      centralized authorization tiers (PUBLIC / CLIENT_API / MANAGEMENT).
  *
- * Without ANY of these guarantees the pipeline silently becomes dead code
- * and every `/api/*` route falls back to per-route self-enforcement, which
- * is the failure mode that led to the v3.8.4 hardening pass. Lock the
- * contract down here so a future rename / refactor cannot regress it
- * unnoticed.
+ * Without either guarantee the pipeline silently becomes dead code and every `/api/*` route
+ * falls back to per-route self-enforcement, the failure mode that led to the v3.8.4
+ * hardening pass.
  *
  * @see docs/security/ROUTE_GUARD_TIERS.md
- * @see https://nextjs.org/docs/app/api-reference/file-conventions/proxy
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-test("Next.js 16 proxy file exists at src/proxy.ts (not src/middleware.ts)", () => {
-  assert.ok(fs.existsSync("src/proxy.ts"), "src/proxy.ts must exist (Next.js 16 file convention)");
-  assert.ok(
-    !fs.existsSync("src/middleware.ts"),
-    "src/middleware.ts must NOT exist — Next.js 16 deprecated middleware.ts, the active file is src/proxy.ts"
-  );
-});
+import { AUTHZ_PATH_PATTERNS, isAuthzPath } from "../../../src/server/http/authzPaths.ts";
 
-test("proxy.ts exports a function named 'proxy' (Next.js 16 requires this exact name)", () => {
-  const content = fs.readFileSync("src/proxy.ts", "utf8");
+test("the request handler delegates to runAuthzPipeline with enforce: true", () => {
+  const content = fs.readFileSync("src/server/http/handler.ts", "utf8");
   assert.match(
     content,
-    /export\s+async\s+function\s+proxy\s*\(/,
-    "must export `async function proxy(...)` — Next.js 16 only invokes this exact name"
+    /runAuthzPipeline\(request,\s*\{\s*enforce:\s*true\b/,
+    "must call runAuthzPipeline with { enforce: true } — otherwise the pipeline never blocks"
   );
+  assert.match(content, /isAuthzPath\(pathname\)/, "the pipeline must be gated on isAuthzPath");
 });
 
-test("proxy.ts delegates to runAuthzPipeline with enforce: true", () => {
-  const content = fs.readFileSync("src/proxy.ts", "utf8");
-  assert.match(
-    content,
-    /runAuthzPipeline\([^)]*\{\s*enforce:\s*true\s*\}\s*\)/,
-    "must call runAuthzPipeline with { enforce: true } — otherwise the pipeline runs in observe-only mode and never blocks"
-  );
-});
-
-test("proxy.ts config.matcher covers every /api/* route plus dashboard and v1 aliases", () => {
-  const content = fs.readFileSync("src/proxy.ts", "utf8");
-  // Required prefixes — drop one and the corresponding routes go unguarded.
-  // The client-API aliases use a case-insensitive path-to-regexp group
-  // (`([vV]1)`) so `/V1/...` reaches the pipeline too — see
-  // GHSA-jvqc-mp9f-q936 and tests/unit/authz/proxy-matcher-case.test.ts for the
-  // semantic (compiled-matcher) coverage assertions.
-  const requiredMatchers = [
-    '"/api/:path*"',
-    '"/dashboard/:path*"',
-    '"/:v1seg([vV]1)/:path*"',
-    '"/:v1betaseg([vV]1[bB][eE][tT][aA])/:path*"',
-    '"/:chatseg([cC][hH][aA][tT])/:path*"',
-    '"/:respseg([rR][eE][sS][pP][oO][nN][sS][eE][sS])/:path*"',
-    '"/:codexseg([cC][oO][dD][eE][xX])/:path*"',
-    '"/:modelsseg([mM][oO][dD][eE][lL][sS])"',
+test("the authz path set covers every /api/* route plus dashboard and client aliases", () => {
+  const required = [
+    "/api/:path*",
+    "/dashboard/:path*",
+    "/home/:path*",
+    "/v1/:path*",
+    "/v1beta/:path*",
+    "/chat/:path*",
+    "/responses/:path*",
+    "/codex/:path*",
+    "/models",
     // CLIProxyAPI management compatibility (/v0/management/* rewrite).
-    '"/:v0seg([vV]0)/:path*"',
+    "/v0/:path*",
+    "/",
   ];
-  for (const matcher of requiredMatchers) {
+  for (const pattern of required) {
     assert.ok(
-      content.includes(matcher),
-      `proxy.ts config.matcher must include ${matcher} — otherwise routes under that prefix bypass the authz pipeline`
+      AUTHZ_PATH_PATTERNS.includes(pattern),
+      `AUTHZ_PATH_PATTERNS must include ${pattern} — otherwise routes under it bypass authz`
     );
   }
 });
 
-test("proxy.ts does not declare runtime: 'edge' (Next.js 16 proxy is Node-only)", () => {
-  const content = fs.readFileSync("src/proxy.ts", "utf8");
-  assert.ok(
-    !/runtime:\s*['"]edge['"]/.test(content),
-    "proxy.ts MUST NOT set runtime: 'edge' — Next.js 16 only supports nodejs in proxy.ts. The pipeline depends on Node-only modules (jose, better-sqlite3) and would crash at request time on the edge runtime."
-  );
+test("bare and nested paths under each prefix are covered", () => {
+  for (const p of [
+    "/",
+    "/api",
+    "/api/keys",
+    "/dashboard",
+    "/dashboard/providers",
+    "/home",
+    "/v1",
+    "/v1/chat/completions",
+    "/v0/management/usage",
+  ]) {
+    assert.equal(isAuthzPath(p), true, p);
+  }
+});
+
+test("public non-API pages and the JSON-404 aliases bypass the pipeline, as before", () => {
+  for (const p of [
+    "/healthz",
+    "/livez",
+    "/readyz",
+    "/a2a",
+    "/login",
+    "/docs/guides/i18n",
+    "/callback",
+    "/anthropic/v1/messages",
+    "/openai/v1/models",
+    "/metrics",
+    "/debug",
+    "/.env",
+    "/models/x",
+    "/sw.js",
+  ]) {
+    assert.equal(isAuthzPath(p), false, p);
+  }
+});
+
+test("src/proxy.ts and src/middleware.ts are gone (the server bundle owns the pipeline)", () => {
+  assert.ok(!fs.existsSync("src/proxy.ts"));
+  assert.ok(!fs.existsSync("src/middleware.ts"));
 });

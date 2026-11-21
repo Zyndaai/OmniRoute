@@ -132,6 +132,8 @@ omniroute
 
 **Symptom:** `omniroute` / `omniroute serve` prints `✔ OmniRoute is running!`, but every dashboard or API request returns a bare `500 Internal Server Error`. `~/.omniroute/logs/application/app.log` stays empty, `APP_LOG_LEVEL=debug` prints nothing useful, and the response body is plain text (`Internal Server Error`) with no JSON detail.
 
+> This failure was diagnosed on the former Next.js build. The app now runs on React Router + Vite and no longer loads Next.js; whether current builds can still hit it has not been re-checked. The workaround described below is still in `bin/omniroute.mjs`.
+
 **Cause:** Some Termux/Node builds report `process.platform === "android"`. Next.js `getCacheDirectory()` does not handle that platform: it requires `~/.cache` (or a generic tmp dir) to _already_ exist, otherwise it fails while loading the instrumentation hook with:
 
 ```text

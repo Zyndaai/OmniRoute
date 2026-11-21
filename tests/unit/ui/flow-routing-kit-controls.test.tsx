@@ -8,20 +8,13 @@
 import React from "react";
 import axe from "axe-core";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { NextIntlClientProvider } from "next-intl";
+import { MemoryRouter } from "react-router";
+import { IntlProvider } from "use-intl";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import ReorderControl from "@/shared/components/ReorderControl";
 import RoutingEntryLink from "@/shared/components/routing/RoutingEntryLink";
 import ModelRoutingSection from "@/shared/components/ModelRoutingSection";
 import messages from "../../../src/i18n/messages/en.json";
-
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
-    <a href={href} {...rest}>
-      {children}
-    </a>
-  ),
-}));
 
 afterEach(() => {
   cleanup();
@@ -30,9 +23,11 @@ afterEach(() => {
 
 const wrap = (ui: React.ReactElement) =>
   render(
-    <NextIntlClientProvider locale="en" timeZone="UTC" messages={messages}>
-      {ui}
-    </NextIntlClientProvider>
+    <MemoryRouter>
+      <IntlProvider locale="en" timeZone="UTC" messages={messages}>
+        {ui}
+      </IntlProvider>
+    </MemoryRouter>
   );
 
 async function runAxe(root: HTMLElement) {

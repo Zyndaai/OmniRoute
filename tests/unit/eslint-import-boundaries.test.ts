@@ -8,8 +8,13 @@ const eslint = new ESLint({ cwd: process.cwd() });
 async function restrictedImportMessages(code: string, filePath: string): Promise<string[]> {
   const [result] = await eslint.lintText(code, { filePath });
 
+  // TypeScript files under src/app use the typescript-eslint variant of the rule, which lets
+  // type-only imports through (eslint.config.mjs); everything else uses the core rule.
   return result.messages
-    .filter(({ ruleId }) => ruleId === "no-restricted-imports")
+    .filter(
+      ({ ruleId }) =>
+        ruleId === "no-restricted-imports" || ruleId === "@typescript-eslint/no-restricted-imports"
+    )
     .map(({ message }) => message);
 }
 
@@ -53,6 +58,15 @@ test("G14 rejects executor implementation imports from src/app", async () => {
     assert.equal(messages.length, 1, `expected ${importPath} to be rejected from src/app`);
     assert.match(messages[0], /handler or service boundary/);
   }
+});
+
+test("G14 lets type-only executor imports into src/app", async () => {
+  const messages = await restrictedImportMessages(
+    'import type { DefaultExecutor } from "@omniroute/open-sse/executors/default.ts";\n' +
+      "export type X = DefaultExecutor;",
+    "src/app/api/example/route.ts"
+  );
+  assert.deepEqual(messages, []);
 });
 
 test("G14 allows imports through the intended boundaries", async () => {

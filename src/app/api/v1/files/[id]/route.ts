@@ -1,6 +1,5 @@
 import { CORS_HEADERS, credentialRejectionHeaders, handleCorsOptions } from "@/shared/utils/cors";
 import { getFile, deleteFile, formatFileResponse } from "@/lib/db/files";
-import { NextResponse } from "next/server";
 import {
   getApiKeyRequestScope,
   canAccessOwnedRecord,
@@ -22,7 +21,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -55,13 +54,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // (GHSA-2jm2-mpx8-6523). A foreign or anonymous caller gets the same 404 as
   // a missing id so the id space cannot be probed.
   if (!file || !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, file.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "File not found", type: "invalid_request_error" } },
       { status: 404, headers: CORS_HEADERS }
     );
   }
 
-  return NextResponse.json(formatFileResponse(file), { headers: CORS_HEADERS });
+  return Response.json(formatFileResponse(file), { headers: CORS_HEADERS });
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -73,7 +72,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   // revoked/expired/banned/deactivated/unresolvable key, #13881) — so the
   // per-key policy check below never has to special-case that status itself.
   if (scope.apiKey && !scope.apiKeyId) {
-    return NextResponse.json(buildErrorBody(401, "Invalid API key"), {
+    return Response.json(buildErrorBody(401, "Invalid API key"), {
       status: 401,
       headers: credentialRejectionHeaders(request),
     });
@@ -103,7 +102,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const effectiveApiKeyId = resolveEffectiveApiKeyId(scope, policy.apiKeyInfo);
 
   if (!file || !canAccessOwnedRecord({ ...scope, apiKeyId: effectiveApiKeyId }, file.apiKeyId)) {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "File not found", type: "invalid_request_error" } },
       { status: 404, headers: CORS_HEADERS }
     );
@@ -111,7 +110,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   await deleteFile(id);
 
-  return NextResponse.json(
+  return Response.json(
     {
       id,
       object: "file",

@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { versionManagerToolSchema } from "@/shared/validation/schemas";
@@ -13,7 +11,7 @@ export function validateVersionManagerToolBody(rawBody: unknown): VersionManager
   if (isValidationFailure(validation)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: validation.error }, { status: 400 }),
+      response: Response.json({ error: validation.error }, { status: 400 }),
     };
   }
 
@@ -22,7 +20,7 @@ export function validateVersionManagerToolBody(rawBody: unknown): VersionManager
   if (!VERSION_MANAGER_SUPERVISOR_TOOLS.has(tool)) {
     return {
       ok: false,
-      response: NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 }),
+      response: Response.json({ error: `Unknown tool: ${tool}` }, { status: 400 }),
     };
   }
 
@@ -43,7 +41,7 @@ export async function parseVersionManagerToolRequest(
   } catch {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }),
+      response: Response.json({ error: "Invalid JSON body" }, { status: 400 }),
     };
   }
 

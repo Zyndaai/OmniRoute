@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 
 import type { ConnectionRowConnection } from "../components/ConnectionRow";

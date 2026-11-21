@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { OUTPUT_STYLE_IDS } from "../../../open-sse/services/compression/outputStyles/catalog.ts";
 
 // Locale is mutable per-test so we can exercise the locale gate (terse-cjk → zh only).
 const intl = vi.hoisted(() => ({ locale: "en" }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => intl.locale,
 }));
@@ -20,7 +21,7 @@ function mount(ui: React.ReactElement): HTMLElement {
   containers.push(container);
   const root = createRoot(container);
   roots.push(root);
-  act(() => root.render(ui));
+  act(() => root.render(<MemoryRouter>{ui}</MemoryRouter>));
   return container;
 }
 

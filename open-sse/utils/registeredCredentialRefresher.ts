@@ -1,8 +1,9 @@
 // src/sse/services/tokenRefresh.ts registers its refresh-and-persist function here,
 // so open-sse can renew a connection's OAuth token without importing src/ (boundary
 // ratchet, scripts/quality/measure-boundary.mjs). The function sits on a process-wide
-// symbol so route bundles and instrumentation see the same registration; startup
-// (src/instrumentation-node.ts) loads the module before any request is served.
+// symbol so every module instance (including ones re-evaluated by the dev server) sees the
+// same registration; startup (src/server/boot.ts) loads the module before any request is
+// served.
 const CREDENTIAL_REFRESHER_KEY = Symbol.for("omniroute.credentialRefresher");
 
 export type RefreshableCredentials = {

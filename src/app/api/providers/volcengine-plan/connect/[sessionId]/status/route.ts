@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { bindVolcenginePlansFromConsoleCredentials } from "@/lib/providers/volcenginePlanBinding";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
@@ -26,16 +25,16 @@ export async function GET(
     );
 
     if (!session) {
-      return NextResponse.json(
+      return Response.json(
         { success: false, error: "Unknown or expired Volcano login session" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ success: session.phase === "success", session });
+    return Response.json({ success: session.phase === "success", session });
   } catch (error) {
     const message = sanitizeErrorMessage(error instanceof Error ? error.message : error);
-    return NextResponse.json(
+    return Response.json(
       { success: false, error: `Volcano login status failed: ${message}` },
       { status: 500 }
     );

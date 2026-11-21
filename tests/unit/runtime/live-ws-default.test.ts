@@ -2,7 +2,7 @@ import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 
 // NOTE: importing liveServer.ts triggers the module-level auto-start guard at
-// the bottom of the file. isBuildOrTest() short-circuits it because:
+// the bottom of the file. isAutomatedTestProcess() short-circuits it because:
 //   - process.argv for the Node test runner includes "--test"
 //   - process.env.NODE_ENV is typically "test" in this suite
 // Either condition is sufficient — no socket is opened.

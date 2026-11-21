@@ -6,30 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("next/link", () => ({
-  default: ({ children, href, ...props }: { children: React.ReactNode; href: string }) =>
-    React.createElement("a", { href, ...props }, children),
-}));
-
-// Mock next/dynamic to synchronously render the loaded module
-vi.mock("next/dynamic", () => ({
-  default: (loader: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>) => {
-    // Run the loader eagerly. Since modules are already mocked via vi.mock(),
-    // the dynamic wrappers will just render the mocked components directly.
-    const Loaded = React.lazy(loader as Parameters<typeof React.lazy>[0]);
-    function DynamicWrapper(props: Record<string, unknown>) {
-      return React.createElement(
-        React.Suspense,
-        { fallback: React.createElement("div", { "data-testid": "dyn-fallback" }) },
-        React.createElement(Loaded, props),
-      );
-    }
-    return DynamicWrapper;
-  },
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) =>
+    React.createElement("a", { href: to, ...props }, children),
 }));
 
 // Mock sub-components

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const translate = (key: string, params?: Record<string, unknown>) =>
   params && "value" in params ? String(params.value) : key;
-vi.mock("next-intl", () => ({ useTranslations: () => translate }));
+vi.mock("use-intl", () => ({ useTranslations: () => translate }));
 
 const ComboHealthTab = (
   await import("../../../src/app/(dashboard)/dashboard/analytics/ComboHealthTab")

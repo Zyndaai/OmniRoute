@@ -8,7 +8,7 @@ import { kitSelectOptions, kitSelectTriggers } from "../../helpers/kitSelect";
 
 import ModalityBridgeAudioTab from "@/app/(dashboard)/dashboard/settings/components/modalityBridge/ModalityBridgeAudioTab";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 

@@ -7,7 +7,7 @@ export interface CatalogVisibilityPatch {
   modelIds: string[];
 }
 
-// A type alias (not an interface) so the counts can be passed straight to next-intl's t(key, values),
+// A type alias (not an interface) so the counts can be passed straight to use-intl's t(key, values),
 // which takes a Record with an index signature.
 export type CatalogVisibilityCounts = {
   visible: number;

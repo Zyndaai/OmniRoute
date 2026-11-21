@@ -1,5 +1,3 @@
-"use client";
-
 import Icon from "@/shared/components/Icon";
 
 // ExclusionsPanel (#8034) — per-model/endpoint compression exclusion filter.
@@ -11,7 +9,7 @@ import Icon from "@/shared/components/Icon";
 // Default (empty list) preserves pre-existing behavior exactly.
 
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
 import Textarea from "@/shared/components/Textarea";

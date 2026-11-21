@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, type RefObject } from "react";
 import type { JsonViewProps } from "react18-json-view";
 

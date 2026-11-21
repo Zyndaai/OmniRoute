@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { validateApiKey, getModelAliases, setModelAlias, isCloudEnabled } from "@/models";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
@@ -18,7 +17,7 @@ export async function PUT(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json(
+    return Response.json(
       { error: { message: "Invalid request", details: [{ field: "body", message: "Invalid JSON body" }] } },
       { status: 400 }
     );
@@ -27,7 +26,7 @@ export async function PUT(request: Request) {
   try {
     const validation = validateBody(cloudModelAliasUpdateSchema, rawBody);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const { model, alias } = validation.data;
 
@@ -35,7 +34,7 @@ export async function PUT(request: Request) {
     const aliases = await getModelAliases();
     const existingModel = aliases[alias];
     if (existingModel && existingModel !== model) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: `Alias '${alias}' already in use for model '${existingModel}'`,
         },
@@ -49,7 +48,7 @@ export async function PUT(request: Request) {
     // Auto sync to Cloud if enabled
     await syncToCloudIfEnabled();
 
-    return NextResponse.json({
+    return Response.json({
       success: true,
       model,
       alias,
@@ -57,7 +56,7 @@ export async function PUT(request: Request) {
     });
   } catch (error) {
     console.log("Error updating alias:", error);
-    return NextResponse.json({ error: "Failed to update alias" }, { status: 500 });
+    return Response.json({ error: "Failed to update alias" }, { status: 500 });
   }
 }
 
@@ -83,19 +82,19 @@ export async function GET(request) {
     const apiKey = authHeader?.replace("Bearer ", "");
 
     if (!apiKey) {
-      return NextResponse.json({ error: "Missing API key" }, { status: 401 });
+      return Response.json({ error: "Missing API key" }, { status: 401 });
     }
 
     const isValid = await validateApiKey(apiKey);
     if (!isValid) {
-      return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+      return Response.json({ error: "Invalid API key" }, { status: 401 });
     }
 
     const aliases = await getModelAliases();
 
-    return NextResponse.json({ aliases });
+    return Response.json({ aliases });
   } catch (error) {
     console.log("Error fetching aliases:", error);
-    return NextResponse.json({ error: "Failed to fetch aliases" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch aliases" }, { status: 500 });
   }
 }

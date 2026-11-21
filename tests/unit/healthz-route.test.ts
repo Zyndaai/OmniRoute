@@ -1,23 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
-import { createRequire } from "node:module";
 
 import {
   getServerLifecyclePhase,
   markServerReady,
   markServerStopping,
 } from "../../src/lib/serverLifecycle.ts";
+import { isAuthzPath } from "../../src/server/http/authzPaths.ts";
 
 const routeModule = await import("../../src/app/healthz/route.ts");
-const require = createRequire(import.meta.url);
-const { getMiddlewareMatchers } = require("next/dist/build/analysis/get-page-static-info.js");
-const {
-  getMiddlewareRouteMatcher,
-} = require("next/dist/shared/lib/router/utils/middleware-route-matcher.js");
 
 test("/healthz follows the native server lifecycle without static caching", async () => {
-  assert.equal(routeModule.dynamic, "force-dynamic");
   assert.equal(getServerLifecyclePhase(), "starting");
 
   const starting = await routeModule.GET(new Request("http://localhost/healthz"));
@@ -58,7 +52,7 @@ test("/healthz follows the native server lifecycle without static caching", asyn
 });
 
 test("native startup and shutdown hooks drive the health lifecycle", () => {
-  const startupSource = fs.readFileSync("src/instrumentation-node.ts", "utf8");
+  const startupSource = fs.readFileSync("src/server/boot.ts", "utf8");
   const registerStart = startupSource.indexOf("export async function registerNodejs");
   const markStarting = startupSource.indexOf("markServerStarting();", registerStart);
   const firstStartupAwait = startupSource.indexOf("await ", registerStart);
@@ -66,7 +60,8 @@ test("native startup and shutdown hooks drive the health lifecycle", () => {
 
   assert.ok(markStarting > registerStart && markStarting < firstStartupAwait);
   assert.ok(markReady > firstStartupAwait);
-  assert.equal(startupSource.slice(markReady).trim(), "markServerReady();\n}");
+  // markServerReady() is the last statement of registerNodejs().
+  assert.ok(startupSource.slice(markReady).startsWith("markServerReady();\n}\n"));
 
   const shutdownSource = fs.readFileSync("src/lib/gracefulShutdown.ts", "utf8");
   const drainingFlag = shutdownSource.indexOf("state.shuttingDown = true;");
@@ -76,17 +71,7 @@ test("native startup and shutdown hooks drive the health lifecycle", () => {
   assert.ok(markStopping > drainingFlag && markStopping < drainAwait);
 });
 
-test("/healthz bypasses the centralized auth proxy matcher", () => {
-  const proxySource = fs.readFileSync("src/proxy.ts", "utf8");
-  const matcherBlock = proxySource.match(/matcher:\s*\[([\s\S]*?)\]/)?.[1];
-  assert.ok(matcherBlock, "proxy matcher configuration must remain discoverable");
-
-  const configuredMatchers = Array.from(
-    matcherBlock.matchAll(/[\"']([^\"']+)[\"']/g),
-    (match) => match[1]
-  );
-  const matcher = getMiddlewareRouteMatcher(getMiddlewareMatchers(configuredMatchers, "/"));
-
-  assert.equal(matcher("/healthz", { headers: {} }), false);
-  assert.equal(matcher("/api/system/version", { headers: {} }), true);
+test("/healthz bypasses the centralized authz pipeline", () => {
+  assert.equal(isAuthzPath("/healthz"), false);
+  assert.equal(isAuthzPath("/api/system/version"), true);
 });

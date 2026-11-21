@@ -9,7 +9,7 @@ import ProviderTransferPanel from "@/app/(dashboard)/dashboard/settings/componen
 // The decision picker is the shared Select in kit mode (KEA-7886): a Radix combobox, no <select>.
 import { chooseKitSelectValue, kitSelectTriggers, kitSelectValue } from "../../helpers/kitSelect";
 
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
 }));

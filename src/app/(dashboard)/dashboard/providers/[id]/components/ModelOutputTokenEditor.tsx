@@ -1,5 +1,3 @@
-"use client";
-
 import React, { useEffect, useRef, useState } from "react";
 import { Input as KitInput } from "@omniroute/ui-kit/input";
 import { Button } from "@/shared/components";

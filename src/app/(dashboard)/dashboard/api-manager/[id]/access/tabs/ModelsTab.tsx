@@ -1,5 +1,3 @@
-"use client";
-
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
 import Toggle from "@/shared/components/Toggle";
@@ -13,7 +11,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   formatProviderModelPermissionSummary,
   restoreProviderScopeSelection,

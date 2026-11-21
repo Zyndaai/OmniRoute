@@ -2,11 +2,11 @@
  * Authz wiring for the CLIProxyAPI management compatibility routes.
  *
  * The handlers live under src/app/api/v0/management/ and are also reachable at the root
- * `/v0/management/*` through a next.config.mjs rewrite (the path CLIProxyAPI clients call).
- * The root spelling is the dangerous one: a path outside the proxy matcher skips the authz
+ * `/v0/management/*` through a rewrite (the path CLIProxyAPI clients call).
+ * The root spelling is the dangerous one: a path outside the authz path set skips the authz
  * pipeline, so the trusted x-omniroute-auth-* stamps that requireManagementAuth() honours
  * would reach the handler unstripped. These tests pin:
- *   - the proxy matcher covers /v0/... in any case;
+ *   - the authz path set covers /v0/... in any case;
  *   - classifyRoute() treats both spellings as MANAGEMENT on the same normalized path;
  *   - the path is ALWAYS_PROTECTED (authenticated even with login disabled), not PUBLIC,
  *     not CLIENT_API, and not LOCAL_ONLY (remote manage-scope clients are the use case);
@@ -18,8 +18,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { NextRequest } from "next/server";
 
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omr-cliproxy-compat-authz-"));
 const ORIGINAL_ENV = {
@@ -33,7 +31,7 @@ process.env.API_KEY_SECRET = "cliproxy-compat-authz-secret";
 process.env.JWT_SECRET = "cliproxy-compat-authz-jwt";
 process.env.OMNIROUTE_DISABLE_REDIS_AUTH_CACHE = "1";
 
-const { config } = await import("../../../src/proxy.ts");
+const { isAuthzPath } = await import("../../../src/server/http/authzPaths.ts");
 const { classifyRoute } = await import("../../../src/server/authz/classify.ts");
 const routeGuard = await import("../../../src/server/authz/routeGuard.ts");
 const core = await import("../../../src/lib/db/core.ts");
@@ -45,9 +43,6 @@ const manageKey = await apiKeysDb.createApiKey("compat-manage", "machine-authz",
 const clientKey = await apiKeysDb.createApiKey("compat-client", "machine-authz", []);
 // Login disabled: ALWAYS_PROTECTED must still demand a credential.
 await settingsDb.updateSettings({ requireLogin: false });
-
-const require = createRequire(import.meta.url);
-const { tryToParsePath } = require("next/dist/lib/try-to-parse-path.js");
 
 const COMPAT_PATHS = [
   "/v0/management/auth-files",
@@ -65,17 +60,9 @@ test.after(() => {
   }
 });
 
-function isMatchedByProxy(pathname: string): boolean {
-  return (config.matcher as string[]).some((entry) => {
-    // Mirror Next's middleware matcher compilation: regex source only, no flags.
-    const parsed = tryToParsePath(entry);
-    return new RegExp(parsed.regexStr as string).test(pathname);
-  });
-}
-
-test("proxy matcher sends /v0/management/* (any case) through the authz pipeline", () => {
+test("the authz path set sends /v0/management/* (any case) through the authz pipeline", () => {
   for (const p of [...COMPAT_PATHS, "/V0/management/api-call", "/v0/MANAGEMENT/auth-files"]) {
-    assert.equal(isMatchedByProxy(p), true, `${p} must reach the authz pipeline`);
+    assert.equal(isAuthzPath(p), true, `${p} must reach the authz pipeline`);
   }
 });
 
@@ -107,8 +94,11 @@ test("the compat paths are ALWAYS_PROTECTED and not LOCAL_ONLY", () => {
 
 async function run(pathname: string, headers: Record<string, string> = {}) {
   return pipeline.runAuthzPipeline(
-    new NextRequest(`http://localhost:20128${pathname}`, { method: "GET", headers }),
-    { enforce: true }
+    new Request(`http://localhost:20128${pathname}`, { method: "GET", headers }),
+    {
+      enforce: true,
+      next: () => new Response(null, { headers: { "x-test-route-reached": "1" } }),
+    }
   );
 }
 
@@ -133,6 +123,6 @@ test("pipeline: an inference-only key is refused, a manage-scope key is admitted
 
     const manage = await run(p, { authorization: `Bearer ${manageKey.key}` });
     assert.equal(manage.status, 200, `${p} manage key`);
-    assert.equal(manage.headers.get("x-middleware-next"), "1");
+    assert.equal(manage.headers.get("x-test-route-reached"), "1");
   }
 });

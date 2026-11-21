@@ -4,11 +4,9 @@ import {
   type DiscoveryStateEntry,
   type DiscoveryStateRecord,
 } from "@/lib/db/discoveryState";
-import { NextResponse } from "next/server";
 import { getSettings } from "@/lib/db/settings";
 import { resolveResilienceSettings } from "@/lib/resilience/settings";
 import { isConnectionAutoProtected } from "@omniroute/open-sse/services/rateLimitManager/autoProtection.ts";
-export const dynamic = "force-dynamic";
 import { getAuditRequestContext, logAuditEvent } from "@/lib/compliance/index";
 import {
   getProviderAuditTarget,
@@ -209,10 +207,10 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({ connections: safeConnections, total });
+    return Response.json({ connections: safeConnections, total });
   } catch (error) {
     console.log("Error fetching providers:", error);
-    return NextResponse.json({ error: "Failed to fetch providers" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch providers" }, { status: 500 });
   }
 }
 
@@ -229,7 +227,7 @@ export async function POST(request: Request) {
     // Zod validation
     const validation = validateBody(createProviderSchema, body);
     if (isValidationFailure(validation)) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+      return Response.json({ error: validation.error }, { status: 400 });
     }
     const {
       provider: requestedProvider,
@@ -244,7 +242,7 @@ export async function POST(request: Request) {
     } = validation.data;
     const provider = resolveProviderId(requestedProvider);
     if (provider === "cloudflare-ai" && Object.hasOwn(body, "accountId")) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: sanitizeErrorMessage(
             "Use providerSpecificData.accountId instead of top-level accountId"
@@ -258,7 +256,7 @@ export async function POST(request: Request) {
       rejectRetiredCommonChatGptWebProvider(provider);
     if (retirementResponse) return retirementResponse;
     if (allowNoCredential === true && !providerAllowsOptionalApiKey(provider)) {
-      return NextResponse.json(
+      return Response.json(
         { error: "This provider does not allow a connection without a credential" },
         { status: 400 }
       );
@@ -275,7 +273,7 @@ export async function POST(request: Request) {
       isNoAuthProvider;
 
     if (!isValidProvider) {
-      return NextResponse.json({ error: "Invalid provider" }, { status: 400 });
+      return Response.json({ error: "Invalid provider" }, { status: 400 });
     }
 
     let providerSpecificData = incomingPsd || null;
@@ -290,7 +288,7 @@ export async function POST(request: Request) {
         persistedApiKey = JSON.stringify(normalizeChatGptWebStorageState(JSON.parse(apiKey)));
       } catch (error) {
         if (!(error instanceof SyntaxError)) {
-          return NextResponse.json(
+          return Response.json(
             { error: "ChatGPT Web storage state JSON is invalid or contains foreign origins" },
             { status: 400 }
           );
@@ -298,7 +296,7 @@ export async function POST(request: Request) {
         try {
           persistedApiKey = JSON.stringify(chatGptWebStorageStateFromCookieHeader(apiKey));
         } catch {
-          return NextResponse.json(
+          return Response.json(
             { error: "ChatGPT Web storage state JSON or Cookie header is invalid" },
             { status: 400 }
           );
@@ -319,7 +317,7 @@ export async function POST(request: Request) {
         providerSpecificData = { ...(providerSpecificData || {}) };
         delete providerSpecificData.validationId;
       } catch (error) {
-        return NextResponse.json(
+        return Response.json(
           {
             error:
               error instanceof Error
@@ -334,20 +332,20 @@ export async function POST(request: Request) {
     if (isOpenAICompatibleProvider(provider)) {
       const node: any = await resolveProviderNodeForConnection(provider);
       if (!node) {
-        return NextResponse.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
+        return Response.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
       }
 
       // Allow multiple connections for compatible nodes exactly like first-party providers
 
       const hydrated = hydrateCompatibleNodeCreation(provider, node, providerSpecificData, true);
       if (hydrated.error) {
-        return NextResponse.json({ error: sanitizeErrorMessage(hydrated.error) }, { status: 400 });
+        return Response.json({ error: sanitizeErrorMessage(hydrated.error) }, { status: 400 });
       }
       providerSpecificData = hydrated.data;
     } else if (isAnthropicCompatibleProvider(provider)) {
       const node: any = await resolveProviderNodeForConnection(provider);
       if (!node) {
-        return NextResponse.json(
+        return Response.json(
           {
             error: isClaudeCodeCompatibleProvider(provider)
               ? "CC Compatible node not found"
@@ -361,7 +359,7 @@ export async function POST(request: Request) {
 
       const hydrated = hydrateCompatibleNodeCreation(provider, node, providerSpecificData, false);
       if (hydrated.error) {
-        return NextResponse.json({ error: sanitizeErrorMessage(hydrated.error) }, { status: 400 });
+        return Response.json({ error: sanitizeErrorMessage(hydrated.error) }, { status: 400 });
       }
       providerSpecificData = hydrated.data;
     }
@@ -509,10 +507,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ connection: result }, { status: 201 });
+    return Response.json({ connection: result }, { status: 201 });
   } catch (error) {
     console.log("Error creating provider:", error);
-    return NextResponse.json({ error: "Failed to create provider" }, { status: 500 });
+    return Response.json({ error: "Failed to create provider" }, { status: 500 });
   }
 }
 
@@ -527,12 +525,12 @@ export async function PATCH(request: Request) {
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(batchUpdateProviderConnectionsSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return Response.json({ error: validation.error }, { status: 400 });
   }
   const { ids, isActive } = validation.data;
 
@@ -582,7 +580,7 @@ export async function PATCH(request: Request) {
       metadata: { isActive, updated: updatedIds.length, notFound: notFoundIds, ids },
     });
 
-    return NextResponse.json(
+    return Response.json(
       {
         message: `${isActive ? "Activated" : "Deactivated"} ${updatedIds.length} connection(s)`,
         updated: updatedIds.length,
@@ -592,7 +590,7 @@ export async function PATCH(request: Request) {
     );
   } catch (error) {
     console.error("Error batch updating connections:", error);
-    return NextResponse.json({ error: "Failed to batch update connections" }, { status: 500 });
+    return Response.json({ error: "Failed to batch update connections" }, { status: 500 });
   }
 }
 
@@ -606,18 +604,18 @@ export async function DELETE(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   if (!body || typeof body !== "object" || !Array.isArray(body.ids) || body.ids.length === 0) {
-    return NextResponse.json(
+    return Response.json(
       { error: "ids must be a non-empty array of connection IDs" },
       { status: 400 }
     );
   }
 
   if (body.ids.length > 100) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Cannot delete more than 100 connections at once" },
       { status: 400 }
     );
@@ -656,13 +654,13 @@ export async function DELETE(request: Request) {
       metadata: { count: deleted, ids: body.ids },
     });
 
-    return NextResponse.json(
+    return Response.json(
       { message: `Deleted ${deleted} connection(s)`, deleted },
       { status: 200 }
     );
   } catch (error) {
     console.log("Error batch deleting connections:", error);
-    return NextResponse.json({ error: "Failed to batch delete connections" }, { status: 500 });
+    return Response.json({ error: "Failed to batch delete connections" }, { status: 500 });
   }
 }
 

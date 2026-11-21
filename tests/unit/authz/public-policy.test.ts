@@ -8,7 +8,11 @@ import { getMachineTokenSync } from "../../../src/lib/machineToken.ts";
 function ctx(): PolicyContext {
   return {
     request: { method: "GET", headers: new Headers() },
-    classification: { routeClass: "PUBLIC", reason: "public_prefix", normalizedPath: "/api/init" },
+    classification: {
+      routeClass: "PUBLIC",
+      reason: "public_prefix",
+      normalizedPath: "/api/auth/status",
+    },
     requestId: "req_test",
   };
 }
@@ -35,7 +39,7 @@ function cliCtx(overrides: Partial<PolicyContext["request"]> = {}): PolicyContex
     request: {
       method: "GET",
       headers: new Headers({ "x-omniroute-cli-token": getMachineTokenSync() }),
-      ip: "127.0.0.1",
+      socket: { remoteAddress: "127.0.0.1" },
       ...overrides,
     },
     classification: {
@@ -64,7 +68,7 @@ test("publicPolicy stamps the local-CLI subject for a valid loopback machine tok
 
 test("publicPolicy keeps anonymous for a non-loopback peer carrying the token", async () => {
   assert.ok(getMachineTokenSync(), "machine token must resolve for this suite to mean anything");
-  const out = await publicPolicy.evaluate(cliCtx({ ip: "203.0.113.7" }));
+  const out = await publicPolicy.evaluate(cliCtx({ socket: { remoteAddress: "203.0.113.7" } }));
   assert.equal(out.allow, true);
   if (out.allow) assert.equal(out.subject.kind, "anonymous");
 });

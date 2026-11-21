@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useMemo, memo, type ReactNode } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import DataTable from "@/shared/components/DataTable";
 import type { DataTableColumn, DataTableRow } from "@/shared/components/DataTable";

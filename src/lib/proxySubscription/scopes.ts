@@ -3,7 +3,7 @@
  * proxy pool should be bound to.
  *
  * Extracted from `subscriptionService.resolveTargetScopes` so the routing
- * rule is unit-testable without the full DB / Next.js stack.
+ * rule is unit-testable without the full DB / server stack.
  */
 
 import { isFeedlessSubscription } from "./due";

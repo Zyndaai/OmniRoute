@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import {
@@ -21,9 +20,9 @@ const modelsDevActionSchema = z.object({
   syncCapabilities: z.boolean().optional(),
 });
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -43,7 +42,7 @@ export async function GET(request: NextRequest) {
       0
     );
 
-    return NextResponse.json({
+    return Response.json({
       ...status,
       providerCount,
       modelCount,
@@ -51,24 +50,24 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  return Response.json({ error: "Unknown action" }, { status: 400 });
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let rawBody: unknown;
   try {
     rawBody = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
   const validation = validateBody(modelsDevActionSchema, rawBody);
   if (isValidationFailure(validation)) {
-    return NextResponse.json(
+    return Response.json(
       { error: formatValidationMessage(validation.error), details: validation.error.details },
       { status: 400 }
     );
@@ -81,18 +80,18 @@ export async function POST(request: NextRequest) {
       dryRun: dryRun ?? false,
       syncCapabilities: syncCapabilities !== false,
     });
-    return NextResponse.json(result);
+    return Response.json(result);
   }
 
   if (action === "start") {
     startPeriodicSync();
-    return NextResponse.json({ success: true, message: "Periodic sync started" });
+    return Response.json({ success: true, message: "Periodic sync started" });
   }
 
   if (action === "stop") {
     stopPeriodicSync();
-    return NextResponse.json({ success: true, message: "Periodic sync stopped" });
+    return Response.json({ success: true, message: "Periodic sync stopped" });
   }
 
-  return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  return Response.json({ error: "Unknown action" }, { status: 400 });
 }

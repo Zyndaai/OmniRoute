@@ -12,9 +12,8 @@ function policyContext(path: string, ip = "127.0.0.1") {
     request: {
       method: "GET",
       headers: new Headers(buildVideoBridgeDrilldownHeaders("principal-a")),
-      ip,
+      socket: { remoteAddress: ip },
       url: `http://localhost${path}`,
-      nextUrl: { pathname: path },
     },
     classification: {
       routeClass: "MANAGEMENT" as const,

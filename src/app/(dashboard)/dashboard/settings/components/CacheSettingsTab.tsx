@@ -1,7 +1,5 @@
-"use client";
-
 import { useCallback, useEffect, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { Slider } from "@omniroute/ui-kit/slider";
 import { Button, Card, Badge, Input, Toggle, Select, SegmentedControl } from "@/shared/components";
 
