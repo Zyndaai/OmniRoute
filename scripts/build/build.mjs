@@ -29,7 +29,10 @@ import { normalizeBasePath } from "./normalizeBasePath.mjs";
 
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
-/** Worker entry points, as paths relative to the app's working directory. */
+/**
+ * Entry points run by file path (worker_threads / child_process, or an operator's `node <file>`),
+ * as paths relative to the app's working directory.
+ */
 export const WORKER_ENTRIES = [
   // usage/callLogArtifactWriter.ts → resolveCallLogArtifactWorker()
   "src/lib/usage/callLogArtifactWorker",
@@ -37,6 +40,8 @@ export const WORKER_ENTRIES = [
   "src/lib/logExport/exportChild",
   // compression/compressionWorkerPool.ts → resolveWorkerFile()
   "open-sse/services/compression/compressionWorker",
+  // The SQLite -> PostgreSQL transfer, run by an operator at the cut-over (docs/ops runbook).
+  "src/lib/db/backends/transfer/cli",
 ];
 
 const TPROXY_ADDON = "src/mitm/tproxy/native/build/Release/transparent.node";

@@ -1,0 +1,3022 @@
+-- Production SQLite schema (DDL only, no data), migrations 1..222, read 2026-11-22.
+CREATE TABLE _omniroute_migrations (
+      version TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+CREATE TABLE a2a_task_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES a2a_tasks(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    data_json TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE a2a_tasks (
+    id TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT 'submitted',
+    skill_id TEXT,
+    input_json TEXT,
+    output_json TEXT,
+    cost_estimated REAL,
+    cost_actual REAL,
+    routing_explanation TEXT,
+    resilience_trace TEXT,
+    policy_verdict TEXT,
+    api_key_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    expires_at TEXT
+);
+
+CREATE TABLE account_key_limits (
+  account_id       TEXT PRIMARY KEY,
+  max_active_keys  INTEGER,
+  daily_issue_limit  INTEGER,
+  hourly_issue_limit INTEGER,
+  daily_issued     INTEGER NOT NULL DEFAULT 0,
+  hourly_issued    INTEGER NOT NULL DEFAULT 0,
+  last_reset_day   TEXT NOT NULL DEFAULT '',
+  last_reset_hour  TEXT NOT NULL DEFAULT '',
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE agent_bridge_bypass (
+  pattern TEXT PRIMARY KEY,
+  source TEXT NOT NULL CHECK (source IN ('default','user')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE agent_bridge_mappings (
+  agent_id TEXT NOT NULL,
+  source_model TEXT NOT NULL,
+  target_model TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (agent_id, source_model)
+);
+
+CREATE TABLE agent_bridge_state (
+  agent_id TEXT PRIMARY KEY,
+  dns_enabled INTEGER NOT NULL DEFAULT 0,
+  cert_trusted INTEGER NOT NULL DEFAULT 0,
+  setup_completed INTEGER NOT NULL DEFAULT 0,
+  last_started_at TEXT,
+  last_error TEXT
+);
+
+CREATE TABLE agentic_conversations (
+  id TEXT PRIMARY KEY,               -- 'conv_' + uuid, or the raw client
+                                      -- X-Omniroute-Session-Id value when supplied
+  api_key_id TEXT,
+  fingerprint_hash TEXT NOT NULL,     -- fast candidate lookup
+  last_message_count INTEGER NOT NULL,
+  last_messages_hash TEXT NOT NULL,   -- bounded hash, for prefix verification
+  turn_count INTEGER NOT NULL DEFAULT 1,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+
+CREATE TABLE api_key_billing_team_history (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  team_id TEXT NOT NULL,
+  valid_from TEXT NOT NULL,
+  valid_to TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE,
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE RESTRICT,
+  CHECK (valid_to IS NULL OR valid_to > valid_from)
+);
+
+CREATE TABLE api_key_context_sources (
+  api_key_id TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  token TEXT,
+  base_url TEXT,
+  vault_path TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (api_key_id, source_type),
+  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+);
+
+CREATE TABLE api_key_quota_counters (
+  api_key_id    TEXT NOT NULL,
+  dimension_key TEXT NOT NULL,
+  bucket_index  INTEGER NOT NULL,
+  consumed      REAL NOT NULL DEFAULT 0,
+  updated_at    INTEGER NOT NULL,
+  PRIMARY KEY (api_key_id, dimension_key, bucket_index)
+);
+
+CREATE TABLE api_key_quota_limits (
+  api_key_id         TEXT PRIMARY KEY,
+  tpm_limit          INTEGER,
+  rpm_limit          INTEGER,
+  monthly_amount_usd REAL,
+  updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE api_key_token_counters (
+  limit_id      TEXT NOT NULL,
+  window_start  TEXT NOT NULL,
+  tokens_used   INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (limit_id, window_start),
+  FOREIGN KEY (limit_id) REFERENCES api_key_token_limits (id) ON DELETE CASCADE
+);
+
+CREATE TABLE api_key_token_limit_reset_logs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  limit_id      TEXT NOT NULL,
+  reset_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  prev_tokens   INTEGER NOT NULL DEFAULT 0,
+  window_start  TEXT NOT NULL,
+  FOREIGN KEY (limit_id) REFERENCES api_key_token_limits (id) ON DELETE CASCADE
+);
+
+CREATE TABLE "api_key_token_limits" (
+  id              TEXT PRIMARY KEY,
+  api_key_id      TEXT NOT NULL,
+  scope_type      TEXT NOT NULL CHECK (scope_type IN ('model', 'provider', 'global')),
+  scope_value     TEXT NOT NULL DEFAULT '',
+  token_limit     INTEGER NOT NULL CHECK (token_limit > 0),
+  reset_interval  TEXT NOT NULL DEFAULT 'monthly' CHECK (reset_interval IN ('daily', 'weekly', 'monthly')),
+  reset_time      TEXT,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (api_key_id, scope_type, scope_value, reset_interval)
+);
+
+CREATE TABLE api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key TEXT NOT NULL UNIQUE,
+    machine_id TEXT,
+    allowed_models TEXT DEFAULT '[]',
+    no_log INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  , revoked_at TEXT, expires_at TEXT, last_used_at TEXT, key_prefix TEXT, ip_allowlist TEXT, scopes TEXT, allowed_combos TEXT, throttle_delay_ms INTEGER, stream_default_mode TEXT NOT NULL DEFAULT 'legacy', allowed_quotas TEXT NOT NULL DEFAULT '[]', disable_non_public_models INTEGER NOT NULL DEFAULT 0, usage_limit_enabled INTEGER NOT NULL DEFAULT 0, daily_usage_limit_usd REAL, weekly_usage_limit_usd REAL, cache_default_mode TEXT NOT NULL DEFAULT 'legacy', model_access_mode TEXT NOT NULL DEFAULT 'all'
+CHECK (model_access_mode IN ('all', 'restricted')), compression_enabled INTEGER NOT NULL DEFAULT 1, blocked_models TEXT, allowed_connections TEXT, auto_resolve INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, access_schedule TEXT, max_requests_per_day INTEGER, max_requests_per_minute INTEGER, max_sessions INTEGER NOT NULL DEFAULT 0, rate_limits TEXT, is_banned INTEGER NOT NULL DEFAULT 0, key_hash TEXT, proxy_id TEXT, allowed_endpoints TEXT, allow_usage_command INTEGER NOT NULL DEFAULT 0, chaos_mode_enabled INTEGER NOT NULL DEFAULT 0, allow_auto_combos INTEGER NOT NULL DEFAULT 1, catalog_scope TEXT NOT NULL DEFAULT 'all' CHECK (catalog_scope IN ('all', 'combos', 'models')), codex_service_mode TEXT NOT NULL DEFAULT 'inherit'
+  CHECK (codex_service_mode IN ('inherit', 'default', 'priority', 'flex')), forced_model TEXT, preferred_connections TEXT, source TEXT NOT NULL DEFAULT 'manual', allow_cc_discovery_aliases INTEGER NOT NULL DEFAULT 1);
+
+CREATE TABLE audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT 'system',
+      target TEXT,
+      details TEXT,
+      ip_address TEXT,
+      resource_type TEXT,
+      status TEXT,
+      request_id TEXT,
+      metadata TEXT
+    );
+
+CREATE TABLE auto_candidate_overrides (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  auto_channel TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  excluded INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  UNIQUE(api_key_id, auto_channel, connection_id)
+);
+
+CREATE TABLE badge_definitions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  icon TEXT,
+  category TEXT,
+  rarity TEXT NOT NULL DEFAULT 'common',
+  criteria TEXT,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE batch_item_checkpoints (
+  batch_id TEXT NOT NULL,
+  line_number INTEGER NOT NULL,
+  custom_id TEXT,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'completed', 'errored')),
+  result_json TEXT,
+  error_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (batch_id, line_number),
+  FOREIGN KEY(batch_id) REFERENCES batches(id) ON DELETE CASCADE
+);
+
+CREATE TABLE batches (
+  id TEXT PRIMARY KEY,
+  endpoint TEXT NOT NULL,
+  completion_window TEXT NOT NULL,
+  status TEXT NOT NULL,
+  input_file_id TEXT NOT NULL,
+  output_file_id TEXT,
+  error_file_id TEXT,
+  created_at INTEGER NOT NULL,
+  in_progress_at INTEGER,
+  expires_at INTEGER,
+  finalizing_at INTEGER,
+  completed_at INTEGER,
+  failed_at INTEGER,
+  expired_at INTEGER,
+  cancelling_at INTEGER,
+  cancelled_at INTEGER,
+  request_counts_total INTEGER DEFAULT 0,
+  request_counts_completed INTEGER DEFAULT 0,
+  request_counts_failed INTEGER DEFAULT 0,
+  metadata TEXT,
+  api_key_id TEXT,
+  errors TEXT,
+  model TEXT,
+  usage TEXT,
+  output_expires_after_seconds INTEGER,
+  output_expires_after_anchor TEXT,
+  FOREIGN KEY(input_file_id) REFERENCES files(id),
+  FOREIGN KEY(output_file_id) REFERENCES files(id),
+  FOREIGN KEY(error_file_id) REFERENCES files(id)
+);
+
+CREATE TABLE cache_metrics (
+        key TEXT PRIMARY KEY,
+        value INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+CREATE TABLE call_logs (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    method TEXT,
+    path TEXT,
+    status INTEGER,
+    model TEXT,
+    requested_model TEXT,
+    provider TEXT,
+    account TEXT,
+    connection_id TEXT,
+    duration INTEGER DEFAULT 0,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    tokens_cache_read INTEGER DEFAULT NULL,
+    tokens_cache_creation INTEGER DEFAULT NULL,
+    tokens_reasoning INTEGER DEFAULT NULL,
+    tokens_compressed INTEGER DEFAULT NULL,
+    cache_source TEXT DEFAULT "upstream",
+    request_type TEXT,
+    source_format TEXT,
+    target_format TEXT,
+    api_key_id TEXT,
+    api_key_name TEXT,
+    combo_name TEXT,
+    combo_step_id TEXT,
+    combo_execution_key TEXT,
+    error_summary TEXT,
+    detail_state TEXT DEFAULT 'none',
+    artifact_relpath TEXT,
+    artifact_size_bytes INTEGER DEFAULT NULL,
+    artifact_sha256 TEXT DEFAULT NULL,
+    has_request_body INTEGER DEFAULT 0,
+    has_response_body INTEGER DEFAULT 0,
+    has_pipeline_details INTEGER DEFAULT 0,
+    request_summary TEXT,
+    correlation_id TEXT
+  , video_content_removed INTEGER NOT NULL DEFAULT 0, model_pinned INTEGER DEFAULT 0, session_tag TEXT DEFAULT NULL, reasoning_source TEXT DEFAULT NULL, reasoning_chars INTEGER DEFAULT NULL, response_id TEXT DEFAULT NULL, error_type TEXT DEFAULT NULL, ttft_ms INTEGER DEFAULT NULL, added_wait_ms INTEGER DEFAULT NULL, added_wait_cause TEXT DEFAULT NULL, reasoning_duration_ms INTEGER DEFAULT NULL, reasoning_effort_requested TEXT DEFAULT NULL, reasoning_effort_upstream TEXT DEFAULT NULL, reasoning_encrypted INTEGER DEFAULT NULL, has_content INTEGER DEFAULT NULL, usage_provenance TEXT DEFAULT NULL, resilience_actions TEXT DEFAULT NULL, detail_pending_until INTEGER DEFAULT NULL, client_session_id TEXT DEFAULT NULL);
+
+CREATE TABLE ccr_blocks (
+  principal_id     TEXT    NOT NULL,
+  hash             TEXT    NOT NULL,
+  content          TEXT    NOT NULL,
+  bytes            INTEGER NOT NULL,
+  chars            INTEGER NOT NULL,
+  lines            INTEGER NOT NULL,
+  content_type     TEXT    NOT NULL DEFAULT 'text/plain',
+  source           TEXT    NOT NULL DEFAULT 'compression',
+  created_at       INTEGER NOT NULL,
+  last_accessed_at INTEGER NOT NULL,
+  expires_at       INTEGER NOT NULL,
+  PRIMARY KEY (principal_id, hash)
+);
+
+CREATE TABLE cli_access_tokens (
+  id           TEXT PRIMARY KEY,
+  token_hash   TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'read',
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  expires_at   TEXT,
+  revoked_at   TEXT
+);
+
+CREATE TABLE cloud_agent_credentials (
+  provider_id TEXT PRIMARY KEY,
+  api_key_encrypted TEXT NOT NULL,
+  base_url TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE codex_wakeup_runs (
+  id                TEXT    PRIMARY KEY,
+  task_id           TEXT    NOT NULL,
+  task_name         TEXT    NOT NULL,
+  trigger_kind      TEXT    NOT NULL CHECK (trigger_kind IN ('scheduled','manual')),
+  status            TEXT    NOT NULL
+                    CHECK (status IN ('running','succeeded','failed','skipped','partial','interrupted')),
+  results           TEXT    NOT NULL DEFAULT '[]',
+  started_at        TEXT    NOT NULL,
+  finished_at       TEXT,
+  lease_expires_at  INTEGER NOT NULL
+);
+
+CREATE TABLE codex_wakeup_tasks (
+  id              TEXT    PRIMARY KEY,
+  name            TEXT    NOT NULL,
+  connection_ids  TEXT    NOT NULL,
+  schedule        TEXT    NOT NULL,
+  enabled         INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0,1)),
+  next_run_at     TEXT,
+  created_at      TEXT    NOT NULL,
+  updated_at      TEXT    NOT NULL
+);
+
+CREATE TABLE combo_adaptation_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    combo_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    learned_score REAL DEFAULT 0.5,
+    request_count INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    avg_latency_ms REAL,
+    last_failure_at TEXT,
+    excluded_until TEXT,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(combo_id, provider_id)
+);
+
+CREATE TABLE combos (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    data TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  , system_message TEXT DEFAULT NULL, tool_filter_regex TEXT DEFAULT NULL, context_cache_protection INTEGER DEFAULT 0);
+
+CREATE TABLE command_code_auth_sessions (
+  id TEXT PRIMARY KEY,
+  state_hash TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'received', 'applied', 'expired')),
+  encrypted_api_key TEXT,
+  metadata_json TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  received_at TEXT,
+  applied_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE community_servers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  api_key_hash TEXT NOT NULL,
+  connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_sync_at TEXT,
+  status TEXT NOT NULL DEFAULT 'connected' CHECK (status IN ('connected', 'disconnected', 'error')),
+  error_message TEXT
+);
+
+CREATE TABLE compression_analytics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,
+  combo_id TEXT,
+  provider TEXT,
+  mode TEXT NOT NULL,
+  original_tokens INTEGER NOT NULL,
+  compressed_tokens INTEGER NOT NULL,
+  tokens_saved INTEGER NOT NULL,
+  duration_ms INTEGER,
+  request_id TEXT
+, actual_prompt_tokens INTEGER, actual_completion_tokens INTEGER, actual_total_tokens INTEGER, actual_cache_read_tokens INTEGER, actual_cache_write_tokens INTEGER, estimated_usd_saved REAL, mcp_description_tokens_saved INTEGER DEFAULT 0, multimodal_skip_count INTEGER DEFAULT 0, receipt_source TEXT, validation_fallback INTEGER DEFAULT 0, output_mode TEXT, compression_combo_id TEXT, engine TEXT, rtk_raw_output_pointer TEXT, rtk_raw_output_bytes INTEGER, rtk_raw_output_pointers TEXT, rtk_raw_output_total_bytes INTEGER, skip_reason TEXT);
+
+CREATE TABLE compression_cache_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  compression_mode TEXT NOT NULL,
+  cache_control_present INTEGER NOT NULL DEFAULT 0,
+  estimated_cache_hit INTEGER NOT NULL DEFAULT 0,
+  tokens_saved_compression INTEGER NOT NULL DEFAULT 0,
+  tokens_saved_caching INTEGER NOT NULL DEFAULT 0,
+  net_savings INTEGER NOT NULL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE compression_combo_assignments (
+  id TEXT PRIMARY KEY,
+  compression_combo_id TEXT NOT NULL REFERENCES compression_combos(id) ON DELETE CASCADE,
+  routing_combo_id TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(routing_combo_id)
+);
+
+CREATE TABLE compression_combos (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  pipeline TEXT NOT NULL DEFAULT '[]',
+  language_packs TEXT DEFAULT '["en"]',
+  output_mode INTEGER DEFAULT 0,
+  output_mode_intensity TEXT DEFAULT 'full',
+  is_default INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+, output_styles TEXT DEFAULT '[]');
+
+CREATE TABLE compression_engine_breakdown (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL,
+      request_id TEXT,
+      engine TEXT NOT NULL,
+      original_tokens INTEGER NOT NULL DEFAULT 0,
+      compressed_tokens INTEGER NOT NULL DEFAULT 0,
+      tokens_saved INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER
+    );
+
+CREATE TABLE compression_run_telemetry (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp INTEGER NOT NULL,
+      request_id TEXT,
+      model TEXT,
+      provider TEXT,
+      source TEXT,
+      tokens_before INTEGER NOT NULL,
+      tokens_after INTEGER NOT NULL,
+      ratio REAL,
+      cost_delta REAL,
+      output_styles TEXT,
+      output_style_bypass TEXT,
+      output_tokens INTEGER
+    );
+
+CREATE TABLE config_audit_log (
+  id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  target_name TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT,
+  diff_json TEXT NOT NULL,
+  source TEXT NOT NULL,
+  note TEXT
+);
+
+CREATE TABLE connection_runtime_state (
+  connection_id TEXT PRIMARY KEY REFERENCES provider_connections(id) ON DELETE CASCADE,
+  refresh_circuit_streak INTEGER DEFAULT 0,
+  refresh_circuit_until TEXT,
+  refresh_last_fail_at TEXT,
+  warmup_circuit_streak INTEGER DEFAULT 0,
+  warmup_circuit_until TEXT,
+  warmup_last_fail_at TEXT,
+  last_warmup_at TEXT,
+  last_warmup_result TEXT,
+  warmup_tokens_used INTEGER DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE context_handoffs (
+  id                    TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+  session_id            TEXT NOT NULL,
+  combo_name            TEXT NOT NULL,
+  from_account          TEXT NOT NULL,
+  summary               TEXT NOT NULL,
+  key_decisions         TEXT NOT NULL DEFAULT '[]',
+  task_progress         TEXT NOT NULL DEFAULT '',
+  active_entities       TEXT NOT NULL DEFAULT '[]',
+  message_count         INTEGER NOT NULL DEFAULT 0,
+  model                 TEXT NOT NULL DEFAULT '',
+  warning_threshold_pct REAL NOT NULL DEFAULT 0.85,
+  generated_at          TEXT NOT NULL,
+  expires_at            TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+, last_model TEXT);
+
+CREATE TABLE conversation_turn_nodes (
+  id TEXT PRIMARY KEY,               -- chain hash, see above
+  conversation_id TEXT NOT NULL,     -- agentic_conversations.id (this chain's conversation)
+  parent_id TEXT,                    -- NULL for the first turn of the chain
+  role TEXT NOT NULL,
+  content_hash TEXT NOT NULL DEFAULT '', -- sha256(role+text) — reconnect-anchor lookup AND
+                                      -- the key the tree API resolves display content by
+  last_correlation_id TEXT,          -- call_logs.correlation_id of the request that
+                                      -- (re)touched this node — resolveConversationId
+                                      -- runs before the call_logs row's own id exists,
+                                      -- but correlation_id (109_call_logs_correlation_id)
+                                      -- is already generated earlier in the same request
+                                      -- and is available synchronously; the tree API route
+                                      -- joins through it to the call_logs artifact holding
+                                      -- this node's actual display content
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+
+CREATE TABLE daily_team_usage_summary (
+  team_id TEXT NOT NULL,
+  api_key_id TEXT NOT NULL,
+  api_key_name TEXT,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  service_tier TEXT NOT NULL DEFAULT 'standard',
+  date TEXT NOT NULL,
+  total_requests INTEGER NOT NULL DEFAULT 0,
+  successful_requests INTEGER NOT NULL DEFAULT 0,
+  total_input_tokens INTEGER NOT NULL DEFAULT 0,
+  total_output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  total_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  total_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  successful_input_tokens INTEGER NOT NULL DEFAULT 0,
+  successful_output_tokens INTEGER NOT NULL DEFAULT 0,
+  successful_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  successful_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  successful_reasoning_tokens INTEGER NOT NULL DEFAULT 0, token_shapes_json TEXT, successful_token_shapes_json TEXT,
+  PRIMARY KEY (team_id, api_key_id, provider, model, service_tier, date),
+  FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE daily_usage_summary (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  date TEXT NOT NULL, -- Format: YYYY-MM-DD
+  total_requests INTEGER NOT NULL DEFAULT 0,
+  total_input_tokens INTEGER NOT NULL DEFAULT 0,
+  total_output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_cost REAL NOT NULL DEFAULT 0.0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE db_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+
+CREATE TABLE discovery_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider_id TEXT NOT NULL,
+  method TEXT NOT NULL CHECK(method IN ('free_tier', 'web_cookie', 'auto_register', 'trial', 'public_api')),
+  endpoint TEXT,
+  auth_type TEXT CHECK(auth_type IN ('none', 'cookie', 'api_key', 'oauth')),
+  models TEXT, -- JSON array
+  rate_limit TEXT,
+  feasibility INTEGER CHECK(feasibility BETWEEN 1 AND 5),
+  risk_level TEXT CHECK(risk_level IN ('none', 'low', 'medium', 'high', 'critical')),
+  status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'testing', 'verified', 'rejected')),
+  notes TEXT,
+  discovered_at TEXT DEFAULT (datetime('now')),
+  verified_at TEXT,
+  UNIQUE(provider_id, method, endpoint)
+);
+
+CREATE TABLE domain_budget_reset_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id TEXT NOT NULL,
+    reset_interval TEXT NOT NULL,
+    previous_spend REAL NOT NULL DEFAULT 0,
+    reset_at INTEGER NOT NULL,
+    next_reset_at INTEGER NOT NULL,
+    period_start INTEGER NOT NULL,
+    period_end INTEGER NOT NULL
+  );
+
+CREATE TABLE domain_budgets (
+    api_key_id TEXT PRIMARY KEY,
+    daily_limit_usd REAL NOT NULL,
+    weekly_limit_usd REAL DEFAULT 0,
+    monthly_limit_usd REAL DEFAULT 0,
+    warning_threshold REAL DEFAULT 0.8,
+    reset_interval TEXT DEFAULT 'daily',
+    reset_time TEXT DEFAULT '00:00',
+    budget_reset_at INTEGER,
+    last_budget_reset_at INTEGER,
+    warning_emitted_at INTEGER,
+    warning_period_start INTEGER
+  );
+
+CREATE TABLE domain_circuit_breakers (
+    name TEXT PRIMARY KEY,
+    state TEXT NOT NULL DEFAULT 'CLOSED',
+    failure_count INTEGER DEFAULT 0,
+    last_failure_time INTEGER,
+    options TEXT
+  );
+
+CREATE TABLE domain_cost_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id TEXT NOT NULL,
+    cost REAL NOT NULL,
+    timestamp INTEGER NOT NULL
+  );
+
+CREATE TABLE domain_fallback_chains (
+    model TEXT PRIMARY KEY,
+    chain TEXT NOT NULL
+  );
+
+CREATE TABLE domain_lockout_state (
+    identifier TEXT PRIMARY KEY,
+    attempts TEXT NOT NULL,
+    locked_until INTEGER
+  );
+
+CREATE TABLE eval_cases (
+  id TEXT PRIMARY KEY,
+  suite_id TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  model TEXT,
+  input_json TEXT NOT NULL,
+  expected_strategy TEXT NOT NULL,
+  expected_value TEXT,
+  tags_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE eval_runs (
+  id TEXT PRIMARY KEY,
+  run_group_id TEXT,
+  suite_id TEXT NOT NULL,
+  suite_name TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT,
+  target_label TEXT NOT NULL,
+  api_key_id TEXT,
+  pass_rate INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  passed INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  avg_latency_ms INTEGER NOT NULL DEFAULT 0,
+  summary_json TEXT NOT NULL,
+  results_json TEXT NOT NULL,
+  outputs_json TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE eval_suites (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE exclusive_connection_leases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lease_owner_hash TEXT NOT NULL
+    CHECK (length(lease_owner_hash) = 64 AND lease_owner_hash = lower(lease_owner_hash)),
+  api_key_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  generation INTEGER NOT NULL CHECK (generation > 0),
+  state TEXT NOT NULL
+    CHECK (state IN ('ACTIVE', 'RELEASED', 'EXPIRED', 'INVALIDATED')),
+  acquired_at TEXT NOT NULL,
+  renewed_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  ended_at TEXT,
+  end_reason TEXT
+);
+
+CREATE TABLE files (
+  id TEXT PRIMARY KEY,
+  bytes INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  content BLOB,
+  mime_type TEXT,
+  api_key_id TEXT,
+  deleted_at INTEGER,
+  expires_at INTEGER
+);
+
+CREATE TABLE free_proxies (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,          -- '1proxy' | 'proxifly' | 'iplocate'
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  type TEXT NOT NULL DEFAULT 'http',
+  country_code TEXT,
+  quality_score INTEGER,
+  latency_ms INTEGER,
+  anonymity TEXT,
+  last_validated TEXT,
+  in_pool INTEGER DEFAULT 0,     -- 0 = not in registry, 1 = promoted to proxy_registry
+  pool_proxy_id TEXT,            -- FK para proxy_registry.id se in_pool=1
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(source, host, port)
+);
+
+CREATE TABLE free_proxy_sync_errors (
+  source TEXT PRIMARY KEY,
+  errors TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE group_model_permissions (
+  id TEXT PRIMARY KEY NOT NULL,
+  group_id TEXT NOT NULL,
+  -- Model identifier (supports wildcards: "gpt-*", "claude-*", "*" for all)
+  model_pattern TEXT NOT NULL,
+  -- Provider constraint (NULL = any provider, otherwise specific provider ID)
+  provider TEXT,
+  -- Allow or deny
+  access_type TEXT NOT NULL DEFAULT 'allow' CHECK(access_type IN ('allow', 'deny')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (group_id) REFERENCES key_groups(id) ON DELETE CASCADE
+);
+
+CREATE TABLE hourly_usage_summary (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  date_hour TEXT NOT NULL, -- Format: YYYY-MM-DD HH:00:00
+  total_requests INTEGER NOT NULL DEFAULT 0,
+  total_input_tokens INTEGER NOT NULL DEFAULT 0,
+  total_output_tokens INTEGER NOT NULL DEFAULT 0,
+  total_cost REAL NOT NULL DEFAULT 0.0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE inspector_custom_hosts (
+  host TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  label TEXT,
+  kind TEXT NOT NULL DEFAULT 'custom' CHECK (kind IN ('llm','app','custom')),
+  added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TEXT
+);
+
+CREATE TABLE inspector_session_requests (
+  session_id TEXT NOT NULL REFERENCES inspector_sessions(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+
+CREATE TABLE inspector_sessions (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  profile TEXT CHECK (profile IN ('llm','custom','all'))
+);
+
+CREATE TABLE invite_tokens (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL,
+  used_by TEXT,
+  server_url TEXT,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  use_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE job_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  started_at TEXT NOT NULL,                  -- ISO-8601, written explicitly by recordRun (no DB default)
+  finished_at TEXT,                          -- ISO-8601; NULL while running
+  status TEXT NOT NULL DEFAULT 'running',    -- 'running' | 'success' | 'failure'
+  error_message TEXT,                        -- sanitized error message (no stack trace)
+  records_affected INTEGER DEFAULT 0,        -- job-specific meaning (see below)
+  duration_ms INTEGER,                       -- execution duration in ms
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE jobs (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL DEFAULT 'interval' CHECK(type IN ('interval', 'cron')),
+  cron TEXT,                                 -- cron expression (type='cron'); NULL for interval jobs
+  interval_ms INTEGER,                       -- interval in ms (type='interval'); NULL for cron jobs
+  enabled INTEGER NOT NULL DEFAULT 1,        -- 0=disabled, 1=enabled
+  env_flag TEXT,                             -- env var name (boolean gate), e.g. 'OMNIROUTE_WARMUP_ENABLED'; NULL = no gate
+  config TEXT NOT NULL DEFAULT '{}',         -- JSON config (concurrency, timezone, envDefault, ...)
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE key_group_members (
+  key_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (key_id, group_id),
+  FOREIGN KEY (group_id) REFERENCES key_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+);
+
+CREATE TABLE key_groups (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE key_value (
+    namespace TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (namespace, key)
+  );
+
+CREATE TABLE leaderboard (
+  api_key_id TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'global',
+  score INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (api_key_id, scope)
+) WITHOUT ROWID;
+
+CREATE TABLE log_export_destinations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  config TEXT NOT NULL DEFAULT '{}',
+  batch_size INTEGER NOT NULL DEFAULT 500,
+  include_bodies INTEGER NOT NULL DEFAULT 0,
+  max_body_bytes INTEGER NOT NULL DEFAULT 262144,
+  max_rows_per_run INTEGER NOT NULL DEFAULT 10000,
+  cursor_row_id INTEGER NOT NULL DEFAULT 0,
+  exported_total INTEGER NOT NULL DEFAULT 0,
+  last_run_at TEXT,
+  last_status TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE mcp_tool_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT NOT NULL,
+    input_hash TEXT,
+    output_summary TEXT,
+    duration_ms INTEGER,
+    api_key_id TEXT,
+    success INTEGER DEFAULT 1,
+    error_code TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  session_id TEXT,
+  type TEXT NOT NULL CHECK(type IN ('factual', 'episodic', 'procedural', 'semantic')),
+  key TEXT,
+  content TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT
+, memory_id INTEGER, needs_reindex INTEGER NOT NULL DEFAULT 0, access_count INTEGER NOT NULL DEFAULT 0, last_accessed_at TEXT);
+
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+  content,
+  key,
+  content='memories',
+  content_rowid='memory_id'
+);
+
+CREATE TABLE 'memory_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+
+CREATE TABLE 'memory_fts_data'(id INTEGER PRIMARY KEY, block BLOB);
+
+CREATE TABLE 'memory_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+
+CREATE TABLE 'memory_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+CREATE TABLE memory_vec_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  active_dim INTEGER,
+  embedding_signature TEXT,
+  last_reset_at TEXT,
+  vec_loaded INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE middleware_hooks (
+  name TEXT PRIMARY KEY NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  priority INTEGER NOT NULL DEFAULT 200,
+  scope_type TEXT NOT NULL DEFAULT 'global' CHECK(scope_type IN ('global', 'combo')),
+  combo_id TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  code TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  run_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+
+CREATE TABLE middleware_logs (
+  id TEXT PRIMARY KEY NOT NULL,
+  hook_name TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  mutated INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (hook_name) REFERENCES middleware_hooks(name) ON DELETE CASCADE
+);
+
+CREATE TABLE model_capabilities (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  tool_call BOOLEAN,
+  reasoning BOOLEAN,
+  attachment BOOLEAN,
+  structured_output BOOLEAN,
+  temperature BOOLEAN,
+  modalities_input TEXT,
+  modalities_output TEXT,
+  knowledge_cutoff TEXT,
+  release_date TEXT,
+  last_updated TEXT,
+  status TEXT,
+  family TEXT,
+  open_weights BOOLEAN,
+  limit_context INTEGER,
+  limit_input INTEGER,
+  limit_output INTEGER,
+  interleaved_field TEXT,
+  last_synced TEXT, reasoning_efforts TEXT DEFAULT NULL,
+  PRIMARY KEY (provider, model_id)
+);
+
+CREATE TABLE model_capability_overrides (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  override_key TEXT NOT NULL,
+  override_value TEXT NOT NULL,
+  refreshed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, model_id, override_key)
+) WITHOUT ROWID;
+
+CREATE TABLE model_combo_mappings (
+  id TEXT PRIMARY KEY,
+  pattern TEXT NOT NULL,           -- glob pattern, e.g. 'claude-*-opus*'
+  combo_id TEXT NOT NULL,          -- references combos.id
+  priority INTEGER DEFAULT 0,     -- higher = checked first
+  enabled INTEGER DEFAULT 1,      -- 0 = disabled, 1 = enabled
+  description TEXT DEFAULT '',     -- optional human-readable label
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (combo_id) REFERENCES combos(id) ON DELETE CASCADE
+);
+
+CREATE TABLE model_context_overrides (
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  real_context INTEGER NOT NULL,          -- the corrected context window (tokens), > 0
+  source TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'auto:discovery'
+  refreshed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, model_id)
+) WITHOUT ROWID;
+
+CREATE TABLE model_intelligence (
+  model TEXT NOT NULL,
+  source TEXT NOT NULL,           -- 'arena_elo' | 'models_dev_tier' | 'user_override'
+  category TEXT NOT NULL,         -- 'coding' | 'review' | 'planning' | 'analysis' | 'debugging' | 'documentation' | 'default'
+  score REAL NOT NULL,            -- [0..1] normalized fitness score
+  elo_raw INTEGER,                -- original ELO if source='arena_elo'
+  confidence TEXT,                -- 'high' | 'medium' | 'low' or CI string like '+10/-8'
+  synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT,                -- TTL for auto-invalidated scores (NULL = never expires)
+  PRIMARY KEY (model, source, category)
+) WITHOUT ROWID;
+
+CREATE TABLE playground_presets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  model TEXT NOT NULL,
+  system TEXT,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE plugin_analytics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plugin_name TEXT NOT NULL,
+  hook TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  success INTEGER NOT NULL DEFAULT 1,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE plugin_metrics (
+  plugin_name TEXT NOT NULL,
+  event TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0,
+  errors INTEGER NOT NULL DEFAULT 0,
+  total_duration_ms REAL NOT NULL DEFAULT 0,
+  last_called_at TEXT,
+  PRIMARY KEY (plugin_name, event)
+);
+
+CREATE TABLE plugins (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  description TEXT,
+  author TEXT,
+  license TEXT DEFAULT 'MIT',
+  main TEXT NOT NULL DEFAULT 'index.js',
+  source TEXT NOT NULL DEFAULT 'local',
+  tags TEXT DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'installed'
+    CHECK (status IN ('installed', 'active', 'inactive', 'error')),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  manifest TEXT NOT NULL,
+  config TEXT DEFAULT '{}',
+  config_schema TEXT DEFAULT '{}',
+  hooks TEXT DEFAULT '[]',
+  permissions TEXT DEFAULT '[]',
+  plugin_dir TEXT NOT NULL,
+  error_message TEXT,
+  installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  activated_at TEXT
+);
+
+CREATE TABLE provider_connections (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    auth_type TEXT,
+    name TEXT,
+    email TEXT,
+    priority INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at TEXT,
+    token_expires_at TEXT,
+    scope TEXT,
+    project_id TEXT,
+    test_status TEXT,
+    error_code TEXT,
+    last_error TEXT,
+    last_error_at TEXT,
+    last_error_type TEXT,
+    last_error_source TEXT,
+    backoff_level INTEGER DEFAULT 0,
+    rate_limited_until TEXT,
+    health_check_interval INTEGER,
+    last_health_check_at TEXT,
+    last_tested TEXT,
+    api_key TEXT,
+    id_token TEXT,
+    provider_specific_data TEXT,
+    expires_in INTEGER,
+    display_name TEXT,
+    global_priority INTEGER,
+    default_model TEXT,
+    token_type TEXT,
+    consecutive_use_count INTEGER DEFAULT 0,
+    rate_limit_protection INTEGER DEFAULT 0,
+    last_used_at TEXT,
+    "group" TEXT,
+    max_concurrent INTEGER,
+    proxy_enabled INTEGER NOT NULL DEFAULT 1,
+    per_key_proxy_enabled INTEGER NOT NULL DEFAULT 0,
+    quota_visible INTEGER NOT NULL DEFAULT 1,
+    quota_window_thresholds_json TEXT,
+    rate_limit_overrides_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  , last_ping_at TEXT, last_pinged_reset_key TEXT, synced_models_at TEXT);
+
+CREATE TABLE provider_key_limits (
+  provider         TEXT PRIMARY KEY,
+  max_active_keys  INTEGER,   -- null = unlimited
+  daily_issue_limit  INTEGER, -- max keys per day
+  hourly_issue_limit INTEGER, -- max keys per hour
+  daily_issued     INTEGER NOT NULL DEFAULT 0,
+  hourly_issued    INTEGER NOT NULL DEFAULT 0,
+  last_reset_day   TEXT NOT NULL DEFAULT '',
+  last_reset_hour  TEXT NOT NULL DEFAULT '',
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE provider_nodes (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    prefix TEXT,
+    api_type TEXT,
+    base_url TEXT,
+    chat_path TEXT,
+    models_path TEXT,
+    custom_headers_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  , icon_url TEXT, daily_quota_reset_timezone TEXT, daily_quota_reset_hour INTEGER);
+
+CREATE TABLE provider_plans (
+  connection_id TEXT PRIMARY KEY,           -- 1:1 with provider_connections; NULL not allowed since it is PK
+  provider TEXT NOT NULL,
+  dimensions_json TEXT NOT NULL,            -- JSON array of QuotaDimension
+  source TEXT NOT NULL CHECK (source IN ('auto','manual')) DEFAULT 'manual',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE provider_quota_reset_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  window_key TEXT NOT NULL,
+  window_started_at TEXT NOT NULL,
+  window_resets_at TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  previous_remaining_percentage REAL,
+  new_remaining_percentage REAL,
+  previous_used_percentage REAL,
+  new_used_percentage REAL,
+  raw_data TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(connection_id, window_key, window_started_at, window_resets_at)
+);
+
+CREATE TABLE provider_quota_state (
+  connection_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tokens_used INTEGER NOT NULL DEFAULT 0,
+  token_limit INTEGER NOT NULL DEFAULT 0,
+  window_start INTEGER NOT NULL,
+  window_reset INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (connection_id, model)
+);
+
+CREATE TABLE proxy_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  proxy_id TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  scope_id TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(scope, scope_id, proxy_id),
+  FOREIGN KEY (proxy_id) REFERENCES proxy_registry(id) ON DELETE RESTRICT
+);
+
+CREATE TABLE proxy_logs (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    status TEXT,
+    proxy_type TEXT,
+    proxy_host TEXT,
+    proxy_port INTEGER,
+    level TEXT,
+    level_id TEXT,
+    provider TEXT,
+    target_url TEXT,
+    public_ip TEXT,
+    latency_ms INTEGER DEFAULT 0,
+    error TEXT,
+    connection_id TEXT,
+    combo_id TEXT,
+    account TEXT,
+    tls_fingerprint INTEGER DEFAULT 0
+  , egress_ip TEXT, upstream_status INTEGER, proxy_name TEXT, rotation_account TEXT, correlation_id TEXT, attempt_number INTEGER, attempt_issue TEXT, headers_ms INTEGER DEFAULT NULL, first_chunk_ms INTEGER DEFAULT NULL);
+
+CREATE TABLE proxy_operator_egress (
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  address TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  PRIMARY KEY (host, port, address)
+);
+
+CREATE TABLE proxy_registry (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  username TEXT,
+  password TEXT,
+  region TEXT,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+, source TEXT NOT NULL DEFAULT 'manual', quality_score INTEGER, latency_ms INTEGER, anonymity TEXT, google_access INTEGER DEFAULT 0, last_validated TEXT, country_code TEXT, family TEXT NOT NULL DEFAULT 'auto', subscription_id TEXT);
+
+CREATE TABLE proxy_scope_rotation (
+  scope TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  strategy TEXT NOT NULL DEFAULT 'round-robin',
+  cursor INTEGER NOT NULL DEFAULT 0,
+  sticky_window_minutes INTEGER NOT NULL DEFAULT 30,
+  rotated_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (scope, scope_id)
+);
+
+CREATE TABLE proxy_subscriptions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  url TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL DEFAULT 'global',
+  rule_providers TEXT,
+  local_core_endpoint TEXT,
+  update_interval_minutes INTEGER NOT NULL DEFAULT 60,
+  last_fetched_at TEXT,
+  status TEXT NOT NULL DEFAULT 'empty',
+  error TEXT,
+  last_nodes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+, last_error_at TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0, control_url TEXT, control_secret_enc TEXT, selector_min_gap_seconds INTEGER NOT NULL DEFAULT 60, selector_last_switch_at TEXT, selector_last_switch_result TEXT, selector_last_switch_member TEXT, core_config_path TEXT, selector_last_switch_kind TEXT, core_binary_path TEXT, selector_last_switch_by_selector TEXT, mirror_urls TEXT);
+
+CREATE TABLE quota_allocation_model_caps (
+  pool_id    TEXT NOT NULL,
+  api_key_id TEXT NOT NULL,
+  model      TEXT NOT NULL,
+  cap_value  REAL NOT NULL CHECK (cap_value > 0),
+  cap_unit   TEXT NOT NULL CHECK (cap_unit IN ('percent','requests','tokens','usd')),
+  PRIMARY KEY (pool_id, api_key_id, model)
+);
+
+CREATE TABLE quota_allocations (
+  pool_id TEXT NOT NULL REFERENCES quota_pools(id) ON DELETE CASCADE,
+  api_key_id TEXT NOT NULL,
+  weight REAL NOT NULL CHECK (weight >= 0 AND weight <= 100),
+  cap_value REAL,
+  cap_unit TEXT CHECK (cap_unit IN ('percent','requests','tokens','usd')),
+  policy TEXT NOT NULL CHECK (policy IN ('hard','soft','burst')) DEFAULT 'hard',
+  PRIMARY KEY (pool_id, api_key_id)
+);
+
+CREATE TABLE quota_consumption (
+  api_key_id TEXT NOT NULL,
+  dimension_key TEXT NOT NULL,
+  bucket_index INTEGER NOT NULL,
+  consumed REAL NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,            -- epoch ms
+  PRIMARY KEY (api_key_id, dimension_key, bucket_index)
+);
+
+CREATE TABLE quota_groups (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE quota_pool_connections (
+  pool_id       TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (pool_id, connection_id)
+);
+
+CREATE TABLE quota_pools (
+  id TEXT PRIMARY KEY,
+  connection_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+, group_id TEXT);
+
+CREATE TABLE quota_recovery_tickets (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  turn_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  endpoint TEXT NOT NULL CHECK (endpoint IN ('chat/completions', 'responses')),
+  request_ciphertext TEXT NOT NULL,
+  result_ciphertext TEXT,
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending', 'running', 'completed', 'failed', 'needs_confirmation', 'cancelled', 'expired')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  next_attempt_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (api_key_id, turn_key)
+);
+
+CREATE TABLE quota_schedules (
+  id             TEXT    PRIMARY KEY,
+  pool_id        TEXT    NOT NULL,
+  label          TEXT,
+  days           TEXT    NOT NULL,
+  start_minute   INTEGER NOT NULL CHECK (start_minute >= 0 AND start_minute < 1440),
+  end_minute     INTEGER NOT NULL CHECK (end_minute > 0 AND end_minute <= 1440),
+  timezone       TEXT,
+  mode           TEXT    NOT NULL DEFAULT 'allow' CHECK (mode IN ('allow','block')),
+  reserves       TEXT,
+  budget_value   REAL             CHECK (budget_value IS NULL OR budget_value > 0),
+  budget_unit    TEXT             CHECK (budget_unit IS NULL OR budget_unit IN ('requests','tokens','usd')),
+  budget_window  TEXT    NOT NULL DEFAULT 'daily' CHECK (budget_window IN ('hourly','5h','daily','weekly','monthly')),
+  priority       INTEGER NOT NULL DEFAULT 0,
+  enabled        INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  created_at     TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE quota_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    connection_id TEXT NOT NULL,
+    window_key TEXT NOT NULL,
+    remaining_percentage REAL,
+    is_exhausted INTEGER DEFAULT 0,
+    next_reset_at TEXT,
+    window_duration_ms INTEGER,
+    raw_data TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+CREATE TABLE radar_feed_cache (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  version    TEXT,
+  tier       TEXT,
+  payload    TEXT,
+  signature  TEXT,
+  fetched_at TEXT
+, generated_at TEXT DEFAULT NULL);
+
+CREATE TABLE radar_intel_cache (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  version TEXT NOT NULL,
+  tier TEXT NOT NULL CHECK (tier = 'live'),
+  payload TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  supporter_identity TEXT NOT NULL,
+  fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE radar_local_model_state (
+  provider     TEXT NOT NULL,
+  model_id     TEXT NOT NULL,
+  display_name TEXT,
+  enabled      INTEGER CHECK (enabled IS NULL OR enabled IN (0, 1)),
+  tombstoned   INTEGER NOT NULL DEFAULT 0 CHECK (tombstoned IN (0, 1)),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, model_id)
+);
+
+CREATE TABLE radar_offers_cache (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  version    TEXT NOT NULL,
+  tier       TEXT NOT NULL CHECK (tier = 'live'),
+  payload    TEXT NOT NULL,
+  signature  TEXT NOT NULL,
+  fetched_at TEXT NOT NULL
+);
+
+CREATE TABLE radar_referrals_cache (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  generated_at TEXT,
+  tier         TEXT,
+  payload      TEXT,
+  signature    TEXT,
+  fetched_at   TEXT
+);
+
+CREATE TABLE radar_settings (
+  id                      INTEGER PRIMARY KEY CHECK (id = 1),
+  opt_in                  INTEGER NOT NULL DEFAULT 0,
+  supporter_key_encrypted TEXT,
+  updated_at              TEXT
+);
+
+CREATE TABLE reasoning_cache (
+  tool_call_id   TEXT PRIMARY KEY,
+  provider       TEXT NOT NULL,
+  model          TEXT NOT NULL,
+  reasoning      TEXT NOT NULL,
+  char_count     INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at     INTEGER NOT NULL
+);
+
+CREATE TABLE reasoning_routing_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  scope TEXT NOT NULL CHECK (scope IN ('global', 'apiKey', 'combo', 'model', 'connection')),
+  api_key_id TEXT REFERENCES api_keys(id) ON DELETE CASCADE,
+  combo_id TEXT REFERENCES combos(id) ON DELETE CASCADE,
+  connection_id TEXT REFERENCES provider_connections(id) ON DELETE CASCADE,
+  model_pattern TEXT,
+  source_effort TEXT NOT NULL DEFAULT 'any'
+    CHECK (source_effort IN ('any', 'missing', 'none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')),
+  request_tags TEXT NOT NULL DEFAULT '[]',
+  tag_match_mode TEXT NOT NULL DEFAULT 'any' CHECK (tag_match_mode IN ('any', 'all')),
+  effort_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (effort_mode IN ('inherit', 'default', 'force')),
+  target_effort TEXT CHECK (target_effort IN ('none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')),
+  target_kind TEXT NOT NULL DEFAULT 'keep' CHECK (target_kind IN ('keep', 'model', 'combo')),
+  target_model TEXT,
+  target_combo_id TEXT REFERENCES combos(id) ON DELETE CASCADE,
+  budget_action TEXT NOT NULL DEFAULT 'preserve' CHECK (budget_action IN ('preserve', 'remove', 'set')),
+  budget_tokens INTEGER,
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (scope != 'apiKey' OR api_key_id IS NOT NULL),
+  CHECK (scope != 'combo' OR combo_id IS NOT NULL),
+  CHECK (scope != 'model' OR model_pattern IS NOT NULL),
+  CHECK (scope != 'connection' OR connection_id IS NOT NULL),
+  CHECK (target_kind != 'model' OR target_model IS NOT NULL),
+  CHECK (target_kind != 'combo' OR target_combo_id IS NOT NULL),
+  CHECK (effort_mode = 'inherit' OR target_effort IS NOT NULL),
+  CHECK (budget_action != 'set' OR budget_tokens > 0),
+  CHECK (NOT (target_effort = 'none' AND budget_action = 'set'))
+);
+
+CREATE TABLE registered_keys (
+  id            TEXT PRIMARY KEY,           -- UUID
+  key           TEXT NOT NULL UNIQUE,       -- hashed key material (sha256)
+  key_prefix    TEXT NOT NULL,              -- first 8 chars for display (e.g. "ork_abc1")
+  name          TEXT NOT NULL,
+  provider      TEXT NOT NULL DEFAULT '',   -- associated provider (optional)
+  account_id    TEXT NOT NULL DEFAULT '',   -- account/tenant identifier
+  is_active     INTEGER NOT NULL DEFAULT 1,
+  revoked_at    TEXT,                       -- ISO timestamp, null if active
+  expires_at    TEXT,                       -- ISO timestamp, null = no expiry
+  idempotency_key TEXT UNIQUE,             -- prevents duplicate issue requests
+  daily_budget  INTEGER,                   -- max requests per day (null = unlimited)
+  hourly_budget INTEGER,                   -- max requests per hour (null = unlimited)
+  daily_used    INTEGER NOT NULL DEFAULT 0,
+  hourly_used   INTEGER NOT NULL DEFAULT 0,
+  last_reset_day  TEXT NOT NULL DEFAULT '',  -- YYYY-MM-DD for daily reset tracking
+  last_reset_hour TEXT NOT NULL DEFAULT '',  -- YYYY-MM-DDTHH for hourly reset tracking
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE relay_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_id TEXT NOT NULL,
+    request_id TEXT,                            -- X-Request-Id
+    model TEXT,
+    prompt_tokens INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    cost REAL DEFAULT 0,
+    status TEXT DEFAULT 'success',              -- success, rate_limited, auth_failed, error
+    status_code INTEGER DEFAULT 200,
+    latency_ms INTEGER DEFAULT 0,
+    client_ip TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (token_id) REFERENCES relay_tokens(id) ON DELETE CASCADE
+);
+
+CREATE TABLE relay_rate_limits (
+    token_id TEXT NOT NULL,
+    window_start INTEGER NOT NULL,              -- unix timestamp of window start
+    request_count INTEGER DEFAULT 0,
+    cost REAL DEFAULT 0,
+    PRIMARY KEY (token_id, window_start),
+    FOREIGN KEY (token_id) REFERENCES relay_tokens(id) ON DELETE CASCADE
+);
+
+CREATE TABLE relay_tokens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,           -- bcrypt hash of the token
+    token_prefix TEXT NOT NULL,                 -- first 8 chars for display (e.g., "rl_abc123")
+    description TEXT DEFAULT '',
+    combo_id TEXT,                              -- optional: restrict to a specific combo
+    allowed_models TEXT DEFAULT '[]',           -- JSON array of model patterns (e.g., ["claude-*", "gpt-*"])
+    max_tokens_per_request INTEGER DEFAULT 128000,
+    max_requests_per_minute INTEGER DEFAULT 60,
+    max_requests_per_day INTEGER DEFAULT 10000,
+    max_cost_per_day REAL DEFAULT 0,            -- 0 = unlimited
+    enabled INTEGER DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER,                         -- optional TTL
+    last_used_at INTEGER,
+    metadata TEXT DEFAULT '{}'
+);
+
+CREATE TABLE request_cost_ledger (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  api_key_id        TEXT NOT NULL,
+  provider          TEXT NOT NULL,
+  model             TEXT NOT NULL,
+  tokens_input      INTEGER NOT NULL DEFAULT 0,
+  tokens_output     INTEGER NOT NULL DEFAULT 0,
+  tokens_cache_read INTEGER NOT NULL DEFAULT 0,
+  tokens_cache_creation INTEGER NOT NULL DEFAULT 0,
+  tokens_reasoning  INTEGER NOT NULL DEFAULT 0,
+  unit_price_input  REAL NOT NULL DEFAULT 0,
+  unit_price_output REAL NOT NULL DEFAULT 0,
+  amount_usd        REAL NOT NULL DEFAULT 0,
+  service_tier      TEXT NOT NULL DEFAULT 'standard',
+  success           INTEGER NOT NULL DEFAULT 1,
+  timestamp         TEXT NOT NULL,
+  request_id        TEXT
+);
+
+CREATE TABLE request_detail_logs (
+  id TEXT PRIMARY KEY,
+  call_log_id TEXT,                  -- FK to call_logs.id (optional, nullable)
+  timestamp TEXT NOT NULL,
+  -- The 4 pipeline stages (all nullable — only populated when available)
+  client_request TEXT,               -- Raw body received from the client (JSON)
+  translated_request TEXT,           -- Body after format translation (JSON)
+  provider_response TEXT,            -- Raw body from the provider (JSON)
+  client_response TEXT,              -- Final body sent to the client (JSON)
+  -- Metadata
+  provider TEXT,
+  model TEXT,
+  source_format TEXT,
+  target_format TEXT,
+  duration_ms INTEGER DEFAULT 0
+);
+
+CREATE TABLE routing_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT,
+    task_type TEXT,
+    combo_id TEXT,
+    provider_selected TEXT,
+    model_selected TEXT,
+    score REAL,
+    factors_json TEXT,
+    fallbacks_triggered INTEGER DEFAULT 0,
+    success INTEGER DEFAULT 1,
+    latency_ms INTEGER,
+    cost REAL,
+    source TEXT DEFAULT 'api',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE semantic_cache (
+    id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL UNIQUE,
+    model TEXT NOT NULL,
+    prompt_hash TEXT NOT NULL,
+    response TEXT NOT NULL,
+    tokens_saved INTEGER DEFAULT 0,
+    hit_count INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+
+CREATE TABLE server_tool_executions (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  request_identity TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  input_digest TEXT NOT NULL,
+  output TEXT,
+  status TEXT NOT NULL CHECK(status IN ('running', 'success', 'error', 'timeout')),
+  error_message TEXT,
+  duration_ms INTEGER,
+  claim_expires_at TEXT NOT NULL,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(api_key_id, request_identity, tool_call_id)
+);
+
+CREATE TABLE session_account_affinity (
+  session_key TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  PRIMARY KEY (session_key, provider)
+);
+
+CREATE TABLE session_model_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  combo_name TEXT NOT NULL,
+  model_str TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  connection_id TEXT,
+  used_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE skill_executions (
+  id TEXT PRIMARY KEY,
+  skill_id TEXT NOT NULL,
+  api_key_id TEXT NOT NULL,
+  session_id TEXT,
+  input TEXT NOT NULL,
+  output TEXT,
+  status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'success', 'error', 'timeout')),
+  error_message TEXT,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (skill_id) REFERENCES skills(id) ON DELETE CASCADE
+);
+
+CREATE TABLE skills (
+  id TEXT PRIMARY KEY,
+  api_key_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  description TEXT,
+  schema TEXT NOT NULL,
+  handler TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+, mode TEXT NOT NULL DEFAULT 'auto', source_provider TEXT, tags TEXT, install_count INTEGER NOT NULL DEFAULT 0);
+
+CREATE TABLE sso_identities (
+  oid           TEXT PRIMARY KEY NOT NULL,
+  tenant_id     TEXT NOT NULL,
+  upn           TEXT,
+  display_name  TEXT,
+  api_key_id    TEXT NOT NULL,
+  -- key_groups ids resolved on the last successful auth, for drift detection.
+  last_groups   TEXT NOT NULL DEFAULT '[]',
+  last_seen_at  TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+);
+
+CREATE TABLE sync_tokens (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  sync_api_key_id TEXT,
+  revoked_at TEXT,
+  last_used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE teams (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+  max_budget_usd REAL,
+  budget_duration TEXT CHECK (budget_duration IS NULL OR budget_duration IN ('1d', '7d', '30d')),
+  budget_reset_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  CHECK (max_budget_usd IS NULL OR max_budget_usd > 0),
+  CHECK (
+    (max_budget_usd IS NULL AND budget_duration IS NULL AND budget_reset_at IS NULL)
+    OR (max_budget_usd IS NOT NULL AND budget_duration IS NOT NULL AND budget_reset_at IS NOT NULL)
+  )
+);
+
+CREATE TABLE tier_assignments (
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  tier TEXT NOT NULL CHECK (tier IN ('free', 'cheap', 'premium')),
+  cost_per_1m_input REAL DEFAULT 0,
+  cost_per_1m_output REAL DEFAULT 0,
+  has_free_tier INTEGER DEFAULT 0,
+  free_quota_limit INTEGER,
+  reason TEXT,
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (provider, model)
+);
+
+CREATE TABLE tier_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE token_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_api_key_id TEXT NOT NULL,
+  to_api_key_id TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  reason TEXT,
+  idempotency_key TEXT UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE upstream_proxy_config (
+  id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider_id               TEXT NOT NULL UNIQUE,          -- e.g., 'antigravity', 'claude', 'codex'
+  mode                      TEXT NOT NULL DEFAULT 'native', -- 'native' | 'cliproxyapi' | 'fallback'
+  cliproxyapi_model_mapping TEXT,                           -- JSON: { "ag/gemini-3-pro": "gemini-3-pro-high", ... }
+  native_priority           INTEGER NOT NULL DEFAULT 1,    -- order in fallback chain (1 = first)
+  cliproxyapi_priority      INTEGER NOT NULL DEFAULT 2,    -- order in fallback chain
+  enabled                   INTEGER NOT NULL DEFAULT 1,
+  created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+, family TEXT NOT NULL DEFAULT 'auto', fallback_backend TEXT NOT NULL DEFAULT 'cliproxyapi');
+
+CREATE TABLE usage_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT,
+    model TEXT,
+    connection_id TEXT,
+    account_key TEXT,
+    account_label TEXT,
+    account_label_priority INTEGER DEFAULT 0,
+    api_key_id TEXT,
+    api_key_name TEXT,
+    tokens_input INTEGER DEFAULT 0,
+    tokens_output INTEGER DEFAULT 0,
+    tokens_cache_read INTEGER DEFAULT 0,
+    tokens_cache_creation INTEGER DEFAULT 0,
+    tokens_reasoning INTEGER DEFAULT 0,
+    service_tier TEXT DEFAULT 'standard',
+    status TEXT,
+    success INTEGER DEFAULT 1,
+    latency_ms INTEGER DEFAULT 0,
+    ttft_ms INTEGER DEFAULT 0,
+    error_code TEXT,
+    timestamp TEXT NOT NULL
+  , combo_strategy TEXT DEFAULT 'direct', endpoint TEXT, cpa_auth_index TEXT, provider_credits REAL CHECK(provider_credits >= 0), provider_cost_usd REAL CHECK(provider_cost_usd >= 0), billing_team_id TEXT, team_rollup_processed_at TEXT);
+
+CREATE TABLE user_badges (
+  api_key_id TEXT NOT NULL,
+  badge_id TEXT NOT NULL,
+  unlocked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (api_key_id, badge_id)
+) WITHOUT ROWID;
+
+CREATE TABLE user_levels (
+  api_key_id TEXT PRIMARY KEY,
+  total_xp INTEGER NOT NULL DEFAULT 0,
+  current_level INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+) WITHOUT ROWID;
+
+CREATE TABLE version_manager (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  tool              TEXT NOT NULL UNIQUE,           -- 'cliproxyapi' | 'omniroute'
+  current_version   TEXT,                           -- latest known release version
+  installed_version TEXT,                           -- currently installed version
+  pinned_version    TEXT,                           -- user-pinned version (null = auto)
+  binary_path       TEXT,                           -- absolute path to binary
+  status            TEXT NOT NULL DEFAULT 'not_installed',  -- not_installed | installed | running | stopped | error
+  pid               INTEGER,                        -- process ID when running
+  port              INTEGER DEFAULT 8317,           -- managed tool's port
+  api_key           TEXT,                           -- API key for CLIProxyAPI (from its config)
+  management_key    TEXT,                           -- CLIProxyAPI management secret key
+  auto_update       INTEGER NOT NULL DEFAULT 1,    -- 1 = auto-update enabled
+  auto_start        INTEGER NOT NULL DEFAULT 0,    -- 1 = start with OmniRoute
+  last_health_check TEXT,                           -- ISO timestamp
+  last_update_check TEXT,                           -- ISO timestamp
+  health_status     TEXT DEFAULT 'unknown',         -- unknown | healthy | unhealthy | timeout
+  config_overrides  TEXT,                           -- JSON blob for CLIProxyAPI config overrides
+  error_message     TEXT,                           -- last error message
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+, logs_buffer_path TEXT, provider_expose INTEGER NOT NULL DEFAULT 0, last_sync_at TEXT, auto_restart_adopted INTEGER NOT NULL DEFAULT 0);
+
+CREATE TABLE webhook_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  webhook_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  http_status INTEGER,
+  latency_ms INTEGER,
+  error TEXT,
+  payload_snapshot TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (webhook_id) REFERENCES webhooks(id) ON DELETE CASCADE
+);
+
+CREATE TABLE webhooks (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT '["*"]',
+  secret TEXT,
+  enabled INTEGER DEFAULT 1,
+  description TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  last_triggered_at TEXT,
+  last_status INTEGER,
+  failure_count INTEGER DEFAULT 0
+, kind TEXT NOT NULL DEFAULT 'custom', metadata_encrypted BLOB);
+
+CREATE TABLE xp_action_counts (
+  api_key_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (api_key_id, action)
+) WITHOUT ROWID;
+
+CREATE TABLE xp_audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  api_key_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  xp_earned INTEGER NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TRIGGER exclusive_connection_leases_retire_chatgpt_web_insert
+AFTER INSERT ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      = 'cgpt-web'
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          = 'cgpt-web'
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER exclusive_connection_leases_retire_chatgpt_web_update
+AFTER UPDATE OF provider, connection_id, state ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      = 'cgpt-web'
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          = 'cgpt-web'
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER exclusive_connection_leases_retire_felo_web_insert
+AFTER INSERT ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      IN ('felo-web', 'felo')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          IN ('felo-web', 'felo')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER exclusive_connection_leases_retire_felo_web_update
+AFTER UPDATE OF provider, connection_id, state ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      IN ('felo-web', 'felo')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          IN ('felo-web', 'felo')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER exclusive_connection_leases_retire_qwen_web_insert
+AFTER INSERT ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      IN ('qwen-web', 'qw')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          IN ('qwen-web', 'qw')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, datetime('now')),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER exclusive_connection_leases_retire_qwen_web_update
+AFTER UPDATE OF provider, connection_id, state ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+      IN ('qwen-web', 'qw')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+          IN ('qwen-web', 'qw')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, datetime('now')),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE id = NEW.id
+    AND state = 'ACTIVE';
+END;
+
+CREATE INDEX idx_a2a_created ON a2a_tasks(created_at);
+
+CREATE INDEX idx_a2a_skill ON a2a_tasks(skill_id);
+
+CREATE INDEX idx_a2a_state ON a2a_tasks(state);
+
+CREATE INDEX idx_a2ae_task ON a2a_task_events(task_id);
+
+CREATE INDEX idx_a2ae_type ON a2a_task_events(event_type);
+
+CREATE INDEX idx_agent_bridge_mappings_agent ON agent_bridge_mappings(agent_id);
+
+CREATE INDEX idx_agentic_conversations_api_key
+  ON agentic_conversations(api_key_id);
+
+CREATE INDEX idx_agentic_conversations_fingerprint
+  ON agentic_conversations(fingerprint_hash);
+
+CREATE INDEX idx_agentic_conversations_last_seen
+  ON agentic_conversations(last_seen_at);
+
+CREATE INDEX idx_ak_key ON api_keys(key);
+
+CREATE INDEX idx_akqc_dim_bucket ON api_key_quota_counters(dimension_key, bucket_index);
+
+CREATE INDEX idx_akqc_updated_at ON api_key_quota_counters(updated_at);
+
+CREATE INDEX idx_aktl_api_key_id ON api_key_token_limits (api_key_id);
+
+CREATE INDEX idx_aktlrl_limit_id
+  ON api_key_token_limit_reset_logs (limit_id);
+
+CREATE UNIQUE INDEX idx_api_key_one_active_billing_team
+  ON api_key_billing_team_history(api_key_id)
+  WHERE valid_to IS NULL;
+
+CREATE INDEX idx_api_keys_expires_at ON api_keys(expires_at);
+
+CREATE INDEX idx_api_keys_revoked_at ON api_keys(revoked_at);
+
+CREATE INDEX idx_audit_action ON audit_log(action);
+
+CREATE INDEX idx_audit_actor ON audit_log(actor);
+
+CREATE INDEX idx_audit_request_id ON audit_log(request_id);
+
+CREATE INDEX idx_audit_resource_type ON audit_log(resource_type);
+
+CREATE INDEX idx_audit_status ON audit_log(status);
+
+CREATE INDEX idx_audit_timestamp ON audit_log(timestamp);
+
+CREATE INDEX idx_auto_candidate_overrides_key_channel
+  ON auto_candidate_overrides(api_key_id, auto_channel);
+
+CREATE INDEX idx_batch_item_checkpoints_batch_status
+  ON batch_item_checkpoints(batch_id, status);
+
+CREATE INDEX idx_batches_api_key ON batches(api_key_id);
+
+CREATE INDEX idx_batches_status ON batches(status);
+
+CREATE INDEX idx_billing_team_active_members
+  ON api_key_billing_team_history(team_id, api_key_id)
+  WHERE valid_to IS NULL;
+
+CREATE INDEX idx_billing_team_history_lookup
+  ON api_key_billing_team_history(api_key_id, valid_from, valid_to);
+
+CREATE INDEX idx_call_logs_combo_name_timestamp
+  ON call_logs(combo_name, timestamp);
+
+CREATE INDEX idx_call_logs_request_type ON call_logs(request_type);
+
+CREATE INDEX idx_call_logs_requested_model ON call_logs(requested_model);
+
+CREATE INDEX idx_cas_combo ON combo_adaptation_state(combo_id);
+
+CREATE INDEX idx_ccr_blocks_expires ON ccr_blocks(expires_at);
+
+CREATE INDEX idx_ceb_engine_ts ON compression_engine_breakdown(engine, timestamp);
+
+CREATE INDEX idx_ceb_request ON compression_engine_breakdown(request_id);
+
+CREATE INDEX idx_cl_artifact_relpath
+  ON call_logs(artifact_relpath)
+  WHERE artifact_relpath IS NOT NULL;
+
+CREATE INDEX idx_cl_client_session_id ON call_logs(client_session_id);
+
+CREATE INDEX idx_cl_combo_target ON call_logs(combo_name, combo_execution_key, timestamp);
+
+CREATE INDEX idx_cl_correlation_id ON call_logs(correlation_id);
+
+CREATE INDEX idx_cl_health_matrix_cover ON call_logs(
+  provider, timestamp, connection_id, model,
+  requested_model, status, duration, id, error_summary
+);
+
+CREATE INDEX idx_cl_provider_timestamp ON call_logs(provider, timestamp);
+
+CREATE INDEX idx_cl_request_provider ON call_logs(request_type, provider);
+
+CREATE INDEX idx_cl_response_id ON call_logs(response_id);
+
+CREATE INDEX idx_cl_session_tag ON call_logs(session_tag);
+
+CREATE INDEX idx_cl_status ON call_logs(status);
+
+CREATE INDEX idx_cl_timestamp ON call_logs(timestamp);
+
+CREATE INDEX idx_cli_access_tokens_hash ON cli_access_tokens(token_hash);
+
+CREATE INDEX idx_codex_wakeup_runs_started
+  ON codex_wakeup_runs(started_at DESC);
+
+CREATE INDEX idx_codex_wakeup_runs_task_status
+  ON codex_wakeup_runs(task_id, status);
+
+CREATE INDEX idx_combos_cache_protection ON combos(context_cache_protection);
+
+CREATE INDEX idx_command_code_auth_sessions_state_hash
+  ON command_code_auth_sessions(state_hash);
+
+CREATE INDEX idx_command_code_auth_sessions_status_expires
+  ON command_code_auth_sessions(status, expires_at);
+
+CREATE INDEX idx_compression_analytics_combo_engine
+      ON compression_analytics(compression_combo_id, engine);
+
+CREATE INDEX idx_compression_analytics_provider 
+  ON compression_analytics(provider);
+
+CREATE INDEX idx_compression_analytics_provider_timestamp 
+  ON compression_analytics(provider, timestamp);
+
+CREATE INDEX idx_compression_analytics_receipt_source
+      ON compression_analytics(receipt_source);
+
+CREATE INDEX idx_compression_analytics_request_id
+      ON compression_analytics(request_id);
+
+CREATE INDEX idx_compression_analytics_timestamp 
+  ON compression_analytics(timestamp);
+
+CREATE INDEX idx_compression_cache_stats_created ON compression_cache_stats(created_at);
+
+CREATE INDEX idx_compression_cache_stats_provider ON compression_cache_stats(provider);
+
+CREATE INDEX idx_compression_combo_assignments_combo
+  ON compression_combo_assignments(compression_combo_id);
+
+CREATE INDEX idx_compression_combo_assignments_routing
+  ON compression_combo_assignments(routing_combo_id);
+
+CREATE INDEX idx_compression_combos_default
+  ON compression_combos(is_default);
+
+CREATE INDEX idx_config_audit_log_created ON config_audit_log(timestamp);
+
+CREATE INDEX idx_config_audit_log_target_created ON config_audit_log(target, timestamp);
+
+CREATE INDEX idx_context_handoffs_expires
+  ON context_handoffs(expires_at);
+
+CREATE INDEX idx_context_handoffs_last_model
+ON context_handoffs(session_id, combo_name, last_model);
+
+CREATE INDEX idx_context_handoffs_session
+  ON context_handoffs(session_id, expires_at);
+
+CREATE UNIQUE INDEX idx_context_handoffs_session_combo
+  ON context_handoffs(session_id, combo_name);
+
+CREATE INDEX idx_crs_warmup_until ON connection_runtime_state(warmup_circuit_until) WHERE warmup_circuit_until IS NOT NULL;
+
+CREATE INDEX idx_daily_team_key_usage_date
+  ON daily_team_usage_summary(team_id, api_key_id, date);
+
+CREATE INDEX idx_daily_team_usage_date
+  ON daily_team_usage_summary(team_id, date);
+
+CREATE INDEX idx_daily_usage_date 
+  ON daily_usage_summary(date);
+
+CREATE INDEX idx_daily_usage_model_date
+  ON daily_usage_summary(model, date);
+
+CREATE INDEX idx_daily_usage_provider_date
+  ON daily_usage_summary(provider, date);
+
+CREATE INDEX idx_daily_usage_provider_model_date 
+  ON daily_usage_summary(provider, model, date);
+
+CREATE INDEX idx_daily_usage_provider_model_date_composite
+  ON daily_usage_summary(provider, model, date);
+
+CREATE UNIQUE INDEX idx_daily_usage_unique
+  ON daily_usage_summary(provider, model, date);
+
+CREATE INDEX idx_dbrl_key_reset ON domain_budget_reset_logs(api_key_id, reset_at DESC);
+
+CREATE INDEX idx_dch_key ON domain_cost_history(api_key_id);
+
+CREATE INDEX idx_dch_key_timestamp ON domain_cost_history(api_key_id, timestamp);
+
+CREATE INDEX idx_dch_ts ON domain_cost_history(timestamp);
+
+CREATE INDEX idx_discovery_results_provider ON discovery_results(provider_id);
+
+CREATE INDEX idx_discovery_results_status ON discovery_results(status);
+
+CREATE INDEX idx_eval_cases_suite_order
+  ON eval_cases(suite_id, sort_order ASC, created_at ASC);
+
+CREATE INDEX idx_eval_runs_created_at
+  ON eval_runs(created_at DESC);
+
+CREATE INDEX idx_eval_runs_group_id
+  ON eval_runs(run_group_id);
+
+CREATE INDEX idx_eval_runs_suite_created_at
+  ON eval_runs(suite_id, created_at DESC);
+
+CREATE INDEX idx_eval_suites_updated_at
+  ON eval_suites(updated_at DESC);
+
+CREATE UNIQUE INDEX idx_exclusive_lease_active_connection
+  ON exclusive_connection_leases(connection_id)
+  WHERE state = 'ACTIVE';
+
+CREATE UNIQUE INDEX idx_exclusive_lease_active_owner
+  ON exclusive_connection_leases(lease_owner_hash)
+  WHERE state = 'ACTIVE';
+
+CREATE INDEX idx_exclusive_lease_expiry
+  ON exclusive_connection_leases(state, expires_at);
+
+CREATE INDEX idx_exclusive_lease_owner_history
+  ON exclusive_connection_leases(lease_owner_hash, generation, id);
+
+CREATE INDEX idx_files_api_key ON files(api_key_id);
+
+CREATE INDEX idx_free_proxies_in_pool ON free_proxies(in_pool);
+
+CREATE INDEX idx_free_proxies_quality ON free_proxies(quality_score DESC);
+
+CREATE INDEX idx_free_proxies_source ON free_proxies(source);
+
+CREATE INDEX idx_group_members_group
+  ON key_group_members(group_id);
+
+CREATE INDEX idx_group_members_key
+  ON key_group_members(key_id);
+
+CREATE INDEX idx_group_permissions_group
+  ON group_model_permissions(group_id);
+
+CREATE INDEX idx_hourly_usage_date 
+  ON hourly_usage_summary(date_hour);
+
+CREATE INDEX idx_hourly_usage_model_date
+  ON hourly_usage_summary(model, date_hour);
+
+CREATE INDEX idx_hourly_usage_provider_date
+  ON hourly_usage_summary(provider, date_hour);
+
+CREATE INDEX idx_hourly_usage_provider_model_date 
+  ON hourly_usage_summary(provider, model, date_hour);
+
+CREATE INDEX idx_hourly_usage_provider_model_date_composite
+  ON hourly_usage_summary(provider, model, date_hour);
+
+CREATE UNIQUE INDEX idx_hourly_usage_unique
+  ON hourly_usage_summary(provider, model, date_hour);
+
+CREATE INDEX idx_inspector_custom_hosts_enabled
+  ON inspector_custom_hosts(enabled);
+
+CREATE INDEX idx_inspector_session_requests_sid
+  ON inspector_session_requests(session_id);
+
+CREATE INDEX idx_invite_tokens_code
+  ON invite_tokens (code);
+
+CREATE INDEX idx_invite_tokens_token_hash
+  ON invite_tokens (token_hash);
+
+CREATE INDEX idx_jr_job_id ON job_runs(job_id, started_at DESC);
+
+CREATE INDEX idx_jr_started_at ON job_runs(started_at);
+
+CREATE INDEX idx_leaderboard_scope_score
+  ON leaderboard (scope, score DESC, api_key_id);
+
+CREATE INDEX idx_log_export_destinations_enabled
+  ON log_export_destinations(enabled);
+
+CREATE INDEX idx_mcm_enabled ON model_combo_mappings(enabled);
+
+CREATE INDEX idx_mcm_priority ON model_combo_mappings(priority DESC);
+
+CREATE INDEX idx_mco_source ON model_context_overrides (source);
+
+CREATE INDEX idx_memories_api_key ON memories(api_key_id);
+
+CREATE INDEX idx_memories_expires ON memories(expires_at);
+
+CREATE UNIQUE INDEX idx_memories_memory_id ON memories(memory_id);
+
+CREATE INDEX idx_memories_needs_reindex
+  ON memories(needs_reindex)
+  WHERE needs_reindex = 1;
+
+CREATE INDEX idx_memories_session ON memories(session_id);
+
+CREATE INDEX idx_memories_type ON memories(type);
+
+CREATE INDEX idx_mi_expires
+  ON model_intelligence (expires_at) WHERE expires_at IS NOT NULL;
+
+CREATE INDEX idx_mi_model_category
+  ON model_intelligence (model, category);
+
+CREATE INDEX idx_mi_source
+  ON model_intelligence (source);
+
+CREATE INDEX idx_middleware_hooks_enabled
+  ON middleware_hooks(enabled, priority);
+
+CREATE INDEX idx_middleware_hooks_scope
+  ON middleware_hooks(scope_type, combo_id);
+
+CREATE INDEX idx_middleware_logs_hook
+  ON middleware_logs(hook_name, timestamp);
+
+CREATE INDEX idx_middleware_logs_request
+  ON middleware_logs(request_id, timestamp);
+
+CREATE INDEX idx_model_capability_overrides_key
+  ON model_capability_overrides (override_key);
+
+CREATE INDEX idx_mta_apikey ON mcp_tool_audit(api_key_id);
+
+CREATE INDEX idx_mta_created ON mcp_tool_audit(created_at);
+
+CREATE INDEX idx_mta_tool ON mcp_tool_audit(tool_name);
+
+CREATE INDEX idx_pc_active ON provider_connections(is_active);
+
+CREATE INDEX idx_pc_auth_active_refresh ON provider_connections(auth_type, is_active, refresh_token);
+
+CREATE INDEX idx_pc_max_concurrent ON provider_connections(provider, max_concurrent);
+
+CREATE INDEX idx_pc_priority ON provider_connections(provider, priority);
+
+CREATE INDEX idx_pc_provider ON provider_connections(provider);
+
+CREATE INDEX idx_pc_provider_auth_type ON provider_connections(provider, auth_type);
+
+CREATE INDEX idx_pl_provider ON proxy_logs(provider);
+
+CREATE INDEX idx_pl_status ON proxy_logs(status);
+
+CREATE INDEX idx_pl_timestamp ON proxy_logs(timestamp);
+
+CREATE INDEX idx_playground_presets_endpoint
+  ON playground_presets(endpoint);
+
+CREATE INDEX idx_playground_presets_name
+  ON playground_presets(name);
+
+CREATE INDEX idx_plugin_analytics_created ON plugin_analytics(created_at);
+
+CREATE INDEX idx_plugin_analytics_name ON plugin_analytics(plugin_name);
+
+CREATE INDEX idx_plugins_enabled ON plugins(enabled);
+
+CREATE INDEX idx_plugins_name ON plugins(name);
+
+CREATE INDEX idx_plugins_status ON plugins(status);
+
+CREATE INDEX idx_poe_member ON proxy_operator_egress (host, port);
+
+CREATE INDEX idx_pqs_connection ON provider_quota_state(connection_id);
+
+CREATE INDEX idx_pqs_reset ON provider_quota_state(window_reset) WHERE window_reset IS NOT NULL;
+
+CREATE INDEX idx_provider_plans_provider
+  ON provider_plans(provider);
+
+CREATE INDEX idx_provider_quota_reset_events_connection_window
+  ON provider_quota_reset_events(connection_id, window_key, window_resets_at);
+
+CREATE INDEX idx_provider_quota_reset_events_provider_observed
+  ON provider_quota_reset_events(provider, observed_at);
+
+CREATE INDEX idx_proxy_assignments_proxy_id ON proxy_assignments(proxy_id);
+
+CREATE INDEX idx_proxy_assignments_scope ON proxy_assignments(scope, scope_id);
+
+CREATE INDEX idx_proxy_registry_country ON proxy_registry(country_code);
+
+CREATE INDEX idx_proxy_registry_host ON proxy_registry(host);
+
+CREATE INDEX idx_proxy_registry_quality ON proxy_registry(quality_score DESC);
+
+CREATE INDEX idx_proxy_registry_source ON proxy_registry(source);
+
+CREATE INDEX idx_proxy_registry_status ON proxy_registry(status);
+
+CREATE INDEX idx_proxy_registry_subscription ON proxy_registry(subscription_id);
+
+CREATE INDEX idx_proxy_subscriptions_enabled ON proxy_subscriptions(enabled);
+
+CREATE INDEX idx_proxy_subscriptions_last_error ON proxy_subscriptions(last_error_at);
+
+CREATE INDEX idx_qamc_pool_key
+  ON quota_allocation_model_caps(pool_id, api_key_id);
+
+CREATE INDEX idx_quota_allocations_apikey
+  ON quota_allocations(api_key_id);
+
+CREATE INDEX idx_quota_consumption_dim_bucket
+  ON quota_consumption(dimension_key, bucket_index);
+
+CREATE INDEX idx_quota_consumption_updated_at
+  ON quota_consumption(updated_at);
+
+CREATE INDEX idx_quota_pool_connections_pool
+  ON quota_pool_connections(pool_id);
+
+CREATE INDEX idx_quota_pools_connection
+  ON quota_pools(connection_id);
+
+CREATE INDEX idx_quota_recovery_due
+  ON quota_recovery_tickets (state, next_attempt_at);
+
+CREATE INDEX idx_quota_schedules_pool
+  ON quota_schedules(pool_id, enabled);
+
+CREATE INDEX idx_quota_snapshots_connection_time ON quota_snapshots(connection_id, created_at);
+
+CREATE INDEX idx_quota_snapshots_created_at ON quota_snapshots(created_at);
+
+CREATE INDEX idx_quota_snapshots_provider_time ON quota_snapshots(provider, created_at);
+
+CREATE INDEX idx_rcl_api_key_timestamp ON request_cost_ledger(api_key_id, timestamp);
+
+CREATE INDEX idx_rcl_timestamp ON request_cost_ledger(timestamp);
+
+CREATE INDEX idx_rd_combo ON routing_decisions(combo_id);
+
+CREATE INDEX idx_rd_created ON routing_decisions(created_at);
+
+CREATE INDEX idx_rd_provider ON routing_decisions(provider_selected);
+
+CREATE INDEX idx_rd_request ON routing_decisions(request_id);
+
+CREATE INDEX idx_rdl_call_log_id ON request_detail_logs(call_log_id);
+
+CREATE INDEX idx_rdl_timestamp ON request_detail_logs(timestamp);
+
+CREATE INDEX idx_reasoning_cache_created
+  ON reasoning_cache(created_at);
+
+CREATE INDEX idx_reasoning_cache_expires
+  ON reasoning_cache(expires_at);
+
+CREATE INDEX idx_reasoning_cache_model
+  ON reasoning_cache(model);
+
+CREATE INDEX idx_reasoning_cache_provider
+  ON reasoning_cache(provider);
+
+CREATE INDEX idx_reasoning_rules_api_key ON reasoning_routing_rules(api_key_id);
+
+CREATE INDEX idx_reasoning_rules_combo ON reasoning_routing_rules(combo_id);
+
+CREATE INDEX idx_reasoning_rules_connection ON reasoning_routing_rules(connection_id);
+
+CREATE INDEX idx_reasoning_rules_enabled
+  ON reasoning_routing_rules(enabled, scope, priority DESC);
+
+CREATE INDEX idx_registered_keys_account   ON registered_keys(account_id);
+
+CREATE INDEX idx_registered_keys_active    ON registered_keys(is_active);
+
+CREATE INDEX idx_registered_keys_idempotency ON registered_keys(idempotency_key);
+
+CREATE INDEX idx_registered_keys_provider  ON registered_keys(provider);
+
+CREATE INDEX idx_relay_logs_created ON relay_logs(created_at);
+
+CREATE INDEX idx_relay_logs_token ON relay_logs(token_id, created_at);
+
+CREATE INDEX idx_relay_rate_limits_window ON relay_rate_limits(token_id, window_start);
+
+CREATE INDEX idx_relay_tokens_prefix ON relay_tokens(token_prefix);
+
+CREATE INDEX idx_saa_last_seen ON session_account_affinity(last_seen_at);
+
+CREATE INDEX idx_saa_provider ON session_account_affinity(provider);
+
+CREATE INDEX idx_sc_model ON semantic_cache(model);
+
+CREATE INDEX idx_sc_sig ON semantic_cache(signature);
+
+CREATE INDEX idx_semantic_cache_expires_at ON semantic_cache(expires_at);
+
+CREATE INDEX idx_server_tool_executions_created
+  ON server_tool_executions(created_at);
+
+CREATE INDEX idx_server_tool_executions_status_expiry
+  ON server_tool_executions(status, claim_expires_at);
+
+CREATE INDEX idx_session_model_history_cleanup
+ON session_model_history(used_at);
+
+CREATE INDEX idx_session_model_history_lookup
+ON session_model_history(session_id, combo_name, used_at DESC);
+
+CREATE INDEX idx_skill_executions_api_key ON skill_executions(api_key_id);
+
+CREATE INDEX idx_skill_executions_created ON skill_executions(created_at);
+
+CREATE INDEX idx_skill_executions_skill ON skill_executions(skill_id);
+
+CREATE INDEX idx_skill_executions_status ON skill_executions(status);
+
+CREATE INDEX idx_skills_api_key ON skills(api_key_id);
+
+CREATE INDEX idx_skills_mode ON skills(mode);
+
+CREATE INDEX idx_skills_name ON skills(name);
+
+CREATE INDEX idx_skills_source_provider ON skills(source_provider);
+
+CREATE INDEX idx_sso_identities_api_key
+  ON sso_identities(api_key_id);
+
+CREATE INDEX idx_sync_tokens_created_at ON sync_tokens(created_at);
+
+CREATE INDEX idx_sync_tokens_last_used_at ON sync_tokens(last_used_at);
+
+CREATE INDEX idx_sync_tokens_revoked_at ON sync_tokens(revoked_at);
+
+CREATE INDEX idx_sync_tokens_sync_api_key_id ON sync_tokens(sync_api_key_id);
+
+CREATE INDEX idx_teams_status ON teams(status);
+
+CREATE INDEX idx_tier_assignments_provider ON tier_assignments(provider);
+
+CREATE INDEX idx_tier_assignments_tier ON tier_assignments(tier);
+
+CREATE INDEX idx_turn_nodes_content_hash
+  ON conversation_turn_nodes(conversation_id, content_hash);
+
+CREATE INDEX idx_turn_nodes_conversation
+  ON conversation_turn_nodes(conversation_id);
+
+CREATE INDEX idx_turn_nodes_last_seen
+  ON conversation_turn_nodes(last_seen_at);
+
+CREATE INDEX idx_uh_account_key ON usage_history(account_key);
+
+CREATE INDEX idx_uh_combo_strategy ON usage_history(combo_strategy);
+
+CREATE INDEX idx_uh_connection_timestamp ON usage_history(connection_id, timestamp);
+
+CREATE INDEX idx_uh_dedup ON usage_history(
+        timestamp,
+        COALESCE(provider, ''),
+        COALESCE(model, ''),
+        COALESCE(connection_id, ''),
+        COALESCE(api_key_id, ''),
+        tokens_input,
+        tokens_output
+      );
+
+CREATE INDEX idx_uh_endpoint ON usage_history(endpoint);
+
+CREATE INDEX idx_uh_key_provider_model_ts
+  ON usage_history (api_key_id, provider, model, timestamp);
+
+CREATE INDEX idx_uh_model ON usage_history(model);
+
+CREATE INDEX idx_uh_provider ON usage_history(provider);
+
+CREATE INDEX idx_uh_provider_model_timestamp ON usage_history(provider, model, timestamp);
+
+CREATE INDEX idx_uh_service_tier ON usage_history(service_tier);
+
+CREATE INDEX idx_uh_timestamp ON usage_history(timestamp);
+
+CREATE INDEX idx_upc_mode ON upstream_proxy_config(mode);
+
+CREATE INDEX idx_upc_provider ON upstream_proxy_config(provider_id);
+
+CREATE INDEX idx_usage_history_api_key_id_timestamp
+  ON usage_history(api_key_id, timestamp);
+
+CREATE INDEX idx_usage_history_api_key_name_timestamp
+  ON usage_history(api_key_name, timestamp);
+
+CREATE INDEX idx_usage_history_billing_team_time
+  ON usage_history(billing_team_id, timestamp);
+
+CREATE INDEX idx_usage_history_team_rollup_pending
+  ON usage_history(team_rollup_processed_at, timestamp)
+  WHERE billing_team_id IS NOT NULL AND team_rollup_processed_at IS NULL;
+
+CREATE INDEX idx_user_badges_badge_id
+  ON user_badges (badge_id);
+
+CREATE INDEX idx_vm_status ON version_manager(status);
+
+CREATE INDEX idx_vm_tool ON version_manager(tool);
+
+CREATE INDEX idx_webhook_deliveries_webhook_created
+  ON webhook_deliveries(webhook_id, created_at DESC);
+
+CREATE INDEX idx_xp_audit_log_api_key_created
+  ON xp_audit_log (api_key_id, created_at);
+
+CREATE TRIGGER memory_fts_ad AFTER DELETE ON memories
+WHEN old.memory_id IS NOT NULL
+BEGIN
+  INSERT INTO memory_fts(memory_fts, rowid, content, key)
+    VALUES('delete', old.memory_id, old.content, old.key);
+END;
+
+CREATE TRIGGER memory_fts_ai AFTER INSERT ON memories
+WHEN new.memory_id IS NOT NULL
+BEGIN
+  INSERT INTO memory_fts(rowid, content, key) VALUES (new.memory_id, new.content, new.key);
+END;
+
+CREATE TRIGGER memory_fts_ai_assign AFTER INSERT ON memories
+WHEN new.memory_id IS NULL
+BEGIN
+  UPDATE memories
+  SET memory_id = (SELECT COALESCE(MAX(memory_id), 0) + 1 FROM memories)
+  WHERE rowid = new.rowid;
+END;
+
+CREATE TRIGGER memory_fts_au AFTER UPDATE ON memories
+WHEN old.content IS DISTINCT FROM new.content
+  OR old.key IS DISTINCT FROM new.key
+  OR old.memory_id IS DISTINCT FROM new.memory_id
+BEGIN
+  INSERT INTO memory_fts(memory_fts, rowid, content, key)
+    SELECT 'delete', old.memory_id, old.content, old.key WHERE old.memory_id IS NOT NULL;
+  INSERT INTO memory_fts(rowid, content, key)
+    SELECT new.memory_id, new.content, new.key WHERE new.memory_id IS NOT NULL;
+END;
+
+CREATE TRIGGER provider_connections_preserve_chatgpt_web_identity_insert
+BEFORE INSERT ON provider_connections
+WHEN EXISTS (
+    SELECT 1
+    FROM provider_connections
+    WHERE id = NEW.id
+      AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+        IN ('chatgpt-web', 'cgpt-web')
+  )
+  AND lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    NOT IN ('chatgpt-web', 'cgpt-web')
+BEGIN
+  SELECT RAISE(ABORT, 'Retired provider connection identity cannot be changed');
+END;
+
+CREATE TRIGGER provider_connections_preserve_chatgpt_web_identity_update
+BEFORE UPDATE OF provider ON provider_connections
+WHEN lower(trim(OLD.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('chatgpt-web', 'cgpt-web')
+  AND lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    NOT IN ('chatgpt-web', 'cgpt-web')
+BEGIN
+  SELECT RAISE(ABORT, 'Retired provider connection identity cannot be changed');
+END;
+
+CREATE TRIGGER provider_connections_preserve_felo_web_identity_insert
+BEFORE INSERT ON provider_connections
+WHEN EXISTS (
+    SELECT 1
+    FROM provider_connections
+    WHERE id = NEW.id
+      AND lower(trim(provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+        IN ('felo-web', 'felo')
+  )
+  AND lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    NOT IN ('felo-web', 'felo')
+BEGIN
+  SELECT RAISE(ABORT, 'Retired provider connection identity cannot be changed');
+END;
+
+CREATE TRIGGER provider_connections_preserve_felo_web_identity_update
+BEFORE UPDATE OF provider ON provider_connections
+WHEN lower(trim(OLD.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('felo-web', 'felo')
+  AND lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    NOT IN ('felo-web', 'felo')
+BEGIN
+  SELECT RAISE(ABORT, 'Retired provider connection identity cannot be changed');
+END;
+
+CREATE TRIGGER provider_connections_retire_chatgpt_web_insert
+AFTER INSERT ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    = 'cgpt-web'
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.51',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-chatgpt-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.51'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-chatgpt-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER provider_connections_retire_chatgpt_web_update
+AFTER UPDATE OF provider, is_active, test_status, error_code, last_error,
+  last_error_type, last_error_source, last_error_at ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    = 'cgpt-web'
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.51',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-chatgpt-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.51'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-chatgpt-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER provider_connections_retire_felo_web_insert
+AFTER INSERT ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('felo-web', 'felo')
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.50',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-felo-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.50'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-felo-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER provider_connections_retire_felo_web_update
+AFTER UPDATE OF provider, is_active, test_status, error_code, last_error,
+  last_error_type, last_error_source, last_error_at ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('felo-web', 'felo')
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.50',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-felo-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.50'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-felo-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = datetime('now'),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER provider_connections_retire_qwen_web_insert
+AFTER INSERT ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('qwen-web', 'qw')
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.51',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-qwen-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.51'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-qwen-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, datetime('now')),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER provider_connections_retire_qwen_web_update
+AFTER UPDATE OF provider, is_active, test_status, error_code, last_error,
+  last_error_type, last_error_source, last_error_at ON provider_connections
+WHEN lower(trim(NEW.provider, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)))
+    IN ('qwen-web', 'qw')
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      error_code = 'PROVIDER_REMOVED',
+      last_error = 'Provider integration retired from OmniRoute v3.8.51',
+      last_error_type = 'provider_removed',
+      last_error_source = 'migration:retire-qwen-web',
+      last_error_at = datetime('now'),
+      updated_at = datetime('now')
+  WHERE id = NEW.id
+    AND (
+      is_active IS NOT 0
+      OR test_status IS NOT 'unavailable'
+      OR error_code IS NOT 'PROVIDER_REMOVED'
+      OR last_error IS NOT 'Provider integration retired from OmniRoute v3.8.51'
+      OR last_error_type IS NOT 'provider_removed'
+      OR last_error_source IS NOT 'migration:retire-qwen-web'
+      OR last_error_at IS NULL
+    );
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, datetime('now')),
+      end_reason = 'CONNECTION_INELIGIBLE'
+  WHERE state = 'ACTIVE'
+    AND connection_id = NEW.id;
+END;
+
+CREATE TRIGGER trg_free_proxies_clear_pool_proxy_id
+AFTER DELETE ON proxy_registry
+FOR EACH ROW
+BEGIN
+  UPDATE free_proxies
+  SET pool_proxy_id = NULL,
+      in_pool = 0,
+      updated_at = datetime('now')
+  WHERE pool_proxy_id = OLD.id;
+END;
+
+CREATE TRIGGER trg_rdl_ring_buffer
+AFTER INSERT ON request_detail_logs
+BEGIN
+  DELETE FROM request_detail_logs
+  WHERE id IN (
+    SELECT id FROM request_detail_logs
+    ORDER BY timestamp ASC
+    LIMIT MAX(0, (SELECT COUNT(*) FROM request_detail_logs) - 500)
+  );
+END;
+
+CREATE TRIGGER trg_reasoning_rules_api_key_delete
+AFTER DELETE ON api_keys BEGIN
+  DELETE FROM reasoning_routing_rules WHERE api_key_id = OLD.id;
+END;
+
+CREATE TRIGGER trg_reasoning_rules_combo_delete
+AFTER DELETE ON combos BEGIN
+  DELETE FROM reasoning_routing_rules WHERE combo_id = OLD.id OR target_combo_id = OLD.id;
+END;
+
+CREATE TRIGGER trg_reasoning_rules_connection_delete
+AFTER DELETE ON provider_connections BEGIN
+  DELETE FROM reasoning_routing_rules WHERE connection_id = OLD.id;
+END;
+
+CREATE TRIGGER trg_retire_microsoft_designer_web_lease_insert
+AFTER INSERT ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+      IN ('microsoft-designer-web', 'msdesigner')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+          IN ('microsoft-designer-web', 'msdesigner')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+      end_reason = 'AUTHORIZATION_CHANGED'
+  WHERE id = NEW.id AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER trg_retire_microsoft_designer_web_lease_update
+AFTER UPDATE OF provider, connection_id, state ON exclusive_connection_leases
+WHEN NEW.state = 'ACTIVE'
+  AND (
+    lower(trim(NEW.provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+      IN ('microsoft-designer-web', 'msdesigner')
+    OR EXISTS (
+      SELECT 1
+      FROM provider_connections
+      WHERE id = NEW.connection_id
+        AND lower(trim(provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+          IN ('microsoft-designer-web', 'msdesigner')
+    )
+  )
+BEGIN
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+      end_reason = 'AUTHORIZATION_CHANGED'
+  WHERE id = NEW.id AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER trg_retire_microsoft_designer_web_provider_insert
+AFTER INSERT ON provider_connections
+WHEN lower(trim(NEW.provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+  IN ('microsoft-designer-web', 'msdesigner')
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      last_error = 'Provider retired from OmniRoute runtime.',
+      last_error_at = COALESCE(last_error_at, CURRENT_TIMESTAMP),
+      last_error_type = 'provider_retired',
+      last_error_source = 'migration:retire-microsoft-designer-web'
+  WHERE id = NEW.id;
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+      end_reason = 'AUTHORIZATION_CHANGED'
+  WHERE connection_id = NEW.id AND state = 'ACTIVE';
+END;
+
+CREATE TRIGGER trg_retire_microsoft_designer_web_provider_update
+AFTER UPDATE OF provider, is_active, test_status, last_error, last_error_type, last_error_source
+ON provider_connections
+WHEN lower(trim(NEW.provider, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)))
+       IN ('microsoft-designer-web', 'msdesigner')
+  AND (
+    COALESCE(NEW.is_active, 0) <> 0
+    OR COALESCE(NEW.test_status, '') <> 'unavailable'
+    OR COALESCE(NEW.last_error, '') <> 'Provider retired from OmniRoute runtime.'
+    OR COALESCE(NEW.last_error_type, '') <> 'provider_retired'
+    OR COALESCE(NEW.last_error_source, '') <> 'migration:retire-microsoft-designer-web'
+  )
+BEGIN
+  UPDATE provider_connections
+  SET is_active = 0,
+      test_status = 'unavailable',
+      last_error = 'Provider retired from OmniRoute runtime.',
+      last_error_at = COALESCE(last_error_at, CURRENT_TIMESTAMP),
+      last_error_type = 'provider_retired',
+      last_error_source = 'migration:retire-microsoft-designer-web'
+  WHERE id = NEW.id;
+
+  UPDATE exclusive_connection_leases
+  SET state = 'INVALIDATED',
+      ended_at = COALESCE(ended_at, CURRENT_TIMESTAMP),
+      end_reason = 'AUTHORIZATION_CHANGED'
+  WHERE connection_id = NEW.id AND state = 'ACTIVE';
+END;
+

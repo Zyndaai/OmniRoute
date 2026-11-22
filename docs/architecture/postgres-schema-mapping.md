@@ -103,6 +103,30 @@ The transfer tool must apply these to every value. Per-table exceptions are list
 
 ## Transfer procedure
 
+The tool is `src/lib/db/backends/transfer/` (command line `cli.ts`, bundled into the image as
+`src/lib/db/backends/transfer/cli.js`; test `tests/unit/db/transfer-sqlite-to-postgres.test.ts`).
+It implements this procedure with these choices:
+
+- The target must be a new, empty database; the tool runs the migrations. It refuses a
+  non-empty target and a live source (a non-empty `-wal`), and reads a private copy of the source,
+  so a WAL-mode snapshot needs no writable folder and the original is never touched.
+- Values are converted by the target column's type, read from PostgreSQL's catalog. Numeric
+  timestamps use the TS-mix rule for every column (`>= 1e11` is ms, else seconds; outside
+  2000–2100 is not an event time and becomes NULL). Per-table rules are in `registry.ts`.
+- Orphans follow each foreign key's ON DELETE action (SET NULL nulls the reference; any other
+  action deletes the child). Everything loads in ONE transaction.
+- Verification reads every touched table back and compares each value with what the tool meant
+  to write; the receipt records counts, every skip and adjustment with its reason, dropped tables
+  and namespaces with row counts, a sha256 per table, the effective database settings, and checks
+  that every API key's `key_hash` matches its key and every encrypted credential decrypts.
+- `discoveryState` with a status outside the CHECK list keeps the row (the synced models) and
+  nulls the status. Unimplemented merges (`provider_key_limits`, `account_key_limits`, the four
+  `radar_*_cache`, `tier_config`) abort if the source ever holds rows in them.
+
+Production dry run, 2026-11-22 (backup-API snapshot, throwaway PostgreSQL 18 on an internal
+network, app never started): 82.5 MB, migrations 222, 25 s, every table verified; 4/4 key hashes
+match, 15/15 credentials decrypt, retention callLogs 90 / usageHistory 365.
+
 1. Create the database (collation `C`) and apply migrations with `runPostgresMigrations`.
 2. Create the historical partitions: `SELECT omniroute_ensure_daily_partitions('<t>', <min day>, <max day>)` for `call_logs`, `usage_history` and `proxy_logs`, using the min and max UTC day found in SQLite.
    - Run it in a transaction that starts with `SET LOCAL statement_timeout = '600s'`. The pool's 5 s timeout is too short: 365 days of partitions take about 7 s.
@@ -193,6 +217,7 @@ The transfer tool must apply these to every value. Per-table exceptions are list
 | `budgetUnpricedUsage` | `domain_budgets.unpriced_usage_since` | TS-ms | No budget row → drop + log. | db/domainState.ts, src/domain/costRules.ts |
 | `keyQuotaUnpricedUsage` | `api_key_quota_limits.unpriced_usage_since` | TS-ms | No limits row → drop + log. | db/keyQuota.ts, src/domain/keyQuota.ts |
 | `scheduler`, `walMaintenance`, `dbBackup`, `apiKeySelfService` | **dropped** | SQLite VACUUM/WAL/file-backup state and a run-once migration marker | not copied | db/vacuumScheduler.ts, db/walMaintenance.ts, db/backupRetention.ts |
+| `gamification:streaks` | **dropped** | Gamification was removed (commit df35513d); production still held 11 rows. Owner: drop. | not copied | — |
 | any other namespace | — | none exists today | The tool aborts on an unknown namespace, so a missed one cannot be dropped silently. | — |
 
 Catalog tables that were already tables:
