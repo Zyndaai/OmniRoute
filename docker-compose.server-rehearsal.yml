@@ -1,0 +1,39 @@
+# Server rehearsal of the PostgreSQL cluster on a COPY of production (docs/ops/POSTGRES_CUTOVER.md,
+# part A). An override of docker-compose.cluster.yml, run next to the live stack from
+# /opt/omniroute:
+#
+#   docker compose -p omniroute-rehearsal -f docker-compose.cluster.yml \
+#     -f docker-compose.server-rehearsal.yml up -d
+#
+# Safety: every container sits on an `internal: true` network (no route to the internet), so the
+# copy can never refresh or use a production OAuth token, and the connections are also switched
+# off in its database before the app starts. Nothing is published on the host: checks run with
+# `docker exec`. Its own volumes, deleted at the end with `down -v`.
+
+name: omniroute-rehearsal
+
+services:
+  postgres:
+    container_name: omniroute-rehearsal-postgres
+    networks: [rehearsal]
+    volumes: !override
+      - rehearsal-pg:/var/lib/postgresql
+
+  redis:
+    container_name: omniroute-rehearsal-redis
+    networks: [rehearsal]
+
+  omniroute:
+    container_name: omniroute-rehearsal
+    networks: [rehearsal]
+    ports: !reset []
+    volumes: !override
+      - rehearsal-data:/app/data
+
+networks:
+  rehearsal:
+    internal: true
+
+volumes:
+  rehearsal-pg:
+  rehearsal-data:

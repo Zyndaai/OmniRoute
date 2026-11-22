@@ -6,6 +6,7 @@ type SyncPhase =
   | "managed-import"
   | "stale-combo"
   | "stale-combo-prune"
+  | "free-filter-cut"
   | "call-log";
 
 /** Opt-in diagnostics: never accept request, account, catalog or error payloads. */

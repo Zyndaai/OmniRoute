@@ -347,8 +347,7 @@ function mistralRejectsReasoningEffort(model: string): boolean {
   if (MISTRAL_NO_REASONING_EFFORT_PATTERN.test(model)) return true;
   const modelId = model.startsWith("mistral/") ? model.slice("mistral/".length) : model;
   const catalogued = getProviderModels("mistral").find(
-    (entry) =>
-      entry.id === modelId || (entry as { aliases?: string[] }).aliases?.includes(modelId)
+    (entry) => entry.id === modelId || entry.aliases?.includes(modelId)
   );
   return catalogued !== undefined && catalogued.supportsReasoning !== true;
 }

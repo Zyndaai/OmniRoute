@@ -220,7 +220,8 @@ async function importOneCodexRecord(
   index: number
 ): Promise<CodexImportRecordResult> {
   const norm = normalizeCodexImportRecord(record);
-  if (!norm.ok) return { index, ok: false, error: norm.error };
+  // `"error" in` narrows the union without strictNullChecks (a `!norm.ok` check does not).
+  if ("error" in norm) return { index, ok: false, error: norm.error };
 
   try {
     // Fetched per record: an earlier record in this batch may have just created
