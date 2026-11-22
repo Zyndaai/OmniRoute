@@ -23,7 +23,9 @@
 import { opaqueTokenFingerprint } from "../utils/opaqueTokenFingerprint.ts";
 
 export const OAUTH_USAGE_429_COOLDOWN_MS = 180_000; // 3 minutes (floor + default)
-export const OAUTH_USAGE_429_MAX_COOLDOWN_MS = 30 * 60_000; // 30 minutes (ceiling)
+// 6 hours (ceiling; guards against garbage hints). It must stay above the hour Anthropic
+// actually asks for: a poll sent earlier is refused again and restarts the window.
+export const OAUTH_USAGE_429_MAX_COOLDOWN_MS = 6 * 60 * 60_000;
 
 /** Largest valid JS Date value (ms) — anything above is a garbage header. */
 const MAX_DATE_MS = 8.64e15;

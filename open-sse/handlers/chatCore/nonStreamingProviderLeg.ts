@@ -36,6 +36,7 @@ import { isEmptyContentResponse } from "../../services/errorClassifier.ts";
 import { createRequestFamilyFallback } from "../../services/modelFamilyFallbackPolicy.ts";
 import { hasTrustedEmptyTurn } from "../../utils/emptyTurnPolicy.ts";
 import { FORMATS } from "../../translator/formats.ts";
+import { readErrorBodyText } from "./errorBodyRead.ts";
 import { scopeGeminiThoughtSignatureNamespace } from "../../services/geminiThoughtSignatureStore.ts";
 import { hasActiveClaudeThinking } from "../../utils/thinkingBudget.ts";
 
@@ -596,7 +597,7 @@ export async function runNonStreamingProviderLeg(
     let parsedErrorBody: Record<string, unknown> = {};
 
     try {
-      const errorBodyText = await providerResponse.text();
+      const errorBodyText = await readErrorBodyText(providerResponse);
       try {
         parsedErrorBody = JSON.parse(errorBodyText) as Record<string, unknown>;
       } catch {
@@ -828,8 +829,9 @@ export async function runNonStreamingProviderLeg(
   });
 
   if (parsed.kind === "invalid_sse") {
+    const sseStatus = parsed.status ?? 502;
     const receipt = buildReceipt(input, {
-      httpStatus: 502,
+      httpStatus: sseStatus,
       errorType: "invalid_sse_payload",
       usage: null,
       termination: "provider_error",
@@ -840,7 +842,7 @@ export async function runNonStreamingProviderLeg(
       model: currentModel,
     });
     const errorResult = legError(
-      502,
+      sseStatus,
       parsed.message,
       new Error(parsed.message),
       null,

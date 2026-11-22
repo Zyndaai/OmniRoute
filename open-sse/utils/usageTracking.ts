@@ -1015,10 +1015,13 @@ export function extractUsage(chunk: UsagePayloadLike | null | undefined) {
   if (chunk.done === true && typeof chunk.prompt_eval_count === "number") {
     const promptEvalCount = chunk.prompt_eval_count || 0;
     const evalCount = chunk.eval_count || 0;
+    // Newer servers also send prompt_eval_cached_count: cache reads, a subset of the prompt.
+    const cachedCount = chunk.prompt_eval_cached_count;
     return normalizeUsage({
       prompt_tokens: promptEvalCount,
       completion_tokens: evalCount,
       total_tokens: promptEvalCount + evalCount,
+      ...(typeof cachedCount === "number" ? { cached_tokens: cachedCount } : {}),
     });
   }
 

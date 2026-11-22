@@ -1,6 +1,5 @@
 /**
  * quota-weighted: skip empty accounts, weighted-draw the rest.
- * Spec: _tasks/superpowers/specs/2026-09-04-quota-weighted-routing-design.md
  */
 import { resolveProviderId } from "../../../src/shared/constants/providers.ts";
 import test, { after, afterEach } from "node:test";

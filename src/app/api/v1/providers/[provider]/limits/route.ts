@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isAuthenticated } from "@/shared/utils/apiAuth";
+import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 import { setProviderKeyLimit, getProviderKeyLimit } from "@/lib/db/registeredKeys";
 
@@ -14,9 +14,8 @@ const limitsSchema = z.object({
  * Get the current issuance limits for a provider.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  if (!(await isAuthenticated(request))) {
-    return Response.json({ error: { message: "Authentication required" } }, { status: 401 });
-  }
+  const authError = await requireManagementAuth(request);
+  if (authError) return authError;
 
   const { provider } = await params;
   const limits = await getProviderKeyLimit(provider);
@@ -28,9 +27,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ prov
  * Configure issuance limits for a provider.
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ provider: string }> }) {
-  if (!(await isAuthenticated(request))) {
-    return Response.json({ error: { message: "Authentication required" } }, { status: 401 });
-  }
+  const authError = await requireManagementAuth(request);
+  if (authError) return authError;
 
   let rawBody: unknown;
   try {

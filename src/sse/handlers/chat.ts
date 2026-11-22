@@ -4,6 +4,10 @@ import { randomUUID } from "crypto";
 import { resolveChatRequestBody } from "./requestBody";
 import { getComboCredentialAvailability } from "./comboCredentialAvailability.ts";
 import * as chatAdmission from "./chatAdmission.ts";
+import {
+  comboStalledConnectionIds,
+  type ComboStalledConnections,
+} from "./chat/comboStalledConnections.ts";
 import { buildClientRawRequest, resolveDispatchClientRawRequest } from "./chat/clientRawRequest.ts";
 export { buildClientRawRequest, resolveDispatchClientRawRequest };
 import { normalizeReasoningRequest } from "@/shared/reasoning/effortStandardization";
@@ -32,6 +36,7 @@ import { getCombo, getComboForModel, getModelInfo } from "../services/model";
 import { stripContextWindowSuffix } from "@omniroute/open-sse/services/model.ts";
 import { resolveBareModelToConnectionDefault } from "@omniroute/open-sse/services/model.ts";
 import { errorResponse } from "@omniroute/open-sse/utils/error.ts";
+import { isMarkedLocalProcessPressureResponse } from "@omniroute/open-sse/utils/localPressureResponse.ts";
 import { getImageModelEntry, isImageOnlyModel } from "@omniroute/open-sse/config/imageRegistry.ts";
 import { acceptHeaderForcesStream } from "@omniroute/open-sse/utils/aiSdkCompat.ts";
 import {
@@ -72,6 +77,7 @@ import { isRuntimeProviderRetirementError } from "@/shared/constants/providerRet
 import { isCommonChatGptWebRetirementError } from "@/shared/constants/chatgptWebRetirement";
 import { isChatGptWebCodexModel } from "@/shared/constants/chatgptWebCodex";
 import { deleteHandoff, getHandoff } from "@/lib/db/contextHandoffs";
+import { scopeHandoffSessionId } from "@omniroute/open-sse/services/combo/handoffSessionScope.ts";
 import { getComboByName, updateCombo } from "@/lib/db/combos";
 import { isModelAllowedForKey } from "@/lib/db/apiKeys";
 import { isProviderBlockedByIdOrAlias } from "@/shared/utils/noAuthProviders";
@@ -1176,6 +1182,7 @@ async function handleChatImplementation(
     const perRequestAutoControls = resolveRequestAutoControls(request.headers);
     const relayOptions = {
       sessionId,
+      apiKeyId: apiKeyInfo?.id ?? null,
       ...(combo.strategy === "context-relay" ? { config: relayConfig } : {}),
       ...(bypassProviderQuotaPolicy ? { bypassProviderQuotaPolicy: true } : {}),
       ...perRequestAutoControls,
@@ -1186,6 +1193,8 @@ async function handleChatImplementation(
     // because only this layer knows which connectionId was actually selected.
     const { defer: deferContextOverflowWhenCompressible, exclusions: compressionExclusions } =
       await resolveComboContextOverflowDeferral(log, apiKeyInfo);
+    // Accounts this combo request's per-target timeout abandoned; later targets prefer others.
+    const comboStalledConnections: ComboStalledConnections = new Map();
     const response = await (handleComboChat as any)({
       body,
       combo,
@@ -1266,6 +1275,7 @@ async function handleChatImplementation(
             // entry (trackPendingRequest(false) never runs) — live incident,
             // log id 1784418258231-14961a.
             modelAbortSignal: target?.modelAbortSignal ?? null,
+            comboStalledConnections,
             fallbackAttempts: target?.fallbackAttempts,
           },
           target?.effectiveComboStrategy ?? combo.strategy,
@@ -1299,10 +1309,12 @@ async function handleChatImplementation(
     comboPreselectedCredentials.clear();
 
     // ── Global Fallback Provider (#689) ────────────────────────────────────
-    // If combo exhausted all models, try the global fallback before giving up.
+    // If combo exhausted all models, try the global fallback before giving up. A local pressure
+    // shed did not exhaust anything: the fallback would only be shed again, with retries.
     if (
       !response.ok &&
       [502, 503].includes(response.status) &&
+      !isMarkedLocalProcessPressureResponse(response) &&
       typeof (settings as any)?.globalFallbackModel === "string" &&
       (settings as any).globalFallbackModel.trim()
     ) {
@@ -1502,6 +1514,8 @@ async function handleSingleModelChat(
      * the signal used for the actual dispatch, not left unused.
      */
     modelAbortSignal?: AbortSignal | null;
+    /** Accounts an earlier target of this combo request stalled on (comboStalledConnections.ts). */
+    comboStalledConnections?: ComboStalledConnections | null;
     fallbackAttempts?: number;
   } = {},
   comboStrategy: string | null = null,
@@ -1534,6 +1548,9 @@ async function handleSingleModelChat(
     // down so getKnownContextOverflow's target-aware deferral check can never drift
     // from chatCore's own native-codex-passthrough decision.
     const sNetSourceFormat = detectFormatFromEndpoint(body, clientRawRequest?.endpoint || "");
+    // A combo target redirected here keeps sharing its outer combo request's record.
+    const sNetStalledConnections: ComboStalledConnections =
+      runtimeOptions.comboStalledConnections ?? new Map();
     return handleComboChat({
       body,
       combo: redirectCombo,
@@ -1578,6 +1595,7 @@ async function handleSingleModelChat(
             previousResponseResumed: runtimeOptions.previousResponseResumed,
             // #7360 follow-up — see the primary handleSingleModel closure above.
             modelAbortSignal: target?.modelAbortSignal ?? null,
+            comboStalledConnections: sNetStalledConnections,
             fallbackAttempts: target?.fallbackAttempts,
           },
           resolvedTarget?.effectiveComboStrategy ?? redirectCombo.strategy ?? "priority",
@@ -1791,6 +1809,12 @@ async function handleSingleModelChat(
         !runtimeOptions.managedLease
       ) {
         emptyTurnExcluded.add(runtimeOptions.emptyTurnConnectionId);
+      }
+      // A combo per-target timeout abandoned these accounts earlier in this combo request.
+      // Not flag-gated: it only applies once a target timed out, with the same fallback below.
+      if (!hasForcedConnection && !museOwner && !runtimeOptions.managedLease) {
+        const stalled = runtimeOptions.comboStalledConnections;
+        for (const id of comboStalledConnectionIds(stalled, provider)) emptyTurnExcluded.add(id);
       }
       const selectCredentials = (excluded: Set<string>) =>
         getProviderCredentialsWithQuotaPreflight(
@@ -2046,13 +2070,14 @@ async function handleSingleModelChat(
         return effectivePolicyRejection;
       }
       let injectedHandoff = null;
+      const handoffSessionId = scopeHandoffSessionId(runtimeOptions.sessionId, apiKeyInfo?.id);
       if (
         comboStrategy === "context-relay" &&
         comboName &&
-        runtimeOptions.sessionId &&
+        handoffSessionId &&
         body?._omnirouteSkipContextRelay !== true
       ) {
-        const handoff = await getHandoff(runtimeOptions.sessionId, comboName);
+        const handoff = await getHandoff(handoffSessionId, comboName);
         if (handoff && handoff.fromAccount !== credentials.connectionId) {
           // Inject only after a real account switch. The combo loop itself cannot
           // reliably detect this because account selection happens inside auth.
@@ -2245,8 +2270,8 @@ async function handleSingleModelChat(
         ) {
           breaker._onSuccess();
         }
-        if (injectedHandoff && runtimeOptions.sessionId && comboName) {
-          await deleteHandoff(runtimeOptions.sessionId, comboName);
+        if (injectedHandoff && handoffSessionId && comboName) {
+          await deleteHandoff(handoffSessionId, comboName);
         }
         if (telemetry) telemetry.startPhase("finalize");
         if (telemetry) telemetry.endPhase();
@@ -2747,6 +2772,7 @@ async function handleSingleModelChat(
               isCombo,
               headers: result.response.headers,
               structuredError: { code: result.errorCode, type: result.errorType },
+              upstreamErrorBody: result.upstreamErrorBody,
             })
           );
 

@@ -10,18 +10,16 @@ lastUpdated: 2026-10-05
 > billing, no multi-tenant isolation, no hosted prompt-processing hop. Your
 > prompts go straight to the provider you pick.
 
-> **Version note:** this flow applies from **v3.8.51** on. The two files it uses
-> (`docker-compose.selfhost.yml` and `.env.selfhost.example`) are not in
-> v3.8.50 or any earlier tag. On v3.8.50, use the single-container
-> [`docker run` flow in the Docker Guide](../guides/DOCKER_GUIDE.md#quick-run)
-> instead.
+> **Files:** the two files this flow uses (`docker-compose.selfhost.yml` and
+> `.env.selfhost.example`) are at the root of this repository. Take them from
+> your checkout of `Zyndaai/OmniRoute`; the upstream copies of the same names
+> do not include PostgreSQL or this team's image.
 
 ```bash
 mkdir omniroute && cd omniroute
-BASE=https://raw.githubusercontent.com/diegosouzapw/OmniRoute/v3.8.51
-curl -fsSLO "$BASE/docker-compose.selfhost.yml"
-curl -fsSLO "$BASE/.env.selfhost.example"
-cp .env.selfhost.example .env      # then edit the 2 lines marked "EDIT ME"
+cp /path/to/OmniRoute/docker-compose.selfhost.yml /path/to/OmniRoute/.env.selfhost.example .
+cp .env.selfhost.example .env      # set POSTGRES_PASSWORD, then the lines marked "EDIT ME"
+docker login ghcr.io               # the team image is private (token with read:packages)
 docker compose -f docker-compose.selfhost.yml up -d
 open http://127.0.0.1:20128
 ```
@@ -34,8 +32,8 @@ form: a packaged container/binary you run on your own machine in 5 minutes.
 ## Why this guide exists
 
 `docker-compose.selfhost.yml` is the one-command path: **the published
-`ghcr.io/zyndaai/omniroute` image, loopback-only, Redis included, no build
-step.** A single-VPS production deployment uses `docker-compose.vps.yml` instead; see
+`ghcr.io/zyndaai/omniroute` image, loopback-only, PostgreSQL and Redis
+included, no build step.** A single-VPS production deployment uses `docker-compose.vps.yml` instead; see
 the [DOCKER_GUIDE](../guides/DOCKER_GUIDE.md).
 
 ---
@@ -47,26 +45,21 @@ the [DOCKER_GUIDE](../guides/DOCKER_GUIDE.md).
 - A provider API key from any supported provider (OpenAI, Anthropic, Google,
   or one of the [150+ free tiers](./FREE-TIERS-GUIDE.md)).
 
-No build toolchain, no Node, no git clone required: you download two files
-(the compose file and the env template, Step 1) and the image is pulled.
+No build toolchain and no Node required: you copy two files (the compose file
+and the env template, Step 1) and the images are pulled.
 
 ---
 
 ## Step 1 — Configure (1 min)
 
-Download the two self-host files into an empty directory, pinned to the
-release tag, and create your `.env` from the template:
+Copy the two self-host files from your checkout of this repository into an
+empty directory, and create your `.env` from the template:
 
 ```bash
 mkdir omniroute && cd omniroute
-BASE=https://raw.githubusercontent.com/diegosouzapw/OmniRoute/v3.8.51
-curl -fsSLO "$BASE/docker-compose.selfhost.yml"
-curl -fsSLO "$BASE/.env.selfhost.example"
+cp /path/to/OmniRoute/docker-compose.selfhost.yml /path/to/OmniRoute/.env.selfhost.example .
 cp .env.selfhost.example .env
 ```
-
-(Working from a git clone of v3.8.51 or later? Both files are at the repo
-root; just run the `cp`.)
 
 The compose file reads **`./.env` next to `docker-compose.selfhost.yml`**
 (`env_file: .env`). It does **not** read `~/.omniroute/.env`: that file belongs
@@ -74,12 +67,17 @@ to the npm CLI install (`omniroute` command, see
 [Local binary build](#local-binary-build-optional)) and has no effect on the
 Docker flow.
 
-Edit exactly **two** lines in `.env`:
+Set the database password, then the two security lines, in `.env`:
 
 ```dotenv
+POSTGRES_PASSWORD=<output of: openssl rand -hex 24>   # required; letters and digits only
 REQUIRE_API_KEY=true          # was false — lock the endpoint down
 APP_BIND_HOST=127.0.0.1       # keep loopback; see "Exposing" only if needed
 ```
+
+`POSTGRES_PASSWORD` is required (compose refuses to start without it) and is used
+when the database is first created, so set it before the first `up`. It goes into
+a connection URL, which is why it should be letters and digits only.
 
 `REQUIRE_API_KEY=true` makes `/v1` requests require an API key (a logged-in
 dashboard session also works), and the
@@ -108,8 +106,9 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 Pulls the team image `ghcr.io/zyndaai/omniroute:latest` (built by
 `.github/workflows/docker-build-push.yml`; private, so `docker login ghcr.io` first) and
-`redis:8.6.5-alpine`, starts both, and waits for Redis to be healthy before
-the app boots.
+`postgres:18-alpine` and `redis:8.6.5-alpine`, starts all three, and waits for
+PostgreSQL and Redis to be healthy before the app boots. The app creates its
+tables in PostgreSQL on first start.
 
 ### Step 3 — Verify (30 s)
 
@@ -140,9 +139,10 @@ is `healthy` — the acceptance bar from the self-host issue.
 | `20129` | API port (server-to-server)                 | `127.0.0.1`  |
 | `20132` | Live WebSocket (realtime dashboard updates) | `127.0.0.1`  |
 
-All three bind to **loopback only** by default. Redis is **not** published to
-the host at all — the app reaches it over the compose network. This is
-deliberate: shipping an unauthenticated Redis on `0.0.0.0` is a footgun.
+All three bind to **loopback only** by default. PostgreSQL and Redis are **not**
+published to the host at all — the app reaches them over the compose network.
+This is deliberate: shipping a database or an unauthenticated Redis on `0.0.0.0`
+is a footgun.
 
 ---
 
@@ -236,21 +236,23 @@ sections for copy-paste reverse-proxy configs.
 
 ## Data, backups, and resets
 
-- **Data dir**: `./data` (bind-mounted to `/app/data`). All SQLite DBs,
-  migrations, audit trail, and encrypted provider keys live here.
-- **Backups**: SQLite auto-backup is on by default
-  (`DISABLE_SQLITE_AUTO_BACKUP` is unset → enabled). For a manual snapshot:
+- **Data**: settings, provider connections, keys and logs live in the bundled
+  PostgreSQL container, in the `postgres-data` Docker volume. `./data`
+  (bind-mounted to `/app/data`) keeps local files such as the generated
+  `server.env`; back up both.
+- **Backups**: dump the database while it runs, and restore into a fresh volume:
   ```bash
-  ./bin/snapshot-data.sh
+  docker exec omniroute-postgres pg_dump -U omniroute omniroute > omniroute.sql
+  docker exec -i omniroute-postgres psql -U omniroute omniroute < omniroute.sql
   ```
-  Restore with `./bin/restore-data.sh`.
+  The SQLite snapshot scripts (`bin/snapshot-data.sh`, `bin/restore-data.sh`,
+  `bin/restore-policies.sh`) were removed with the move to PostgreSQL.
+- **Upgrading an install from before PostgreSQL**: older installs kept their data in
+  `./data/storage.sqlite`. This version does not read that file, and no transfer tool
+  ships with it, so the new database starts empty (the file is left untouched).
 - **Reset the dashboard password**:
   ```bash
   docker exec -it omniroute node bin/reset-password.mjs
-  ```
-- **Reset policies** (routing/failover/quota to factory defaults):
-  ```bash
-  docker exec -it omniroute node bin/restore-policies.sh
   ```
 
 ---
@@ -260,10 +262,16 @@ sections for copy-paste reverse-proxy configs.
 <details>
 <summary><code>cp: cannot stat '.env.selfhost.example': No such file or directory</code></summary>
 
-The self-host files are not in your current directory. Download them first
-(see [Step 1](#step-1--configure-1-min)); they ship from v3.8.51 on, so the
-tag-pinned URLs do not exist for v3.8.50 or earlier. On v3.8.50 use the
-[`docker run` flow](../guides/DOCKER_GUIDE.md#quick-run).
+The self-host files are not in your current directory. Copy them from your
+checkout of this repository first (see [Step 1](#step-1--configure-1-min)).
+</details>
+
+<details>
+<summary><code>required variable POSTGRES_PASSWORD is missing a value: set POSTGRES_PASSWORD in .env</code></summary>
+
+`docker compose` stops before starting anything because `.env` has no
+`POSTGRES_PASSWORD`. Set it (letters and digits, for example
+`openssl rand -hex 24`) and run `up -d` again.
 </details>
 
 <details>
@@ -277,7 +285,11 @@ That file is read by the npm CLI install only. The Docker flow reads the
 <details>
 <summary>Healthcheck stays <code>starting</code> / <code>unhealthy</code></summary>
 
-- Check Redis is up: `docker inspect --format '{{.State.Health.Status}}' omniroute-redis`
+- Check PostgreSQL and Redis are up:
+  `docker inspect --format '{{.State.Health.Status}}' omniroute-postgres omniroute-redis`
+- `password authentication failed` in `docker logs omniroute`: `POSTGRES_PASSWORD`
+  changed after the database was created. Put the original value back, or change the
+  password inside PostgreSQL (`ALTER USER omniroute PASSWORD '...'`) to match.
 - Check app logs: `docker logs omniroute`
 - The healthcheck probes `/healthz` and allows a 20 s start period. A slow
   first boot (cold migrations) can take longer — bump `start_period` in the
@@ -313,9 +325,8 @@ Two ways to fix it, without changing the documented default:
   this changes where your data lives:
   - a new named volume starts **empty** — on an existing install, copy
     `./data` into it first, or OmniRoute will boot as a fresh instance;
-  - `bin/snapshot-data.sh` and `bin/restore-data.sh` read/write `./data` on
-    the host directly, so they will not see a named volume's contents unless
-    you back it up separately, for example:
+  - a host-side backup of `./data` will not see a named volume's contents;
+    back the volume up separately, for example:
 
     ```bash
     docker run --rm -v omniroute-data:/data -v "$PWD":/backup alpine \
@@ -365,8 +376,9 @@ Before you expose beyond loopback:
 - [ ] Dashboard login password set in the onboarding wizard to a strong, unique value
 - [ ] `APP_BIND_HOST` left at `127.0.0.1` _unless_ behind an auth-enforcing proxy
 - [ ] TLS terminated by Caddy/Traefik/Cloudflare in front (never plain HTTP on WAN)
-- [ ] Redis not published to the host (the self-host compose already enforces this)
-- [ ] `./data` volume backed up regularly (`bin/snapshot-data.sh`)
+- [ ] PostgreSQL and Redis not published to the host (the self-host compose already enforces this)
+- [ ] `POSTGRES_PASSWORD` set to a random value (`openssl rand -hex 24`)
+- [ ] PostgreSQL database backed up regularly (`pg_dump`)
 - [ ] Provider keys rotated per the provider's own policy
 
 For the security policy, see [SECURITY.md](../../SECURITY.md).

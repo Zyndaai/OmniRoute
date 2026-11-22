@@ -21,8 +21,6 @@
  * to return them, and the values the attempt loop still consumes (`orderedTargets`,
  * `stickyWeightedLimit`, `getWeightedStepKeyForTarget`, `sticky`, `preScreenMap`) are
  * returned instead of closed over.
- *
- * See _tasks/quality/2026-06-19-DESIGN-godfiles-decomposition.md §4.
  */
 import { getModelLockoutInfo, isModelLocked } from "../accountFallback.ts";
 import { parseAutoPrefix } from "../autoCombo/autoPrefix.ts";
@@ -87,6 +85,7 @@ import {
   type ApplyStickinessResult,
 } from "./sessionStickiness.ts";
 import { applyRequestTagRouting } from "./autoStrategy.ts";
+import { scopeHandoffSessionId } from "./handoffSessionScope.ts";
 import { getStrategyTraits, type StrategyTraits } from "./strategyRegistry.ts";
 import type {
   ComboCollectionLike,
@@ -368,11 +367,20 @@ function buildWeightedStepKeyMapper(
 ): (target: ResolvedComboTarget) => string | null {
   return (target: ResolvedComboTarget): string | null => {
     if (!weightedResolution?.orderedSteps) return null;
-    const step = weightedResolution.orderedSteps.find(
-      (entry) =>
-        target.executionKey === entry.executionKey ||
-        target.executionKey.startsWith(entry.executionKey + ">")
+    // Prefer an exact step match before checking nested and account-expanded
+    // execution keys. Prompt-cache expansion may append "@connectionId".
+    const exact = weightedResolution.orderedSteps.find(
+      (entry) => target.executionKey === entry.executionKey
     );
+    const step =
+      exact ??
+      weightedResolution.orderedSteps
+        .filter(
+          (entry) =>
+            target.executionKey.startsWith(entry.executionKey + ">") ||
+            target.executionKey.startsWith(entry.executionKey + "@")
+        )
+        .sort((left, right) => right.executionKey.length - left.executionKey.length)[0];
     return step?.executionKey || null;
   };
 }
@@ -598,7 +606,7 @@ async function applyContinuityFilters(
     if (exhaustion) {
       // Match handleComboChat: only track failures under context-cache protection pins.
       const effectiveSessionId: string | null = combo.context_cache_protection
-        ? (relayOptions?.sessionId ?? null)
+        ? scopeHandoffSessionId(relayOptions?.sessionId, relayOptions?.apiKeyId)
         : null;
       recordComboFailure(effectiveSessionId, combo.name);
       return {
@@ -624,7 +632,7 @@ async function applyContinuityFilters(
   orderedTargets = await applyContextRequirements(orderedTargets, config.contextRequirements, log);
   if (orderedTargets.length === 0 && preContextTargets.length > 0) {
     const effectiveSessionId: string | null = combo.context_cache_protection
-      ? (relayOptions?.sessionId ?? null)
+      ? scopeHandoffSessionId(relayOptions?.sessionId, relayOptions?.apiKeyId)
       : null;
     recordComboFailure(effectiveSessionId, combo.name);
     const { message, diagnostics } = buildEmptyComboTargetsPayload(
@@ -743,7 +751,7 @@ async function applyPromptCacheStage(
   );
   const promptCacheAffinityTargets =
     promptCacheAffinityEnabled && resolvePromptCacheAffinityKey(body)
-      ? await expandPromptCacheAffinityTargets(orderedTargets)
+      ? await expandPromptCacheAffinityTargets(orderedTargets, deps.apiKeyAllowedConnections)
       : orderedTargets;
 
   // Determine affinity scope: restrict to model-level for deterministic strategies
@@ -760,7 +768,10 @@ async function applyPromptCacheStage(
     getStrategyTraits(strategy).promptCacheAffinityScope,
     deps.relayOptions?.sessionId
   );
-  if (!promptCacheAffinity.applied) return orderedTargets;
+  // Account expansion is meaningful even when affinity did not reorder targets
+  // (e.g. one eligible account). Returning the unbound originals here lets the
+  // later credential selector discard that resolved account identity.
+  if (!promptCacheAffinity.applied) return promptCacheAffinityTargets;
   const protectedOriginal =
     shouldProtectOriginalFirst(stickyStuck, autoUsedExplicitRouter, strategy) && orderedTargets[0];
   const nextTargets = protectFirstTarget(promptCacheAffinity.targets, protectedOriginal);
@@ -794,7 +805,9 @@ function buildWeightedExhaustionResponse(
     `Weighted selection: every target excluded before dispatch — ${formatPreDispatchExclusions(exclusions)}`
   );
   recordComboFailure(
-    deps.combo.context_cache_protection ? (deps.relayOptions?.sessionId ?? null) : null,
+    deps.combo.context_cache_protection
+      ? scopeHandoffSessionId(deps.relayOptions?.sessionId, deps.relayOptions?.apiKeyId)
+      : null,
     deps.combo.name
   );
   return coolingDown;

@@ -47,6 +47,7 @@ import HarImportButton from "../HarImportButton";
 import CcCompatibleRequestDefaultsFields from "./CcCompatibleRequestDefaultsFields";
 import { buildAddProviderSpecificData } from "./connectionProviderSpecificData";
 import { getCommandCodeAuthPhaseLabel } from "./commandCodeAuthPhase";
+import { buildProviderValidateRequestBody } from "./providerValidateRequestBody";
 import { createInitialAddApiKeyFormData } from "./addApiKeyInitialFormData";
 import AgentrouterConsoleFields from "./AgentrouterConsoleFields";
 import QuotaScrapingFields from "./QuotaScrapingFields";
@@ -272,24 +273,17 @@ export default function AddApiKeyModal({
       const res = await fetch("/api/providers/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          apiKey: resolveCredentialInput(),
-          validationModelId: formData.validationModelId || undefined,
-          customUserAgent: formData.customUserAgent.trim() || undefined,
-          baseUrl: formData.baseUrl.trim() || undefined,
-          region: isAwsPolly
-            ? formData.region.trim() || "us-east-1"
-            : showsRegion
-              ? formData.region.trim() || defaultRegion
-              : undefined,
-          accessKeyId: isAwsPolly ? formData.awsAccessKeyId.trim() || undefined : undefined,
-          sessionToken: isAwsPolly ? formData.awsSessionToken.trim() || undefined : undefined,
-          cx: formData.cx.trim() || undefined,
-          runtimeKey: isChatGptWebCodex ? formData.runtimeKey.trim() || undefined : undefined,
-          tunnelId: isChatGptWebCodex ? formData.tunnelId.trim() || undefined : undefined,
-          connectorName: isChatGptWebCodex ? formData.connectorName.trim() || undefined : undefined,
-        }),
+        body: JSON.stringify(
+          buildProviderValidateRequestBody({
+            provider,
+            apiKey: resolveCredentialInput(),
+            formData,
+            isAwsPolly,
+            showsRegion,
+            defaultRegion,
+            isChatGptWebCodex,
+          })
+        ),
       });
       const data = await res.json();
       const ok = !!data.valid;
@@ -358,26 +352,17 @@ export default function AddApiKeyModal({
           const res = await fetch("/api/providers/validate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              provider,
-              apiKey: credentialInput,
-              validationModelId: formData.validationModelId || undefined,
-              customUserAgent: formData.customUserAgent.trim() || undefined,
-              baseUrl: formData.baseUrl.trim() || undefined,
-              region: isAwsPolly
-                ? formData.region.trim() || "us-east-1"
-                : showsRegion
-                  ? formData.region.trim() || defaultRegion
-                  : undefined,
-              accessKeyId: isAwsPolly ? formData.awsAccessKeyId.trim() || undefined : undefined,
-              sessionToken: isAwsPolly ? formData.awsSessionToken.trim() || undefined : undefined,
-              cx: formData.cx.trim() || undefined,
-              runtimeKey: isChatGptWebCodex ? formData.runtimeKey.trim() || undefined : undefined,
-              tunnelId: isChatGptWebCodex ? formData.tunnelId.trim() || undefined : undefined,
-              connectorName: isChatGptWebCodex
-                ? formData.connectorName.trim() || undefined
-                : undefined,
-            }),
+            body: JSON.stringify(
+              buildProviderValidateRequestBody({
+                provider,
+                apiKey: credentialInput,
+                formData,
+                isAwsPolly,
+                showsRegion,
+                defaultRegion,
+                isChatGptWebCodex,
+              })
+            ),
           });
           const data = await res.json();
           isValid = !!data.valid;

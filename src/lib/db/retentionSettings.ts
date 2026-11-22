@@ -8,6 +8,7 @@
 
 import { db } from "./pg";
 import { DEFAULT_DATABASE_SETTINGS } from "@/types/databaseSettings";
+import { getCallLogRetentionDays } from "../logEnv";
 
 export type RetentionSettings = typeof DEFAULT_DATABASE_SETTINGS.retention;
 
@@ -24,6 +25,7 @@ export async function getRetentionSettings(): Promise<RetentionSettings> {
     `SELECT key, value FROM config_entries
       WHERE namespace = 'databaseSettings' AND key LIKE 'retention.%'`
   );
+  let savedCallLogs = false;
   for (const row of rows) {
     const name = row.key.slice(RETENTION_KEY_PREFIX.length);
     if (!(name in merged)) continue;
@@ -32,8 +34,14 @@ export async function getRetentionSettings(): Promise<RetentionSettings> {
       if (typeof row.value === "boolean") merged[name] = row.value;
     } else if (isPositiveNumber(row.value)) {
       merged[name] = row.value;
+      if (name === "callLogs" && row.value > 0) savedCallLogs = true;
     }
   }
+  // One effective call-log age for display, scheduled cleanup and request-log rotation
+  // (resolveCallLogRetentionDays): an install that never saved one follows
+  // CALL_LOG_RETENTION_DAYS, else 7 days, instead of the shipped 30 that rotation never
+  // enforces. A value the operator saved still wins (#19435).
+  if (!savedCallLogs) merged.callLogs = getCallLogRetentionDays();
   return merged as RetentionSettings;
 }
 

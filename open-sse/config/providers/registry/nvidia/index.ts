@@ -51,5 +51,11 @@ export const nvidiaProvider: RegistryEntry = {
       supportsVision: true,
     },
     { id: "openai/gpt-oss-120b", name: "GPT OSS 120B", toolCalling: false },
+    {
+      id: "openai/gpt-oss-20b",
+      name: "GPT OSS 20B",
+      supportsReasoning: true,
+      toolCalling: true,
+    },
   ],
 };

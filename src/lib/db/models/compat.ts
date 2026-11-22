@@ -257,7 +257,8 @@ export async function listModelCompatVisionOverrides(): Promise<ModelCompatVisio
 }
 
 export type ModelCompatPatch = {
-  normalizeToolCallId?: boolean;
+  /** `null` unsets the override (back to the provider default); `false` is kept as an explicit opt-out. */
+  normalizeToolCallId?: boolean | null;
   preserveOpenAIDeveloperRole?: boolean | null;
   preserveVideoUrl?: boolean | null;
   compatByProtocol?: CompatByProtocolMap;
@@ -301,8 +302,8 @@ function applyCompatPatch(
   const prev = idx >= 0 ? { ...list[idx] } : { id: modelId };
   const next: ModelCompatOverride = { ...prev, id: modelId };
   if ("normalizeToolCallId" in patch) {
-    if (patch.normalizeToolCallId) next.normalizeToolCallId = true;
-    else delete next.normalizeToolCallId;
+    if (patch.normalizeToolCallId === null) delete next.normalizeToolCallId;
+    else next.normalizeToolCallId = Boolean(patch.normalizeToolCallId);
   }
   if ("preserveOpenAIDeveloperRole" in patch) {
     if (patch.preserveOpenAIDeveloperRole === null) {
@@ -381,7 +382,7 @@ function applyCompatPatch(
   const hasTargetFormat = Object.prototype.hasOwnProperty.call(next, "targetFormat");
   const hasVisionFlag = Object.prototype.hasOwnProperty.call(next, "supportsVision");
   if (
-    next.normalizeToolCallId ||
+    Object.prototype.hasOwnProperty.call(next, "normalizeToolCallId") ||
     hasPreserveFlag ||
     hasVideoUrlFlag ||
     hasHiddenFlag ||

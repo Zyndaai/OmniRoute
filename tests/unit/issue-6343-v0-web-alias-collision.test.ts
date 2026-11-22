@@ -6,7 +6,7 @@
 // the provider's ALIAS (not its canonical id), and open-sse's alias->id map is
 // necessarily 1:1, so "v0/<model>" always resolved to v0-vercel (which the user
 // has no credentials for) instead of v0-vercel-web (the provider they actually
-// configured). See _tasks/pipeline/bugs/2-implementing/6343-*.plan.md.
+// configured).
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";

@@ -96,7 +96,7 @@ export const OPENAPI_ENDPOINTS: OpenApiEndpoint[] = [
     description: "",
     tag: "V1 Accounts",
     tags: ["V1 Accounts"],
-    requiresAuth: false,
+    requiresAuth: true,
     hasRequestBody: false,
   },
   {
@@ -106,7 +106,7 @@ export const OPENAPI_ENDPOINTS: OpenApiEndpoint[] = [
     description: "",
     tag: "V1 Accounts",
     tags: ["V1 Accounts"],
-    requiresAuth: false,
+    requiresAuth: true,
     hasRequestBody: false,
   },
   {
@@ -476,7 +476,7 @@ export const OPENAPI_ENDPOINTS: OpenApiEndpoint[] = [
     description: "",
     tag: "V1 Issues",
     tags: ["V1 Issues"],
-    requiresAuth: false,
+    requiresAuth: true,
     hasRequestBody: false,
   },
   {
@@ -876,7 +876,7 @@ export const OPENAPI_ENDPOINTS: OpenApiEndpoint[] = [
     description: "",
     tag: "V1 Providers",
     tags: ["V1 Providers"],
-    requiresAuth: false,
+    requiresAuth: true,
     hasRequestBody: false,
   },
   {
@@ -886,7 +886,7 @@ export const OPENAPI_ENDPOINTS: OpenApiEndpoint[] = [
     description: "",
     tag: "V1 Providers",
     tags: ["V1 Providers"],
-    requiresAuth: false,
+    requiresAuth: true,
     hasRequestBody: false,
   },
   {

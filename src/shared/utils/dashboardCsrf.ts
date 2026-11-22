@@ -113,11 +113,24 @@ function isClientApiPath(pathname: string): boolean {
   );
 }
 
+const DASHBOARD_PAGE_PREFIXES = ["/dashboard", "/home"];
+
+/**
+ * React Router submits a dashboard page's action to the page's data URL (`/dashboard/x.data`,
+ * `/home.data`). The server judges it as a dashboard mutation, so it needs the token too.
+ */
+function isDashboardActionPath(pathname: string): boolean {
+  if (!pathname.endsWith(".data")) return false;
+  const page = pathname.slice(0, -".data".length);
+  return DASHBOARD_PAGE_PREFIXES.some((prefix) => page === prefix || page.startsWith(prefix + "/"));
+}
+
 function shouldAttachDashboardCsrf(url: URL, method: string): boolean {
   if (
     TOP_LEVEL_MANAGEMENT_PATH_PREFIXES.some(
       (prefix) => url.pathname === prefix || url.pathname.startsWith(prefix + "/")
-    )
+    ) ||
+    isDashboardActionPath(url.pathname)
   ) {
     return true;
   }

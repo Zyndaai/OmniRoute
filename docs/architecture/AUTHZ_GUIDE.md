@@ -170,6 +170,46 @@ Incoming request → src/server/http/handler.ts (redirects → headless gate →
 
 Trusted internal headers (defined in `src/server/authz/headers.ts`) are **stripped from incoming requests** before classification — clients cannot pre-populate `x-omniroute-auth-*` to impersonate a subject.
 
+This only happens on the paths the pipeline runs on (`AUTHZ_PATH_PATTERNS` in
+`src/server/http/authzPaths.ts`). Endpoints outside them (`/a2a`, `/authorize`, `/healthz`,
+`/docs/api/search`, ...) receive client-sent `x-omniroute-auth-*` headers unchanged, so they must
+never call a helper that trusts those headers (`requireManagementAuth`, `operatorCredential`,
+`assertAuth`/`readSubjectFromHeaders`, `apiKeyPolicy`). `/a2a` authenticates itself from the API
+key or the signed session cookie (`src/lib/a2a/authenticate.ts`).
+
+### Dashboard pages: loaders and page writes
+
+Dashboard pages are `MANAGEMENT` routes, and a page's data URL (`/dashboard/x.data`, which React
+Router fetches for loaders and actions) is judged as the page itself. Several rules are keyed on
+the `/api/...` path instead (LOCAL_ONLY, ALWAYS_PROTECTED under `requireLogin=false`, access-token
+scopes, session-only routes, body limits, each route's own checks), so a page loader must not read
+the database directly:
+
+- **Loaders read through the API.** `apiJson()` / `apiRequest()` / `apiAction()` in
+  `src/server/routing/dashboardApi.server.ts` replay the `/api/...` route in-process through the
+  whole request pipeline with the headers the page request arrived with (kept by
+  `src/server/http/handler.ts` in the request context), so a loader gets exactly what the
+  browser's own `fetch("/api/...")` would get. A 401 redirects to `<basePath>/login`. Return only
+  the fields the page renders: loader data is serialized into the HTML. Tests:
+  `tests/unit/dashboard-api-parity.test.ts`; `tests/unit/dashboard-loaders-use-api.test.ts` fails
+  when a dashboard page imports `@/lib/db/*` or `@/sse/services/*` for data.
+- **Page writes are origin-checked for every caller.** React Router's own action check compares
+  `Origin` with `request.url`, which this server builds from its bound address, so
+  `react-router.config.ts` sets `allowedActionOrigins: ["**"]` and the request pipeline checks
+  instead: any non-GET request to a page (not `/api`, a rewritten alias, or an endpoint listed in
+  `src/server/http/resourceRoutes.ts`) must come from a trusted public origin
+  (`validateBrowserMutationOrigin`), with the dashboard CSRF token as the fallback for a
+  session (`src/server/origin/pageActionOrigin.ts`). The authz pipeline's own origin check covers
+  dashboard sessions only; this one also covers anonymous callers under `requireLogin=false`.
+  Test: `tests/unit/page-action-origin.test.ts`, which also fails when a `route.ts` outside
+  `src/app/api` is missing from `resourceRoutes.ts`.
+- **CSRF token on action posts.** `installDashboardCsrfFetch` (`src/shared/utils/dashboardCsrf.ts`)
+  attaches the token to `/dashboard/....data` and `/home.data` posts as well as `/api/...` writes.
+- **Expired session on a data request.** A plain 307 would be followed by `fetch()` (a POST stays a
+  POST, so `/login` answers 405) and land on the error boundary. The pipeline answers a `.data`
+  request with React Router's redirect form instead: 204 with `X-Remix-Redirect: <basePath>/login`
+  and `X-Remix-Reload-Document: true`. Test: `tests/unit/dashboard-data-login-redirect.test.ts`.
+
 ### Policy contracts
 
 Each route class has a policy in `src/server/authz/policies/`:

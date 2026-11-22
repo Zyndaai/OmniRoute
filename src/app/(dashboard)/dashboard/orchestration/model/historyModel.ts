@@ -1,6 +1,6 @@
 /**
  * Pure history-grid model for the Orchestration Canvas "History" tab (Airflow-grid style).
- * No React, no side effects. Spec: _tasks/superpowers/specs/2026-08-30-orchestration-canvas-design.md
+ * No React, no side effects.
  *
  * Converts persisted A2A task-history rows (`GET /api/a2a/tasks/history`, Task C3) and the
  * existing in-memory Cloud Agent task list (`GET /api/v1/agents/tasks`) into a shared

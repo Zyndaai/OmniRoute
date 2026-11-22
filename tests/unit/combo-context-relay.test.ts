@@ -10,6 +10,8 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
 const core = await import("../../src/lib/db/core.ts");
 const handoffDb = await import("../../src/lib/db/contextHandoffs.ts");
+const { scopeHandoffSessionId } =
+  await import("../../open-sse/services/combo/handoffSessionScope.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
 const { registerCodexConnection } = await import("../../open-sse/services/codexQuotaFetcher.ts");
@@ -212,6 +214,8 @@ test("handleComboChat context-relay treats provider circuit breaker responses as
 
 test("handleComboChat context-relay persists a handoff when codex quota reaches the warning threshold", async () => {
   const sessionId = "sess-generate";
+  // Rows are stored under the caller-scoped id; this call has no API key.
+  const storedSessionId = scopeHandoffSessionId(sessionId, null)!;
   const connectionId = "conn-generate";
   touchSession(sessionId, connectionId);
   registerCodexConnection(connectionId, {
@@ -274,7 +278,7 @@ test("handleComboChat context-relay persists a handoff when codex quota reaches 
     },
   });
 
-  const saved = await waitFor(() => handoffDb.getHandoff(sessionId, "relay-generate"));
+  const saved = await waitFor(() => handoffDb.getHandoff(storedSessionId, "relay-generate"));
 
   assert.equal(result.ok, true);
   assert.equal(usageCalls, 1);
@@ -336,7 +340,10 @@ test("handleComboChat context-relay respects handoffProviders and skips generati
   assert.equal(result.ok, true);
   assert.equal(usageCalls, 0);
   assert.equal(summaryCalls, 0);
-  assert.equal(await handoffDb.getHandoff(sessionId, "relay-disabled-provider"), null);
+  assert.equal(
+    await handoffDb.getHandoff(scopeHandoffSessionId(sessionId, null)!, "relay-disabled-provider"),
+    null
+  );
 });
 
 test("handleComboChat context-relay treats explicit empty handoffProviders as disabled", async () => {
@@ -384,7 +391,10 @@ test("handleComboChat context-relay treats explicit empty handoffProviders as di
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(result.ok, true);
   assert.equal(usageCalls, 0);
-  assert.equal(await handoffDb.getHandoff(sessionId, "relay-empty-providers"), null);
+  assert.equal(
+    await handoffDb.getHandoff(scopeHandoffSessionId(sessionId, null)!, "relay-empty-providers"),
+    null
+  );
 });
 
 test("getLastSessionModel returns the most recently recorded model for a session", async () => {
@@ -409,10 +419,11 @@ test("handleComboChat universal handoff skips same-request fallback targets enti
   // note. The fallback target must receive the original request untouched.
   const sessionId = "sess-universal-no-mutate";
   const comboName = "universal-no-mutate";
+  const storedSessionId = scopeHandoffSessionId(sessionId, null)!;
 
-  await handoffDb.recordSessionModelUsage(sessionId, comboName, "openai/previous", "openai");
+  await handoffDb.recordSessionModelUsage(storedSessionId, comboName, "openai/previous", "openai");
   await handoffDb.upsertHandoff({
-    sessionId,
+    sessionId: storedSessionId,
     comboName,
     fromAccount: "universal:openai/previous",
     summary: "Previous model summary",
@@ -472,11 +483,12 @@ test("handleComboChat universal handoff skips same-request fallback targets enti
 test("handleComboChat universal handoff detects model switch before recording current model", async () => {
   const sessionId = "sess-universal-switch";
   const comboName = "universal-switch";
+  const storedSessionId = scopeHandoffSessionId(sessionId, null)!;
 
-  await handoffDb.recordSessionModelUsage(sessionId, comboName, "openai/previous", "openai");
+  await handoffDb.recordSessionModelUsage(storedSessionId, comboName, "openai/previous", "openai");
   await getTestBackend().execute(
     `UPDATE session_model_pins SET used_at = $1 WHERE session_id = $2 AND combo_name = $3`,
-    ["2000-01-01T00:00:00Z", sessionId, comboName]
+    ["2000-01-01T00:00:00Z", storedSessionId, comboName]
   );
 
   let summaryCalls = 0;
@@ -520,7 +532,7 @@ test("handleComboChat universal handoff detects model switch before recording cu
     relayOptions: { sessionId },
   });
 
-  const saved = await waitFor(() => handoffDb.getHandoff(sessionId, comboName));
+  const saved = await waitFor(() => handoffDb.getHandoff(storedSessionId, comboName));
 
   assert.equal(result.ok, true);
   assert.equal(summaryCalls, 1);
@@ -536,10 +548,11 @@ test("handleComboChat universal handoff detects model switch before recording cu
 test("context_cache_protection: pins body.model to last session model when history exists", async () => {
   const sessionId = "sess-cache-pin-active";
   const comboName = "cache-pin-combo";
+  const storedSessionId = scopeHandoffSessionId(sessionId, null)!;
 
   // Pre-record a prior model usage for this session/combo
   await handoffDb.recordSessionModelUsage(
-    sessionId,
+    storedSessionId,
     comboName,
     "anthropic/claude-3-5-sonnet",
     "anthropic"

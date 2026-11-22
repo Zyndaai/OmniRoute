@@ -47,40 +47,53 @@ const CACHE_TTL_MS = 5_000;
 export async function seedWindowUsageFromHistory(
   limit: TokenLimit,
   now = Date.now(),
-  executor: DbExecutor = db()
+  executor: DbExecutor = db(),
+  recordedBefore?: number
 ): Promise<number> {
   const { periodStartAt } = resetWindowIfElapsed(limit, now);
   const lowerBound = new Date(periodStartAt).toISOString();
 
-  // Canonical billable total = input + output + reasoning. tokens_cache_read and
-  // tokens_cache_creation are a BREAKDOWN already inside tokens_input (see migration
-  // 012_fix_token_input_cache_tokens.sql) — summing them again would double-count.
-  // This must mirror computeBillableTokens() in chatCore/upstreamTimeouts.ts.
+  // Optional exclusive upper bound. recordTokenUsage passes the start of the request it is
+  // recording: that request's own usage_history row (and those of requests still in flight beside
+  // it) is written before the counter increment runs, so a seed without this bound counts the
+  // request twice (#18898).
+  const upperBound =
+    typeof recordedBefore === "number" && Number.isFinite(recordedBefore)
+      ? new Date(recordedBefore).toISOString()
+      : null;
+
+  // Canonical billable total = input + output (+ reasoning only when it exceeds output).
+  // tokens_cache_read and tokens_cache_creation are a BREAKDOWN already inside tokens_input (see
+  // migration 012_fix_token_input_cache_tokens.sql) — summing them again would double-count.
+  // Reasoning is a subset of tokens_output unless the provider reported it as a separate bucket,
+  // and then both are billed (#15496, #19031). Mirrors computeBillableTokens() in
+  // chatCore/upstreamTimeouts.ts.
   const tokenSum = `COALESCE(SUM(
       COALESCE(tokens_input, 0) + COALESCE(tokens_output, 0)
-      + COALESCE(tokens_reasoning, 0)
+      + CASE WHEN COALESCE(tokens_reasoning, 0) > COALESCE(tokens_output, 0)
+          THEN COALESCE(tokens_reasoning, 0) ELSE 0 END
     ), 0) AS total`;
 
-  let row: unknown;
+  let scopeClause = "";
+  const params: unknown[] = [limit.apiKeyId];
   if (limit.scopeType === "model") {
-    row = await executor.queryOne(
-      `SELECT ${tokenSum} FROM usage_history
-       WHERE api_key_id = $1 AND model = $2 AND "timestamp" >= $3`,
-      [limit.apiKeyId, limit.scopeValue, lowerBound]
-    );
+    scopeClause = " AND model = $2";
+    params.push(limit.scopeValue);
   } else if (limit.scopeType === "provider") {
-    row = await executor.queryOne(
-      `SELECT ${tokenSum} FROM usage_history
-       WHERE api_key_id = $1 AND provider = $2 AND "timestamp" >= $3`,
-      [limit.apiKeyId, limit.scopeValue, lowerBound]
-    );
-  } else {
-    row = await executor.queryOne(
-      `SELECT ${tokenSum} FROM usage_history
-       WHERE api_key_id = $1 AND "timestamp" >= $2`,
-      [limit.apiKeyId, lowerBound]
-    );
+    scopeClause = " AND provider = $2";
+    params.push(limit.scopeValue);
   }
+  params.push(lowerBound);
+  let timeClause = `"timestamp" >= $${params.length}`;
+  if (upperBound) {
+    params.push(upperBound);
+    timeClause += ` AND "timestamp" < $${params.length}`;
+  }
+  const row: unknown = await executor.queryOne(
+    `SELECT ${tokenSum} FROM usage_history
+     WHERE api_key_id = $1${scopeClause} AND ${timeClause}`,
+    params
+  );
 
   const total = row && typeof row === "object" ? (row as { total?: unknown }).total : 0;
   const n = typeof total === "number" ? total : Number(total);
@@ -260,12 +273,16 @@ export async function checkTokenLimits(
  * @param provider  resolved upstream provider id
  * @param model     resolved model id
  * @param tokens    billable tokens consumed by this request (no-op if <= 0)
+ * @param requestStartedAt epoch-ms the request started. When given, a cold-window seed only
+ *        counts usage_history rows written before it, so the request's own row is not counted
+ *        on top of `tokens` (#18898).
  */
 export function recordTokenUsage(
   apiKeyId: string,
   provider: string,
   model: string,
-  tokens: number
+  tokens: number,
+  requestStartedAt?: number
 ): void {
   if (!apiKeyId) return;
   const delta = Number.isFinite(tokens) && tokens > 0 ? Math.floor(tokens) : 0;
@@ -297,7 +314,7 @@ export function recordTokenUsage(
 
             // Cold window: seed from usage_history so the running total reflects
             // prior usage already recorded in this window before the new delta.
-            const seeded = await seedWindowUsageFromHistory(limit, now, tx);
+            const seeded = await seedWindowUsageFromHistory(limit, now, tx, requestStartedAt);
             if (seeded > 0) {
               await incrementWindowTokens(limit.id, windowStart, seeded, tx);
             }

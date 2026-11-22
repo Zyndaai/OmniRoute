@@ -60,6 +60,8 @@ import {
   shouldRecordModelLockoutForComboFailure,
   isLocalKeyPolicyBreachErrorBody,
   isLocalQueueCapacityErrorBody,
+  isLocalProcessPressureResponse,
+  isHedgeCancelledSentinel,
   toRecordedTarget,
   resolveDelayMs,
   resolvePersistedConnectionCooldownSkipReason,
@@ -114,6 +116,8 @@ import {
   isReadinessFailure,
 } from "./emptyContentRetry.ts";
 import { isEmptyStreamSiblingRecoveryEnabled } from "../streamRecovery.ts";
+import { isVertexSharedCapacityResponse } from "../vertexSharedCapacity.ts";
+import { scopeHandoffSessionId } from "./handoffSessionScope.ts";
 
 export async function executeTargetAttempt(
   opts: ExecuteTargetAttemptOptions
@@ -141,6 +145,12 @@ export async function executeTargetAttempt(
       cause,
     });
 
+  // Handoff and model-history rows are keyed per caller (see scopeHandoffSessionId).
+  const handoffSessionId = scopeHandoffSessionId(
+    deps.relayOptions?.sessionId,
+    deps.relayOptions?.apiKeyId
+  );
+  const targetSignal = state.abortControllers?.get(i)?.signal;
   const familyTried = new Set<string>();
   // #16438 opt-in (EMPTY_STREAM_SIBLING_RECOVERY_ENABLED): an empty_content turn spends
   // this loop's existing retry on a sibling connection with no lockout. Off = release path.
@@ -292,12 +302,12 @@ export async function executeTargetAttempt(
     if (
       i === 0 &&
       universalHandoffConfig.enabled &&
-      deps.relayOptions?.sessionId &&
+      handoffSessionId &&
       !(deps.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
     ) {
-      const lastModel = await getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
+      const lastModel = await getLastSessionModel(handoffSessionId, deps.combo.name);
       if (lastModel && lastModel !== modelStr) {
-        const existingHandoff = await getHandoff(deps.relayOptions.sessionId, deps.combo.name);
+        const existingHandoff = await getHandoff(handoffSessionId, deps.combo.name);
         attemptBody = injectUniversalHandoffBody(
           attemptBody, // Use the cloned body to maintain isolation
           lastModel,
@@ -396,10 +406,18 @@ export async function executeTargetAttempt(
         deps.clientRequestedStream,
         deps.log,
         deps.config.responseValidation as ResponseValidationConfig | null | undefined,
-        null,
+        targetSignal ?? null,
         await isTrustedEmptyTurn(provider, result, target.connectionId)
       );
       releaseQualityClone(qualityClone, result, quality);
+      // The per-target timers are gone once the first-output gate passed, so an abort here comes
+      // from the parent (a hedge sibling won, a fatal sibling, or the loop safety). The quality
+      // peek reports such an abort as valid; it is not a success of this target.
+      if (targetSignal?.aborted) {
+        void quality.clonedResponse?.body?.cancel().catch(() => {});
+        releaseRejectedQualityResponse(qualityClone, result);
+        return null;
+      }
       if (!quality.valid) {
         releaseRejectedQualityResponse(qualityClone, result);
         deps.log.warn(
@@ -634,12 +652,12 @@ export async function executeTargetAttempt(
       // Universal handoff: record model usage for session
       if (
         universalHandoffConfig.enabled &&
-        deps.relayOptions?.sessionId &&
+        handoffSessionId &&
         !(deps.body as Record<string, unknown>)?.[SKIP_UNIVERSAL_HANDOFF_FLAG]
       ) {
-        const prevModel = await getLastSessionModel(deps.relayOptions.sessionId, deps.combo.name);
+        const prevModel = await getLastSessionModel(handoffSessionId, deps.combo.name);
         await recordSessionModelUsage(
-          deps.relayOptions.sessionId,
+          handoffSessionId,
           deps.combo.name,
           modelStr,
           provider,
@@ -661,7 +679,7 @@ export async function executeTargetAttempt(
                 : [];
 
           maybeGenerateUniversalHandoff({
-            sessionId: deps.relayOptions.sessionId,
+            sessionId: handoffSessionId,
             comboName: deps.combo.name,
             messages: handoffSourceMessages as MessageLike[],
             prevModel,
@@ -672,7 +690,7 @@ export async function executeTargetAttempt(
         }
 
         await recordSessionModelUsage(
-          deps.relayOptions.sessionId,
+          handoffSessionId,
           deps.combo.name,
           modelStr,
           provider,
@@ -685,6 +703,7 @@ export async function executeTargetAttempt(
       if (
         getStrategyTraits(deps.strategy).contextRelay &&
         deps.relayOptions?.sessionId &&
+        handoffSessionId &&
         deps.relayConfig &&
         (deps.relayConfig.handoffProviders ?? []).includes(provider) &&
         provider === "codex"
@@ -708,7 +727,7 @@ export async function executeTargetAttempt(
                   : [];
 
             maybeGenerateHandoff({
-              sessionId: deps.relayOptions.sessionId,
+              sessionId: handoffSessionId,
               comboName: deps.combo.name,
               connectionId,
               percentUsed: quotaInfo.percentUsed,
@@ -741,6 +760,11 @@ export async function executeTargetAttempt(
 
     const failure = await readAttemptFailure(result, { log: deps.log, modelStr });
     const { errorText, errorBody, structuredError } = failure;
+    // Return the original verdict before retry hints, health or affinity mutations.
+    // The attempt loop treats this as fatal and cancels already-running hedges.
+    if (isLocalProcessPressureResponse(result, errorBody)) {
+      return { ok: false, response: result };
+    }
     const retryAfter = resolveAttemptRetryAfter(failure);
 
     // Track earliest retryAfter
@@ -808,6 +832,13 @@ export async function executeTargetAttempt(
       // executeTarget must return the {ok,response} contract — a raw Response
       // here makes the speculative loop's res.ok/res.response checks both miss,
       // so the combo would wrongly fall through to the next model after a 499.
+      return { ok: false, response: result };
+    }
+    // A hedge loser superseded by a sibling (status-599 `hedge_cancelled` sentinel) is not a
+    // failure: skip all failure bookkeeping (comboErrors, fallbackCount, LKGP clear, provider
+    // cooldown, failure logs) — the sibling that won already resolved this execution.
+    if (isHedgeCancelledSentinel(result.status, structuredError)) {
+      deps.log.info("COMBO", `Hedge sibling superseded ${modelStr} — ignoring its attempt result`);
       return { ok: false, response: result };
     }
     if (isLocalQueueCapacity) {
@@ -1014,7 +1045,16 @@ export async function executeTargetAttempt(
     // upstream 400s on the same GitHub models, all day). isModelLocked()
     // is checked before dispatch (see the pre-check above this loop), so
     // this lockout is honored on the next request.
-    if (result.status === 400 && isModelScoped400(errorText) && provider && rawModel) {
+    // A combo with a single target has no sibling to fall back to, so the lock would
+    // only turn every later request into a local refusal for the whole hour, even after
+    // the upstream serves the model again. Lock only when another target can take over.
+    if (
+      result.status === 400 &&
+      isModelScoped400(errorText) &&
+      provider &&
+      rawModel &&
+      state.orderedTargets.length > 1
+    ) {
       lockModelIfPerModelQuota(
         provider,
         targetWithConnection.connectionId || "",
@@ -1061,6 +1101,15 @@ export async function executeTargetAttempt(
       });
     }
 
+    // Shared Vertex capacity is not this model's fault: no model lockout (auth.ts does the same).
+    // handleChat hands the combo a client-safe body (no `status`, no `details`), so a retry
+    // hint in the Retry-After header stands in for `details`.
+    const vertexSharedCapacity = isVertexSharedCapacityResponse(
+      provider,
+      result.status,
+      failure.bodyText,
+      Boolean(result.headers?.get("retry-after"))
+    );
     const quotaExhausted = isQuotaExhaustionFailure(failure, provider, rawModel, profile);
     recordQuotaExhaustionClassification(result, quotaExhausted);
     // Balance exhaustion is upstream truth about credits, and it outranks the
@@ -1141,7 +1190,8 @@ export async function executeTargetAttempt(
         rawModel &&
         retry === 0 &&
         shouldRecordModelLockoutForComboFailure(scopedFailure, structuredError) &&
-        !isConnectionScopedClaudeQuota
+        !isConnectionScopedClaudeQuota &&
+        !vertexSharedCapacity
       ) {
         const mlSettings = resolveModelLockoutSettings(deps.settings);
         if (mlSettings.enabled && mlSettings.errorCodes.includes(result.status)) {
@@ -1234,7 +1284,8 @@ export async function executeTargetAttempt(
       provider &&
       rawModel &&
       shouldRecordModelLockoutForComboFailure(scopedFailure, structuredError) &&
-      !isConnectionScopedClaudeQuota
+      !isConnectionScopedClaudeQuota &&
+      !vertexSharedCapacity
     ) {
       const mlSettings = resolveModelLockoutSettings(deps.settings);
       if (mlSettings.enabled && mlSettings.errorCodes.includes(result.status)) {

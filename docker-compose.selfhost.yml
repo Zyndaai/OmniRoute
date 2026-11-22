@@ -3,9 +3,12 @@
 # ──────────────────────────────────────────────────────────────────────
 #  KISS: ONE command brings up the whole thing on loopback.
 #
-#    cp .env.selfhost.example .env   # edit the 2 secrets you want
+#    cp .env.selfhost.example .env   # set POSTGRES_PASSWORD, then the rest you want
 #    docker compose -f docker-compose.selfhost.yml up -d
 #    open http://127.0.0.1:20128
+#
+#  Three containers: omniroute (the app), postgres (all durable state) and
+#  redis (cache and coordination). Neither database publishes a port.
 #
 #  No profiles, no build step, no multi-tenant anything.
 #  Pulls the team image `ghcr.io/zyndaai/omniroute:latest`, built by
@@ -19,6 +22,29 @@
 # ──────────────────────────────────────────────────────────────────────
 
 services:
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    container_name: omniroute-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: omniroute
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: omniroute
+      # The schema requires the C collation (0001_init.sql guard): set it when the
+      # database is created. Changing it later means recreating the volume.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    # No port published to the host. For psql or a backup, run
+    #   docker exec -it omniroute-postgres psql -U omniroute omniroute
+    #   docker exec omniroute-postgres pg_dump -U omniroute omniroute > omniroute.sql
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omniroute -d omniroute"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   redis:
     image: docker.io/library/redis:8.6.5-alpine
     container_name: omniroute-redis
@@ -44,6 +70,7 @@ services:
     env_file: .env
     environment:
       - DATA_DIR=/app/data
+      - OMNIROUTE_POSTGRES_URL=postgres://omniroute:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/omniroute
       - REDIS_URL=redis://redis:6379
     ports:
       # Loopback-only by default. Override APP_BIND_HOST in .env to expose.
@@ -51,9 +78,8 @@ services:
       - "${APP_BIND_HOST:-127.0.0.1}:${API_PORT:-20129}:${API_PORT:-20129}"
       - "${APP_BIND_HOST:-127.0.0.1}:${LIVE_WS_PORT:-20132}:${LIVE_WS_PORT:-20132}"
     volumes:
-      # Default: bind-mount ./data on the host (what bin/snapshot-data.sh and
-      # bin/restore-data.sh back up and restore). Keep this line active so an
-      # existing install keeps reading the same data after pulling this file.
+      # Default: bind-mount ./data on the host. Keep this line active so an
+      # existing install keeps reading the same files after pulling this file.
       - ./data:/app/data
       # EACCES on the first write to /app/data? Some managed-deploy platforms
       # run the Docker daemon as root while the container runs as the
@@ -61,11 +87,13 @@ services:
       # writable. Either `chown -R 1000:1000 ./data` on the host, or opt into
       # a Docker-managed named volume: comment the bind mount above, uncomment
       # the line below AND the `omniroute-data:` entry under `volumes:` at the
-      # bottom. A named volume starts EMPTY and is not seen by the ./data
-      # backup scripts — see docs/getting-started/SELF_HOST_GUIDE.md
+      # bottom. A named volume starts EMPTY and is not seen by a host-side
+      # ./data backup — see docs/getting-started/SELF_HOST_GUIDE.md
       # ("Common issues") before switching an existing install.
       # - omniroute-data:/app/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -76,6 +104,7 @@ services:
       start_period: 20s
 
 volumes:
+  postgres-data:
   redis-data:
   # Only needed if you opted into the named-volume alternative above.
   # omniroute-data:

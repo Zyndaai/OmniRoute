@@ -4,6 +4,7 @@
  *   1. redirects (trailing slash, renamed pages)            -> 308
  *   2. headless gate for the dashboard                      -> 404 JSON
  *   3. a React Router data URL (`.data`) on an endpoint     -> 404 JSON
+ *      a page write from an untrusted origin                -> 403 JSON
  *   4. authz pipeline on `AUTHZ_PATH_PATTERNS`, judged on the path the client sent; it may
  *      answer itself, and it re-stamps the trusted request headers the route receives
  *   5. rewrites (`/v1/*` -> `/api/v1/*`, ...)
@@ -22,10 +23,17 @@ import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 import { headlessGateResponse } from "@/lib/system/headless";
 
 import { runAuthzPipeline } from "../authz/pipeline";
-import { AfterResponseQueue, currentAfterResponseQueue, runWithRequest } from "../requestContext";
+import { isPageWrite, pageActionOriginRejection } from "../origin/pageActionOrigin";
+import {
+  AfterResponseQueue,
+  currentAfterResponseQueue,
+  runWithIncoming,
+  runWithRequest,
+} from "../requestContext";
 import { isAuthzPath } from "./authzPaths";
 import { rebuildRequest } from "./rebuildRequest";
 import { REDIRECT_STATUS, resolveRedirect } from "./redirects";
+import { isResourceRoutePath } from "./resourceRoutes";
 import {
   decodePathname,
   encodePathname,
@@ -125,11 +133,21 @@ function releaseAfterBody(
 
 export function createAppHandler({ basePath, render }: AppHandlerOptions): FetchHandler {
   async function handle(request: Request, queue: AfterResponseQueue): Promise<Response> {
+    const base = await basePath();
+    return runWithIncoming({ request, basePath: base, fetch: appFetch }, () =>
+      route(request, queue, base)
+    );
+  }
+
+  async function route(
+    request: Request,
+    queue: AfterResponseQueue,
+    base: string
+  ): Promise<Response> {
     const serve: FetchHandler = (incoming) =>
       runWithRequest(incoming, () => render(incoming), queue);
 
     const url = new URL(request.url);
-    const base = await basePath();
     const stripped = stripBasePath(url.pathname, base);
     if (stripped === null) return serve(request);
 
@@ -143,6 +161,12 @@ export function createAppHandler({ basePath, render }: AppHandlerOptions): Fetch
     const headless = headlessGateResponse(pathname);
     if (headless) return headless;
     if (isEndpointDataRequest(decoded)) return endpointNotFound();
+    // A page write (a React Router action) is origin-checked for every caller; see
+    // ../origin/pageActionOrigin.ts. Endpoints keep the authz pipeline's rules.
+    if (isPageWrite(request.method) && !isEndpointPath(pathname) && !isResourceRoutePath(pathname)) {
+      const rejection = pageActionOriginRejection(request);
+      if (rejection) return rejection;
+    }
 
     const forward: FetchHandler = async (incoming) => {
       const target = resolveRewrite(decoded);
@@ -155,7 +179,7 @@ export function createAppHandler({ basePath, render }: AppHandlerOptions): Fetch
     return runAuthzPipeline(request, { enforce: true, pathname, basePath: base, next: forward });
   }
 
-  return async (request) => {
+  const appFetch: FetchHandler = async (request) => {
     // The Node listener owns the queue and releases it when the response closes.
     const listenerQueue = currentAfterResponseQueue();
     const queue = listenerQueue ?? new AfterResponseQueue();
@@ -168,4 +192,5 @@ export function createAppHandler({ basePath, render }: AppHandlerOptions): Fetch
     }
     return listenerQueue ? response : releaseAfterBody(response, queue, request.signal);
   };
+  return appFetch;
 }

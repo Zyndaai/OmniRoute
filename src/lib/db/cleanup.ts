@@ -38,7 +38,10 @@ function cutoffFor(retentionDays: number): Date {
   return new Date(Date.now() - retentionDays * 86_400_000);
 }
 
-/** One bounded `DELETE ... WHERE <column> < cutoff` over a plain table, with the usual result shape. */
+/**
+ * `DELETE ... WHERE <column> < cutoff` over a plain table in batches of 10,000 rows, with the
+ * event loop running in between, so a large backlog never holds one long statement.
+ */
 async function deleteOlderThan(
   table: string,
   column: string,
@@ -46,7 +49,7 @@ async function deleteOlderThan(
 ): Promise<CleanupResult> {
   const result: CleanupResult = { deleted: 0, errors: 0 };
   try {
-    result.deleted = await deleteFromTableBefore(
+    result.deleted = await deleteFromTableBeforeInBatches(
       { table, column, cutoff: "iso" },
       cutoffFor(retentionDays).toISOString()
     );
@@ -64,6 +67,34 @@ async function deleteOlderThan(
 export async function cleanupQuotaSnapshots(): Promise<CleanupResult> {
   const retention = await getRetentionSettings();
   return deleteOlderThan("quota_snapshots", "created_at", retention.quotaSnapshots);
+}
+
+// A closed quota-share bucket is read by no window once it is older than two monthly windows.
+const QUOTA_SHARE_BUCKET_RETENTION_DAYS = 62;
+
+/**
+ * Delete closed quota-share consumption buckets that no window reads any more (#19445), so
+ * `quota_counters` stops growing without limit. The per-key tpm/rpm counters ('key-quota:*')
+ * prune themselves on write and are left alone here.
+ */
+export async function cleanupQuotaShareBuckets(): Promise<CleanupResult> {
+  const result: CleanupResult = { deleted: 0, errors: 0 };
+  try {
+    result.deleted = await deleteFromTableBeforeInBatches(
+      {
+        table: "quota_counters",
+        column: "updated_at",
+        cutoff: "iso",
+        extraWhere: "dimension_key NOT LIKE 'key-quota:%'",
+      },
+      cutoffFor(QUOTA_SHARE_BUCKET_RETENTION_DAYS).toISOString()
+    );
+    console.log(`[Cleanup] Deleted ${result.deleted} closed quota-share buckets`);
+  } catch (err: unknown) {
+    console.error("[Cleanup] Error cleaning quota-share buckets:", err);
+    result.errors++;
+  }
+  return result;
 }
 
 /**
@@ -415,6 +446,7 @@ export async function runAutoCleanup(): Promise<{
 
   const results: Record<string, CleanupResult> = {
     quotaSnapshots: await cleanupQuotaSnapshots(),
+    quotaShareBuckets: await cleanupQuotaShareBuckets(),
     callLogs: await cleanupCallLogs(),
     usageHistory: await cleanupUsageHistory(),
     compressionAnalytics: await cleanupCompressionAnalytics(),

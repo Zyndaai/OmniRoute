@@ -32,6 +32,7 @@ import {
   unavailableResponse,
 } from "@omniroute/open-sse/utils/error.ts";
 import { inheritTrustedLocalRateLimitResponse } from "@omniroute/open-sse/services/rateLimitManager/errors.ts";
+import { inheritLocalProcessPressureResponse } from "@omniroute/open-sse/utils/localPressureResponse.ts";
 import { isRequestScopedUpstreamFailure } from "./comboFailureLogging";
 import { isCodexNativeResponsesRequest } from "./requestShapeGuards";
 import { HTTP_STATUS } from "@omniroute/open-sse/config/constants.ts";
@@ -1248,7 +1249,10 @@ export function withSessionHeader(response: Response, sessionId: string | null):
       headers: response.headers,
     });
     cloned.headers.set("X-OmniRoute-Session-Id", sessionId);
-    return inheritTrustedLocalRateLimitResponse(response, cloned);
+    return inheritLocalProcessPressureResponse(
+      response,
+      inheritTrustedLocalRateLimitResponse(response, cloned)
+    );
   }
 }
 
@@ -1265,7 +1269,10 @@ export function withCorrelationId(response: Response, correlationId: string | nu
       headers: response.headers,
     });
     cloned.headers.set("X-Correlation-Id", correlationId);
-    return inheritTrustedLocalRateLimitResponse(response, cloned);
+    return inheritLocalProcessPressureResponse(
+      response,
+      inheritTrustedLocalRateLimitResponse(response, cloned)
+    );
   }
 }
 
@@ -1290,7 +1297,7 @@ export function withModalityBridgeHeader(response: Response, value: string | nul
       headers: response.headers,
     });
     cloned.headers.set("x-omniroute-modality-bridge", value);
-    return cloned;
+    return inheritLocalProcessPressureResponse(response, cloned);
   }
 }
 
@@ -1307,7 +1314,7 @@ export function withConversationId(response: Response, conversationId: string | 
       headers: response.headers,
     });
     cloned.headers.set("X-ConversationId", conversationId);
-    return cloned;
+    return inheritLocalProcessPressureResponse(response, cloned);
   }
 }
 

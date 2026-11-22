@@ -86,7 +86,7 @@ test("turning it on through updateSettings is visible to the combo resolver", as
 });
 
 test("a combo with no advisory in its own config honours the global setting", async () => {
-  saveModelsDevCapabilities({
+  await saveModelsDevCapabilities({
     // Separate providers: a 503 from one provider must not skip the other.
     "unit-global-advisory-a": { insufficient: capabilityEntry(128) },
     "unit-global-advisory-b": { sufficient: capabilityEntry(4_096) },

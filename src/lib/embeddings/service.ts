@@ -133,8 +133,10 @@ export async function createEmbeddingResponse(
         // dimensions would corrupt any vector store on failover (vectors from
         // different models are not comparable). The generic combo engine has no
         // notion of embedding families, so reject loudly here before dispatch.
-        // See _tasks/features-v3.8.12/01-embeddings-combo-family-guard.plan.md.
-        const dimConflict = await findEmbeddingComboDimensionConflict(combo as any, allCombos as any);
+        const dimConflict = await findEmbeddingComboDimensionConflict(
+          combo as any,
+          allCombos as any
+        );
         if (dimConflict.conflict) {
           return errorResponse(
             HTTP_STATUS.BAD_REQUEST,
@@ -557,6 +559,7 @@ export async function createEmbeddingResponse(
         options.connectionId ||
         connectionIdForProxy ||
         null,
+      connectionProvider: credentialsProviderId,
     });
 
   const result = connectionIdForProxy
@@ -601,7 +604,11 @@ export async function createEmbeddingResponse(
       credentials.connectionId,
       result.status,
       result.error || "Embedding provider error",
-      provider,
+      // Classify against the connection's own provider id. For a custom node the
+      // request `provider` is the model prefix (e.g. "my-embed"), which is not a
+      // compatible-provider id, so a node's rate-limit 429 was judged by API-key wallet
+      // rules and parked as credits_exhausted instead of a model-scoped cooldown.
+      credentialsProviderId,
       resolvedModel || null
     ).catch((err) => {
       log.debug(

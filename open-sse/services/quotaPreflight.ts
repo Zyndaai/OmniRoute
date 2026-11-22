@@ -89,6 +89,8 @@ export interface QuotaInfo {
   windowMonthly?: QuotaWindowInfo;
   /** True when the upstream usage endpoint explicitly reports exhausted quota. */
   limitReached?: boolean;
+  /** True on a cached snapshot served because the refresh failed; see usableQuotaSnapshot. */
+  stale?: boolean;
   /** Separate from subscription percentages and banked quota-reset coupons. */
   paidCredits?: CodexPaidCredits;
   /**
@@ -463,14 +465,37 @@ function healthyQuotaCutoffResult(
     : { proceed: true, quotaPercent: quota.percentUsed };
 }
 
+/**
+ * A stale snapshot counts only while its own windows clear the cutoff. Past it the
+ * quota is unknown: old data must not block an account that may have reset, and its
+ * credits must not vouch for a window that is already spent.
+ */
+function usableQuotaSnapshot(
+  quota: QuotaInfo | null | undefined,
+  thresholds: PreflightQuotaThresholds | undefined,
+  scope: QuotaCutoffScope | undefined
+): QuotaInfo | null | undefined {
+  if (!quota?.stale) return quota;
+  return measuredQuotaCutoffResult(quota, thresholds, scope).proceed ? quota : null;
+}
+
 export function evaluateQuotaCutoff(
   quota: QuotaInfo | null | undefined,
   thresholds?: PreflightQuotaThresholds,
   scope?: QuotaCutoffScope
 ): PreflightQuotaResult {
-  const paidCreditsGate = resolveCodexPaidCreditsGate(quota, scope);
+  const usableQuota = usableQuotaSnapshot(quota, thresholds, scope);
+  const paidCreditsGate = resolveCodexPaidCreditsGate(usableQuota, scope);
   if (paidCreditsGate) return paidCreditsGate;
-  if (!quota) return { proceed: true };
+  if (!usableQuota) return { proceed: true };
+  return measuredQuotaCutoffResult(usableQuota, thresholds, scope);
+}
+
+function measuredQuotaCutoffResult(
+  quota: QuotaInfo,
+  thresholds: PreflightQuotaThresholds | undefined,
+  scope: QuotaCutoffScope | undefined
+): PreflightQuotaResult {
   // Explicit local quota opt-outs leave billing eligibility to the upstream service.
   if (
     isClaudeExtraUsageAllowed(scope?.provider, scope?.providerSpecificData) ||

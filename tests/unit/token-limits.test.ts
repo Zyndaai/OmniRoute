@@ -253,8 +253,9 @@ test("seed total excludes cache tokens (no double-count) (FIX 2)", async () => {
     }
   );
 
-  // 500 + 200 + 40 = 740. Must NOT add cacheRead/cacheCreation again (would be 1140).
-  assert.equal(await counter.seedWindowUsageFromHistory(limit, NOW_JAN), 740);
+  // 500 + 200 = 700: reasoning (40) is inside output (200) and is not added again (#19031).
+  // Must NOT add cacheRead/cacheCreation again either.
+  assert.equal(await counter.seedWindowUsageFromHistory(limit, NOW_JAN), 700);
 });
 
 test("cold-window recordTokenUsage seeds from history before increment (FIX 4)", async () => {

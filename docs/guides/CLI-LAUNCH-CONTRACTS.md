@@ -67,3 +67,26 @@ With an explicit `DATA_DIR`, setting
 `OMNIROUTE_CLI_SKIP_DEFAULT_DATA_ENV=1` prevents startup from falling through
 to the default user data directory's credential environment. This is useful for
 isolated tests. It does not disable other explicitly selected environment files.
+
+## Working-directory env
+
+The CLI loads `<cwd>/.env`, and `omniroute serve` hands the result to the server and every
+process it spawns, so a `.env` in a directory someone else controls (a cloned repository, an
+extracted archive) must not choose where credentials go or which code runs. A `.env` in the
+working directory may therefore set only:
+
+- `PORT`, `API_PORT`, `DASHBOARD_PORT` (1 to 65535)
+- `REQUIRE_API_KEY` (only `true`, `1` or `yes`; the file can turn enforcement on, never off)
+- `LANG`, `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `TZ` (names, never paths)
+- `NO_COLOR`, `FORCE_COLOR`
+
+Names must be exact and upper case. Other keys are skipped with a warning that names the keys
+(never the values); set them in the shell or in `<DATA_DIR>/.env`. The data-directory `.env`,
+the package `.env` and the shell are unchanged, and so is the working-directory file when the
+cwd is the data directory or the package root. The allowlist lives in
+`bin/cli/utils/untrustedCwdEnv.mjs`.
+
+A context's stored token is sent only to that context's own origin (scheme, host, port): for
+CLI requests and for `launch`, `run`, `configure` and `setup-*` with `--remote`/`--base-url`.
+`omniroute packs` does not read `optional-packs.index.json` from the working directory; pass
+`--source` for an index outside the CLI install.

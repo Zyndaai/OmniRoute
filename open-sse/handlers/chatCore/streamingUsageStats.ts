@@ -30,6 +30,10 @@ export type RecordStreamingUsageStatsContext = {
   comboStrategy: string | null | undefined;
   endpoint?: string | null | undefined;
   cpaAuthIndex?: string | null | undefined;
+  /** Tokens generated before a 499 / mid-stream failure (usage is null then). */
+  partialUsage?: unknown;
+  /** Whether the stream carried output, so a combo cannot have failed over from it. */
+  emittedOutput?: boolean;
 };
 
 function persistStreamingUsageRow(usage: object, ctx: RecordStreamingUsageStatsContext): void {
@@ -57,20 +61,23 @@ function persistStreamingUsageRow(usage: object, ctx: RecordStreamingUsageStatsC
 }
 
 async function recordStreamingBillableTokens(
-  usage: object,
+  usage: object | null,
   ctx: RecordStreamingUsageStatsContext
 ): Promise<void> {
-  if (!ctx.apiKeyInfo?.id || ctx.streamStatus !== 200) return;
+  if (!ctx.apiKeyInfo?.id) return;
   try {
-    const billable = computeBillableTokens(usage);
-    // Key-quota tpm/rpm counters advance on every completed stream.
+    const billable = usage ? computeBillableTokens(usage) : 0;
+    // Key-quota rpm/tpm advance on every stream, aborted or failed ones too: the
+    // provider already generated the partial tokens, and the apiKeyPolicy gate
+    // must see the request, or a key that aborts after the first token is never counted.
     await recordKeyQuotaUsage(ctx.apiKeyInfo.id, billable);
-    if (billable > 0)
+    if (ctx.streamStatus === 200 && billable > 0)
       recordTokenUsage(
         ctx.apiKeyInfo.id,
         ctx.provider || "unknown",
         ctx.model || "unknown",
-        billable
+        billable,
+        ctx.startTime
       );
   } catch {
     // never block the stream on counter recording
@@ -81,7 +88,14 @@ export async function recordStreamingUsageStats(
   usage: unknown,
   ctx: RecordStreamingUsageStatsContext
 ): Promise<void> {
-  if (!usage || typeof usage !== "object") return;
-  persistStreamingUsageRow(usage, ctx);
-  await recordStreamingBillableTokens(usage, ctx);
+  const isObject = (v: unknown): v is object => !!v && typeof v === "object";
+  // The failure finalizer already writes the 499/5xx usage row from partialUsage,
+  // so only a real `usage` persists a row here; the counters take either.
+  if (isObject(usage)) persistStreamingUsageRow(usage, ctx);
+  // A combo reads each target's stream and fails over from a rejected one, and that attempt
+  // ends here too. With no usage and no output it may be one: the target that answers counts
+  // the client's request, so counting this attempt as well would use up the key's rpm early.
+  if (ctx.isCombo && !isObject(usage) && !ctx.emittedOutput) return;
+  const counted = isObject(usage) ? usage : isObject(ctx.partialUsage) ? ctx.partialUsage : null;
+  await recordStreamingBillableTokens(counted, ctx);
 }

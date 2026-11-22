@@ -7,6 +7,7 @@
  */
 
 import type { ComboRecord } from "@/domain/persistence/comboRepositories";
+import { pruneDeletedComboConnectionRefs } from "./comboConnectionRefs";
 import { clearSessionModelHistoryForCombo } from "./contextHandoffs";
 import { db, jsonb } from "./pg";
 import { invalidateDbCache } from "./readCache";
@@ -84,16 +85,23 @@ export async function setActiveCombo(name: string): Promise<void> {
 }
 
 /**
- * Null out any combo model step whose connectionId matches a deleted connection.
- * Called after a provider connection is removed so combo routes don't carry
- * stale references.
+ * Drop references to deleted connections from combo steps.
+ *
+ * A step that pins an account keeps its `connectionId`: clearing it turned the
+ * step into "any account of this provider", so deleting one account silently
+ * rerouted that step's traffic to the remaining ones. The dead pin now fails
+ * the target locally (ineligible), moves the combo to its next step, and the
+ * dashboard reports the account as deleted.
+ *
+ * Scope allowlists are pruned, but never down to empty -- empty means "the whole
+ * active pool" downstream, which would widen routing the same way.
  */
 export async function cleanupComboConnectionRefs(connectionIds: string | string[]) {
-  const deletedConnectionIds = new Set(
-    (Array.isArray(connectionIds) ? connectionIds : [connectionIds]).filter(Boolean)
-  );
+  const deletedConnectionIds = (
+    Array.isArray(connectionIds) ? connectionIds : [connectionIds]
+  ).filter(Boolean);
 
-  if (deletedConnectionIds.size === 0) return 0;
+  if (deletedConnectionIds.length === 0) return 0;
 
   const combos = await getCombos();
   let touched = 0;
@@ -101,40 +109,17 @@ export async function cleanupComboConnectionRefs(connectionIds: string | string[
   for (const combo of combos) {
     if (!Array.isArray(combo.models)) continue;
 
-    let changed = false;
-
-    const models = (combo.models as unknown as Record<string, unknown>[]).map((step) => {
-      let out = step;
-
-      if (typeof out.connectionId === "string" && deletedConnectionIds.has(out.connectionId)) {
-        const { connectionId: _, ...rest } = out;
-        out = rest;
-        changed = true;
-      }
-
-      if (Array.isArray(out.allowedConnectionIds)) {
-        const filtered = out.allowedConnectionIds.filter(
-          (id) => typeof id !== "string" || !deletedConnectionIds.has(id)
-        );
-
-        if (filtered.length !== out.allowedConnectionIds.length) {
-          out = {
-            ...out,
-            allowedConnectionIds: filtered,
-          };
-          changed = true;
-        }
-      }
-
-      return out;
-    });
+    const { steps, changed } = pruneDeletedComboConnectionRefs(
+      combo.models as unknown as Record<string, unknown>[],
+      deletedConnectionIds
+    );
 
     if (changed && typeof combo.id === "string") {
       try {
         const { id, ...rest } = combo;
         await updateCombo(combo.id, {
           ...rest,
-          models,
+          models: steps,
         });
         touched++;
       } catch {

@@ -55,3 +55,24 @@ test("API-key management needs admin: a write token cannot mint a manage-scoped 
   assert.equal(inferRequiredScope("GET", "/api/keys/abc/reveal"), "admin");
   assert.equal(inferRequiredScope("GET", "/api/keys-catalog"), "read");
 });
+
+test("resilience mutations need admin; reads stay read (remote access tokens)", () => {
+  assert.equal(inferRequiredScope("GET", "/api/resilience"), "read");
+  assert.equal(inferRequiredScope("GET", "/api/resilience/cooldowns"), "read");
+  assert.equal(inferRequiredScope("PATCH", "/api/resilience"), "admin");
+  assert.equal(inferRequiredScope("POST", "/api/resilience/reset"), "admin");
+  assert.equal(inferRequiredScope("POST", "/api/resilience/cooldowns"), "admin");
+  assert.equal(inferRequiredScope("DELETE", "/api/resilience/model-cooldowns"), "admin");
+  assert.equal(inferRequiredScope("GET", "/api/resilience-catalog"), "read");
+});
+
+test("the global system prompt is operator-only: a write token cannot rewrite it", () => {
+  // The prompt is injected into every request through the gateway, for every client.
+  for (const method of ["PUT", "POST", "PATCH", "DELETE"]) {
+    assert.equal(inferRequiredScope(method, "/api/settings/system-prompt"), "admin", method);
+    assert.equal(inferRequiredScope(method, "/api/settings/system-prompt/"), "admin", method);
+  }
+  assert.equal(inferRequiredScope("GET", "/api/settings/system-prompt"), "read");
+  // Exact path only: the other settings sub-routes keep the method-inferred scope.
+  assert.equal(inferRequiredScope("PUT", "/api/settings/combo-defaults"), "write");
+});

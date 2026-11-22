@@ -5,7 +5,7 @@
  * _omniroute_migrations). When two files share the same numeric prefix
  * (e.g. 068_a.sql + 068_b.sql), only the first is applied; the rest are
  * silently skipped. This caused a production regression in v3.8.4 (three
- * PRs each shipped a 068_*.sql; see _tasks/features-v3.8.4/9route/POST-MERGE-AUDIT.md).
+ * PRs each shipped a 068_*.sql).
  *
  * SUPERSEDED_DUPLICATE_MIGRATIONS in migrationRunner.ts intentionally allows
  * known historical pairs (e.g. 041_session_account_affinity superseded by 050).

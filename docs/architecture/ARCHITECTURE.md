@@ -162,6 +162,15 @@ building blocks from `@/shared/components` (adapters over the vendored Keak CI U
 icons through `<Icon>` (`ICON_MAP` → Lucide). Theme (`system` by default, light/dark) and tokens come
 from the kit via the bridge in `src/app/globals.css`. Details: `docs/architecture/DESIGN_SYSTEM.md`.
 
+Data: a page's first-paint reads belong in its React Router `loader` (in `page.tsx`), which reads
+through the API routes with `apiJson()` from `src/server/routing/dashboardApi.server.ts`, never from
+`@/lib/db/*` directly (see [Authorization Guide → Dashboard pages](AUTHZ_GUIDE.md#dashboard-pages-loaders-and-page-writes)).
+Read loader data with `useLoaderData()` on every render rather than copying it into `useState`
+(a copy hides revalidations); after a write, call `useRevalidator().revalidate()`; page-wide
+polling revalidates only while the tab is visible. Writes from modals and other components call
+the `/api/...` routes with `fetch`. Example: `src/app/(dashboard)/dashboard/mcp/page.tsx`. Most
+pages still load with `useEffect` + `fetch` and are being converted.
+
 ## High-Level System Context
 
 ```mermaid

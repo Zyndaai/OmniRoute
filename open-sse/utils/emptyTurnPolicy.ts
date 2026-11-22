@@ -1,5 +1,6 @@
 import { getRegistryEntry } from "../config/providerRegistry.ts";
 import { inheritTruncatedStreamPolicy } from "./truncatedStreamPolicy.ts";
+import { isDeliberateEmptyResponsesTerminal } from "../translator/helpers/responsesTerminalStatus.ts";
 
 type NativeProtocol = "openai" | "claude" | "openai-responses";
 type EmptyTurnExecution = {
@@ -34,12 +35,19 @@ function azureProtocol(actual: URL): NativeProtocol | null {
 function executionProtocol(response: Response, requestUrl: string): NativeProtocol | null {
   try {
     const actual = new URL(response.url || requestUrl);
+    // #19009: Codex's Responses-over-WebSocket transport reports the wss twin
+    // of its https endpoint (same host, path and native events). Only Codex
+    // has that transport, so only its entry accepts the wss form.
+    const websocket = actual.protocol === "wss:";
+    if (websocket) actual.protocol = "https:";
     if (actual.protocol !== "https:" || actual.username || actual.password) return null;
-    const azure = azureProtocol(actual);
+    const azure = websocket ? null : azureProtocol(actual);
     if (azure) return azure;
     // These are protocol-native endpoints already used by the executors. A
     // compatible node or overridden base URL does not inherit their policy.
-    for (const id of ["openai", "anthropic", "codex", "openrouter"]) {
+    for (const id of websocket
+      ? ["codex"]
+      : ["openai", "anthropic", "codex", "openrouter", "mistral"]) {
       const entry = getRegistryEntry(id);
       if (!entry?.baseUrl) continue;
       const expected = new URL(entry.baseUrl);
@@ -53,6 +61,20 @@ function executionProtocol(response: Response, requestUrl: string): NativeProtoc
   return null;
 }
 
+// Anthropic reasons for "the turn ended on purpose", as opposed to "the turn was
+// cut off". `refusal` belongs here: the model declined to answer and closed the
+// stream itself, so the absence of output is intended rather than truncated. It is
+// not a successful completion, and nothing here hides that -- the response
+// translator turns the reason into `finish_reason: "content_filter"`, which is the
+// signal a caller acts on. Counting it as a failed attempt instead turned a
+// deliberate refusal into a 502, and a caller that retries a 502 retries a refusal
+// forever.
+//
+// `max_tokens` and `model_context_window_exceeded` are deliberately absent. Those
+// mean output was cut short, so the caller is owed a retry or a narrower request;
+// treating them as a normal end would silently hand back a truncated answer.
+const NORMAL_CLAUDE_STOP_REASONS = new Set(["end_turn", "stop_sequence", "refusal"]);
+
 function observeClaudePayload(state: EmptyTurnExecution, data: Record<string, unknown>) {
   if (
     data.type === "content_block_start" ||
@@ -61,7 +83,7 @@ function observeClaudePayload(state: EmptyTurnExecution, data: Record<string, un
     state.openedBlock = true;
   const delta = data.delta as Record<string, unknown> | undefined;
   const reason = data.stop_reason ?? delta?.stop_reason;
-  if (reason === "end_turn" || reason === "stop_sequence") state.normalStop = true;
+  if (NORMAL_CLAUDE_STOP_REASONS.has(reason as string)) state.normalStop = true;
   if (data.type === "message_stop" || data.type === "message") state.messageStop = true;
 }
 
@@ -69,9 +91,16 @@ function isCompletedResponsesPayload(
   data: Record<string, unknown>,
   response: Record<string, unknown> | undefined
 ): boolean {
+  // A completed turn, or the status a filtered turn (a Claude refusal) is given: both end
+  // on purpose, so an empty output is not a truncation. `max_output_tokens` stays out.
   return (
-    (data.type === "response.completed" && response?.status === "completed") ||
-    (data.object === "response" && data.status === "completed")
+    (data.type === "response.completed" &&
+      !!response &&
+      isDeliberateEmptyResponsesTerminal(response)) ||
+    (data.type === "response.incomplete" &&
+      !!response &&
+      isDeliberateEmptyResponsesTerminal(response)) ||
+    (data.object === "response" && isDeliberateEmptyResponsesTerminal(data))
   );
 }
 

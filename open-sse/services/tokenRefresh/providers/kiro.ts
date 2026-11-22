@@ -3,6 +3,7 @@
 // provenance notes (ported idea from KooshaPari's PR #7338, redone on tip).
 import { PROVIDERS } from "../../../config/constants.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
+import { sanitizeErrorMessage } from "../../../utils/errorSanitization.ts";
 import { buildExternalIdpRefreshParams, isExternalIdpAuthMethod } from "../../kiroExternalIdp.ts";
 import { safeAwsRegion } from "../../kiroRegion.ts";
 import { isPassiveRefresh } from "../passiveRefresh.ts";
@@ -71,7 +72,7 @@ export async function refreshKiroToken(
         }
         log?.error?.("TOKEN_REFRESH", "Failed to refresh Kiro external_idp token", {
           status: response.status,
-          error: errorText.slice(0, 200),
+          error: sanitizeErrorMessage(errorText).slice(0, 200),
         });
         return null;
       }
@@ -155,7 +156,7 @@ export async function refreshKiroToken(
         log?.warn?.(
           "TOKEN_REFRESH",
           "Kiro OIDC refresh failed, attempting client re-registration...",
-          { status: response.status, error: errorText.slice(0, 200) }
+          { status: response.status, error: sanitizeErrorMessage(errorText).slice(0, 200) }
         );
 
         try {
@@ -217,7 +218,7 @@ export async function refreshKiroToken(
 
         log?.error?.("TOKEN_REFRESH", "Failed to refresh Kiro AWS token", {
           status: response.status,
-          error: errorText.slice(0, 200),
+          error: sanitizeErrorMessage(errorText).slice(0, 200),
         });
         return null;
       }
@@ -282,7 +283,7 @@ export async function refreshKiroToken(
 
       log?.error?.("TOKEN_REFRESH", "Failed to refresh Kiro social token", {
         status: response.status,
-        error: errorText.slice(0, 200),
+        error: sanitizeErrorMessage(errorText).slice(0, 200),
       });
       return null;
     }

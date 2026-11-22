@@ -32,7 +32,9 @@ test("stop accepts --port (runStopCommand reads opts.port, so the option must ex
   }
 });
 
-test("stop does not print 'stopped' when the port-discovery tool (lsof) is missing", async () => {
+test("stop does not print 'stopped' when the port-discovery tool (lsof) is missing", {
+  skip: process.platform === "win32" ? "POSIX-only: win32 lists listeners with netstat" : false,
+}, async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-stop-15177-"));
   const prev = process.env.DATA_DIR;
   process.env.DATA_DIR = dataDir;
@@ -45,7 +47,6 @@ test("stop does not print 'stopped' when the port-discovery tool (lsof) is missi
     await runStopCommand(
       {},
       {
-        platform: "linux", // exercise the lsof branch regardless of host OS
         execFileAsync: async () => {
           throw enoent;
         },
@@ -93,6 +94,9 @@ test("stale PID file still falls back to the port and kills the listener (no rea
           return true;
         },
         isPidRunning: (p: number) => (p === 424242 ? alive : false),
+        // The mocked listener is an OmniRoute server. Without this the real probe reads
+        // /proc/424242, finds no process ("gone") and, correctly, signals nothing.
+        classifyPidIdentity: () => "ours",
         sleep: async () => {},
       }
     );

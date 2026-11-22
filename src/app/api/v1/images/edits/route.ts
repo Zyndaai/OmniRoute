@@ -19,6 +19,7 @@ import {
 import {
   getProviderCredentialsWithQuotaPreflight,
   clearRecoveredProviderState,
+  isCodexPoolPlanIneligibleForModel,
 } from "@/sse/services/auth";
 import { executeImageWithCredentialFallback } from "@/sse/services/imageCredentialRetry";
 import {
@@ -59,6 +60,7 @@ import { isMicrosoftDesignerWebProviderRetiredError } from "@/shared/constants/d
 import { resolveProxyForConnection } from "@/lib/db/settings";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
 import { isCodexFreePlan } from "@omniroute/open-sse/executors/codex/tools.ts";
+import { imageQuotaPreflightOptions } from "@/sse/services/imageQuotaSelectionPolicy";
 import {
   getBodySizeLimit,
   readRequestBodyWithLimit,
@@ -624,7 +626,8 @@ async function executeImageEditCombo(comboName: string, ctx: ImageEditContext): 
         target.credKey,
         null,
         ctx.allowedConnections,
-        target.modelStr
+        target.modelStr,
+        imageQuotaPreflightOptions(target.credKey)
       ),
     isRateLimited: isAllRateLimitedCredentials,
     dispatch: ({ target, credentials }) =>
@@ -812,8 +815,20 @@ async function postHandler(request: Request, _context?: unknown) {
       parsed.provider,
       null,
       allowedConnections,
-      resolvedModel
+      resolvedModel,
+      imageQuotaPreflightOptions(parsed.provider)
     )) as EditCredentials;
+    // Paid-only Codex models skip Free/Go accounts during selection; a pool made only of
+    // them still gets the explicit paid-plan answer instead of "no credentials".
+    if (
+      !credentials &&
+      (await isCodexPoolPlanIneligibleForModel(resolvedModel, allowedConnections))
+    ) {
+      return errorResponse(
+        HTTP_STATUS.BAD_REQUEST,
+        "Codex image editing requires a paid ChatGPT/Codex plan"
+      );
+    }
     if (!credentials) {
       return errorResponse(
         HTTP_STATUS.UNAUTHORIZED,

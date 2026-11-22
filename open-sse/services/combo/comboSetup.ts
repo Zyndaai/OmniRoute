@@ -6,8 +6,6 @@
  * (which rewrites ctx.body), combo agent middleware (also rewrites ctx.body), the config
  * cascade, the per-target timeout, and the reasoning-token-buffer flag. Behaviour is
  * byte-identical to the inline block it replaces — it just reads/writes via ComboContext.
- *
- * See _tasks/quality/2026-06-19-DESIGN-godfiles-decomposition.md §4.
  */
 import { normalizeRoutingStrategy } from "../../../src/shared/constants/routingStrategies.ts";
 import {
@@ -16,6 +14,7 @@ import {
   SKIP_UNIVERSAL_HANDOFF_FLAG,
 } from "../contextHandoff.ts";
 import { getLastSessionModel } from "../../../src/lib/db/contextHandoffs.ts";
+import { scopeHandoffSessionId } from "./handoffSessionScope.ts";
 import { applyComboAgentMiddleware } from "../comboAgentMiddleware.ts";
 import { resolveComboSetupConfig, resolveComboTargetTimeoutMsForCombo } from "../comboConfig.ts";
 import { resolveResilienceSettings } from "../../../src/lib/resilience/settings";
@@ -57,7 +56,10 @@ async function resolveContextCachePin(ctx: ComboContext): Promise<{
 }> {
   const { combo, relayOptions, log } = ctx;
   const effectiveSessionId: string | null = combo.context_cache_protection
-    ? (relayOptions?.sessionId ?? deriveComboSessionKey(ctx.body))
+    ? scopeHandoffSessionId(
+        relayOptions?.sessionId ?? deriveComboSessionKey(ctx.body),
+        relayOptions?.apiKeyId
+      )
     : null;
   let pinnedModel: string | null = null;
   if (

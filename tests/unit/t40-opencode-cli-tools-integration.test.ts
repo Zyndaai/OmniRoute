@@ -193,7 +193,6 @@ test("T40: Windsurf was removed from CLI_TOOLS in plan 14 D17 (MITM backlog plan
   // windsurf (Codeium) was removed from CLI_TOOLS because it has no generic custom base URL
   // support. It remains as an OAuth provider in src/lib/oauth/ for authentication.
   // The old guide/limitations notes are no longer needed in the UI catalog.
-  // Cross-reference: _tasks/features-v3.8.6/refactorpages/_orchestration/_plan11-mitm-backlog.md
   assert.equal(
     (CLI_TOOLS as Record<string, unknown>)["windsurf"],
     undefined,

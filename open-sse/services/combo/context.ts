@@ -9,8 +9,6 @@
  * into a small, independently testable/mutatable function instead of living inside the
  * monolith. This is the first extracted slice; subsequent phases will add their own shared
  * mutable fields (executor, runUpstreamStream, semaphore, retry accumulators) to ComboContext.
- *
- * See _tasks/quality/2026-06-19-DESIGN-godfiles-decomposition.md §4.
  */
 import type { ComboLike, ComboLogger, ComboRelayOptions } from "./types.ts";
 

@@ -19,6 +19,12 @@ import { finalizeResponsesTerminalStatus } from "../translator/helpers/responses
 // stripping it has no functional impact on the output.
 const CORRUPTED_REQUEST_ID_THRESHOLD = 200;
 
+// An upstream that sends a finish_reason but neither usage nor [DONE] and keeps the
+// connection open must not hold the client until the stall watchdog fires. Upstream keeps this
+// in config/constants.ts (RESPONSES_DEFERRED_COMPLETION_GRACE_MS); kept local to this file
+// because constants.ts belongs to another owner.
+const RESPONSES_DEFERRED_COMPLETION_GRACE_MS = 3000;
+
 /**
  * Responses API Transformer
  * Converts OpenAI Chat Completions SSE to Codex Responses API SSE format
@@ -260,6 +266,7 @@ export function createResponsesApiTransformStream(
     // response.completed — a trailing usage-only chunk (choices: [], usage: {...}) may
     // still arrive for stream_options.include_usage=true upstreams.
     awaitingTrailingUsage: false,
+    completionTimer: null as ReturnType<typeof setTimeout> | null,
   };
 
   const encoder = new TextEncoder();
@@ -594,7 +601,15 @@ export function createResponsesApiTransformStream(
     }
   };
 
+  const clearCompletionTimer = () => {
+    if (state.completionTimer) {
+      clearTimeout(state.completionTimer);
+      state.completionTimer = null;
+    }
+  };
+
   const sendCompleted = (controller) => {
+    clearCompletionTimer();
     if (!state.completedSent) {
       state.completedSent = true;
 
@@ -970,8 +985,21 @@ export function createResponsesApiTransformStream(
               // #6906: defer response.completed — a trailing usage-only chunk may
               // still arrive (stream_options.include_usage=true). The empty-choices
               // branch above (or flush() at stream end, as a fallback) actually
-              // calls sendCompleted().
+              // calls sendCompleted(). An upstream that sends neither usage nor
+              // [DONE] and keeps the connection open must not hold the client until
+              // the stall watchdog fires, so a short timer completes the response.
               state.awaitingTrailingUsage = true;
+              state.completionTimer = setTimeout(() => {
+                state.completionTimer = null;
+                try {
+                  sendCompleted(controller);
+                } catch (error) {
+                  // flush() and cancel() clear this timer, so a failure here happened on a live
+                  // stream: report it to the client. error() is a no-op on a closed stream.
+                  controller.error(error);
+                }
+              }, RESPONSES_DEFERRED_COMPLETION_GRACE_MS);
+              (state.completionTimer as { unref?: () => void })?.unref?.();
             }
           }
         }
@@ -995,6 +1023,7 @@ export function createResponsesApiTransformStream(
           clearInterval(state.keepaliveTimer);
           state.keepaliveTimer = null;
         }
+        clearCompletionTimer();
         for (const i in state.msgItemAdded) closeMessage(controller, i);
         closeReasoning(controller);
         for (const i in state.funcCallIds) closeToolCall(controller, i);
@@ -1013,6 +1042,7 @@ export function createResponsesApiTransformStream(
           clearInterval(state.keepaliveTimer);
           state.keepaliveTimer = null;
         }
+        clearCompletionTimer();
       },
     } as Transformer & { cancel?(): void },
     { highWaterMark: 16384 },

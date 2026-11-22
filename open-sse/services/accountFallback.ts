@@ -86,12 +86,23 @@ const RESETS_IN_RE = /resets? in (\d+h)?(\d+m)?(\d+s)?/i;
 const RETRY_IN_SEC_RE = /please retry in (\d+(?:\.\d+)?)\s*s/i;
 const COOLDOWN_NUMERIC_RE = /^\d+(\.\d+)?$/;
 
-export type RetryHintProvenance = "header" | "google_rpc_retry_info" | "body";
+export type RetryHintProvenance = "header" | "google_rpc_retry_info" | "body" | "body_structured";
 
 export function retryHintBypassesMaxCooldownMs(
   provenance: RetryHintProvenance | undefined
 ): boolean {
   return provenance === "header" || provenance === "google_rpc_retry_info";
+}
+
+/** Structured provenances reflect the provider's own reset clock and may shorten an existing model lock (#CO-402). */
+export function isAuthoritativeRetryHintSource(
+  provenance: RetryHintProvenance | undefined
+): boolean {
+  return (
+    provenance === "header" ||
+    provenance === "google_rpc_retry_info" ||
+    provenance === "body_structured"
+  );
 }
 import {
   isSubscriptionQuotaText,
@@ -447,10 +458,23 @@ export const PARAM_VALIDATION_PATTERNS = [
 ];
 
 /**
+ * Google Cloud Code's `TOS_VIOLATION` ErrorInfo, recognized by its reason plus its
+ * `cloudcode-pa` domain. The reason alone is not enough: isAccountDeactivated() has no
+ * provider or status input, so another provider's per-request refusal (or a prompt
+ * echoed into an error) could otherwise park a healthy connection for a year.
+ */
+function isGoogleCloudCodeTosViolation(lowerText: string): boolean {
+  return lowerText.includes("tos_violation") && lowerText.includes("cloudcode-pa");
+}
+
+/**
  * T06: Returns true if response body indicates the account is permanently deactivated.
  */
 export function isAccountDeactivated(errorText: string): boolean {
   const lower = String(errorText || "").toLowerCase();
+  if (isGoogleCloudCodeTosViolation(lower)) {
+    return true;
+  }
   return getMergedBannedSignals().some((sig) => lower.includes(sig));
 }
 
@@ -753,7 +777,8 @@ export function lockModel(
   model: string | null | undefined,
   reason: string,
   cooldownMs: number,
-  metadata: Partial<ModelLockoutEntry> = {}
+  metadata: Partial<ModelLockoutEntry> = {},
+  options: { authoritativeReset?: boolean } = {}
 ): void {
   if (!model) return; // No model → skip model-level locking
   ensureCleanupTimer();
@@ -765,6 +790,15 @@ export function lockModel(
   // within Node.js's single-threaded event loop.
   const existing = modelLockouts.get(key);
   if (existing && existing.until > newUntil) {
+    // An authoritative upstream reset (structured body field or header) shortens
+    // a longer guessed lock — the provider's own clock wins (#CO-402).
+    if (options.authoritativeReset === true) {
+      modelLockouts.set(
+        key,
+        exactModelLock.buildAuthoritativeShortenedLockEntry(existing, reason, newUntil, metadata)
+      );
+      return;
+    }
     if (metadata.failureCount && metadata.failureCount > existing.failureCount) {
       existing.failureCount = metadata.failureCount;
       existing.lastFailureAt = metadata.lastFailureAt ?? existing.lastFailureAt;
@@ -831,6 +865,14 @@ export function recordModelLockoutFailure(
      * until-midnight default below, plain exponential backoff).
      */
     exactCooldownIsUpstreamReset?: boolean;
+    /**
+     * A structured body hint (reset_at / retry_after seconds parsed from JSON) is
+     * the provider's own reset clock: a NEW such hint may SHORTEN an existing
+     * model lock instead of only extending it. Header/RetryInfo hints already
+     * carry this via exactCooldownIsUpstreamReset; body hints got it separately
+     * so routerai-style 402s unstick after the provider's reset passes (#CO-402).
+     */
+    authoritativeBodyReset?: boolean;
   } = {}
 ) {
   ensureCleanupTimer();
@@ -889,11 +931,19 @@ export function recordModelLockoutFailure(
   });
 
   const lockFn = scope === "exact" ? lockExactModel : lockModel;
-  lockFn(provider, connectionId, model, reason, cooldownMs, {
-    failureCount,
-    lastFailureAt: now,
-    resetAfterMs,
-  });
+  lockFn(
+    provider,
+    connectionId,
+    model,
+    reason,
+    cooldownMs,
+    {
+      failureCount,
+      lastFailureAt: now,
+      resetAfterMs,
+    },
+    { authoritativeReset: options.authoritativeBodyReset === true }
+  );
 
   return {
     cooldownMs,
@@ -1415,8 +1465,9 @@ export function parseRetryAfterFromBody(responseBody: unknown): {
   for (const detail of Array.isArray(details) ? details : []) {
     const detailRecord = toJsonRecord(detail);
     if (detailRecord.retryDelay) {
+      const delayMs = parseDelayString(detailRecord.retryDelay);
       return {
-        retryAfterMs: parseDelayString(detailRecord.retryDelay),
+        retryAfterMs: delayMs === null ? null : Math.min(delayMs, MAX_PROVIDER_COOLDOWN_MS),
         reason: RateLimitReason.RATE_LIMIT_EXCEEDED,
       };
     }
@@ -1819,14 +1870,20 @@ export function checkFallbackError(
     const resetTime = parseResetFromHeaders(headers);
     if (resetTime) {
       const waitMs = Math.max(resetTime - Date.now(), 0);
-      if (waitMs > 0) return { retryAfterMs: waitMs, provenance: "header" };
+      // Header hints bypass maxCooldownMs downstream, so clamp them here: an
+      // epoch-like Retry-After must not lock the connection for decades.
+      if (waitMs > 0)
+        return { retryAfterMs: Math.min(waitMs, MAX_PROVIDER_COOLDOWN_MS), provenance: "header" };
     }
 
     const detailedJsonHint = parseDetailedRetryHintFromJsonBody(errorStr, MAX_PROVIDER_COOLDOWN_MS);
     if (detailedJsonHint) {
       return {
         retryAfterMs: detailedJsonHint.retryAfterMs,
-        provenance: detailedJsonHint.provenance,
+        provenance:
+          detailedJsonHint.provenance === "body"
+            ? ("body_structured" as const)
+            : detailedJsonHint.provenance,
       };
     }
 
@@ -2055,7 +2112,8 @@ export function checkFallbackError(
         } else {
           return {
             shouldFallback: true,
-            cooldownMs: tpdMs,
+            // A Retry-After header wins over the node clock; clamp it like detectRetryHint does.
+            cooldownMs: Math.min(tpdMs, MAX_PROVIDER_COOLDOWN_MS),
             reason: RateLimitReason.QUOTA_EXHAUSTED,
             dailyQuotaExhausted: true,
           };
@@ -2089,7 +2147,7 @@ export function checkFallbackError(
     if (shouldUseQuotaSignal && !isCreditsExhausted(errorStr) && !isDailyQuotaExhausted(errorStr)) {
       const subResult = buildSubscriptionQuotaFallback(
         errorStr,
-        () => getUpstreamRetryHint()?.retryAfterMs ?? null,
+        getUpstreamRetryHint,
         parseRetryFromErrorText,
         provider
       );
@@ -2276,7 +2334,7 @@ export function checkFallbackError(
   if (status === HTTP_STATUS.PLAN_LIMIT_EXCEEDED) {
     const subResult = buildSubscriptionQuotaFallback(
       errorStr,
-      () => getUpstreamRetryHint()?.retryAfterMs ?? null,
+      getUpstreamRetryHint,
       parseRetryFromErrorText,
       provider
     );

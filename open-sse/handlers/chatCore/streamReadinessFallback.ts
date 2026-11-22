@@ -14,7 +14,7 @@
  */
 import { ensureStreamReadiness, type StreamReadinessResult } from "../../utils/streamReadiness.ts";
 import { isStreamReadinessStallRetryEnabled } from "@/shared/utils/featureFlags.ts";
-import { maybeConvertJsonBodyToSse } from "./jsonBodyToSse.ts";
+import { convertJsonBodyWithinCap } from "./jsonBodyToSse.ts";
 
 type LoggerLike = {
   warn?: (...args: unknown[]) => void;
@@ -83,7 +83,7 @@ async function dispatchRetryLeg(
   }
   const retryResponse = retryResult?.response;
   if (!retryResponse) return { ...empty, retryResult };
-  const prepared = await maybeConvertJsonBodyToSse(retryResponse, {
+  const { response: prepared } = await convertJsonBodyWithinCap(retryResponse, {
     log: args.log,
     provider: args.provider,
     model: args.model,

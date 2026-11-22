@@ -9,4 +9,9 @@ export default {
   basename: normalizeBasePath(process.env.OMNIROUTE_BASE_PATH) || "/",
   buildDirectory: process.env.OMNIROUTE_BUILD_DIR || ".build/app",
   ssr: true,
+  // React Router's action origin check compares `Origin` with `request.url`, which this server
+  // builds from its bound address, so it would refuse every same-origin dashboard write. The
+  // request pipeline checks page writes against the trusted public origins instead
+  // (src/server/origin/pageActionOrigin.ts, tests/unit/page-action-origin.test.ts).
+  allowedActionOrigins: ["**"],
 } satisfies Config;

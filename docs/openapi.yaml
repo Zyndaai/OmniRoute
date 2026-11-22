@@ -14466,6 +14466,9 @@ paths:
       tags:
         - V1 Accounts
       summary: "GET accounts › <id> › limits"
+      security:
+        - BearerAuth: []
+        - ManagementSessionAuth: []
       responses:
         "200":
           description: OK
@@ -14473,6 +14476,9 @@ paths:
       tags:
         - V1 Accounts
       summary: "PUT accounts › <id> › limits"
+      security:
+        - BearerAuth: []
+        - ManagementSessionAuth: []
       responses:
         "200":
           description: OK
@@ -14723,6 +14729,9 @@ paths:
       tags:
         - V1 Issues
       summary: "POST issues › report"
+      security:
+        - BearerAuth: []
+        - ManagementSessionAuth: []
       responses:
         "200":
           description: OK
@@ -14830,6 +14839,9 @@ paths:
       tags:
         - V1 Providers
       summary: "GET providers › <provider> › limits"
+      security:
+        - BearerAuth: []
+        - ManagementSessionAuth: []
       responses:
         "200":
           description: OK
@@ -14837,6 +14849,9 @@ paths:
       tags:
         - V1 Providers
       summary: "PUT providers › <provider> › limits"
+      security:
+        - BearerAuth: []
+        - ManagementSessionAuth: []
       responses:
         "200":
           description: OK

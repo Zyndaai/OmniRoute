@@ -13,9 +13,19 @@
 
 import { shouldUseMidConversationSystem } from "../../executors/claudeIdentity.ts";
 import { ensureCacheControlOnLastUserMessage } from "../../services/claudeCodeConstraints.ts";
-import { hoistDeferredToolsForTarget } from "../../translator/helpers/claudeDeferredTools.ts";
+import { detachClaudeCodeRewriteTargets } from "../../executors/claudeOauthBodyIsolation.ts";
+import {
+  acceptsInlineToolAdditions,
+  hoistDeferredToolsForTarget,
+} from "../../translator/helpers/claudeDeferredTools.ts";
 import { splitMisplacedToolResults } from "../../translator/helpers/claudeHelper.ts";
 import { FORMATS } from "../../translator/formats.ts";
+import type { ConnectionCacheOverride } from "../../utils/cacheControlPolicy.ts";
+import {
+  acceptsInjectedCacheBreakpoints,
+  ensurePassthroughCacheBreakpoints,
+  type PassthroughCacheBody,
+} from "./passthroughCacheBreakpoints.ts";
 import { sanitizeAnthropicPassthroughHistory } from "./anthropicPassthroughHistory.ts";
 import {
   extractSystemRoleMessages,
@@ -28,6 +38,28 @@ import { stripClaudeRejectedTopLevelFields } from "./passthroughHelpers.ts";
 
 type LoggerLike = { debug?: (...args: unknown[]) => void } | null | undefined;
 
+const BILLING_LINE = /^x-anthropic-billing-header:[^\n]*(?:\r?\n)?/i;
+
+// Claude Code's billing line rotates every turn. A non-Claude target cannot use it, and it breaks
+// that target's prompt-cache prefix. Replace the system value; never mutate the client's array.
+// shortcut: "Claude-native" means a provider that accepts inline tool additions or a "claude"
+// model name; a custom host proxying real Claude under another name keeps losing the line.
+function dropBillingLine(body: Record<string, unknown>): void {
+  const { system } = body;
+  if (typeof system === "string") {
+    const text = system.replace(BILLING_LINE, "");
+    if (text) body.system = text;
+    else delete body.system;
+  } else if (Array.isArray(system)) {
+    body.system = system.flatMap((block) => {
+      const text = block?.text;
+      if (typeof text !== "string" || !BILLING_LINE.test(text)) return [block];
+      const rest = text.replace(BILLING_LINE, "");
+      return rest ? [{ ...block, text: rest }] : [];
+    });
+  }
+}
+
 export function buildClaudePassthroughBody({
   body,
   provider,
@@ -36,6 +68,7 @@ export function buildClaudePassthroughBody({
   effectiveModel,
   targetFormat,
   preserveCacheControl,
+  connectionCacheOverride,
   normalizeClaudeUpstreamMessages,
   applyReasoningRuleDirective,
   log,
@@ -47,6 +80,7 @@ export function buildClaudePassthroughBody({
   effectiveModel: string;
   targetFormat: string;
   preserveCacheControl: boolean;
+  connectionCacheOverride?: ConnectionCacheOverride | null;
   normalizeClaudeUpstreamMessages: (
     payload: Record<string, unknown>,
     options?: { preserveToolResultBlocks?: boolean }
@@ -66,10 +100,14 @@ export function buildClaudePassthroughBody({
   );
   translatedBody._disableToolPrefix = true;
 
-  // Sanitize historical thinking-block signatures for Anthropic-native Claude OAuth.
+  if (!acceptsInlineToolAdditions(provider) && !/claude/i.test(effectiveModel)) {
+    dropBillingLine(translatedBody);
+  }
+
+  // Sanitize historical thinking-block signatures for first-party Anthropic (OAuth + API key).
   // Only Anthropic's first-party API validates these signatures (token-bound); third-party
   // Claude-shape providers do not. See redactPassthroughThinkingSignatures + issue #2454.
-  if (provider === "claude") {
+  if (provider === "claude" || provider === "anthropic") {
     // Also drops foreign server_tool_use ids (z.ai `call_…`) that fail ^srvtoolu_ (9router#3685).
     translatedBody.messages = sanitizeAnthropicPassthroughHistory(
       translatedBody.messages
@@ -112,6 +150,14 @@ export function buildClaudePassthroughBody({
     normalizeClaudeUpstreamMessages(translatedBody, {
       preserveToolResultBlocks: targetFormat === FORMATS.CLAUDE,
     });
+    // Marker-less Anthropic clients (e.g. Cursor) ship zero cache breakpoints through pure
+    // passthrough, re-billing the full prefix every turn. Inject the standard breakpoints ONLY
+    // when the body carries none anywhere; a client that manages its own markers stays
+    // byte-untouched. A combo replays the caller's body on its next step, so write into copies.
+    if (acceptsInjectedCacheBreakpoints(provider, connectionCacheOverride)) {
+      detachClaudeCodeRewriteTargets(translatedBody);
+      ensurePassthroughCacheBreakpoints(translatedBody as PassthroughCacheBody, provider);
+    }
   }
 
   log?.debug?.("FORMAT", `claude passthrough (preserveCache=${preserveCacheControl})`);
@@ -120,9 +166,11 @@ export function buildClaudePassthroughBody({
   // Anthropic returns a 400 on the legacy field; some clients (e.g. ForgeCode)
   // still emit it. Preserves an existing output_config.format if present.
   if (translatedBody.output_format !== undefined) {
+    // Copy-on-write: output_config may be the caller's shared object (shallow body copy per
+    // combo leg); writing format into it would leak to the other legs.
     const oc =
       translatedBody.output_config && typeof translatedBody.output_config === "object"
-        ? (translatedBody.output_config as Record<string, unknown>)
+        ? { ...(translatedBody.output_config as Record<string, unknown>) }
         : {};
     if (oc.format === undefined) oc.format = translatedBody.output_format;
     translatedBody.output_config = oc;

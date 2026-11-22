@@ -314,6 +314,17 @@ async function compressAndStore(
   return result;
 }
 
+/** Returns 1 when `transformed` is `contextItems` plus one leading system note, else 0. */
+function leadingNoteOffset(transformed: unknown[], contextItems: unknown[]): number {
+  if (transformed.length !== contextItems.length + 1) return 0;
+  const leading = transformed[0];
+  return leading &&
+    typeof leading === "object" &&
+    (leading as Record<string, unknown>).role === "system"
+    ? 1
+    : 0;
+}
+
 async function compressLiveToolOutputs(
   body: Record<string, unknown>,
   field: "messages" | "input",
@@ -347,14 +358,22 @@ async function compressLiveToolOutputs(
   const liveToolLinks = liveToolIndexes.map((index) => toolLinkage(transformedLive[index]));
   const liveResult = await compress({ ...body, [field]: compressionItems });
   const transformed = liveResult.body[field];
+  if (!Array.isArray(transformed)) {
+    return { liveResult: { body, compressed: false, stats: null }, transformedLive };
+  }
+  // A stacked-pipeline post-pass (CCR/dedup marker note) may prepend one leading system
+  // note. It is per-request protocol state, not history: skip it when aligning.
+  const noteOffset = leadingNoteOffset(transformed, contextItems);
   if (
-    !Array.isArray(transformed) ||
-    transformed.length !== contextItems.length ||
+    transformed.length !== contextItems.length + noteOffset ||
     identities.some(
-      (identity, index) => identity === null || identity !== itemIdentity(transformed[index])
+      (identity, index) =>
+        identity === null || identity !== itemIdentity(transformed[noteOffset + index])
     ) ||
     liveToolIndexes.some((liveIndex, index) => {
-      if (digest(transformed[liveOffset + liveIndex]) === originalToolDigests[index]) return false;
+      if (digest(transformed[noteOffset + liveOffset + liveIndex]) === originalToolDigests[index]) {
+        return false;
+      }
       const link = liveToolLinks[index];
       return link === null || toolLinkCounts.get(link) !== 1;
     })
@@ -363,7 +382,7 @@ async function compressLiveToolOutputs(
   }
   for (let index = 0; index < liveToolIndexes.length; index++) {
     const liveIndex = liveToolIndexes[index];
-    transformedLive[liveIndex] = transformed[liveOffset + liveIndex];
+    transformedLive[liveIndex] = transformed[noteOffset + liveOffset + liveIndex];
   }
   return { liveResult, transformedLive };
 }

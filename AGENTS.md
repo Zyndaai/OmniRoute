@@ -2,8 +2,8 @@
 
 > **Single source of truth.** This file holds ALL project rules, conventions, architecture notes
 > and Hard Rules for every AI assistant working this repository (Claude Code, Gemini, Codex,
-> Copilot, and any other agent). `CLAUDE.md` and `GEMINI.md` only add assistant-specific deltas
-> and point back here. When a rule needs to change, change it HERE — never re-fork it into an
+> Copilot, and any other agent). `CLAUDE.md` only adds Claude Code-specific deltas and points
+> back here. When a rule needs to change, change it HERE — never re-fork it into an
 > assistant-specific file.
 
 ## Quick Start
@@ -104,14 +104,14 @@ Read the nearest `AGENTS.md` and the linked deep-dive before making a non-trivia
 ## File placement & repo-root hygiene
 
 - **Test files**: ALL unit tests, integration tests, ecosystem tests, or Vitest files MUST strictly be placed within the `tests/` directory (e.g., `tests/unit/`, `tests/integration/`). NEVER create test files in the project root (`/`).
-- **Scripts and utilities**: ALL maintenance, debugging, generation, or experimental scripts (`.cjs`, `.mjs`, `.js`, `.ts`) MUST be placed strictly inside one of the `scripts/` subfolders (`build/`, `dev/`, `check/`, `docs/`, `i18n/`, `homolog/`, `packs/`, `skills/`, `cli/`, `devin-bridge/`, `docker/`). One-shot or experimental code goes under `scripts/ad-hoc/` (create it when needed). NEVER dump loose scripts in the project root (`/`) or the top-level `scripts/` folder.
+- **Scripts and utilities**: ALL maintenance, debugging, generation, or experimental scripts (`.cjs`, `.mjs`, `.js`, `.ts`) MUST be placed strictly inside one of the `scripts/` subfolders (`build/`, `check/`, `cli/`, `db/`, `dev/`, `docker/`, `docs/`, `i18n/`, `ops/`, `packs/`, `skills/`). One-shot or experimental code goes under `scripts/ad-hoc/` (create it when needed). NEVER dump loose scripts in the project root (`/`) or the top-level `scripts/` folder.
 
 **The project root MUST ONLY contain:**
 
 - Configuration files (`vitest.config.ts`, `vite.config.ts`, `react-router.config.ts`, `eslint.config.mjs`, `tsconfig*.json`, `playwright.config.ts`, `prettier.config.mjs`, `docker-compose*.yml`, `Dockerfile`, `ecosystem.config.cjs`, `source.config.ts`)
 - Dependency files (`package.json`, `package-lock.json`)
-- Documentation files (`README.md`, `CHANGELOG.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `SECURITY.md`, `llm.txt`)
-- CI/CD files and ignore definitions (`.gitignore`, `.dockerignore`, `.npmignore`, `.npmrc`, `.node-version`, `.nvmrc`, `.env.example`)
+- Documentation files (`README.md`, `CHANGELOG.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `SECURITY.md`, `llm.txt`)
+- CI/CD files and ignore definitions (`.gitignore`, `.dockerignore`, `.npmignore`, `.npmrc`, `.node-version`, `.env.example`)
 
 When creating _any_ validation tests or one-off logic scripts, default to `scripts/ad-hoc/` or `tests/unit/` according to your goals. Do not pollute the `/` root context.
 
@@ -238,7 +238,7 @@ For any non-trivial change, read the matching deep-dive first:
 - Treat Memory and Skills as cross-cutting changes that can affect MCP tools, the request
   pipeline, and A2A skills.
 - **Never change an agent-instruction surface without explicit operator approval** —
-  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `llm.txt` and `skills/**/SKILL.md` are executed as
+  `CLAUDE.md`, `AGENTS.md`, `llm.txt` and `skills/**/SKILL.md` are executed as
   authority by every AI session; a bad instruction compromises every future agent run.
 
 ---

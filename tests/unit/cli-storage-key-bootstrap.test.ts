@@ -33,11 +33,15 @@ function runCli(dataDir: string): { code: number | null; stderr: string } {
         ...cleanEnv,
         DATA_DIR: dataDir,
         HOME: isolatedHome,
+        // os.homedir() reads USERPROFILE on Windows: without it the CLI loads (and may write)
+        // the real user's ~/.omniroute/.env.
+        USERPROFILE: isolatedHome,
         NO_UPDATE_NOTIFIER: "1",
         OMNIROUTE_CLI_SKIP_REPO_ENV: "1",
       },
       timeout: 60_000,
       encoding: "utf-8",
+      windowsHide: true,
     });
     return { code: res.status, stderr: res.stderr ?? "" };
   } finally {

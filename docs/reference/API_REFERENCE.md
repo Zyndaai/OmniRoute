@@ -1027,7 +1027,10 @@ completion.
 | GET    | `/v1/quotas/check`  | Pre-validate quota for a `provider` + `accountId` before issuing a registered key     |
 | POST   | `/v1/issues/report` | Report a quota/key issuance failure to GitHub (requires `GITHUB_ISSUES_REPO` + token) |
 
-**Auth:** Bearer API key (`isAuthenticated`).
+**Auth:** `GET /v1/quotas/check` takes a Bearer API key (`isAuthenticated`). `POST /v1/issues/report`
+and the issuance-limit routes (`/v1/providers/{provider}/limits`, `/v1/accounts/{id}/limits`) take
+the management credential (`requireManagementAuth`): a dashboard session, the local CLI token, or an
+API key with `manage`/`admin` scope; other API keys get `403`.
 
 ### Quota session recovery (opt-in)
 

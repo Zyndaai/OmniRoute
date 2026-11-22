@@ -112,6 +112,7 @@ import { validateZyloApiProvider } from "./validation/zylo";
 import { validateInceptionProvider } from "./validation/inception";
 import { validateClineProvider } from "./validation/cline";
 import { validateKilocodeProvider } from "./validation/kilocode";
+import { validateCloudflareAiProvider } from "./validation/cloudflareAi";
 import { validateAdobeFireflyProvider } from "./validation/adobeFirefly";
 import {
   validateV0VercelProvider,
@@ -282,6 +283,9 @@ export async function validateProviderApiKey({
     // Kilo Code serves unauthenticated GET /models (open catalog returning 200 for any key).
     // Authenticate against /chat/completions with the required X-KILOCODE-EDITORNAME header.
     kilocode: validateKilocodeProvider,
+    // Workers AI URLs are account-scoped: probe the account's model metadata with the Account ID
+    // from the form, never a chat completion.
+    "cloudflare-ai": validateCloudflareAiProvider,
     deepgram: validateDeepgramProvider,
     assemblyai: validateAssemblyAIProvider,
     "rev-ai": validateRevAiProvider,

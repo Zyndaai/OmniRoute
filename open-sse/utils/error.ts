@@ -15,6 +15,12 @@ import { isFeatureFlagEnabled } from "@/shared/utils/featureFlags";
 import { resolveRetryAfterInstant } from "./retryAfterInstant.ts";
 import { parseAntigravityRetryTime, parseProseRetryDelayMs } from "./proseRetryDelay.ts";
 import { parseDetailedRetryHintFromJsonBody } from "../services/retryAfterJson.ts";
+import { NonStreamingResponseTooLargeError } from "./responseBodyCap.ts";
+import { readErrorBodyText } from "../handlers/chatCore/errorBodyRead.ts";
+
+// Bounded upstream error-body read (64 KiB / 5 s, #19425): implemented in a leaf module so the
+// executors can use it without importing this file; re-exported here for the public path.
+export { readErrorBodyText };
 
 import {
   isSafePublicErrorIdentifier,
@@ -489,7 +495,7 @@ export async function parseUpstreamError(response: Response, provider: string | 
   let rawText = "";
 
   try {
-    const text = await response.text();
+    const text = await readErrorBodyText(response);
     rawText = text;
     responseBody = normalizePayloadForLog(text);
 
@@ -513,8 +519,13 @@ export async function parseUpstreamError(response: Response, provider: string | 
     } catch {
       message = text;
     }
-  } catch {
-    message = `Upstream error: ${response.status}`;
+  } catch (err) {
+    // Every caller relies on this returning the upstream status, so an over-cap body
+    // is reported in the message: nothing of it is parsed, and the read closed the body.
+    message =
+      err instanceof NonStreamingResponseTooLargeError
+        ? "Provider error body exceeded response size limit"
+        : `Upstream error: ${response.status}`;
     responseBody = { _rawText: message };
   }
 
@@ -648,6 +659,12 @@ export function createErrorResult(
      * for internal callers that inspect the returned object.
      */
     rawMessage: string;
+    /**
+     * The parsed upstream error JSON, for internal classifiers only (the client-safe `error`
+     * object drops its `status` and `details`). This result field is never serialized; the HTTP
+     * body is built from `body` above, which adds only a sanitized `upstream_details` copy.
+     */
+    upstreamErrorBody?: unknown;
     errorType?: string;
     errorCode?: string;
     response: Response;
@@ -668,6 +685,10 @@ export function createErrorResult(
   // Add retryAfterMs if available (for Antigravity quota errors)
   if (retryAfterMs) {
     result.retryAfterMs = retryAfterMs;
+  }
+
+  if (upstreamDetails !== undefined && upstreamDetails !== null) {
+    result.upstreamErrorBody = upstreamDetails;
   }
 
   // Opt-in relay of the recursively sanitized upstream JSON shape (Claude Code

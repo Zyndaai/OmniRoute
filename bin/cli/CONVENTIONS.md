@@ -1,6 +1,6 @@
 # OmniRoute CLI — Internal Conventions
 
-> Status: normative. Source: `_tasks/features-v3.8.0/cli/fase-0-preparacao/0.3-definir-convencoes.md`.
+> Status: normative.
 > This file is the authoritative reference for every new or migrated CLI command.
 > If reality diverges from this document, fix the code first; only edit this file
 > after the discrepancy has been justified in a PR.

@@ -1226,6 +1226,16 @@ export async function revokeApiKey(id: string): Promise<boolean> {
 }
 
 /**
+ * Drop every cached auth decision for one key after its row changed outside this module:
+ * this process, every other cluster process (bus) and the shared Redis auth entry, the same
+ * path `revokeApiKey` takes.
+ */
+export async function invalidateApiKeyAuthCaches(id: string): Promise<void> {
+  invalidateCaches();
+  await deleteRedisAuthCacheForKeyId(id);
+}
+
+/**
  * Set or clear the expiry of an API key. Pass null to remove the expiry.
  */
 export async function setApiKeyExpiry(id: string, expiresAt: string | null): Promise<boolean> {

@@ -205,8 +205,6 @@ Auth: optional (`REQUIRE_API_KEY`). Errors via `buildErrorBody()` (Hard Rule #12
 
 ## References
 
-- Master plan: `_tasks/features-v3.8.6/refactorpages/_orchestration/master-plan-group-C.md`
-- Feature plan: `_tasks/features-v3.8.6/refactorpages/17-playground-studio-redesign.plan.md`
 - Code export: `src/lib/playground/codeExport.ts`
 - Prompt improver: `src/lib/playground/promptImprover.ts`
 - Search Tools Studio: `docs/frameworks/SEARCH_TOOLS_STUDIO.md`

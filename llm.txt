@@ -493,4 +493,4 @@ diagnostics) plus **memory**, **skill**, **agentSkill**, **githubSkill**, **pool
 - **Security**: `docs/architecture/AUTHZ_GUIDE.md`, `docs/security/GUARDRAILS.md`, `docs/security/COMPLIANCE.md`, `docs/security/STEALTH_GUIDE.md`
 - **Extensibility**: `docs/frameworks/SKILLS.md`, `docs/frameworks/MEMORY.md`, `docs/frameworks/EVALS.md`, `docs/frameworks/WEBHOOKS.md`, `docs/routing/REASONING_REPLAY.md`
 - **Platform**: `docs/ops/TUNNELS_GUIDE.md`
-- **AI agents**: `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`
+- **AI agents**: `CLAUDE.md`, `AGENTS.md`

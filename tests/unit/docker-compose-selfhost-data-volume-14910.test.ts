@@ -1,9 +1,8 @@
 // #14910: the self-host compose file must keep the ./data bind mount as the
 // ACTIVE data volume. Switching the default to a named volume would make every
 // existing self-host install boot on an empty volume after pulling the new
-// compose file (looks like data loss), and bin/snapshot-data.sh /
-// bin/restore-data.sh only operate on ./data. The named volume stays available
-// as a commented, opt-in alternative for platforms that hit EACCES.
+// compose file (looks like data loss). The named volume stays available as a
+// commented, opt-in alternative for platforms that hit EACCES.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

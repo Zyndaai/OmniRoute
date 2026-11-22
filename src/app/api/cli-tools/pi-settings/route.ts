@@ -158,7 +158,9 @@ export async function POST(request: Request) {
     }
 
     await createBackup(PI_TOOL_ID, modelsPath);
-    await applyOmniRoutePiProvider({ baseUrl, apiKey, model, modelName: model });
+    // No `modelName`: the card has no name field, so the applied id is not a
+    // user-chosen label. piConfig keeps a hand-set `name` from models.json.
+    await applyOmniRoutePiProvider({ baseUrl, apiKey, model });
 
     try {
       await saveCliToolLastConfigured(PI_TOOL_ID);

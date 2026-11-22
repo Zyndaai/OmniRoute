@@ -62,6 +62,7 @@ import { shouldIsolateProbeFailures } from "@/shared/utils/probeOrigin";
 import { resolveProviderId } from "@/shared/constants/providers";
 import { buildContinuationLogHooks } from "./recoveryTraceLogging.ts";
 import { formatStreamRecoveryRetryWarning } from "./streamErrorResult.ts";
+import { readErrorBodyText } from "./errorBodyRead.ts";
 import { injectSystemPromptPostTranslation } from "../../services/systemPrompt.ts";
 import type { ToolDisclosureConfig } from "../../utils/toolDisclosure.ts";
 
@@ -440,10 +441,7 @@ export async function executeProviderRequest(
             ) {
               const failureDetail = res.response.ok
                 ? ""
-                : await res.response
-                    .clone()
-                    .text()
-                    .catch(() => "");
+                : await readErrorBodyText(res.response.clone()).catch(() => "");
               recordKeyHealthStatus(
                 res.response.status,
                 execCreds,
@@ -456,10 +454,7 @@ export async function executeProviderRequest(
             }
 
             if (isModelScope() && res.response.status === 429 && attempts < maxAttempts - 1) {
-              const bodyPeek = await res.response
-                .clone()
-                .text()
-                .catch(() => "");
+              const bodyPeek = await readErrorBodyText(res.response.clone()).catch(() => "");
               const normalizedHeaders = normalizeHeaders(res.response.headers);
               const decision = classifyModelScope429(bodyPeek, normalizedHeaders);
               if (decision.retryable) {

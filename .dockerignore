@@ -69,10 +69,6 @@ quality-ratchet/
 # (English) sources at runtime, so translations are not required in the
 # container image.
 docs/i18n/**
-# Internal planning artifacts (gitignored). `*.md` above only matches the root,
-# so without this rule these land in /app/docs and become readable through the
-# dashboard's Docs viewer at runtime.
-docs/superpowers/**
 # Operator-internal security writeups: git only, not the image or /docs catalog.
 docs/security/STEALTH_GUIDE.md
 docs/security/SOCKET_DEV_FINDINGS.md

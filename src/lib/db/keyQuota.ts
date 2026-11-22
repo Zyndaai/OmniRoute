@@ -277,14 +277,28 @@ export async function incrementKeyQuotaCounter(
   if (!apiKeyId || delta <= 0) return;
   const dimensionKey = dimension === "tpm" ? DIMENSION_TPM : DIMENSION_RPM;
   const bucket = bucketIndex(nowMs);
-  await db().execute(
+  const written = await db().queryOne<{ inserted: boolean }>(
     `INSERT INTO quota_counters (api_key_id, dimension_key, bucket_index, consumed, updated_at)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (api_key_id, dimension_key, bucket_index) DO UPDATE SET
        consumed = quota_counters.consumed + EXCLUDED.consumed,
-       updated_at = EXCLUDED.updated_at`,
+       updated_at = EXCLUDED.updated_at
+     RETURNING (xmax = 0) AS inserted`,
     [apiKeyId, dimensionKey, bucket, delta, new Date(nowMs).toISOString()]
   );
+  // A new bucket is the moment older ones become unreadable: effectiveWindowCount only reads
+  // the current and the previous bucket, so older rows of this key and dimension are dead
+  // weight that would otherwise grow without limit (#19445).
+  if (written?.inserted) {
+    // Bounded, so a large legacy backlog drains over several new buckets, not in one statement.
+    await db().execute(
+      `DELETE FROM quota_counters WHERE ctid = ANY(ARRAY(
+         SELECT ctid FROM quota_counters
+         WHERE api_key_id = $1 AND dimension_key = $2 AND bucket_index < $3
+         LIMIT 1000))`,
+      [apiKeyId, dimensionKey, bucket - 1]
+    );
+  }
 }
 
 /**

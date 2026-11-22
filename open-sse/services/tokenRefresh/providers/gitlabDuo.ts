@@ -3,6 +3,7 @@
 // provenance notes (ported idea from KooshaPari's PR #7338, redone on tip).
 import { PROVIDERS } from "../../../config/constants.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
+import { sanitizeErrorMessage } from "../../../utils/errorSanitization.ts";
 import { buildGitLabOAuthEndpoints, resolveGitLabOAuthBaseUrl } from "@/lib/oauth/gitlab";
 import { buildFormParams, type RefreshLogger } from "../shared.ts";
 
@@ -75,7 +76,7 @@ export async function refreshGitLabDuoToken(
 
       log?.error?.("TOKEN_REFRESH", "Failed to refresh GitLab Duo token", {
         status: response.status,
-        error: errorText.slice(0, 200),
+        error: sanitizeErrorMessage(errorText).slice(0, 200),
       });
       return null;
     }

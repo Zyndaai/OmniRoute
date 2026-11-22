@@ -42,6 +42,7 @@ const STATIC_SALT = "omniroute-field-encryption-v1";
 
 let _staticKey: Buffer | null = null;
 let _legacyDynamicKey: Buffer | null = null;
+let _staticKeyBeforeFirstEqualsFix: Buffer | null = null;
 /** Connection object with potentially encrypted credential fields. */
 export interface ConnectionFields {
   apiKey?: string | null;
@@ -84,6 +85,33 @@ import os from "os";
 import { isTestContext, resolveDataDir } from "../dataPaths.ts";
 import { mapProviderSpecificDataSecrets } from "./providers/providerSpecificDataSecrets";
 
+// Same as bin/cli/utils/parseEnvValue.mjs: quoted values are verbatim, and an
+// unquoted `#` preceded by whitespace starts a comment.
+function parseEnvValue(raw: string): string {
+  const value = raw.trim();
+  const quoted = value.match(/^(['"])([\s\S]*)\1\s*(?:#.*)?$/);
+  if (quoted) return quoted[2];
+  const commentIdx = value.search(/\s#/);
+  return (commentIdx === -1 ? value : value.slice(0, commentIdx)).trim();
+}
+
+/**
+ * What the .env reader before the first-"=" fix took from a trimmed line: it cut the
+ * value at a second "=", so a base64 key lost its padding. Data encrypted under that
+ * value must stay readable, so decrypt() also tries a key derived from it.
+ */
+function readValueBeforeFirstEqualsFix(trimmed: string): string | undefined {
+  if (!trimmed.startsWith("STORAGE_ENCRYPTION_KEY=")) return undefined;
+  const val = trimmed
+    .split("=", 2)[1]
+    ?.trim()
+    .replace(/^["'](.*)["']$/, "$1");
+  return val || undefined;
+}
+
+/** The old reading of the .env key, set only when it differs from the key now in use. */
+let _secretBeforeFirstEqualsFix: { secret: string; beforeFix: string } | null = null;
+
 function ensureSecretLoaded(): string | undefined {
   if (isTestContext()) {
     return process.env.STORAGE_ENCRYPTION_KEY;
@@ -96,27 +124,58 @@ function ensureSecretLoaded(): string | undefined {
     path.join(process.cwd(), ".env"),
     path.join(os.homedir(), ".hermes", ".env"),
   ];
+  let current: string | undefined;
+  let beforeFix: string | undefined;
   for (const envPath of candidates) {
     try {
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, "utf8");
         for (const line of content.split("\n")) {
           const trimmed = line.trim();
-          if (trimmed.startsWith("STORAGE_ENCRYPTION_KEY=")) {
-            const val = trimmed
-              .split("=", 2)[1]
-              ?.trim()
-              .replace(/^["'](.*)["']$/, "$1");
-            if (val) {
-              process.env.STORAGE_ENCRYPTION_KEY = val;
-              return val;
-            }
-          }
+          beforeFix ??= readValueBeforeFirstEqualsFix(trimmed);
+          if (current !== undefined) continue;
+          // Split on the first "=" only, like bin/omniroute.mjs and
+          // scripts/build/bootstrap-env.mjs: `split("=", 2)` dropped everything after a
+          // second "=" (base64 padding).
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx < 1 || trimmed.slice(0, eqIdx).trim() !== "STORAGE_ENCRYPTION_KEY") continue;
+          const val = parseEnvValue(trimmed.slice(eqIdx + 1));
+          if (val) current = val;
         }
       }
     } catch {}
   }
-  return undefined;
+  // Never turn encryption off where the old reader turned it on.
+  const secret = current ?? beforeFix;
+  if (!secret) return undefined;
+  if (beforeFix && beforeFix.trim() && beforeFix !== secret) {
+    _secretBeforeFirstEqualsFix = { secret, beforeFix };
+    console.warn(
+      "[Encryption] STORAGE_ENCRYPTION_KEY was read from a .env file, and versions before " +
+        "the first-'=' parsing fix read a different value from it. Data stored under either " +
+        "value still decrypts while this .env line stays as it is; keep it unchanged."
+    );
+  }
+  process.env.STORAGE_ENCRYPTION_KEY = secret;
+  return secret;
+}
+
+/**
+ * Static-salt key derived from the value the .env reader used before the first-"="
+ * fix, when that differs from the active key. AES-GCM rejects a wrong key through
+ * the auth tag, so trying it after the primary key cannot return wrong plaintext.
+ */
+function getStaticKeyBeforeFirstEqualsFix(): Buffer | null {
+  if (_staticKeyBeforeFirstEqualsFix !== null) return _staticKeyBeforeFirstEqualsFix;
+  ensureSecretLoaded();
+  const old = _secretBeforeFirstEqualsFix;
+  if (!old || old.secret !== process.env.STORAGE_ENCRYPTION_KEY) return null;
+  try {
+    _staticKeyBeforeFirstEqualsFix = scryptSync(old.beforeFix, STATIC_SALT, KEY_LENGTH);
+  } catch {
+    return null;
+  }
+  return _staticKeyBeforeFirstEqualsFix;
 }
 
 /**
@@ -310,6 +369,13 @@ export function decrypt(
       return decrypted;
     }
 
+    // Written under the value the .env reader took before the first-"=" fix.
+    const keyBeforeFix = getStaticKeyBeforeFirstEqualsFix();
+    if (keyBeforeFix) {
+      const decryptedBeforeFix = tryDecryptWithKey(keyBeforeFix);
+      if (decryptedBeforeFix !== null) return decryptedBeforeFix;
+    }
+
     // #9927 — the low-level generic log is suppressed when called through the
     // connection-decryption path (quiet:true); decryptConnectionFields emits a
     // single enriched message naming the credential + recovery path instead.
@@ -373,9 +439,8 @@ export function encryptConnectionFields<T extends ConnectionFields | null | unde
   if (conn.refreshToken) conn.refreshToken = encrypt(conn.refreshToken);
   if (conn.idToken) conn.idToken = encrypt(conn.idToken);
   if (conn.providerSpecificData) {
-    conn.providerSpecificData = mapProviderSpecificDataSecrets(
-      conn.providerSpecificData,
-      (value) => encrypt(value)
+    conn.providerSpecificData = mapProviderSpecificDataSecrets(conn.providerSpecificData, (value) =>
+      encrypt(value)
     );
   }
   return conn;

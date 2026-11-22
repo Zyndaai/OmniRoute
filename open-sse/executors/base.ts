@@ -47,7 +47,12 @@ import { SessionPool } from "../services/sessionPool/sessionPool.ts";
 import { PoolRegistry } from "../services/sessionPool/poolRegistry.ts";
 import { resolveKeyForRequest } from "../services/apiKeyRotator.ts";
 import type { KeyHealth } from "../services/apiKeyRotator.ts";
-import { getOpenAICompatibleType, isClaudeCodeCompatible } from "../services/provider.ts";
+import {
+  getOpenAICompatibleType,
+  getTargetFormat,
+  isClaudeCodeCompatible,
+} from "../services/provider.ts";
+import { normalizeClaudeFinalAssistantWhitespace } from "../services/claudeFinalAssistantWhitespace.ts";
 import { usesCcWireImage } from "../services/ccWireImageBuiltins.ts";
 import { getForcedReasoningEffort } from "../utils/reasoningRuleContext.ts";
 import {
@@ -58,6 +63,7 @@ import {
 } from "../services/tokenRefresh.ts";
 import type { ProviderRequestDefaults } from "../services/providerRequestDefaults.ts";
 import { signRequestBody } from "../services/claudeCodeCCH.ts";
+import { readErrorBodyText } from "../handlers/chatCore/errorBodyRead.ts";
 import { normalizeCacheControlTtl } from "../services/claudeCodeConstraints.ts";
 import {
   appendAnthropicBetaHeader,
@@ -314,6 +320,15 @@ export class BaseExecutor {
   constructor(provider: string, config: ProviderConfig) {
     this.provider = provider;
     this.config = config;
+  }
+
+  /** Provider-specific wire transport, after validation and serialization. */
+  protected dispatchRequest(
+    url: string,
+    init: RequestInit,
+    credentials: ProviderCredentials
+  ): Promise<Response> {
+    return dispatchGuarded(this.provider, url, init, credentials);
   }
 
   getProvider() {
@@ -1312,8 +1327,13 @@ export class BaseExecutor {
             mergeCcHeaders(headers, ccHeaders);
             if (usesCcWireImage(this.provider) && usesClaudeCodeProtocol) {
               delete headers["Authorization"];
+              // Keep the rotated key buildHeaders set (selectedKeyId names it); a second
+              // resolveEffectiveKey() call would advance the rotator.
               headers["x-api-key"] =
-                activeCredentials?.apiKey || activeCredentials?.accessToken || "";
+                headers["x-api-key"] ||
+                activeCredentials?.apiKey ||
+                activeCredentials?.accessToken ||
+                "";
             }
             delete headers["X-Stainless-Helper-Method"];
             applyStainlessHeaders(headers, { arch: stainlessArch(), os: stainlessOS() });
@@ -1372,7 +1392,8 @@ export class BaseExecutor {
             // (tool_result must be in immediately next message).
             // Only apply for Claude/Claude-compatible — OpenAI allows results
             // spread across multiple subsequent messages.
-            const isClaude = this.provider === "claude" || usesClaudeCodeProtocol;
+            const isClaude =
+              this.provider === "claude" || this.provider === "anthropic" || usesClaudeCodeProtocol;
             // For Claude, fixToolAdjacency may strip tool_use blocks whose
             // tool_result isn't in the next message; re-run fixToolPairs to
             // drop any tool_result orphaned by that strip (discussion #2410).
@@ -1382,6 +1403,16 @@ export class BaseExecutor {
             // trailing text-only assistant turn with 400. Strip here so combo
             // failover does not burn the next account on the same body.
             tb.messages = stripTrailingAssistantForProvider(stripped, this.provider);
+            // Anthropic reads an assistant-last turn as a prefill and 400s on trailing whitespace.
+            // Select by the outbound format: generic anthropic-compatible-* relays send it too.
+            if (
+              isClaude ||
+              getTargetFormat(this.provider, requestCredentials?.providerSpecificData) === "claude"
+            ) {
+              tb.messages = normalizeClaudeFinalAssistantWhitespace(
+                tb.messages as Record<string, unknown>[]
+              );
+            }
           }
         }
 
@@ -1392,7 +1423,7 @@ export class BaseExecutor {
         // at this final dispatch point — the single chokepoint every Claude
         // routing mode (grouped/raw/combo) and the native passthrough share,
         // before fingerprinting and CCH signing serialize the body.
-        if (this.provider === "claude" || usesClaudeCodeProtocol) {
+        if (this.provider === "claude" || this.provider === "anthropic" || usesClaudeCodeProtocol) {
           finalizeClaudeBodyConstraints(transformedBody as Record<string, unknown>);
         }
 
@@ -1539,10 +1570,7 @@ export class BaseExecutor {
           typeof transformedBody === "object" &&
           (transformedBody as Record<string, unknown>).context_management !== undefined
         ) {
-          const errText = await response
-            .clone()
-            .text()
-            .catch(() => "");
+          const errText = await readErrorBodyText(response.clone()).catch(() => "");
           if (/context[_-]management|context editing/i.test(errText)) {
             contextEditingDisabled = true;
             delete (transformedBody as Record<string, unknown>).context_management;
@@ -1572,10 +1600,7 @@ export class BaseExecutor {
           transformedBody &&
           typeof transformedBody === "object"
         ) {
-          const errText = await response
-            .clone()
-            .text()
-            .catch(() => "");
+          const errText = await readErrorBodyText(response.clone()).catch(() => "");
           const upstreamMax = parseThinkingBudgetMax(errText);
           if (upstreamMax !== null) {
             const currentBudget = readNestedThinkingBudget(transformedBody);
@@ -1693,10 +1718,7 @@ export class BaseExecutor {
           response.status === HTTP_STATUS.BAD_REQUEST &&
           (retryAttemptsByUrl[urlIndex] ?? 0) < BaseExecutor.WAF_RETRY_CONFIG.maxAttempts
         ) {
-          const wafErrText = await response
-            .clone()
-            .text()
-            .catch(() => "");
+          const wafErrText = await readErrorBodyText(response.clone()).catch(() => "");
           if (/content[_-]blocked/i.test(wafErrText)) {
             retryAttemptsByUrl[urlIndex] = (retryAttemptsByUrl[urlIndex] ?? 0) + 1;
             const wafAttempt = retryAttemptsByUrl[urlIndex];

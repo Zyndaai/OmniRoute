@@ -95,7 +95,7 @@ function bigResponsesBody(tokens: number) {
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 
 test("#10225 combo does not early-400 a compressible over-limit request when deferral is on", async () => {
-  saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
+  await saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
   let dispatches = 0;
 
   const response = await handleComboChat({
@@ -120,7 +120,7 @@ test("#10225 combo does not early-400 a compressible over-limit request when def
 });
 
 test("#10225 combo keeps the fast 400 when compression is disabled", async () => {
-  saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
+  await saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
   let dispatches = 0;
 
   const response = await handleComboChat({
@@ -169,7 +169,7 @@ test("#10225 combo keeps the fast 400 when compression is disabled", async () =>
 // reactive compression bypass — exactly the gap `sourceFormat`/`endpointPath` (not the looser
 // `clientManagedResponsesContext` flag) now closes.
 test("#10503 handleComboChat: native-codex-passthrough pool fails FAST locally, zero upstream dispatches", async () => {
-  saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
+  await saveModelsDevCapabilities({ codex: { "gpt-5.6-terra": capabilityEntry(272_000) } });
   let dispatches = 0;
 
   const response = await handleComboChat({

@@ -3,7 +3,10 @@ import {
   recordRejectedToken,
 } from "../../services/tokenRefresh/passiveRefresh.ts";
 import type { ChatCoreErrorResult, ProviderLegUsage } from "@/lib/skills/toolLoopTypes.ts";
-import type { getProviderCredentials } from "@/sse/services/auth.ts";
+import type {
+  getProviderCredentials,
+  getProviderCredentialsWithQuotaPreflight,
+} from "@/sse/services/auth.ts";
 import type { updateFromHeaders, updateFromResponseBody } from "../../services/rateLimitManager.ts";
 import type { writeTerminalStatus } from "@/shared/utils/terminalStatus.ts";
 import type { updateProviderConnection } from "@/lib/db/providers.ts";
@@ -24,6 +27,7 @@ import {
 import { COOLDOWN_MS } from "../../config/errorConfig.ts";
 import { normalizeHeaders } from "../../utils/headers.ts";
 import { shouldSkipCredentialRefresh } from "./skipCredentialRefresh.ts";
+import { readErrorBodyText } from "./errorBodyRead.ts";
 import { isTransientCodexCapacity429 } from "../../services/codexAccount/capacity429.ts";
 
 export interface ChatCoreExecutorResult {
@@ -79,6 +83,12 @@ export interface PipelineConnectionContext {
   onCredentialsRefreshed: (next: Record<string, unknown>) => void | Promise<void>;
   assertManagedLeaseFence: (connectionId: string) => Promise<void>;
   getProviderCredentials: typeof getProviderCredentials;
+  /**
+   * Quota-preflight-aware selector used for the Codex 429 in-request rotation (#18425),
+   * so the replacement account is chosen with the same quota cutoff as primary selection.
+   * Falls back to `getProviderCredentials` when not wired.
+   */
+  getProviderCredentialsWithQuotaPreflight?: typeof getProviderCredentialsWithQuotaPreflight;
   /**
    * Connection allowlist the request was routed under (API key allowlist ∩ combo
    * step allowlist ∩ quota pool). Account rotation must stay inside it; null means
@@ -200,7 +210,7 @@ async function recordUpstreamRateLimit(
   }
   let capacity429 = false;
   try {
-    const text = await attempt.response.clone().text();
+    const text = await readErrorBodyText(attempt.response.clone());
     capacity429 =
       provider === "codex" && isTransientCodexCapacity429(status, text, attempt.response.headers);
     // parseRetryAfterFromBody JSON.parses a string and falls back to "unknown"
@@ -276,7 +286,7 @@ async function toOutcome(
   try {
     // clone() is the drain. sendProviderAttempt must not cancel() a streaming
     // non-2xx body before we get here (BYOP 422 / Codex 429 Retry-After).
-    const text = await attempt.response.clone().text();
+    const text = await readErrorBodyText(attempt.response.clone());
     try {
       body = JSON.parse(text);
       fields = readUpstreamErrorFields(body);
@@ -429,7 +439,6 @@ export async function runProviderExecutionPipeline(
 
     const isolateProbe = await state.isolateProbeFailures();
     const canRotateAccount = policy.allowAccountRotation && !isolateProbe;
-
     if (
       canRotateAccount &&
       target.provider === "codex" &&
@@ -450,11 +459,27 @@ export async function runProviderExecutionPipeline(
         }
         await state.onClearSessionAffinity?.({ failedConnectionId: failedId });
       }
-      const nextCreds = await connection
-        .getProviderCredentials("codex", null, allowedConnections, wire.currentModel, {
-          excludeConnectionIds: [...excludedIds],
-        })
-        .catch(() => null);
+      // Both arms stay direct `connection.*` calls so the hard-lease credential
+      // inventory (tests/unit/hard-session-lease-bypass-inventory.test.ts) keeps
+      // seeing this rotation site; an aliased selector would hide it.
+      const codexFailoverOptions = { excludeConnectionIds: [...excludedIds] };
+      const nextCreds = await (
+        connection.getProviderCredentialsWithQuotaPreflight
+          ? connection.getProviderCredentialsWithQuotaPreflight(
+              "codex",
+              null,
+              allowedConnections,
+              wire.currentModel,
+              codexFailoverOptions
+            )
+          : connection.getProviderCredentials(
+              "codex",
+              null,
+              allowedConnections,
+              wire.currentModel,
+              codexFailoverOptions
+            )
+      ).catch(() => null);
       if (nextCreds && !nextCreds.allRateLimited && nextCreds.connectionId) {
         await state.onAuditAccountRotation?.({
           action: "codex.account_rotation",

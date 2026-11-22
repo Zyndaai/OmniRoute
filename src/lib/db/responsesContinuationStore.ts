@@ -62,7 +62,12 @@ function containsTruncatedArrayMarker(items: readonly unknown[]): boolean {
 
 export type ContinuationPipeline = {
   clientRawRequest?: { body?: unknown; effectiveInput?: unknown };
-  clientResponse?: { output?: unknown; summary?: { output?: unknown }; _truncated?: unknown };
+  clientResponse?: {
+    output?: unknown;
+    status?: unknown;
+    summary?: { output?: unknown; status?: unknown };
+    _truncated?: unknown;
+  };
 };
 
 /**
@@ -143,10 +148,41 @@ function extractContinuationState(
   // makes the caller ask the client to resend full history instead of
   // silently reconstructing an empty one, exactly like a real
   // previous_response_not_found from OpenAI itself.
-  if ((clientResponse as { _truncated?: unknown } | undefined)?._truncated === true) return null;
-  if (output.length === 0) return null;
+  //
+  // `_truncated` only says the collector dropped stream events from the log.
+  // A reasoning-heavy reply can pass the cap and still reach
+  // `response.completed`, whose summary carries the whole output, so that turn
+  // is safe to continue from. Rejecting it sent a false "not found" for a
+  // response OmniRoute had just served and cost the client a full resend.
+  const status = clientResponse?.summary?.status ?? clientResponse?.status;
+  if (clientResponse?._truncated === true && status !== "completed") return null;
+  const replayableOutput = withoutOmittedEncryptedReasoning(output);
+  if (replayableOutput.length === 0) return null;
 
-  return { input, output };
+  return { input: withoutOmittedEncryptedReasoning(input), output: replayableOutput };
+}
+
+/** True for the placeholder that stands in for encrypted reasoning in a stored log copy. */
+function isOmittedEncryptedReasoningMarker(value: unknown): boolean {
+  return typeof value === "string" && value.startsWith("[omitted: encrypted reasoning");
+}
+
+/**
+ * The stored copy holds a marker instead of encrypted reasoning (the ciphertext is not kept
+ * on disk). Replaying it would send the marker upstream as `encrypted_content`, so the marker
+ * is removed. A reasoning item left with no plaintext and no summary has nothing to replay and
+ * is dropped.
+ */
+function withoutOmittedEncryptedReasoning(items: unknown[]): unknown[] {
+  return items.flatMap((item) => {
+    if (!isPlainRecord(item) || !isOmittedEncryptedReasoningMarker(item.encrypted_content)) {
+      return [item];
+    }
+    const { encrypted_content: _marker, ...rest } = item;
+    const hasContent = Array.isArray(rest.content) && rest.content.length > 0;
+    const hasSummary = Array.isArray(rest.summary) && rest.summary.length > 0;
+    return hasContent || hasSummary ? [rest] : [];
+  });
 }
 
 type PendingContinuationEntry = {
@@ -161,7 +197,32 @@ type PendingContinuationEntry = {
 // which never reaches "ready" (e.g. detailState becomes "missing") falls back
 // to the same permanent not-found the durable path already gives today.
 const PENDING_CONTINUATION_TTL_MS = 60_000;
+// Pending continuation payloads may contain full (large) Responses API histories.
+// TTL alone is not a memory bound unless expired entries are actually evicted.
+const PENDING_CONTINUATION_MAX_ENTRIES = 512;
+const PENDING_CONTINUATION_SWEEP_MS = 30_000;
 const pendingContinuationStates = new Map<string, PendingContinuationEntry>();
+let pendingContinuationSweep: ReturnType<typeof setInterval> | null = null;
+
+function prunePendingContinuationStates(now = Date.now()): void {
+  for (const [id, entry] of pendingContinuationStates) {
+    if (entry.expiresAt <= now) pendingContinuationStates.delete(id);
+  }
+}
+
+function startPendingContinuationSweep(): void {
+  if (pendingContinuationSweep !== null) return;
+  pendingContinuationSweep = setInterval(
+    prunePendingContinuationStates,
+    PENDING_CONTINUATION_SWEEP_MS
+  );
+  pendingContinuationSweep.unref?.();
+}
+
+/** Non-payload diagnostic: counts pending continuation bridges, not their contents. */
+export function getPendingContinuationStateCount(): number {
+  return pendingContinuationStates.size;
+}
 
 /**
  * Called from callLogs.ts the moment a response id and its pipeline payload
@@ -179,6 +240,15 @@ export function seedPendingContinuationState(
   if (!responseId) return;
   const state = extractContinuationState(pipeline, videoContentRemoved);
   if (!state) return;
+  startPendingContinuationSweep();
+  prunePendingContinuationStates();
+  // Replacing an existing ID also refreshes its insertion order for FIFO eviction.
+  pendingContinuationStates.delete(responseId);
+  while (pendingContinuationStates.size >= PENDING_CONTINUATION_MAX_ENTRIES) {
+    const oldest = pendingContinuationStates.keys().next().value;
+    if (oldest === undefined) break;
+    pendingContinuationStates.delete(oldest);
+  }
   pendingContinuationStates.set(responseId, {
     apiKeyId,
     state,

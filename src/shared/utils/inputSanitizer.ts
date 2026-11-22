@@ -7,6 +7,7 @@
  * @module inputSanitizer
  */
 
+import { getFeatureFlagOverride } from "@/lib/db/featureFlags";
 import { parseEnvBoolean } from "@/shared/utils/envBoolean";
 import { resolveBlockThreshold, shouldBlockDetections } from "@/shared/utils/injectionSeverity";
 import { PII_REQUEST_TYPE_ALIASES } from "@/shared/constants/piiTypes";
@@ -175,16 +176,45 @@ const PII_PATTERNS = [
 
 // ─── Configuration ────────────────────────────────────────────────────
 
+export type SanitizerFlagOverrides = { enabled?: string; piiRedaction?: string };
+
 /**
- * Get sanitizer configuration from environment.
+ * Read the dashboard-set Feature Flags DB overrides. They win over the env vars so the Feature
+ * Flags UI actually controls these flags (DB > ENV > default, matching resolveFeatureFlag and the
+ * INJECTION_GUARD_MODE reader in promptInjection.ts). The store is async here, so async callers
+ * resolve it once and hand the result to `sanitizeRequest`; an unavailable store falls back to
+ * the env-based behavior.
+ */
+export async function resolveSanitizerFlagOverrides(): Promise<SanitizerFlagOverrides> {
+  try {
+    const [enabled, piiRedaction] = await Promise.all([
+      getFeatureFlagOverride("INPUT_SANITIZER_ENABLED"),
+      getFeatureFlagOverride("PII_REDACTION_ENABLED"),
+    ]);
+    return { enabled, piiRedaction };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Get sanitizer configuration: DB overrides (when supplied) over environment over defaults.
  * @returns {{ enabled: boolean, mode: string, piiRedaction: boolean }}
  */
-function getConfig() {
+function getConfig(overrides: SanitizerFlagOverrides = {}) {
   return {
     // Default ON (opt-out). Truthy/falsy parsing accepts true/1/yes/on and false/0/no/off.
-    enabled: parseEnvBoolean(process.env.INPUT_SANITIZER_ENABLED, true),
+    enabled:
+      overrides.enabled !== undefined
+        ? parseEnvBoolean(overrides.enabled, true)
+        : parseEnvBoolean(process.env.INPUT_SANITIZER_ENABLED, true),
+    // INPUT_SANITIZER_MODE has no registered flag (the dashboard cannot set it), so it stays
+    // env-only.
     mode: process.env.INPUT_SANITIZER_MODE || "warn", // "warn" | "block" | "redact"
-    piiRedaction: parseEnvBoolean(process.env.PII_REDACTION_ENABLED, false),
+    piiRedaction:
+      overrides.piiRedaction !== undefined
+        ? parseEnvBoolean(overrides.piiRedaction, false)
+        : parseEnvBoolean(process.env.PII_REDACTION_ENABLED, false),
     blockThreshold: resolveBlockThreshold(),
   };
 }
@@ -401,8 +431,8 @@ function redactValidatedMatches(text, rule, redact) {
  * @param {Object} [logger] - Logger instance (defaults to console)
  * @returns {SanitizeResult}
  */
-export function sanitizeRequest(body, logger = console) {
-  const config = getConfig();
+export function sanitizeRequest(body, logger = console, flagOverrides = {}) {
+  const config = getConfig(flagOverrides);
 
   const result = {
     blocked: false,

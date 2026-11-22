@@ -44,7 +44,9 @@ const MAX_BUFFERED_CHARS = 64 * 1024;
 export type FirstOutputStallReason = "budget" | "cancelled" | "empty";
 
 export type FirstOutputResult =
-  { kind: "output"; response: Response } | { kind: "stalled"; reason: FirstOutputStallReason };
+  | { kind: "output"; response: Response }
+  | { kind: "reasoning"; response: Response; frameKind: string }
+  | { kind: "stalled"; reason: FirstOutputStallReason };
 
 /** True for SSE responses carrying a body, the only kind this gate inspects. */
 export function isEventStreamResponse(response: Response): boolean {
@@ -77,6 +79,52 @@ function carriesUpstreamError(payload: string, eventType: string): boolean {
 }
 
 /**
+ * Claude-only upstream thinking activity. Structural block starts count even when empty;
+ * deltas count only when they carry a non-empty thinking/signature string. Injected thinking
+ * signatures add only `signature: ""` to an upstream start, which does not match a delta.
+ */
+function claudeThinkingFrameKind(payload: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload.replace(/\n/g, " "));
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(parsed)) return null;
+  if (parsed.type === "content_block_start") return thinkingBlockStartKind(parsed.content_block);
+  if (parsed.type === "content_block_delta") return thinkingDeltaKind(parsed.delta);
+  return null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function thinkingBlockStartKind(block: unknown): string | null {
+  if (!block || typeof block !== "object") return null;
+  const blockType = (block as Record<string, unknown>).type;
+  return blockType === "thinking" || blockType === "redacted_thinking" ? blockType : null;
+}
+
+/** Field of a Claude delta that must be a non-empty string for the delta to count. */
+const THINKING_DELTA_FIELDS: Record<string, string> = {
+  thinking_delta: "thinking",
+  signature_delta: "signature",
+};
+
+function thinkingDeltaKind(delta: unknown): string | null {
+  if (!delta || typeof delta !== "object") return null;
+  const record = delta as Record<string, unknown>;
+  const deltaType = typeof record.type === "string" ? record.type : "";
+  const field = Object.hasOwn(THINKING_DELTA_FIELDS, deltaType)
+    ? THINKING_DELTA_FIELDS[deltaType]
+    : undefined;
+  if (!field) return null;
+  const text = record[field];
+  return typeof text === "string" && text.length > 0 ? deltaType : null;
+}
+
+/**
  * Incremental SSE reader that reports the first event carrying output.
  *
  * Owns the framing only: one event may span several `data:` lines (joined with `\n`), an event
@@ -89,6 +137,7 @@ export class SseOutputScanner {
   private dataLines: string[] = [];
   private eventType = "";
   private bufferedChars = 0;
+  private reasoningKind: string | null = null;
 
   /** Feed decoded text; true once an event has shown output or reported an upstream error. */
   push(text: string): boolean {
@@ -140,14 +189,25 @@ export class SseOutputScanner {
     return this.endEvent();
   }
 
+  /** The kind of upstream reasoning progress found in the most recent push. */
+  reasoningActivity(): string | null {
+    const kind = this.reasoningKind;
+    this.reasoningKind = null;
+    return kind;
+  }
+
   private endEvent(): boolean {
     const payload = this.dataLines.join("\n");
     const eventType = this.eventType;
     this.dataLines = [];
     this.eventType = "";
-    return (
-      payload.length > 0 && (carriesOutput(payload) || carriesUpstreamError(payload, eventType))
-    );
+    const ready =
+      payload.length > 0 && (carriesOutput(payload) || carriesUpstreamError(payload, eventType));
+    if (!ready && payload.length > 0) {
+      const kind = claudeThinkingFrameKind(payload);
+      if (kind) this.reasoningKind = kind;
+    }
+    return ready;
   }
 
   private consumeLine(line: string): boolean {
@@ -161,6 +221,19 @@ export class SseOutputScanner {
     this.dataLines.push(value.startsWith(" ") ? value.slice(1) : value);
     return false;
   }
+}
+
+type ChunkStep = { kind: "output"; frameKind: null } | { kind: "reasoning"; frameKind: string };
+
+/**
+ * Feed one decoded chunk to the scanner and report whether the gate can open: real output,
+ * upstream Claude thinking, or a buffer overflow (treated as output). Null keeps waiting.
+ */
+function scanChunk(scanner: SseOutputScanner, text: string): ChunkStep | null {
+  if (scanner.push(text)) return { kind: "output", frameKind: null };
+  const frameKind = scanner.reasoningActivity();
+  if (frameKind) return { kind: "reasoning", frameKind };
+  return scanner.overflowedWithoutOutput() ? { kind: "output", frameKind: null } : null;
 }
 
 /**
@@ -187,9 +260,10 @@ export async function awaitFirstOutput(
   const scanner = new SseOutputScanner();
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const outcome = await new Promise<"output" | FirstOutputStallReason>((resolve) => {
+  let thinkingFrameKind: string | null = null;
+  const outcome = await new Promise<"output" | "reasoning" | FirstOutputStallReason>((resolve) => {
     let settled = false;
-    const finish = (value: "output" | FirstOutputStallReason) => {
+    const finish = (value: "output" | "reasoning" | FirstOutputStallReason) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
@@ -213,12 +287,10 @@ export async function awaitFirstOutput(
             return;
           }
           if (!value) continue;
-          if (scanner.push(decoder.decode(value, { stream: true }))) {
-            finish("output");
-            return;
-          }
-          if (scanner.overflowedWithoutOutput()) {
-            finish("output");
+          const step = scanChunk(scanner, decoder.decode(value, { stream: true }));
+          if (step) {
+            thinkingFrameKind = step.frameKind;
+            finish(step.kind);
             return;
           }
         }
@@ -235,6 +307,9 @@ export async function awaitFirstOutput(
   // awaited — a tee branch's cancel only settles once the sibling is cancelled too.
   void reader.cancel(COMBO_PER_MODEL_TIMEOUT_REASON).catch(() => undefined);
   if (outcome === "output") return { kind: "output", response };
+  if (outcome === "reasoning") {
+    return { kind: "reasoning", response, frameKind: thinkingFrameKind ?? "thinking" };
+  }
 
   if (outcome === "budget") {
     void response.body?.cancel(COMBO_PER_MODEL_TIMEOUT_REASON).catch(() => undefined);

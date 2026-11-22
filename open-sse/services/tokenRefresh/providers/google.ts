@@ -3,6 +3,7 @@
 // provenance notes (ported idea from KooshaPari's PR #7338, redone on tip).
 import { OAUTH_ENDPOINTS } from "../../../config/constants.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
+import { sanitizeErrorMessage } from "../../../utils/errorSanitization.ts";
 import { buildFormParams } from "../shared.ts";
 
 /**
@@ -35,7 +36,8 @@ export async function refreshGoogleToken(
     const errorText = await response.text();
     log?.error?.("TOKEN_REFRESH", "Failed to refresh Google token", {
       status: response.status,
-      error: errorText.slice(0, 200),
+      // Sanitize before truncating: a secret cut in half no longer matches the patterns.
+      error: sanitizeErrorMessage(errorText).slice(0, 200),
     });
 
     // Detect unrecoverable token (invalid_grant = revoked / expired refresh token)

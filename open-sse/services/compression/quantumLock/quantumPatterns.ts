@@ -1,7 +1,7 @@
 /**
  * QuantumLock leaf module: category enum, span/config/stats types, constants, and the
  * fixed-order, ReDoS-bounded detection patterns. No imports — keeps every consumer one-way
- * (cycle-safe). See docs/superpowers/specs/2026-06-28-compression-quantumlock-design.md.
+ * (cycle-safe).
  */
 
 export type QuantumCategory =

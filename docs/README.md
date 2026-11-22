@@ -68,7 +68,7 @@ How the system is put together — read these to understand the runtime, code la
 - [AUTHZ_GUIDE.md](architecture/AUTHZ_GUIDE.md) — authorization pipeline (route classifier + policy engine).
 - [RESILIENCE_GUIDE.md](architecture/RESILIENCE_GUIDE.md) — provider circuit breaker, connection cooldown, and model lockout.
 - [MONITORING_SECTIONS.md](architecture/MONITORING_SECTIONS.md) — monitoring/costs dashboard navigation.
-- [cluster-decisions.md](architecture/cluster-decisions.md) — optional sidecar/cluster profile decisions.
+- [persistence-shared-state.md](architecture/persistence-shared-state.md) — PostgreSQL persistence and cluster mode: roles, coordination bus, shared vs per-process state, what providers see per account.
 - [DESIGN_SYSTEM.md](architecture/DESIGN_SYSTEM.md) — design system & visual identity.
 - [ROUTER_BACKENDS.md](architecture/ROUTER_BACKENDS.md) — router backends & embedded services architecture contract (ADR).
 - [admission-lanes.md](architecture/admission-lanes.md) — the two admission-lane systems and what gates each.
@@ -175,7 +175,6 @@ Provider-specific integration guides.
 
 Deployment, proxies, tunnels, database, monitoring.
 
-- [HOMOLOGATION.md](ops/HOMOLOGATION.md) — homologation suite (`npm run homolog`).
 - [DATABASE_GUIDE.md](ops/DATABASE_GUIDE.md) — DB schema and operations.
 - [SQLITE_RUNTIME.md](ops/SQLITE_RUNTIME.md) — SQLite driver resolution chain.
 - [REDIS_PRODUCTION_CONFIG.md](ops/REDIS_PRODUCTION_CONFIG.md) — Redis production configuration.

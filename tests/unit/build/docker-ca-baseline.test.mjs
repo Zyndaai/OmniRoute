@@ -27,8 +27,6 @@ function imageTags(text, image) {
 
 const cases = [
   ["Dockerfile", "node", MIN.node],
-  ["docker/devin-bridge/compose.yml", "node", MIN.node],
-  ["docker/devin-bridge/Dockerfile", "node", MIN.node],
 ];
 
 for (const [file, image, min] of cases) {

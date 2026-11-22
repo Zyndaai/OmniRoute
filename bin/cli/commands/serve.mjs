@@ -455,6 +455,8 @@ function runDaemon(serverJs, env, memoryLimit, dashboardPort, apiPort) {
       env,
       stdio: "ignore",
       detached: true,
+      // A detached child on Windows otherwise opens its own console window.
+      windowsHide: true,
     }
   );
   writePidFile("server", server.pid);
@@ -481,6 +483,9 @@ function runWithoutRecovery(serverJs, env, memoryLimit, dashboardPort, apiPort, 
       cwd: APP_DIR,
       env,
       stdio: "pipe",
+      // When `serve` itself has no console (started from a service, a scheduler or a test),
+      // Windows would give the server a new visible console window.
+      windowsHide: true,
     }
   );
 

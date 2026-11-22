@@ -94,7 +94,12 @@ export function normalizeOpenAIToolFinishReasons(responseBody: unknown): void {
   if (!response?.choices) return;
 
   for (const choice of response.choices) {
-    if (choice.message?.tool_calls?.length > 0 && choice.finish_reason !== "tool_calls") {
+    // `length` means the output-token limit cut the turn, possibly inside a tool call.
+    if (
+      choice.message?.tool_calls?.length > 0 &&
+      choice.finish_reason !== "tool_calls" &&
+      choice.finish_reason !== "length"
+    ) {
       choice.finish_reason = "tool_calls";
     }
   }

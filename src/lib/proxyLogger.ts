@@ -380,6 +380,25 @@ async function writeProxyBatch(batch: ProxyLogEntry[]): Promise<void> {
   });
 }
 
+// One row the database rejects must not drop the whole batch: retry row by row (each in its
+// own transaction) so only the bad row is lost (#19470).
+async function writeProxyBatchIsolatingBadRows(batch: ProxyLogEntry[]): Promise<void> {
+  try {
+    await writeProxyBatch(batch);
+  } catch (err) {
+    if (batch.length < 2) throw err;
+    let rowError: unknown;
+    for (const entry of batch) {
+      try {
+        await writeProxyBatch([entry]);
+      } catch (error) {
+        rowError ??= error;
+      }
+    }
+    if (rowError) logProxyBatchFailure(rowError);
+  }
+}
+
 function ensureBatchTimer() {
   if (batchTimer) return;
   batchTimer = setInterval(() => {
@@ -432,7 +451,7 @@ export function flushProxyLogsSync(): Promise<void> {
   inFlightFlush = inFlightFlush.then(async () => {
     if (generation !== proxyLogGeneration) return;
     try {
-      await writeProxyBatch(batch);
+      await writeProxyBatchIsolatingBadRows(batch);
     } catch (err: any) {
       logProxyBatchFailure(err);
     }

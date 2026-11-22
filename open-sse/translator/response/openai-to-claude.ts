@@ -208,7 +208,7 @@ function resolveToolCallKey(state, tc, incomingName: string): number {
   return fresh;
 }
 
-function createToolCallEntry(tc, incomingName: string) {
+function createToolCallEntry(tc, incomingName: string, schemas?) {
   return {
     // An id-less call still needs an addressable tool_use id (sanitizeToolId
     // mints a random one); a real id arriving before the block opens wins.
@@ -219,7 +219,9 @@ function createToolCallEntry(tc, incomingName: string) {
     blockIndex: undefined,
     // Shimmed tools buffer their raw args and emit a single corrected
     // input_json_delta at content_block_stop time (see finish handler).
-    shimmed: incomingName ? hasToolCallShim(incomingName) : false,
+    shimmed: incomingName
+      ? hasToolCallShim(incomingName, findToolCallSchema(incomingName, schemas))
+      : false,
     argBuffer: "",
     startEmitted: false,
     // Arguments arrived before any id/name: hold them until the call is known.
@@ -227,7 +229,7 @@ function createToolCallEntry(tc, incomingName: string) {
   };
 }
 
-function adoptToolCallIdentity(toolInfo, tc, incomingName: string): void {
+function adoptToolCallIdentity(toolInfo, tc, incomingName: string, schemas?): void {
   if (tc.id && !toolInfo.startEmitted && (toolInfo.syntheticId || !toolInfo.id)) {
     toolInfo.id = sanitizeToolId(tc.id);
     toolInfo.upstreamId = tc.id;
@@ -235,7 +237,7 @@ function adoptToolCallIdentity(toolInfo, tc, incomingName: string): void {
   }
   if (incomingName && !toolInfo.startEmitted && !toolInfo.name) {
     toolInfo.name = incomingName;
-    toolInfo.shimmed = hasToolCallShim(incomingName);
+    toolInfo.shimmed = hasToolCallShim(incomingName, findToolCallSchema(incomingName, schemas));
   }
   if (tc.id || incomingName) toolInfo.awaitingIdentity = false;
 }
@@ -685,13 +687,13 @@ export function openaiToClaudeResponse(chunk, state) {
       // patch a content_block_start after it is emitted, so content_block_start
       // is DEFERRED until the name arrives (#2077 / decolua/9router#2077).
       if (!state.toolCalls.has(idx) && (tc.id || incomingName || tc.function?.arguments)) {
-        state.toolCalls.set(idx, createToolCallEntry(tc, incomingName));
+        state.toolCalls.set(idx, createToolCallEntry(tc, incomingName, state.toolSchemas));
       }
 
       const toolInfo = state.toolCalls.get(idx);
       if (toolInfo) {
         // Capture a late-arriving id or name (streamed after the initial chunk).
-        adoptToolCallIdentity(toolInfo, tc, incomingName);
+        adoptToolCallIdentity(toolInfo, tc, incomingName, state.toolSchemas);
         if (!toolInfo.awaitingIdentity) ensureToolBlockIndex(state, toolInfo, results);
 
         // Emit content_block_start once we have a name. If arguments arrive before
@@ -879,8 +881,17 @@ export function openaiToClaudeResponse(chunk, state) {
       });
     }
 
-    // Override finish_reason to tool_use if XML tool calls were found
-    const overrideFinishReason = xmlToolCalls.length > 0 ? "tool_calls" : choice.finish_reason;
+    // Override finish_reason to tool_calls when tool calls were emitted but the
+    // upstream reported a clean stop (#18270): some OpenAI-compatible upstreams
+    // send finish_reason "stop" together with tool_calls, and the Claude client
+    // stops its agent loop unless stop_reason is "tool_use".
+    const hasEmittedToolCalls =
+      xmlToolCalls.length > 0 || (state.toolCalls instanceof Map && state.toolCalls.size > 0);
+    const overrideFinishReason =
+      hasEmittedToolCalls &&
+      openAIFinishReasonToClaudeStopReason(choice.finish_reason) === "end_turn"
+        ? "tool_calls"
+        : choice.finish_reason;
 
     // Mark finish for later usage injection in stream.js
     state.finishReason = overrideFinishReason;

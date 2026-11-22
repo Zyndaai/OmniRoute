@@ -274,6 +274,23 @@ export async function getSyncedPricing(): Promise<PricingByProvider> {
   return synced;
 }
 
+function countPricingModels(map: PricingByProvider): number {
+  return Object.values(map).reduce((sum, models) => sum + Object.keys(models).length, 0);
+}
+
+/**
+ * A truncated upstream file must not replace a good map: saveSyncedPricing() is a full
+ * replace. Half the stored size still passes, so real removals sync (#19566).
+ */
+async function assertFetchedPriceMapNotTruncated(modelCount: number): Promise<void> {
+  const storedCount = countPricingModels((await readPricingSource("litellm")) as PricingByProvider);
+  if (modelCount === 0 || modelCount * 2 < storedCount) {
+    throw new Error(
+      `Fetched price map rejected: ${modelCount} models, stored map has ${storedCount}`
+    );
+  }
+}
+
 /**
  * Save synced pricing (`model_pricing` rows of source `litellm`, full replace).
  */
@@ -369,13 +386,11 @@ export async function syncPricingFromSources(opts?: {
       }
     }
 
-    const modelCount = Object.values(aggregated).reduce(
-      (sum, models) => sum + Object.keys(models).length,
-      0
-    );
+    const modelCount = countPricingModels(aggregated);
     const providerCount = Object.keys(aggregated).length;
 
     if (!dryRun) {
+      await assertFetchedPriceMapNotTruncated(modelCount);
       await saveSyncedPricing(aggregated);
       lastSyncTime = new Date().toISOString();
       lastSyncModelCount = modelCount;

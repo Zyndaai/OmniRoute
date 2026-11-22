@@ -50,8 +50,6 @@ test("the distributable pins wreq-js 3.2.0 and carries all nine native lock entr
     "package-lock.json",
     "vite.config.ts",
     "Dockerfile",
-    "pnpm.json",
-    "pnpm-workspace.yaml",
     "scripts/build/postinstall.mjs",
   ]) {
     const source = readFileSync(join(ROOT, relativePath), "utf8");

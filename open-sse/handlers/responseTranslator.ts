@@ -1,7 +1,9 @@
 import {
   applyToolCallShimToBuffer,
   findToolCallSchema,
+  hasToolCallShim,
 } from "../translator/helpers/toolCallShim.ts";
+import { stripGeminiPlaceholderArgs } from "../translator/helpers/geminiPlaceholderArgs.ts";
 import { FORMATS } from "../translator/formats.ts";
 import {
   buildGeminiThoughtSignatureKey,
@@ -513,7 +515,13 @@ export function translateNonStreamingResponse(
                       type: "function",
                       function: {
                         name: restoredName,
-                        arguments: JSON.stringify(normalizeToolCallArgs(fn.args || {})),
+                        arguments: JSON.stringify(
+                          stripGeminiPlaceholderArgs(
+                            restoredName,
+                            normalizeToolCallArgs(fn.args || {}),
+                            clientTools
+                          )
+                        ),
                       },
                     });
                   }
@@ -808,7 +816,7 @@ function parseToolUseInput(
   schema: ReturnType<typeof findToolCallSchema>
 ): Record<string, unknown> {
   const parsed = parseToolCallArguments(rawArguments);
-  if (name.toLowerCase() !== "read" || !schema) return parsed;
+  if (!schema || !hasToolCallShim(name, schema)) return parsed;
   return JSON.parse(applyToolCallShimToBuffer(name, JSON.stringify(parsed), schema));
 }
 
@@ -915,7 +923,12 @@ function convertOpenAINonStreamingToClaude(
     }
   }
 
-  const stopReason = openAIFinishReasonToClaudeStopReason(choiceObj.finish_reason);
+  const mappedStopReason = openAIFinishReasonToClaudeStopReason(choiceObj.finish_reason);
+  // #18270: some OpenAI-compatible upstreams report finish_reason "stop" together
+  // with tool_calls. Claude requires stop_reason "tool_use" whenever tool_use
+  // blocks are present, otherwise the agent loop stops after a single turn.
+  const stopReason =
+    hasToolCalls && mappedStopReason === "end_turn" ? "tool_use" : mappedStopReason;
 
   const usageSrc = toRecord(openaiResponse.usage);
   const promptTokens = toFiniteNumber(usageSrc.prompt_tokens, 0);

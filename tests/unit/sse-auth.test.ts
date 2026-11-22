@@ -609,8 +609,10 @@ test("getProviderCredentials keeps separate codex affinity per session", async (
 });
 
 test("concurrent OAuth selections reserve different available accounts atomically", async () => {
+  // Spreading across priority tiers is a spreading-strategy behavior; fill-first keeps the
+  // higher-priority account (#19262).
   await settingsDb.updateSettings({
-    fallbackStrategy: "fill-first",
+    fallbackStrategy: "round-robin",
     codexSessionAffinityTtlMs: 0,
   });
   const first = await seedConnection("codex", {

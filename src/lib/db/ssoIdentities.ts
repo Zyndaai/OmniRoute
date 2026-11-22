@@ -14,7 +14,7 @@
  */
 
 import { db, jsonb } from "@/lib/db/pg";
-import { createApiKey, deleteApiKey } from "./apiKeys";
+import { createApiKey, deleteApiKey, invalidateApiKeyAuthCaches } from "./apiKeys";
 import { addKeyToGroup, getKeyGroupsForApiKey, removeKeyFromGroup } from "./apiKeyGroups";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import * as log from "@/sse/utils/logger";
@@ -110,11 +110,16 @@ async function markKeyAsSso(apiKeyId: string): Promise<void> {
 }
 
 export async function setSsoKeyActive(apiKeyId: string, active: boolean): Promise<boolean> {
-  const result = await db().execute("UPDATE api_keys SET is_active = $1 WHERE id = $2", [
-    active,
-    apiKeyId,
-  ]);
-  return (result.changes ?? 0) > 0;
+  // Match only a real state change, so a repeat call does not report a change and clear caches.
+  const result = await db().execute(
+    "UPDATE api_keys SET is_active = $1 WHERE id = $2 AND is_active IS DISTINCT FROM $1",
+    [active, apiKeyId]
+  );
+  const changed = (result.changes ?? 0) > 0;
+  // A cached pass would keep a deactivated key authenticating until the cache TTL ends; this
+  // also tells the other cluster processes and the Redis auth cache.
+  if (changed) await invalidateApiKeyAuthCaches(apiKeyId);
+  return changed;
 }
 
 /** Skips all writes when the resolved set matches `previous`, the common case. */

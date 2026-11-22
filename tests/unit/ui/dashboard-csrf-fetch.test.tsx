@@ -78,6 +78,35 @@ describe("installDashboardCsrfFetch", () => {
     expect(headers.get(DASHBOARD_CSRF_HEADER)).toBe("csrf-token");
   });
 
+  it("adds dashboard CSRF to React Router action submissions on dashboard pages", async () => {
+    fetchMock.mockResolvedValue(csrfResponse());
+
+    // React Router posts a page's action to its data URL (`/x.data`, `/x.data?index`).
+    await fetch(new URL("/dashboard/mcp.data?index", window.location.href), {
+      method: "POST",
+      body: "{}",
+    });
+    await fetch("/home.data", { method: "POST", body: "{}" });
+
+    const posted = fetchMock.mock.calls.filter(([url]) => !String(url).includes("/api/auth/csrf"));
+    expect(posted).toHaveLength(2);
+    for (const [, init] of posted) {
+      expect((init?.headers as Headers).get(DASHBOARD_CSRF_HEADER)).toBe("csrf-token");
+    }
+  });
+
+  it("does not attach dashboard CSRF to other page paths", async () => {
+    fetchMock.mockResolvedValue(new Response("{}"));
+
+    await fetch("/login.data", { method: "POST", body: "{}" });
+    await fetch("/dashboard-lookalike.data", { method: "POST", body: "{}" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get(DASHBOARD_CSRF_HEADER)).toBeNull();
+    }
+  });
+
   it("reuses a prefetched dashboard CSRF token for later unsafe requests", async () => {
     fetchMock.mockResolvedValueOnce(csrfResponse()).mockResolvedValueOnce(new Response("{}"));
 

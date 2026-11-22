@@ -2,6 +2,7 @@ import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
 import { adjustMaxTokens } from "../helpers/maxTokensHelper.ts";
 import { createGeminiToolCallIdPairing } from "../helpers/geminiToolCallIds.ts";
+import { geminiFunctionParameters } from "../helpers/geminiFunctionParameters.ts";
 import { fixToolPairs } from "../../services/contextManager.ts";
 import { normalizeEffort } from "@/shared/reasoning/effortStandardization";
 
@@ -108,7 +109,7 @@ export function antigravityToOpenAIRequest(model, body, stream) {
             function: {
               name: func.name,
               description: func.description || "",
-              parameters: cleanSchemaPreservingRequired(func.parameters) || {
+              parameters: cleanSchemaPreservingRequired(geminiFunctionParameters(func)) || {
                 type: "object",
                 properties: {},
               },
@@ -197,6 +198,11 @@ const DRAFT_META_KEYS = new Set([
   "title",
 ]);
 
+/**
+ * Remove `DRAFT_META_KEYS` and `x-*` keywords from every schema node, in place.
+ * The keys of a `properties` map are parameter names, so they are kept and only
+ * each child schema is cleaned.
+ */
 function stripDraftMeta(obj: unknown): void {
   if (!obj || typeof obj !== "object") return;
   if (Array.isArray(obj)) {
@@ -204,14 +210,31 @@ function stripDraftMeta(obj: unknown): void {
     return;
   }
   const record = obj as JsonRecord;
+  removeDraftMetaKeys(record);
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "properties") stripPropertiesMap(value);
+    else stripDraftMeta(value);
+  }
+}
+
+/** Delete `DRAFT_META_KEYS` and `x-*` keywords from one schema node, in place. */
+function removeDraftMetaKeys(record: JsonRecord): void {
   for (const key of Object.keys(record)) {
-    if (DRAFT_META_KEYS.has(key) || key.startsWith("x-")) {
-      delete record[key];
-    }
+    if (DRAFT_META_KEYS.has(key) || key.startsWith("x-")) delete record[key];
   }
-  for (const value of Object.values(record)) {
-    if (value && typeof value === "object") stripDraftMeta(value);
+}
+
+/**
+ * Clean the child schemas of a `properties` map without touching its keys.
+ * The keys are parameter names, not keywords (#18972): a tool parameter named
+ * `title`, `const` or `x-...` must survive. A non-map value is cleaned as a node.
+ */
+function stripPropertiesMap(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    stripDraftMeta(value);
+    return;
   }
+  for (const child of Object.values(value as JsonRecord)) stripDraftMeta(child);
 }
 
 // Preserve `required` even when referenced fields were stripped from constraint blocks.

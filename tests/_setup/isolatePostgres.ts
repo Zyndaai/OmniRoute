@@ -44,7 +44,12 @@ if (adminUrl) {
       path.dirname(fileURLToPath(import.meta.url)),
       "../../scripts/db/test-db.mjs"
     );
-    // Credentials travel in the inherited env, never argv.
-    spawnSync(process.execPath, [script, "drop", db.name], { stdio: "ignore", timeout: 15_000 });
+    // Credentials travel in the inherited env, never argv. `windowsHide`: a test process
+    // without a console would otherwise open a console window for this child on Windows.
+    spawnSync(process.execPath, [script, "drop", db.name], {
+      stdio: "ignore",
+      timeout: 15_000,
+      windowsHide: true,
+    });
   });
 }

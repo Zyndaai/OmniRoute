@@ -19,7 +19,11 @@ import {
   getDefaultThinkingBudget,
 } from "../../../src/lib/modelCapabilities.ts";
 import { getModelSpec } from "../../../src/shared/constants/modelSpecs.ts";
-import { gemini38ThinkingConfig, isGemini38Model } from "../../services/thinkingBudget.ts";
+import {
+  gemini38ThinkingConfig,
+  isGeminiThinkingLevelModel,
+  resolveNativeGeminiThinking,
+} from "../../services/thinkingBudget.ts";
 
 import {
   DEFAULT_SAFETY_SETTINGS,
@@ -140,6 +144,19 @@ function convertOpenAIToolChoiceToGemini(choice: unknown): GeminiFunctionCalling
     if (c.type === "required" || c.type === "any") return { mode: "ANY" };
   }
   return { mode: "VALIDATED" };
+}
+
+// A tool message content may be an array of text parts. Gemini should see the text itself,
+// not a JSON list of {type, text} objects. Arrays with any other part stay as they are.
+function joinToolTextParts(content: unknown): unknown {
+  if (!Array.isArray(content) || content.length === 0) return content;
+  const texts: string[] = [];
+  for (const part of content) {
+    const record = part as { type?: unknown; text?: unknown } | null;
+    if (record?.type !== "text" || typeof record.text !== "string") return content;
+    texts.push(record.text);
+  }
+  return texts.join("\n");
 }
 
 type CloudCodeEnvelope = {
@@ -321,7 +338,10 @@ async function openaiToGeminiBase(
   // Models without thinking support (TTS, transcription, gemini-2.5-flash-image)
   // 400 on ANY thinkingConfig, so every path below skips them (#16928).
   const rejectsThinkingConfig = geminiModelRejectsThinkingConfig(model);
-  if (model.startsWith("gemma-4") || rejectsThinkingConfig) {
+  const nativeThinking = rejectsThinkingConfig ? null : resolveNativeGeminiThinking(model, body);
+  if (nativeThinking !== null) {
+    result.generationConfig.thinkingConfig = nativeThinking;
+  } else if (model.startsWith("gemma-4") || rejectsThinkingConfig) {
     // gemma-4 models returns - 400: Thinking budget is not supported for this model
   } else {
     // 1. OpenAI format: reasoning_effort (none/low/medium/high/auto/max/xhigh)
@@ -357,7 +377,7 @@ async function openaiToGeminiBase(
       // only include thinkingBudget when no explicit level was supplied.
       result.generationConfig.thinkingConfig = explicitThinkingLevel
         ? { includeThoughts: budget !== 0 }
-        : isGemini38Model(model)
+        : isGeminiThinkingLevelModel(model)
           ? await gemini38ThinkingConfig(model, budget, body)
           : buildGeminiThinkingConfig(model, budget, budget !== 0);
     }
@@ -381,7 +401,7 @@ async function openaiToGeminiBase(
       if (cappedBudget > 0 || getModelSpec(model)?.thinkingBudgetCap !== 0) {
         result.generationConfig.thinkingConfig = explicitThinkingLevel
           ? { includeThoughts: cappedBudget !== 0 }
-          : isGemini38Model(model)
+          : isGeminiThinkingLevelModel(model)
             ? await gemini38ThinkingConfig(model, cappedBudget, body)
             : buildGeminiThinkingConfig(model, cappedBudget, cappedBudget !== 0);
       }
@@ -436,7 +456,7 @@ async function openaiToGeminiBase(
             Math.max(Math.floor(outputCap / 2), tierMinimum)
           );
         }
-        result.generationConfig.thinkingConfig = isGemini38Model(model)
+        result.generationConfig.thinkingConfig = isGeminiThinkingLevelModel(model)
           ? await gemini38ThinkingConfig(model, defaultBudget, body)
           : { thinkingBudget: defaultBudget, includeThoughts: true };
       }
@@ -492,7 +512,7 @@ async function openaiToGeminiBase(
   if (messages && Array.isArray(messages)) {
     for (const msg of messages) {
       if (msg.role === "tool" && msg.tool_call_id) {
-        toolResponses[msg.tool_call_id as string] = msg.content;
+        toolResponses[msg.tool_call_id as string] = joinToolTextParts(msg.content);
       }
     }
   }
@@ -644,7 +664,7 @@ async function openaiToGeminiBase(
             const later = messages[j];
             if (later.role === "assistant" || later.role === "user") break;
             if (later.role === "tool" && later.tool_call_id) {
-              turnToolResponses[later.tool_call_id as string] = later.content;
+              turnToolResponses[later.tool_call_id as string] = joinToolTextParts(later.content);
             }
           }
 
@@ -801,9 +821,21 @@ async function openaiToGeminiBase(
       result.tools.push({ googleSearch: {} });
     }
     if (result.tools.some((tool) => (tool.functionDeclarations?.length ?? 0) > 0)) {
-      result.toolConfig = {
-        functionCallingConfig: convertOpenAIToolChoiceToGemini(body.tool_choice),
-      };
+      const functionCallingConfig = convertOpenAIToolChoiceToGemini(body.tool_choice);
+      // The forced name must match the DECLARED (sanitized) name or Gemini rejects
+      // the config, so map it through the table buildGeminiTools filled above. A
+      // name that matches no declared tool is left as the client sent it.
+      if (functionCallingConfig.allowedFunctionNames) {
+        functionCallingConfig.allowedFunctionNames = functionCallingConfig.allowedFunctionNames.map(
+          (name) => {
+            for (const [sanitizedName, rawName] of toolNameMap.entries()) {
+              if (rawName === name) return sanitizedName;
+            }
+            return name;
+          }
+        );
+      }
+      result.toolConfig = { functionCallingConfig };
     }
   } else if (hasGoogleSearch) {
     result.tools = [{ googleSearch: {} }];

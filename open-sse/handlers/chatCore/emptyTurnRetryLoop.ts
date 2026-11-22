@@ -8,7 +8,7 @@
  * rate-limit writes have to stay on the connection that produced it.
  */
 import { getProviderCredentials as defaultGetProviderCredentials } from "@/sse/services/auth";
-import { maybeConvertJsonBodyToSse } from "./jsonBodyToSse.ts";
+import { convertJsonBodyWithinCap } from "./jsonBodyToSse.ts";
 import { ensureStreamReadiness } from "../../utils/streamReadiness.ts";
 import {
   formatBufferedVerdictLog,
@@ -214,7 +214,7 @@ async function runRetryRequest(
     if (retryResponse) await retryResponse.body?.cancel().catch(() => {});
     return null;
   }
-  const prepared = await maybeConvertJsonBodyToSse(retryResponse, {
+  const { response: prepared } = await convertJsonBodyWithinCap(retryResponse, {
     log: deps.log,
     provider: deps.provider,
     model: deps.model,

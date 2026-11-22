@@ -1,4 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useState } from "react";
+import {
+  useFetcher,
+  useLoaderData,
+  useRevalidator,
+  type ActionFunctionArgs,
+} from "react-router";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { interpolateNodes, nodeArgs } from "@/shared/utils/interpolateNodes";
@@ -11,10 +17,49 @@ import EmptyState from "@/shared/components/EmptyState";
 import Icon from "@/shared/components/Icon";
 import { cn } from "@/shared/utils/cn";
 import { copyToClipboard } from "@/shared/utils/clipboard";
+import { apiAction, apiJson, apiRequest } from "@/server/routing/dashboardApi.server";
 import McpDashboardPage from "../endpoint/components/MCPDashboard";
 
 type ServiceStatus = { online: boolean; loading: boolean };
 type McpTransport = "stdio" | "sse" | "streamable-http";
+
+const TRANSPORTS: readonly McpTransport[] = ["stdio", "sse", "streamable-http"];
+const STATUS_POLL_MS = 30_000;
+
+async function readMcpOnline(): Promise<boolean> {
+  try {
+    const response = await apiRequest("/api/mcp/status");
+    if (!response.ok) return false;
+    return Boolean(((await response.json()) as { online?: unknown }).online);
+  } catch {
+    return false;
+  }
+}
+
+/** MCP on/off, its transport and whether the server is up (polled by the page). */
+export async function loader() {
+  const [settings, online] = await Promise.all([
+    apiJson<{ mcpEnabled?: unknown; mcpTransport?: unknown }>("/api/settings"),
+    readMcpOnline(),
+  ]);
+  const transport = TRANSPORTS.find((value) => value === settings.mcpTransport);
+  return {
+    mcpEnabled: Boolean(settings.mcpEnabled),
+    mcpTransport: transport ?? "streamable-http",
+    online,
+  };
+}
+
+/** Saves `mcpEnabled` or `mcpTransport`; nothing else goes through this page's action. */
+export async function action({ request }: ActionFunctionArgs) {
+  const submitted = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  if (typeof submitted.mcpEnabled === "boolean") patch.mcpEnabled = submitted.mcpEnabled;
+  if (TRANSPORTS.includes(submitted.mcpTransport as McpTransport)) {
+    patch.mcpTransport = submitted.mcpTransport;
+  }
+  return apiAction("/api/settings", { method: "PATCH", body: patch });
+}
 
 function ServiceToggle({
   label,
@@ -149,89 +194,34 @@ function DisabledPanel() {
 export default function McpPage() {
   const t = useTranslations("mcpDashboard");
   const tSidebar = useTranslations("sidebar");
-  const [mcpStatus, setMcpStatus] = useState<ServiceStatus>({ online: false, loading: true });
-  const [mcpEnabled, setMcpEnabled] = useState(false);
-  const [mcpToggling, setMcpToggling] = useState(false);
-  const [mcpTransport, setMcpTransport] = useState<McpTransport>("streamable-http");
-  const [transportSaving, setTransportSaving] = useState(false);
+  const { mcpEnabled, mcpTransport, online } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  const toggleFetcher = useFetcher<typeof action>();
+  const transportFetcher = useFetcher<typeof action>();
   const [baseUrl, setBaseUrl] = useState("");
 
   useEffect(() => {
-    void (async () => {
-      await Promise.resolve();
-      setBaseUrl(`${window.location.protocol}//${window.location.host}`);
-    })();
+    setBaseUrl(`${window.location.protocol}//${window.location.host}`);
   }, []);
 
-  const patchSetting = useCallback(async (body: Record<string, unknown>) => {
-    return fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  }, []);
-
+  // Re-runs the loader, which re-reads the server status. Skipped while the tab is hidden.
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await fetch("/api/settings");
-        if (res.ok) {
-          const data = await res.json();
-          setMcpEnabled(!!data.mcpEnabled);
-          setMcpTransport(data.mcpTransport as McpTransport);
-        }
-      } catch {
-        // defaults stay
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
       }
-    };
-    void fetchSettings();
-  }, []);
-
-  const refreshStatus = useCallback(async () => {
-    setMcpStatus((prev) => ({ ...prev, loading: true }));
-    try {
-      const res = await fetch("/api/mcp/status");
-      setMcpStatus({ online: res.ok ? !!(await res.json()).online : false, loading: false });
-    } catch {
-      setMcpStatus({ online: false, loading: false });
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await refreshStatus();
-    })();
-    const interval = setInterval(() => void refreshStatus(), 30000);
+    }, STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, [refreshStatus]);
+  }, [revalidator]);
 
-  const toggleMcp = useCallback(async () => {
-    const newValue = !mcpEnabled;
-    setMcpToggling(true);
-    try {
-      const res = await patchSetting({ mcpEnabled: newValue });
-      if (res.ok) setMcpEnabled(newValue);
-    } catch {
-      // keep current
-    } finally {
-      setMcpToggling(false);
-    }
-  }, [mcpEnabled, patchSetting]);
+  const mcpToggling = toggleFetcher.state !== "idle";
+  const transportSaving = transportFetcher.state !== "idle";
+  const mcpStatus: ServiceStatus = { online, loading: revalidator.state === "loading" };
 
-  const changeTransport = useCallback(
-    async (newTransport: McpTransport) => {
-      setTransportSaving(true);
-      try {
-        const res = await patchSetting({ mcpTransport: newTransport });
-        if (res.ok) setMcpTransport(newTransport);
-      } catch {
-        // keep current
-      } finally {
-        setTransportSaving(false);
-      }
-    },
-    [patchSetting]
-  );
+  const toggleMcp = () =>
+    toggleFetcher.submit({ mcpEnabled: !mcpEnabled }, { method: "post", encType: "application/json" });
+  const changeTransport = (next: McpTransport) =>
+    transportFetcher.submit({ mcpTransport: next }, { method: "post", encType: "application/json" });
 
   return (
     <div className="flex flex-col gap-6">

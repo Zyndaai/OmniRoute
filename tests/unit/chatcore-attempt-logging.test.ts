@@ -121,6 +121,26 @@ test("persists a call log row with the mapped fields (default cacheSource=upstre
   assert.equal(row.cacheSource, "upstream");
 });
 
+test("a no-log key persists a row with no payload bodies (#19052)", async () => {
+  const id = "attempt-no-log-1";
+  persistAttemptLogs(
+    {
+      status: 200,
+      tokens: { input: 1, output: 2 },
+      responseBody: { choices: [{ message: { role: "assistant", content: "secret answer" } }] },
+    },
+    baseCtx({ pendingRequestId: id, noLogEnabled: true })
+  );
+  const deadline = Date.now() + CALL_LOG_SETTLE_TIMEOUT_MS;
+  let rows = await getCallLogs({ correlationId: id, limit: 5 });
+  while (rows.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+    rows = await getCallLogs({ correlationId: id, limit: 5 });
+  }
+  assert.equal(rows.length, 1, "the call log row should still be persisted");
+  assert.equal(JSON.stringify(rows[0]).includes("secret answer"), false);
+});
+
 test("uses final credentials connectionId when Codex failover rotates the account", async () => {
   const id = "attempt-codex-rotation-1";
   persistAttemptLogs(

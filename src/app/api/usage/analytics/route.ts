@@ -426,6 +426,8 @@ function computeUsageRowCost(
         model,
         serviceTier,
         flatRateAsZero,
+        // Analytics rows sum many requests: no per-request long-context tier (#19429).
+        aggregatedTokens: true,
       }
     )
   );

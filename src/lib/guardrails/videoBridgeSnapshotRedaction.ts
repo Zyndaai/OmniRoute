@@ -27,8 +27,7 @@
  * so an observed request cannot retain their cue text merely because extraction rejected
  * that particular part. A video MIME on `source` covers the implicit video-source shape.
  * Redaction is a structured field substitution, not a scan over rendered text, so it cannot
- * be bypassed by adversarial cue content (see the discarded regex approach recorded in the
- * #12150 design doc, `_tasks/superpowers/specs/2026-09-01-video-transcript-retention-design.md`).
+ * be bypassed by adversarial cue content (a regex scan was considered and discarded, #12150).
  */
 
 // Kept as a local literal (not imported from videoBridgeHelpers.ts) for the reason in the

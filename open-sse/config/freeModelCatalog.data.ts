@@ -22,7 +22,7 @@ import type { FreeModelBudget } from "./freeModelCatalog.ts";
  * rewrites file timestamps on every deploy, which would report a months-old
  * catalog as "updated today". Bump this whenever the entries below change.
  */
-export const FREE_CATALOG_CURATED_AT = "2026-10-28";
+export const FREE_CATALOG_CURATED_AT = "2026-11-09";
 
 export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
   { provider: "agentrouter", modelId: "claude-opus-4-8", displayName: "Claude Opus 4.8", monthlyTokens: 0, creditTokens: 200000000, freeType: "one-time-initial", poolKey: "agentrouter", tos: "caution" },
@@ -318,18 +318,16 @@ export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
   { provider: "nscale", modelId: "meta-llama/Llama-3.3-70B-Instruct", displayName: "meta-llama/Llama-3.3-70B-Instruct", monthlyTokens: 0, creditTokens: 5000000, freeType: "one-time-initial", poolKey: "nscale", tos: "caution" },
   { provider: "nvidia", modelId: "google/gemma-4-31b-it", displayName: "Gemma 4 31B", monthlyTokens: 0, creditTokens: 0, freeType: "one-time-initial", poolKey: "nvidia", tos: "caution" },
   { provider: "nvidia", modelId: "nvidia/nemotron-3.5-super-vl-120b-a12b", displayName: "Nemotron 3.5 Super VL 120B A12B", monthlyTokens: 0, creditTokens: 0, freeType: "one-time-initial", poolKey: "nvidia", tos: "caution" },
+  // evidence: public-page https://github.com/mnfst/awesome-free-llm-apis (2026-10-30)
+  // lists GPT OSS 20B on NVIDIA NIM's free Developer Program tier (40 RPM / 10,000 RPD).
+  // NVIDIA's model page https://build.nvidia.com/openai/gpt-oss-20b identifies this as an
+  // API Trial governed by NVIDIA API Trial Terms. The allowance is request-based, not a
+  // published token budget; keep it uncapped here rather than inventing a token estimate.
+  // NVIDIA's trial notice says prompts are logged to improve products; do not send secrets
+  // or confidential code through this free endpoint.
+  { provider: "nvidia", modelId: "openai/gpt-oss-20b", displayName: "GPT OSS 20B", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "nvidia", tos: "caution", trainsOnPrompts: true },
   { provider: "nvidia", modelId: "openai/gpt-oss-120b", displayName: "GPT OSS 120B", monthlyTokens: 0, creditTokens: 0, freeType: "one-time-initial", poolKey: "nvidia", tos: "caution" },
-  // evidence: public-page https://ollama.com/pricing (2026-09-02) — Free plan: "Starter usage credits
-  // included · Includes access to starter models · Add credits to unlock all models"; docs.ollama.com/cloud:
-  // "usage resets monthly". No token figure and no named starter-model list ⇒ recurring-uncapped.
-  { provider: "ollama-cloud", modelId: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "kimi-k2.6", displayName: "Kimi K2.6", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "glm-5.1", displayName: "GLM 5.1", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "minimax-m2.7", displayName: "MiniMax M2.7", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "gemma4:31b", displayName: "Gemma 4 31B", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "nemotron-3-super", displayName: "NVIDIA Nemotron 3 Super", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
-  { provider: "ollama-cloud", modelId: "qwen3.5:397b", displayName: "Qwen 3.5 397B", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ollama-cloud", tos: "ambiguous" },
+  // evidence: https://ollama.com/pricing (2026-11-09) ended the free tier; all models moved to pay-as-you-go (#19334).
   // evidence: api-public https://onomeo.com/api/info (2026-10-25) — `freeModels` lists the models served free of
   // charge. Metering is 30 calls per 5 h per account inside a site-wide pool shared by all accounts (`rate`:
   // perAccountWindowMax 30, windowMinutes 300) — a call count, not a token quantity ⇒ recurring-uncapped with 0
@@ -347,19 +345,10 @@ export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
   { provider: "onomeo", modelId: "glm-4.5-flash", displayName: "GLM 4.5 Flash", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "onomeo", tos: "caution", trainsOnPrompts: true },
   { provider: "onomeo", modelId: "glm-4.6v-flash", displayName: "GLM 4.6v Flash", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "onomeo", tos: "caution", trainsOnPrompts: true },
   { provider: "onomeo", modelId: "glm-4.7-flash", displayName: "GLM 4.7 Flash", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "onomeo", tos: "caution", trainsOnPrompts: true },
-  // OpenCode Zen free set refreshed 2026-10-20 against https://opencode.ai/zen/v1/models
-  // (served IDs) ∩ https://opencode.ai/docs/zen/ ($0 input+output pricing). The free list
-  // rotates ("free for a limited time"); only IDs present in BOTH sources are listed here.
-  { provider: "opencode-zen", modelId: "opencode/big-pickle", displayName: "Big Pickle (stealth)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/beam-free", displayName: "Beam (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/mimo-v2.6-flash-free", displayName: "MiMo V2.6 Flash (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/nemotron-3.5-super-vl-free", displayName: "Nemotron 3.5 Super VL (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/nemotron-3.5-lightning-free", displayName: "Nemotron 3.5 Lightning (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/jev-1.13-free", displayName: "Jev 1.13 (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/longcat-2.5-preview-free", displayName: "LongCat 2.5 Preview (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/deepseek-v4.1-flash-free", displayName: "DeepSeek V4.1 Flash (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/glm-5.3-flash-free", displayName: "GLM 5.3 Flash (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
-  { provider: "opencode-zen", modelId: "opencode/minimax-m3.1-flash-free", displayName: "MiniMax M3.1 Flash (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "opencode-zen-free", tos: "caution" },
+  // OpenCode's free-tier chat offers require its own client (checked 2026-10-27):
+  // https://opencode.ai/v2/docs/console/models/#endpoints
+  // Public zero prices do not grant generic proxy eligibility. Keep the provider
+  // available for manual/paid use, but do not count these offers as free access.
   { provider: "openrouter", modelId: "auto", displayName: "Auto (Best Available)", monthlyTokens: 1200000, creditTokens: 0, freeType: "recurring-daily", poolKey: "openrouter-free", tos: "caution" },
   { provider: "openrouter", modelId: "stealth/ox-alpha", displayName: "Stealth Ox Alpha (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "openrouter-free", tos: "caution" },
   { provider: "openrouter", modelId: "liquid/lfm-2.5-2.6b:free", displayName: "LiquidAI: LFM2.5-2.6B (free)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "openrouter-free", tos: "caution" },
@@ -449,7 +438,7 @@ export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
   { provider: "t3-web", modelId: "qwen3-235b", displayName: "Qwen3 235B (via t3.chat)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "t3-web", tos: "avoid" },
   { provider: "t3-web", modelId: "qwen3-32b", displayName: "Qwen3 32B (via t3.chat)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "t3-web", tos: "avoid" },
   { provider: "t3-web", modelId: "kimi-k2", displayName: "Kimi K2 (via t3.chat)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-daily", poolKey: "t3-web", tos: "avoid" },
-  { provider: "tencent", modelId: "hunyuan-pro", displayName: "Hunyuan Pro", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "tencent", tos: "caution" },
+  // Tencent hunyuan-pro retired 2026-06-22: cloud.tencent.com/document/product/1729/131925.
   // 2026-10-16 refresh: upstream /v1/models serves a single live model; the
   // previously catalogued id 404s on /v1/chat/completions (see the matching
   // comment in providers/registry/uncloseai/index.ts).
@@ -504,8 +493,7 @@ export const FREE_MODEL_BUDGETS: FreeModelBudget[] = [
   { provider: "ainative", modelId: "qwen3-8b", displayName: "Qwen3 8B", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
   { provider: "ainative", modelId: "llama-4-maverick", displayName: "Llama 4 Maverick", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
   { provider: "ainative", modelId: "llama3.1-8b-cerebras", displayName: "Llama 3.1 8B (Cerebras)", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
-  { provider: "ainative", modelId: "deepseek-r1", displayName: "DeepSeek R1", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
-  { provider: "ainative", modelId: "nous-coder", displayName: "Nous Coder", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
+  // 2026-10-28: docs.ainative.studio/docs/api/models/ retires nous-coder; R1 requires Enterprise.
   { provider: "ainative", modelId: "gemini-flash", displayName: "Gemini Flash", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "ainative-free", tos: "caution" },
   { provider: "aion", modelId: "aion-labs/aion-3.0", displayName: "Aion 3.0", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "aion-free", tos: "ok" },
   { provider: "aion", modelId: "aion-labs/aion-3.0-mini", displayName: "Aion 3.0 Mini", monthlyTokens: 0, creditTokens: 0, freeType: "recurring-uncapped", poolKey: "aion-free", tos: "ok" },

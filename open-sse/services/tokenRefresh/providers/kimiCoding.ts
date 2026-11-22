@@ -10,6 +10,7 @@ import {
 } from "../../../config/providers/registry/kimi/coding/runtime.ts";
 import { getKimiDeviceModel } from "../../../utils/kimiDevice.ts";
 import { runWithProxyContext } from "../../../utils/proxyFetch.ts";
+import { sanitizeErrorMessage } from "../../../utils/errorSanitization.ts";
 import type { RefreshLogger } from "../shared.ts";
 
 /**
@@ -96,7 +97,7 @@ export async function refreshKimiCodingToken(
 
       log?.error?.("TOKEN_REFRESH", "Failed to refresh Kimi Coding token", {
         status: response.status,
-        error: errorText.slice(0, 200),
+        error: sanitizeErrorMessage(errorText).slice(0, 200),
       });
       return null;
     }

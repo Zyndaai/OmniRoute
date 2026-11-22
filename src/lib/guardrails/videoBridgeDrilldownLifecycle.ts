@@ -103,6 +103,7 @@ export interface VideoDrilldownResolveQuery {
   /** Test/defense-in-depth override; production callers use the exported constant. */
   maxPageBytes?: number;
   page?: number;
+  signal?: AbortSignal;
   startSeconds?: number;
   variant?: VideoDrilldownVariant;
 }
@@ -227,6 +228,7 @@ export class VideoDrilldownLifecycle {
   private readonly maxHandlesPerPrincipal: number;
   private readonly now: () => number;
   private readonly ttlMs: number;
+  private expiryTimer?: ReturnType<typeof setTimeout>;
 
   constructor(options: VideoDrilldownLifecycleOptions) {
     this.cache = options.cache;
@@ -241,11 +243,27 @@ export class VideoDrilldownLifecycle {
     let removed = 0;
     for (const [handle, entry] of this.handles) {
       if (entry.expiresAt <= now) {
-        this.dropHandle(handle, entry);
+        this.releaseEvictedHandle(handle, entry);
         removed += 1;
       }
     }
     return removed;
+  }
+
+  /** Releases retained frames at the oldest handle's TTL even when the process stays idle. */
+  private armExpiryTimer(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = undefined;
+    const oldest = this.handles.values().next().value;
+    if (!oldest) return;
+    this.expiryTimer = setTimeout(
+      () => {
+        this.expiryTimer = undefined;
+        this.cleanup();
+      },
+      Math.max(1, Math.min(2_147_483_647, oldest.expiresAt - this.now()))
+    );
+    this.expiryTimer.unref?.();
   }
 
   private dropHandle(handle: string, entry: HandleEntry): void {
@@ -311,6 +329,7 @@ export class VideoDrilldownLifecycle {
       this.evictOldestHandleGlobally();
       if (this.handles.size === before) break;
     }
+    this.armExpiryTimer();
     return handle;
   }
 
@@ -333,6 +352,10 @@ export class VideoDrilldownLifecycle {
     await this.cache.put(principalId, sessionId, videoRef, value as VideoDrilldownPutValue, {
       signal: options.signal,
     });
+    if (options.signal?.aborted) {
+      this.cache.clearSession(principalId, sessionId);
+      options.signal.throwIfAborted();
+    }
     const handle = this.registerHandle(principalId, sessionId, videoRef);
     const entry = this.handles.get(handle);
     return { expiresAt: entry?.expiresAt ?? this.now() + this.ttlMs, handle };
@@ -343,6 +366,7 @@ export class VideoDrilldownLifecycle {
     handle: string,
     query: VideoDrilldownResolveQuery
   ): Promise<VideoDrilldownPage | null> {
+    query.signal?.throwIfAborted();
     const entry = this.resolveHandleEntry(principalId, handle);
     if (!entry) return null;
     const stored = this.cache.get(principalId, entry.sessionId, entry.videoRef, {
@@ -362,8 +386,18 @@ export class VideoDrilldownLifecycle {
       query.frameCount,
       variant
     );
-    const shrunk = await Promise.all(slice.map((frame) => shrinkFrameForVariant(frame, preset)));
-    const { frames, trimmed } = trimToByteBudget(shrunk, query.maxPageBytes ?? VIDEO_DRILLDOWN_MAX_PAGE_BYTES);
+    const shrunk: VideoDrilldownFrame[] = [];
+    for (const frame of slice) {
+      query.signal?.throwIfAborted();
+      shrunk.push(await shrinkFrameForVariant(frame, preset));
+      query.signal?.throwIfAborted();
+    }
+    // A concurrent DELETE/TTL expiry must not deliver already-revoked derived data.
+    if (!this.resolveHandleEntry(principalId, handle)) return null;
+    const { frames, trimmed } = trimToByteBudget(
+      shrunk,
+      query.maxPageBytes ?? VIDEO_DRILLDOWN_MAX_PAGE_BYTES
+    );
     return {
       derivation: stored.derivation,
       durationSeconds: stored.durationSeconds,
@@ -380,12 +414,15 @@ export class VideoDrilldownLifecycle {
     if (!entry) return 0;
     const removed = this.cache.clearSession(principalId, entry.sessionId);
     this.dropHandle(handle, entry);
+    this.armExpiryTimer();
     return removed;
   }
 
   /** Explicit sweep for scheduled cleanup; returns the number of stale handles reclaimed. */
   cleanup(): number {
-    return this.sweepExpiredHandles();
+    const removed = this.sweepExpiredHandles();
+    this.armExpiryTimer();
+    return removed;
   }
 
   getUsage(principalId: string): VideoDrilldownUsage {
@@ -393,6 +430,8 @@ export class VideoDrilldownLifecycle {
   }
 
   clearAll(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = undefined;
     this.cache.clearAll();
     this.handles.clear();
     this.handleCountByPrincipal.clear();

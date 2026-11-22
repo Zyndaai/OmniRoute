@@ -377,7 +377,22 @@ function normalizeAttemptBody(opts: PrepareUpstreamBodyOptions): Body {
     translatedBody.reasoning !== undefined ||
     translatedBody.thinking !== undefined ||
     hasExplicitTemplateReasoning;
-  let bodyToSend: Body = { ...structuredClone(translatedBody), model: modelToCall };
+  // Codex's Responses `input` can be a huge history. Share it instead of deep-cloning it here:
+  // every later step copies on write (the input_image pass above, payload rules, and the codex
+  // executor's transformRequest, which clones the whole body before mutating anything). Every
+  // other field, and every other target, keeps full isolation.
+  const shareInput =
+    provider === "codex" &&
+    targetFormat === FORMATS.OPENAI_RESPONSES &&
+    Object.hasOwn(translatedBody, "input");
+  let attemptSource: Body;
+  if (shareInput) {
+    const { input, ...rest } = translatedBody;
+    attemptSource = { ...structuredClone(rest), input };
+  } else {
+    attemptSource = structuredClone(translatedBody);
+  }
+  let bodyToSend: Body = { ...attemptSource, model: modelToCall };
   bodyToSend = normalizeThinkingForModel(bodyToSend, modelToCall);
   bodyToSend = normalizeClaudeAdaptiveThinking(bodyToSend, modelToCall);
   bodyToSend = normalizeClaudeDisabledThinkingEffort(bodyToSend, modelToCall, provider);

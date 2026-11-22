@@ -922,8 +922,7 @@ export function createStructuredSSECollector(options: CollectorOptions = {}) {
 
       // Reducer only reads — safe to pass the original payload without a clone.
       // The deep clone is deferred until after the cap check so dropped events
-      // don't pay the structuredClone cost (~9,800 saved per stream — see
-      // _tasks/research/2026-08-31_performance-resource-audit.md, Quick Win #2).
+      // don't pay the structuredClone cost (~9,800 saved per stream).
       reducer?.ingest(unwrapEventEnvelope(payload));
 
       const event: StructuredSSEEvent = {

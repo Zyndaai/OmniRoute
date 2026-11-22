@@ -1,6 +1,6 @@
 /**
  * Pure client-side filter over an OrchSnapshot — full-text search + state/source/provider chips.
- * No React, no side effects. Spec: _tasks/superpowers/specs/2026-08-30-orchestration-canvas-design.md §1/2.4
+ * No React, no side effects.
  *
  * Only `work` nodes are tested against the filter dimensions. `activity` nodes always follow
  * their parent work node (id = `${workId}:activity`) — they survive iff the parent does.

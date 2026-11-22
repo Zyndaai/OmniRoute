@@ -75,6 +75,8 @@ import {
   getUpstreamErrorIdentifier,
 } from "./streamErrorResult.ts";
 
+import { isHedgeCancelledReasonError } from "./hedgeCancelled.ts";
+
 import { getExecutionConnectionId } from "../chatCore/executionCredentials.ts";
 
 import { prepareUpstreamBody } from "../chatCore/upstreamBody.ts";
@@ -90,7 +92,11 @@ import {
   relogFallbackDiagnostic,
 } from "../../executors/antigravityUpstreamError.ts";
 
-import { getProviderCredentials, extractSessionAffinityKey } from "@/sse/services/auth";
+import {
+  getProviderCredentials,
+  getProviderCredentialsWithQuotaPreflight,
+  extractSessionAffinityKey,
+} from "@/sse/services/auth";
 
 import { updateFromHeaders, updateFromResponseBody } from "../../services/rateLimitManager.ts";
 import * as localLimiterErrors from "../../services/rateLimitManager/errors.ts";
@@ -243,6 +249,7 @@ export async function runStreamingResponse(deps: StreamingDeps) {
         refreshCredentials: executeRefreshCredentials,
         assertManagedLeaseFence: (id) => assertManagedLeaseFence(id),
         getProviderCredentials,
+        getProviderCredentialsWithQuotaPreflight,
         allowedConnections: deps.allowedConnections ?? null,
       },
       wire: {
@@ -423,6 +430,29 @@ export async function runStreamingResponse(deps: StreamingDeps) {
           errorType: "account_semaphore_capacity",
           errorCode: semaphoreCode,
         },
+        carry: {
+          translatedBody,
+          currentModel,
+          effectiveServiceTier,
+          finalBody,
+          pipelineRecovered,
+          providerHeaders,
+          providerResponse,
+          providerUrl,
+        },
+      };
+    }
+    // A hedge-cancelled attempt was superseded by a sibling target (see
+    // COMBO_HEDGE_CANCELLED_REASON): the request it belonged to is served by
+    // the winner, so this attempt is neither a client abort nor an upstream
+    // failure. Falling through would persist it as 499 "Request aborted",
+    // making every status-keyed dashboard count internal hedge cancellations
+    // as client disconnects. Tear down quietly and persist nothing; the combo
+    // loop ignores this result, a sibling has already resolved the execution.
+    if (isHedgeCancelledReasonError(error)) {
+      streamController.handleError(createSafeAbortError());
+      return {
+        response: createErrorResult(599, "Superseded by hedge sibling", null, "hedge_cancelled"),
         carry: {
           translatedBody,
           currentModel,

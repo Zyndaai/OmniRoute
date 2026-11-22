@@ -58,6 +58,7 @@ export const CACHE_CREATION_TOKEN_KEYS = [
 
 export const CACHE_CREATION_TOKEN_DETAIL_KEYS = [
   "cache_creation_tokens",
+  "cache_creation_input_tokens",
   "cache_write_tokens",
 ] as const;
 
@@ -69,6 +70,7 @@ export function getPromptCacheCreationTokens(tokens: unknown): number {
       tokenRecord.cache_creation_input_tokens ??
       tokenRecord.cache_write_tokens ??
       promptDetails.cache_creation_tokens ??
+      promptDetails.cache_creation_input_tokens ??
       promptDetails.cache_write_tokens
   );
 }

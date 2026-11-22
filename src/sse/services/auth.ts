@@ -103,7 +103,9 @@ import {
   getRuntimeProviderProfile,
   recordModelLockoutFailure,
   retryHintBypassesMaxCooldownMs,
+  isAuthoritativeRetryHintSource,
   isProviderModelUnsupported400,
+  isAccountSemaphoreFull,
 } from "@omniroute/open-sse/services/accountFallback.ts";
 import { copilotRejectionFlag, lockCopilotModelNotSupported } from "./copilotModelNotSupportedLock";
 import { isSharedWalletCredits402 } from "@omniroute/open-sse/services/accountFallback/sharedWalletCredits.ts";
@@ -152,6 +154,7 @@ import {
 import {
   getCodexChildCooldown,
   isCodexChildUnavailable,
+  isCodexTextQuotaPreflightCooldown,
   persistCodexChildCooldown,
 } from "@omniroute/open-sse/services/codexAccount/index.ts";
 import {
@@ -206,6 +209,14 @@ import {
   planNextFromDeckSync,
 } from "@/shared/utils/shuffleDeck";
 import { shouldIsolateProbeFailures } from "@/shared/utils/probeOrigin";
+import { isVertexSharedCapacity429 } from "@omniroute/open-sse/services/vertexSharedCapacity.ts";
+import {
+  filterCodexPlanEligible,
+  isCodexPaidOnlyModel,
+  isConnectionPlanEligible,
+} from "@omniroute/open-sse/services/codexPlanEligibility.ts";
+import { isCodexFreePlan } from "@omniroute/open-sse/executors/codex/tools.ts";
+import { classifyGeminiProjectBlock, GEMINI_PROJECT_BLOCK_COOLDOWN_MS } from "./geminiProjectBlock";
 import {
   applyExclusiveConnectionLeasePolicy,
   invalidateManagedConnectionLease,
@@ -846,6 +857,40 @@ async function materializeConnection(
 }
 
 /**
+ * True when the provider's active Codex pool (optionally narrowed to `allowedConnections`) is
+ * non-empty and every account is plan-ineligible for the paid-only `requestedModel`.
+ * Lets a caller explain an empty credential result as "needs a paid plan" instead of
+ * "no credentials".
+ */
+export async function isCodexPoolPlanIneligibleForModel(
+  requestedModel: string | null | undefined,
+  allowedConnections: string[] | null = null
+): Promise<boolean> {
+  if (!isCodexPaidOnlyModel(requestedModel)) return false;
+  const rows = await getCachedRawProviderConnections({ provider: "codex", isActive: true });
+  const active = (Array.isArray(rows) ? rows : []).map(createLazyConnectionView);
+  const pool = allowedConnections?.length
+    ? active.filter((connection) => allowedConnections.includes(connection.id))
+    : active;
+  return pool.length > 0 && filterCodexPlanEligible("codex", pool, requestedModel).length === 0;
+}
+
+/**
+ * Drop accounts that sit at their `max_concurrent` cap, so a pick never queues behind a full
+ * account while a sibling has room. Same cap source as the combo gate. When every account is
+ * full, or none has a cap, the list is returned unchanged.
+ */
+function skipFullAccounts<T extends { id: string; maxConcurrent?: number | null }>(
+  provider: string,
+  connections: T[]
+): T[] {
+  const open = connections.filter(
+    (c) => !(c.maxConcurrent && isAccountSemaphoreFull(provider, c.id, c.maxConcurrent))
+  );
+  return open.length > 0 ? open : connections;
+}
+
+/**
  * Get provider credentials from localDb
  * Filters out unavailable accounts and returns the selected account based on strategy
  * @param {string} provider - Provider name
@@ -1021,7 +1066,10 @@ export async function getProviderCredentials(
     const isCodexScopeUnavailable = (
       connection: ProviderConnectionView,
       model: string | null
-    ): boolean => provider === "codex" && isCodexChildUnavailable(connection, model);
+    ): boolean =>
+      provider === "codex" &&
+      isCodexChildUnavailable(connection, model) &&
+      !(options.requirePaidCodexPlan && isCodexTextQuotaPreflightCooldown(connection, model));
 
     // Prefetch once for the synchronous consumers below (applySessionAffinityPin,
     // planSessionAffinityConnection). Every store is async now; they no longer read in place,
@@ -1138,6 +1186,8 @@ export async function getProviderCredentials(
       if (resolvedId === "qoder" && options.requireToolCalling) {
         allConnections = allConnections.filter(qoderSupportsCallerTools);
       }
+      // An ineligible Codex plan cannot make a paid-only model appear rate-limited.
+      allConnections = filterCodexPlanEligible(provider, allConnections, requestedModel);
       log.debug("AUTH", `${provider} | all connections (incl inactive): ${allConnections.length}`);
       if (allConnections.length > 0) {
         const earliest = getEarliestRateLimitedUntil(allConnections);
@@ -1254,8 +1304,22 @@ export async function getProviderCredentials(
         connectionFilterStatus.set(c.id, "excluded");
         return false;
       }
+      if (
+        provider === "codex" &&
+        options.requirePaidCodexPlan &&
+        isCodexFreePlan(c.providerSpecificData)
+      ) {
+        connectionFilterStatus.set(c.id, "freePlan");
+        return false;
+      }
       if (requestedModel && isModelExcludedByConnection(requestedModel, c.providerSpecificData)) {
         connectionFilterStatus.set(c.id, "modelExcluded");
+        return false;
+      }
+      // Paid-only Codex models must never be sent to accounts with a recorded Free/Go plan.
+      // Filter before routing modes so even an explicit probe cannot select one.
+      if (!isConnectionPlanEligible(provider, c.providerSpecificData, requestedModel)) {
+        connectionFilterStatus.set(c.id, "codexPlanIneligible");
         return false;
       }
       if (
@@ -1378,10 +1442,16 @@ export async function getProviderCredentials(
     });
 
     if (availableConnections.length === 0) {
-      const cooldownStates: CooldownInspectionState[] = connections.map((connection) => {
+      // Only plan-eligible accounts may contribute to this model's retry/cooldown hint.
+      const planEligible = filterCodexPlanEligible(provider, connections, requestedModel);
+      const cooldownStates: CooldownInspectionState[] = planEligible.map((connection) => {
         const connectionCooldownMs = parseFutureDateMs(connection.rateLimitedUntil);
         const codexScopeCooldownMs =
-          provider === "codex"
+          provider === "codex" &&
+          !(
+            options.requirePaidCodexPlan &&
+            isCodexTextQuotaPreflightCooldown(connection, requestedModel)
+          )
             ? parseFutureDateMs(getCodexChildCooldown(connection, requestedModel))
             : null;
         const modelLockout = requestedModel
@@ -1664,7 +1734,7 @@ export async function getProviderCredentials(
         : null;
     }
 
-    const orderedConnections = [...leasePolicy.connections].sort((a, b) => {
+    const allOrderedConnections = [...leasePolicy.connections].sort((a, b) => {
       if (a.authType !== "oauth" || b.authType !== "oauth") return 0;
       const priorityDelta = (a.priority || 999) - (b.priority || 999);
       if (priorityDelta !== 0) return priorityDelta;
@@ -1686,13 +1756,16 @@ export async function getProviderCredentials(
     const strategy = providerOverride.fallbackStrategy || settings.fallbackStrategy || "fill-first";
     let commitSelectionSideEffects: (() => Promise<void> | void) | undefined;
     let connection = leasePolicy.activeLease
-      ? orderedConnections.find(
+      ? allOrderedConnections.find(
           (candidate) => candidate.id === leasePolicy.activeLease?.connectionId
         )
       : undefined;
     let selectedByApiKeyPreference = false;
     if (!connection && options.preferredConnectionIds?.length) {
-      const preferred = pickPreferredConnection(orderedConnections, options.preferredConnectionIds);
+      const preferred = pickPreferredConnection(
+        allOrderedConnections,
+        options.preferredConnectionIds
+      );
       if (preferred) {
         connection = preferred;
         selectedByApiKeyPreference = true;
@@ -1706,7 +1779,7 @@ export async function getProviderCredentials(
         ? planSessionAffinityConnection(
             provider,
             options.sessionKey,
-            orderedConnections,
+            allOrderedConnections,
             sessionAffinityTtlMs,
             affinityRecord
           )
@@ -1718,7 +1791,7 @@ export async function getProviderCredentials(
         : await selectSessionAffinityConnection(
             provider,
             options.sessionKey,
-            orderedConnections,
+            allOrderedConnections,
             sessionAffinityTtlMs
           );
     if (affinityConnection) {
@@ -1731,6 +1804,10 @@ export async function getProviderCredentials(
         `session_key=${formatSessionKeyForLog(options.sessionKey)} has no available affinity target`
       );
     }
+
+    // A pin, lease or key preference above keeps its account whatever the load (prompt cache).
+    // Global routing below skips accounts already at their concurrency cap.
+    const orderedConnections = skipFullAccounts(provider, allOrderedConnections);
 
     if (connection) {
       // Active lease, API-key preference, or session affinity selected before global routing.
@@ -1910,10 +1987,15 @@ export async function getProviderCredentials(
     ) {
       const selectedPriority = connection.priority || 999;
       const selectedAvailability = getOAuthSessionAvailability(connection.id, options.sessionKey);
+      // Priority-ordered strategies must never spill to a lower-priority account just because
+      // the preferred one is busy; spreading strategies may use the next priority tier (#19262).
+      const isPriorityStrategy =
+        strategy === "fill-first" || strategy === "priority" || strategy === "cost-optimized";
+      const maxAllowedPriority = isPriorityStrategy ? selectedPriority : selectedPriority + 1;
       const moreAvailablePeer = [...orderedConnections]
         .filter(
           (candidate) =>
-            candidate.authType === "oauth" && (candidate.priority || 999) <= selectedPriority + 1
+            candidate.authType === "oauth" && (candidate.priority || 999) <= maxAllowedPriority
         )
         .sort(
           (a, b) =>
@@ -1929,7 +2011,7 @@ export async function getProviderCredentials(
 
     let exclusiveLease: ExclusiveConnectionLease | undefined;
     if (options.lease) {
-      const candidateIds = orderedConnections.map((candidate) => candidate.id);
+      const candidateIds = allOrderedConnections.map((candidate) => candidate.id);
       const selectNextLeaseCandidate = (excludedConnectionId: string) =>
         getProviderCredentials(provider, null, allowedConnections, requestedModel, {
           ...options,
@@ -2170,7 +2252,7 @@ export async function getProviderCredentialsWithQuotaPreflight(
         Number.isFinite(preflight.quotaPercent)
           ? ` at ${Math.round((preflight.quotaPercent as number) * 100)}%`
           : ""
-      } until ${unavailableUntil}`
+      }${unavailableUntil ? ` until ${unavailableUntil}` : " (no cooldown persisted)"}`
     );
   }
 }
@@ -2356,6 +2438,8 @@ export async function markAccountUnavailable(
     correlationId?: string | null;
     streamOutputEmitted?: boolean;
     structuredError?: { code?: string | null; type?: string | null } | null;
+    /** Parsed upstream error JSON, for internal classifiers only (never serialized). */
+    upstreamErrorBody?: unknown;
   } = {}
 ) {
   const currentMutex = markMutexes.get(connectionId) || Promise.resolve();
@@ -2437,6 +2521,36 @@ export async function markAccountUnavailable(
       return { shouldFallback: true, cooldownMs: 0 };
     }
 
+    // A project-level billing refusal must extend an earlier, shorter cooldown.
+    // Handle it before the concurrent-failure guard, which otherwise returns
+    // without persisting the six-hour block. Probe-origin failures still leave
+    // account routing state untouched, and #2997's disableCooling opt-out skips
+    // this connection-level cooldown exactly like the connection-scope branch below.
+    const geminiProjectBlock = classifyGeminiProjectBlock(provider, status, errorText);
+    const coolingDisabled =
+      (conn?.providerSpecificData as Record<string, unknown> | undefined)?.disableCooling === true;
+    if (geminiProjectBlock && !coolingDisabled && !(await shouldIsolateProbeFailures())) {
+      const priorUntilMs = conn?.rateLimitedUntil ? cooldownUntilMs(conn.rateLimitedUntil) : NaN;
+      const cooldownMs = Math.max(
+        GEMINI_PROJECT_BLOCK_COOLDOWN_MS,
+        Number.isFinite(priorUntilMs) ? priorUntilMs - Date.now() : 0
+      );
+      await updateProviderConnection(connectionId, {
+        lastErrorType: geminiProjectBlock,
+        lastError: geminiProjectBlock,
+        lastErrorAt: new Date().toISOString(),
+        errorCode: status,
+        backoffLevel: 0,
+        rateLimitedUntil: getUnavailableUntil(cooldownMs),
+        testStatus: "unavailable",
+      });
+      log.info(
+        "AUTH",
+        `Project-level block for ${provider}:${connectionId.slice(0, 8)} — ${status} ${geminiProjectBlock} ${Math.ceil(cooldownMs / 1000)}s (connection cooldown, overrides per-model lockout)`
+      );
+      return { shouldFallback: true, cooldownMs };
+    }
+
     // ─── Anti-Thundering Herd Guard ─────────────────────────────────
     // If this connection was ALREADY marked unavailable by a prior concurrent
     // request (within the mutex window), skip re-marking to avoid resetting
@@ -2510,6 +2624,15 @@ export async function markAccountUnavailable(
       null,
       await resolveDailyResetForProvider(provider)
     );
+
+    // Shared Vertex capacity is not this account's fault: no model lock, no connection cooldown.
+    if (isVertexSharedCapacity429(provider, status, errorText, options.upstreamErrorBody)) {
+      log.info(
+        "AUTH",
+        `${connectionId.slice(0, 8)} ${provider} shared-capacity 429 — no cooldown, trying the next account`
+      );
+      return { shouldFallback: true, cooldownMs: 0 };
+    }
 
     // T-PROBE: probe-origin failures (model test-all) must never remove the
     // connection from the pool. Record the failure for visibility but leave
@@ -3040,6 +3163,16 @@ export async function markAccountUnavailable(
           exactCooldownMs:
             fallbackResult.usedUpstreamRetryHint === true ? fallbackResult.cooldownMs : null,
           maxCooldownMs: mlSettings.maxCooldownMs,
+          // A structured upstream reset (reset_at/retry_after JSON or header) is the
+          // provider's own clock: a new, shorter hint must shrink a stale longer
+          // lock, otherwise the model stays parked after the provider recovered.
+          // Only an ACTUALLY-APPLIED upstream hint qualifies — the same condition as
+          // exactCooldownMs above. A locally scaled cooldown (usedUpstreamRetryHint
+          // === false, e.g. hints disabled in the profile while the body still
+          // carries a structured hint) must never shorten a longer lock (#CO-402).
+          authoritativeBodyReset:
+            fallbackResult.usedUpstreamRetryHint === true &&
+            isAuthoritativeRetryHintSource(fallbackResult.retryHintSource),
         }
       );
       await updateProviderConnection(connectionId, {

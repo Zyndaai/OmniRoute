@@ -59,23 +59,51 @@ export class AfterResponseQueue {
   }
 }
 
+/**
+ * The request as it reached the app (before the authz pipeline stripped and re-stamped its
+ * trusted headers), with the pipeline that served it. A dashboard loader replays an API call
+ * through `fetch` with these headers, so the call is judged exactly as the browser's own
+ * request to that API path would be (see `./routing/dashboardApi.server.ts`). Server-side only:
+ * the headers carry the per-process peer stamps and never leave the process.
+ */
+export interface IncomingScope {
+  request: Request;
+  /** Base path the app is served under (`""` at the root). */
+  basePath: string;
+  /** The app's request pipeline (redirects, authz, rewrites, React Router). */
+  fetch: (request: Request) => Promise<Response>;
+}
+
 interface RequestScope {
   request?: Request;
   afterResponse?: AfterResponseQueue;
+  incoming?: IncomingScope;
 }
 
 const storage = new AsyncLocalStorage<RequestScope>();
 
 /**
  * Runs `fn` with `request` as the current request. `afterResponse` defaults to the queue of the
- * enclosing scope, so a rewritten request keeps the queue of the response being produced.
+ * enclosing scope, so a rewritten request keeps the queue of the response being produced; the
+ * incoming request is inherited the same way.
  */
 export function runWithRequest<T>(
   request: Request,
   fn: () => T,
   afterResponse: AfterResponseQueue | undefined = storage.getStore()?.afterResponse
 ): T {
-  return storage.run({ request, afterResponse }, fn);
+  return storage.run({ request, afterResponse, incoming: storage.getStore()?.incoming }, fn);
+}
+
+/** Runs `fn` with `incoming` recorded as the request that reached the app. */
+export function runWithIncoming<T>(incoming: IncomingScope, fn: () => T): T {
+  const store = storage.getStore();
+  return storage.run({ ...store, incoming }, fn);
+}
+
+/** The request that reached the app, or `undefined` outside a request. */
+export function currentIncoming(): IncomingScope | undefined {
+  return storage.getStore()?.incoming;
 }
 
 /** Runs `fn` with `queue` collecting `afterResponse()` callbacks (the Node listener's scope). */

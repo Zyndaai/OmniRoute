@@ -23,18 +23,18 @@ without inventing new modules.
 
 ## 1. Tech Stack
 
-| Concern       | Choice                                                                                                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Concern       | Choice                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Web framework | **React Router 8** framework mode (SSR) on **Vite 8**, served by an Express app (`src/server/app.ts`); no global middleware |
-| Language      | **TypeScript 6.0+** — target `ES2022`, `module: esnext`, `moduleResolution: bundler`, `strict: false`                    |
-| Runtime       | **Node.js** `>=22.22.2 <23` or `>=24.0.0 <27` (enforced via `engines` + `SUPPORTED_NODE_RANGE`)                          |
-| Database      | **SQLite** via `better-sqlite3` (singleton, WAL journaling)                                                              |
-| Tests         | **Node native test runner** (unit/integration), **Vitest** (MCP, autoCombo, cache), **Playwright** (e2e + protocols-e2e) |
-| Build         | `npm run build` → `scripts/build/build.mjs` (React Router + Vite; output in `.build/app/`)                                |
-| Lint/format   | ESLint flat config + Prettier (`lint-staged` via Husky pre-commit)                                                       |
-| Module system | ESM everywhere (`"type": "module"`)                                                                                      |
-| Dashboard UI  | **Tailwind CSS 4** + the vendored **Keak CI UI Kit** (`packages/ui-kit`), Lucide icons — see `DESIGN_SYSTEM.md`          |
-| Workspaces    | npm workspaces — `open-sse`, `packages/browser-pool`, `packages/ui-kit`                                                  |
+| Language      | **TypeScript 6.0+** — target `ES2022`, `module: esnext`, `moduleResolution: bundler`, `strict: false`                       |
+| Runtime       | **Node.js** `>=22.22.2 <23` or `>=24.0.0 <27` (enforced via `engines` + `SUPPORTED_NODE_RANGE`)                             |
+| Database      | **SQLite** via `better-sqlite3` (singleton, WAL journaling)                                                                 |
+| Tests         | **Node native test runner** (unit/integration), **Vitest** (MCP, autoCombo, cache), **Playwright** (e2e + protocols-e2e)    |
+| Build         | `npm run build` → `scripts/build/build.mjs` (React Router + Vite; output in `.build/app/`)                                  |
+| Lint/format   | ESLint flat config + Prettier (`lint-staged` via Husky pre-commit)                                                          |
+| Module system | ESM everywhere (`"type": "module"`)                                                                                         |
+| Dashboard UI  | **Tailwind CSS 4** + the vendored **Keak CI UI Kit** (`packages/ui-kit`), Lucide icons — see `DESIGN_SYSTEM.md`             |
+| Workspaces    | npm workspaces — `open-sse`, `packages/browser-pool`, `packages/ui-kit`                                                     |
 
 Path aliases (`tsconfig.json`):
 
@@ -62,7 +62,7 @@ OmniRoute/
 ├── public/               Static assets, PWA manifest, service worker
 ├── config/               Runtime config samples
 ├── images/               Marketing/screenshot assets
-├── _ideia/, _references/, _mono_repo/, _tasks/   Internal scratch / planning (not shipped)
+├── _artifacts/            Local scratch (gitignored, never tracked; not shipped)
 ├── CLAUDE.md             Repo rules for Claude Code
 ├── AGENTS.md             Deeper architecture reference for agents
 ├── package.json          v3.8.51, workspace root
@@ -102,22 +102,59 @@ There is **no global middleware**: the request pipeline in `src/server/http/hand
 (redirects → headless gate → authz → rewrites) runs inside the Express app, and route-level
 guards cover the rest.
 
+Process layout: `scripts/dev/run-server.mjs` is the launcher (HTTP server, timeouts, peer-IP
+stamp, WebSocket upgrades, shutdown). It runs `await boot()` once, then hands every request to
+`app(req, res)`; both come from `src/server/app.ts` (the built bundle in production, Vite's SSR
+module loader in development). `boot()` runs the startup sequence and is idempotent.
+
+#### Pages and layouts
+
+Pages use React Router's own API; there is no Next-style compatibility layer.
+
+- `layout.tsx` renders `<Outlet />` for its children. An error screen for a folder is the
+  `ErrorBoundary` export of that folder's `layout.tsx` (`useRouteError()`; "try again" calls
+  `useRevalidator().revalidate()`).
+- Navigation: `Link to`, `useNavigate`, `useLocation`, `useSearchParams` (a tuple, also for
+  writing URL state; never `history.replaceState` or `window.location.search`), `useParams`.
+  A link to something that is not a page (an `/api/...` download, an external URL, a file in
+  `public/`) is a plain `<a href>`.
+- Server work runs in the page's `loader` (redirect: `throw redirect(url)`; not found:
+  `throw data(null, { status: 404 })`). Loader data is serialized, so return plain objects.
+  Dashboard loaders read through the API routes (see
+  [Authorization Guide → Dashboard pages](AUTHZ_GUIDE.md#dashboard-pages-loaders-and-page-writes)).
+- Titles and meta tags come from one place: the page's `meta` export, with translated text from
+  its `loader` (`getTranslator(namespace, request)` from `@/i18n/request.server`). `root.tsx`
+  renders the defaults, so a page never renders its own `<title>`; return
+  `pageMeta(matches, [...])` (`src/shared/utils/pageMeta.ts`) to keep the parents' entries.
+  Examples: `privacy/page.tsx`, `docs/page.tsx`.
+- A component that must not render on the server: `clientOnlyLazy(() => import("./X"))` or
+  `<ClientOnly>` (`src/shared/components/ClientOnly.tsx`).
+- Server-only code (`@/lib/db/*`, `node:` modules, `@/server/*`, `*.server.ts`) may be imported
+  by a route module only when it is used solely from `loader`, `action` or `headers`, which the
+  build strips from the browser bundle. A module that must never reach the browser is named
+  `*.server.ts`; the React Router Vite plugin refuses it in the client build.
+- Translations: `useTranslations` (`use-intl`) everywhere; one provider in `root.tsx`. The locale
+  comes from the `NEXT_LOCALE` cookie, then the `x-locale` header, then `en`; changing it reloads
+  the document.
+- Tests render a page inside a router (`createRoutesStub` or `MemoryRouter` from `react-router`)
+  and pass loader data, rather than mocking navigation modules.
+
 Top-level segments under `src/app/`:
 
-| Path                                                                          | Purpose                                   |
-| ----------------------------------------------------------------------------- | ----------------------------------------- |
-| `api/`                                                                        | All HTTP API routes (see breakdown below) |
-| `a2a/`                                                                        | A2A JSON-RPC 2.0 endpoint (`POST /a2a`)   |
-| `.well-known/agent.json/`                                                     | A2A Agent Card discovery document         |
-| `(dashboard)/`                                                                | Dashboard UI (route group, no URL prefix) |
-| `auth/`, `login/`, `forgot-password/`, `callback/`                            | Auth flows                                |
-| `landing/`                                                                    | Marketing/landing page                    |
-| `docs/`                                                                       | Embedded API docs viewer                  |
-| `status/`, `maintenance/`, `offline/`                                         | Operational pages                         |
-| `privacy/`, `terms/`                                                          | Legal pages                               |
-| `400/`, `401/`, `403/`, `408/`, `429/`, `500/`, `502/`, `503/`                | Static error pages                        |
-| `root.tsx` (`ErrorBoundary`), `[...rest]/`, `forbidden/`                      | Error boundary, localised 404 catch-all   |
-| `root.tsx`, `entry.client.tsx`, `page.tsx`, `globals.css`, `manifest.webmanifest/` | Root shell, browser entry, PWA manifest |
+| Path                                                                               | Purpose                                   |
+| ---------------------------------------------------------------------------------- | ----------------------------------------- |
+| `api/`                                                                             | All HTTP API routes (see breakdown below) |
+| `a2a/`                                                                             | A2A JSON-RPC 2.0 endpoint (`POST /a2a`)   |
+| `.well-known/agent.json/`                                                          | A2A Agent Card discovery document         |
+| `(dashboard)/`                                                                     | Dashboard UI (route group, no URL prefix) |
+| `auth/`, `login/`, `forgot-password/`, `callback/`                                 | Auth flows                                |
+| `landing/`                                                                         | Marketing/landing page                    |
+| `docs/`                                                                            | Embedded API docs viewer                  |
+| `status/`, `maintenance/`, `offline/`                                              | Operational pages                         |
+| `privacy/`, `terms/`                                                               | Legal pages                               |
+| `400/`, `401/`, `403/`, `408/`, `429/`, `500/`, `502/`, `503/`                     | Static error pages                        |
+| `root.tsx` (`ErrorBoundary`), `[...rest]/`, `forbidden/`                           | Error boundary, localised 404 catch-all   |
+| `root.tsx`, `entry.client.tsx`, `page.tsx`, `globals.css`, `manifest.webmanifest/` | Root shell, browser entry, PWA manifest   |
 
 #### 3.1.1 `src/app/(dashboard)/dashboard/` — UI pages
 
@@ -293,7 +330,7 @@ table groups the actual directories and notable top-level files.
 | `env/`            | Env loading + introspection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `evals/`          | Eval runtime                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `guardrails/`     | `piiMasker.ts`, `promptInjection.ts`, `visionBridge.ts`, `visionBridgeHelpers.ts`, `registry.ts`, `base.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `jobs/`           | Background jobs (`budgetResetJob.ts`, `tokenHealthCheckJob.ts`, …)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `jobs/`           | Background jobs (`budgetResetJob.ts`, `tokenHealthCheckJob.ts`, …)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `memory/`         | Persistent memory: `store.ts`, `cache.ts`, `retrieval.ts`, `summarization.ts`, `extraction.ts`, `injection.ts`, `qdrant.ts`, `settings.ts`, `verify.ts`, `schemas.ts`, `types.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `monitoring/`     | `observability.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `oauth/`          | OAuth/import provider modules (22): `agy`, `antigravity`, `claude`, `cline`, `codebuddy-cn`, `codex`, `cursor`, `devin-desktop`, `ghe-copilot`, `github`, `gitlab-duo`, `grok-cli-oauth`, `grok-cli`, `kilocode`, `kimi-coding`, `kiro`, `openference`, `qoder`, `trae`, `xai-oauth`, `zed-hosted`, `zed`, plus `services/`, `utils/`, and `constants/oauth.ts`                                                                                                                                                                                                                                                                                                                  |

@@ -219,8 +219,28 @@ async function refreshDashboardSessionIfNeeded(
   }
 }
 
+/**
+ * A React Router data request (`/x.data`, sent by `fetch()` for loaders and actions) must not
+ * get a plain redirect: `fetch()` would follow it and hand the router the login page's HTML.
+ * React Router's client reads a 204 carrying `X-Remix-Redirect` as a redirect instead, and
+ * `X-Remix-Reload-Document` makes it a full page load.
+ */
+function isRouterDataRequest(request: Request): boolean {
+  return new URL(request.url).pathname.endsWith(".data");
+}
+
 function dashboardLoginRedirect(request: Request, basePath: string, requestId: string): Response {
-  const response = redirectResponse(`${basePath}/login`);
+  const location = `${basePath}/login`;
+  const response = isRouterDataRequest(request)
+    ? new Response(null, {
+        status: 204,
+        headers: {
+          "X-Remix-Redirect": location,
+          "X-Remix-Status": "302",
+          "X-Remix-Reload-Document": "true",
+        },
+      })
+    : redirectResponse(location);
   response.headers.append("Set-Cookie", deleteCookieHeader(DASHBOARD_SESSION_COOKIE));
   stampRouteResponse(response, requestId, "MANAGEMENT");
   applyCorsHeaders(response, request);

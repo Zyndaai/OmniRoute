@@ -2,7 +2,9 @@ import { BaseGuardrail, type GuardrailContext, type GuardrailResult } from "./ba
 import {
   buildInjectionScanText,
   extractMessageContents,
+  resolveSanitizerFlagOverrides,
   sanitizeRequest,
+  type SanitizerFlagOverrides,
 } from "@/shared/utils/inputSanitizer";
 import { getFeatureFlagOverride } from "@/lib/db/featureFlags";
 import { parseEnvBoolean } from "@/shared/utils/envBoolean";
@@ -189,8 +191,15 @@ function getThreshold(options: PromptInjectionGuardrailOptions) {
   return resolveBlockThreshold(options.blockThreshold);
 }
 
-function isEnabled(options: PromptInjectionGuardrailOptions) {
-  return options.enabled ?? parseEnvBoolean(process.env.INPUT_SANITIZER_ENABLED, true);
+// DB override (Feature Flags UI) > env > default, like INJECTION_GUARD_MODE above.
+function isEnabled(
+  options: PromptInjectionGuardrailOptions,
+  overrides: SanitizerFlagOverrides
+): boolean {
+  if (options.enabled !== undefined) return options.enabled;
+  return overrides.enabled !== undefined
+    ? parseEnvBoolean(overrides.enabled, true)
+    : parseEnvBoolean(process.env.INPUT_SANITIZER_ENABLED, true);
 }
 
 export async function evaluatePromptInjection(
@@ -198,7 +207,8 @@ export async function evaluatePromptInjection(
   options: PromptInjectionGuardrailOptions = {},
   context: GuardrailContext = {}
 ): Promise<PromptInjectionGuardrailDecision> {
-  if (!isEnabled(options) || !body || typeof body !== "object") {
+  const flagOverrides = options.enabled !== undefined ? {} : await resolveSanitizerFlagOverrides();
+  if (!isEnabled(options, flagOverrides) || !body || typeof body !== "object") {
     return {
       blocked: false,
       result: {
@@ -214,10 +224,16 @@ export async function evaluatePromptInjection(
   const threshold = getThreshold(options);
   const patterns = normalizeGuardPatterns(options.customPatterns || [], logger);
 
-  const sanitizerResult = sanitizeRequest(body, {
-    info() {},
-    warn() {},
-  } as Console);
+  // The guardrail already decided it is enabled (options.enabled may force it on), so the inner
+  // sanitizer must not re-read the env and veto it.
+  const sanitizerResult = sanitizeRequest(
+    body,
+    {
+      info() {},
+      warn() {},
+    } as Console,
+    { ...flagOverrides, enabled: "true" }
+  );
   const contents = extractMessageContents(body);
   // Same 16 KB budget as detectInjection, and now the same bytes: custom
   // patterns and built-in ones disagreeing about what was scanned would be its

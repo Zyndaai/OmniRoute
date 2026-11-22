@@ -11,6 +11,9 @@
 import { saveCallLog } from "@/lib/usageDb";
 import { sanitizeErrorMessage } from "../../utils/error.ts";
 import { formatSearchProviderFailure } from "./providerFailure.ts";
+import { fetchWithCheckedRedirects, isRegistryEndpoint } from "./redirectGuard.ts";
+import { lockBorrowedSearchKey } from "./borrowedKeyLock.ts";
+import type { SearchUrlGuard } from "./baseUrl.ts";
 import { HTTP_STATUS } from "../../config/constants.ts";
 import { isSubscriptionQuotaText } from "../../services/quotaTextCooldowns.ts";
 import type { SearchProviderConfig } from "../../config/searchRegistry.ts";
@@ -179,6 +182,8 @@ export interface ExecuteProviderFetchParams {
   config: SearchProviderConfig;
   url: string;
   init: RequestInit;
+  /** `public-only` when the base URL came from the caller (searchBaseUrlGuard). */
+  guard?: SearchUrlGuard;
   controller: AbortController;
   timer: ReturnType<typeof setTimeout>;
   query: string;
@@ -242,7 +247,14 @@ export async function executeProviderFetch(
 
   try {
     const response = await fetchWithSearchProxy(proxy, () =>
-      fetch(url, { ...init, signal: controller.signal })
+      fetchWithCheckedRedirects(
+        url,
+        { ...init, signal: controller.signal },
+        config.id,
+        // The fixed registry origin keeps the pooled dispatcher on the first hop.
+        !isRegistryEndpoint(url, config.baseUrl),
+        { guard: p.guard }
+      )
     );
     clearTimeout(timer);
 
@@ -253,8 +265,18 @@ export async function executeProviderFetch(
       }
       if (connectionId && shouldCoolDownSearchConnection(response.status, errorText)) {
         try {
-          const { markAccountUnavailable } = await import("@/sse/services/auth.ts");
-          await markAccountUnavailable(connectionId, response.status, errorText, config.id, null);
+          // A search provider can borrow a chat key (SEARCH_CREDENTIAL_FALLBACKS). A search
+          // failure says nothing about that key's chat health, so only the provider's own
+          // connections get the connection-wide cooldown.
+          const { getProviderConnectionById } = await import("@/lib/db/providers");
+          const owner = await getProviderConnectionById(connectionId);
+          if (owner?.provider === config.id) {
+            const { markAccountUnavailable } = await import("@/sse/services/auth.ts");
+            await markAccountUnavailable(connectionId, response.status, errorText, config.id, null);
+          } else {
+            // Search-scoped lock: the chat model lock map, a model only search asks for.
+            lockBorrowedSearchKey(config.id, owner?.provider, connectionId, response.status);
+          }
         } catch {
           /* non-critical - background cooldown mark must not break search response */
         }

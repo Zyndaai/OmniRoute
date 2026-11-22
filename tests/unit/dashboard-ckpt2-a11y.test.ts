@@ -4,8 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// F4 (KEA-7886): axe/console findings of the wave-2/3 checkpoint smoke on routes F4-B touched
-// (`_tasks/reports/uikit/wave2-checkpoint.md` §6 items 3, 4, 7, 8, 11).
+// F4 (KEA-7886): axe/console findings of the wave-2/3 checkpoint smoke on routes F4-B touched.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), "utf8");
 

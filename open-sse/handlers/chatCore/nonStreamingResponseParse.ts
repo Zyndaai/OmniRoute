@@ -13,6 +13,7 @@
 
 import { normalizePayloadForLog } from "@/lib/logPayloads";
 import { extractSSEErrorMessage } from "../sseParser.ts";
+import { extractSSEErrorFrameStatus } from "./sseErrorFrameStatus.ts";
 import { readNonStreamingResponseBody } from "./nonStreamingResponseBody.ts";
 import { isTruncatedStreamBody } from "../sseParser/truncation.ts";
 import { markTruncatedStreamResponse } from "../../utils/truncatedStreamPolicy.ts";
@@ -47,6 +48,8 @@ export type NonStreamingParseResult =
   | {
       kind: "invalid_sse";
       message: string;
+      /** HTTP status (400-599) the upstream error frame carried; absent means 502. */
+      status?: number;
       looksLikeSSE: true;
       normalizedProviderPayload: unknown;
     }
@@ -106,6 +109,7 @@ export async function parseNonStreamingResponseBody(opts: {
       return {
         kind: "invalid_sse",
         message: invalidSseMessage,
+        status: surfacedSseError ? extractSSEErrorFrameStatus(streamPayload) : undefined,
         looksLikeSSE: true,
         normalizedProviderPayload,
       };

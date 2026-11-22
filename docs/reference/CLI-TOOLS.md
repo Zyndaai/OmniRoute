@@ -124,7 +124,7 @@ Each entry has these fields (defined in `src/shared/schemas/cliCatalog.ts`):
 | `configType`                                    | `"env" \| "custom" \| "guide" \| "custom-builder" \| "mitm"` | Configuration mechanism                                |
 | `id`, `name`, `color`, `description`, `docsUrl` | standard                                                     | Core display fields                                    |
 
-Entries with `baseUrlSupport: "none"` are **not shown** in the dashboard pages — they are registered in the MITM backlog for plan 11 (see `_tasks/features-v3.8.6/refactorpages/_orchestration/_plan11-mitm-backlog.md`).
+Entries with `baseUrlSupport: "none"` are **not shown** in the dashboard pages.
 
 ### Capability tiers (cataloged × detectable × configurable × launchable)
 
@@ -222,8 +222,6 @@ The following CLIs do not support custom base URL natively and are **not listed*
 | amp                 | Closed ecosystem (Sourcegraph)                             |
 | amazon-q / kiro-cli | AWS SSO auth, no custom URL                                |
 | cowork              | Anthropic Desktop, no configurable endpoint                |
-
-See `_tasks/features-v3.8.6/refactorpages/_orchestration/_plan11-mitm-backlog.md` for the full cross-reference.
 
 ---
 

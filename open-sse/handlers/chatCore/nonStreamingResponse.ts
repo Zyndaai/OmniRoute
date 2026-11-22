@@ -68,7 +68,7 @@ import {
 } from "../../executors/antigravityUpstreamError.ts";
 import { routingFinishReason } from "../chatCore/routingFinishReason.ts";
 import { hasTrustedEmptyTurn, inheritEmptyTurnPolicy } from "../../utils/emptyTurnPolicy.ts";
-import { getProviderCredentials } from "@/sse/services/auth";
+import { getProviderCredentials, getProviderCredentialsWithQuotaPreflight } from "@/sse/services/auth";
 import { getModelPreserveVideoUrl } from "@/lib/db/models/modelPreserveVideoUrl";
 import { prefetchThoughtSignatures } from "../../translator/index.ts";
 // The leaf body is unchanged from the barrel, so its closed-over values keep
@@ -259,6 +259,7 @@ export async function runNonStreamingResponse(deps: NonStreamingDeps) {
           // Async fence: the pipeline context type is `=> void`; hand it the promise.
           assertManagedLeaseFence: (id) => assertManagedLeaseFence(id),
           getProviderCredentials,
+          getProviderCredentialsWithQuotaPreflight,
           allowedConnections: deps.allowedConnections ?? null,
         },
         wire: {

@@ -1,6 +1,10 @@
 // Claude helper functions for translator
 import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingSignature.ts";
-import { lookupReasoning, recordReplay } from "../../services/reasoningCache.ts";
+import {
+  buildToolCallCacheKey,
+  lookupReasoning,
+  recordReplay,
+} from "../../services/reasoningCache.ts";
 import { getModelTargetFormat } from "../../config/providerModels.ts";
 import { NON_ANTHROPIC_THINKING_PLACEHOLDER } from "../../utils/reasoningPlaceholder.ts";
 import { sanitizeToolId } from "./schemaCoercion.ts";
@@ -54,6 +58,42 @@ type ClaudeRequestBody = {
   thinking?: Record<string, unknown> | null;
   [key: string]: unknown;
 };
+
+/**
+ * Anthropic docs (build-with-claude/thinking, "Thinking with tool use"): adaptive mode needs
+ * no thinking block on any assistant turn; manual mode needs one on the final assistant turn,
+ * so when that tool-use turn has none (e.g. after unsigned blocks were dropped), thinking is
+ * disabled for this request instead of letting Anthropic answer 400.
+ */
+function lastAssistantIndex(messages: ClaudeMessage[]): number {
+  for (let k = messages.length - 1; k >= 0; k--) {
+    if (messages[k]?.role === "assistant") return k;
+  }
+  return -1;
+}
+
+function dropClearThinkingEdits(body: ClaudeRequestBody): void {
+  const cm = body.context_management as { edits?: Array<{ type?: unknown }> } | undefined;
+  if (!cm || !Array.isArray(cm.edits)) return;
+  const edits = cm.edits.filter((e) => !String(e?.type || "").startsWith("clear_thinking"));
+  if (edits.length) body.context_management = { ...cm, edits };
+  else delete body.context_management;
+}
+
+export function disableManualThinkingWithoutFinalBlock(body: ClaudeRequestBody): void {
+  const messages = body.messages;
+  if (!Array.isArray(messages) || body.thinking?.type !== "enabled") return;
+  if (messages[messages.length - 1]?.role !== "user") return;
+  const content = messages[lastAssistantIndex(messages)]?.content;
+  const blocks = Array.isArray(content) ? content : [];
+  const hasToolUse = blocks.some((b) => b?.type === "tool_use");
+  const hasThinking = blocks.some(
+    (b) => b?.type === "thinking" || b?.type === "redacted_thinking"
+  );
+  if (!hasToolUse || hasThinking) return;
+  delete body.thinking;
+  dropClearThinkingEdits(body);
+}
 
 type KimiThinkingInput = {
   reasoning_effort?: unknown;
@@ -431,7 +471,7 @@ export function prepareClaudeRequest(
   provider: string | null = null,
   preserveCacheControl = false,
   model: string | null = null,
-  opts: { fallbackToHeuristicWhenNoMarkers?: boolean } = {}
+  opts: { fallbackToHeuristicWhenNoMarkers?: boolean; reasoningCacheScope?: string | null } = {}
 ): ClaudeRequestBody {
   // 0. Strip Anthropic `output_config` for providers that reject it on their
   // Claude-compatible endpoints (MiniMax). Must run before any downstream
@@ -784,7 +824,9 @@ export function prepareClaudeRequest(
                 if (!text) {
                   const pairedToolUseId = toolUseIds[thinkingBlockIdx];
                   if (pairedToolUseId) {
-                    const cached = lookupReasoning(pairedToolUseId);
+                    const cached = lookupReasoning(
+                      buildToolCallCacheKey(opts.reasoningCacheScope, pairedToolUseId)
+                    );
                     if (cached) {
                       text = cached;
                       recordReplay();
@@ -826,7 +868,9 @@ export function prepareClaudeRequest(
             let text = "";
             const firstToolUseId = toolUseIds[0];
             if (firstToolUseId) {
-              const cached = lookupReasoning(firstToolUseId);
+              const cached = lookupReasoning(
+                buildToolCallCacheKey(opts.reasoningCacheScope, firstToolUseId)
+              );
               if (cached) {
                 text = cached;
                 recordReplay();

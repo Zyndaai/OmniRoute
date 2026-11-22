@@ -30,7 +30,12 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     // emptyTurnRetryLoop.ts — still dispatched through executeProviderRequest(), still
     // fenced centrally (class A).
     "open-sse/handlers/chatCore/emptyTurnRetryLoop.ts": 1,
-    "open-sse/handlers/chatCore/providerExecutionPipeline.ts": 2,
+    // #18425: the codex 429 rotation now prefers the injected quota-preflight selector
+    // (`connection.getProviderCredentialsWithQuotaPreflight`) and falls back to the plain
+    // `connection.getProviderCredentials` when the leg does not wire it — two call
+    // expressions for the same rotation site, 2->3. Same gate as before
+    // (`policy.allowAccountRotation`, derived from !managedLease), so still class B.
+    "open-sse/handlers/chatCore/providerExecutionPipeline.ts": 3,
     "open-sse/services/imageCombo.ts": 1,
     // GHSA-3w2r: keyless providers (local zero-config defaults, keyless
     // remotes) look up an in-scope connection for a connection-scoped API key
@@ -139,7 +144,9 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     // #14958: after a successful search the proxy re-reads the connection row it
     // just used so clearAccountError() can wipe a stale lastError/testStatus — a
     // post-dispatch state read, not connection selection, so it stays class C.
-    "open-sse/handlers/search/searchProxy.ts": 1,
+    // #19541: after a failed search it reads the same connection's owner to choose between
+    // the connection cooldown and the borrowed-key lock — also post-dispatch, class C.
+    "open-sse/handlers/search/searchProxy.ts": 2,
     // The deep research tool reads one connection by id to take its cookie and
     // check its cooldown. The caller names the connection; this is not selection.
     "open-sse/mcp-server/tools/perplexityResearch.ts": 1,

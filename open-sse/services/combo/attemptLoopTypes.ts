@@ -126,7 +126,8 @@ export type AttemptLoopDeps = {
   getWeightedStepKeyForTarget?: (target: ResolvedComboTarget) => string | null;
   universalHandoffConfig?: UniversalHandoffConfig;
   sourceFormat?: string | null;
-  relayOptions?: { sessionId?: string | null } | null;
+  // apiKeyId scopes handoff and model-history rows per caller (scopeHandoffSessionId).
+  relayOptions?: { sessionId?: string | null; apiKeyId?: string | null } | null;
   relayConfig?: ContextRelayConfig | null;
 };
 

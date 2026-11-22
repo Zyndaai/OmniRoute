@@ -2,10 +2,7 @@
  * headroom compression engine — SmartCrusher: tabular compaction of homogeneous JSON arrays.
  *
  * Implements item H3 (SmartCrusher lossless compaction) + N5 (explicit [N rows] count marker)
- * + GP5' (columnar/tabular encoder, dependency-free) from the compression research plan:
- *   _tasks/research/compression/headroom-plano-implementacao.md
- *   _tasks/research/compression/rodada4-internet-e-coerencia.md
- *   _tasks/research/compression/gcf-proxy-relatorio-plano.md
+ * + GP5' (columnar/tabular encoder, dependency-free) from the compression research plan.
  *
  * Algorithm:
  *   - Scans non-system message contents (string contents and ```json fenced blocks).

@@ -503,6 +503,8 @@ test("checkSemanticCache replays the full prompt total of an OpenAI answer cache
       messages: [{ role: "user", content: "hit query claude client" }],
       temperature: 0,
     },
+    // A Claude-shaped entry is only replayed to a Claude (/v1/messages) client.
+    clientRawRequest: { headers: {}, endpoint: "/v1/messages" },
     stream: false,
   });
   await seedHit(args, cached);
@@ -832,6 +834,8 @@ test("read path isolates response controls written by either cache store", async
         model: common.model,
         body: requestBody,
         apiKeyId: common.apiKeyId,
+        // Chat endpoint: without it `max_tokens` makes the body read as Claude format.
+        clientRawRequest: { headers: {}, endpoint: "/v1/chat/completions" },
         reqLogger: { logConvertedResponse: () => {} },
         log: null,
       });

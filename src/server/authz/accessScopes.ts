@@ -39,6 +39,7 @@ export const ADMIN_MUTATION_PREFIXES: readonly string[] = [
   // manage-scoped key is full-access on every management route (including token mint),
   // so a `write` token must not be able to reach it (GHSA-35gq-52m5-wgw2).
   "/api/keys",
+  "/api/resilience", // persist policy, reset breakers and mutate account cooldowns
 ];
 
 /**
@@ -47,13 +48,16 @@ export const ADMIN_MUTATION_PREFIXES: readonly string[] = [
  * A write to the general settings route or to the login-settings route can change the
  * operator's own authentication policy (login enforcement, the management password, OIDC
  * identity, CORS origins, brute-force protection), so a delegated `write` token must not
- * reach them; GET stays `read`. The other `/api/settings/*` sub-routes (proxies, combo
+ * reach them; GET stays `read`. The system-prompt route is here too: the prompt it writes
+ * is injected into every request through the gateway, for every client, so a delegated
+ * token must not be able to rewrite it. The other `/api/settings/*` sub-routes (proxies, combo
  * defaults, model aliases, compression, purges…) are ordinary configuration and keep the
  * method-inferred scope — matching `/api/settings` as a prefix would raise all of them.
  */
 const ADMIN_MUTATION_EXACT_PATHS: readonly string[] = [
   "/api/settings",
   "/api/settings/require-login",
+  "/api/settings/system-prompt",
 ];
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);

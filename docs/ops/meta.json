@@ -2,7 +2,6 @@
   "title": "Operations",
   "pages": [
     "BUILD_WARNINGS",
-    "HOMOLOGATION",
     "VM_DEPLOYMENT_GUIDE",
     "TUNNELS_GUIDE",
     "PROXY_GUIDE",

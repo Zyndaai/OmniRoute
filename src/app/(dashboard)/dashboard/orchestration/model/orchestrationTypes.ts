@@ -1,6 +1,5 @@
 /**
  * Pure domain vocabulary for the Orchestration Canvas — no React, no side effects.
- * Spec: _tasks/superpowers/specs/2026-08-30-orchestration-canvas-design.md
  */
 
 export type OrchState =

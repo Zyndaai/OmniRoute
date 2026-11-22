@@ -453,6 +453,17 @@ export function applyPayloadRules(
   protocol: string | string[],
   rules: PayloadRulesConfig
 ) {
+  // The default configuration has no rules. The caller already owns its
+  // isolated per-attempt body, and cloning its entire input/history here would
+  // double peak memory before the provider has even serialized the request.
+  if (
+    rules.default.length === 0 &&
+    rules.defaultRaw.length === 0 &&
+    rules.override.length === 0 &&
+    rules.filter.length === 0
+  ) {
+    return { payload, applied: [] as AppliedPayloadRule[] };
+  }
   const normalizedPayload = cloneValue(payload);
   const protocols = toPayloadRuleProtocols(protocol);
   const applied: AppliedPayloadRule[] = [];

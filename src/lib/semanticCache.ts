@@ -20,6 +20,7 @@ import { db } from "@/lib/db/pg";
 import { toNumber } from "@/shared/utils/numeric";
 import { conversationSignatureFields } from "../../open-sse/utils/conversationSignatureFields";
 import { startSemanticCachePruneJob } from "./jobs/semanticCachePruneJob";
+import { isCompleteToolCallArguments } from "../../open-sse/handlers/sseParser/truncation";
 
 // Like reasoning-cache cleanup, start from the consumer module, independent of boot path.
 startSemanticCachePruneJob();
@@ -75,6 +76,19 @@ function getHeaderValue(
   }
 
   return null;
+}
+
+// One long answer must not evict every other entry from the small memory tier (the Postgres
+// tier still stores it). The estimate matches LRUCache: 2 bytes per JSON character.
+const DEFAULT_MAX_ENTRY_BYTES = 256 * 1024;
+
+function getMaxEntryBytes(): number {
+  const configured = parseInt(process.env.SEMANTIC_CACHE_MAX_ENTRY_BYTES || "", 10);
+  return configured > 0 ? configured : DEFAULT_MAX_ENTRY_BYTES;
+}
+
+function exceedsEntryCap(payloadJson: string): boolean {
+  return payloadJson.length * 2 > getMaxEntryBytes();
 }
 
 // ─── Singleton ─────────────────
@@ -346,11 +360,13 @@ export async function getCachedResponse(signature) {
       }
       const parsed = JSON.parse(responsePayload);
       const tokensSaved = toNumber(record.tokens_saved, 0);
-      // Promote to memory cache
-      getMemoryCache().set(signature, {
-        response: parsed,
-        tokensSaved,
-      });
+      // Promote to memory cache, unless it is too large for the small tier.
+      if (!exceedsEntryCap(responsePayload)) {
+        getMemoryCache().set(signature, {
+          response: parsed,
+          tokensSaved,
+        });
+      }
       // Update hit count in DB
       await db().execute(
         "UPDATE semantic_cache SET hit_count = hit_count + 1 WHERE signature = $1",
@@ -407,8 +423,19 @@ export async function setCachedResponse(
 ) {
   const ttl = parseInt(process.env.SEMANTIC_CACHE_TTL_MS || String(ttlMs), 10);
 
-  // 1. Memory cache
-  getMemoryCache().set(signature, { response, tokensSaved }, ttl);
+  let payloadJson: string | undefined;
+  try {
+    payloadJson = JSON.stringify(response);
+  } catch {
+    // Unserializable: memory tier only, as before.
+  }
+
+  // 1. Memory cache. An oversized answer drops any older entry for the key so it cannot go stale.
+  if (payloadJson !== undefined && exceedsEntryCap(payloadJson)) {
+    getMemoryCache().delete(signature);
+  } else {
+    getMemoryCache().set(signature, { response, tokensSaved }, ttl);
+  }
 
   // 2. Postgres
   try {
@@ -484,9 +511,7 @@ export async function invalidateStale(maxAgeMs: number): Promise<number> {
   getMemoryCache().clear();
   try {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-    const result = await db().execute("DELETE FROM semantic_cache WHERE created_at < $1", [
-      cutoff,
-    ]);
+    const result = await db().execute("DELETE FROM semantic_cache WHERE created_at < $1", [cutoff]);
     return result.changes || 0;
   } catch {
     return 0;
@@ -584,23 +609,69 @@ export function isCacheableForWrite(body, headers) {
  */
 const TRUNCATED_FINISH_REASONS = new Set(["length", "max_tokens"]);
 
+type CompletionChoice = {
+  finish_reason?: unknown;
+  message?: { tool_calls?: Array<{ function?: { arguments?: unknown } }> };
+};
+
+function isTruncatedReason(reason: unknown): boolean {
+  return typeof reason === "string" && TRUNCATED_FINISH_REASONS.has(reason);
+}
+
+// A cut tool call can reach this point relabelled `tool_calls` (the response
+// sanitizer and the streaming accumulator set it whenever calls exist). Its
+// arguments are then not a complete JSON object. Empty arguments are a no-arg call.
+function hasCutToolCallArguments(choice: CompletionChoice | null | undefined): boolean {
+  const toolCalls = choice?.message?.tool_calls;
+  if (!Array.isArray(toolCalls)) return false;
+  return toolCalls.some((call) => {
+    const args = call?.function?.arguments;
+    return typeof args === "string" && !isCompleteToolCallArguments(args, true);
+  });
+}
+
+function isTruncatedChoice(choice: CompletionChoice | null | undefined): boolean {
+  return isTruncatedReason(choice?.finish_reason) || hasCutToolCallArguments(choice);
+}
+
 export function isTruncatedCompletion(response: unknown): boolean {
   if (!response || typeof response !== "object") return false;
   const r = response as {
-    choices?: Array<{ finish_reason?: unknown }>;
+    choices?: Array<CompletionChoice>;
     stop_reason?: unknown;
+    status?: unknown;
   };
-  if (Array.isArray(r.choices)) {
-    for (const choice of r.choices) {
-      const reason = choice?.finish_reason;
-      if (typeof reason === "string" && TRUNCATED_FINISH_REASONS.has(reason)) return true;
-    }
-  }
+  if (Array.isArray(r.choices) && r.choices.some(isTruncatedChoice)) return true;
+  // Responses-format replies report a cut turn as `status: "incomplete"`.
+  if (r.status === "incomplete") return true;
   // Claude-format responses carry the reason at the top level instead.
-  if (typeof r.stop_reason === "string" && TRUNCATED_FINISH_REASONS.has(r.stop_reason)) {
-    return true;
-  }
-  return false;
+  return isTruncatedReason(r.stop_reason);
+}
+
+/**
+ * True when a response carries client-visible tool calls: OpenAI `tool_calls` / `function_call`,
+ * Claude `tool_use`, Responses `function_call` / `custom_tool_call` items, Gemini `functionCall`.
+ * Replaying one from the exact-match cache hands back a stale argument list and skips the tool
+ * round trip, so such a response is never stored.
+ */
+export function responseCarriesToolCalls(response: unknown): boolean {
+  const r = asRecord(response);
+  const list = (value: unknown): JsonRecord[] => (Array.isArray(value) ? value.map(asRecord) : []);
+  const fromChoices = list(r.choices).some((choice) => {
+    const message = asRecord(choice.message ?? choice.delta);
+    return (
+      (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) ||
+      !!message.function_call
+    );
+  });
+  const fromBlocks = list(r.content).some((block) => block.type === "tool_use");
+  const fromOutput = list(r.output).some(
+    (item) => item.type === "function_call" || item.type === "custom_tool_call"
+  );
+  const fromCandidates = list(r.candidates).some((candidate) =>
+    list(asRecord(candidate.content).parts).some((part) => !!part.functionCall)
+  );
+  return fromChoices || fromBlocks || fromOutput || fromCandidates;
 }
 
 /**

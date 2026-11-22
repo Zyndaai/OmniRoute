@@ -4,17 +4,12 @@
  * Extracted from handleComboChat's `handleSingleModelWithTimeout` closure (combo.ts).
  * A locally expired timer aborts that target and returns a typed 504 response so the Combo
  * can fall back without treating OmniRoute's own deadline as a provider-connection failure.
- * The per-model abort signal still comes from the target (`target.modelAbortSignal`), so
- * the outer request signal is intentionally NOT a dependency here.
- *
- * See _tasks/superpowers/plans/2026-07-03-blocoJ-combo-hotpath-decomposition.md (Task 1).
+ * The per-model abort signal originates at the target (`target.modelAbortSignal`) and is combined
+ * with the local timeout so hedge cancellation can remain linked through response validation.
  */
 import { buildErrorBody, errorResponse, sanitizeErrorMessage } from "../../utils/error.ts";
 import { DECLARED_FIRST_OUTPUT_WAIT_CAP_MS } from "../comboConfig.ts";
-import {
-  COMBO_HEDGE_CANCELLED_REASON,
-  COMBO_PER_MODEL_TIMEOUT_REASON,
-} from "./comboAbortReasons.ts";
+import { COMBO_PER_MODEL_TIMEOUT_REASON } from "./comboAbortReasons.ts";
 import { awaitFirstOutput, isEventStreamResponse } from "./firstOutputStream.ts";
 import type { HandleSingleModel, SingleModelTarget, ComboLogger } from "./types.ts";
 
@@ -127,6 +122,7 @@ interface FirstOutputGateParams {
   effectiveTimeoutMs: number;
   startedAt: number;
   timeoutController: AbortController;
+  signal: AbortSignal;
   resolveDeclaredTargetBudgetMs?: (
     target?: SingleModelTarget
   ) => Promise<number | undefined> | number | undefined;
@@ -147,6 +143,7 @@ async function gateFirstOutput(params: FirstOutputGateParams): Promise<Response>
     effectiveTimeoutMs,
     startedAt,
     timeoutController,
+    signal,
     resolveDeclaredTargetBudgetMs,
     log,
   } = params;
@@ -159,9 +156,16 @@ async function gateFirstOutput(params: FirstOutputGateParams): Promise<Response>
   const gate = await awaitFirstOutput(
     dispatched,
     firstOutputBudgetMs - (Date.now() - startedAt),
-    timeoutController.signal
+    signal
   );
   if (gate.kind === "output") return gate.response;
+  if (gate.kind === "reasoning") {
+    log.info(
+      "COMBO",
+      `first-output gate: upstream thinking from ${modelStr} (${gate.frameKind}), ending the first-output wait`
+    );
+    return gate.response;
+  }
 
   if (gate.reason !== "budget") {
     // Cancelled from outside (hedge winner, client disconnect) or the body closed empty.
@@ -262,22 +266,16 @@ export function buildTargetTimeoutRunner(deps: {
         resolve(targetTimeoutResponse(modelStr));
       }, effectiveTimeoutMs);
     });
+    const parentHedgeSignal = target?.modelAbortSignal ?? null;
+    const targetSignal = parentHedgeSignal
+      ? AbortSignal.any([timeoutController.signal, parentHedgeSignal])
+      : timeoutController.signal;
     const targetWithSignal = {
       ...(target ?? {}),
-      modelAbortSignal: timeoutController.signal,
+      // Keep the caller's abort linked after headers are returned: the attempt's
+      // response-quality peek may still be consuming this target's stream.
+      modelAbortSignal: targetSignal,
     };
-    const parentHedgeSignal = target?.modelAbortSignal ?? null;
-    let onParentHedgeAbort: (() => void) | null = null;
-    if (parentHedgeSignal) {
-      if (parentHedgeSignal.aborted) {
-        timeoutController.abort(new Error(COMBO_HEDGE_CANCELLED_REASON));
-      } else {
-        onParentHedgeAbort = () => {
-          timeoutController.abort(new Error(COMBO_HEDGE_CANCELLED_REASON));
-        };
-        parentHedgeSignal.addEventListener("abort", onParentHedgeAbort, { once: true });
-      }
-    }
     // Both branches of the race resolve (never reject): the inner handleSingleModel call has a
     // .catch() that converts rejections into responses, and timeoutPromise always resolves. The
     // outer .catch() guards the .catch() handler itself (e.g. a broken Error.prototype.message
@@ -307,23 +305,16 @@ export function buildTargetTimeoutRunner(deps: {
       clearTimeout(timeoutId);
     }
 
-    try {
-      return await gateFirstOutput({
-        dispatched,
-        modelStr,
-        target,
-        effectiveTimeoutMs,
-        startedAt,
-        timeoutController,
-        resolveDeclaredTargetBudgetMs,
-        log,
-      });
-    } finally {
-      // The parent hedge can cancel this target at any point up to here, including while the
-      // first-output gate is still waiting.
-      if (parentHedgeSignal && onParentHedgeAbort) {
-        parentHedgeSignal.removeEventListener("abort", onParentHedgeAbort);
-      }
-    }
+    return gateFirstOutput({
+      dispatched,
+      modelStr,
+      target,
+      effectiveTimeoutMs,
+      startedAt,
+      timeoutController,
+      signal: targetSignal,
+      resolveDeclaredTargetBudgetMs,
+      log,
+    });
   };
 }

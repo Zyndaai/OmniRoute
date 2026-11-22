@@ -10,7 +10,7 @@
     "MONITORING_SECTIONS",
     "ROUTER_BACKENDS",
     "admission-lanes",
-    "cluster-decisions",
+    "persistence-shared-state",
     "persistence-backend-boundary",
     "ADAPTIVE_ROUTING",
     "MODIFICATION_SCENARIOS"

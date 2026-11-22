@@ -315,7 +315,7 @@ Most "free tokens per month" figures in this space are sums of per-model labels.
 
 ## What changed since the shipped catalog (`freeNote`)
 
-> The v3.8.0-era `freeNote` strings are stale. Corrections found by this research (these drive the catalog update in `_tasks/features-v3.8.12`):
+> The v3.8.0-era `freeNote` strings are stale. Corrections found by this research:
 
 - **`360ai`** — The shipped freeNote "Free 360 AI Brain models" appears outdated. Current access is application-gated and paid. The 2023 launch-era promotional tokens (100M–250M one-time) may have been the basis for…
 - **`agentrouter`** — Our shipped freeNote says "$200 free credits on signup." Current reality shows standard (non-referral) signups receive only $100; referral signups may get $200 but a community comment from April 2026…
@@ -401,4 +401,4 @@ Most "free tokens per month" figures in this space are sums of per-model labels.
 | **Theoretical ceiling** | `rate-limit × 24/7 × 30d` — a maximum, not a granted budget                |
 | **Neuron**              | Cloudflare compute unit (~1 output token)                                  |
 
-> Generated from per-provider research on 2026-06-05. Re-run the research workflow (see `_tasks/features-v3.8.12`) to refresh.
+> Generated from per-provider research on 2026-06-05.

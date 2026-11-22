@@ -610,7 +610,8 @@ export async function computeCompatRejectedTargets(
   const keptSet = new Set(compatKeptTargets);
   return filterAsync(
     rankedTargets,
-    async (target) => !keptSet.has(target) && !(await isVisionIncompatibleTarget(target, requirements))
+    async (target) =>
+      !keptSet.has(target) && !(await isVisionIncompatibleTarget(target, requirements))
   );
 }
 
@@ -863,7 +864,10 @@ export async function filterTargetsByRequestCompatibility(
     await Promise.all(
       targets.map(
         async (target) =>
-          [target, await contextRequirementsForTarget(target, requirements, outputLimitAdvisory)] as const
+          [
+            target,
+            await contextRequirementsForTarget(target, requirements, outputLimitAdvisory),
+          ] as const
       )
     )
   );
@@ -1051,7 +1055,9 @@ export async function sortTargetsByContextSize(
   targets: ResolvedComboTarget[]
 ): Promise<ResolvedComboTarget[]> {
   const knownFlags = await Promise.all(
-    targets.map(async (target) => (await getModelContextLimitForModelString(target.modelStr)) != null)
+    targets.map(
+      async (target) => (await getModelContextLimitForModelString(target.modelStr)) != null
+    )
   );
   const hasKnownContext = knownFlags.some(Boolean);
   if (!hasKnownContext) return targets;
@@ -1157,10 +1163,7 @@ export function resolveWeightedTargets(
     hasCompositeTierRuntimeOrder(combo)
   );
   const targetsByStep = new Map(
-    stepGroups.map((group) => [
-      group.step.executionKey,
-      group.targets,
-    ])
+    stepGroups.map((group) => [group.step.executionKey, group.targets])
   );
   const expandedTargets = orderedSteps.flatMap(
     (step) => targetsByStep.get(step.executionKey) || []

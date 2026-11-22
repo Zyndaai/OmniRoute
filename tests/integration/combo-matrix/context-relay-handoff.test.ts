@@ -49,6 +49,8 @@ const {
 // is set by the harness before any import triggers DB init).
 const { recordSessionModelUsage, getHandoff } =
   await import("../../../src/lib/db/contextHandoffs.ts");
+const { scopeHandoffSessionId } =
+  await import("../../../open-sse/services/combo/handoffSessionScope.ts");
 
 // A minimal but valid handoff-JSON blob that parseHandoffJSON will accept.
 // Must have at minimum a non-empty "summary" field.
@@ -65,7 +67,7 @@ const COMBO_NAME = "m-relay-handoff";
 // We must seed session_model_history with this exact "ext:"-prefixed ID so that
 // getLastSessionModel(relayOptions.sessionId, comboName) returns the prior model.
 const SESSION_HEADER_VALUE = "relay-handoff-session-001";
-const SESSION_ID = `ext:${SESSION_HEADER_VALUE}`; // matches what extractExternalSessionId produces
+const SESSION_ID = scopeHandoffSessionId(`ext:${SESSION_HEADER_VALUE}`, null)!; // caller-scoped, no API key
 const PREV_MODEL = "gemini/gemini-2.5-flash"; // the "old" model — must differ from combo target
 const CURR_MODEL = "openai/gpt-4o-mini"; // the combo target model (provider/model format)
 
@@ -235,7 +237,7 @@ test("context-relay universal handoff: does NOT fire when no prior model is reco
   // Give setImmediate time to fire if the bug were present.
   await new Promise((res) => setTimeout(res, 250));
 
-  const handoff = getHandoff(SESSION_ID, COMBO_NAME);
+  const handoff = await getHandoff(SESSION_ID, COMBO_NAME);
   assert.equal(
     handoff,
     null,
@@ -276,7 +278,7 @@ test("context-relay universal handoff: does NOT fire when x-omniroute-session-id
 
   await new Promise((res) => setTimeout(res, 250));
 
-  const handoff = getHandoff(SESSION_ID, COMBO_NAME);
+  const handoff = await getHandoff(SESSION_ID, COMBO_NAME);
   assert.equal(
     handoff,
     null,

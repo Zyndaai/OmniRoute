@@ -60,12 +60,16 @@ import {
   poolReselectKeyOf,
   isOpencodeUserBlocked,
 } from "./opencodeGeoBlock.ts";
+import { applyOpencodeClaudeBeta } from "./opencodeClaudeBeta.ts";
 import {
   FREE_TIER_INFERENCE_BASE_URL,
+  applyZenResponsesAuth,
   attemptFor,
   isGatedFreeTierRequest,
+  isGoGeminiWire,
   isPremiumOpencodeModel,
   noteFreeTierOutcome,
+  opencodeEndpointUrl,
   prepareFreeTierRequest,
   rebuildJsonFromForcedStream,
   resolveFreeTierCredential,
@@ -1554,27 +1558,17 @@ export class OpencodeExecutor extends BaseExecutor {
       Boolean(model) && isGatedFreeTierRequest(this._surface(), this.provider, model)
         ? FREE_TIER_INFERENCE_BASE_URL
         : (getPublishedBaseUrl(this.provider) ?? this.config.baseUrl);
-    switch (this._requestFormat) {
-      case "claude":
-        return `${base}/messages`;
-      case "openai-responses":
-        return `${base}/responses`;
-      case "gemini":
-        return `${base}/models/${model}:${stream ? "streamGenerateContent?alt=sse" : "generateContent"}`;
-      default:
-        return `${base}/chat/completions`;
-    }
+    return opencodeEndpointUrl(this._requestFormat, this._surface(), base, model, stream);
   }
 
   /**
-   * #12633: OpenCode Zen's `/v1/responses` endpoint (reached when
-   * `_requestFormat === "openai-responses"`, e.g. Muse Spark Contributor
-   * models) requires `x-api-key`, not `Authorization: Bearer` — unlike the
-   * default `/chat/completions` endpoint on the same host, which accepts
-   * Bearer. Scoped by baseUrl (not provider id/alias) so this only applies to
-   * the main Zen host (`opencode` / `opencode-zen`, both `https://opencode.ai/zen/v1`)
-   * and never to opencode-go, which serves Responses-format models from a
-   * different upstream (`https://opencode.ai/zen/go/v1`) that expects Bearer.
+   * #12633 / #19315: OpenCode Zen's `/v1/responses` endpoint (reached when
+   * `_requestFormat === "openai-responses"`, e.g. Muse Spark, GPT-5.6, Grok
+   * models) expects `x-api-key` for the gated public lane, while OpenCode
+   * Console keys require `Authorization: Bearer` (otherwise answering 401
+   * "Missing API key."). For keyed requests we send both headers so both
+   * console and gateway contracts are satisfied. Scoped by baseUrl (not provider
+   * id/alias) so it never applies to opencode-go.
    */
   private usesZenApiKeyAuth(): boolean {
     return this._requestFormat === "openai-responses" && this.config?.baseUrl === ZEN_BASE_URL;
@@ -1603,8 +1597,12 @@ export class OpencodeExecutor extends BaseExecutor {
     );
 
     if (key) {
-      if (this._requestFormat === "claude" || this.usesZenApiKeyAuth()) {
+      if (this._requestFormat === "claude") {
         headers["x-api-key"] = key;
+      } else if (this.usesZenApiKeyAuth()) {
+        applyZenResponsesAuth(headers, key, gatedScope);
+      } else if (isGoGeminiWire(this._requestFormat, this._surface())) {
+        headers["x-goog-api-key"] = key;
       } else {
         headers["Authorization"] = `Bearer ${key}`;
       }
@@ -1612,6 +1610,7 @@ export class OpencodeExecutor extends BaseExecutor {
 
     if (this._requestFormat === "claude") {
       headers["anthropic-version"] = "2023-06-01";
+      applyOpencodeClaudeBeta(headers, clientHeaders, model, body);
     }
     // The free tier only answers streamed requests (measured 2026-09-17: a non-streamed
     // body answers 403 FreeTierError), so a JSON client is served by streaming upstream and

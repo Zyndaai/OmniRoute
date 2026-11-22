@@ -52,17 +52,41 @@ const ReadQuerySchema = z
     start: NonNegativeNumberSchema.optional(),
     variant: VariantSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (query) => query.start === undefined || query.end === undefined || query.start < query.end,
+    "focus end must follow start"
+  );
 const DeleteQuerySchema = z.object({ handle: HandleSchema }).strict();
 
-function queryRecord(searchParams: URLSearchParams): Record<string, string> {
-  const values: Record<string, string> = {};
-  for (const [key, value] of searchParams) values[key] = value;
+// A repeated key becomes an array so the strict string schemas reject it instead of the
+// last value silently winning.
+function queryRecord(searchParams: URLSearchParams): Record<string, string | string[]> {
+  const values: Record<string, string | string[]> = {};
+  for (const [key, value] of searchParams) {
+    const existing = values[key];
+    values[key] =
+      existing === undefined
+        ? value
+        : Array.isArray(existing)
+          ? [...existing, value]
+          : [existing, value];
+  }
   return values;
 }
 
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+
 function corsJson(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
+  const json = JSON.stringify(body);
+  if (Buffer.byteLength(json, "utf8") > MAX_RESPONSE_BYTES) {
+    return corsError(
+      413,
+      "Video Bridge drill-down response exceeds the byte limit; request fewer frames",
+      "response_too_large"
+    );
+  }
+  return new Response(json, {
     status,
     headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
@@ -102,6 +126,23 @@ export async function handleVideoBridgeDrilldownConsumerRequest(
   request: Request,
   dependencies: VideoBridgeDrilldownRouteDependencies = {}
 ): Promise<Response> {
+  try {
+    return await runConsumerRequest(request, dependencies);
+  } catch {
+    if (request.signal.aborted) return corsError(499, "Request was cancelled", "request_cancelled");
+    return corsError(
+      503,
+      "Video Bridge drill-down is temporarily unavailable",
+      "service_unavailable"
+    );
+  }
+}
+
+async function runConsumerRequest(
+  request: Request,
+  dependencies: VideoBridgeDrilldownRouteDependencies
+): Promise<Response> {
+  request.signal.throwIfAborted();
   const isRemoteAccessEnabled =
     dependencies.isRemoteAccessEnabled ?? isVideoBridgeDrilldownRemoteAccessEnabled;
   if (!isRemoteAccessEnabled()) {
@@ -136,6 +177,7 @@ export async function handleVideoBridgeDrilldownConsumerRequest(
     page: parsed.data.page,
     startSeconds: parsed.data.start,
     variant: parsed.data.variant,
+    signal: request.signal,
   });
   if (!page) {
     return corsError(404, "Video Bridge drill-down result was not found", "not_found");
