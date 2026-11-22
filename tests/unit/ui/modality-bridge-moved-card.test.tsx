@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { createRoutesStub, MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MediaProviderPageClient from "@/app/(dashboard)/dashboard/media-providers/[kind]/[id]/MediaProviderPageClient";
@@ -119,7 +119,17 @@ describe("Modality Bridge relocation and shortcuts", () => {
     const card = await render(<ModalityBridgeMovedCard />);
     expect(card.querySelector('a[href="/dashboard/settings/modality-bridge"]')).toBeTruthy();
 
-    const page = await render(<SettingsAiPage />);
+    // The page reads its first-paint data from a route loader; an empty result leaves every card
+    // on its own client fetch (mocked to null components above).
+    const Stub = createRoutesStub([{ path: "/", Component: SettingsAiPage, loader: () => ({}) }]);
+    const page = document.createElement("div");
+    document.body.appendChild(page);
+    const pageRoot = createRoot(page);
+    await act(async () => {
+      pageRoot.render(<Stub />);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    roots.push({ root: pageRoot, el: page });
     expect(page.textContent).not.toContain("visionBridgeEnabledLabel");
     expect(page.textContent).toContain("modalityBridgeMovedTitle");
   });

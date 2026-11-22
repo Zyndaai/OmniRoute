@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   DEFAULT_CHAOS_PAGE_CONFIG,
   type ChaosPageConfig,
@@ -34,31 +34,29 @@ function extractProvidersFromPayload(payload: unknown): ChaosProviderInfo[] {
   return extracted;
 }
 
-/** Fetch the persisted chaos config, or null on failure (caller keeps the default). */
-async function fetchChaosConfig(): Promise<ChaosPageConfig | null> {
-  const res = await fetch("/api/chaos/config");
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.config || DEFAULT_CHAOS_PAGE_CONFIG;
+/** The persisted chaos config from the `/api/chaos/config` payload (default when absent). */
+export function chaosConfigFromPayload(payload: unknown): ChaosPageConfig {
+  return (payload as { config?: ChaosPageConfig } | null)?.config || DEFAULT_CHAOS_PAGE_CONFIG;
 }
 
-/** Fetch active provider connections, or [] on failure/empty. */
-async function fetchChaosProviders(): Promise<ChaosProviderInfo[]> {
-  const res = await fetch("/api/providers");
-  if (!res.ok) return [];
-  const data = await res.json();
-  return extractProvidersFromPayload(data);
+/** The deduplicated providers from the `/api/providers` payload ([] when absent). */
+export function chaosProvidersFromPayload(payload: unknown): ChaosProviderInfo[] {
+  return payload ? extractProvidersFromPayload(payload) : [];
 }
 
 /**
- * Chaos config + provider-connection data loading for the Chaos Mode config
- * page. Extracted out of the page component to keep it under the
+ * Chaos config + provider-connection state for the Chaos Mode config page. The route loader
+ * reads both; the config is editable, so it is kept as a local copy that every new loader
+ * result replaces. Extracted out of the page component to keep it under the
  * complexity/size ratchet (config/quality/complexity-baseline.json).
  */
-export function useChaosConfigData() {
-  const [config, setConfig] = useState<ChaosPageConfig>(DEFAULT_CHAOS_PAGE_CONFIG);
-  const [providers, setProviders] = useState<ChaosProviderInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+export function useChaosConfigData(loadedConfig: ChaosPageConfig, providers: ChaosProviderInfo[]) {
+  const [config, setConfig] = useState<ChaosPageConfig>(loadedConfig);
+  const [shownLoadedConfig, setShownLoadedConfig] = useState(loadedConfig);
+  if (loadedConfig !== shownLoadedConfig) {
+    setShownLoadedConfig(loadedConfig);
+    setConfig(loadedConfig);
+  }
 
   // Build a unique list of provider names from active connections for the dropdown
   const availableProviders = useMemo(() => {
@@ -71,24 +69,5 @@ export function useChaosConfigData() {
     });
   }, [providers]);
 
-  // Fetch current config + providers on mount
-  useEffect(() => {
-    async function load() {
-      try {
-        const [nextConfig, nextProviders] = await Promise.all([
-          fetchChaosConfig(),
-          fetchChaosProviders(),
-        ]);
-        if (nextConfig) setConfig(nextConfig);
-        if (nextProviders.length > 0) setProviders(nextProviders);
-      } catch (err) {
-        console.error("[chaos] Failed to load config", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
-
-  return { config, setConfig, availableProviders, loading };
+  return { config, setConfig, availableProviders };
 }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card } from "@/shared/components";
 import { useTranslateSession } from "../hooks/useTranslateSession";
 import type { UseTranslateSessionReturn } from "../hooks/useTranslateSession";
-import { useProviderOptions } from "../hooks/useProviderOptions";
+import { useProviderOptions, type ProviderOptionsData } from "../hooks/useProviderOptions";
 import SimpleControls from "./SimpleControls";
 import ResultNarrated from "./ResultNarrated";
 import type { AdvancedSlug, FormatId, TranslateMode } from "../types";
@@ -30,6 +30,11 @@ interface TranslateTabProps {
    * and pipeline Step 1 see the real input text.
    */
   onInputChange?: (text: string) => void;
+  /**
+   * Providers and provider nodes read by the route loader. When provided, the provider options
+   * are built from them at first paint instead of being fetched after mount.
+   */
+  providerData?: ProviderOptionsData | null;
 }
 
 export default function TranslateTab({
@@ -37,6 +42,7 @@ export default function TranslateTab({
   onAdvancedSlugChange,
   session: sessionProp,
   onInputChange,
+  providerData,
 }: TranslateTabProps) {
   // Internal simple-mode state
   const [source, setSource] = useState<FormatId>("claude");
@@ -51,7 +57,10 @@ export default function TranslateTab({
 
   // Provider/target state: derive from useProviderOptions
   // GAP-3: useProviderOptions lives only here; SimpleControls receives it as props
-  const { provider, setProvider, providerOptions, loading } = useProviderOptions("openai");
+  const { provider, setProvider, providerOptions, loading } = useProviderOptions(
+    "openai",
+    providerData
+  );
   // target FormatId mirrors provider selection; managed via SimpleControls callback
   const [target, setTarget] = useState<FormatId>("openai");
 

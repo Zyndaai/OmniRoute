@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { BrowserRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/i18n/messages/en.json";
@@ -22,7 +21,7 @@ vi.mock("use-intl", () => ({
   },
 }));
 
-import ModelCatalogPage from "@/app/(dashboard)/dashboard/models/page";
+import { ModelsPageRoute } from "./modelsPageRoute.helper";
 
 const CATALOG = {
   claude: {
@@ -104,11 +103,7 @@ describe("Model catalog visibility controls", () => {
 
   async function renderPage() {
     await act(async () => {
-      root.render(
-        <BrowserRouter>
-          <ModelCatalogPage />
-        </BrowserRouter>
-      );
+      root.render(<ModelsPageRoute />);
     });
     await flush();
   }

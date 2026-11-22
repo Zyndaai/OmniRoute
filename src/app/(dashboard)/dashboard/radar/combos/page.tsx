@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
-import { Link } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import RadarNotFound from "../RadarNotFound";
+import { radarRead } from "../radarApi.server";
 
 import type { ComboBuilderOptionsPayload } from "@/lib/combos/builderOptions";
 import type { MergedEntry } from "@/lib/radar/applyFeed";
@@ -22,50 +23,69 @@ function comboNames(payload: ComboBuilderOptionsPayload): Set<string> {
   return new Set(payload.comboRefs.map((combo) => combo.name));
 }
 
+const NO_ENTRIES: MergedEntry[] = [];
+const NO_PROVIDERS: ComboBuilderOptionsPayload["providers"] = [];
+
+/**
+ * Both reads are required: 404 on the catalog = Radar flag off; any other failure (or an
+ * unexpected shape) shows `loadFailed`, as before.
+ */
+export async function loader() {
+  const [catalogRead, optionsRead] = await Promise.all([
+    radarRead<RadarCatalogPayload>("/api/radar/catalog"),
+    radarRead<ComboBuilderOptionsPayload>("/api/combos/builder/options"),
+  ]);
+  const catalog = catalogRead.body;
+  const options = optionsRead.body;
+  if (
+    catalogRead.status === 404 ||
+    !catalog ||
+    !options ||
+    !Array.isArray(catalog.entries) ||
+    !Array.isArray(options.providers)
+  ) {
+    return {
+      flagOff: catalogRead.status === 404,
+      loadFailed: catalogRead.status !== 404,
+      entries: NO_ENTRIES,
+      providers: NO_PROVIDERS,
+      existingNames: [] as string[],
+      hasCatalog: false,
+    };
+  }
+  return {
+    flagOff: false,
+    loadFailed: false,
+    entries: catalog.entries,
+    providers: options.providers,
+    existingNames: [...comboNames(options)],
+    hasCatalog: catalog.meta != null,
+  };
+}
+
 export default function RadarCombosPage() {
   const t = useTranslations("radarCombosPage");
-  const [entries, setEntries] = useState<MergedEntry[]>([]);
-  const [providers, setProviders] = useState<ComboBuilderOptionsPayload["providers"]>([]);
-  const [existingNames, setExistingNames] = useState<Set<string>>(new Set());
+  const {
+    flagOff,
+    loadFailed,
+    entries: loadedEntries,
+    providers: loadedProviders,
+    existingNames: loadedNames,
+    hasCatalog,
+  } = useLoaderData<typeof loader>();
+  const entries = loadedEntries as MergedEntry[];
+  const providers = loadedProviders as ComboBuilderOptionsPayload["providers"];
+  // Names grow when a combo is created here; the copy restarts from every new loader result.
+  const [existingNames, setExistingNames] = useState<Set<string>>(() => new Set(loadedNames));
+  const [shownLoadedNames, setShownLoadedNames] = useState(loadedNames);
+  if (loadedNames !== shownLoadedNames) {
+    setShownLoadedNames(loadedNames);
+    setExistingNames(new Set(loadedNames));
+  }
   const [createdNames, setCreatedNames] = useState<Set<string>>(new Set());
-  const [hasCatalog, setHasCatalog] = useState(false);
-  const [flagOff, setFlagOff] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [creatingName, setCreatingName] = useState<string | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const [catalogResponse, optionsResponse] = await Promise.all([
-          fetch("/api/radar/catalog"),
-          fetch("/api/combos/builder/options"),
-        ]);
-        if (catalogResponse.status === 404) {
-          setFlagOff(true);
-          return;
-        }
-        if (!catalogResponse.ok || !optionsResponse.ok) throw new Error("load_failed");
-
-        const catalog = (await catalogResponse.json()) as RadarCatalogPayload;
-        const options = (await optionsResponse.json()) as ComboBuilderOptionsPayload;
-        if (!Array.isArray(catalog.entries) || !Array.isArray(options.providers)) {
-          throw new Error("invalid_shape");
-        }
-
-        setEntries(catalog.entries);
-        setProviders(options.providers);
-        setExistingNames(comboNames(options));
-        setHasCatalog(catalog.meta != null);
-      } catch {
-        setError(t("loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    void load();
-  }, [t]);
+  const [actionError, setError] = useState("");
+  const error = actionError || (loadFailed ? t("loadFailed") : "");
 
   const suggestions = useMemo(
     () => buildRadarComboSuggestions({ entries, providers, existingComboNames: existingNames }),
@@ -134,11 +154,7 @@ export default function RadarCombosPage() {
 
       {error && <div className="p-3 rounded-lg bg-error/10 text-error text-sm">{error}</div>}
 
-      {loading ? (
-        <div className="flex items-center justify-center min-h-[200px] text-text-muted">
-          {t("loading")}
-        </div>
-      ) : !hasCatalog ? (
+      {!hasCatalog ? (
         <Card>
           <p className="text-center text-text-muted py-8">{t("catalogRequired")}</p>
         </Card>

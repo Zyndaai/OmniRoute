@@ -159,4 +159,37 @@ describe("dashboard layout loader", () => {
   it("never re-runs after the first render", () => {
     expect(dashboardLayout.shouldRevalidate()).toBe(false);
   });
+
+  it("marks every dashboard page response no-store (loader data carries API secrets)", () => {
+    expect(dashboardLayout.headers()).toEqual({ "Cache-Control": "no-store" });
+  });
+});
+
+describe("dashboard pages and headers", () => {
+  it("no page under (dashboard) exports its own headers, so the layout's no-store applies", async () => {
+    const { readdir, readFile } = await import("node:fs/promises");
+    const path = await import("node:path");
+    const root = path.resolve(__dirname, "../../../src/app/(dashboard)");
+    const offenders: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) await walk(full);
+        else if (
+          /^(page|layout)\.tsx$/.test(entry.name) &&
+          full !== path.join(root, "layout.tsx")
+        ) {
+          if (
+            /export\s+(async\s+)?function\s+headers\b|export\s+const\s+headers\b/.test(
+              await readFile(full, "utf8")
+            )
+          ) {
+            offenders.push(path.relative(root, full));
+          }
+        }
+      }
+    };
+    await walk(root);
+    expect(offenders).toEqual([]);
+  });
 });

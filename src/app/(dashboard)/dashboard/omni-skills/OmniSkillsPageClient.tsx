@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type JSX } from "react";
+import { useState, useRef, type JSX } from "react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
@@ -23,21 +23,31 @@ interface Execution {
   createdAt: string;
 }
 
-export function OmniSkillsPageClient(): JSX.Element {
-  const [skills, setSkills] = useState<OmniSkill[]>([]);
-  const [executions, setExecutions] = useState<Execution[]>([]);
-  const [loading, setLoading] = useState(true);
+/** First-paint data from the route loader (page 1 of skills and executions, provider setting). */
+export interface OmniSkillsInitialData {
+  skills: { data?: OmniSkill[]; total?: number; totalPages?: number; popularDefaults?: string[] };
+  executions: { data?: Execution[]; total?: number; totalPages?: number };
+  skillsProvider: string | null;
+}
+
+export function OmniSkillsPageClient({ initial }: { initial: OmniSkillsInitialData }): JSX.Element {
+  // Local copies: the list is edited optimistically and replaced by the paginated/filtered
+  // client reads below.
+  const [skills, setSkills] = useState<OmniSkill[]>(initial.skills.data || []);
+  const [executions, setExecutions] = useState<Execution[]>(initial.executions.data || []);
   const [skillsPage, setSkillsPage] = useState(1);
-  const [skillsTotal, setSkillsTotal] = useState(0);
-  const [skillsTotalPages, setSkillsTotalPages] = useState(1);
-  const [popularDefaults, setPopularDefaults] = useState<string[]>([]);
+  const [skillsTotal, setSkillsTotal] = useState(initial.skills.total || 0);
+  const [skillsTotalPages, setSkillsTotalPages] = useState(initial.skills.totalPages || 1);
+  const [popularDefaults, setPopularDefaults] = useState<string[]>(
+    Array.isArray(initial.skills.popularDefaults) ? initial.skills.popularDefaults : []
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [modeFilter, setModeFilter] = useState<"all" | "on" | "off" | "auto">("all");
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
 
   const [execPage, setExecPage] = useState(1);
-  const [execTotal, setExecTotal] = useState(0);
-  const [execTotalPages, setExecTotalPages] = useState(1);
+  const [execTotal, setExecTotal] = useState(initial.executions.total || 0);
+  const [execTotalPages, setExecTotalPages] = useState(initial.executions.totalPages || 1);
 
   const [activeTab, setActiveTab] = useState<"skills" | "executions" | "sandbox" | "marketplace">(
     "skills"
@@ -50,7 +60,10 @@ export function OmniSkillsPageClient(): JSX.Element {
   } | null>(null);
   const [installing, setInstalling] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [skillsProvider, setSkillsProvider] = useState<SkillsProvider>("skillsmp");
+  const skillsProvider: SkillsProvider =
+    initial.skillsProvider === "skillsmp" || initial.skillsProvider === "skillssh"
+      ? initial.skillsProvider
+      : "skillsmp";
 
   const t = useTranslations("skills");
   const tSidebar = useTranslations("sidebar");
@@ -79,36 +92,6 @@ export function OmniSkillsPageClient(): JSX.Element {
     setExecTotal((res as { total?: number }).total || 0);
     setExecTotalPages((res as { totalPages?: number }).totalPages || 1);
   };
-
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/skills?page=1&limit=20").then((r) => r.json()),
-      fetch("/api/skills/executions?page=1&limit=20").then((r) => r.json()),
-      fetch("/api/settings").then((r) => (r.ok ? r.json() : null)),
-    ])
-      .then(([skillsData, executionsData, settingsData]) => {
-        setSkills((skillsData as { data?: OmniSkill[] }).data || []);
-        setSkillsTotal((skillsData as { total?: number }).total || 0);
-        setSkillsTotalPages((skillsData as { totalPages?: number }).totalPages || 1);
-        setPopularDefaults(
-          Array.isArray((skillsData as { popularDefaults?: string[] }).popularDefaults)
-            ? (skillsData as { popularDefaults: string[] }).popularDefaults
-            : []
-        );
-
-        setExecutions((executionsData as { data?: Execution[] }).data || []);
-        setExecTotal((executionsData as { total?: number }).total || 0);
-        setExecTotalPages((executionsData as { totalPages?: number }).totalPages || 1);
-
-        const sd = settingsData as { skillsProvider?: SkillsProvider } | null;
-        if (sd?.skillsProvider === "skillsmp" || sd?.skillsProvider === "skillssh") {
-          setSkillsProvider(sd.skillsProvider);
-        }
-
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
 
   const refreshSkills = async () => {
     setSkillsPage(1);
@@ -178,14 +161,6 @@ export function OmniSkillsPageClient(): JSX.Element {
     };
     reader.readAsText(file);
   };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-text-muted">{t("loading")}...</div>
-      </div>
-    );
-  }
 
   const enabledCount = skills.filter((s) => s.enabled).length;
   const execSuccessCount = executions.filter((e) => e.status === "success").length;

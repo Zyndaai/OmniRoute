@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { BrowserRouter } from "react-router";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -33,6 +33,7 @@ vi.mock("use-intl", () => ({
 }));
 
 import ModelCatalogPage from "@/app/(dashboard)/dashboard/models/page";
+import { flattenCatalog } from "@/app/(dashboard)/dashboard/models/modelCatalogUtils";
 
 describe("ModelCatalogPage", () => {
   let container: HTMLDivElement;
@@ -64,51 +65,51 @@ describe("ModelCatalogPage", () => {
     });
   }
 
-  it("loads all provider models and only labels flags the API actually reports", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          catalog: {
-            alpha: {
-              provider: "Alpha Labs",
-              models: [
-                {
-                  id: "alpha-chat",
-                  name: "Alpha Chat",
-                  type: "chat",
-                  free: true,
-                  context_length: 128_000,
-                  capabilities: {
-                    tools: true,
-                    vision: true,
-                    reasoning: true,
-                    audio: true,
-                    structured_output: true,
-                  },
-                },
-              ],
-            },
-            beta: {
-              provider: "Beta AI",
-              models: [{ id: "beta-vision", name: "Beta Vision", type: "chat" }],
-            },
-          },
-        }),
-      })
-    );
-
+  /** The page reads the catalog in its route loader: serve `data` as the loader result. */
+  function renderPage(data: { models: ReturnType<typeof flattenCatalog>; modelsError: boolean }) {
+    const Stub = createRoutesStub([
+      {
+        path: "/dashboard/models",
+        Component: ModelCatalogPage,
+        loader: () => ({ ...data, combos: [], combosError: false, providerHealthMap: {} }),
+      },
+    ]);
     act(() => {
-      root.render(
-        <BrowserRouter>
-          <ModelCatalogPage />
-        </BrowserRouter>
-      );
+      root.render(<Stub initialEntries={["/dashboard/models"]} />);
+    });
+  }
+
+  it("loads all provider models and only labels flags the API actually reports", async () => {
+    renderPage({
+      modelsError: false,
+      models: flattenCatalog({
+        alpha: {
+          provider: "Alpha Labs",
+          models: [
+            {
+              id: "alpha-chat",
+              name: "Alpha Chat",
+              type: "chat",
+              free: true,
+              context_length: 128_000,
+              capabilities: {
+                tools: true,
+                vision: true,
+                reasoning: true,
+                audio: true,
+                structured_output: true,
+              },
+            },
+          ],
+        },
+        beta: {
+          provider: "Beta AI",
+          models: [{ id: "beta-vision", name: "Beta Vision", type: "chat" }],
+        },
+      }),
     });
     await flush();
 
-    expect(fetch).toHaveBeenCalledWith("/api/models/catalog?includeHidden=1", expect.anything());
     expect(container.textContent).toContain("Alpha Labs");
     expect(container.textContent).toContain("Beta AI");
     expect(container.textContent).toContain("Free");
@@ -119,17 +120,20 @@ describe("ModelCatalogPage", () => {
     expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
 
     const providerFilter = container.querySelector("select")!;
-    act(() => {
+    // Filters live in the URL; the router applies the navigation asynchronously.
+    await act(async () => {
       providerFilter.value = "beta";
       providerFilter.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await flush();
     expect(container.querySelectorAll("tbody tr")).toHaveLength(1);
     expect(container.querySelector("tbody")?.textContent).toContain("Beta Vision");
 
-    act(() => {
+    await act(async () => {
       providerFilter.value = "all";
       providerFilter.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await flush();
     const modelSort = [...container.querySelectorAll<HTMLButtonElement>("th button")].find(
       (button) => button.textContent === "Model"
     )!;
@@ -140,15 +144,7 @@ describe("ModelCatalogPage", () => {
   });
 
   it("shows a retry action after the catalog request fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
-
-    act(() => {
-      root.render(
-        <BrowserRouter>
-          <ModelCatalogPage />
-        </BrowserRouter>
-      );
-    });
+    renderPage({ models: [], modelsError: true });
     await flush();
 
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(

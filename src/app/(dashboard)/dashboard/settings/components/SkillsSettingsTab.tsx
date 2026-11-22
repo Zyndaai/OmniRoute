@@ -39,22 +39,39 @@ function SavedBadge({ status, t }: { status: SaveStatus; t: (key: string) => str
   return null;
 }
 
-export default function SkillsSettingsTab() {
+/** The settings this tab shows. */
+export type SkillsInitialSettings = {
+  skillsEnabled?: unknown;
+  skillsmpApiKey?: unknown;
+  skillsProvider?: unknown;
+};
+
+/** `initialSettings` is the route loader's read of those settings; without it the tab fetches `/api/settings` on mount. */
+export default function SkillsSettingsTab({
+  initialSettings,
+}: {
+  initialSettings?: SkillsInitialSettings;
+} = {}) {
   const t = useTranslations("settings");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSettings);
   // chatCore and the skills executor treat a missing value as enabled (`!== false`).
-  const [skillsEnabled, setSkillsEnabled] = useState(true);
+  const [skillsEnabled, setSkillsEnabled] = useState(initialSettings?.skillsEnabled !== false);
   const [skillsEnabledSaving, setSkillsEnabledSaving] = useState(false);
   const [skillsEnabledStatus, setSkillsEnabledStatus] = useState<SaveStatus>("");
 
-  const [skillsmpApiKey, setSkillsmpApiKey] = useState("");
+  const [skillsmpApiKey, setSkillsmpApiKey] = useState(
+    typeof initialSettings?.skillsmpApiKey === "string" ? initialSettings.skillsmpApiKey : ""
+  );
   const [skillsmpSaving, setSkillsmpSaving] = useState(false);
   const [skillsmpStatus, setSkillsmpStatus] = useState<SaveStatus>("");
-  const [skillsProvider, setSkillsProvider] = useState<SkillsProvider>("skillsmp");
+  const [skillsProvider, setSkillsProvider] = useState<SkillsProvider>(
+    initialSettings?.skillsProvider === "skillssh" ? "skillssh" : "skillsmp"
+  );
   const [skillsProviderSaving, setSkillsProviderSaving] = useState(false);
   const [skillsProviderStatus, setSkillsProviderStatus] = useState<SaveStatus>("");
 
   useEffect(() => {
+    if (initialSettings) return;
     fetch("/api/settings")
       .then((res) => (res.ok ? res.json() : null))
       .then((settingsData) => {
@@ -70,7 +87,7 @@ export default function SkillsSettingsTab() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [initialSettings]);
 
   const flashSaved = (setStatus: (status: SaveStatus) => void, ok: boolean) => {
     setStatus(ok ? "saved" : "error");

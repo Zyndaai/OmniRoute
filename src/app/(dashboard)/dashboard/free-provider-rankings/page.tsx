@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useLoaderData } from "react-router";
 import { useTranslations } from "use-intl";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import {
@@ -69,15 +71,32 @@ const TYPE_OPTIONS: Array<{ value: ProviderAuthType | ""; labelKey: string }> = 
   { value: "apikey", labelKey: "typeApikey" },
 ];
 
+/**
+ * First paint: the unfiltered ranking. Optional read: when it fails the page shows its error
+ * alert with an empty list, as the client fetch did. Filter changes refetch client-side.
+ */
+export async function loader() {
+  const data = await apiJsonOrNull<{ rankings?: FreeProviderRanking[] }>(
+    "/api/free-provider-rankings",
+    { query: { withUsage: 1, usageRange: "24h" } }
+  );
+  return { rankings: data?.rankings ?? [], failed: data === null };
+}
+
 export default function FreeProviderRankingsPage() {
   const t = useTranslations("freeProviderRankingsPage");
   const tc = useTranslations("common");
-  const [rankings, setRankings] = useState<FreeProviderRanking[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const loaderData = useLoaderData<typeof loader>();
+  const [rankings, setRankings] = useState<FreeProviderRanking[]>(
+    loaderData.rankings as FreeProviderRanking[]
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(loaderData.failed ? t("errorLoading") : "");
   const [filter, setFilter] = useState<string>("");
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [availableOnly, setAvailableOnly] = useState(false);
+  // The loader already holds the default (unfiltered) ranking; skip the mount fetch.
+  const skipMountFetch = useRef(true);
   const [typeFilter, setTypeFilter] = useState<ProviderAuthType | "">("");
   const [groupByType, setGroupByType] = useState(false);
   const [sortByReliability, setSortByReliability] = useState(false);
@@ -109,6 +128,10 @@ export default function FreeProviderRankingsPage() {
   );
 
   useEffect(() => {
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     void (async () => {
       await fetchRankings(filter || undefined, { configuredOnly, availableOnly });
     })();

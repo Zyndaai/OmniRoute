@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModalityBridgePage from "@/app/(dashboard)/dashboard/settings/modality-bridge/page";
@@ -42,11 +43,16 @@ vi.mock(
 
 const roots: Array<{ root: Root; el: HTMLDivElement }> = [];
 
+// The page reads its tab data from a route loader (mocked tabs ignore it); a data router
+// supplies `useLoaderData`, and `useSearchParams` is mocked above.
 function renderPage(): HTMLDivElement {
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
-  act(() => root.render(<ModalityBridgePage />));
+  const router = createMemoryRouter([{ id: "page", path: "/", Component: ModalityBridgePage }], {
+    hydrationData: { loaderData: { page: {} } },
+  });
+  act(() => root.render(<RouterProvider router={router} />));
   roots.push({ root, el });
   return el;
 }

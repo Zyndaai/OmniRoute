@@ -4,27 +4,45 @@ import { Field } from "@omniroute/ui-kit/field";
 import { Card, Textarea, Toggle } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 
-export default function SystemPromptTab() {
-  const [config, setConfig] = useState({ enabled: false, prefixPrompt: "", suffixPrompt: "" });
-  const [loading, setLoading] = useState(true);
+interface SystemPromptConfig {
+  enabled: boolean;
+  prefixPrompt: string;
+  suffixPrompt: string;
+}
+
+function normalizeConfig(data: Partial<SystemPromptConfig> | null | undefined): SystemPromptConfig {
+  return {
+    enabled: data?.enabled ?? false,
+    prefixPrompt: data?.prefixPrompt ?? "",
+    suffixPrompt: data?.suffixPrompt ?? "",
+  };
+}
+
+/** `initialConfig` is the route loader's read of `/api/settings/system-prompt`; without it the tab fetches on mount. */
+export default function SystemPromptTab({
+  initialConfig,
+}: {
+  initialConfig?: Partial<SystemPromptConfig>;
+} = {}) {
+  const [config, setConfig] = useState<SystemPromptConfig>(() => normalizeConfig(initialConfig));
+  const [loading, setLoading] = useState(!initialConfig);
   const [status, setStatus] = useState("");
   const [debounceTimer, setDebounceTimer] = useState(null);
   const configRef = useRef(config);
   const t = useTranslations("settings");
 
   useEffect(() => {
+    if (initialConfig) return;
     fetch("/api/settings/system-prompt")
       .then((res) => res.json())
       .then((data) => {
-        setConfig({
-          enabled: data?.enabled ?? false,
-          prefixPrompt: data?.prefixPrompt ?? "",
-          suffixPrompt: data?.suffixPrompt ?? "",
-        });
+        const loaded = normalizeConfig(data);
+        configRef.current = loaded;
+        setConfig(loaded);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [initialConfig]);
 
   const save = async (updates) => {
     const newConfig = { ...configRef.current, ...updates };

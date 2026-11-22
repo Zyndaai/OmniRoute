@@ -2,6 +2,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -71,6 +72,8 @@ const cleanupCallbacks: Array<() => void> = [];
 
 async function renderClient() {
   const { default: CooldownManagerClient } = await import(CLIENT_PATH);
+  const { toCooldownRules } =
+    await import("@/app/(dashboard)/dashboard/resilience/cooldowns/components/useCooldownData");
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -78,8 +81,14 @@ async function renderClient() {
     root.unmount();
     container.remove();
   });
+  // The page reads connections + rules in its route loader and passes them in; the client needs
+  // a router for `useRevalidator`.
+  const loaded = { connections: CONNECTIONS, rules: toCooldownRules(SETTINGS), failed: false };
+  const Stub = createRoutesStub([
+    { path: "/", Component: () => React.createElement(CooldownManagerClient, { loaded }) },
+  ]);
   await act(async () => {
-    root.render(React.createElement(CooldownManagerClient));
+    root.render(React.createElement(Stub, { initialEntries: ["/"] }));
   });
   await act(async () => {
     await Promise.resolve();

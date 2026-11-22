@@ -250,21 +250,56 @@ export interface UseProviderConnectionsReturn {
   PAGE_SIZE: number;
 }
 
+/**
+ * The connections and compatible node the route loader read for first paint. When the page
+ * passes them (with `revalidate`), the hook seeds its state from them, resets to each new
+ * result, and re-reads through the loader after a write. Without them it fetches by itself.
+ */
+export interface ProviderConnectionsInitialData {
+  /** `null` when the connections read failed: keep what is shown. */
+  connections: ConnectionRowConnection[] | null;
+  node: any;
+  /** `false` when the nodes read failed: keep the node that is shown. */
+  nodeResolved: boolean;
+}
+
+export interface UseProviderConnectionsOptions {
+  initial?: ProviderConnectionsInitialData;
+  revalidate?: () => Promise<unknown>;
+}
+
 export function useProviderConnections(
   providerId: string,
   isCompatible: boolean,
-  _isSearchProvider: boolean
+  _isSearchProvider: boolean,
+  options: UseProviderConnectionsOptions = {}
 ): UseProviderConnectionsReturn {
+  const { initial, revalidate } = options;
   const t = useTranslations("providers");
   const notify = useNotificationStore();
 
   const isCcCompatible = isClaudeCodeCompatibleProvider(providerId);
 
   // ── core state ──────────────────────────────────────────────────────────
-  const [connections, setConnections] = useState<ConnectionRowConnection[]>([]);
+  const [connections, setConnections] = useState<ConnectionRowConnection[]>(
+    initial?.connections ?? []
+  );
   const handleToggleQuotaVisibility = useProviderQuotaVisibility(setConnections, notify, t);
-  const [providerNode, setProviderNode] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [providerNode, setProviderNode] = useState<any>(
+    initial?.nodeResolved ? initial.node : null
+  );
+  const [loading, setLoading] = useState(!initial);
+  // Reset the local copy (optimistic edits) to every new loader result.
+  const [shownInitial, setShownInitial] = useState(initial);
+  if (initial !== shownInitial) {
+    setShownInitial(initial);
+    if (initial) {
+      if (initial.connections) setConnections(initial.connections);
+      if (initial.nodeResolved) setProviderNode(initial.node);
+      setLoading(false);
+    }
+  }
+  const hasInitial = Boolean(initial);
 
   // ── test state ──────────────────────────────────────────────────────────
   const [retestingId, setRetestingId] = useState<string | null>(null);
@@ -349,13 +384,18 @@ export function useProviderConnections(
   }, []);
 
   const fetchConnections = useCallback(async () => {
+    if (revalidate) {
+      // The route loader re-reads connections and node; the keyed copy above applies them.
+      await revalidate();
+      return;
+    }
     const result = await loadProviderConnectionsData(providerId, isCompatible);
     if (result) {
       if (result.connections) setConnections(result.connections);
       if (result.nodeResolved) setProviderNode(result.node);
     }
     setLoading(false);
-  }, [providerId, isCompatible]);
+  }, [providerId, isCompatible, revalidate]);
 
   // ── effects ──────────────────────────────────────────────────────────────
   // The async work is defined INSIDE each effect (a component-scope loader
@@ -373,7 +413,8 @@ export function useProviderConnections(
       }
       setLoading(false);
     };
-    void run();
+    // The route loader already supplied the connections and node.
+    if (!hasInitial) void run();
     const runProxyConfig = async () => {
       const result = await loadProxyConfigData();
       if (!active) return;
@@ -383,7 +424,7 @@ export function useProviderConnections(
     return () => {
       active = false;
     };
-  }, [providerId, isCompatible]);
+  }, [providerId, isCompatible, hasInitial]);
 
   // Per-connection proxy (handles registry assignments)
   useEffect(() => {

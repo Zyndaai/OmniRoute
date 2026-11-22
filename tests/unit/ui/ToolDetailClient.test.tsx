@@ -158,14 +158,26 @@ const { default: ToolDetailClient } =
 
 const containers: HTMLElement[] = [];
 
-function renderDetail(toolId: string, category: "code" | "agent"): HTMLElement {
+function renderDetail(
+  toolId: string,
+  category: "code" | "agent",
+  loaded: { connections?: any[]; apiKeys?: any[]; cloudEnabled?: boolean } = {}
+): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
   containers.push(container);
 
   const root = createRoot(container);
   act(() => {
-    root.render(<ToolDetailClient toolId={toolId} category={category} />);
+    root.render(
+      <ToolDetailClient
+        toolId={toolId}
+        category={category}
+        connections={loaded.connections ?? []}
+        apiKeys={loaded.apiKeys ?? []}
+        cloudEnabled={loaded.cloudEnabled ?? false}
+      />
+    );
   });
   return container;
 }
@@ -212,32 +224,18 @@ describe("ToolDetailClient", () => {
   });
 
   it("keeps Apply available for an active dynamic compatible provider", async () => {
-    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            connections: [
-              {
-                provider: "openai-compatible-chat-node-123",
-                name: "Kimi gateway",
-                isActive: true,
-                testStatus: "active",
-                defaultModel: "Kimi-K3",
-                providerSpecificData: { prefix: "kimi-gateway" },
-              },
-            ],
-          }),
-        };
-      }
-      return {
-        ok: true,
-        json: async () => ({ keys: [], data: [], cloudEnabled: false }),
-      };
+    const container = renderDetail("claude", "code", {
+      connections: [
+        {
+          provider: "openai-compatible-chat-node-123",
+          name: "Kimi gateway",
+          isActive: true,
+          testStatus: "active",
+          defaultModel: "Kimi-K3",
+          providerSpecificData: { prefix: "kimi-gateway" },
+        },
+      ],
     });
-
-    const container = renderDetail("claude", "code");
     await act(async () => {});
 
     const card = container.querySelector("[data-testid='ClaudeToolCard']");
@@ -256,21 +254,6 @@ describe("ToolDetailClient", () => {
   it("accepts compatible-provider models published under the connection prefix", async () => {
     mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/providers") {
-        return {
-          ok: true,
-          json: async () => ({
-            connections: [
-              {
-                provider: "anthropic-compatible-node-456",
-                name: "Claude gateway",
-                isActive: true,
-                providerSpecificData: { prefix: "claude-gateway" },
-              },
-            ],
-          }),
-        };
-      }
       if (url === "/v1/models") {
         return {
           ok: true,
@@ -283,7 +266,16 @@ describe("ToolDetailClient", () => {
       };
     });
 
-    const container = renderDetail("claude", "code");
+    const container = renderDetail("claude", "code", {
+      connections: [
+        {
+          provider: "anthropic-compatible-node-456",
+          name: "Claude gateway",
+          isActive: true,
+          providerSpecificData: { prefix: "claude-gateway" },
+        },
+      ],
+    });
     await act(async () => {});
 
     const card = container.querySelector("[data-testid='ClaudeToolCard']");

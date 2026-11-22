@@ -50,24 +50,24 @@ test("AuditLogTab.tsx no longer exists (deleted by F4)", () => {
   assert.ok(!exists, "AuditLogTab.tsx must have been deleted");
 });
 
-// Also confirm ActivityFeedClient exists
-test("activity/ActivityFeedClient.tsx exists", () => {
-  const CLIENT_PATH = resolve(
+// Also confirm the activity route reads the audit log (its loader) and renders ActivityFeedClient
+test("activity/page.tsx loads the audit log and renders ActivityFeedClient", () => {
+  const dir = resolve(
     import.meta.dirname ?? new URL(".", import.meta.url).pathname,
-    "../../../src/app/(dashboard)/dashboard/activity/ActivityFeedClient.tsx"
+    "../../../src/app/(dashboard)/dashboard/activity"
   );
   let src: string;
   try {
-    src = readFileSync(CLIENT_PATH, "utf-8");
+    readFileSync(resolve(dir, "ActivityFeedClient.tsx"), "utf-8");
+    src = readFileSync(resolve(dir, "page.tsx"), "utf-8");
   } catch {
-    assert.fail("ActivityFeedClient.tsx does not exist");
+    assert.fail("activity/page.tsx or ActivityFeedClient.tsx does not exist");
     return;
   }
-  assert.ok(src.includes("/api/compliance/audit-log"), "Client must fetch from audit-log endpoint");
-  // The client sets level: "high" in URLSearchParams (produces level=high in the query string)
+  assert.ok(src.includes("/api/compliance/audit-log"), "Loader must read the audit-log endpoint");
+  // The loader sets level: "high" in the query (produces level=high in the query string)
   assert.ok(
     src.includes('level: "high"') || src.includes("level=high"),
-    "Client must request level=high"
+    "Loader must request level=high"
   );
 });
-

@@ -3,12 +3,13 @@ import EmptyState from "@/shared/components/EmptyState";
 import { useNotificationStore } from "@/store/notificationStore";
 import CooldownConnectionsCard from "./CooldownConnectionsCard";
 import CooldownRulesCard from "./CooldownRulesCard";
-import { useCooldownData, type CooldownRules } from "./useCooldownData";
+import { useCooldownData, type CooldownLoad, type CooldownRules } from "./useCooldownData";
 
-export default function CooldownManagerClient() {
+export default function CooldownManagerClient({ loaded }: { loaded: CooldownLoad }) {
   const t = useTranslations("resilienceCooldowns");
   const notify = useNotificationStore();
-  const { connections, rules, loadError, refresh, clearCooldowns, saveRules } = useCooldownData();
+  const { connections, rules, loadError, refresh, clearCooldowns, saveRules } =
+    useCooldownData(loaded);
 
   const handleClear = async (request: Parameters<typeof clearCooldowns>[0]) => {
     try {

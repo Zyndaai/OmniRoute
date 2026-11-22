@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Card from "@/shared/components/Card";
@@ -10,7 +11,7 @@ import { useNotificationStore } from "@/store/notificationStore";
 import { useDisplayBaseUrl } from "@/shared/hooks";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 
-interface RelayToken {
+export interface RelayToken {
   id: string;
   name: string;
   tokenPrefix: string;
@@ -24,35 +25,19 @@ interface RelayToken {
   lastUsedAt: number | null;
 }
 
-export default function RelayProxyClient() {
+export default function RelayProxyClient({ tokens }: { tokens: RelayToken[] }) {
   const t = useTranslations("relay");
   const displayBaseUrl = useDisplayBaseUrl();
   const [confirm, confirmDialog] = useConfirmDialog();
-  const [tokens, setTokens] = useState<RelayToken[]>([]);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
   const [showCreate, setShowCreate] = useState(false);
   const [newTokenData, setNewTokenData] = useState<{ rawToken: string; name: string } | null>(null);
   const [form, setForm] = useState({ name: "", description: "", maxRpm: "60", maxRpd: "10000" });
   const addNotification = useNotificationStore((s) => s.addNotification);
 
   const fetchTokens = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/relay/tokens");
-      const data = await res.json();
-      setTokens(Array.isArray(data) ? data : []);
-    } catch {
-      setTokens([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await fetchTokens();
-    })();
-  }, [fetchTokens]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   const createToken = async () => {
     if (!form.name.trim()) return;
@@ -203,9 +188,7 @@ export default function RelayProxyClient() {
           <h2 className="text-sm font-semibold mb-3">
             {t("tokenCount", { count: tokens.length })}
           </h2>
-          {loading ? (
-            <p className="text-sm text-text-muted">{t("loading")}</p>
-          ) : tokens.length === 0 ? (
+          {tokens.length === 0 ? (
             <EmptyState icon="key" title={t("empty")} />
           ) : (
             <div className="space-y-2">

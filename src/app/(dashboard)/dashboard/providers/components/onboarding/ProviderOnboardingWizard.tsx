@@ -303,7 +303,12 @@ function ResultSummary({
   );
 }
 
-export default function ProviderOnboardingWizard() {
+export default function ProviderOnboardingWizard({
+  initialCcCompatibleProviderEnabled,
+}: {
+  /** Read by the route loader; when absent the wizard fetches it itself. */
+  initialCcCompatibleProviderEnabled?: boolean;
+} = {}) {
   const navigate = useNavigate();
   const t = useTranslations("providers");
   const text = (key: string, fallback: string, values?: Record<string, unknown>) =>
@@ -332,13 +337,16 @@ export default function ProviderOnboardingWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [knownOAuthConnectionIds, setKnownOAuthConnectionIds] = useState<Set<string>>(new Set());
-  const [ccCompatibleProviderEnabled, setCcCompatibleProviderEnabled] = useState(false);
+  const [ccCompatibleProviderEnabled, setCcCompatibleProviderEnabled] = useState(
+    initialCcCompatibleProviderEnabled === true
+  );
 
   const providerOptions = kind === "oauth" ? oauthOptions : apiKeyOptions;
   const filteredOptions = filterWizardProviderOptions(providerOptions, query);
   const currentStepIndex = ["type", "provider", "credentials", "oauth", "result"].indexOf(step);
 
   useEffect(() => {
+    if (initialCcCompatibleProviderEnabled !== undefined) return;
     let cancelled = false;
     fetchOnboardingProviderNodes()
       .then((data) => {
@@ -366,7 +374,7 @@ export default function ProviderOnboardingWizard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialCcCompatibleProviderEnabled]);
 
   const resetProviderSelection = (nextKind: WizardKind) => {
     setKind(nextKind);
@@ -531,10 +539,7 @@ export default function ProviderOnboardingWizard() {
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <Link
-            to="/dashboard/providers"
-            className="text-sm text-text-muted hover:text-text-main"
-          >
+          <Link to="/dashboard/providers" className="text-sm text-text-muted hover:text-text-main">
             ← {text("backToProviders", "Back to providers")}
           </Link>
           <h1 className="mt-2 text-3xl font-bold text-text-main">

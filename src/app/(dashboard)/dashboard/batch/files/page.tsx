@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useTranslations } from "use-intl";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import Button from "@/shared/components/Button";
 import FilesListTab from "../FilesListTab";
 import FilesConceptCard from "../components/FilesConceptCard";
@@ -8,42 +10,31 @@ import { mapFileApiToRecord, mapBatchApiToRecord } from "../batch-utils";
 import type { FileRecord } from "@/lib/db/files";
 import type { BatchRecord } from "@/lib/db/batches";
 
+/** Both reads are optional, as before: a failing one leaves its list empty. */
+export async function loader() {
+  const [filesBody, batchesBody] = await Promise.all([
+    apiJsonOrNull<{ data?: unknown[]; total_count?: number }>("/api/v1/files", {
+      query: { limit: 20 },
+    }),
+    apiJsonOrNull<{ data?: unknown[] }>("/api/v1/batches", { query: { limit: 20 } }),
+  ]);
+  return {
+    files: (filesBody?.data || []).map(mapFileApiToRecord) as FileRecord[],
+    filesTotal: filesBody?.total_count || 0,
+    batches: (batchesBody?.data || []).map(mapBatchApiToRecord) as BatchRecord[],
+  };
+}
+
 export default function BatchFilesPage() {
   const t = useTranslations("common");
-  const [files, setFiles] = useState<FileRecord[]>([]);
-  const [filesTotal, setFilesTotal] = useState(0);
-  const [batches, setBatches] = useState<BatchRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const { files, filesTotal, batches } = useLoaderData<typeof loader>();
+  const loading = revalidator.state !== "idle";
   const [showUpload, setShowUpload] = useState(false);
 
   const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [filesRes, batchesRes] = await Promise.all([
-        fetch("/api/v1/files?limit=20"),
-        fetch("/api/v1/batches?limit=20"),
-      ]);
-      if (filesRes.ok) {
-        const data = await filesRes.json();
-        setFiles((data.data || []).map(mapFileApiToRecord));
-        setFilesTotal(data.total_count || 0);
-      }
-      if (batchesRes.ok) {
-        const data = await batchesRes.json();
-        setBatches((data.data || []).map(mapBatchApiToRecord));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await fetchAll();
-    })();
-  }, [fetchAll]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   return (
     <div className="flex flex-col gap-6">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import React from "react";
 import { useTranslations } from "use-intl";
 import { PROVIDER_COLORS as CHART_SERIES_COLORS } from "@/shared/components/analytics/chartColors";
@@ -588,25 +588,13 @@ export function FreeBudgetView({
 // Fetch + interactivity wrapper (client component)
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function FreeBudgetCard() {
+export default function FreeBudgetCard({ data }: { data: FreeBudgetData | null }) {
   const t = useTranslations("freeBudget");
-  const [data, setData] = useState<FreeBudgetData | null>(null);
   const [sort, setSort] = useState<FreeBudgetSort>("tokens");
   const [hideAvoid, setHideAvoid] = useState(false);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [keylessOnly, setKeylessOnly] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/free-tier/summary")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((json) => {
-        if (json) setData(json as FreeBudgetData);
-      })
-      .catch(() => {
-        /* best-effort */
-      });
-  }, []);
 
   const providers = useMemo(() => {
     if (!data) return [];

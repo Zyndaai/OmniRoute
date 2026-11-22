@@ -1,14 +1,13 @@
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
-import { CardSkeleton } from "@/shared/components/Loading";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { getProviderDisplayName } from "@/lib/display/names";
@@ -676,100 +675,45 @@ async function loadAccessEditorModels({
   }
 }
 
-async function loadAccessConnections(
-  cancelled: () => boolean,
-  setAllConnections: React.Dispatch<React.SetStateAction<ProviderConnection[]>>
-) {
-  try {
-    const res = await fetch("/api/providers");
-    if (res.ok && !cancelled()) {
-      const data = await res.json();
-      setAllConnections(data.connections || []);
-    }
-  } catch (err) {
-    console.error("Error fetching connections:", err);
+/**
+ * The key, combos and connections come from the route loader (`./page`). The model list stays
+ * client-side: it is read from `/v1/models` (not an `/api` route) with a fallback chain.
+ */
+function useAccessEditorData() {
+  const loaded = useLoaderData<typeof import("./page").loader>();
+  const t = useTranslations("apiManager");
+  // `setApiKey` keeps what was just saved on screen; every new loader result replaces it.
+  const [apiKey, setApiKey] = useState<ApiKeyAccessData | null>(
+    loaded.apiKey as ApiKeyAccessData | null
+  );
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    setApiKey(loaded.apiKey as ApiKeyAccessData | null);
   }
-}
-
-function useAccessEditorData(apiKeyId: string, t: ReturnType<typeof useTranslations>) {
-  // Remote data state
-  const [apiKey, setApiKey] = useState<ApiKeyAccessData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const notFound = loaded.keyStatus === 404;
+  const fetchError = !notFound && !loaded.apiKey ? t("failedLoadKey") : null;
+  const allCombos = loaded.combos as ComboOption[];
+  const allConnections = loaded.connections as ProviderConnection[];
 
   const [allModels, setAllModels] = useState<Model[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [allCombos, setAllCombos] = useState<ComboOption[]>([]);
-  const [allConnections, setAllConnections] = useState<ProviderConnection[]>([]);
 
-  // Fetch initial data
   useEffect(() => {
     let cancelled = false;
-
-    async function loadKey() {
-      setLoading(true);
-      setFetchError(null);
-      setNotFound(false);
-
-      try {
-        const keyRes = await fetch(`/api/keys/${encodeURIComponent(apiKeyId)}`);
-        if (cancelled) return;
-
-        if (keyRes.status === 404) {
-          setNotFound(true);
-          return;
-        }
-
-        if (!keyRes.ok) {
-          setFetchError(t("failedLoadKey"));
-          return;
-        }
-
-        const keyData = await keyRes.json();
-        if (cancelled) return;
-        setApiKey(keyData);
-      } catch (err) {
-        if (cancelled) return;
-        console.error("Error fetching API key:", err);
-        setFetchError(t("failedLoadKey"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    const fetchModels = () =>
-      loadAccessEditorModels({ cancelled: () => cancelled, setModelsLoaded, setAllModels });
-    async function fetchCombos() {
-      try {
-        const res = await fetch("/api/combos");
-        if (res.ok && !cancelled) {
-          const data = await res.json();
-          const combos = Array.isArray(data.combos) ? data.combos : [];
-          setAllCombos(
-            combos.filter((c: ComboOption) => typeof c?.name === "string" && c.name.trim())
-          );
-        }
-      } catch (err) {
-        console.error("Error fetching combos:", err);
-      }
-    }
-
-    const fetchConnections = () => loadAccessConnections(() => cancelled, setAllConnections);
-
-    // The key and the model/combo/connection lists load in parallel (same as the old page);
-    // only the key gates the loading state.
-    void Promise.all([loadKey(), fetchModels(), fetchCombos(), fetchConnections()]);
-
+    void loadAccessEditorModels({
+      cancelled: () => cancelled,
+      setModelsLoaded,
+      setAllModels,
+    });
     return () => {
       cancelled = true;
     };
-  }, [apiKeyId, t]);
+  }, []);
 
   return {
     apiKey,
     setApiKey,
-    loading,
     notFound,
     fetchError,
     allModels,
@@ -777,17 +721,6 @@ function useAccessEditorData(apiKeyId: string, t: ReturnType<typeof useTranslati
     allCombos,
     allConnections,
   };
-}
-
-function AccessEditorLoading() {
-  const tc = useTranslations("common");
-  return (
-    <div className="flex flex-col gap-6" role="status" aria-live="polite" aria-busy="true">
-      <span className="sr-only">{tc("loading")}</span>
-      <CardSkeleton />
-      <CardSkeleton />
-    </div>
-  );
 }
 function useAccessEditorTab(tabParam: AccessEditorTab | null) {
   // Deep-linked tab
@@ -827,7 +760,8 @@ interface ApiKeyAccessEditorClientProps {
   apiKeyId: string;
 }
 
-export default function ApiKeyAccessEditorClient({ apiKeyId }: ApiKeyAccessEditorClientProps) {
+// The key itself comes from the route loader, which reads it by the same id.
+export default function ApiKeyAccessEditorClient(_props: ApiKeyAccessEditorClientProps) {
   const t = useTranslations("apiManager");
   const [searchParams] = useSearchParams();
 
@@ -837,15 +771,13 @@ export default function ApiKeyAccessEditorClient({ apiKeyId }: ApiKeyAccessEdito
   const {
     apiKey,
     setApiKey,
-    loading,
     notFound,
     fetchError,
     allModels,
     modelsLoaded,
     allCombos,
     allConnections,
-  } = useAccessEditorData(apiKeyId, t);
-  if (loading) return <AccessEditorLoading />;
+  } = useAccessEditorData();
   // Not Found Gate
   if (notFound) {
     return (

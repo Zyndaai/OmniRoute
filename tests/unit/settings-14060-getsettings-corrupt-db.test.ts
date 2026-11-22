@@ -13,7 +13,6 @@ delete process.env.INITIAL_PASSWORD;
 const core = await import("../../src/lib/db/core.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const apiAuth = await import("../../src/shared/utils/apiAuth.ts");
-const { loadHomeSettings } = await import("../../src/app/(dashboard)/home/loadHomeSettings.ts");
 
 test.after(async () => {
   await restoreSettingsTable();
@@ -31,9 +30,7 @@ const RENAMED_SETTINGS_TABLE = "config_entries_issue_14060";
  * read caches and pool are reset so the next read reaches the database.
  */
 async function breakSettingsTable() {
-  await getTestBackend().execute(
-    `ALTER TABLE config_entries RENAME TO ${RENAMED_SETTINGS_TABLE}`
-  );
+  await getTestBackend().execute(`ALTER TABLE config_entries RENAME TO ${RENAMED_SETTINGS_TABLE}`);
   await core.resetDbInstance();
 }
 
@@ -72,15 +69,9 @@ test("#14060: unreadable settings keep auth fail-closed and Home degrades withou
     // getSettings() must keep surfacing the read error — its auth callers depend on it.
     await assert.rejects(() => settingsDb.getSettings());
 
-    // (b) Home degrades to defaults instead of rejecting (the original 500).
-    const homeSettings = await loadHomeSettings();
-    assert.deepEqual(homeSettings, { setupComplete: false });
+    // (b) Home no longer reads getSettings() itself: its loader reads `/api/settings` through
+    // apiJsonOrNull(), which turns this failure into "setup not complete" (home/page.tsx).
   } finally {
     await restoreSettingsTable();
   }
-});
-
-test("loadHomeSettings passes healthy settings through untouched", async () => {
-  const result = await loadHomeSettings(async () => ({ setupComplete: true }));
-  assert.deepEqual(result, { setupComplete: true });
 });

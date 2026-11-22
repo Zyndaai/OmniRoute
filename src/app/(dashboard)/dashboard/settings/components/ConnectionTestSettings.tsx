@@ -9,14 +9,21 @@ import {
   CONNECTION_TEST_PROMPT_MAX_LENGTH,
 } from "@/shared/constants/connectionTest";
 
-export default function ConnectionTestSettings() {
+/** `initialPrompt` is the route loader's `connectionTestPrompt` setting (null when unset); without it the component fetches `/api/settings` on mount. */
+export default function ConnectionTestSettings({
+  initialPrompt,
+}: {
+  initialPrompt?: string | null;
+} = {}) {
   const t = useTranslations("connectionTest");
-  const [prompt, setPrompt] = useState(DEFAULT_CONNECTION_TEST_PROMPT);
-  const [loading, setLoading] = useState(true);
+  const hasInitial = initialPrompt !== undefined;
+  const [prompt, setPrompt] = useState(initialPrompt || DEFAULT_CONNECTION_TEST_PROMPT);
+  const [loading, setLoading] = useState(!hasInitial);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(false);
   useEffect(() => {
+    if (hasInitial) return;
     let cancelled = false;
     fetch("/api/settings")
       .then(async (response) => {
@@ -33,7 +40,7 @@ export default function ConnectionTestSettings() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasInitial]);
   async function save() {
     if (saving || loading || !prompt.trim()) return;
     setSaving(true);

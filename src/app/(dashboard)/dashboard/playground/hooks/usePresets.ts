@@ -27,8 +27,10 @@ export interface UsePresets extends UsePresetsState {
  * Hook for managing playground presets via REST API.
  * Wraps fetch calls to /api/playground/presets with local state cache.
  */
-export function usePresets(): UsePresets {
-  const [presets, setPresets] = useState<PlaygroundPresetListItem[]>([]);
+export function usePresets(initialPresets?: PlaygroundPresetListItem[]): UsePresets {
+  // `initialPresets` is the route loader's first-paint read; after a write the list is re-read
+  // by `list()` below.
+  const [presets, setPresets] = useState<PlaygroundPresetListItem[]>(initialPresets ?? []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

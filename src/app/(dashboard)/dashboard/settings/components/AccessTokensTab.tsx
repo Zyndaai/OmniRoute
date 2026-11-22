@@ -22,7 +22,7 @@ import {
   Modal,
 } from "@/shared/components";
 
-interface AccessTokenRow {
+export interface AccessTokenRow {
   id: string;
   name: string;
   scope: "read" | "write" | "admin";
@@ -46,7 +46,12 @@ async function fetchTokens(): Promise<AccessTokenRow[]> {
   return Array.isArray(data.tokens) ? data.tokens : [];
 }
 
-export default function AccessTokensTab() {
+export default function AccessTokensTab({
+  initialTokens,
+}: {
+  /** The tokens read by the route loader; without them the tab fetches `/api/cli/tokens`. */
+  initialTokens?: AccessTokenRow[] | null;
+} = {}) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
   const nameRef = useRef<HTMLInputElement>(null);
@@ -56,9 +61,19 @@ export default function AccessTokensTab() {
     write: t("accessTokensScopeWriteLabel"),
     admin: t("accessTokensScopeAdminLabel"),
   };
-  const [tokens, setTokens] = useState<AccessTokenRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tokens, setTokens] = useState<AccessTokenRow[]>(initialTokens ?? []);
+  const [loading, setLoading] = useState(!initialTokens);
   const [error, setError] = useState("");
+  // Keyed copy: a new loader result (compared by content) replaces the list.
+  const initialKey = initialTokens ? JSON.stringify(initialTokens) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialTokens) {
+      setTokens(initialTokens);
+      setLoading(false);
+    }
+  }
 
   const [name, setName] = useState("");
   const [scope, setScope] = useState("read");
@@ -83,6 +98,8 @@ export default function AccessTokensTab() {
   }, [t]);
 
   useEffect(() => {
+    // The route loader already supplied the tokens.
+    if (initialTokens) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -97,6 +114,7 @@ export default function AccessTokensTab() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialTokens only gates the mount fetch
   }, [t]);
 
   const createToken = async () => {

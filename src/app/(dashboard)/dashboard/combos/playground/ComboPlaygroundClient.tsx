@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Slider } from "@omniroute/ui-kit/slider";
@@ -35,11 +35,10 @@ interface SimulateResponse {
   errors: string[];
 }
 
-interface Combo {
+export interface Combo {
   id: string;
   name: string;
   strategy: string;
-  targets: string;
   isActive: boolean;
 }
 
@@ -79,25 +78,13 @@ function StatusTag({ status }: { status: TargetSimulation["status"] }) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function ComboPlaygroundClient() {
+/** `combos` comes from the route loader (the list is read once; the page only simulates). */
+export default function ComboPlaygroundClient({ combos }: { combos: Combo[] }) {
   const t = useTranslations("combos");
-  const [combos, setCombos] = useState<Combo[]>([]);
-  const [selectedComboId, setSelectedComboId] = useState("");
+  const [selectedComboId, setSelectedComboId] = useState(combos[0]?.id ?? "");
   const [promptTokens, setPromptTokens] = useState(500);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SimulateResponse | null>(null);
-
-  // Fetch combos on mount
-  useEffect(() => {
-    fetch("/api/combos")
-      .then((r) => r.json())
-      .then((data) => {
-        const list: Combo[] = Array.isArray(data) ? data : (data?.combos ?? data?.data ?? []);
-        setCombos(list);
-        if (list.length > 0) setSelectedComboId(list[0].id);
-      })
-      .catch(() => {});
-  }, []);
 
   const simulate = useCallback(async () => {
     if (!selectedComboId) return;

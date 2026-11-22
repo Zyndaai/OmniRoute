@@ -111,16 +111,38 @@ async function fetchInventory(): Promise<InventoryFetchResult> {
   }
 }
 
-export default function AuthzSection() {
+export default function AuthzSection({
+  initialInventory,
+}: {
+  /** The `/api/settings/authz-inventory` body read by the route loader; without it the section fetches. */
+  initialInventory?: InventoryPayload | null;
+} = {}) {
   const t = useTranslations("settings");
-  const [inventory, setInventory] = useState<InventoryPayload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [inventory, setInventory] = useState<InventoryPayload | null>(initialInventory ?? null);
+  const [loading, setLoading] = useState(!initialInventory);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Draft state — only persisted on Save (security-impacting fields require
   // a password re-prompt before the PATCH is fired).
-  const [draftEnabled, setDraftEnabled] = useState<boolean>(true);
-  const [draftPrefixes, setDraftPrefixes] = useState<string[]>([]);
+  const [draftEnabled, setDraftEnabled] = useState<boolean>(
+    initialInventory ? initialInventory.bypassEnabled : true
+  );
+  const [draftPrefixes, setDraftPrefixes] = useState<string[]>(
+    initialInventory ? [...initialInventory.bypassPrefixes] : []
+  );
+  // Keyed copy: a new loader result (compared by content) resets the drafts to the saved policy.
+  const initialKey = initialInventory ? JSON.stringify(initialInventory) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialInventory) {
+      setInventory(initialInventory);
+      setDraftEnabled(initialInventory.bypassEnabled);
+      setDraftPrefixes([...initialInventory.bypassPrefixes]);
+      setLoadError(null);
+      setLoading(false);
+    }
+  }
   const [newPrefixInput, setNewPrefixInput] = useState("");
 
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -151,6 +173,8 @@ export default function AuthzSection() {
   }, [applyInventoryResult]);
 
   useEffect(() => {
+    // The route loader already supplied the inventory.
+    if (initialInventory) return;
     let cancelled = false;
     void (async () => {
       const result = await fetchInventory();
@@ -159,6 +183,7 @@ export default function AuthzSection() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialInventory only gates the mount fetch
   }, [applyInventoryResult]);
 
   const dirty = useMemo(() => {

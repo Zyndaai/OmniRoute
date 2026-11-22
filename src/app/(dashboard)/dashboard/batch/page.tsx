@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "use-intl";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Icon from "@/shared/components/Icon";
@@ -27,18 +29,74 @@ const PROVIDER_NAMES: Record<string, string> = {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+interface BatchPageData {
+  batches: BatchRecord[];
+  files: FileRecord[];
+  batchesTotal: number;
+  hasMore: boolean;
+  lastId: string | null;
+  providers: Array<{ id: string; name: string; models: string[] }>;
+}
+
+/**
+ * First page of batches and files, and the batch-capable providers (D16: /api/providers
+ * intersected with BATCH_SUPPORTED, hardcoded list when none is connected or the read fails).
+ * Every read is optional, as before: a failing one leaves its list empty.
+ */
+export async function loader(): Promise<BatchPageData> {
+  const [batchesBody, filesBody, providersBody] = await Promise.all([
+    apiJsonOrNull<{ data?: unknown[]; has_more?: boolean; last_id?: string; total_count?: number }>(
+      "/api/v1/batches",
+      { query: { limit: 20 } }
+    ),
+    apiJsonOrNull<{ data?: unknown[] }>("/api/v1/files", { query: { limit: 20 } }),
+    apiJsonOrNull<{ connections?: Array<{ provider: string }> }>("/api/providers"),
+  ]);
+  const connected = new Set(
+    (providersBody?.connections ?? [])
+      .filter((c) => BATCH_SUPPORTED.includes(c.provider))
+      .map((c) => c.provider)
+  );
+  const providerIds = connected.size > 0 ? Array.from(connected) : BATCH_SUPPORTED;
+  return {
+    batches: (batchesBody?.data || []).map(mapBatchApiToRecord),
+    files: (filesBody?.data || []).map(mapFileApiToRecord),
+    batchesTotal: batchesBody?.total_count || 0,
+    hasMore: Boolean(batchesBody?.has_more),
+    lastId: batchesBody?.last_id || null,
+    providers: providerIds.map((id) => ({
+      id,
+      name: PROVIDER_NAMES[id] ?? id,
+      models: MODEL_DEFAULTS[id] ?? [],
+    })),
+  };
+}
+
 export default function BatchPage() {
   const t = useTranslations("common");
-  const [batches, setBatches] = useState<BatchRecord[]>([]);
-  const [files, setFiles] = useState<FileRecord[]>([]);
-  const [batchesTotal, setBatchesTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const loaded = useLoaderData<typeof loader>();
+  const providers = loaded.providers;
+  // Background polling and "load more" grow these lists locally; every new loader result
+  // (refresh button, batch created) replaces them.
+  const [batches, setBatches] = useState<BatchRecord[]>(loaded.batches);
+  const [files, setFiles] = useState<FileRecord[]>(loaded.files);
+  const [batchesTotal, setBatchesTotal] = useState(loaded.batchesTotal);
+  const [batchesHasMore, setBatchesHasMore] = useState(loaded.hasMore);
+  const [batchesLastId, setBatchesLastId] = useState<string | null>(loaded.lastId);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    setBatches(loaded.batches);
+    setFiles(loaded.files);
+    setBatchesTotal(loaded.batchesTotal);
+    setBatchesHasMore(loaded.hasMore);
+    setBatchesLastId(loaded.lastId);
+  }
+  const loading = revalidator.state !== "idle";
   const [loadingMore, setLoadingMore] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
-  const [providers, setProviders] = useState<Array<{ id: string; name: string; models: string[] }>>(
-    []
-  );
 
   // Auto-dismiss "batch created" banner after 5s (A-6)
   useEffect(() => {
@@ -47,17 +105,16 @@ export default function BatchPage() {
     return () => clearTimeout(id);
   }, [createdBanner]);
 
-  const [batchesHasMore, setBatchesHasMore] = useState(false);
-  const [batchesLastId, setBatchesLastId] = useState<string | null>(null);
   const bottomRefBatches = useRef<HTMLDivElement>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isFetchingRef = useRef(false);
   const fetchDataRef = useRef<typeof fetchData | null>(null);
 
+  // Background refresh (merge into the lists) and "load more" (append). The first page and the
+  // manual refresh come from the route loader.
   const fetchData = useCallback(
-    async (isBackground = false, opts: { appendBatches?: boolean; limit?: number } = {}) => {
+    async (isBackground = true, opts: { appendBatches?: boolean; limit?: number } = {}) => {
       if (isFetchingRef.current) return;
-      if (!isBackground) setLoading(true);
       if (opts.appendBatches) setLoadingMore(true);
       isFetchingRef.current = true;
       const limit = opts.limit ?? 20;
@@ -117,7 +174,6 @@ export default function BatchPage() {
         console.error("[BatchPage] fetchData threw", error);
       } finally {
         isFetchingRef.current = false;
-        if (!isBackground) setLoading(false);
         if (opts.appendBatches) setLoadingMore(false);
       }
     },
@@ -135,49 +191,7 @@ export default function BatchPage() {
     loadingMoreRef.current = loadingMore;
   }, [loadingMore]);
 
-  // Fetch available batch-capable providers on mount (D16).
-  // Intersects /api/providers with BATCH_SUPPORTED list.
-  // Falls back to hardcoded list if route errors or returns empty.
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/providers");
-        if (res.ok) {
-          const data = (await res.json()) as {
-            connections: Array<{ provider: string; is_active?: boolean }>;
-          };
-          const connected = new Set(
-            (data.connections ?? [])
-              .filter((c) => BATCH_SUPPORTED.includes(c.provider))
-              .map((c) => c.provider)
-          );
-          if (connected.size > 0) {
-            setProviders(
-              Array.from(connected).map((id) => ({
-                id,
-                name: PROVIDER_NAMES[id] ?? id,
-                models: MODEL_DEFAULTS[id] ?? [],
-              }))
-            );
-            return;
-          }
-        }
-      } catch (e) {
-        console.error("[BatchPage] providers fetch error", e);
-      }
-      // Fallback: hardcoded list per D16
-      setProviders(
-        BATCH_SUPPORTED.map((id) => ({
-          id,
-          name: PROVIDER_NAMES[id] ?? id,
-          models: MODEL_DEFAULTS[id] ?? [],
-        }))
-      );
-    };
-    void load();
-  }, []);
-
-  // Initial fetch + 30s polling (D10). Pauses when tab is hidden.
+  // 30s polling (D10). Pauses when tab is hidden.
   useEffect(() => {
     const scheduleRefresh = () => {
       refreshTimeoutRef.current = setTimeout(async () => {
@@ -188,8 +202,6 @@ export default function BatchPage() {
       }, 30_000);
     };
 
-    // Initial fetch (with loading indicator)
-    fetchDataRef.current?.();
     // Schedule background refreshes
     scheduleRefresh();
 
@@ -304,7 +316,7 @@ export default function BatchPage() {
           <Button
             variant="outline"
             icon="refresh"
-            onClick={() => fetchData(false)}
+            onClick={() => void revalidator.revalidate()}
             disabled={loading}
           >
             {loading ? t("batchListRefreshing") : t("batchListRefresh")}
@@ -322,7 +334,7 @@ export default function BatchPage() {
           files={files}
           batchesTotal={batchesTotal}
           loading={loading}
-          onRefresh={() => fetchData(false)}
+          onRefresh={() => void revalidator.revalidate()}
         />
         {loadingMore && batchesCount > 0 && (
           <div className="text-center text-sm">{t("batchPageLoadingMore")}</div>
@@ -337,7 +349,7 @@ export default function BatchPage() {
           onCreated={(id) => {
             setShowWizard(false);
             setCreatedBanner(id);
-            void fetchData(false);
+            void revalidator.revalidate();
           }}
           availableProviders={providers}
         />

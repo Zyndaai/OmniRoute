@@ -663,15 +663,35 @@ function validateProviderTransformsConfig(value: unknown, t: any): string | null
   return null;
 }
 
-export default function RoutingTab() {
-  const [settings, setSettings] = useState<any>({
-    alwaysPreserveClientCache: "auto",
-    antigravitySignatureCacheMode: "enabled",
-    cliCompatProviders: [],
-    autoRoutingEnabled: true,
-    autoRoutingDefaultVariant: "lkgp",
-    systemTransforms: DEFAULT_SYSTEM_TRANSFORMS_CLIENT,
-  });
+export default function RoutingTab({
+  initialSettings,
+}: {
+  /**
+   * The `/api/settings` fields this tab reads, as loaded by the route; without them the tab
+   * fetches the settings itself.
+   */
+  initialSettings?: Record<string, unknown> | null;
+} = {}) {
+  const [settings, setSettings] = useState<any>(() =>
+    initialSettings
+      ? initialSettings
+      : {
+          alwaysPreserveClientCache: "auto",
+          antigravitySignatureCacheMode: "enabled",
+          cliCompatProviders: [],
+          autoRoutingEnabled: true,
+          autoRoutingDefaultVariant: "lkgp",
+          systemTransforms: DEFAULT_SYSTEM_TRANSFORMS_CLIENT,
+        }
+  );
+
+  // Keyed copy: a new loader result (compared by content) resets the local settings.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) setSettings(initialSettings);
+  }
   // Per-provider JSON draft + error state for the system-transforms editor.
   // Map keyed by provider id; values track the textarea content + last
   // validation error string (null when valid). Synced from settings via
@@ -685,7 +705,7 @@ export default function RoutingTab() {
   const [showJsonEditor, setShowJsonEditor] = useState<Record<string, boolean>>({});
   const [addOpKind, setAddOpKind] = useState<Record<string, TransformOpKind>>({});
   const [newProviderId, setNewProviderId] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSettings);
   const [lkgpCacheLoading, setLkgpCacheLoading] = useState(false);
   const [lkgpCacheStatus, setLkgpCacheStatus] = useState({ type: "", message: "" });
   const t = useTranslations("settings");
@@ -693,6 +713,8 @@ export default function RoutingTab() {
   const notify = useNotificationStore();
 
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     fetch("/api/settings")
       .then((res) => res.json())
       .then((data) => {
@@ -700,6 +722,7 @@ export default function RoutingTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   // Optimistic update: apply the patch to local state FIRST so the UI never

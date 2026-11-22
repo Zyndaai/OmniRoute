@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Link } from "react-router";
@@ -10,7 +10,9 @@ import { EXPECTED_CODE_COUNT } from "@/shared/schemas/cliCatalog";
 import { CliToolCard, CliConceptCard, CliComparisonCard } from "@/shared/components/cli";
 import { useToolBatchStatuses } from "@/shared/hooks/cli/useToolBatchStatuses";
 import type { CliCatalogEntry } from "@/shared/schemas/cliCatalog";
-import CliProfileAutoSyncToggles from "./components/CliProfileAutoSyncToggles";
+import CliProfileAutoSyncToggles, {
+  type ProfileSyncState,
+} from "./components/CliProfileAutoSyncToggles";
 import CliCompanionPanel from "./components/CliCompanionPanel";
 import type { CompanionTarget } from "@/shared/utils/cliCompanion";
 
@@ -33,25 +35,22 @@ if (CODE_TOOLS.length !== EXPECTED_CODE_COUNT) {
 type DetectionFilter = "all" | "installed" | "not_installed";
 type BaseUrlFilter = "all" | "full" | "partial";
 
-interface ProviderConnection {
-  isActive?: boolean;
-  [key: string]: unknown;
-}
-
-interface ProvidersResponse {
-  connections?: ProviderConnection[];
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface CliCodePageClientProps {
   machineId: string;
   companionTargets?: CompanionTarget[];
+  /** At least one active provider connection (from the route loader). */
+  hasActiveProviders: boolean;
+  /** Auto-sync feature flags (from the route loader). */
+  profileSync: ProfileSyncState;
 }
 
 export default function CliCodePageClient({
   machineId: _machineId,
   companionTargets = [],
+  hasActiveProviders,
+  profileSync,
 }: CliCodePageClientProps) {
   const t = useTranslations("cliCode");
   const tCommon = useTranslations("cliCommon");
@@ -60,31 +59,6 @@ export default function CliCodePageClient({
   const { statuses, loading, error, refetch } = useToolBatchStatuses();
 
   // ── Providers ───────────────────────────────────────────────────────────────
-  const [hasActiveProviders, setHasActiveProviders] = useState<boolean>(false);
-  const [providersLoading, setProvidersLoading] = useState<boolean>(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/providers")
-      .then<ProvidersResponse>((res) =>
-        res.ok ? res.json() : Promise.resolve({ connections: [] })
-      )
-      .then((data) => {
-        if (cancelled) return;
-        const active = (data.connections ?? []).filter((c) => c.isActive !== false);
-        setHasActiveProviders(active.length > 0);
-      })
-      .catch(() => {
-        if (!cancelled) setHasActiveProviders(false);
-      })
-      .finally(() => {
-        if (!cancelled) setProvidersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   // ── Filters ─────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState<string>("");
   const [detectionFilter, setDetectionFilter] = useState<DetectionFilter>("all");
@@ -130,7 +104,7 @@ export default function CliCodePageClient({
   }, [search, detectionFilter, baseUrlFilter, statuses]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
-  const isLoadingOverall = loading || providersLoading;
+  const isLoadingOverall = loading;
 
   return (
     <div className="flex flex-col gap-6">
@@ -157,7 +131,7 @@ export default function CliCodePageClient({
       {/* Comparison card */}
       <CliComparisonCard currentType="code" />
 
-      <CliProfileAutoSyncToggles />
+      <CliProfileAutoSyncToggles initial={profileSync} />
 
       <CliCompanionPanel
         targets={companionTargets}
@@ -204,7 +178,7 @@ export default function CliCodePageClient({
       </div>
 
       {/* Empty state — no active providers */}
-      {!providersLoading && !hasActiveProviders && (
+      {!hasActiveProviders && (
         <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 flex items-start gap-3">
           <Icon name="warning" className="text-warning flex-shrink-0" />
           <div className="flex-1 min-w-0">

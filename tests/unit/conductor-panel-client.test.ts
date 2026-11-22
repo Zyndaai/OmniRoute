@@ -10,10 +10,18 @@ const PAGE = "src/app/(dashboard)/dashboard/conductor/page.tsx";
 
 test("client: poll com setInterval + clearInterval; fala SÓ com /api/conductor (nunca com o hub)", () => {
   const src = fs.readFileSync(path.join(process.cwd(), CLIENT), "utf8");
-  assert.doesNotMatch(src, /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"/, "client code imports no server module");
+  assert.doesNotMatch(
+    src,
+    /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"/,
+    "client code imports no server module"
+  );
   assert.match(src, /setInterval\(/);
   assert.match(src, /clearInterval\(/);
-  assert.match(src, /\/api\/conductor\/fleet/);
+  // The fleet snapshot is read by the route loader (page.tsx) through the API; the client
+  // re-runs that loader on a timer and still talks to /api/conductor for task detail/cancel.
+  assert.match(src, /revalidat/);
+  assert.match(src, /\/api\/conductor\/tasks/);
+  assert.match(fs.readFileSync(path.join(process.cwd(), PAGE), "utf8"), /\/api\/conductor\/fleet/);
   assert.ok(!src.includes("CONDUCTOR_HUB"), "nenhuma env do hub no client");
   assert.ok(!src.includes(":7910"), "nenhum endereço de hub hardcoded no client");
 });
@@ -33,7 +41,12 @@ test("page: wrapper fino; título via loader + export meta (um só <title>)", ()
   assert.match(src, /export async function loader/);
   assert.doesNotMatch(src, /<title>/, "o título vem do meta, não de um <title> no componente");
   assert.match(src, /ConductorPageClient/);
-  assert.doesNotMatch(src, /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[^"]*|server-only)"/, "page.tsx não importa módulo de servidor");
+  // The API helper for loaders (`@/server/routing/dashboardApi.server`) is the one allowed server import.
+  assert.doesNotMatch(
+    src,
+    /from "(node:[^"]+|@[/]lib[/]db[^"]*|@[/]server[/](?!routing[/]dashboardApi[.]server")[^"]*|server-only)"/,
+    "page.tsx não importa módulo de servidor"
+  );
   // @/i18n/request.server is allowed only for the loader: the component must not reference it.
   const componentPart = src.slice(src.indexOf("export default function"));
   assert.doesNotMatch(componentPart, /getTranslator/);

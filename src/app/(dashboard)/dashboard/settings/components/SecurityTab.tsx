@@ -10,9 +10,25 @@ import SessionInfoCard from "./SessionInfoCard";
 import AuthzSection from "./AuthzSection";
 import { useTranslations } from "use-intl";
 
-export default function SecurityTab() {
-  const [settings, setSettings] = useState<any>({ requireLogin: false, hasPassword: false });
-  const [loading, setLoading] = useState(true);
+export default function SecurityTab({
+  initialSettings,
+  initialIpFilter,
+  initialPii,
+  initialInventory,
+}: {
+  /** The settings fields read by the route loader; without them the tab fetches `/api/settings`. */
+  initialSettings?: Record<string, any> | null;
+  /** `/api/settings/ip-filter` body, for the IP filter section. */
+  initialIpFilter?: Parameters<typeof IPFilterSection>[0]["initialConfig"];
+  /** `/api/settings/pii` body, for the PII masking card. */
+  initialPii?: Parameters<typeof PiiMaskingCard>[0]["initialData"];
+  /** `/api/settings/authz-inventory` body, for the authz section. */
+  initialInventory?: Parameters<typeof AuthzSection>[0]["initialInventory"];
+} = {}) {
+  const [settings, setSettings] = useState<any>(
+    initialSettings ?? { requireLogin: false, hasPassword: false }
+  );
+  const [loading, setLoading] = useState(!initialSettings);
   const [passwords, setPasswords] = useState({ current: "", new: "", confirm: "" });
   const [passStatus, setPassStatus] = useState({ type: "", message: "" });
   const [confirmError, setConfirmError] = useState("");
@@ -25,7 +41,9 @@ export default function SecurityTab() {
     string,
     unknown
   > | null>(null);
-  const [savedCorsOrigins, setSavedCorsOrigins] = useState("");
+  const [savedCorsOrigins, setSavedCorsOrigins] = useState(
+    typeof initialSettings?.corsOrigins === "string" ? initialSettings.corsOrigins : ""
+  );
   const [requireLoginPassword, setRequireLoginPassword] = useState("");
   const [requireLoginError, setRequireLoginError] = useState("");
   const [requireLoginLoading, setRequireLoginLoading] = useState(false);
@@ -36,7 +54,23 @@ export default function SecurityTab() {
   const getSettingsLabel = (key: string, fallback: string) =>
     typeof t.has === "function" && t.has(key) ? t(key) : fallback;
 
+  // Keyed copy: a new loader result (compared by content) replaces the local settings.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setSettings(initialSettings);
+      setSavedCorsOrigins(
+        typeof initialSettings.corsOrigins === "string" ? initialSettings.corsOrigins : ""
+      );
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     fetch("/api/settings")
       .then((res) => res.json())
       .then((data) => {
@@ -45,6 +79,7 @@ export default function SecurityTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, []);
 
   const rememberSavedSecurityValues = (update: Record<string, unknown>) => {
@@ -309,9 +344,9 @@ export default function SecurityTab() {
         </div>
       </Card>
 
-      <IPFilterSection />
+      <IPFilterSection initialConfig={initialIpFilter} />
 
-      <PiiMaskingCard />
+      <PiiMaskingCard initialData={initialPii} />
 
       {/* API Endpoint Protection */}
       <Card title={t("apiEndpointProtection")} icon="api">
@@ -500,7 +535,7 @@ export default function SecurityTab() {
         </div>
       </Card>
 
-      <AuthzSection />
+      <AuthzSection initialInventory={initialInventory} />
       <SessionInfoCard />
     </div>
   );

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll } from "vitest";
+import { render, screen } from "@testing-library/react";
 import React from "react";
+import { createRoutesStub } from "react-router";
 import { DiscoveryPageClient } from "../DiscoveryPageClient";
 
 // The results now render in the kit Table (KEA-7886), whose persistent scrollbar measures the
@@ -14,9 +15,7 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-// Stable `t` reference: useTranslations must return the SAME function across
-// renders, otherwise the `load` useCallback (dep [t]) changes every render and
-// the fetch-on-mount useEffect loops forever.
+// Stable `t` reference: useTranslations must return the SAME function across renders.
 const t = (key: string, vars?: Record<string, unknown>) =>
   vars ? `${key}:${JSON.stringify(vars)}` : key;
 
@@ -24,28 +23,21 @@ vi.mock("use-intl", () => ({
   useTranslations: () => t,
 }));
 
-function mockFetchOnce(results: unknown[]) {
-  const fetchMock = vi.fn(
-    async () =>
-      new Response(JSON.stringify({ results }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+// The page reads its results in a route loader and passes them in; the component needs a router
+// for `useRevalidator`.
+function renderPage(results: unknown[], loadFailed = false) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => <DiscoveryPageClient results={results as never} loadFailed={loadFailed} />,
+    },
+  ]);
+  return render(<Stub initialEntries={["/"]} />);
 }
 
 describe("DiscoveryPageClient", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("loads and renders discovery results from the API", async () => {
-    mockFetchOnce([
+  it("renders the discovery results it is given", async () => {
+    renderPage([
       {
         id: 1,
         providerId: "huggingchat",
@@ -58,30 +50,18 @@ describe("DiscoveryPageClient", () => {
       },
     ]);
 
-    render(<DiscoveryPageClient />);
-
-    await waitFor(() => {
-      expect(screen.getByText("huggingchat")).toBeTruthy();
-    });
+    expect(await screen.findByText("huggingchat")).toBeTruthy();
     // status + risk badges render (mocked t returns the key)
     expect(screen.getByText("verified")).toBeTruthy();
   });
 
   it("shows the empty state when there are no results", async () => {
-    mockFetchOnce([]);
-
-    render(<DiscoveryPageClient />);
-
-    await waitFor(() => {
-      expect(screen.getByText("emptyTitle")).toBeTruthy();
-    });
+    renderPage([]);
+    expect(await screen.findByText("emptyTitle")).toBeTruthy();
   });
 
-  it("calls the discovery results endpoint on mount", async () => {
-    const fetchMock = mockFetchOnce([]);
-    render(<DiscoveryPageClient />);
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/discovery/results");
-    });
+  it("shows the load-failed message when the loader's read failed", async () => {
+    renderPage([], true);
+    expect(await screen.findByText("loadFailed")).toBeTruthy();
   });
 });

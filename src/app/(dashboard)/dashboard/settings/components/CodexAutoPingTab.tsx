@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "use-intl";
 import { Card, Toggle, InfoTooltip } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import CodexWakeupsSection from "./CodexWakeupsSection";
 
-type CodexConnection = {
+export type CodexConnection = {
   id: string;
   provider: string;
   authType?: string;
@@ -13,18 +13,41 @@ type CodexConnection = {
   displayName?: string | null;
 };
 
+/** What the route loader reads for this tab; without it the tab fetches on mount. */
+export type CodexAutoPingInitialData = {
+  /** `codexAutoPing.connections` from `/api/settings`. */
+  enabledMap: Record<string, boolean>;
+  /** The codex connections from `/api/providers`, any auth type. */
+  connections: CodexConnection[];
+};
+
+// The wakeups section reads the browser time zone and formats local times while rendering, so it
+// is rendered (and fetches its own list) on the client only, after hydration.
+const subscribeNever = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
 function connectionLabel(conn: CodexConnection): string {
   return conn.displayName || conn.name || conn.email || conn.id;
 }
 
-function useCodexAutoPingSettings() {
-  const [connections, setConnections] = useState<CodexConnection[]>([]);
-  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
+function filterCodexOAuth(list: CodexConnection[] | undefined | null): CodexConnection[] {
+  return (list || []).filter((c) => c.provider === "codex" && c.authType === "oauth");
+}
+
+function useCodexAutoPingSettings(initial?: CodexAutoPingInitialData) {
+  const [connections, setConnections] = useState<CodexConnection[]>(() =>
+    filterCodexOAuth(initial?.connections)
+  );
+  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>(
+    () => initial?.enabledMap ?? {}
+  );
+  const [loading, setLoading] = useState(!initial);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [status, setStatus] = useState<"" | "saved" | "error">("");
 
   useEffect(() => {
+    if (initial) return;
     let cancelled = false;
     Promise.all([
       fetch("/api/settings").then((res) => res.json()),
@@ -32,10 +55,7 @@ function useCodexAutoPingSettings() {
     ])
       .then(([settingsData, providersData]) => {
         if (cancelled) return;
-        const codexOAuthConnections: CodexConnection[] = (providersData?.connections || []).filter(
-          (c: CodexConnection) => c.provider === "codex" && c.authType === "oauth"
-        );
-        setConnections(codexOAuthConnections);
+        setConnections(filterCodexOAuth(providersData?.connections));
         setEnabledMap(settingsData?.codexAutoPing?.connections || {});
         setLoading(false);
       })
@@ -45,7 +65,7 @@ function useCodexAutoPingSettings() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initial]);
 
   const toggleConnection = async (connectionId: string, checked: boolean) => {
     if (savingId) return;
@@ -126,10 +146,15 @@ function CodexAutoPingConnectionList({
   );
 }
 
-export default function CodexAutoPingTab() {
+export default function CodexAutoPingTab({
+  initialData,
+}: {
+  initialData?: CodexAutoPingInitialData;
+} = {}) {
   const t = useTranslations("settings");
   const { connections, enabledMap, loading, savingId, status, toggleConnection } =
-    useCodexAutoPingSettings();
+    useCodexAutoPingSettings(initialData);
+  const hydrated = useSyncExternalStore(subscribeNever, clientSnapshot, serverSnapshot);
 
   if (!loading && connections.length === 0) return null;
 
@@ -157,9 +182,11 @@ export default function CodexAutoPingTab() {
             savingId={savingId}
             onToggle={toggleConnection}
           />
-          <CodexWakeupsSection
-            accounts={connections.map((conn) => ({ id: conn.id, label: connectionLabel(conn) }))}
-          />
+          {hydrated && (
+            <CodexWakeupsSection
+              accounts={connections.map((conn) => ({ id: conn.id, label: connectionLabel(conn) }))}
+            />
+          )}
         </>
       )}
     </Card>

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useRevalidator } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, Input, EmptyState, Select, Checkbox } from "@/shared/components";
@@ -112,9 +113,13 @@ function pctUsed(row: KeyRow): number {
 
 // Project end-of-month spend based on current burn rate. Simple linear
 // extrapolation: (monthly cost so far) / (days elapsed) * (days in month).
+// UTC fields, like the budget periods and `formatDateTime` below: the server render and the
+// browser's hydration must agree on the day whatever the viewer's timezone.
 function projectEndOfMonth(monthlyCost: number, now = new Date()): number {
-  const dayOfMonth = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const dayOfMonth = now.getUTCDate();
+  const daysInMonth = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
+  ).getUTCDate();
   if (dayOfMonth <= 0) return monthlyCost;
   const burnRate = monthlyCost / dayOfMonth;
   return burnRate * daysInMonth;
@@ -153,14 +158,49 @@ const STATUS_META: Record<StatusKey, { tone: string; bg: string; dot: string }> 
 // Component
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function BudgetTab() {
+const noopSubscribe = () => () => {};
+let templatesSnapshot: { raw: string | null; value: Template[] } | null = null;
+
+/** The saved templates (localStorage); the defaults on the server and when nothing is saved. */
+function readSavedTemplates(): Template[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(LS_TEMPLATES);
+  } catch {
+    /* ignore */
+  }
+  // A stable reference per stored value, as useSyncExternalStore requires.
+  if (templatesSnapshot?.raw === raw) return templatesSnapshot.value;
+  let value = DEFAULT_TEMPLATES;
+  if (raw) {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      /* ignore */
+    }
+  }
+  templatesSnapshot = { raw, value };
+  return value;
+}
+
+export interface BudgetKeysLoaderData {
+  keys: ApiKey[];
+  /** Per-key budgets from `/api/usage/budget/bulk`, by key id. */
+  budgets: Record<string, BudgetSummary>;
+}
+
+/** `keys` and `budgets` come from the route loader; a save re-runs the loader. */
+export default function BudgetTab({ keys, budgets }: BudgetKeysLoaderData) {
   const t = useTranslations("usage");
   const tCommon = useTranslations("common");
   const locale = useLocale();
   const notify = useNotificationStore();
+  const revalidator = useRevalidator();
 
-  const [rows, setRows] = useState<KeyRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const rows = useMemo<KeyRow[]>(
+    () => keys.map((k) => ({ ...k, budget: budgets[k.id] ?? null })),
+    [keys, budgets]
+  );
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusKey>("all");
@@ -169,16 +209,11 @@ export default function BudgetTab() {
   );
   const [expandedKeyId, setExpandedKeyId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [templates] = useState<Template[]>(() => {
-    if (typeof window === "undefined") return DEFAULT_TEMPLATES;
-    try {
-      const saved = localStorage.getItem(LS_TEMPLATES);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      /* ignore */
-    }
-    return DEFAULT_TEMPLATES;
-  });
+  const templates = useSyncExternalStore(
+    noopSubscribe,
+    readSavedTemplates,
+    () => DEFAULT_TEMPLATES
+  );
   const [breakdownCache, setBreakdownCache] = useState<Record<string, ProviderBreakdown[]>>({});
   const templateName = useCallback(
     (template: Template) => {
@@ -213,36 +248,10 @@ export default function BudgetTab() {
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
+  // After a save: re-run the route loader (keys and budgets).
   const loadAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      // Bulk: one request for the key list + one for every key's budget
-      // (was N+1: one budget request per key).
-      const [keysRes, bulkRes] = await Promise.all([
-        fetch("/api/keys"),
-        fetch("/api/usage/budget/bulk"),
-      ]);
-      const keysData = keysRes.ok ? await keysRes.json() : null;
-      const keys: ApiKey[] = Array.isArray(keysData) ? keysData : keysData?.keys || [];
-
-      const bulkPayload = bulkRes.ok ? await bulkRes.json() : null;
-      const budgetsMap: Record<string, BudgetSummary> =
-        bulkPayload && typeof bulkPayload === "object" && bulkPayload.budgets
-          ? bulkPayload.budgets
-          : {};
-
-      setRows(keys.map((k) => ({ ...k, budget: budgetsMap[k.id] ?? null })));
-    } catch (err) {
-      console.error("[Budget] load failed", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadAll(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadAll]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   const fetchBreakdown = useCallback(
     async (apiKeyId: string) => {
@@ -418,15 +427,6 @@ export default function BudgetTab() {
   }, [expandedKeyId, breakdownCache, fetchBreakdown]);
 
   // ── Render ───────────────────────────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-text-muted p-8 animate-pulse">
-        <Icon name="account_balance_wallet" size={20} />
-        {t("loadingBudgetData")}
-      </div>
-    );
-  }
 
   if (rows.length === 0) {
     return (

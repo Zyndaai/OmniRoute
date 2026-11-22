@@ -2,12 +2,12 @@ import Icon from "@/shared/components/Icon";
 import { Alert } from "@omniroute/ui-kit/alert";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useRevalidator } from "react-router";
 import { Checkbox } from "@omniroute/ui-kit/checkbox";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";
-import { CardSkeleton } from "@/shared/components/Loading";
 import Modal from "@/shared/components/Modal";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import { cn } from "@/shared/utils/cn";
@@ -20,7 +20,7 @@ import A2ADashboardPage from "./components/A2ADashboard";
 import McpDashboardPage from "./components/MCPDashboard";
 import NotionSourceCard from "./components/NotionSourceCard";
 import ObsidianSourceCard from "./components/ObsidianSourceCard";
-import VscodeTokenAliasCard from "./VscodeTokenAliasCard";
+import VscodeTokenAliasCard, { type CliKeysLoaded } from "./VscodeTokenAliasCard";
 
 const BUILD_TIME_CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL || null;
 const CLOUD_ACTION_TIMEOUT_MS = 15000;
@@ -86,9 +86,73 @@ type TunnelNotice = {
   message: string;
 };
 
+/** The `/api/settings` fields this page reads (the route loader projects to these). */
+export type EndpointSettings = {
+  hideEndpointCloudflaredTunnel?: boolean;
+  hideEndpointTailscaleFunnel?: boolean;
+  hideEndpointNgrokTunnel?: boolean;
+  cloudEnabled?: boolean;
+  cloudConfigured?: boolean;
+  cloudUrl?: string;
+  machineId?: string;
+  ngrokAuthToken?: string;
+  customSystemPromptEnabled?: boolean;
+  customSystemPrompt?: string;
+};
+
+/** What the route loader read for first paint; every read is optional (see page.tsx). */
+export type EndpointLoaded = {
+  settings: EndpointSettings | null;
+  searchProviders: any[];
+  network: { localUrl?: string; lanUrls?: string[]; tailscaleIpUrl?: string | null } | null;
+  cliKeys: CliKeysLoaded;
+};
+
 type APIPageClientProps = {
   machineId: string;
+  loaded: EndpointLoaded;
 };
+
+type EndpointSettingsState = {
+  cloudEnabled: boolean;
+  cloudConfigured: boolean;
+  cloudBaseUrl: string | null;
+  machineId: string;
+  tunnelVisibility: EndpointTunnelVisibility;
+  ngrokToken: string;
+  customSystemPromptEnabled: boolean;
+  customSystemPrompt: string;
+};
+
+/**
+ * The page state a settings read sets. A field the settings do not carry keeps its value from
+ * `current` (as the old client-side load did); a missing read changes nothing.
+ */
+function settingsToState(
+  data: EndpointSettings | null,
+  current: Pick<
+    EndpointSettingsState,
+    "cloudConfigured" | "cloudBaseUrl" | "machineId" | "ngrokToken"
+  >
+): EndpointSettingsState {
+  return {
+    cloudEnabled: data?.cloudEnabled || false,
+    cloudConfigured:
+      typeof data?.cloudConfigured === "boolean" ? data.cloudConfigured : current.cloudConfigured,
+    cloudBaseUrl: data?.cloudUrl ? data.cloudUrl : current.cloudBaseUrl,
+    machineId: data?.machineId ? data.machineId : current.machineId,
+    tunnelVisibility: data
+      ? {
+          showCloudflaredTunnel: data.hideEndpointCloudflaredTunnel !== true,
+          showTailscaleFunnel: data.hideEndpointTailscaleFunnel !== true,
+          showNgrokTunnel: data.hideEndpointNgrokTunnel !== true,
+        }
+      : DEFAULT_TUNNEL_VISIBILITY,
+    ngrokToken: data?.ngrokAuthToken ? data.ngrokAuthToken : current.ngrokToken,
+    customSystemPromptEnabled: !!data?.customSystemPromptEnabled,
+    customSystemPrompt: data?.customSystemPrompt || "",
+  };
+}
 
 type EndpointProviderSummary = {
   id: string;
@@ -136,18 +200,29 @@ function runEndpointBackgroundTask(taskName: string, task: () => Promise<unknown
   });
 }
 
-export default function APIPageClient({ machineId }: Readonly<APIPageClientProps>) {
-  const [resolvedMachineId, setResolvedMachineId] = useState(machineId || "");
+export default function APIPageClient({ machineId, loaded }: Readonly<APIPageClientProps>) {
   const t = useTranslations("endpoint");
   const tc = useTranslations("common");
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  // First-paint values from the settings read (the route loader); they are local state because
+  // this page changes them itself (cloud sync, ngrok token, the custom system prompt) and a new
+  // loader result (after a cloud change) replaces them, see "shownLoadedSettings" below.
+  const [initialSettings] = useState(() =>
+    settingsToState(loaded.settings, {
+      cloudConfigured: Boolean(BUILD_TIME_CLOUD_URL),
+      cloudBaseUrl: BUILD_TIME_CLOUD_URL,
+      machineId: machineId || "",
+      ngrokToken: "",
+    })
+  );
+  const [resolvedMachineId, setResolvedMachineId] = useState(initialSettings.machineId);
 
   // Endpoints / models state
   const [allModels, setAllModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(true);
 
   // Cloud sync state
-  const [cloudEnabled, setCloudEnabled] = useState(false);
+  const [cloudEnabled, setCloudEnabled] = useState(initialSettings.cloudEnabled);
   const [showCloudModal, setShowCloudModal] = useState(false);
   const [acknowledgeCloudUpload, setAcknowledgeCloudUpload] = useState(false);
   const [showDisableModal, setShowDisableModal] = useState(false);
@@ -156,11 +231,11 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
   const [syncStep, setSyncStep] = useState(""); // "syncing" | "verifying" | "disabling" | "done" | ""
   const [modalSuccess, setModalSuccess] = useState(false); // show success state in modal before closing
   const [selectedProvider, setSelectedProvider] = useState(null); // for provider models popup
-  const [cloudBaseUrl, setCloudBaseUrl] = useState(BUILD_TIME_CLOUD_URL); // dynamic cloud URL from API response
-  const [cloudConfigured, setCloudConfigured] = useState(Boolean(BUILD_TIME_CLOUD_URL));
+  const [cloudBaseUrl, setCloudBaseUrl] = useState(initialSettings.cloudBaseUrl); // dynamic cloud URL from API response
+  const [cloudConfigured, setCloudConfigured] = useState(initialSettings.cloudConfigured);
   const [_mcpStatus, setMcpStatus] = useState<any>(null);
   const [_a2aStatus, setA2aStatus] = useState<any>(null);
-  const [searchProviders, setSearchProviders] = useState<any[]>([]);
+  const searchProviders = loaded.searchProviders;
   const [cloudflaredStatus, setCloudflaredStatus] = useState<CloudflaredTunnelStatus | null>(null);
   const [cloudflaredBusy, setCloudflaredBusy] = useState(false);
   const [cloudflaredNotice, setCloudflaredNotice] = useState<TunnelNotice | null>(null);
@@ -171,22 +246,71 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
   const [tailscaleInstallBusy, setTailscaleInstallBusy] = useState(false);
   const [tailscaleInstallLog, setTailscaleInstallLog] = useState<string[]>([]);
   const [tailscalePassword, setTailscalePassword] = useState("");
-  const [showCloudflaredTunnel, setShowCloudflaredTunnel] = useState(true);
-  const [showTailscaleFunnel, setShowTailscaleFunnel] = useState(true);
+  const [showCloudflaredTunnel, setShowCloudflaredTunnel] = useState(
+    initialSettings.tunnelVisibility.showCloudflaredTunnel
+  );
+  const [showTailscaleFunnel, setShowTailscaleFunnel] = useState(
+    initialSettings.tunnelVisibility.showTailscaleFunnel
+  );
   const [ngrokStatus, setNgrokStatus] = useState<NgrokTunnelStatus | null>(null);
   const [ngrokBusy, setNgrokBusy] = useState(false);
   const [ngrokNotice, setNgrokNotice] = useState<TunnelNotice | null>(null);
-  const [ngrokToken, setNgrokToken] = useState("");
-  const [showNgrokTunnel, setShowNgrokTunnel] = useState(true);
-  const [expandedTunnel, setExpandedTunnel] = useState<string | null>(null);
-  const [localApiUrl, setLocalApiUrl] = useState(
-    typeof window !== "undefined" ? `${window.location.origin}/v1` : "http://localhost:20128/v1"
+  const [ngrokToken, setNgrokToken] = useState(initialSettings.ngrokToken);
+  const [showNgrokTunnel, setShowNgrokTunnel] = useState(
+    initialSettings.tunnelVisibility.showNgrokTunnel
   );
-  const [lanUrls, setLanUrls] = useState<string[]>([]);
-  const [tailscaleIpUrl, setTailscaleIpUrl] = useState<string | null>(null);
+  const [expandedTunnel, setExpandedTunnel] = useState<string | null>(null);
+  // The browser's own origin is only known after hydration; the network info (loader) wins.
+  const [browserApiUrl, setBrowserApiUrl] = useState<string | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBrowserApiUrl(`${window.location.origin}/v1`);
+  }, []);
+  const localApiUrl = loaded.network?.localUrl || browserApiUrl || "http://localhost:20128/v1";
+  const lanUrls = loaded.network?.lanUrls ?? [];
+  const tailscaleIpUrl = loaded.network?.tailscaleIpUrl || null;
   const [activeEndpointTab, setActiveEndpointTab] = useState<EndpointTab>("apis");
-  const [customSystemPromptEnabled, setCustomSystemPromptEnabled] = useState(false);
-  const [customSystemPrompt, setCustomSystemPrompt] = useState("");
+  const [customSystemPromptEnabled, setCustomSystemPromptEnabled] = useState(
+    initialSettings.customSystemPromptEnabled
+  );
+  const [customSystemPrompt, setCustomSystemPrompt] = useState(initialSettings.customSystemPrompt);
+
+  // A new settings result from the loader (after a cloud enable/disable) replaces the state
+  // derived from it, as the old client-side reload did. A failed read (null) changes nothing.
+  const [shownLoadedSettings, setShownLoadedSettings] = useState(loaded.settings);
+  if (loaded.settings !== shownLoadedSettings) {
+    setShownLoadedSettings(loaded.settings);
+    if (loaded.settings) {
+      const next = settingsToState(loaded.settings, {
+        cloudConfigured,
+        cloudBaseUrl,
+        machineId: resolvedMachineId,
+        ngrokToken,
+      });
+      setCloudEnabled(next.cloudEnabled);
+      setCloudConfigured(next.cloudConfigured);
+      setCloudBaseUrl(next.cloudBaseUrl);
+      setResolvedMachineId(next.machineId);
+      setShowCloudflaredTunnel(next.tunnelVisibility.showCloudflaredTunnel);
+      setShowTailscaleFunnel(next.tunnelVisibility.showTailscaleFunnel);
+      setShowNgrokTunnel(next.tunnelVisibility.showNgrokTunnel);
+      setNgrokToken(next.ngrokToken);
+      setCustomSystemPromptEnabled(next.customSystemPromptEnabled);
+      setCustomSystemPrompt(next.customSystemPrompt);
+      if (!next.tunnelVisibility.showCloudflaredTunnel) {
+        setCloudflaredStatus(null);
+        setCloudflaredNotice(null);
+      }
+      if (!next.tunnelVisibility.showTailscaleFunnel) {
+        setTailscaleStatus(null);
+        setTailscaleNotice(null);
+      }
+      if (!next.tunnelVisibility.showNgrokTunnel) {
+        setNgrokStatus(null);
+        setNgrokNotice(null);
+      }
+    }
+  }
 
   const { copied, copy } = useCopyToClipboard();
 
@@ -204,18 +328,6 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
     },
     [t]
   );
-
-  const fetchSearchProviders = async () => {
-    try {
-      const res = await fetch("/api/search/providers");
-      if (res.ok) {
-        const data = await res.json();
-        setSearchProviders(data.providers || []);
-      }
-    } catch {
-      // Search endpoint may not be available
-    }
-  };
 
   const fetchCloudflaredStatus = useCallback(
     async (silent = false) => {
@@ -421,89 +533,19 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
     }
   };
 
-  const loadCloudSettings = async (
-    shouldApplyState: () => boolean = () => true
-  ): Promise<EndpointTunnelVisibility> => {
-    try {
-      const res = await fetch("/api/settings");
-      if (res.ok) {
-        const data = await res.json();
-        const tunnelVisibility = {
-          showCloudflaredTunnel: data.hideEndpointCloudflaredTunnel !== true,
-          showTailscaleFunnel: data.hideEndpointTailscaleFunnel !== true,
-          showNgrokTunnel: data.hideEndpointNgrokTunnel !== true,
-        };
-
-        if (!shouldApplyState()) {
-          return tunnelVisibility;
-        }
-
-        setCloudEnabled(data.cloudEnabled || false);
-        if (typeof data.cloudConfigured === "boolean") {
-          setCloudConfigured(data.cloudConfigured);
-        }
-        if (data.cloudUrl) {
-          setCloudBaseUrl(data.cloudUrl);
-        }
-        if (data.machineId) {
-          setResolvedMachineId(data.machineId);
-        }
-        setShowCloudflaredTunnel(tunnelVisibility.showCloudflaredTunnel);
-        setShowTailscaleFunnel(tunnelVisibility.showTailscaleFunnel);
-        setShowNgrokTunnel(tunnelVisibility.showNgrokTunnel);
-        if (data.ngrokAuthToken) setNgrokToken(data.ngrokAuthToken);
-        setCustomSystemPromptEnabled(!!data.customSystemPromptEnabled);
-        setCustomSystemPrompt(data.customSystemPrompt || "");
-
-        if (!tunnelVisibility.showCloudflaredTunnel) {
-          setCloudflaredStatus(null);
-          setCloudflaredNotice(null);
-        }
-        if (!tunnelVisibility.showTailscaleFunnel) {
-          setTailscaleStatus(null);
-          setTailscaleNotice(null);
-        }
-        if (!tunnelVisibility.showNgrokTunnel) {
-          setNgrokStatus(null);
-          setNgrokNotice(null);
-        }
-
-        return tunnelVisibility;
-      }
-    } catch (error) {
-      console.log("Error loading cloud settings:", error);
-    }
-
-    return DEFAULT_TUNNEL_VISIBILITY;
-  };
-
+  // The settings, search providers and network info arrive from the route loader. What is left
+  // to load here: the model list (a `/v1` call), the protocol status and the tunnel statuses
+  // (slow probes of the local cloudflared/tailscale/ngrok programs).
   useEffect(() => {
     let mounted = true;
 
     const loadPage = async () => {
-      const tunnelVisibility = await loadCloudSettings(() => mounted);
+      const tunnelVisibility = initialSettings.tunnelVisibility;
 
       if (!mounted) return;
-      setLoading(false);
 
       runEndpointBackgroundTask("models", fetchModels);
       runEndpointBackgroundTask("protocol-status", fetchProtocolStatus);
-      runEndpointBackgroundTask("search-providers", fetchSearchProviders);
-      runEndpointBackgroundTask("network-info", async () => {
-        try {
-          const res = await fetch("/api/network/info");
-          if (res.ok) {
-            const data = await res.json();
-            if (mounted) {
-              if (data.localUrl) setLocalApiUrl(data.localUrl);
-              setLanUrls(data.lanUrls ?? []);
-              if (data.tailscaleIpUrl) setTailscaleIpUrl(data.tailscaleIpUrl);
-            }
-          }
-        } catch {
-          // non-critical
-        }
-      });
 
       if (tunnelVisibility.showCloudflaredTunnel) {
         runEndpointBackgroundTask("cloudflared-status", () => fetchCloudflaredStatus(true));
@@ -521,7 +563,7 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
     return () => {
       mounted = false;
     };
-  }, [fetchCloudflaredStatus, fetchTailscaleStatus, fetchNgrokStatus]);
+  }, [fetchCloudflaredStatus, fetchTailscaleStatus, fetchNgrokStatus, initialSettings]);
 
   const handleCustomSystemPromptEnabledChange = (value: boolean) => {
     setCustomSystemPromptEnabled(value);
@@ -656,8 +698,8 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
         if (data.cloudUrl) {
           setCloudBaseUrl(data.cloudUrl);
         }
-        // Reload settings to ensure fresh state
-        await loadCloudSettings();
+        // Reload settings to ensure fresh state (re-runs the route loader)
+        await revalidator.revalidate();
       } else {
         // Sync failed — provide a helpful error message
         let errorMessage = data.error || t("failedEnable");
@@ -694,7 +736,7 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
         setCloudStatus({ type: "success", message: t("cloudDisabledSuccess") });
         setShowDisableModal(false);
         dispatchCloudChange();
-        await loadCloudSettings();
+        await revalidator.revalidate();
       } else {
         setCloudStatus({ type: "error", message: data.error || t("failedDisable") });
       }
@@ -1094,15 +1136,6 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
       : cloudBaseUrl
     : null;
   const cloudEndpointNew = normalizedCloudBaseUrl ? `${normalizedCloudBaseUrl}/v1` : null;
-
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-8">
-        <CardSkeleton />
-        <CardSkeleton />
-      </div>
-    );
-  }
 
   const activeTunnelUrls = [
     ...(publicDisplayApiUrl
@@ -2110,7 +2143,7 @@ export default function APIPageClient({ machineId }: Readonly<APIPageClientProps
             />
           </div>
 
-          <VscodeTokenAliasCard className="mt-4" />
+          <VscodeTokenAliasCard className="mt-4" cliKeys={loaded.cliKeys} />
         </div>
       </Card>
 

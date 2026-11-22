@@ -61,7 +61,7 @@ export type ProviderCooldownSettings = {
   maxRetryCooldownMs: number;
 };
 
-type ResilienceResponse = {
+export type ResilienceResponse = {
   requestQueue: RequestQueueSettings;
   connectionCooldown: {
     oauth: ConnectionCooldownProfileSettings;
@@ -1118,11 +1118,34 @@ function CredentialHealthCheckCard({
   );
 }
 
-export default function ResilienceTab() {
+export default function ResilienceTab({
+  initialData,
+  initialAutoDisable,
+  initialSettings,
+}: {
+  /** The `/api/resilience` body read by the route loader; without it the tab fetches. */
+  initialData?: ResilienceResponse | null;
+  /** The `/api/settings/auto-disable-accounts` body, for the auto-disable card. */
+  initialAutoDisable?: Parameters<typeof AutoDisableCard>[0]["initialConfig"];
+  /** The `modelLockout` settings field, for the model lockout card. */
+  initialSettings?: Parameters<typeof ModelLockoutCard>[0]["initialSettings"];
+} = {}) {
   const notify = useNotificationStore();
   const t = useTranslations("settings");
-  const [data, setData] = useState<ResilienceResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<ResilienceResponse | null>(
+    initialData ? toResilienceResponse(initialData) : null
+  );
+  const [loading, setLoading] = useState(!initialData);
+  // Keyed copy: a new loader result (compared by content) replaces the local data.
+  const initialKey = initialData ? JSON.stringify(initialData) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialData) {
+      setData(toResilienceResponse(initialData));
+      setLoading(false);
+    }
+  }
   const [savingSection, setSavingSection] = useState<string | null>(null);
   const tx = useCallback(
     (key: string, fallback: string) => {
@@ -1135,6 +1158,8 @@ export default function ResilienceTab() {
   );
 
   useEffect(() => {
+    // The route loader already supplied the resilience settings.
+    if (initialData) return;
     let mounted = true;
 
     const load = async () => {
@@ -1161,6 +1186,7 @@ export default function ResilienceTab() {
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData only gates the mount fetch
   }, [notify, tx]);
 
   const savePatch = async (section: string, payload: Record<string, unknown>) => {
@@ -1210,7 +1236,7 @@ export default function ResilienceTab() {
 
   return (
     <div className="space-y-6">
-      <AutoDisableCard />
+      <AutoDisableCard initialConfig={initialAutoDisable} />
 
       <RequestQueueCard
         value={data.requestQueue}
@@ -1267,7 +1293,7 @@ export default function ResilienceTab() {
           }
         />
       )}
-      <ModelLockoutCard />
+      <ModelLockoutCard initialSettings={initialSettings} />
     </div>
   );
 }

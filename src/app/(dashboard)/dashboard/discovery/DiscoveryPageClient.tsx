@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -15,10 +16,9 @@ import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import EmptyState from "@/shared/components/EmptyState";
 import Input from "@/shared/components/Input";
-import { Spinner } from "@/shared/components/Loading";
 import { ConfirmModal } from "@/shared/components/Modal";
 
-interface DiscoveryResult {
+export interface DiscoveryResult {
   id: number;
   providerId: string;
   method: string;
@@ -73,33 +73,26 @@ async function callApi(
   }
 }
 
-/** Results list + loading + feedback state, plus the reload function. */
-function useDiscoveryResults(t: Translate) {
-  const [results, setResults] = useState<DiscoveryResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [feedback, setFeedback] = useState<Feedback>(null);
+/**
+ * Feedback state, plus the reload function (re-runs the route loader). A failed read arrives as
+ * `loadFailed` and is shown as an error feedback, like the old client-side load did.
+ */
+function useDiscoveryResults(t: Translate, loadFailed: boolean) {
+  const revalidator = useRevalidator();
+  const [feedback, setFeedback] = useState<Feedback>(
+    loadFailed ? { type: "error", message: t("loadFailed") } : null
+  );
+  const [shownLoadFailed, setShownLoadFailed] = useState(loadFailed);
+  if (loadFailed !== shownLoadFailed) {
+    setShownLoadFailed(loadFailed);
+    if (loadFailed) setFeedback({ type: "error", message: t("loadFailed") });
+  }
 
   const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/discovery/results");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error?.message || t("loadFailed"));
-      setResults(Array.isArray(data.results) ? data.results : []);
-    } catch (err) {
-      setFeedback({ type: "error", message: err instanceof Error ? err.message : t("loadFailed") });
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
-  useEffect(() => {
-    void (async () => {
-      await load();
-    })();
-  }, [load]);
-
-  return { results, loading, feedback, setFeedback, load };
+  return { feedback, setFeedback, load };
 }
 
 /** Scan / verify / delete actions and their transient state. */
@@ -181,12 +174,12 @@ function useDiscoveryActions(
 }
 
 /** State + data orchestration for the discovery page, kept out of the view. */
-function useDiscovery() {
+function useDiscovery(loadFailed: boolean) {
   const t = useTranslations("discovery");
-  const { results, loading, feedback, setFeedback, load } = useDiscoveryResults(t);
+  const { feedback, setFeedback, load } = useDiscoveryResults(t, loadFailed);
   const actions = useDiscoveryActions(t, load, setFeedback);
   const tc = useTranslations("common");
-  return { t, tc, results, loading, feedback, setFeedback, ...actions };
+  return { t, tc, feedback, setFeedback, ...actions };
 }
 
 function DiscoveryScanForm({
@@ -278,8 +271,14 @@ function DiscoveryResultRow({
   );
 }
 
-export function DiscoveryPageClient() {
-  const d = useDiscovery();
+export function DiscoveryPageClient({
+  results,
+  loadFailed,
+}: {
+  results: DiscoveryResult[];
+  loadFailed: boolean;
+}) {
+  const d = useDiscovery(loadFailed);
 
   return (
     <div className="space-y-6">
@@ -303,11 +302,7 @@ export function DiscoveryPageClient() {
         />
       )}
 
-      {d.loading ? (
-        <div className="flex justify-center py-10">
-          <Spinner />
-        </div>
-      ) : d.results.length === 0 ? (
+      {results.length === 0 ? (
         <EmptyState title={d.t("emptyTitle")} description={d.t("emptyDescription")} />
       ) : (
         <Table className="text-sm" scrollbarLabel={d.t("title")}>
@@ -322,7 +317,7 @@ export function DiscoveryPageClient() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {d.results.map((row) => (
+            {results.map((row) => (
               <DiscoveryResultRow
                 key={row.id}
                 t={d.t}

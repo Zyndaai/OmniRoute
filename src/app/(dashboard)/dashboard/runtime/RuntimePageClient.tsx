@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { Link } from "react-router";
+import { Link, useRevalidator } from "react-router";
 import { PageHeader, SectionHeader as KitSectionHeader } from "@omniroute/ui-kit/page-header";
 import {
   Table,
@@ -209,11 +209,11 @@ function shortId(value: string | null | undefined, max = 12): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
-function untilMs(value: number | string | null | undefined): number {
-  if (typeof value === "number") return value - Date.now();
+function untilMs(value: number | string | null | undefined, now: number): number {
+  if (typeof value === "number") return value - now;
   if (typeof value === "string") {
     const ts = new Date(value).getTime();
-    if (Number.isFinite(ts)) return ts - Date.now();
+    if (Number.isFinite(ts)) return ts - now;
   }
   return 0;
 }
@@ -291,12 +291,12 @@ function diffSnapshots(
   // Cooldowns (per-connection rateLimitedUntil)
   const prevCooldowns = new Map(
     prev.conns
-      .filter((c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil) > 0)
+      .filter((c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil, nowTs) > 0)
       .map((c) => [c.id, c])
   );
   const nextCooldowns = new Map(
     next.conns
-      .filter((c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil) > 0)
+      .filter((c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil, nowTs) > 0)
       .map((c) => [c.id, c])
   );
   for (const [id, conn] of nextCooldowns) {
@@ -307,7 +307,7 @@ function diffSnapshots(
         ts: nowTs,
         kind: "cooldown-added",
         title: `${conn.provider}/${label} cooling`,
-        detail: `${fmtMs(untilMs(conn.rateLimitedUntil))} · ${conn.lastError || "unavailable"}`,
+        detail: `${fmtMs(untilMs(conn.rateLimitedUntil, nowTs))} · ${conn.lastError || "unavailable"}`,
       });
     }
   }
@@ -412,12 +412,26 @@ function diffSnapshots(
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function RuntimePageClient() {
+/**
+ * What the route loader read: the health snapshot (`null` when that read failed), the
+ * connections (`[]` when it failed) and the server clock at read time. Remaining cooldown
+ * times are computed against `serverNow`, not the render-time clock, so the server render and
+ * the hydrated page agree.
+ */
+export interface RuntimeData {
+  health: HealthPayload | null;
+  connections: Connection[];
+  serverNow: number;
+}
+
+export type { HealthPayload as RuntimeHealthPayload, Connection as RuntimeConnection };
+
+export default function RuntimePageClient({ loaded }: { loaded: RuntimeData }) {
   const t = useTranslations("runtime");
   const nodeMap = useProviderNodeMap();
-  const [health, setHealth] = useState<HealthPayload | null>(null);
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const { health, connections, serverNow } = loaded;
+  const loading = revalidator.state !== "idle";
   const [paused, setPaused] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [feed, setFeed] = useState<FeedEvent[]>([]);
@@ -428,51 +442,36 @@ export default function RuntimePageClient() {
   });
   const initialLoadRef = useRef(true);
 
-  const fetchAll = useCallback(async () => {
-    try {
-      const [healthRes, connsRes] = await Promise.all([
-        fetch("/api/monitoring/health"),
-        fetch("/api/providers/client"),
-      ]);
-      const healthData: HealthPayload | null = healthRes.ok ? await healthRes.json() : null;
-      const connsData = connsRes.ok ? await connsRes.json() : null;
-      const conns: Connection[] = Array.isArray(connsData?.connections)
-        ? connsData.connections
-        : [];
-
-      const nowTs = Date.now();
-      const prev = prevSnapshotRef.current;
-      // Skip diff on first load — everything is "new" but we don't want a
-      // burst of fake events on mount.
-      if (!initialLoadRef.current) {
-        const events = diffSnapshots(prev, { health: healthData, conns }, nowTs);
-        if (events.length > 0) setFeed((cur) => pushFeed(cur, events));
-      }
-      initialLoadRef.current = false;
-      prevSnapshotRef.current = { health: healthData, conns };
-
-      setHealth(healthData);
-      setConnections(conns);
-      setLastUpdated(nowTs);
-    } catch (err) {
-      console.error("[Runtime] fetch failed", err);
-    } finally {
-      setLoading(false);
+  // Each new loader result: diff it against the previous snapshot into the event feed.
+  useEffect(() => {
+    const prev = prevSnapshotRef.current;
+    // Skip diff on first load — everything is "new" but we don't want a
+    // burst of fake events on mount.
+    if (!initialLoadRef.current) {
+      const events = diffSnapshots(prev, { health, conns: connections }, serverNow);
+      if (events.length > 0) setFeed((cur) => pushFeed(cur, events));
     }
-  }, []);
+    initialLoadRef.current = false;
+    prevSnapshotRef.current = { health, conns: connections };
+    // The clock is client-only (time zone), so it is set after hydration.
+    setLastUpdated(Date.now());
+  }, [loaded, health, connections, serverNow]);
 
   useEffect(() => {
-    fetchAll();
     if (paused) return;
-    const id = setInterval(fetchAll, REFRESH_INTERVAL_MS);
+    const id = setInterval(() => {
+      if (revalidator.state === "idle") void revalidator.revalidate();
+    }, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [fetchAll, paused]);
+  }, [paused, revalidator]);
 
   // ── Derived data ────────────────────────────────────────────────────────────
 
   const cooldowns = useMemo(() => {
-    return connections.filter((c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil) > 0);
-  }, [connections]);
+    return connections.filter(
+      (c) => c.rateLimitedUntil && untilMs(c.rateLimitedUntil, serverNow) > 0
+    );
+  }, [connections, serverNow]);
 
   const breakers = health?.providerBreakers ?? EMPTY_PROVIDER_BREAKERS;
   const lockoutEntries = useMemo<Array<[string, LockoutEntry]>>(
@@ -561,7 +560,7 @@ export default function RuntimePageClient() {
             <Button
               variant="outline"
               size="icon"
-              onClick={() => fetchAll()}
+              onClick={() => void revalidator.revalidate()}
               disabled={loading}
               title={t("refreshNow")}
               aria-label={t("refreshNow")}
@@ -723,7 +722,7 @@ export default function RuntimePageClient() {
             ) : (
               <div className="flex flex-col divide-y divide-border/60">
                 {cooldowns.slice(0, 8).map((c) => {
-                  const remaining = untilMs(c.rateLimitedUntil);
+                  const remaining = untilMs(c.rateLimitedUntil, serverNow);
                   const label = c.name || c.email || c.displayName || shortId(c.id);
                   return (
                     <div
@@ -782,7 +781,9 @@ export default function RuntimePageClient() {
               <div className="flex flex-col divide-y divide-border/60">
                 {lockoutEntries.slice(0, 8).map(([key, lk]) => {
                   const remaining =
-                    typeof lk.remainingMs === "number" ? lk.remainingMs : untilMs(lk.until);
+                    typeof lk.remainingMs === "number"
+                      ? lk.remainingMs
+                      : untilMs(lk.until, serverNow);
                   return (
                     <div
                       key={key}

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams } from "react-router";
+import { useState } from "react";
+import { useLoaderData, useParams, type LoaderFunctionArgs } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card, Button } from "@/shared/components";
 import Checkbox from "@/shared/components/Checkbox";
@@ -23,35 +24,27 @@ interface PluginConfig {
   configSchema: Record<string, ConfigField>;
 }
 
+/** A failed read shows "plugin not found", as the old page did (optional read). */
+export async function loader({ params }: LoaderFunctionArgs) {
+  const plugin = await apiJsonOrNull<PluginConfig>(
+    `/api/plugins/${encodeURIComponent(params.name ?? "")}/config`
+  );
+  return { plugin };
+}
+
 export default function PluginConfigPage() {
   const { name = "" } = useParams();
   const { addNotification } = useNotificationStore();
   const t = useTranslations("plugins");
-  const [plugin, setPlugin] = useState<PluginConfig | null>(null);
-  const [config, setConfig] = useState<Record<string, unknown>>({});
-  const [loading, setLoading] = useState(true);
+  const { plugin } = useLoaderData<typeof loader>();
+  // Editable draft: reset whenever the loader returns a new result.
+  const [config, setConfig] = useState<Record<string, unknown>>(plugin?.config || {});
+  const [shownPlugin, setShownPlugin] = useState(plugin);
+  if (plugin !== shownPlugin) {
+    setShownPlugin(plugin);
+    setConfig(plugin?.config || {});
+  }
   const [saving, setSaving] = useState(false);
-
-  const fetchConfig = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/plugins/${name}/config`);
-      if (res.ok) {
-        const data = await res.json();
-        setPlugin(data);
-        setConfig(data.config || {});
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, [name]);
-
-  useEffect(() => {
-    void (async () => {
-      await fetchConfig();
-    })();
-  }, [fetchConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -77,7 +70,6 @@ export default function PluginConfigPage() {
     setConfig((prev) => ({ ...prev, [key]: value }));
   };
 
-  if (loading) return <div className="p-6">{t("loading")}</div>;
   if (!plugin) return <div className="p-6">{t("pluginNotFound")}</div>;
 
   const schemaKeys = Object.keys(plugin.configSchema || {});

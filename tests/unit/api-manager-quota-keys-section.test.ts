@@ -44,9 +44,11 @@ test("api-manager differentiates quota keys (pill + groups + mode)", () => {
     src.includes("quotaGroupsForKey") && src.includes("quotaPoolGroup"),
     "must map a quota key's pools to group names for the chips"
   );
+  // The route loader (page.tsx) reads pools + groups and resolves the group names.
+  const routeSrc = readFileSync(join(dirname(PAGE), "page.tsx"), "utf8");
   assert.ok(
-    src.includes("/api/quota/pools") && src.includes("/api/quota/groups"),
-    "must fetch pools + groups to resolve group names"
+    routeSrc.includes("/api/quota/pools") && routeSrc.includes("/api/quota/groups"),
+    "must read pools + groups to resolve group names"
   );
 });
 

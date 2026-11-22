@@ -28,10 +28,26 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-export default function CliproxyapiSettingsTab() {
+export default function CliproxyapiSettingsTab({
+  initialSettings,
+}: {
+  /** The `cliproxyapi_*` settings read by the route loader; without them the tab fetches them. */
+  initialSettings?: Settings | null;
+} = {}) {
   const t = useTranslations("settings");
-  const [settings, setSettings] = useState<Settings>({});
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<Settings>(() => initialSettings ?? {});
+  const [loading, setLoading] = useState(!initialSettings);
+
+  // Keyed copy: a new loader result (compared by content) resets the local settings.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setSettings(initialSettings);
+      setLoading(false);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
   const [toolState, setToolState] = useState<VersionManagerEntry | null>(null);
@@ -65,19 +81,23 @@ export default function CliproxyapiSettingsTab() {
   }, [t]);
 
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => {
-        if (!r.ok) throw new Error(`Settings API returned ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        setSettings(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to load settings:", err);
-        setLoading(false);
-      });
+    // The route loader supplies the settings; the version-manager status stays a client read
+    // (it probes the managed service).
+    if (!initialSettings) {
+      fetch("/api/settings")
+        .then((r) => {
+          if (!r.ok) throw new Error(`Settings API returned ${r.status}`);
+          return r.json();
+        })
+        .then((data) => {
+          setSettings(data);
+          setLoading(false);
+        })
+        .catch((err) => {
+          console.error("Failed to load settings:", err);
+          setLoading(false);
+        });
+    }
 
     fetch("/api/version-manager/status")
       .then((r) => {
@@ -96,6 +116,7 @@ export default function CliproxyapiSettingsTab() {
         setToolStateError("Unable to reach version manager service");
         setToolState(null);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only reads
   }, []);
 
   const updateSetting = useCallback(

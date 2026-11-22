@@ -7,6 +7,7 @@
 import React from "react";
 import axe from "axe-core";
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
 import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import HealthPage from "../../../src/app/(dashboard)/dashboard/health/page";
@@ -62,9 +63,25 @@ it("keeps the pool bar decorative and the progressbar out of the accessibility t
       return new Response("{}");
     })
   );
+  // The snapshot is read by the route loader: serve it as the loader result.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: HealthPage,
+      loader: () => ({
+        health: HEALTH,
+        healthError: null,
+        dbHealth: null,
+        cache: null,
+        signatureCache: null,
+        degradation: null,
+        autopilot: null,
+      }),
+    },
+  ]);
   const { container } = render(
     <IntlProvider locale="en" timeZone="UTC" messages={messages}>
-      <HealthPage />
+      <Stub initialEntries={["/"]} />
     </IntlProvider>
   );
   await act(async () => {});

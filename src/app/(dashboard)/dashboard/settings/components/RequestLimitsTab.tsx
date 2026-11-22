@@ -20,15 +20,37 @@ function normalizeInputValue(value: unknown): string {
     : String(DEFAULT_REQUEST_BODY_LIMIT_MB);
 }
 
-export default function RequestLimitsTab() {
+export default function RequestLimitsTab({
+  initialSettings,
+}: {
+  /** The settings read by the route loader (`maxBodySizeMb`); without them the tab fetches them. */
+  initialSettings?: { maxBodySizeMb?: number } | null;
+} = {}) {
   const t = useTranslations("settings");
-  const [value, setValue] = useState(String(DEFAULT_REQUEST_BODY_LIMIT_MB));
-  const [savedValue, setSavedValue] = useState(String(DEFAULT_REQUEST_BODY_LIMIT_MB));
-  const [loading, setLoading] = useState(true);
+  const initialValue = initialSettings
+    ? normalizeInputValue(initialSettings.maxBodySizeMb)
+    : String(DEFAULT_REQUEST_BODY_LIMIT_MB);
+  const [value, setValue] = useState(initialValue);
+  const [savedValue, setSavedValue] = useState(initialValue);
+  const [loading, setLoading] = useState(!initialSettings);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
 
+  // Keyed copy: a new loader result (compared by content) resets the draft to the saved value.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setValue(initialValue);
+      setSavedValue(initialValue);
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     let active = true;
 
     fetch("/api/settings")
@@ -55,6 +77,7 @@ export default function RequestLimitsTab() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, [t]);
 
   const validationError = useMemo(() => {

@@ -418,7 +418,12 @@ function ImageResults({ data }: { data: any }) {
   );
 }
 
-export default function MediaPageClient() {
+export default function MediaPageClient({
+  configuredLocalProviderIds = null,
+}: {
+  /** Local provider ids (sdwebui, comfyui) with a connection; `null` when unknown. */
+  configuredLocalProviderIds?: string[] | null;
+}) {
   const t = useTranslations("media");
   const tc = useTranslations("common");
   const [activeTab, setActiveTab] = useState<Modality>("image");
@@ -450,9 +455,8 @@ export default function MediaPageClient() {
   // Fix #390: Track which local providers (sdwebui, comfyui) are actually configured
   // so we can hide them when they haven't been set up in the providers page
   const LOCAL_PROVIDERS = ["sdwebui", "comfyui"];
-  const [configuredLocalProviders, setConfiguredLocalProviders] = useState<Set<string>>(
-    new Set(LOCAL_PROVIDERS) // Optimistic: show all until we know otherwise
-  );
+  // `null` (providers could not be read) fails open: show every local provider.
+  const configuredLocalProviders = new Set(configuredLocalProviderIds ?? LOCAL_PROVIDERS);
 
   useEffect(() => {
     const audioUrl = result?.audioUrl;
@@ -462,35 +466,6 @@ export default function MediaPageClient() {
       }
     };
   }, [result?.audioUrl]);
-
-  useEffect(() => {
-    // Fetch configured provider connections to determine which local providers are set up
-    fetch("/api/providers")
-      .then((r) => r.json())
-      .then((data) => {
-        const connections: { provider?: string; testStatus?: string }[] = Array.isArray(data)
-          ? data
-          : (data?.connections ?? data?.providers ?? []);
-        const configured = new Set<string>();
-        for (const conn of connections) {
-          const pId = conn?.provider;
-          if (pId && LOCAL_PROVIDERS.includes(pId)) {
-            configured.add(pId);
-          }
-        }
-        // Only update if at least one local provider was found, otherwise keep optimistic
-        if (configured.size > 0) {
-          setConfiguredLocalProviders(configured);
-        } else {
-          // No local providers configured — hide sdwebui/comfyui
-          setConfiguredLocalProviders(new Set());
-        }
-      })
-      .catch(() => {
-        // On error, keep showing all (fail-open)
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Filter out unconfigured local providers from the provider list
   const currentProviders = (PROVIDER_MODELS[activeTab] ?? []).filter(

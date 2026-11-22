@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import EmptyState from "@/shared/components/EmptyState";
-import Loading from "@/shared/components/Loading";
 import { ConfirmModal } from "@/shared/components/Modal";
 import { DestinationCard } from "./components/DestinationCard";
 import { DestinationFormModal } from "./components/DestinationFormModal";
@@ -40,13 +40,21 @@ function errorText(payload: ApiErrorPayload | undefined, fallback: string): stri
   return fallback;
 }
 
-export function LogExportPageClient() {
+export function LogExportPageClient({
+  status,
+  types,
+  loadFailed,
+}: {
+  status: LogExportStatus | null;
+  types: LogExportTypeDescriptor[];
+  loadFailed: boolean;
+}) {
   const t = useTranslations("logExport");
-  const [status, setStatus] = useState<LogExportStatus | null>(null);
-  const [types, setTypes] = useState<LogExportTypeDescriptor[]>([]);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
   const tc = useTranslations("common");
-  const [feedback, setFeedback] = useState<Feedback>(null);
+  const [feedback, setFeedback] = useState<Feedback>(
+    loadFailed ? { type: "error", message: t("errLoadStatus") } : null
+  );
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<LogExportDestination | null>(null);
   const [saving, setSaving] = useState(false);
@@ -55,32 +63,7 @@ export function LogExportPageClient() {
   const [deleteTarget, setDeleteTarget] = useState<LogExportDestination | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [statusRes, typesRes] = await Promise.all([
-        fetch("/api/log-export/status"),
-        fetch("/api/log-export/types"),
-      ]);
-      const statusData = await statusRes.json().catch(() => ({}));
-      const typesData = await typesRes.json().catch(() => ({}));
-      if (!statusRes.ok) throw new Error(errorText(statusData, t("errLoadStatus")));
-      setStatus(statusData as LogExportStatus);
-      setTypes(Array.isArray(typesData.types) ? typesData.types : []);
-    } catch (err) {
-      setFeedback({
-        type: "error",
-        message: err instanceof Error ? err.message : t("errLoadStatus"),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void (async () => {
-      await load();
-    })();
-  }, [load]);
+  const load = useCallback(() => revalidator.revalidate(), [revalidator]);
 
   const handleSubmit = async (payload: SubmitPayload) => {
     setSaving(true);
@@ -201,8 +184,6 @@ export function LogExportPageClient() {
     }
   };
 
-  if (loading) return <Loading />;
-
   const destinations = status?.destinations ?? [];
   const lastRun = status?.runs?.[0] ?? null;
 
@@ -241,7 +222,8 @@ export function LogExportPageClient() {
             <span className="block text-text-main">{t("cronLabel")}</span>
             {status?.job?.cron ?? t("notScheduled")} ({status?.job?.timezone ?? "UTC"})
           </div>
-          <div>
+          {/* toLocaleString() differs between server and browser locale/timezone. */}
+          <div suppressHydrationWarning>
             <span className="block text-text-main">{t("lastScheduledRun")}</span>
             {lastRun
               ? t("lastRunSummary", {

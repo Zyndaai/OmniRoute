@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader, SectionHeader } from "@omniroute/ui-kit/page-header";
@@ -19,41 +20,35 @@ function getStatus(wh: WebhookItem): "active" | "inactive" | "errored" {
   return "active";
 }
 
-export function WebhooksPageClient() {
+export function WebhooksPageClient({
+  loadedWebhooks,
+  loadFailed,
+}: {
+  loadedWebhooks: WebhookItem[];
+  loadFailed: boolean;
+}) {
   const t = useTranslations("webhooks");
+  const revalidator = useRevalidator();
 
-  const [webhooks, setWebhooks] = useState<WebhookItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Local copy for the optimistic toggle/delete; resets on every new loader result.
+  const [webhooks, setWebhooks] = useState(loadedWebhooks);
+  const [shownLoadedWebhooks, setShownLoadedWebhooks] = useState(loadedWebhooks);
+  if (loadedWebhooks !== shownLoadedWebhooks) {
+    setShownLoadedWebhooks(loadedWebhooks);
+    setWebhooks(loadedWebhooks);
+  }
+  const loading = revalidator.state === "loading";
   const [testingId, setTestingId] = useState<string | null>(null);
   const tc = useTranslations("common");
-  const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [feedback, setFeedback] = useState<FeedbackState>(
+    loadFailed ? { type: "error", message: t("loadFailed") } : null
+  );
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<WebhookItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WebhookItem | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/webhooks");
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || t("loadFailed"));
-      setWebhooks(Array.isArray(data.webhooks) ? data.webhooks : []);
-    } catch (err) {
-      setFeedback({
-        type: "error",
-        message: err instanceof Error ? err.message : t("loadFailed"),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void (async () => {
-      await load();
-    })();
-  }, [load]);
+  const load = useCallback(() => revalidator.revalidate(), [revalidator]);
 
   const stats = useMemo(
     () =>

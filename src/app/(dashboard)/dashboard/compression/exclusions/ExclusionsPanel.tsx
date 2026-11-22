@@ -8,7 +8,7 @@ import Icon from "@/shared/components/Icon";
 // `normalizeCompressionExclusions` (open-sse/services/compression/exclusions.ts).
 // Default (empty list) preserves pre-existing behavior exactly.
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import Card from "@/shared/components/Card";
 import Button from "@/shared/components/Button";
@@ -21,34 +21,36 @@ function parsePatterns(raw: string): string[] {
     .filter((line) => line.length > 0);
 }
 
-// A load or save that gets no reply in this time counts as failed, so one stalled request
-// cannot leave the panel locked or the save spinning for good.
+// A save that gets no reply in this time counts as failed, so one stalled request
+// cannot leave the save spinning for good.
 const REQUEST_TIMEOUT_MS = 15_000;
 
-export default function ExclusionsPanel() {
+export default function ExclusionsPanel({
+  exclusions: loadedExclusions,
+  loadError,
+}: {
+  /** The stored list the route loader read (empty when it could not be read). */
+  exclusions: string[];
+  /**
+   * Set when the stored list could not be read: the HTTP status, or "" when the body had no list.
+   * The editor stays locked, so Save cannot replace the stored list with an empty one.
+   */
+  loadError: string | null;
+}) {
   const t = useTranslations("settings");
-  const [raw, setRaw] = useState("");
-  const [loading, setLoading] = useState(true);
-  // Set when the stored list could not be read: the HTTP status, or "" when the request or its
-  // body failed. The editor stays locked, so Save cannot replace the stored list with an empty one.
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // The draft is edited locally; it restarts from every new loader result.
+  const [raw, setRaw] = useState(loadedExclusions.join("\n"));
+  const [shownLoadedExclusions, setShownLoadedExclusions] = useState(loadedExclusions);
+  if (loadedExclusions !== shownLoadedExclusions) {
+    setShownLoadedExclusions(loadedExclusions);
+    setRaw(loadedExclusions.join("\n"));
+  }
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"" | "saved" | "error">("");
   const savedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useEffect(() => {
-    fetch("/api/settings/compression", { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
-      .then(async (r) => {
-        const data: { exclusions?: unknown } | null = r.ok ? await r.json() : null;
-        if (Array.isArray(data?.exclusions)) setRaw(data.exclusions.join("\n"));
-        else setLoadError(r.ok ? "" : String(r.status));
-      })
-      .catch(() => setLoadError(""))
-      .finally(() => setLoading(false));
-  }, []);
-
   const patterns = parsePatterns(raw);
-  const locked = loading || saving || loadError !== null;
+  const locked = saving || loadError !== null;
 
   const save = async () => {
     // Each save stops the previous save's timer, so that timer cannot hide this save's message.
@@ -95,8 +97,7 @@ export default function ExclusionsPanel() {
         />
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-text-muted" data-testid="compression-exclusions-count">
-            {!loading &&
-              loadError === null &&
+            {loadError === null &&
               (patterns.length === 0
                 ? t("compressionExclusionsEmpty")
                 : t("compressionExclusionsCount", { count: patterns.length }))}

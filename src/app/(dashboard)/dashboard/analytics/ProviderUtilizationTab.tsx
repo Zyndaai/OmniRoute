@@ -1,5 +1,5 @@
 import { useTranslations } from "use-intl";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PROVIDER_COLORS as CHART_PROVIDER_COLORS } from "@/shared/components/analytics/chartColors";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import Button from "@/shared/components/Button";
@@ -73,14 +73,25 @@ function getLatestPoints(points: ProviderUtilizationPoint[]) {
   return Array.from(latestByProvider.values()).sort((a, b) => b.remainingPct - a.remainingPct);
 }
 
-export default function ProviderUtilizationTab() {
+/**
+ * `initial` is the default view (24h, by provider) from a route loader, or `null` if that read
+ * failed; changing the range or grouping fetches client-side. Without it the tab fetches itself.
+ */
+export default function ProviderUtilizationTab({
+  initial,
+}: {
+  initial?: ProviderUtilizationResponse | null;
+}) {
   const t = useTranslations("analytics");
   const nodeMap = useProviderNodeMap();
   const [range, setRange] = useState<UtilizationTimeRange>("24h");
   const [aggregateBy, setAggregateBy] = useState<"provider" | "connection">("provider");
-  const [data, setData] = useState<ProviderUtilizationResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<ProviderUtilizationResponse | null>(initial ?? null);
+  const [loading, setLoading] = useState(initial === undefined);
+  const [error, setError] = useState<string | null>(
+    initial === null ? "Failed to fetch utilization data" : null
+  );
+  const skipMountFetch = useRef(initial !== undefined);
 
   const fetchUtilization = useCallback(
     async (
@@ -125,6 +136,10 @@ export default function ProviderUtilizationTab() {
   );
 
   useEffect(() => {
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     const controller = new AbortController();
 
     void (async () => {

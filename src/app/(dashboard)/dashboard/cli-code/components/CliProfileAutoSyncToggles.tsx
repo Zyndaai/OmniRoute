@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Toggle } from "@/shared/components";
 
@@ -17,38 +17,40 @@ function isOn(value: string | undefined): boolean {
  * /api/settings/feature-flags. Both default off; enabling one makes a provider model
  * sync regenerate that tool's profile files from the live catalog.
  */
-export default function CliProfileAutoSyncToggles() {
+/** The two flags and the load error, as the route loader reads them. */
+export interface ProfileSyncState {
+  codex: boolean;
+  claude: boolean;
+  /** "HTTP <status>" when the flags could not be read. */
+  error: string | null;
+}
+
+/** Reads the two auto-sync flags out of the `/api/settings/feature-flags` body. */
+export function profileSyncFromFlags(body: { flags?: unknown } | null): {
+  codex: boolean;
+  claude: boolean;
+} {
+  const flags: FlagEntry[] = Array.isArray(body?.flags) ? (body.flags as FlagEntry[]) : [];
+  return {
+    codex: isOn(flags.find((f) => f.key === CODEX_KEY)?.effectiveValue),
+    claude: isOn(flags.find((f) => f.key === CLAUDE_KEY)?.effectiveValue),
+  };
+}
+
+export default function CliProfileAutoSyncToggles({ initial }: { initial: ProfileSyncState }) {
   const t = useTranslations("cliTools");
-  const [codexOn, setCodexOn] = useState(false);
-  const [claudeOn, setClaudeOn] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [codexOn, setCodexOn] = useState(initial.codex);
+  const [claudeOn, setClaudeOn] = useState(initial.claude);
   const [savingKey, setSavingKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/settings/feature-flags");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const flags: FlagEntry[] = Array.isArray(data.flags) ? data.flags : [];
-      setCodexOn(isOn(flags.find((f) => f.key === CODEX_KEY)?.effectiveValue));
-      setClaudeOn(isOn(flags.find((f) => f.key === CLAUDE_KEY)?.effectiveValue));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("profileSyncLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    // Load in an async continuation so every setState happens after an await
-    // (react-hooks/set-state-in-effect: no synchronous setState in effect bodies).
-    void (async () => {
-      await load();
-    })();
-  }, [load]);
+  const [error, setError] = useState<string | null>(initial.error);
+  // Edits are local (optimistic); a new loader result replaces them.
+  const [shownInitial, setShownInitial] = useState(initial);
+  if (initial !== shownInitial) {
+    setShownInitial(initial);
+    setCodexOn(initial.codex);
+    setClaudeOn(initial.claude);
+    setError(initial.error);
+  }
 
   const persist = useCallback(
     async (key: string, next: boolean, previous: boolean, apply: (v: boolean) => void) => {
@@ -81,14 +83,14 @@ export default function CliProfileAutoSyncToggles() {
       <div className="flex flex-col gap-3">
         <Toggle
           checked={codexOn}
-          disabled={loading || savingKey === CODEX_KEY}
+          disabled={savingKey === CODEX_KEY}
           onChange={(v) => persist(CODEX_KEY, v, codexOn, setCodexOn)}
           label={t("codexProfiles")}
           description={t("codexProfilesDescription")}
         />
         <Toggle
           checked={claudeOn}
-          disabled={loading || savingKey === CLAUDE_KEY}
+          disabled={savingKey === CLAUDE_KEY}
           onChange={(v) => persist(CLAUDE_KEY, v, claudeOn, setClaudeOn)}
           label={t("claudeProfiles")}
           description={t("claudeProfilesDescription")}

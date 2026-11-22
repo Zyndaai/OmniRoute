@@ -74,15 +74,41 @@ async function fetchSyncStatusData(): Promise<ModelsDevStatus | null> {
   return null;
 }
 
-export default function ModelsDevSyncTab() {
+export type ModelsDevInitialSettings = {
+  modelsDevSyncEnabled?: unknown;
+  modelsDevSyncInterval?: unknown;
+};
+
+function intervalHoursFromSettings(settings: ModelsDevInitialSettings): number {
+  const intervalMs =
+    typeof settings.modelsDevSyncInterval === "number" && settings.modelsDevSyncInterval
+      ? settings.modelsDevSyncInterval
+      : 86400000;
+  return Math.round(intervalMs / 3600000);
+}
+
+/**
+ * `initialSettings` is the route loader's read of the two sync settings; without it the tab
+ * fetches `/api/settings` on mount. The sync status (`/api/settings/models-dev?action=status`
+ * counts every synced model) always loads on the client after first paint.
+ */
+export default function ModelsDevSyncTab({
+  initialSettings,
+}: {
+  initialSettings?: ModelsDevInitialSettings;
+} = {}) {
   const t = useTranslations("settings");
   const [status, setStatus] = useState<ModelsDevStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSettings);
   const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [enabled, setEnabled] = useState(false);
-  const [intervalHours, setIntervalHours] = useState(24);
-  const [draftPos, setDraftPos] = useState(2);
+  const [enabled, setEnabled] = useState(initialSettings?.modelsDevSyncEnabled === true);
+  const [intervalHours, setIntervalHours] = useState(
+    initialSettings ? intervalHoursFromSettings(initialSettings) : 24
+  );
+  const [draftPos, setDraftPos] = useState(
+    initialSettings ? hoursToPosition(intervalHoursFromSettings(initialSettings)) : 2
+  );
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null
   );
@@ -95,6 +121,14 @@ export default function ModelsDevSyncTab() {
 
   useEffect(() => {
     let cancelled = false;
+    if (initialSettings) {
+      void fetchSyncStatusData().then((statusData) => {
+        if (!cancelled && statusData) setStatus(statusData);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     void (async () => {
       try {
         const [statusData, settingsData] = await Promise.all([
@@ -120,7 +154,7 @@ export default function ModelsDevSyncTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSettings]);
 
   const triggerSync = async () => {
     setSyncing(true);

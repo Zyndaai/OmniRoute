@@ -37,15 +37,29 @@ function clampNumber(raw: string, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
 }
 
-export default function ModalityBridgeAudioTab() {
+/**
+ * `initialSettings` is the route loader's read of `/api/settings` (the modalityBridge* keys) and
+ * `initialStats` its read of `/api/modality-bridge/stats`; without `initialSettings` the tab
+ * fetches `/api/settings` on mount.
+ */
+export default function ModalityBridgeAudioTab({
+  initialSettings,
+  initialStats,
+}: {
+  initialSettings?: Record<string, unknown>;
+  initialStats?: unknown;
+} = {}) {
   const t = useTranslations("settings");
-  const [settings, setSettings] = useState<AudioState | null>(null);
+  const [settings, setSettings] = useState<AudioState | null>(() =>
+    initialSettings ? fromApi(initialSettings) : null
+  );
   const isSttModel = useCallback(
     (model: ApiModel) => model.type === "audio" && model.subtype === "transcription",
     []
   );
 
   useEffect(() => {
+    if (initialSettings) return;
     let cancelled = false;
     fetch("/api/settings")
       .then((response) => (response.ok ? response.json() : null))
@@ -58,7 +72,7 @@ export default function ModalityBridgeAudioTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSettings]);
 
   const update = async (patch: Partial<AudioState>) => {
     try {
@@ -156,7 +170,7 @@ export default function ModalityBridgeAudioTab() {
           </div>
         </Collapsible>
 
-        <ModalityBridgeStatsRow kind="audio" />
+        <ModalityBridgeStatsRow kind="audio" initialStats={initialStats} />
         <ModalityBridgeAudioTestButton />
       </div>
     </Card>

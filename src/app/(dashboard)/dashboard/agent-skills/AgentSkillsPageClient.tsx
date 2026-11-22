@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type JSX } from "react";
+import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Icon from "@/shared/components/Icon";
@@ -19,19 +20,6 @@ import type { AgentSkill, SkillCoverage } from "@/lib/agentSkills/types";
 type FilterCategory = "all" | "api" | "cli" | "config";
 
 // ── Skeleton helpers ─────────────────────────────────────────────────────────
-
-function SkillCardSkeleton(): JSX.Element {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-border p-3 animate-pulse">
-      <div className="h-9 w-9 rounded-lg bg-bg-subtle shrink-0" />
-      <div className="flex-1 space-y-2">
-        <div className="h-3 w-1/3 rounded bg-bg-subtle" />
-        <div className="h-2 w-full rounded bg-bg-subtle" />
-        <div className="h-2 w-4/5 rounded bg-bg-subtle" />
-      </div>
-    </div>
-  );
-}
 
 function CoverageBarSkeleton(): JSX.Element {
   return (
@@ -54,51 +42,25 @@ function CoverageBarSkeleton(): JSX.Element {
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export function AgentSkillsPageClient(): JSX.Element {
+/** The catalog + coverage the route loader read (`[]` / `null` when the read failed). */
+export interface AgentSkillsData {
+  catalog: AgentSkill[];
+  coverage: SkillCoverage | null;
+}
+
+export function AgentSkillsPageClient({ catalog, coverage }: AgentSkillsData): JSX.Element {
   const t = useTranslations("agentSkills");
   const tSidebar = useTranslations("sidebar");
   const [confirm, confirmDialog] = useConfirmDialog();
+  const revalidator = useRevalidator();
 
   // State
-  const [catalog, setCatalog] = useState<AgentSkill[]>([]);
-  const [coverage, setCoverage] = useState<SkillCoverage | null>(null);
-  const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [filter, setFilter] = useState<FilterCategory>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [markdownCache, setMarkdownCache] = useState<Map<string, string>>(new Map());
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [generatingSkills, setGeneratingSkills] = useState(false);
-
-  const abortRef = useRef<AbortController | null>(null);
-
-  // ── Fetch catalog + coverage on mount ────────────────────────────────────
-  useEffect(() => {
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const load = async () => {
-      try {
-        setLoadingCatalog(true);
-        const res = await fetch("/api/agent-skills", { signal: controller.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as { skills: AgentSkill[]; coverage: SkillCoverage };
-        setCatalog(json.skills ?? []);
-        setCoverage(json.coverage ?? null);
-      } catch (err) {
-        if ((err as Error).name !== "AbortError") {
-          setCatalog([]);
-        }
-      } finally {
-        setLoadingCatalog(false);
-      }
-    };
-
-    void load();
-    return () => {
-      controller.abort();
-    };
-  }, []);
 
   // ── Fetch raw markdown when a card is selected ────────────────────────────
   const loadPreview = useCallback(
@@ -160,18 +122,13 @@ export function AgentSkillsPageClient(): JSX.Element {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // Refresh catalog + coverage after generation
-      const res2 = await fetch("/api/agent-skills");
-      if (res2.ok) {
-        const json = (await res2.json()) as { skills: AgentSkill[]; coverage: SkillCoverage };
-        setCatalog(json.skills ?? []);
-        setCoverage(json.coverage ?? null);
-      }
+      await revalidator.revalidate();
     } catch {
       // Error handled silently — could extend with toast notification
     } finally {
       setGeneratingSkills(false);
     }
-  }, [t, confirm]);
+  }, [t, confirm, revalidator]);
 
   // ── Filtering + search ────────────────────────────────────────────────────
   const localizedCatalog = useMemo(
@@ -297,9 +254,7 @@ export function AgentSkillsPageClient(): JSX.Element {
       <div className="grid grid-cols-12 gap-4" data-testid="skills-grid">
         {/* Left: skill cards list (col-span 7) */}
         <div className="col-span-12 lg:col-span-7 flex flex-col gap-2" data-testid="skills-list">
-          {loadingCatalog ? (
-            Array.from({ length: 6 }).map((_, i) => <SkillCardSkeleton key={i} />)
-          ) : filteredSkills.length === 0 ? (
+          {filteredSkills.length === 0 ? (
             <EmptyState icon="search_off" title={t("noSkillsFound")} />
           ) : (
             filteredSkills.map((skill) => (

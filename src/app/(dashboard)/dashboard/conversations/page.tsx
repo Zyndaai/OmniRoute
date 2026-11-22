@@ -1,6 +1,8 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { useNavigate, useSearchParams } from "react-router";
+import { useLoaderData, useNavigate, useSearchParams } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import { skipSearchOnlyRevalidation } from "@/shared/utils/routeRevalidation";
 import {
   Table,
   TableBody,
@@ -219,9 +221,34 @@ function ConversationLogView({
   );
 }
 
+/**
+ * First paint: the first page of the list and whether detail logging is on. Both are optional
+ * reads (the old page showed an empty list / "off" when they failed). The page keeps polling
+ * the list on its own timer (user-set interval, switches to a single-row refresh while a
+ * conversation is open), so only the initial data comes from here.
+ */
+export async function loader() {
+  const [list, detail] = await Promise.all([
+    apiJsonOrNull<{ conversations?: ConversationRow[]; total?: number }>("/api/conversations", {
+      query: { limit: 100 },
+    }),
+    apiJsonOrNull<{ enabled?: unknown }>("/api/logs/detail", { query: { limit: 1 } }),
+  ]);
+  return {
+    conversations: Array.isArray(list?.conversations) ? list.conversations : [],
+    total: typeof list?.total === "number" ? list.total : 0,
+    detailLoggingEnabled: detail?.enabled === true,
+  };
+}
+
+// The query string only holds the open request/conversation (`?id=`, `?tree=`), which the loader
+// does not read.
+export const shouldRevalidate = skipSearchOnlyRevalidation;
+
 function ConversationsPageContent() {
   const t = useTranslations("conversations");
   const navigate = useNavigate();
+  const loaded = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   // Read once on mount, mirroring dashboard/logs/page.tsx (#6830/#8354): re-reading the
   // live searchParams on every render re-fires the deep-link open effect right when the
@@ -231,15 +258,16 @@ function ConversationsPageContent() {
   // request-detail panel) so either overlay can be linked independently.
   const [initialConversationParam] = useState(() => searchParams.get("tree"));
 
-  const [conversations, setConversations] = useState<ConversationRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // The list is polled client-side after the first paint (see the poll effect), so it is a
+  // local copy seeded from the loader.
+  const [conversations, setConversations] = useState<ConversationRow[]>(loaded.conversations);
+  const [total, setTotal] = useState(loaded.total);
 
   const { emailsVisible } = useEmailPrivacyStore();
   const [selectedLog, setSelectedLog] = useState<any>(null);
   const [detailData, setDetailData] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [detailLoggingEnabled, setDetailLoggingEnabled] = useState(false);
+  const detailLoggingEnabled = loaded.detailLoggingEnabled;
   const [activeConversation, setActiveConversation] = useState<ConversationRow | null>(null);
   // Extracted so effects that only care "which conversation" (not its
   // summary fields) can depend on this stable primitive instead of the
@@ -256,15 +284,21 @@ function ConversationsPageContent() {
   const [conversationLoading, setConversationLoading] = useState(false);
   const [conversationHasMore, setConversationHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [pollSeconds, setPollSeconds] = useState(() => {
+  // The saved interval is read after hydration (the server render has no localStorage, and
+  // the poll-interval input is part of the server-rendered page).
+  const [pollSeconds, setPollSeconds] = useState(DEFAULT_POLL_SECONDS);
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(POLL_STORAGE_KEY);
       const parsed = saved ? Number(saved) : DEFAULT_POLL_SECONDS;
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_POLL_SECONDS;
+      if (Number.isFinite(parsed) && parsed > 0 && parsed !== DEFAULT_POLL_SECONDS) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setPollSeconds(parsed);
+      }
     } catch {
-      return DEFAULT_POLL_SECONDS;
+      // keep the default
     }
-  });
+  }, []);
   const initialOpenedRef = useRef(false);
   const initialConversationOpenedRef = useRef(false);
   const conversationPanelRef = useRef<HTMLDivElement | null>(null);
@@ -315,10 +349,7 @@ function ConversationsPageContent() {
         setConversations(Array.isArray(data.conversations) ? data.conversations : []);
         setTotal(typeof data.total === "number" ? data.total : 0);
       })
-      .catch(() => {})
-      .finally(() => {
-        setLoading(false);
-      });
+      .catch(() => {});
   }, []);
 
   // While the modal is open, only the one open conversation's summary needs
@@ -345,12 +376,15 @@ function ConversationsPageContent() {
       .catch(() => {});
   }, []);
 
+  const firstPollRef = useRef(true);
   useEffect(() => {
     const poll = () =>
       activeConversationId
         ? loadActiveConversationSummary(activeConversationId)
         : loadConversations();
-    poll();
+    // The list came from the loader, so the first run only starts the timer.
+    if (firstPollRef.current && !activeConversationId) firstPollRef.current = false;
+    else poll();
     const interval = setInterval(poll, pollSeconds * 1000);
     return () => {
       clearInterval(interval);
@@ -375,16 +409,6 @@ function ConversationsPageContent() {
       setActiveConversation((prev) => (prev && prev.id === fresh.id ? fresh : prev));
     })();
   }, [conversations, activeConversationId]);
-
-  useEffect(() => {
-    fetch("/api/logs/detail?limit=1")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!data) return;
-        setDetailLoggingEnabled(data.enabled === true);
-      })
-      .catch(() => {});
-  }, []);
 
   // Opens a request's detail panel in-place — used for the initial row click and for
   // every subsequent turn/next-message navigation, so viewing a conversation never
@@ -729,7 +753,7 @@ function ConversationsPageContent() {
   // current page of the list (still fully works — the API only needs the
   // id).
   useEffect(() => {
-    if (!initialConversationParam || initialConversationOpenedRef.current || loading) return;
+    if (!initialConversationParam || initialConversationOpenedRef.current) return;
     initialConversationOpenedRef.current = true;
     const found = conversations.find((c) => c.id === initialConversationParam);
     openConversation(
@@ -748,7 +772,7 @@ function ConversationsPageContent() {
         isStalled: false,
       }
     );
-  }, [initialConversationParam, loading, conversations, openConversation]);
+  }, [initialConversationParam, conversations, openConversation]);
 
   const gotoLatestRequest = () => {
     const id = activeConversation?.lastCallLogId;
@@ -808,13 +832,7 @@ function ConversationsPageContent() {
         }
       />
 
-      {loading && conversations.length === 0 && (
-        <div className="flex items-center justify-center py-12 text-text-muted text-sm">
-          {t("loading")}
-        </div>
-      )}
-
-      {!loading && conversations.length === 0 && (
+      {conversations.length === 0 && (
         <div className="flex items-center justify-center py-12 text-text-muted text-sm">
           No multi-turn conversations yet.
         </div>
@@ -858,7 +876,8 @@ function ConversationsPageContent() {
                   </div>
                   <StatusBadge status={row.lastStatus} />
                 </div>
-                <div className="text-right text-[11px] text-text-muted">
+                {/* formatTime uses the viewer's time zone, which the server render cannot know. */}
+                <div className="text-right text-[11px] text-text-muted" suppressHydrationWarning>
                   {formatTime(row.lastSeenAt)}
                 </div>
               </div>
@@ -918,7 +937,7 @@ function ConversationsPageContent() {
                   <TableCell>
                     <StatusBadge status={row.lastStatus} />
                   </TableCell>
-                  <TableCell className="text-right text-text-muted">
+                  <TableCell className="text-right text-text-muted" suppressHydrationWarning>
                     {formatTime(row.lastSeenAt)}
                   </TableCell>
                 </TableRow>

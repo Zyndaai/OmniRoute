@@ -67,11 +67,35 @@ const CATEGORIES = [
   { value: "__restart", labelKey: "requiresRestart" },
 ];
 
-export default function FeatureFlagsGrid() {
+export interface FeatureFlagsData {
+  flags?: FlagData[];
+  summary?: Summary | null;
+}
+
+export default function FeatureFlagsGrid({
+  initialData,
+}: {
+  /** The `/api/settings/feature-flags` body read by the route loader; without it the grid fetches. */
+  initialData?: FeatureFlagsData | null;
+} = {}) {
   const t = useTranslations("featureFlags");
-  const [flags, setFlags] = useState<FlagData[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const hasInitial = Array.isArray(initialData?.flags);
+  const [flags, setFlags] = useState<FlagData[]>(hasInitial ? initialData!.flags! : []);
+  const [summary, setSummary] = useState<Summary | null>(
+    hasInitial ? (initialData!.summary ?? null) : null
+  );
+  const [loading, setLoading] = useState(!hasInitial);
+  // Keyed copy: a new loader result (compared by content) replaces the local flags.
+  const initialKey = hasInitial ? JSON.stringify(initialData) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (hasInitial) {
+      setFlags(initialData!.flags!);
+      setSummary(initialData!.summary ?? null);
+      setLoading(false);
+    }
+  }
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("all");
@@ -103,8 +127,11 @@ export default function FeatureFlagsGrid() {
   }, [t]);
 
   useEffect(() => {
+    // The route loader already supplied the flags.
+    if (hasInitial) return;
     const timer = window.setTimeout(() => void loadFlags(), 0);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hasInitial only gates the mount fetch
   }, [loadFlags]);
 
   useEffect(() => {

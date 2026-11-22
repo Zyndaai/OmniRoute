@@ -50,15 +50,11 @@ describe("FreeBudgetCard — eligibility-gated line", () => {
   });
 
   it("renders the gated callout with its providers when gatedRecurringTokens > 0", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(JSON.stringify(summary), { status: 200 }))
-    );
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
     await act(async () => {
-      root.render(<FreeBudgetCard />);
+      root.render(<FreeBudgetCard data={summary} />);
     });
     await act(async () => {});
     expect(el.textContent).toContain("gated");
@@ -66,20 +62,12 @@ describe("FreeBudgetCard — eligibility-gated line", () => {
   });
 
   it("hides the callout when the gated total is zero", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({ ...summary, gatedRecurringTokens: 0, gatedProviders: [] }),
-            { status: 200 }
-          )
-      )
-    );
     const el = document.createElement("div");
     document.body.appendChild(el);
     await act(async () => {
-      createRoot(el).render(<FreeBudgetCard />);
+      createRoot(el).render(
+        <FreeBudgetCard data={{ ...summary, gatedRecurringTokens: 0, gatedProviders: [] }} />
+      );
     });
     await act(async () => {});
     expect(el.textContent).not.toContain("gated");

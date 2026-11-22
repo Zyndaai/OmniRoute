@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { DataTableFooter, DataTableShell } from "@omniroute/ui-kit/data-table-shell";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -13,6 +13,7 @@ import {
 import { TableLoadingState } from "@omniroute/ui-kit/table-loading";
 import { Badge, Button, EmptyState, Input, Select } from "@/shared/components";
 import type { A2ATask, TaskState } from "@/lib/a2a/taskManager";
+import LocalDateTime from "./LocalDateTime";
 
 type TaskListResponse = {
   tasks: A2ATask[];
@@ -37,15 +38,17 @@ function taskDuration(task: A2ATask): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export default function A2aAuditTab() {
+/** `initial` is the unfiltered first page from the route loader; filters and paging refetch. */
+export default function A2aAuditTab({ initial }: { initial?: Partial<TaskListResponse> | null }) {
   const t = useTranslations("compliance");
   const [data, setData] = useState<TaskListResponse>({
-    tasks: [],
-    total: 0,
-    limit: A2A_PAGE_SIZE,
-    offset: 0,
+    tasks: Array.isArray(initial?.tasks) ? initial.tasks : [],
+    total: Number(initial?.total || 0),
+    limit: Number(initial?.limit || A2A_PAGE_SIZE),
+    offset: Number(initial?.offset || 0),
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initial === undefined);
+  const skipMountFetch = useRef(initial !== undefined);
   const [skillFilter, setSkillFilter] = useState("");
   const [stateFilter, setStateFilter] = useState<TaskState | "all">("all");
   const [offset, setOffset] = useState(0);
@@ -73,6 +76,11 @@ export default function A2aAuditTab() {
   }, [offset, skillFilter, stateFilter]);
 
   useEffect(() => {
+    // The loader already holds the first page for the default filters.
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     void (async () => {
       await fetchTasks();
     })();
@@ -186,7 +194,7 @@ export default function A2aAuditTab() {
               {data.tasks.map((task) => (
                 <TableRow key={task.id}>
                   <TableCell className="font-mono text-xs text-text-muted">
-                    {new Date(task.createdAt).toLocaleString()}
+                    <LocalDateTime value={task.createdAt} />
                   </TableCell>
                   <TableCell className="font-mono text-xs text-text-muted">
                     {task.id.slice(0, 8)}&hellip;

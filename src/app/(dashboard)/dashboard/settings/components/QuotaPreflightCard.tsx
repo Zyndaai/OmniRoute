@@ -22,18 +22,49 @@ type QuotaPreflightSettings = {
  * set on the Provider Quota page (quotaWindowThresholds / providerWindowDefaults)
  * take precedence; the global default applies to everything else.
  */
-export default function QuotaPreflightCard() {
+function toQuotaPreflightSettings(qp: any): QuotaPreflightSettings | null {
+  if (!qp) return null;
+  return {
+    enabled: qp.enabled === true,
+    defaultThresholdPercent: Number(qp.defaultThresholdPercent ?? 2),
+    warnThresholdPercent: Number(qp.warnThresholdPercent ?? 20),
+    providerWindowDefaults: qp.providerWindowDefaults || {},
+  };
+}
+
+export default function QuotaPreflightCard({
+  initialQuotaPreflight,
+}: {
+  /**
+   * `resilience.quotaPreflight` as read by the route loader (`null`: the read succeeded but the
+   * setting is absent). Undefined: the card fetches it itself.
+   */
+  initialQuotaPreflight?: unknown;
+} = {}) {
   const t = useTranslations("settings");
   const tx = (key: string, fallback: string) => {
     if (typeof t.has === "function" && t.has(key as never)) return t(key as never);
     return fallback;
   };
 
-  const [value, setValue] = useState<QuotaPreflightSettings | null>(null);
+  const loadedByRoute = initialQuotaPreflight !== undefined;
+  const [value, setValue] = useState<QuotaPreflightSettings | null>(() =>
+    toQuotaPreflightSettings(initialQuotaPreflight)
+  );
   const [saving, setSaving] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
+  // Keyed copy: a new loader result (compared by content) resets the local value.
+  const initialKey = loadedByRoute ? JSON.stringify(initialQuotaPreflight) : undefined;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (loadedByRoute) setValue(toQuotaPreflightSettings(initialQuotaPreflight));
+  }
+
   useEffect(() => {
+    // The route loader already supplied the setting.
+    if (loadedByRoute) return;
     let alive = true;
     void (async () => {
       try {
@@ -41,15 +72,8 @@ export default function QuotaPreflightCard() {
         if (!resilienceRes.ok) throw new Error(`HTTP ${resilienceRes.status}`);
         const resilience = await resilienceRes.json();
         if (!alive) return;
-        const qp = resilience.quotaPreflight;
-        if (qp) {
-          setValue({
-            enabled: qp.enabled === true,
-            defaultThresholdPercent: Number(qp.defaultThresholdPercent ?? 2),
-            warnThresholdPercent: Number(qp.warnThresholdPercent ?? 20),
-            providerWindowDefaults: qp.providerWindowDefaults || {},
-          });
-        }
+        const next = toQuotaPreflightSettings(resilience.quotaPreflight);
+        if (next) setValue(next);
       } catch {
         if (alive) setLoadFailed(true);
       }
@@ -57,6 +81,7 @@ export default function QuotaPreflightCard() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const save = async (patch: Partial<QuotaPreflightSettings>) => {

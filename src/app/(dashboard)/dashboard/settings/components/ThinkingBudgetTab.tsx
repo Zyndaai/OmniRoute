@@ -41,18 +41,32 @@ const EFFORTS = [
   { value: "high", labelKey: "effortHigh" },
 ];
 
-export default function ThinkingBudgetTab() {
-  const [config, setConfig] = useState({
-    mode: "passthrough",
-    customBudget: 10240,
-    effortLevel: "medium",
-  });
-  const [loading, setLoading] = useState(true);
+interface ThinkingBudgetConfig {
+  mode: string;
+  customBudget: number;
+  effortLevel: string;
+}
+
+/** `initialConfig` is the route loader's read of `/api/settings/thinking-budget`; without it the tab fetches on mount. */
+export default function ThinkingBudgetTab({
+  initialConfig,
+}: {
+  initialConfig?: ThinkingBudgetConfig;
+} = {}) {
+  const [config, setConfig] = useState<ThinkingBudgetConfig>(
+    initialConfig ?? {
+      mode: "passthrough",
+      customBudget: 10240,
+      effortLevel: "medium",
+    }
+  );
+  const [loading, setLoading] = useState(!initialConfig);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const t = useTranslations("settings");
 
   useEffect(() => {
+    if (initialConfig) return;
     fetch("/api/settings/thinking-budget")
       .then((res) => res.json())
       .then((data) => {
@@ -60,7 +74,7 @@ export default function ThinkingBudgetTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [initialConfig]);
 
   const save = async (updates) => {
     const newConfig = { ...config, ...updates };

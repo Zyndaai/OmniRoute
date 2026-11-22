@@ -2,6 +2,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Root } from "react-dom/client";
 import type { AgentSkill, SkillCoverage } from "../../src/lib/agentSkills/types";
@@ -96,11 +97,32 @@ const PARTIAL_COVERAGE: SkillCoverage = {
 
 // ── Fetch mock factory ───────────────────────────────────────────────────────
 
+// The page reads the catalog in a route loader and passes it in as props, so only the preview
+// fetch (`/raw`) still goes through `fetch`. `mockFetch` also records the catalog for `pageElement`.
+let pageData: { catalog: AgentSkill[]; coverage: SkillCoverage } = {
+  catalog: [],
+  coverage: null as unknown as SkillCoverage,
+};
+
+/** Renders the page component inside a router stub (it calls `useRevalidator`). */
+function pageElement(
+  Page: React.ComponentType<{ catalog: AgentSkill[]; coverage: SkillCoverage | null }>
+) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => <Page catalog={pageData.catalog} coverage={pageData.coverage} />,
+    },
+  ]);
+  return <Stub initialEntries={["/"]} />;
+}
+
 function mockFetch(
   skills: AgentSkill[],
   coverage: SkillCoverage,
   rawMarkdown = "# Test Skill\nContent here."
 ) {
+  pageData = { catalog: skills, coverage };
   return vi.fn(async (url: string | Request) => {
     const urlStr = typeof url === "string" ? url : url.toString();
     if (urlStr === "/api/agent-skills") {
@@ -174,7 +196,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const cards = container.querySelectorAll("[data-testid^='skill-card-']");
@@ -189,7 +211,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     // SkillsConceptCard uses i18n key conceptCard.agent.title
@@ -205,7 +227,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const filterApiBtn = container.querySelector(
@@ -230,7 +252,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const filterCliBtn = container.querySelector(
@@ -255,7 +277,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const firstCard = container.querySelector(
@@ -295,7 +317,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const emptyState = container.querySelector("[data-testid='skill-preview-empty']");
@@ -310,7 +332,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const coverageBar = container.querySelector("[data-testid='coverage-bar']");
@@ -339,7 +361,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const generateBtn = container.querySelector("[data-testid='generate-button']");
@@ -354,7 +376,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const generateBtn = container.querySelector("[data-testid='generate-button']");
@@ -370,7 +392,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const searchInput = container.querySelector(
@@ -406,7 +428,7 @@ describe("AgentSkillsPageClient", () => {
     const container = makeContainer();
     root = createRoot(container);
     await act(async () => {
-      root?.render(<AgentSkillsPageClient />);
+      root?.render(pageElement(AgentSkillsPageClient));
     });
 
     const linksBar = container.querySelector("[data-testid='mcp-a2a-links-bar']");

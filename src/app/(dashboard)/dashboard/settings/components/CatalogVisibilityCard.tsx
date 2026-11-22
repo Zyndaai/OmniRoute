@@ -19,17 +19,37 @@ function visibilitySettings(value: Partial<VisibilitySettings>): VisibilitySetti
   };
 }
 
-export default function CatalogVisibilityCard() {
+export default function CatalogVisibilityCard({
+  initialSettings,
+}: {
+  /** Settings read by the route loader; without it the card fetches them itself. */
+  initialSettings?: Partial<VisibilitySettings> | null;
+} = {}) {
   const t = useTranslations("settings");
   const common = useTranslations("common");
-  const [value, setValue] = useState<VisibilitySettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [value, setValue] = useState<VisibilitySettings | null>(() =>
+    initialSettings ? visibilitySettings(initialSettings) : null
+  );
+  const [loading, setLoading] = useState(!initialSettings);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<"load" | "save" | null>(null);
   const [saved, setSaved] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
+  // Keyed copy: a new loader result (compared by content) resets the local value.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setValue(visibilitySettings(initialSettings));
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the settings (the retry button still fetches).
+    if (initialSettings && loadAttempt === 0) return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -47,6 +67,7 @@ export default function CatalogVisibilityCard() {
       }
     })();
     return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the first run
   }, [loadAttempt]);
 
   const save = useCallback(

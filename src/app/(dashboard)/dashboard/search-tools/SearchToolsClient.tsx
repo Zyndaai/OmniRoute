@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import type { SearchProviderCatalogItem } from "@/shared/schemas/searchTools";
 import type { PlaygroundState } from "@/lib/playground/codeExport";
 
@@ -20,6 +20,8 @@ interface SearchProvider {
   cost_per_query: number;
 }
 
+const EMPTY_CATALOG: SearchProviderCatalogItem[] = [];
+
 const DEFAULT_CONFIG: ConfigState = {
   provider: "auto",
   searchType: "web",
@@ -28,35 +30,31 @@ const DEFAULT_CONFIG: ConfigState = {
   rerankModel: "",
 };
 
-export default function SearchToolsClient() {
+export default function SearchToolsClient({
+  catalogProviders = EMPTY_CATALOG,
+}: {
+  /** Provider catalog from the route loader. */
+  catalogProviders?: SearchProviderCatalogItem[];
+}) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("search");
   const [configState, setConfigState] = useState<ConfigState>(DEFAULT_CONFIG);
-  const [catalogProviders, setCatalogProviders] = useState<SearchProviderCatalogItem[]>([]);
-  const [legacyProviders, setLegacyProviders] = useState<SearchProvider[]>([]);
   // Metrics shared across tabs (updated by active tab)
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [costUsd, setCostUsd] = useState<number | null>(null);
 
-  useEffect(() => {
-    globalThis
-      .fetch("/api/search/providers")
-      .then((res) => res.json())
-      .then((data: { providers?: SearchProviderCatalogItem[] }) => {
-        const providers = data.providers ?? [];
-        setCatalogProviders(providers);
-        // Build legacy-compatible list for SearchTab/SearchForm
-        const legacy: SearchProvider[] = providers
-          .filter((p) => p.kind === "search")
-          .map((p) => ({
-            id: p.id,
-            name: p.name,
-            status: p.status === "configured" ? "active" : "no_credentials",
-            cost_per_query: p.costPerQuery,
-          }));
-        setLegacyProviders(legacy);
-      })
-      .catch(() => {});
-  }, []);
+  // Legacy-compatible list for SearchTab/SearchForm
+  const legacyProviders = useMemo<SearchProvider[]>(
+    () =>
+      catalogProviders
+        .filter((p) => p.kind === "search")
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status === "configured" ? "active" : "no_credentials",
+          cost_per_query: p.costPerQuery,
+        })),
+    [catalogProviders]
+  );
 
   const handleConfigChange = (patch: Partial<ConfigState>) => {
     setConfigState((prev) => ({ ...prev, ...patch }));

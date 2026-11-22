@@ -43,9 +43,28 @@ async function fetchChainsData() {
   return null;
 }
 
-export default function FallbackChainsEditor() {
-  const [chains, setChains] = useState({});
-  const [loading, setLoading] = useState(true);
+export default function FallbackChainsEditor({
+  initialChains,
+  onChanged,
+}: {
+  /** Chains read by the route loader; without them the editor fetches them itself. */
+  initialChains?: Record<string, unknown> | null;
+  /** Re-runs the route loader after a create/delete (replaces the editor's own re-fetch). */
+  onChanged?: () => unknown;
+} = {}) {
+  const [chains, setChains] = useState<Record<string, any>>(() => initialChains ?? {});
+  const [loading, setLoading] = useState(!initialChains);
+
+  // Keyed copy: a new loader result (compared by content) replaces the shown chains.
+  const initialKey = initialChains ? JSON.stringify(initialChains) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialChains) {
+      setChains(initialChains);
+      setLoading(false);
+    }
+  }
   const [showCreate, setShowCreate] = useState(false);
   const [newModel, setNewModel] = useState("");
   const [newProviders, setNewProviders] = useState("");
@@ -61,10 +80,16 @@ export default function FallbackChainsEditor() {
   }, []);
 
   const fetchChains = useCallback(async () => {
+    if (onChanged) {
+      await onChanged();
+      return;
+    }
     applyChains(await fetchChainsData());
-  }, [applyChains]);
+  }, [applyChains, onChanged]);
 
   useEffect(() => {
+    // The route loader already supplied the chains.
+    if (initialChains) return;
     let cancelled = false;
     void (async () => {
       const data = await fetchChainsData();
@@ -73,6 +98,7 @@ export default function FallbackChainsEditor() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialChains only gates the mount fetch
   }, [applyChains]);
 
   const handleCreate = async () => {

@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createRoutesStub } from "react-router";
 import ProviderDetailPageClient from "../../src/app/(dashboard)/dashboard/providers/[id]/ProviderDetailPageClient";
 import RadarSetupPage from "../../src/app/(dashboard)/dashboard/radar/setup/page";
 
@@ -21,7 +22,6 @@ vi.mock("react-router", async (importOriginal) => ({
     </a>
   ),
 }));
-
 
 function response(body: unknown = {}) {
   return {
@@ -46,6 +46,30 @@ async function renderComponent(element: React.ReactNode): Promise<{
     await Promise.resolve();
   });
   return { container, root };
+}
+
+/** The setup page reads its data in the route loader: serve `data` as the loader result. */
+async function renderSetupTour(data: {
+  setup: { keyUrl: string | null; steps: unknown[] } | null;
+  connectionId: string | null;
+}) {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: RadarSetupPage,
+      loader: () => ({
+        provider: "groq",
+        setupData: {
+          provider: "groq",
+          setup: data.setup,
+          configured: data.connectionId !== null,
+          connectionId: data.connectionId,
+        },
+        error: null,
+      }),
+    },
+  ]);
+  return renderComponent(<Stub initialEntries={["/"]} />);
 }
 
 async function renderProviderPage(): Promise<{ container: HTMLElement; root: Root }> {
@@ -170,7 +194,13 @@ describe("Radar guided setup provider action", () => {
       return response();
     });
 
-    const firstTour = await renderComponent(<RadarSetupPage />);
+    const firstTour = await renderSetupTour({
+      setup: {
+        keyUrl: "https://console.groq.com/keys",
+        steps: [{ en: "Create a project-specific Groq key.", pt: "Crie a chave Groq." }],
+      },
+      connectionId: null,
+    });
     await settle();
     expect(firstTour.container.textContent).toContain("https://console.groq.com/keys");
     expect(
@@ -196,7 +226,10 @@ describe("Radar guided setup provider action", () => {
     act(() => providerPage.root.unmount());
 
     searchParams = new URLSearchParams("provider=groq");
-    const reloadedTour = await renderComponent(<RadarSetupPage />);
+    const reloadedTour = await renderSetupTour({
+      setup: { keyUrl: "https://console.groq.com/keys", steps: [] },
+      connectionId: "conn-groq",
+    });
     await settle();
     const testButton = [...reloadedTour.container.querySelectorAll("button")].find((button) =>
       button.textContent?.toLowerCase().includes("test")
@@ -232,7 +265,10 @@ describe("Radar guided setup provider action", () => {
       return response();
     });
 
-    const tour = await renderComponent(<RadarSetupPage />);
+    const tour = await renderSetupTour({
+      setup: { keyUrl: null, steps: [] },
+      connectionId: "conn-groq",
+    });
     await settle();
     const testButton = [...tour.container.querySelectorAll("button")].find((button) =>
       button.textContent?.toLowerCase().includes("test")

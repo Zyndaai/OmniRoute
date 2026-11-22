@@ -38,14 +38,16 @@ const NEW_KEYS = [
   "changeKeyButton",
 ];
 
-test("radar page: flag-gated GETs bypass cached 404 responses after enablement", () => {
+test("radar page: flag-gated GETs are replayed by the route loader, never browser-cached", () => {
+  // The loader replays the API route in-process on every navigation, so no browser cache can
+  // keep a flag-off 404 after RADAR_ENABLED changes.
   assert.ok(
-    PAGE_SRC.includes('fetch("/api/radar/settings", { cache: "no-store" })'),
-    "settings fetch must bypass the flag-off 404 cache after RADAR_ENABLED changes"
+    PAGE_SRC.includes('radarRead<RadarSettingsPayload>("/api/radar/settings")'),
+    "settings must be read by the page loader"
   );
   assert.ok(
-    PAGE_SRC.includes('fetch("/api/radar/catalog", { cache: "no-store" })'),
-    "catalog fetch must bypass the flag-off 404 cache after RADAR_ENABLED changes"
+    /radarRead<[^>]*>\("\/api\/radar\/catalog"\)/.test(PAGE_SRC),
+    "catalog must be read by the page loader"
   );
 });
 

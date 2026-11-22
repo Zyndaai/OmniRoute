@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Link } from "react-router";
 import { useTranslations } from "use-intl";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
@@ -19,7 +18,7 @@ import { VideoExampleCard } from "../../components/VideoExampleCard";
 import { MusicExampleCard } from "../../components/MusicExampleCard";
 import { OcrExampleCard } from "../../components/OcrExampleCard";
 
-interface Connection {
+export interface Connection {
   id: string;
   name?: string | null;
   testStatus?: string | null;
@@ -37,6 +36,8 @@ interface MediaProviderPageClientProps {
   website?: string;
   hasFree?: boolean;
   freeNote?: string;
+  /** This provider's connections, read by the route loader. */
+  connections?: Connection[];
 }
 
 function renderPlayground(
@@ -107,32 +108,9 @@ export default function MediaProviderPageClient({
   website,
   hasFree,
   freeNote,
+  connections = [],
 }: MediaProviderPageClientProps) {
   const t = useTranslations("media");
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchConnections = async () => {
-      try {
-        const res = await fetch(`/api/providers?provider=${encodeURIComponent(providerId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setConnections(
-            (data.connections ?? []).filter(
-              (c: Connection & { provider?: string }) => c.provider === providerId
-            )
-          );
-        }
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false);
-      }
-    };
-    void fetchConnections();
-  }, [providerId]);
-
   const backHref = `/dashboard/media-providers/${activeKind}`;
 
   return (
@@ -175,9 +153,7 @@ export default function MediaProviderPageClient({
           }
         />
 
-        {loading ? (
-          <div className="py-8 text-center text-sm text-text-muted">{t("loading")}</div>
-        ) : connections.length === 0 ? (
+        {connections.length === 0 ? (
           <EmptyState
             icon="key_off"
             title={t("noConnections")}

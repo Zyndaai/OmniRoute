@@ -123,17 +123,56 @@ function NumberField({
   );
 }
 
-export default function ModelLockoutCard() {
+function parseModelLockout(raw: Record<string, unknown> | undefined): ModelLockoutSettings {
+  return {
+    enabled: typeof raw?.enabled === "boolean" ? raw.enabled : DEFAULTS.enabled,
+    errorCodes: Array.isArray(raw?.errorCodes)
+      ? [...(raw.errorCodes as number[])].sort((a, b) => a - b)
+      : [...DEFAULTS.errorCodes].sort((a, b) => a - b),
+    baseCooldownMs:
+      typeof raw?.baseCooldownMs === "number" ? raw.baseCooldownMs : DEFAULTS.baseCooldownMs,
+    maxCooldownMs:
+      typeof raw?.maxCooldownMs === "number" ? raw.maxCooldownMs : DEFAULTS.maxCooldownMs,
+    maxBackoffSteps:
+      typeof raw?.maxBackoffSteps === "number" ? raw.maxBackoffSteps : DEFAULTS.maxBackoffSteps,
+    useExponentialBackoff:
+      typeof raw?.useExponentialBackoff === "boolean"
+        ? raw.useExponentialBackoff
+        : DEFAULTS.useExponentialBackoff,
+  };
+}
+
+export default function ModelLockoutCard({
+  initialSettings,
+}: {
+  /** The `modelLockout` settings field read by the route loader; without it the card fetches. */
+  initialSettings?: { modelLockout?: unknown } | null;
+} = {}) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
   const notify = useNotificationStore();
   const notifyAudioContextRef = useRef<AudioContext | null>(null);
 
-  const [data, setData] = useState<ModelLockoutSettings>(DEFAULTS);
-  const [draft, setDraft] = useState<ModelLockoutSettings>(DEFAULTS);
+  const initialParsed = initialSettings
+    ? parseModelLockout(initialSettings.modelLockout as Record<string, unknown> | undefined)
+    : DEFAULTS;
+  const [data, setData] = useState<ModelLockoutSettings>(initialParsed);
+  const [draft, setDraft] = useState<ModelLockoutSettings>(initialParsed);
   const [errorCodesInput, setErrorCodesInput] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSettings);
   const [saving, setSaving] = useState(false);
+  // Keyed copy: a new loader result (compared by content) resets the draft to the saved value.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setData(initialParsed);
+      setDraft(initialParsed);
+      setErrorCodesInput("");
+      setLoading(false);
+    }
+  }
 
   useEffect(
     () => () => {
@@ -151,6 +190,8 @@ export default function ModelLockoutCard() {
   );
 
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     let mounted = true;
 
     const load = async () => {
@@ -163,24 +204,7 @@ export default function ModelLockoutCard() {
         const raw = (json as Record<string, unknown>).modelLockout as
           Record<string, unknown> | undefined;
 
-        const parsed: ModelLockoutSettings = {
-          enabled: typeof raw?.enabled === "boolean" ? raw.enabled : DEFAULTS.enabled,
-          errorCodes: Array.isArray(raw?.errorCodes)
-            ? [...(raw.errorCodes as number[])].sort((a, b) => a - b)
-            : [...DEFAULTS.errorCodes].sort((a, b) => a - b),
-          baseCooldownMs:
-            typeof raw?.baseCooldownMs === "number" ? raw.baseCooldownMs : DEFAULTS.baseCooldownMs,
-          maxCooldownMs:
-            typeof raw?.maxCooldownMs === "number" ? raw.maxCooldownMs : DEFAULTS.maxCooldownMs,
-          maxBackoffSteps:
-            typeof raw?.maxBackoffSteps === "number"
-              ? raw.maxBackoffSteps
-              : DEFAULTS.maxBackoffSteps,
-          useExponentialBackoff:
-            typeof raw?.useExponentialBackoff === "boolean"
-              ? raw.useExponentialBackoff
-              : DEFAULTS.useExponentialBackoff,
-        };
+        const parsed = parseModelLockout(raw);
 
         setData(parsed);
         setDraft(parsed);
@@ -196,6 +220,7 @@ export default function ModelLockoutCard() {
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, [notify, t]);
 
   const hasChanges =

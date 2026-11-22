@@ -21,7 +21,7 @@ interface CustomPattern {
   enabled: boolean;
 }
 
-interface PiiSettingsPayload {
+export interface PiiSettingsPayload {
   requestMaskingEnabled: boolean;
   responseSanitizationEnabled: boolean;
   enabledTypes: string[] | null;
@@ -42,12 +42,19 @@ function errorMessageOf(body: unknown): string {
   return error?.details?.[0]?.message || error?.message || "";
 }
 
-export default function PiiMaskingCard() {
+export default function PiiMaskingCard({
+  initialData,
+}: {
+  /** The `/api/settings/pii` body read by the route loader; without it the card fetches. */
+  initialData?: PiiSettingsPayload | null;
+} = {}) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  const [data, setData] = useState<PiiSettingsPayload | null>(null);
-  const [selected, setSelected] = useState<string[]>([...PII_BUILTIN_TYPES]);
-  const [patterns, setPatterns] = useState<CustomPattern[]>([]);
+  const [data, setData] = useState<PiiSettingsPayload | null>(initialData ?? null);
+  const [selected, setSelected] = useState<string[]>(
+    initialData ? (initialData.enabledTypes ?? [...PII_BUILTIN_TYPES]) : [...PII_BUILTIN_TYPES]
+  );
+  const [patterns, setPatterns] = useState<CustomPattern[]>(initialData?.customPatterns ?? []);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [sample, setSample] = useState("");
   const [testResult, setTestResult] = useState<{ count: number; preview: string } | null>(null);
@@ -61,7 +68,17 @@ export default function PiiMaskingCard() {
     setPatterns(payload.customPatterns ?? []);
   };
 
+  // Keyed copy: a new loader result (compared by content) replaces the local state.
+  const initialKey = initialData ? JSON.stringify(initialData) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialData) apply(initialData);
+  }
+
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialData) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -74,6 +91,7 @@ export default function PiiMaskingCard() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialData only gates the mount fetch
   }, []);
 
   const toggleType = (type: string) =>

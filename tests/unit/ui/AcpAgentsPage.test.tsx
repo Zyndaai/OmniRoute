@@ -2,6 +2,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -107,9 +108,7 @@ const mockFetch = vi.fn().mockResolvedValue({
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-const { default: AcpAgentsPage } = await import(
-  "@/app/(dashboard)/dashboard/acp-agents/page"
-);
+const { default: AcpAgentsPage } = await import("@/app/(dashboard)/dashboard/acp-agents/page");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,10 +120,19 @@ async function renderPage(): Promise<HTMLElement> {
   containers.push(container);
 
   const root = createRoot(container);
+  // The agent scan is a deferred promise from the page's route loader (stubbed here with the
+  // same fixture); the page streams it in through <Await>.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: AcpAgentsPage,
+      loader: () => ({ scan: Promise.resolve({ agents: mockAgents, summary: mockSummary }) }),
+    },
+  ]);
   await act(async () => {
-    root.render(<AcpAgentsPage />);
+    root.render(<Stub initialEntries={["/"]} />);
   });
-  // Allow data-fetching effects to resolve
+  // Allow the loader to resolve
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -186,9 +194,8 @@ describe("AcpAgentsPage", () => {
     expect(cliToolsLinks).toHaveLength(0);
   });
 
-  it("agent grid renders with mocked /api/acp/agents response", async () => {
+  it("agent grid renders with the loader's /api/acp/agents data", async () => {
     const container = await renderPage();
-    expect(mockFetch).toHaveBeenCalledWith("/api/acp/agents");
     // Agent names from mock should appear somewhere in the rendered output
     expect(container.textContent).toContain("Claude Code");
     expect(container.textContent).toContain("Codex");

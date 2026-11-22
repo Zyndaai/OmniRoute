@@ -71,11 +71,29 @@ async function fetchPayloadRulesResult(
   }
 }
 
-export default function PayloadRulesTab() {
+export default function PayloadRulesTab({
+  initialRules,
+}: {
+  /** The payload rules read by the route loader; without them the tab fetches them itself. */
+  initialRules?: Record<string, unknown> | null;
+} = {}) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
-  const [editorValue, setEditorValue] = useState(EMPTY_PAYLOAD_RULES_TEXT);
-  const [loading, setLoading] = useState(true);
+  const [editorValue, setEditorValue] = useState(() =>
+    initialRules ? JSON.stringify(initialRules, null, 2) : EMPTY_PAYLOAD_RULES_TEXT
+  );
+  const [loading, setLoading] = useState(!initialRules);
+
+  // Keyed copy: a new loader result (compared by content) resets the editor.
+  const initialKey = initialRules ? JSON.stringify(initialRules) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialRules) {
+      setEditorValue(JSON.stringify(initialRules, null, 2));
+      setLoading(false);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<StatusMessage | null>(null);
   const editorId = useId();
@@ -120,6 +138,8 @@ export default function PayloadRulesTab() {
   }, [applyConfigResult, tCommon]);
 
   useEffect(() => {
+    // The route loader already supplied the rules.
+    if (initialRules) return;
     let cancelled = false;
     void (async () => {
       const result = await fetchPayloadRulesResult(tCommon("failedToLoad"));
@@ -128,6 +148,7 @@ export default function PayloadRulesTab() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialRules only gates the mount fetch
   }, [applyConfigResult, tCommon]);
 
   const handleReset = () => {

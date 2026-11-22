@@ -11,14 +11,31 @@ import {
 } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 
-export default function BackgroundDegradationTab() {
-  const [config, setConfig] = useState({
-    enabled: false,
-    degradationMap: {},
-    detectionPatterns: [],
-    stats: { detected: 0, tokensSaved: 0 },
-  });
-  const [loading, setLoading] = useState(true);
+const DEFAULT_CONFIG = {
+  enabled: false,
+  degradationMap: {},
+  detectionPatterns: [],
+  stats: { detected: 0, tokensSaved: 0 },
+};
+
+export default function BackgroundDegradationTab({
+  initialConfig,
+}: {
+  /** Config read by the route loader; without it the tab fetches it itself. */
+  initialConfig?: Record<string, any> | null;
+} = {}) {
+  const [config, setConfig] = useState<typeof DEFAULT_CONFIG>(
+    () => (initialConfig as typeof DEFAULT_CONFIG | null | undefined) ?? DEFAULT_CONFIG
+  );
+  const [loading, setLoading] = useState(!initialConfig);
+
+  // Keyed copy: a new loader result (compared by content) resets the local config.
+  const initialKey = initialConfig ? JSON.stringify(initialConfig) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialConfig) setConfig(initialConfig as typeof DEFAULT_CONFIG);
+  }
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [newFrom, setNewFrom] = useState("");
@@ -27,6 +44,8 @@ export default function BackgroundDegradationTab() {
   const t = useTranslations("settings");
 
   useEffect(() => {
+    // The route loader already supplied the config.
+    if (initialConfig) return;
     fetch("/api/settings/background-degradation")
       .then((res) => res.json())
       .then((data) => {
@@ -34,6 +53,7 @@ export default function BackgroundDegradationTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const save = async (updates) => {

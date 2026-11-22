@@ -6,6 +6,7 @@
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enMessages from "@/i18n/messages/en.json";
@@ -67,16 +68,6 @@ describe("ProviderStatsPage", () => {
     ).IS_REACT_ACT_ENVIRONMENT = true;
     fetchCalls = 0;
     setVisibility("visible");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        fetchCalls += 1;
-        return new Response(JSON.stringify(payload), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      })
-    );
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -90,9 +81,24 @@ describe("ProviderStatsPage", () => {
     setVisibility("visible");
   });
 
-  async function mount() {
+  type LoaderResult = { stats: typeof payload | null; error: string | null };
+
+  // The page reads its stats through the route loader; each loader run counts as one read.
+  async function mount(
+    results: (call: number) => LoaderResult = () => ({ stats: payload, error: null })
+  ) {
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: ProviderStatsPage,
+        loader: () => {
+          fetchCalls += 1;
+          return results(fetchCalls);
+        },
+      },
+    ]);
     await act(async () => {
-      root.render(<ProviderStatsPage />);
+      root.render(<Stub initialEntries={["/"]} />);
     });
     // Settle the initial fetch (microtasks only — no timer advance, so the
     // 30-second interval cannot fire here).
@@ -135,5 +141,44 @@ describe("ProviderStatsPage", () => {
       await vi.advanceTimersByTimeAsync(30000);
     });
     expect(fetchCalls).toBe(3);
+  });
+
+  it("keeps the last good stats when a refresh fails", async () => {
+    await mount((call) =>
+      call === 1 ? { stats: payload, error: null } : { stats: null, error: "HTTP 503" }
+    );
+    expect(container.textContent).toContain("openai");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(fetchCalls).toBe(2);
+    expect(container.textContent).toContain("openai");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    act(() => root.unmount());
+  });
+
+  it("shows a dismissible load-failed alert under the header when there are no stats", async () => {
+    await mount(() => ({ stats: null, error: "HTTP 503" }));
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("HTTP 503");
+    expect(container.querySelector("h1")?.textContent).toBeTruthy();
+
+    const close = container.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+    expect(close).toBeTruthy();
+    await act(async () => {
+      close!.click();
+    });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    // The header survives the dismissal, with its refresh button as the retry.
+    expect(container.querySelector("h1")?.textContent).toBeTruthy();
+    const refresh = container.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]');
+    expect(refresh).toBeTruthy();
+    await act(async () => {
+      refresh!.click();
+      await Promise.resolve();
+    });
+    expect(fetchCalls).toBe(2);
+    act(() => root.unmount());
   });
 });

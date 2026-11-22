@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { Card, Button, Badge, Checkbox, ConfirmModal, Input, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
 import ProviderTransferPanel from "./ProviderTransferPanel";
@@ -36,7 +36,7 @@ const RETENTION_FIELDS = [
 type Status = { type: string; message: string };
 const NO_STATUS: Status = { type: "", message: "" };
 
-type StorageHealth = {
+export type StorageHealth = {
   driver: string;
   sizeBytes: number;
   dataDir?: string;
@@ -95,8 +95,17 @@ function usePurgeAction(
   return { loading, status, run };
 }
 
-export default function SystemStorageTab() {
+export default function SystemStorageTab({
+  initialStorageHealth,
+  initialDatabaseSettings,
+}: {
+  /** The `/api/storage/health` body read by the route loader; without it the tab fetches. */
+  initialStorageHealth?: Partial<StorageHealth> | null;
+  /** The `/api/settings/database` result read by the route loader; without it the tab fetches. */
+  initialDatabaseSettings?: { data: any; authRequired: boolean } | null;
+} = {}) {
   const t = useTranslations("settings");
+  const format = useFormatter();
   const [exportLoading, setExportLoading] = useState(false);
   const [exportStatus, setExportStatus] = useState<Status>(NO_STATUS);
   const [clearCacheLoading, setClearCacheLoading] = useState(false);
@@ -123,12 +132,33 @@ export default function SystemStorageTab() {
     sizeBytes: 0,
     retentionDays: { app: 7, call: 7 },
     tableMaxRows: { callLogs: 100000, proxyLogs: 100000 },
+    ...(initialStorageHealth ?? {}),
   });
 
-  const [dbSettings, setDbSettings] = useState<any>(null);
-  const [dbSettingsLoading, setDbSettingsLoading] = useState(true);
-  const [dbSettingsAuthRequired, setDbSettingsAuthRequired] = useState(false);
+  const [dbSettings, setDbSettings] = useState<any>(initialDatabaseSettings?.data ?? null);
+  const [dbSettingsLoading, setDbSettingsLoading] = useState(!initialDatabaseSettings);
+  const [dbSettingsAuthRequired, setDbSettingsAuthRequired] = useState(
+    initialDatabaseSettings?.authRequired ?? false
+  );
   const [dbSettingsSaving, setDbSettingsSaving] = useState(false);
+
+  // Keyed copies: a new loader result (compared by content) replaces the local values.
+  const healthKey = initialStorageHealth ? JSON.stringify(initialStorageHealth) : null;
+  const [shownHealthKey, setShownHealthKey] = useState(healthKey);
+  if (healthKey !== shownHealthKey) {
+    setShownHealthKey(healthKey);
+    if (initialStorageHealth) setStorageHealth((prev) => ({ ...prev, ...initialStorageHealth }));
+  }
+  const dbKey = initialDatabaseSettings ? JSON.stringify(initialDatabaseSettings) : null;
+  const [shownDbKey, setShownDbKey] = useState(dbKey);
+  if (dbKey !== shownDbKey) {
+    setShownDbKey(dbKey);
+    if (initialDatabaseSettings) {
+      if (initialDatabaseSettings.data) setDbSettings(initialDatabaseSettings.data);
+      setDbSettingsAuthRequired(initialDatabaseSettings.authRequired);
+      setDbSettingsLoading(false);
+    }
+  }
 
   const applyStorageHealth = useCallback((data: Partial<StorageHealth> | null) => {
     if (!data) return;
@@ -173,17 +203,23 @@ export default function SystemStorageTab() {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const data = await fetchStorageHealthData();
-      if (!cancelled) applyStorageHealth(data);
-    })();
-    void (async () => {
-      const data = await fetchDatabaseSettingsData();
-      if (!cancelled) applyDatabaseSettings(data);
-    })();
+    // Each read the route loader already supplied is skipped.
+    if (!initialStorageHealth) {
+      void (async () => {
+        const data = await fetchStorageHealthData();
+        if (!cancelled) applyStorageHealth(data);
+      })();
+    }
+    if (!initialDatabaseSettings) {
+      void (async () => {
+        const data = await fetchDatabaseSettingsData();
+        if (!cancelled) applyDatabaseSettings(data);
+      })();
+    }
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the initial props only gate the mount fetches
   }, [applyStorageHealth, applyDatabaseSettings]);
 
   const handleClearCache = async () => {
@@ -336,7 +372,8 @@ export default function SystemStorageTab() {
             </Badge>
             <Badge variant="default" size="sm">
               {t("retentionRows", {
-                count: (storageHealth.tableMaxRows?.callLogs ?? 100000).toLocaleString(),
+                // use-intl pins the locale, so server and client render the same digits.
+                count: format.number(storageHealth.tableMaxRows?.callLogs ?? 100000),
               })}
             </Badge>
           </div>

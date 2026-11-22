@@ -4,7 +4,8 @@ import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { resolveProviderServiceKinds } from "@omniroute/open-sse/config/mediaServiceKinds.ts";
 import type { MediaKind } from "../../components/mediaKinds";
 import { MEDIA_KINDS } from "../../components/mediaKinds";
-import MediaProviderPageClient from "./MediaProviderPageClient";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import MediaProviderPageClient, { type Connection } from "./MediaProviderPageClient";
 
 /**
  * /dashboard/media-providers/[kind]/[id]
@@ -13,7 +14,7 @@ import MediaProviderPageClient from "./MediaProviderPageClient";
  * Validates both kind and id; 404 if either is unknown or the provider
  * does not declare the requested kind.
  */
-export function loader({ params }: { params: { kind?: string; id?: string } }) {
+export async function loader({ params }: { params: { kind?: string; id?: string } }) {
   const kind = params.kind ?? "";
   const id = params.id ?? "";
 
@@ -51,8 +52,17 @@ export function loader({ params }: { params: { kind?: string; id?: string } }) {
     throw data(null, { status: 404 });
   }
 
+  // Optional read: the old page listed no connections when the call failed.
+  const providersBody = await apiJsonOrNull<{
+    connections?: Array<Connection & { provider?: string }>;
+  }>("/api/providers", { query: { provider: provider.id } });
+  const connections: Connection[] = (providersBody?.connections ?? [])
+    .filter((c) => c.provider === provider.id)
+    .map((c) => ({ id: c.id, name: c.name, testStatus: c.testStatus, isActive: c.isActive }));
+
   return {
     kind: validKind,
+    connections,
     provider: {
       id: provider.id,
       name: provider.name,
@@ -65,7 +75,7 @@ export function loader({ params }: { params: { kind?: string; id?: string } }) {
 }
 
 export default function MediaProviderDetailPage() {
-  const { kind, provider } = useLoaderData<typeof loader>();
+  const { kind, provider, connections } = useLoaderData<typeof loader>();
   const t = useTranslations("media");
 
   return (
@@ -78,6 +88,7 @@ export default function MediaProviderDetailPage() {
       website={provider.website}
       hasFree={provider.hasFree}
       freeNote={provider.freeNote}
+      connections={connections}
     />
   );
 }

@@ -24,8 +24,8 @@ const PAGE_SRC = fs.readFileSync(PAGE_PATH, "utf-8");
 
 test("radar page: fetches referrals only from the local /api/radar/referrals route", () => {
   assert.ok(
-    PAGE_SRC.includes('fetch("/api/radar/referrals")'),
-    "page must fetch the local referrals route"
+    PAGE_SRC.includes('apiJsonOrNull<Partial<RadarReferralsState>>("/api/radar/referrals")'),
+    "page loader must read the local referrals route"
   );
   // Never a direct call to an external feed-server URL from this component.
   assert.ok(

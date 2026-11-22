@@ -22,6 +22,7 @@ vi.mock("@/app/(dashboard)/dashboard/settings/components/QuotaPreflightCard", ()
 }));
 vi.mock("@/app/(dashboard)/dashboard/settings/components/ComboDefaultsTab", () => ({
   default: () => null,
+  activeProviderNames: () => [],
 }));
 vi.mock("@/app/(dashboard)/dashboard/settings/components/ModelAliasesUnified", () => ({
   default: () => null,
@@ -41,15 +42,33 @@ vi.mock("@/shared/components/routing/RoutingEntryLink", () => ({ default: () => 
 const { default: SettingsRoutingPage } =
   await import("@/app/(dashboard)/dashboard/settings/routing/page");
 const { IntlProvider } = await import("use-intl");
+const { createRoutesStub } = await import("react-router");
 const fetchMock = vi.fn<typeof fetch>();
 let stored = { hideAutoCombos: false, hideNoThinkVariants: false, exposeCombosOnly: false };
 const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-const mount = (locale = "en") =>
-  render(
+// The page reads from its route loader. This fixture is the loader result of a failed settings
+// read: every card then falls back to its own client fetch, which is what these tests drive.
+const failedLoaderRead = {
+  strategySettings: null,
+  quotaPreflight: null,
+  quotaPreflightLoaded: false,
+  comboDefaultsData: null,
+  catalogVisibility: null,
+  aliases: { wildcardAliases: [], builtIn: {}, custom: {} },
+  chains: {},
+  routingSettings: null,
+  backgroundDegradation: null,
+};
+const mount = (locale = "en") => {
+  const Stub = createRoutesStub([
+    { path: "/", Component: SettingsRoutingPage as never, loader: () => failedLoaderRead },
+  ]);
+  return render(
     <IntlProvider locale={locale} timeZone="UTC" messages={locale === "ar" ? ar : en}>
-      <SettingsRoutingPage />
+      <Stub initialEntries={["/"]} />
     </IntlProvider>
   );
+};
 const autoSwitch = () => screen.getByRole("switch", { name: "Hide auto/*" });
 const noThinkSwitch = () => screen.getByRole("switch", { name: "Hide no-think/*" });
 // The switches stay disabled until the settings load (and while a save runs). Testing Library
@@ -73,9 +92,31 @@ afterEach(() => {
 });
 afterAll(() => fs.rmSync(dataDir, { recursive: true, force: true }));
 
-test("the routing settings page remains mounted", () => {
+test("the routing settings page remains mounted", async () => {
   const view = mount();
-  expect(view.container.querySelector("p")?.textContent).toBeTruthy();
+  await waitFor(() => expect(view.container.querySelector("p")?.textContent).toBeTruthy(), SETTLED);
+});
+
+test("the catalog card renders from the loader result without a client read", async () => {
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: SettingsRoutingPage as never,
+      loader: () => ({
+        ...failedLoaderRead,
+        catalogVisibility: { hideAutoCombos: true, hideNoThinkVariants: false },
+      }),
+    },
+  ]);
+  render(
+    <IntlProvider locale="en" timeZone="UTC" messages={en}>
+      <Stub initialEntries={["/"]} />
+    </IntlProvider>
+  );
+  await waitFor(() => expect(autoSwitch()).toHaveProperty("disabled", false), SETTLED);
+  expect(autoSwitch().getAttribute("aria-checked")).toBe("true");
+  expect(noThinkSwitch().getAttribute("aria-checked")).toBe("false");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 test("both catalog visibility switches are reachable and use persisted defaults", async () => {

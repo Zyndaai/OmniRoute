@@ -50,19 +50,15 @@ test("A1: home page fetches settings + machineId concurrently (#11396)", () => {
 
   const pair = src.match(/const \[settings, machineId\] = await Promise\.all\(\[([\s\S]*?)\]\);/s);
   assert.ok(pair, "expected `[settings, machineId] = await Promise.all([...])`");
-  // #14421 (#14060) routes the settings read through loadHomeSettings(), which degrades a
-  // corrupted key_value table to defaults and reads getSettings() by default.
-  assert.match(pair![1], /\bloadHomeSettings\(\)/);
+  // The settings read goes through the API route (apiJsonOrNull degrades a failing settings
+  // table to defaults, #14060) and runs next to getMachineId().
+  assert.match(pair![1], /\bapiJsonOrNull<[^>]*>\("\/api\/settings"\)/);
   assert.match(pair![1], /\bgetMachineId\(\)/);
-  assert.match(
-    readSource("src/app/(dashboard)/home/loadHomeSettings.ts"),
-    /load: \(\) => Promise<HomeSettings> = getSettings/
-  );
   // destructuring order must stay (settings → machineId), or values swap
-  assert.ok(pair![1].indexOf("loadHomeSettings()") < pair![1].indexOf("getMachineId()"));
+  assert.ok(pair![1].indexOf("/api/settings") < pair![1].indexOf("getMachineId()"));
 
   // both values are still consumed exactly as before the batching
-  assert.match(src, /setupComplete: Boolean\(settings\.setupComplete\)/);
+  assert.match(src, /setupComplete: Boolean\(settings\?\.setupComplete\)/);
   assert.match(src, /machineId=\{machineId\}/);
 
   // no serial awaits left for these two reads
@@ -236,26 +232,37 @@ test("N1: apiKeys fetches synced + custom models in parallel (#11396)", () => {
   // The published-model lookup behind isModelAllowedForKey lives in its own module.
   const src = readSource("src/lib/db/apiKeys/publishedModelLookup.ts");
 
-  const pair = src.match(
-    /const \[syncedModelsByConnection, customModels\] = await Promise\.all\(\[([\s\S]*?)\]\);/s
+  const reads = src.match(
+    /const \[syncedModelsByConnection, admissionRefs, customModels\] = await Promise\.all\(\[([\s\S]*?)\]\);/s
   );
-  assert.ok(pair, "expected `[syncedModelsByConnection, customModels] = await Promise.all([...])`");
-  assert.match(pair![1], /getSyncedAvailableModelsByConnection\(providerId\)/);
-  assert.match(pair![1], /getCustomModels\(providerId\)/);
-  // destructuring order must stay (synced first, custom second)
   assert.ok(
-    pair![1].indexOf("getSyncedAvailableModelsByConnection(providerId)") <
-      pair![1].indexOf("getCustomModels(providerId)")
+    reads,
+    "expected `[syncedModelsByConnection, admissionRefs, customModels] = await Promise.all([...])`"
+  );
+  const order = [
+    "getSyncedAvailableModelsByConnection(providerId)",
+    "getActiveConnectionAdmissionRefs(providerId)",
+    "getCustomModels(providerId)",
+  ].map((call) => reads![1].indexOf(call));
+  // every read is in the one Promise.all, in destructuring order
+  assert.ok(
+    order.every((index) => index >= 0),
+    JSON.stringify(order)
+  );
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order
   );
 
-  // the merged view feeding the deny/allow decision is unchanged
+  // the view feeding the deny/allow decision: the admitted synced rows, then custom rows
   assert.match(
     src,
-    /syncedModels = Object\.values\(syncedModelsByConnection\)\.flat\(\);[\s\S]*?syncedModels\s*\.concat\(customModels\)/
+    /syncedModels = unionAdmittedModels\(\s*admitSyncedModelsByConnection\(providerId, syncedModelsByConnection, admissionRefs\)\s*\);[\s\S]*?syncedModels\s*\.concat\(customModels\)/
   );
 
   // no serial awaits left behind
   assert.doesNotMatch(src, /await getSyncedAvailableModelsByConnection\(providerId\)/);
+  assert.doesNotMatch(src, /await getActiveConnectionAdmissionRefs\(providerId\)/);
   assert.doesNotMatch(src, /await getCustomModels\(providerId\)/);
 });
 

@@ -3,6 +3,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
 import { IntlProvider } from "use-intl";
 import messages from "../../../src/i18n/messages/en.json";
 import ApiKeyAccessEditorClient from "../../../src/app/(dashboard)/dashboard/api-manager/[id]/access/ApiKeyAccessEditorClient";
@@ -91,8 +92,11 @@ describe("ApiKeyAccessEditorClient", () => {
   let patchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
   let fetchUrls: string[] = [];
   let keyGetCount = 0;
+  let loaderKey: KeyRecord = sampleKey;
 
   function installFetch(options: FetchOptions = {}, initialKey: KeyRecord = sampleKey) {
+    // The route loader serves the key; the fetch mock only answers what stays client-side.
+    loaderKey = initialKey;
     let serverKey: KeyRecord = { ...initialKey };
     keyGetCount = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -136,6 +140,7 @@ describe("ApiKeyAccessEditorClient", () => {
     fetchUrls = [];
     currentSearch = "";
     vi.clearAllMocks();
+    loaderKey = sampleKey;
     installFetch();
   });
 
@@ -146,9 +151,23 @@ describe("ApiKeyAccessEditorClient", () => {
   });
 
   function renderEditor() {
+    // The key, combos and connections are read by the route loader (`access/page.tsx`).
+    const Stub = createRoutesStub([
+      {
+        path: "/",
+        Component: () => <ApiKeyAccessEditorClient apiKeyId="test-key-id" />,
+        loader: () => ({
+          id: "test-key-id",
+          apiKey: JSON.parse(JSON.stringify(loaderKey)),
+          keyStatus: 200,
+          combos: [{ name: "test-combo", isActive: true }],
+          connections: [],
+        }),
+      },
+    ]);
     return render(
       <IntlProvider locale="en" messages={messages}>
-        <ApiKeyAccessEditorClient apiKeyId="test-key-id" />
+        <Stub initialEntries={["/"]} />
       </IntlProvider>
     );
   }
@@ -248,30 +267,15 @@ describe("ApiKeyAccessEditorClient", () => {
     expect(screen.getByText(/Max Active Sessions/i)).toBeDefined();
   });
 
-  it("fetches the key and the model/combo/connection lists in parallel", async () => {
-    const keyGate = deferred<FakeResponse>();
-    installFetch({ keyGet: (index, key) => (index === 0 ? keyGate.promise : jsonResponse(key)) });
+  it("gets the key, combos and connections from the loader and only the model list by fetch", async () => {
+    await renderLoaded();
 
-    renderEditor();
-
-    // Lists must be requested without waiting for the key to resolve
     await waitFor(() => {
-      const hasModels = fetchUrls.some((url) => url.includes("/v1/models"));
-      const hasCombos = fetchUrls.some((url) => url.includes("/api/combos"));
-      const hasProviders = fetchUrls.some((url) => url.includes("/api/providers"));
-      const hasKey = fetchUrls.some((url) => url.includes("/api/keys/test-key-id"));
-      expect(hasModels).toBe(true);
-      expect(hasCombos).toBe(true);
-      expect(hasProviders).toBe(true);
-      expect(hasKey).toBe(true);
+      expect(fetchUrls.some((url) => url.includes("/v1/models"))).toBe(true);
     });
-    // Loading gate should still be up (key not yet resolved)
-    expect(screen.queryByRole("tablist")).toBeNull();
-
-    keyGate.resolve(jsonResponse(sampleKey));
-    await waitFor(() => {
-      expect(screen.getByRole("tablist")).toBeDefined();
-    });
+    expect(fetchUrls.some((url) => url.includes("/api/combos"))).toBe(false);
+    expect(fetchUrls.some((url) => url.includes("/api/providers"))).toBe(false);
+    expect(keyGetCount).toBe(0);
   });
 
   it("dirty state enables save/discard and discard restores the loaded values", async () => {
@@ -307,7 +311,7 @@ describe("ApiKeyAccessEditorClient", () => {
 
     await waitFor(() => {
       expect(patchCalls.length).toBe(1);
-      expect(keyGetCount).toBe(2);
+      expect(keyGetCount).toBe(1);
     });
     await waitForSaveToSettle();
     expect(isUnloadBlocked()).toBe(false);
@@ -459,8 +463,8 @@ describe("ApiKeyAccessEditorClient", () => {
 
   it("a failed refetch after a successful PATCH leaves the form clean without an error toast", async () => {
     installFetch({
-      keyGet: (index, key) => {
-        if (index === 0) return jsonResponse(key);
+      // The loader served the key; the only client GET is the refresh after the save.
+      keyGet: () => {
         throw new TypeError("network down");
       },
     });
@@ -475,7 +479,7 @@ describe("ApiKeyAccessEditorClient", () => {
 
     await waitFor(() => {
       expect(successSpy).toHaveBeenCalledWith(messages.apiManager.accessUpdatedSuccess);
-      expect(keyGetCount).toBe(2);
+      expect(keyGetCount).toBe(1);
     });
     await waitForSaveToSettle();
 

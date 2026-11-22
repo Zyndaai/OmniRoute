@@ -1,7 +1,7 @@
 import Icon from "@/shared/components/Icon";
 
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from "react";
-import { Link } from "react-router";
+import { Link, useLoaderData, useRevalidator } from "react-router";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import {
@@ -15,7 +15,6 @@ import {
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import Input from "@/shared/components/Input";
-import { CardSkeleton } from "@/shared/components/Loading";
 import Modal from "@/shared/components/Modal";
 import Toggle from "@/shared/components/Toggle";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -85,7 +84,7 @@ interface AccessSchedule {
 
 type StreamDefaultMode = "legacy" | "json";
 
-interface ApiKey {
+export interface ApiKey {
   id: string;
   name: string;
   key: string;
@@ -131,11 +130,22 @@ export default function ApiManagerPageClient() {
   const t = useTranslations("apiManager");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const revalidator = useRevalidator();
+  const {
+    keys: loadedKeys,
+    allowKeyReveal,
+    quotaPoolGroup,
+  } = useLoaderData<typeof import("./page").loader>();
   const [confirm, confirmDialog] = useConfirmDialog();
   const newKeyNameInputId = useId();
   const createKeyFormRef = useRef<HTMLDivElement | null>(null);
-  const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Deleting a key drops its row at once; every new loader result replaces the list.
+  const [keys, setKeys] = useState<ApiKey[]>(loadedKeys as ApiKey[]);
+  const [shownLoadedKeys, setShownLoadedKeys] = useState(loadedKeys);
+  if (loadedKeys !== shownLoadedKeys) {
+    setShownLoadedKeys(loadedKeys);
+    setKeys(loadedKeys as ApiKey[]);
+  }
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyManageEnabled, setNewKeyManageEnabled] = useState(false);
@@ -150,7 +160,6 @@ export default function ApiManagerPageClient() {
   const [usageStats, setUsageStats] = useState<Record<string, KeyUsageStats>>({});
   const [sessionCounts, setSessionCounts] = useState<Record<string, number>>({});
   const [deviceCounts, setDeviceCounts] = useState<Record<string, number>>({});
-  const [allowKeyReveal, setAllowKeyReveal] = useState(false);
   // Per-row API key visibility toggle (eye / eye-off). Keys default to masked.
   // Map id -> fully revealed key string fetched on demand from /api/keys/{id}/reveal.
   const [revealedKeys, setRevealedKeys] = useState<Map<string, string>>(new Map());
@@ -161,7 +170,6 @@ export default function ApiManagerPageClient() {
   const [activeOnly, setActiveOnly] = useState(false);
   const [statusFilter, setStatusFilter] = useState<KeyStatus | null>(null);
   const [typeFilter, setTypeFilter] = useState<KeyType | null>(null);
-  const [quotaPoolGroup, setQuotaPoolGroup] = useState<Record<string, string>>({});
 
   const { copied, copy } = useCopyToClipboard();
 
@@ -195,44 +203,6 @@ export default function ApiManagerPageClient() {
   useEffect(() => {
     writeActiveOnlyPreference(activeOnly);
   }, [activeOnly]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadQuotaGroups = async () => {
-      try {
-        const [poolsRes, groupsRes] = await Promise.all([
-          fetch("/api/quota/pools"),
-          fetch("/api/quota/groups"),
-        ]);
-        if (!poolsRes.ok || !groupsRes.ok) return;
-        const poolsData = await poolsRes.json();
-        const groupsData = await groupsRes.json();
-        const pools: Array<{ id: string; groupId: string }> = Array.isArray(poolsData.pools)
-          ? poolsData.pools
-          : [];
-        const groups: Array<{ id: string; name: string }> = Array.isArray(groupsData.groups)
-          ? groupsData.groups
-          : [];
-        const groupNameById: Record<string, string> = {};
-        for (const g of groups) {
-          groupNameById[g.id] = g.name;
-        }
-        const map: Record<string, string> = {};
-        for (const p of pools) {
-          if (groupNameById[p.groupId]) {
-            map[p.id] = groupNameById[p.groupId];
-          }
-        }
-        if (!cancelled) setQuotaPoolGroup(map);
-      } catch {
-        // fail open — quota group chips simply won't render
-      }
-    };
-    loadQuotaGroups();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!showAddModal || !nameError) return;
@@ -329,36 +299,21 @@ export default function ApiManagerPageClient() {
     }
   };
 
-  // fetchData calls the three per-key fetchers above — declared after them so the
-  // calls are not TDZ reads (react-hooks/immutability).
+  // After a write the page re-runs its loader (`revalidator.revalidate()`).
   const fetchData = async () => {
-    try {
-      const res = await fetch("/api/keys");
-      if (res.ok) {
-        const data = await res.json();
-        setKeys(data.keys || []);
-        setAllowKeyReveal(data.allowKeyReveal === true);
-        // Fetch usage stats after keys are loaded
-        fetchUsageStats(data.keys || []);
-        fetchSessionCounts(data.keys || []);
-        fetchDeviceCounts(data.keys || []);
-      }
-    } catch (error) {
-      console.log("Error fetching keys:", error);
-    } finally {
-      setLoading(false);
-    }
+    await revalidator.revalidate();
   };
 
-  // Initial dashboard load — placed after the fetcher declarations so the effect does
-  // not read them in their TDZ (react-hooks/immutability), behind an async boundary
-  // (react-hooks/set-state-in-effect).
+  // Per-key totals, session and device counts for every new key list from the loader (first
+  // paint and after each write), behind an async boundary (react-hooks/set-state-in-effect).
   useEffect(() => {
     void (async () => {
-      await fetchData();
+      await Promise.resolve();
+      void fetchUsageStats(loadedKeys as ApiKey[]);
+      void fetchSessionCounts(loadedKeys as ApiKey[]);
+      void fetchDeviceCounts(loadedKeys as ApiKey[]);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial dashboard load only
-  }, []);
+  }, [loadedKeys]);
 
   const clearPageError = useCallback(() => setPageError(null), []);
 
@@ -589,18 +544,6 @@ export default function ApiManagerPageClient() {
 
     setVisibleKeys((prev) => toggleKeyVisibility(prev, keyId));
   };
-
-  if (loading) {
-    // The skeleton cards are aria-hidden, so without this status wrapper the page
-    // has no accessible content at all until /api/keys settles (#12066).
-    return (
-      <div className="flex flex-col gap-8" role="status" aria-live="polite" aria-busy="true">
-        <span className="sr-only">{tc("loading")}</span>
-        <CardSkeleton />
-        <CardSkeleton />
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-8">

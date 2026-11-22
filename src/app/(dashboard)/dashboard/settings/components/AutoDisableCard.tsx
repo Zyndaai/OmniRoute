@@ -24,18 +24,29 @@ function normalizeForm(json: Partial<AutoDisableForm> | null | undefined): AutoD
   };
 }
 
-export default function AutoDisableCard() {
-  const [data, setData] = useState<AutoDisableForm>({
-    enabled: false,
-    threshold: 3,
-    scope: "all",
-  });
-  const [draft, setDraft] = useState<AutoDisableForm>({
-    enabled: false,
-    threshold: 3,
-    scope: "all",
-  });
-  const [loading, setLoading] = useState(true);
+export default function AutoDisableCard({
+  initialConfig,
+}: {
+  /** The `/api/settings/auto-disable-accounts` body read by the route loader; else the card fetches. */
+  initialConfig?: Partial<AutoDisableForm> | null;
+} = {}) {
+  const initialForm = initialConfig
+    ? normalizeForm(initialConfig)
+    : ({ enabled: false, threshold: 3, scope: "all" } as AutoDisableForm);
+  const [data, setData] = useState<AutoDisableForm>(initialForm);
+  const [draft, setDraft] = useState<AutoDisableForm>(initialForm);
+  const [loading, setLoading] = useState(!initialConfig);
+  // Keyed copy: a new loader result (compared by content) resets the form to the saved config.
+  const initialKey = initialConfig ? JSON.stringify(initialConfig) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialConfig) {
+      setData(initialForm);
+      setDraft(initialForm);
+      setLoading(false);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const t = useTranslations("settings");
@@ -43,6 +54,8 @@ export default function AutoDisableCard() {
   const notify = useNotificationStore();
 
   useEffect(() => {
+    // The route loader already supplied the config.
+    if (initialConfig) return;
     fetch("/api/settings/auto-disable-accounts")
       .then((res) => res.json())
       .then((json) => {
@@ -52,6 +65,7 @@ export default function AutoDisableCard() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialConfig only gates the mount fetch
   }, []);
 
   const handleSave = async () => {

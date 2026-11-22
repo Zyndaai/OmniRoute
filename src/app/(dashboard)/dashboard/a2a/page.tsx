@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { interpolateNodes, nodeArgs } from "@/shared/utils/interpolateNodes";
 import { Switch } from "@omniroute/ui-kit/switch";
@@ -66,11 +68,37 @@ function DisabledPanel() {
   );
 }
 
+const STATUS_POLL_MS = 30_000;
+
+/**
+ * A2A on/off and whether the server is up. Both reads degrade to "off" / "offline" (the old
+ * page showed those defaults when a read failed), so neither is required.
+ */
+export async function loader() {
+  const [settings, status] = await Promise.all([
+    apiJsonOrNull<{ a2aEnabled?: unknown }>("/api/settings"),
+    apiJsonOrNull<{ status?: unknown }>("/api/a2a/status"),
+  ]);
+  // `null` = the settings read failed: a poll keeps the last good value instead of flipping to off.
+  return {
+    a2aEnabled: settings ? Boolean(settings.a2aEnabled) : null,
+    online: status?.status === "ok",
+  };
+}
+
 export default function A2APage() {
   const t = useTranslations("a2aDashboard");
   const tSidebar = useTranslations("sidebar");
-  const [a2aStatus, setA2aStatus] = useState<ServiceStatus>({ online: false, loading: true });
-  const [a2aEnabled, setA2aEnabled] = useState(false);
+  const { a2aEnabled: loadedEnabled, online } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  const a2aStatus: ServiceStatus = { online, loading: false };
+  // Local copy so the toggle flips at once; a new successful loader result replaces it.
+  const [a2aEnabled, setA2aEnabled] = useState(loadedEnabled ?? false);
+  const [shownLoadedEnabled, setShownLoadedEnabled] = useState(loadedEnabled);
+  if (loadedEnabled !== shownLoadedEnabled) {
+    setShownLoadedEnabled(loadedEnabled);
+    if (loadedEnabled !== null) setA2aEnabled(loadedEnabled);
+  }
   const [a2aToggling, setA2aToggling] = useState(false);
 
   const patchSetting = useCallback(async (body: Record<string, unknown>) => {
@@ -82,38 +110,13 @@ export default function A2APage() {
   }, []);
 
   useEffect(() => {
-    const fetchSettings = async () => {
-      try {
-        const res = await fetch("/api/settings");
-        if (res.ok) {
-          const data = await res.json();
-          setA2aEnabled(!!data.a2aEnabled);
-        }
-      } catch {
-        // defaults stay
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
       }
-    };
-    void fetchSettings();
-  }, []);
-
-  const refreshStatus = useCallback(async () => {
-    setA2aStatus((prev) => ({ ...prev, loading: true }));
-    try {
-      const res = await fetch("/api/a2a/status");
-      const data = res.ok ? await res.json() : null;
-      setA2aStatus({ online: data?.status === "ok", loading: false });
-    } catch {
-      setA2aStatus({ online: false, loading: false });
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await refreshStatus();
-    })();
-    const interval = setInterval(() => void refreshStatus(), 30000);
-    return () => clearInterval(interval);
-  }, [refreshStatus]);
+    }, STATUS_POLL_MS);
+    return () => clearInterval(id);
+  }, [revalidator]);
 
   const toggleA2a = useCallback(async () => {
     const newValue = !a2aEnabled;

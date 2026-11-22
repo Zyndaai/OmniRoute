@@ -4,10 +4,7 @@ import { Button, Card, ConfirmModal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import type { DeprecatedProviderLeftoverGroup } from "@/lib/providers/deprecatedProviderCleanup";
 
-type ProviderMessageTranslator = ((
-  key: string,
-  values?: Record<string, unknown>
-) => string) & {
+type ProviderMessageTranslator = ((key: string, values?: Record<string, unknown>) => string) & {
   has?: (key: string) => boolean;
 };
 
@@ -29,16 +26,28 @@ function providerText(
   return fallback;
 }
 
-
-export default function DeprecatedProviderBanner() {
+export default function DeprecatedProviderBanner({
+  initialLeftovers,
+}: {
+  /** Read by the route loader; when absent the banner fetches them itself. */
+  initialLeftovers?: DeprecatedProviderLeftoverGroup[];
+} = {}) {
   const t = useTranslations("providers") as ProviderMessageTranslator;
   const notify = useNotificationStore();
-  const [leftovers, setLeftovers] = useState<DeprecatedProviderLeftoverGroup[]>([]);
+  const [leftovers, setLeftovers] = useState<DeprecatedProviderLeftoverGroup[]>(
+    initialLeftovers ?? []
+  );
+  const [shownInitialLeftovers, setShownInitialLeftovers] = useState(initialLeftovers);
+  if (initialLeftovers !== shownInitialLeftovers) {
+    setShownInitialLeftovers(initialLeftovers);
+    if (initialLeftovers) setLeftovers(initialLeftovers);
+  }
   const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<DeprecatedProviderLeftoverGroup | null>(null);
   const [purging, setPurging] = useState(false);
 
   useEffect(() => {
+    if (initialLeftovers) return;
     let cancelled = false;
     void fetch("/api/providers/deprecated", { credentials: "same-origin" })
       .then((res) => (res.ok ? res.json() : { leftovers: [] }))
@@ -52,7 +61,7 @@ export default function DeprecatedProviderBanner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialLeftovers]);
 
   const visible = leftovers.filter((row) => !dismissed[row.provider]);
   if (visible.length === 0) return null;
@@ -68,9 +77,7 @@ export default function DeprecatedProviderBanner() {
       });
       if (res.ok) {
         setLeftovers((prev) => prev.filter((row) => row.provider !== provider));
-        notify.success(
-          providerText(t, "purgeLeftoversSuccess", "Leftover connections removed.")
-        );
+        notify.success(providerText(t, "purgeLeftoversSuccess", "Leftover connections removed."));
       } else {
         notify.error(
           providerText(t, "purgeLeftoversFailed", "Failed to purge leftover connections.")
@@ -107,9 +114,7 @@ export default function DeprecatedProviderBanner() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() =>
-                  setDismissed((prev) => ({ ...prev, [row.provider]: true }))
-                }
+                onClick={() => setDismissed((prev) => ({ ...prev, [row.provider]: true }))}
               >
                 {providerText(t, "dismissForSession", "Dismiss for this session")}
               </Button>

@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useLoaderData, useSearchParams, type LoaderFunctionArgs } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { useTranslations } from "use-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
 import Icon from "@/shared/components/Icon";
@@ -10,7 +11,7 @@ import ComboHealthTab from "./ComboHealthTab";
 import ProviderUtilizationTab from "./ProviderUtilizationTab";
 import RouteExplainabilityTab from "./RouteExplainabilityTab";
 import SearchAnalyticsTab from "./SearchAnalyticsTab";
-import DiversityScoreCard from "./components/DiversityScoreCard";
+import DiversityScoreCard, { type DiversityReport } from "./components/DiversityScoreCard";
 
 type AnalyticsTab =
   "overview" | "evals" | "search" | "utilization" | "combo-health" | "cache-health" | "route-trace";
@@ -62,8 +63,20 @@ function normalizeTab(tab: string | null): AnalyticsTab {
   return "overview";
 }
 
+/**
+ * The overview tab's diversity report. Optional read (the card keeps its spinner without it),
+ * made only when the URL opens the overview tab. The other tabs fetch their own data.
+ */
+export async function loader({ request }: LoaderFunctionArgs) {
+  const tab = normalizeTab(new URL(request.url).searchParams.get("tab"));
+  const diversity =
+    tab === "overview" ? await apiJsonOrNull<DiversityReport>("/api/analytics/diversity") : null;
+  return { diversity };
+}
+
 function AnalyticsPageContent() {
   const t = useTranslations("analytics") as AnalyticsTranslator;
+  const { diversity } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<AnalyticsTab>(normalizeTab(searchParams.get("tab")));
   const [initialRequestId] = useState(searchParams.get("id") || "");
@@ -114,7 +127,7 @@ function AnalyticsPageContent() {
           {activeTab === "overview" ? (
             <>
               <UsageAnalytics />
-              <DiversityScoreCard />
+              <DiversityScoreCard data={diversity} />
             </>
           ) : null}
           {activeTab === "evals" ? <EvalsTab /> : null}

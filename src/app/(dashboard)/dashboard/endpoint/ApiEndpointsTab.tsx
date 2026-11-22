@@ -1,6 +1,6 @@
 import Icon from "@/shared/components/Icon";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { CodePreview } from "@omniroute/ui-kit/code-preview";
@@ -13,7 +13,7 @@ import Select from "@/shared/components/Select";
 import Textarea from "@/shared/components/Textarea";
 import { cn } from "@/shared/utils/cn";
 import { useDisplayBaseUrl } from "@/shared/hooks";
-import VscodeTokenAliasCard from "./VscodeTokenAliasCard";
+import VscodeTokenAliasCard, { type CliKeysLoaded } from "./VscodeTokenAliasCard";
 import { matchesSearch } from "@/shared/utils/turkishText";
 
 /* ─── Types ──────────────────────────────────────────── */
@@ -58,8 +58,23 @@ const METHOD_VARIANTS: Record<string, "success" | "info" | "warning" | "error"> 
   DELETE: "error",
 };
 
+/** What the route loader read: the OpenAPI catalog, the masked API keys and, per read, the
+ * HTTP status when it failed (`null` when it succeeded). */
+export interface ApiEndpointsLoaded {
+  catalog: CatalogData | null;
+  catalogStatus: number | null;
+  /** The route's own `error` string for a failed catalog read, when it sent one. */
+  catalogMessage?: string | null;
+  apiKeys: Array<{ id: string; key: string }>;
+  apiKeysStatus: number | null;
+  /** The CLI keys for the VS Code alias card. */
+  cliKeys: CliKeysLoaded;
+}
+
+export type { CatalogData as ApiEndpointsCatalog };
+
 /* ─── Main Component ─────────────────────────────────── */
-export default function ApiEndpointsTab() {
+export default function ApiEndpointsTab({ loaded }: { loaded: ApiEndpointsLoaded }) {
   const t = useTranslations("endpoint");
   const tc = useTranslations("common");
   const baseUrl = useDisplayBaseUrl();
@@ -86,9 +101,6 @@ export default function ApiEndpointsTab() {
     );
   }
 
-  const [catalog, setCatalog] = useState<CatalogData | null>(null);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [expandedEndpoint, setExpandedEndpoint] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -102,80 +114,21 @@ export default function ApiEndpointsTab() {
   const [tryBody, setTryBody] = useState("");
   const [tryResult, setTryResult] = useState<TryItResult | null>(null);
   const [trying, setTrying] = useState(false);
-  const [availableApiKeys, setAvailableApiKeys] = useState<Array<{ id: string; key: string }>>([]);
-  const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>("");
   const [revealedApiKeys, setRevealedApiKeys] = useState<Record<string, string>>({});
-  const [apiKeyLoadError, setApiKeyLoadError] = useState<string | null>(null);
   const [manualApiKey, setManualApiKey] = useState("");
   const [useManualKey, setUseManualKey] = useState(false);
+  // The catalog and the (masked) API key list come from the route loader. The selected key is
+  // revealed only when sending a Try It request.
+  const catalog = loaded.catalog;
+  const catalogError =
+    loaded.catalogStatus === null
+      ? null
+      : loaded.catalogMessage || t("catalogLoadFailed", { status: loaded.catalogStatus });
+  const availableApiKeys = loaded.apiKeys;
+  const apiKeyLoadError =
+    loaded.apiKeysStatus === null ? null : t("apiKeysLoadFailed", { status: loaded.apiKeysStatus });
+  const [selectedApiKeyId, setSelectedApiKeyId] = useState<string>(loaded.apiKeys[0]?.id ?? "");
   const selectedApiKey = availableApiKeys.find((apiKey) => apiKey.id === selectedApiKeyId) || null;
-
-  const loadCatalog = useCallback(async () => {
-    try {
-      const res = await fetch("/api/openapi/spec");
-      if (res.ok) {
-        const data = await res.json();
-        return { data: data as CatalogData, error: null };
-      }
-      const body = await res.json().catch(() => null);
-      const message =
-        body && typeof body.error === "string"
-          ? body.error
-          : t("catalogLoadFailed", { status: res.status });
-      return { data: null, error: message };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : t("catalogLoadFailedGeneric");
-      return { data: null, error: message };
-    }
-  }, [t]);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadCatalog().then((result) => {
-      if (!cancelled) {
-        setCatalog(result.data);
-        setCatalogError(result.error);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadCatalog]);
-
-  // Load API keys for Try It functionality. The list endpoint returns masked
-  // keys; the selected key is revealed only when sending a Try It request.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/keys?limit=100", { credentials: "same-origin" })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(t("apiKeysLoadFailed", { status: res.status }));
-        return res.json();
-      })
-      .then((data) => {
-        if (cancelled) return;
-        const rows = Array.isArray(data?.keys) ? data.keys : Array.isArray(data) ? data : [];
-        const keys = rows
-          .filter((k) => k?.id && k.isActive !== false && k.isBanned !== true)
-          .map((k) => ({ id: String(k.id), key: String(k.key || k.id) }));
-        setAvailableApiKeys(keys);
-        setApiKeyLoadError(null);
-        if (keys.length > 0) {
-          setSelectedApiKeyId((current) => current || keys[0].id);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setAvailableApiKeys([]);
-          setApiKeyLoadError(
-            error instanceof Error ? error.message : t("apiKeysLoadFailedGeneric")
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [t]);
 
   // Filter endpoints
   const filteredEndpoints = useMemo(() => {
@@ -309,15 +262,6 @@ export default function ApiEndpointsTab() {
     setTrying(false);
   };
 
-  if (loading) {
-    return (
-      <div className="animate-pulse space-y-4">
-        <div className="h-8 bg-surface-2 rounded-lg w-1/3" />
-        <div className="h-64 bg-surface-2 rounded-xl" />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
       {/* Header with spec info */}
@@ -394,7 +338,7 @@ export default function ApiEndpointsTab() {
             </div>
           </Card>
 
-          <VscodeTokenAliasCard variant="catalog" />
+          <VscodeTokenAliasCard variant="catalog" cliKeys={loaded.cliKeys} />
         </>
       )}
 
@@ -473,7 +417,7 @@ export default function ApiEndpointsTab() {
             </div>
           </div>
 
-          <VscodeTokenAliasCard variant="catalog" />
+          <VscodeTokenAliasCard variant="catalog" cliKeys={loaded.cliKeys} />
 
           {/* Endpoint groups */}
           {Object.entries(groupedEndpoints).map(([tag, endpoints]) => (

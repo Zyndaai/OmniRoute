@@ -21,11 +21,7 @@ const SERVER_DATA_MODULE = /^(@\/lib\/db(\/|$)|@\/sse\/services(\/|$)|(\.\.\/)+.
  * Known direct reads. Each returns only a yes/no to the page, never row data.
  * Converting one to `apiJson()` removes it from this list.
  */
-const ALLOWED: Record<string, string> = {
-  "src/app/(dashboard)/dashboard/tools/agent-bridge/page.tsx":
-    "getProviderConnections() -> hasProviders boolean only",
-  "src/app/(dashboard)/home/loadHomeSettings.ts": "getSettings() -> setupComplete only",
-};
+const ALLOWED: Record<string, string> = {};
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -177,7 +177,6 @@ const EXPECTED: Record<InventoryKind, Record<string, number>> = {
     "src/app/api/providers/[id]/test-message/route.ts": 3,
     "src/lib/providers/volcPlanAutoSyncBackfill.ts": 1,
     "src/lib/providers/volcenginePlanBinding.ts": 1,
-    "src/app/(dashboard)/dashboard/tools/agent-bridge/page.tsx": 1,
     "src/app/api/cloud/auth/route.ts": 1,
     "src/app/api/cloud/credentials/update/route.ts": 1,
     "src/app/api/models/route.ts": 1,

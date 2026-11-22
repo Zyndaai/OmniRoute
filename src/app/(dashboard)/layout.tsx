@@ -11,6 +11,15 @@ export function loader({ request }: LoaderFunctionArgs) {
   return { sidebarDefaultOpen: requestCookie("ci_sidebar_state", request) !== "0" };
 }
 
+/**
+ * Dashboard pages render their loaders' API data (keys, tunnel tokens, settings) into the HTML
+ * and the `.data` responses, so they are never stored, like the `/api` responses they come from.
+ * No page below exports `headers`, so this one applies to all of them.
+ */
+export function headers() {
+  return { "Cache-Control": "no-store" };
+}
+
 /** The cookie only seeds the first render; the sidebar keeps its own state after that. */
 export function shouldRevalidate() {
   return false;

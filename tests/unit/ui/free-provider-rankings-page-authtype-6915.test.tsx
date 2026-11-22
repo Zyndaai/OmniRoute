@@ -11,6 +11,7 @@
 
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -103,20 +104,22 @@ function render(jsx: React.ReactElement) {
  * React 19 + jsdom in this repo's test environment.
  */
 async function waitForNotLoading(el: HTMLDivElement, maxAttempts = 40) {
-  for (let i = 0; i < maxAttempts && el.textContent?.includes("loading"); i++) {
+  // The route loader resolves before the page renders: wait for the table rows.
+  for (let i = 0; i < maxAttempts && !el.querySelector("tbody tr"); i++) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 
 async function renderPageWithFixture() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ rankings: FIXTURE_RANKINGS }),
-    })
-  );
-  const el = render(<FreeProviderRankingsPage />);
+  // The first paint comes from the route loader, which returns the unfiltered ranking.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: FreeProviderRankingsPage,
+      loader: () => ({ rankings: FIXTURE_RANKINGS, failed: false }),
+    },
+  ]);
+  const el = render(<Stub initialEntries={["/"]} />);
   await waitForNotLoading(el);
   return el;
 }

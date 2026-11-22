@@ -35,10 +35,28 @@ interface HeadroomStatus {
   installed?: boolean;
 }
 
-export default function HeadroomProxyCard() {
+export default function HeadroomProxyCard({
+  initialSettings,
+}: {
+  /** The `headroomUrl` setting read by the route loader; without it the card fetches it. */
+  initialSettings?: { headroomUrl?: unknown } | null;
+} = {}) {
   const t = useTranslations("settings");
-  const [url, setUrl] = useState("");
-  const [loaded, setLoaded] = useState(false);
+  const initialUrl =
+    typeof initialSettings?.headroomUrl === "string" ? initialSettings.headroomUrl : "";
+  const [url, setUrl] = useState(initialUrl);
+  const [loaded, setLoaded] = useState(!!initialSettings);
+
+  // Keyed copy: a new loader result (compared by content) resets the URL draft.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setUrl(initialUrl);
+      setLoaded(true);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [acting, setActing] = useState(false);
   const [status, setStatus] = useState<HeadroomStatus | null>(null);
@@ -59,15 +77,19 @@ export default function HeadroomProxyCard() {
     // Async continuation so every setState happens after an await
     // (react-hooks/set-state-in-effect: no synchronous setState in effect bodies).
     void (async () => {
-      try {
-        const r = await fetch("/api/settings", { signal: ac.signal });
-        const data = (r.ok ? await r.json() : {}) as Record<string, unknown>;
-        if (ac.signal.aborted) return;
-        if (typeof data.headroomUrl === "string") setUrl(data.headroomUrl);
-      } catch {
-        // ignore
-      } finally {
-        if (!ac.signal.aborted) setLoaded(true);
+      // The route loader supplies the URL; the lifecycle status stays a client read
+      // (it probes the proxy process).
+      if (!initialSettings) {
+        try {
+          const r = await fetch("/api/settings", { signal: ac.signal });
+          const data = (r.ok ? await r.json() : {}) as Record<string, unknown>;
+          if (ac.signal.aborted) return;
+          if (typeof data.headroomUrl === "string") setUrl(data.headroomUrl);
+        } catch {
+          // ignore
+        } finally {
+          if (!ac.signal.aborted) setLoaded(true);
+        }
       }
       // Status is for start/stop buttons only. Do not copy status.url into the
       // input -- that value is HEADROOM_URL fallback and would overwrite empty.
@@ -82,6 +104,7 @@ export default function HeadroomProxyCard() {
       saveAc.current?.abort();
       lifecycleAc.current?.abort();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, [refreshStatus]);
 
   const save = useCallback(async () => {

@@ -17,8 +17,9 @@ test("Radar exposes the guided combos page from its catalog", () => {
 
 test("guided combos reuse only the local catalog, builder options, and combo writer", () => {
   const source = pageSource();
-  assert.match(source, /fetch\("\/api\/radar\/catalog"\)/);
-  assert.match(source, /fetch\("\/api\/combos\/builder\/options"\)/);
+  // The loader reads the catalog and builder options; the writer stays a client fetch.
+  assert.match(source, /radarRead<[^>]*>\("\/api\/radar\/catalog"\)/);
+  assert.match(source, /radarRead<[^>]*>\("\/api\/combos\/builder\/options"\)/);
   assert.match(source, /fetch\("\/api\/combos",\s*\{/);
   assert.match(source, /method:\s*"POST"/);
   assert.doesNotMatch(source, /\/api\/radar\/sync/);

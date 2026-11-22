@@ -36,9 +36,12 @@ test("providers page mounts the leftover banner", () => {
 // again from 2010 to 1989 lines; re-pinned at the measured size.
 // React Router port: next/dynamic became clientOnlyLazy (src/shared/components/ClientOnly.tsx),
 // 1989 → 1986 lines; re-pinned at the measured size.
-test("providers page stays frozen at 1986 lines", () => {
+// Loader port: the route loader (first-paint reads) replaced the client fetch effects,
+// 1986 → 2023 lines (including the expiration summary the banner reads); re-pinned at the
+// measured size.
+test("providers page stays frozen at 2023 lines", () => {
   const lines = fs.readFileSync(pagePath, "utf8").split("\n").length;
-  assert.equal(lines, 1986);
+  assert.equal(lines, 2023);
 });
 
 test("purge surfaces notify.error when POST is not ok", () => {

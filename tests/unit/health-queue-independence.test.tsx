@@ -1,5 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRoutesStub } from "react-router";
 import { IntlProvider } from "use-intl";
 import { afterEach, expect, it, vi } from "vitest";
 import HealthPage from "../../src/app/(dashboard)/dashboard/health/page";
@@ -25,15 +26,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("keeps queue polling and refresh mounted through health loading and health failures", async () => {
+it("keeps queue polling and refresh mounted through health failures", async () => {
   vi.useFakeTimers();
-  let failHealth!: () => void;
   const fetchMock = vi.fn<typeof fetch>(async (input) => {
-    if (input === "/api/monitoring/health") {
-      return new Promise<Response>((resolve) => {
-        failHealth = () => resolve(new Response(null, { status: 503 }));
-      });
-    }
     if (input === "/api/admin/concurrency") {
       return new Response(
         JSON.stringify({ timestamp: new Date().toISOString(), comboQueues: {}, semaphores: {} })
@@ -42,20 +37,36 @@ it("keeps queue polling and refresh mounted through health loading and health fa
     return new Response("{}");
   });
   vi.stubGlobal("fetch", fetchMock);
+  // The health snapshot is read by the route loader: serve a failed read as its result.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: HealthPage,
+      loader: () => ({
+        health: null,
+        healthError: "HTTP 503",
+        dbHealth: null,
+        cache: null,
+        signatureCache: null,
+        degradation: null,
+        autopilot: null,
+      }),
+    },
+  ]);
   render(
     <IntlProvider locale="en" timeZone="UTC" messages={messages}>
-      <HealthPage />
+      <Stub initialEntries={["/"]} />
     </IntlProvider>
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByText("Loading health data...")).toBeTruthy();
-  expect(screen.getAllByText("No gates tracked in this snapshot.")).toHaveLength(2);
-  await act(async () => {
-    failHealth();
-  });
   expect(screen.getByText("Failed to load health data: HTTP 503")).toBeTruthy();
+  // The queue card mounts with the page and fetches its own snapshot.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(screen.getAllByText("No gates tracked in this snapshot.")).toHaveLength(2);
   expect(screen.getAllByText("No gates tracked in this snapshot.")).toHaveLength(2);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(3000);
@@ -65,5 +76,6 @@ it("keeps queue polling and refresh mounted through health loading and health fa
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await act(async () => {});
   expect(queueCalls()).toHaveLength(3);
-  expect(fetchMock.mock.calls.filter(([url]) => url === "/api/monitoring/health")).toHaveLength(1);
+  // The page's own snapshot never goes through the browser's fetch any more.
+  expect(fetchMock.mock.calls.filter(([url]) => url === "/api/monitoring/health")).toHaveLength(0);
 });

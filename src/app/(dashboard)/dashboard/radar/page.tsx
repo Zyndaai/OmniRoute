@@ -3,7 +3,9 @@ import { useTranslations } from "use-intl";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Tabs, TabsList, TabsTrigger } from "@omniroute/ui-kit/tabs";
-import { Link } from "react-router";
+import { Link, useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import { radarRead } from "./radarApi.server";
 import Icon from "@/shared/components/Icon";
 import { Card } from "@/shared/components";
 import Button from "@/shared/components/Button";
@@ -13,7 +15,11 @@ import { isValidSupporterKeyFormat } from "@/lib/radar/supporterKey";
 import RadarNotFound from "./RadarNotFound";
 import { resolveRadarPageState } from "./radarPageState";
 import { RadarAccessExplainer } from "./RadarAccessExplainer";
-import { RadarCatalogTable, type RadarMergedEntry } from "./RadarCatalogTable";
+import {
+  RadarCatalogTable,
+  type RadarLocalModelState,
+  type RadarMergedEntry,
+} from "./RadarCatalogTable";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,28 +72,101 @@ function relativeTime(isoDate: string): string {
 // Page Component
 // ---------------------------------------------------------------------------
 
+interface RadarSettingsPayload {
+  optIn?: boolean;
+  hasSupporterKey?: boolean;
+  supporterKeyMasked?: string | null;
+  contributorClaimUrl?: string;
+  supporterPlansUrl?: string;
+}
+
+const EMPTY_ENTRIES: RadarMergedEntry[] = [];
+const EMPTY_REFERRALS: RadarReferralsState = { fixed: [], campaigns: [], tier: null };
+
+/**
+ * Settings decide the page state (404 = Radar flag off). When opted in, the catalog, the
+ * referral links and the local model edits are read too. Required: the settings read; a failing
+ * catalog shows its error message, referrals and local edits fall back to empty (best-effort).
+ */
+export async function loader() {
+  const settingsRead = await radarRead<RadarSettingsPayload>("/api/radar/settings");
+  const base = {
+    featureAvailable: true,
+    // null = settings unreadable (old page showed the activation screen then).
+    optIn: null as boolean | null,
+    hasSupporterKey: false,
+    supporterKeyMasked: null as string | null,
+    // F4/T7 — outbound links relayed by the settings route (src/lib/radar/links.ts); never
+    // hardcoded in the page.
+    contributorClaimUrl: null as string | null,
+    supporterPlansUrl: null as string | null,
+    entries: EMPTY_ENTRIES,
+    meta: null as RadarMeta | null,
+    catalogError: "",
+    referrals: EMPTY_REFERRALS,
+    localStates: [] as RadarLocalModelState[],
+  };
+  if (settingsRead.status === 404) return { ...base, featureAvailable: false };
+  const settings = settingsRead.body;
+  if (!settings) return base;
+
+  const optIn = settings.optIn === true;
+  const result = {
+    ...base,
+    optIn,
+    hasSupporterKey: settings.hasSupporterKey === true,
+    supporterKeyMasked:
+      typeof settings.supporterKeyMasked === "string" ? settings.supporterKeyMasked : null,
+    contributorClaimUrl:
+      typeof settings.contributorClaimUrl === "string" ? settings.contributorClaimUrl : null,
+    supporterPlansUrl:
+      typeof settings.supporterPlansUrl === "string" ? settings.supporterPlansUrl : null,
+  };
+  if (!optIn) return result;
+
+  const [catalogRead, referrals, localState] = await Promise.all([
+    radarRead<{ entries?: RadarMergedEntry[]; meta?: RadarMeta | null }>("/api/radar/catalog"),
+    apiJsonOrNull<Partial<RadarReferralsState>>("/api/radar/referrals"),
+    apiJsonOrNull<{ states?: RadarLocalModelState[] }>("/api/radar/local-model-state"),
+  ]);
+  if (catalogRead.status === 404) return { ...result, featureAvailable: false };
+  return {
+    ...result,
+    entries: catalogRead.body?.entries || EMPTY_ENTRIES,
+    meta: catalogRead.body?.meta || null,
+    catalogError: catalogRead.body ? "" : `HTTP ${catalogRead.status}`,
+    referrals: referrals
+      ? {
+          fixed: Array.isArray(referrals.fixed) ? referrals.fixed : [],
+          campaigns: Array.isArray(referrals.campaigns) ? referrals.campaigns : [],
+          tier: referrals.tier ?? null,
+        }
+      : EMPTY_REFERRALS,
+    localStates: Array.isArray(localState?.states) ? localState.states : [],
+  };
+}
+
 export default function RadarPage() {
   const t = useTranslations("radarPage");
-  const [entries, setEntries] = useState<RadarMergedEntry[]>([]);
-  const [meta, setMeta] = useState<RadarMeta | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [featureAvailable, setFeatureAvailable] = useState<boolean | null>(null);
-  const [optIn, setOptIn] = useState<boolean | null>(null);
+  const revalidator = useRevalidator();
+  const {
+    featureAvailable,
+    optIn,
+    hasSupporterKey,
+    supporterKeyMasked,
+    contributorClaimUrl,
+    supporterPlansUrl,
+    entries,
+    meta,
+    catalogError,
+    referrals,
+    localStates,
+  } = useLoaderData<typeof loader>();
+  const [actionError, setError] = useState("");
+  const error = actionError || catalogError;
   const [activating, setActivating] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [activeTab, setActiveTab] = useState<RadarTabId>("catalog");
-  const [referrals, setReferrals] = useState<RadarReferralsState>({
-    fixed: [],
-    campaigns: [],
-    tier: null,
-  });
-  // F4/T7 — "get a supporter key" outbound links, relayed by
-  // GET /api/radar/settings (server-resolved, see src/lib/radar/links.ts).
-  // Never hardcoded here: this component must never embed an external URL
-  // literal (see tests/unit/radar-referrals-page-tab.test.ts).
-  const [contributorClaimUrl, setContributorClaimUrl] = useState<string | null>(null);
-  const [supporterPlansUrl, setSupporterPlansUrl] = useState<string | null>(null);
 
   // Paste-key activation — the primary path on the activation screen: paste
   // an already-obtained supporter key (`omr_` + 40 hex) to activate opt-in
@@ -97,106 +176,11 @@ export default function RadarPage() {
   // form instead of an empty input — the raw key is never displayed.
   const [keyInput, setKeyInput] = useState("");
   const [keySubmitting, setKeySubmitting] = useState(false);
-  const [hasSupporterKey, setHasSupporterKey] = useState(false);
-  const [supporterKeyMasked, setSupporterKeyMasked] = useState<string | null>(null);
   const [showKeyForm, setShowKeyForm] = useState(false);
-  // Fetch catalog
-  const fetchCatalog = useCallback(
-    async (showLoading = true) => {
-      if (showLoading) setLoading(true);
-      setError("");
-      try {
-        const res = await fetch("/api/radar/catalog", { cache: "no-store" });
-        if (res.status === 404) {
-          // Flag off — treat as not found
-          setFeatureAvailable(false);
-          setEntries([]);
-          setMeta(null);
-          if (showLoading) setLoading(false);
-          return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setFeatureAvailable(true);
-        const data = await res.json();
-        setEntries(data.entries || []);
-        setMeta(data.meta || null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t("errorLoading"));
-      } finally {
-        if (showLoading) setLoading(false);
-      }
-    },
-    [t]
-  );
-  const refreshCatalogSilently = useCallback(() => fetchCatalog(false), [fetchCatalog]);
 
-  // D28 — fetch the referral links section ("Pegue seus créditos grátis").
-  // Best-effort: flag off => 404, no cache => empty shape; either way this
-  // never blocks rendering of the rest of the page.
-  const fetchReferrals = useCallback(async () => {
-    try {
-      const res = await fetch("/api/radar/referrals");
-      if (!res.ok) return;
-      const data = await res.json();
-      setReferrals({
-        fixed: Array.isArray(data.fixed) ? data.fixed : [],
-        campaigns: Array.isArray(data.campaigns) ? data.campaigns : [],
-        tier: data.tier ?? null,
-      });
-    } catch {
-      // Best-effort only.
-    }
-  }, []);
-
-  // Fetch settings to determine opt-in state (GET /api/radar/settings — FIX 3:
-  // previously there was no settings GET, so an already-opted-in operator saw
-  // the activation screen on every reload).
-  const fetchSettings = useCallback(async () => {
-    try {
-      const settingsRes = await fetch("/api/radar/settings", { cache: "no-store" });
-      if (settingsRes.status === 404) {
-        // Flag off
-        setFeatureAvailable(false);
-        setOptIn(null);
-        return;
-      }
-      if (!settingsRes.ok) throw new Error(`HTTP ${settingsRes.status}`);
-      const settingsData = await settingsRes.json();
-      setFeatureAvailable(true);
-      setOptIn(settingsData.optIn === true);
-      setHasSupporterKey(settingsData.hasSupporterKey === true);
-      setSupporterKeyMasked(
-        typeof settingsData.supporterKeyMasked === "string" ? settingsData.supporterKeyMasked : null
-      );
-      // F4/T7 — best-effort: keep whatever we already had if the field is
-      // absent (older cached response shape), never fall back to a literal.
-      if (typeof settingsData.contributorClaimUrl === "string") {
-        setContributorClaimUrl(settingsData.contributorClaimUrl);
-      }
-      if (typeof settingsData.supporterPlansUrl === "string") {
-        setSupporterPlansUrl(settingsData.supporterPlansUrl);
-      }
-
-      if (settingsData.optIn === true) {
-        // Already opted in — load the catalog now so the populated/empty
-        // state renders immediately instead of waiting for a manual sync.
-        await fetchCatalog();
-        // D28 — load the referral links in parallel; best-effort, never
-        // blocks the catalog state above.
-        void fetchReferrals();
-      }
-    } catch {
-      setOptIn(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchCatalog, fetchReferrals]);
-
-  useEffect(() => {
-    void (async () => {
-      await fetchSettings();
-    })();
-  }, [fetchSettings]);
+  const refreshCatalogSilently = useCallback(async () => {
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   // Sync (defined before handleActivate which depends on it)
   const handleSync = useCallback(async () => {
@@ -207,8 +191,7 @@ export default function RadarPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.status === "updated" || data.status === "stale") {
-        await fetchCatalog();
-        void fetchReferrals();
+        await revalidator.revalidate();
       } else if (data.status === "error" || data.status === "too_large") {
         // "too_large" reuses the generic sync-failed copy — the feed exceeded the
         // client-side size cap (10MB), which is operationally the same as any
@@ -217,14 +200,14 @@ export default function RadarPage() {
       } else if (data.status === "disabled") {
         setError(t("flagDisabled"));
       } else if (data.status === "opt_out") {
-        setOptIn(false);
+        await revalidator.revalidate();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t("syncFailed"));
     } finally {
       setSyncing(false);
     }
-  }, [t, fetchCatalog, fetchReferrals]);
+  }, [t, revalidator]);
 
   // Auto-sync on open: when the operator is already opted in and the cached
   // feed is stale (or absent), refresh it automatically once per mount so the
@@ -233,13 +216,13 @@ export default function RadarPage() {
   // re-firing when `meta` updates after the sync itself.
   const autoSyncFiredRef = useRef(false);
   useEffect(() => {
-    if (loading || syncing || optIn !== true || autoSyncFiredRef.current) return;
+    if (syncing || optIn !== true || autoSyncFiredRef.current) return;
     if (!shouldAutoSyncOnOpen(meta?.fetchedAt ?? null, Date.now())) return;
     autoSyncFiredRef.current = true;
     void (async () => {
       await handleSync();
     })();
-  }, [loading, syncing, optIn, meta, handleSync]);
+  }, [syncing, optIn, meta, handleSync]);
 
   // Activate opt-in
   const handleActivate = useCallback(async () => {
@@ -251,7 +234,7 @@ export default function RadarPage() {
         body: JSON.stringify({ optIn: true }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setOptIn(true);
+      await revalidator.revalidate();
       // After activation, trigger a sync
       await handleSync();
     } catch (err) {
@@ -259,7 +242,7 @@ export default function RadarPage() {
     } finally {
       setActivating(false);
     }
-  }, [t, handleSync]);
+  }, [t, handleSync, revalidator]);
 
   // Activate with a pasted supporter key — the primary path on this screen.
   // Submitting a key both sets it AND opts in, in a single POST (pasting a
@@ -280,10 +263,7 @@ export default function RadarPage() {
         body: JSON.stringify({ optIn: true, supporterKey: trimmed }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setOptIn(true);
-      setHasSupporterKey(true);
-      setSupporterKeyMasked(typeof data.supporterKey === "string" ? data.supporterKey : null);
+      await revalidator.revalidate();
       setKeyInput("");
       setShowKeyForm(false);
       // After activation, trigger a sync so the live tier catalog loads.
@@ -293,18 +273,14 @@ export default function RadarPage() {
     } finally {
       setKeySubmitting(false);
     }
-  }, [keyInput, t, handleSync]);
+  }, [keyInput, t, handleSync, revalidator]);
 
   // Feature availability and privacy opt-in are independent states. A successful
   // settings response with `optIn: false` means "show activation", not "flag off".
-  const pageState = resolveRadarPageState(
-    featureAvailable !== false,
-    optIn === true,
-    meta !== null
-  );
+  const pageState = resolveRadarPageState(featureAvailable, optIn === true, meta !== null);
 
   // Flag off — render not-found
-  if (featureAvailable === false && !loading) {
+  if (!featureAvailable) {
     return <RadarNotFound />;
   }
 
@@ -361,7 +337,8 @@ export default function RadarPage() {
               {meta.tier === "live" ? t("tierLive") : t("tierCommunity")}
             </span>
           </span>
-          <span>
+          {/* Relative to the clock: differs between the server render and hydration. */}
+          <span suppressHydrationWarning>
             {t("feedFetched")}: {relativeTime(meta.fetchedAt)}
           </span>
         </div>
@@ -369,11 +346,7 @@ export default function RadarPage() {
 
       {error && <div className="p-3 rounded-lg bg-error/10 text-error text-sm">{error}</div>}
 
-      {loading ? (
-        <div className="flex items-center justify-center min-h-[200px]">
-          <div className="text-text-muted">{t("loading")}</div>
-        </div>
-      ) : (
+      {
         <>
           {/* Opt-in pending */}
           {pageState === "optin_pending" && (
@@ -582,12 +555,13 @@ export default function RadarPage() {
           {pageState === "populated" && activeTab === "catalog" && (
             <RadarCatalogTable
               entries={entries}
+              localStates={localStates}
               refreshCatalog={refreshCatalogSilently}
               onError={setError}
             />
           )}
         </>
-      )}
+      }
     </div>
   );
 }

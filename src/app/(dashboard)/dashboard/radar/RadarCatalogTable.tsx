@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useTranslations } from "use-intl";
 import {
@@ -50,8 +50,12 @@ interface RadarLocalModelState {
   updatedAt: string;
 }
 
+export type { RadarLocalModelState };
+
 interface RadarCatalogTableProps {
   entries: RadarMergedEntry[];
+  /** Local edits/hides read by the page loader (`/api/radar/local-model-state`). */
+  localStates?: RadarLocalModelState[];
   refreshCatalog: () => Promise<void>;
   onError: (message: string) => void;
 }
@@ -131,30 +135,27 @@ function capabilityBadge(
   );
 }
 
-export function RadarCatalogTable({ entries, refreshCatalog, onError }: RadarCatalogTableProps) {
+const NO_LOCAL_STATES: RadarLocalModelState[] = [];
+
+export function RadarCatalogTable({
+  entries,
+  localStates = NO_LOCAL_STATES,
+  refreshCatalog,
+  onError,
+}: RadarCatalogTableProps) {
   const t = useTranslations("radarPage");
-  const [states, setStates] = useState<RadarLocalModelState[]>([]);
+  // The page's loader reads the local edits; this copy follows each new loader result and
+  // is replaced by the server's answer after a save.
+  const [states, setStates] = useState<RadarLocalModelState[]>(localStates);
+  const [shownLocalStates, setShownLocalStates] = useState(localStates);
+  if (localStates !== shownLocalStates) {
+    setShownLocalStates(localStates);
+    setStates(localStates);
+  }
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  const loadState = useCallback(async () => {
-    try {
-      const response = await fetch("/api/radar/local-model-state");
-      if (!response.ok) return;
-      const payload = await response.json();
-      setStates(Array.isArray(payload.states) ? payload.states : []);
-    } catch {
-      onError(t("errorLoading"));
-    }
-  }, [onError, t]);
-
-  useEffect(() => {
-    void (async () => {
-      await loadState();
-    })();
-  }, [loadState]);
 
   const stateByKey = useMemo(
     () => new Map(states.map((state) => [`${state.provider}:${state.modelId}`, state])),

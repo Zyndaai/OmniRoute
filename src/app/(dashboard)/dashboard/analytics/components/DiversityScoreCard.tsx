@@ -1,5 +1,4 @@
 import { useTranslations } from "use-intl";
-import { useEffect, useState } from "react";
 import Icon from "@/shared/components/Icon";
 import { Card } from "@/shared/components";
 
@@ -7,49 +6,18 @@ interface DiversityProviderStat {
   share: number;
 }
 
-interface DiversityReport {
+export interface DiversityReport {
   score: number;
   providers: Record<string, DiversityProviderStat>;
   windowSize: number;
   ttlMs: number;
 }
 
-export default function DiversityScoreCard() {
+/** `data` is the report the route loader read; null while unavailable (the card shows a spinner). */
+export default function DiversityScoreCard({ data }: { data: DiversityReport | null }) {
   const t = useTranslations("analytics");
-  const [data, setData] = useState<DiversityReport | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadDiversity() {
-      try {
-        const res = await fetch("/api/analytics/diversity");
-        if (!res.ok) {
-          throw new Error(`Failed to fetch diversity analytics: ${res.status}`);
-        }
-
-        const json = (await res.json()) as DiversityReport;
-        if (!cancelled) {
-          setData(json);
-        }
-      } catch (error) {
-        console.error(error);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void loadDiversity();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (loading || !data) {
+  if (!data) {
     return (
       <Card className="p-5 flex flex-col justify-center items-center min-h-[220px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>

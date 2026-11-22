@@ -11,17 +11,27 @@ import {
 
 const SUPPORTED_MODEL_CHOICES = [...CLAUDE_FAST_MODE_DEFAULT_MODELS];
 
-export default function ClaudeFastModeTab() {
-  const [enabled, setEnabled] = useState(false);
-  const [selectedModels, setSelectedModels] = useState<string[]>([
-    ...CLAUDE_FAST_MODE_DEFAULT_MODELS,
-  ]);
-  const [loading, setLoading] = useState(true);
+/** `initialSettings` carries the route loader's `claudeFastMode` setting; without it the tab fetches `/api/settings` on mount. */
+export default function ClaudeFastModeTab({
+  initialSettings,
+}: {
+  initialSettings?: { claudeFastMode?: unknown };
+} = {}) {
+  const [enabled, setEnabled] = useState(
+    initialSettings ? isClaudeFastModeEnabled(initialSettings) : false
+  );
+  const [selectedModels, setSelectedModels] = useState<string[]>(
+    initialSettings
+      ? getClaudeFastModeSupportedModels(initialSettings)
+      : [...CLAUDE_FAST_MODE_DEFAULT_MODELS]
+  );
+  const [loading, setLoading] = useState(!initialSettings);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"" | "saved" | "error">("");
   const t = useTranslations("settings");
 
   useEffect(() => {
+    if (initialSettings) return;
     let cancelled = false;
     fetch("/api/settings")
       .then((res) => res.json())
@@ -37,7 +47,7 @@ export default function ClaudeFastModeTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSettings]);
 
   const modelsCount = selectedModels.length;
 

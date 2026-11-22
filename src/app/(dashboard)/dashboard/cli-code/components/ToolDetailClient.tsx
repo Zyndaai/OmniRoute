@@ -26,56 +26,31 @@ import {
 export interface ToolDetailClientProps {
   toolId: string;
   category: "code" | "agent";
+  /** `/api/providers` connections, from the route loader. */
+  connections: any[];
+  /** `/api/cli-tools/keys` keys, from the route loader. */
+  apiKeys: any[];
+  /** `cloudEnabled` from `/api/settings`, from the route loader. */
+  cloudEnabled: boolean;
 }
 
 const CLOUD_URL = process.env.NEXT_PUBLIC_CLOUD_URL;
 
-export default function ToolDetailClient({ toolId, category }: ToolDetailClientProps) {
+export default function ToolDetailClient({
+  toolId,
+  category,
+  connections,
+  apiKeys,
+  cloudEnabled,
+}: ToolDetailClientProps) {
   const t = useTranslations("cliCommon");
   const tool = CLI_TOOLS[toolId];
 
-  const [connections, setConnections] = useState<any[]>([]);
-  const [apiKeys, setApiKeys] = useState<any[]>([]);
-  const [cloudEnabled, setCloudEnabled] = useState(false);
+  // Providers, API keys and the cloud flag come from the route loader. The model catalogue is
+  // `/v1/models` (not an `/api` route), so it stays a client read; the card waits for it.
   const [dynamicModels, setDynamicModels] = useState<any[]>([]);
   const [modelMappings, setModelMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-
-  const fetchConnections = useCallback(async () => {
-    try {
-      const res = await fetch("/api/providers");
-      if (res.ok) {
-        const data = await res.json();
-        setConnections(data.connections || []);
-      }
-    } catch (error) {
-      console.log("Error fetching connections:", error);
-    }
-  }, []);
-
-  const fetchApiKeys = useCallback(async () => {
-    try {
-      const res = await fetch("/api/cli-tools/keys");
-      if (res.ok) {
-        const data = await res.json();
-        setApiKeys(data.keys || []);
-      }
-    } catch (error) {
-      console.log("Error fetching API keys:", error);
-    }
-  }, []);
-
-  const fetchCloudSettings = useCallback(async () => {
-    try {
-      const res = await fetch("/api/settings");
-      if (res.ok) {
-        const data = await res.json();
-        setCloudEnabled(data.cloudEnabled || false);
-      }
-    } catch (error) {
-      console.log("Error loading cloud settings:", error);
-    }
-  }, []);
 
   const fetchDynamicModels = useCallback(async () => {
     try {
@@ -91,25 +66,16 @@ export default function ToolDetailClient({ toolId, category }: ToolDetailClientP
 
   useEffect(() => {
     let cancelled = false;
-    // "Load data on mount" pattern: fetch* callbacks call setState internally
-    // after async resolution. The cancelled flag prevents setState after unmount.
-    // The react-hooks/set-state-in-effect rule flags this pattern conservatively
-    // (it cannot distinguish sync vs async setState), but this is the canonical
-    // way to load remote data on mount until we migrate to use()/Suspense.
+    // fetchDynamicModels sets state after an await; the rule cannot tell it from a sync setState.
     /* eslint-disable react-hooks/set-state-in-effect */
-    Promise.all([
-      fetchConnections(),
-      fetchApiKeys(),
-      fetchCloudSettings(),
-      fetchDynamicModels(),
-    ]).finally(() => {
+    fetchDynamicModels().finally(() => {
       if (!cancelled) setLoading(false);
     });
     /* eslint-enable react-hooks/set-state-in-effect */
     return () => {
       cancelled = true;
     };
-  }, [fetchConnections, fetchApiKeys, fetchCloudSettings, fetchDynamicModels]);
+  }, [fetchDynamicModels]);
 
   const getActiveProviders = useCallback(() => {
     return connections.filter((c) => c.isActive !== false);

@@ -3,7 +3,7 @@
 import { useSearchParams } from "react-router";
 import { useState } from "react";
 import { clientOnlyLazy } from "@/shared/components/ClientOnly";
-import type { StreamMetrics } from "@/shared/schemas/playground";
+import type { PlaygroundPresetListItem, StreamMetrics } from "@/shared/schemas/playground";
 import StudioTopBar, { type StudioTab } from "./components/StudioTopBar";
 import StudioConfigPane, { type ConfigState } from "./components/StudioConfigPane";
 import { DEFAULT_PARAMS } from "./components/ParamSliders";
@@ -48,7 +48,12 @@ function resolveTab(value: string | null): StudioTab {
  * - SLOT_PRESETS: F7 will replace the comment in StudioConfigPane with PresetPicker
  * - SLOT_IMPROVE: F7 will replace the comment in StudioConfigPane with ImprovePromptButton
  */
-export function PlaygroundStudio() {
+export function PlaygroundStudio({
+  initialPresets,
+}: {
+  /** Presets from the route loader; when absent the preset picker fetches them itself. */
+  initialPresets?: PlaygroundPresetListItem[];
+} = {}) {
   const [searchParams] = useSearchParams();
   // Derive active tab from URL — no effect needed, avoids setState-in-effect lint violation.
   // When URL changes (client nav), searchParams updates, component re-renders with new tab.
@@ -97,7 +102,11 @@ export function PlaygroundStudio() {
 
         {/* Config pane — always visible, collapsible */}
         {/* SLOT_PRESETS and SLOT_IMPROVE are inside StudioConfigPane */}
-        <StudioConfigPane configState={configState} setConfigState={setConfigState} />
+        <StudioConfigPane
+          configState={configState}
+          setConfigState={setConfigState}
+          initialPresets={initialPresets}
+        />
       </div>
     </div>
   );

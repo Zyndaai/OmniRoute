@@ -2,12 +2,29 @@ import { useEffect, useState } from "react";
 import { Card, Toggle } from "@/shared/components";
 import { useTranslations } from "use-intl";
 
-export default function DebugModeCard() {
-  const [debugMode, setDebugMode] = useState(true);
-  const [loading, setLoading] = useState(true);
+export default function DebugModeCard({
+  initialDebugMode,
+}: {
+  /** `settings.debugMode` as read by the route loader; undefined: the card fetches it itself. */
+  initialDebugMode?: boolean;
+} = {}) {
+  const [debugMode, setDebugMode] = useState(initialDebugMode ?? true);
+  const [loading, setLoading] = useState(initialDebugMode === undefined);
   const t = useTranslations("settings");
 
+  // A new loader result replaces the local value.
+  const [shownInitial, setShownInitial] = useState(initialDebugMode);
+  if (initialDebugMode !== shownInitial) {
+    setShownInitial(initialDebugMode);
+    if (initialDebugMode !== undefined) {
+      setDebugMode(initialDebugMode);
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the value.
+    if (initialDebugMode !== undefined) return;
     let mounted = true;
 
     async function loadSettings() {
@@ -29,6 +46,7 @@ export default function DebugModeCard() {
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const updateDebugMode = async (value: boolean) => {

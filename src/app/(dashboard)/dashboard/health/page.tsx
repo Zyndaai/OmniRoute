@@ -1,6 +1,8 @@
 /** System health diagnostics and independently refreshed local concurrency gates. */
 
 import { useState, useEffect, useCallback } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJson, apiJsonOrNull, apiRequest } from "@/server/routing/dashboardApi.server";
 
 import { PageHeader, SectionHeader } from "@omniroute/ui-kit/page-header";
 import { Progress } from "@omniroute/ui-kit/progress";
@@ -14,7 +16,7 @@ import { compareTr } from "@/shared/utils/turkishText";
 import { useConfirmDialog } from "@/shared/hooks/useConfirmDialog";
 import { useLocale, useTranslations } from "use-intl";
 import TelemetryCard from "./TelemetryCard";
-import ProviderHealthAutopilotCard from "./ProviderHealthAutopilotCard";
+import ProviderHealthAutopilotCard, { type AutopilotReport } from "./ProviderHealthAutopilotCard";
 import ProviderHealthMatrixCard from "./ProviderHealthMatrixCard";
 import ConcurrencyQueuesCard from "./ConcurrencyQueuesCard";
 
@@ -76,6 +78,49 @@ function HealthLayout({
   );
 }
 
+const HEALTH_POLL_MS = 15_000;
+
+/**
+ * Health snapshot plus the cache, signature-cache, degradation and database-health reads.
+ * Required: `/api/monitoring/health` (the page shows a retry card with its HTTP status when it
+ * fails). Optional, each falling back to null as before: the four others; while polling, the
+ * component keeps the last good value of each.
+ */
+export async function loader() {
+  const healthResponse = await apiRequest("/api/monitoring/health");
+  // apiJson() turns a 401 into the login redirect; the replay is the same request, so it throws.
+  if (healthResponse.status === 401) await apiJson("/api/monitoring/health");
+  const [health, dbHealth, cache, rateLimits, degradation, autopilot] = await Promise.all([
+    healthResponse.ok ? (healthResponse.json() as Promise<HealthData>) : Promise.resolve(null),
+    apiJsonOrNull<DbHealth>("/api/db/health"),
+    apiJsonOrNull<{
+      size?: number;
+      maxSize?: number;
+      hitRate?: number;
+      hits?: number;
+      misses?: number;
+    }>("/api/cache/stats"),
+    apiJsonOrNull<{ cacheStats?: Record<string, any> }>("/api/rate-limits"),
+    apiJsonOrNull<Record<string, any>>("/api/health/degradation"),
+    apiJsonOrNull<AutopilotReport>("/api/providers/health-autopilot", {
+      query: { includeHealthy: "false" },
+    }),
+  ]);
+  return {
+    health,
+    healthError: healthResponse.ok ? null : `HTTP ${healthResponse.status}`,
+    dbHealth,
+    cache,
+    signatureCache: rateLimits?.cacheStats ?? null,
+    degradation,
+    autopilot,
+  };
+}
+
+// The snapshot's shape is owned by /api/monitoring/health; the page reads it loosely.
+type HealthData = Record<string, any>;
+type DbHealth = Record<string, any>;
+
 function HealthSnapshot() {
   const locale = useLocale();
   const t = useTranslations("health");
@@ -83,75 +128,53 @@ function HealthSnapshot() {
   const tp = useTranslations("providers");
   const [confirm, confirmDialog] = useConfirmDialog();
   const nodeMap = useProviderNodeMap();
-  const [data, setData] = useState(null);
-  const [dbHealth, setDbHealth] = useState(null);
-  const [dbHealthError, setDbHealthError] = useState(null);
-  const [error, setError] = useState(null);
-  const [lastRefresh, setLastRefresh] = useState(null);
-  const [cache, setCache] = useState(null);
-  const [signatureCache, setSignatureCache] = useState(null);
-  const [degradation, setDegradation] = useState(null);
+  const revalidator = useRevalidator();
+  const loaded = useLoaderData<typeof loader>();
+  const [dbHealthError, setDbHealthError] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  // Polling keeps the last good value of each read when a later one fails.
+  const [snapshot, setSnapshot] = useState(loaded);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    setSnapshot({
+      health: loaded.health ?? snapshot.health,
+      healthError: loaded.healthError,
+      dbHealth: loaded.dbHealth ?? snapshot.dbHealth,
+      cache: loaded.cache ?? snapshot.cache,
+      signatureCache: loaded.signatureCache ?? snapshot.signatureCache,
+      degradation: loaded.degradation ?? snapshot.degradation,
+      autopilot: loaded.autopilot,
+    });
+  }
+  const { cache, signatureCache, degradation } = snapshot;
+  const data = snapshot.health as HealthData | null;
+  const error = snapshot.healthError;
+  const dbHealth = snapshot.dbHealth as DbHealth | null;
   const [resetting, setResetting] = useState(false);
   const [repairingDb, setRepairingDb] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
   const [unblockingKey, setUnblockingKey] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // The time of the last successful snapshot, set on the client only.
+  useEffect(() => {
+    if (!loaded.health) return;
+    void Promise.resolve().then(() => setLastRefresh(new Date()));
+  }, [loaded]);
+
   const fetchHealth = useCallback(async () => {
-    try {
-      const res = await fetch("/api/monitoring/health");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
-      setError(null);
-      setLastRefresh(new Date());
-    } catch (err) {
-      setError(err.message);
-    }
-  }, []);
-
-  const fetchDbHealth = useCallback(async () => {
-    try {
-      const res = await fetch("/api/db/health");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setDbHealth(json);
-      setDbHealthError(null);
-    } catch (err) {
-      setDbHealthError(err.message);
-    }
-  }, []);
-
-  // Fetch cache, signature cache, and degradation stats.
-  const fetchExtras = useCallback(async () => {
-    const results = await Promise.allSettled([
-      fetch("/api/cache/stats").then((r) => r.json()),
-      fetch("/api/rate-limits").then((r) => r.json()),
-      fetch("/api/health/degradation").then((r) => r.json()),
-    ]);
-    if (results[0].status === "fulfilled") setCache(results[0].value);
-    if (results[1].status === "fulfilled" && results[1].value.cacheStats) {
-      setSignatureCache(results[1].value.cacheStats);
-    }
-    if (results[2].status === "fulfilled") setDegradation(results[2].value);
-  }, []);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   useEffect(() => {
-    const initialFetch = setTimeout(() => {
-      void fetchHealth();
-      void fetchExtras();
-      void fetchDbHealth();
-    }, 0);
     const interval = setInterval(() => {
-      void fetchHealth();
-      void fetchExtras();
-      void fetchDbHealth();
-    }, 15000);
-    return () => {
-      clearTimeout(initialFetch);
-      clearInterval(interval);
-    };
-  }, [fetchHealth, fetchExtras, fetchDbHealth]);
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
+    }, HEALTH_POLL_MS);
+    return () => clearInterval(interval);
+  }, [revalidator]);
 
   const handleResetHealth = async () => {
     if (!(await confirm(t("resetConfirm")))) return;
@@ -161,7 +184,6 @@ function HealthSnapshot() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // Refresh health data immediately
       await fetchHealth();
-      await fetchExtras();
     } catch (err) {
       console.error("Failed to reset health:", err);
     } finally {
@@ -209,11 +231,8 @@ function HealthSnapshot() {
     try {
       const res = await fetch("/api/db/health", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setDbHealth(json);
       setDbHealthError(null);
       await fetchHealth();
-      await fetchExtras();
     } catch (err) {
       console.error("Failed to repair database health:", err);
       setDbHealthError(err.message);
@@ -225,20 +244,7 @@ function HealthSnapshot() {
   const fmtMs = (ms) =>
     ms != null ? t("millisecondsShort", { value: Math.round(ms) }) : t("notAvailable");
 
-  if (!data && !error) {
-    return (
-      <HealthLayout>
-        <div className="flex items-center justify-center min-h-100">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-            <p className="text-text-muted mt-4">{t("loadingHealth")}</p>
-          </div>
-        </div>
-      </HealthLayout>
-    );
-  }
-
-  if (error && !data) {
+  if (!data) {
     return (
       <HealthLayout>
         <div>
@@ -291,11 +297,7 @@ function HealthSnapshot() {
                 variant="ghost"
                 size="icon"
                 icon="refresh"
-                onClick={() => {
-                  fetchHealth();
-                  fetchExtras();
-                  fetchDbHealth();
-                }}
+                onClick={() => void fetchHealth()}
                 title={tc("refresh")}
                 aria-label={tc("refresh")}
               />
@@ -343,7 +345,7 @@ function HealthSnapshot() {
         />
         <div className={showAdvanced ? "block" : "hidden"}>
           <TelemetryCard />
-          <ProviderHealthAutopilotCard />
+          <ProviderHealthAutopilotCard report={snapshot.autopilot} />
           <ProviderHealthMatrixCard />
         </div>
       </div>
@@ -698,7 +700,11 @@ function HealthSnapshot() {
                       {feat.reason.length > 80 ? feat.reason.substring(0, 80) + "..." : feat.reason}
                     </div>
                   )}
-                  <div className="text-[10px] text-text-muted text-right mt-1">
+                  {/* Times format in the viewer's time zone: may differ from the server render. */}
+                  <div
+                    className="text-[10px] text-text-muted text-right mt-1"
+                    suppressHydrationWarning
+                  >
                     {t("sinceTime", {
                       time: new Date(feat.since).toLocaleTimeString(locale),
                     })}
@@ -879,7 +885,7 @@ function HealthSnapshot() {
                                 </span>
                               )}
                               {cb.lastFailure && (
-                                <span className="ml-2">
+                                <span className="ml-2" suppressHydrationWarning>
                                   · {t("lastFailure")}:{" "}
                                   {new Date(cb.lastFailure).toLocaleTimeString(locale)}
                                 </span>
@@ -1109,7 +1115,7 @@ function HealthSnapshot() {
                               <p>{t("throttleStatus", { value: `${learnedMinTime}ms/req` })}</p>
                             )}
                             {learnedLastUpdated != null && (
-                              <p>
+                              <p suppressHydrationWarning>
                                 {t("lastHeaderUpdate", {
                                   age: formatRelativeTime(learnedLastUpdated) || t("notAvailable"),
                                 })}
@@ -1163,7 +1169,7 @@ function HealthSnapshot() {
                       <span className="text-xs text-text-muted ml-2">({lockout.reason})</span>
                     )}
                     {lockout.until && (
-                      <span className="text-xs text-error ml-2">
+                      <span className="text-xs text-error ml-2" suppressHydrationWarning>
                         until {new Date(lockout.until).toLocaleTimeString()}
                       </span>
                     )}

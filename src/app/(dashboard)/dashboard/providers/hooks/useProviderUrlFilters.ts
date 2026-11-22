@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useLocation, type SetURLSearchParams } from "react-router";
 import { providerFiltersToSearchParams, readProviderFiltersFromUrl } from "../providerPageUtils";
 import {
@@ -7,6 +7,7 @@ import {
 } from "../providerPageStorage";
 
 const WRITTEN_BY_FILTERS = "providerFiltersWrite";
+const subscribeNever = () => () => {};
 
 interface UseProviderUrlFiltersArgs {
   searchParams: URLSearchParams;
@@ -59,6 +60,15 @@ export function useProviderUrlFilters({
   const [storedDisplayModePreference] = useState<ProviderDisplayMode>(() =>
     readProviderDisplayModePreference()
   );
+  // The page is now server-rendered with its data, so the first (hydrating) render must match
+  // the server, which has no localStorage: it shows the "all" mode. `isClient` is false for
+  // that render and true right after it; the stored preference is applied then.
+  const isClient = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false
+  );
+  const [storedModeApplied, setStoredModeApplied] = useState(false);
   const [hydratedFromParams, setHydratedFromParams] = useState<URLSearchParams | null>(null);
   // Locations this hook writes carry WRITTEN_BY_FILTERS in their history state, so the
   // router handing back our own write is not mistaken for a new input.
@@ -78,7 +88,11 @@ export function useProviderUrlFilters({
     setHydratedFromParams(searchParams);
     if (hydratedFromParams === null || !ownWrite) {
       const urlFilters = readProviderFiltersFromUrl(searchParams);
-      setProviderDisplayMode(urlFilters.displayMode ?? storedDisplayModePreference);
+      setProviderDisplayMode(
+        urlFilters.displayMode ?? (isClient ? storedDisplayModePreference : "all")
+      );
+      if (hydratedFromParams === null)
+        setStoredModeApplied(urlFilters.displayMode != null || isClient);
       setSearchQuery(urlFilters.searchQuery ?? "");
       setModelSearchQuery(urlFilters.modelSearchQuery ?? "");
       setActiveCategory(urlFilters.category ?? null);
@@ -86,7 +100,11 @@ export function useProviderUrlFilters({
       setActiveServiceKind(urlFilters.mediaKind ?? null);
     }
   }
-  const displayModePreferenceReady = hydratedFromParams !== null;
+  if (isClient && hydratedFromParams !== null && !storedModeApplied) {
+    setStoredModeApplied(true);
+    setProviderDisplayMode(storedDisplayModePreference);
+  }
+  const displayModePreferenceReady = hydratedFromParams !== null && storedModeApplied;
   const filtersHydrated = displayModePreferenceReady;
 
   useEffect(() => {

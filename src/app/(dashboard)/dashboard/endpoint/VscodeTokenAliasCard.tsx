@@ -8,58 +8,40 @@ import { useDisplayBaseUrl } from "@/shared/hooks";
 import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 
-type EndpointApiKeySummary = {
+export type EndpointApiKeySummary = {
   id: string;
   key: string;
   rawKey?: string;
   isActive?: boolean;
 };
 
+/** What the route loaders read from `/api/cli-tools/keys` (`failed` when that read failed). */
+export type CliKeysLoaded = { keys: EndpointApiKeySummary[]; failed: boolean };
+
 export default function VscodeTokenAliasCard({
   className = "",
   variant = "highlight",
-}: Readonly<{ className?: string; variant?: "highlight" | "catalog" }>) {
+  cliKeys,
+}: Readonly<{
+  className?: string;
+  variant?: "highlight" | "catalog";
+  cliKeys: CliKeysLoaded;
+}>) {
   const t = useTranslations("endpoint");
-  const [cliApiKeys, setCliApiKeys] = useState<EndpointApiKeySummary[]>([]);
-  const [keysLoading, setKeysLoading] = useState(true);
-  const [keysError, setKeysError] = useState(false);
+  const cliApiKeys = cliKeys.keys;
+  const keysError = cliKeys.failed;
   const { copied, copy } = useCopyToClipboard();
   const displayBaseUrl = useDisplayBaseUrl();
-
+  // The key the user picked on the CLI tools page lives in localStorage, which the server
+  // render cannot read: it is applied after hydration.
+  const [storedCopilotKeyId, setStoredCopilotKeyId] = useState<string | null>(null);
   useEffect(() => {
-    let cancelled = false;
-
-    const loadCliApiKeys = async () => {
-      setKeysLoading(true);
-      setKeysError(false);
-
-      try {
-        const res = await fetch("/api/cli-tools/keys");
-        if (!res.ok) {
-          throw new Error("Failed to load CLI keys");
-        }
-
-        const data = await res.json();
-        if (!cancelled) {
-          setCliApiKeys(data.keys || []);
-        }
-      } catch {
-        if (!cancelled) {
-          setCliApiKeys([]);
-          setKeysError(true);
-        }
-      } finally {
-        if (!cancelled) {
-          setKeysLoading(false);
-        }
-      }
-    };
-
-    void loadCliApiKeys();
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStoredCopilotKeyId(window.localStorage.getItem("omniroute-cli-key-copilot"));
+    } catch {
+      // keep the default pick
+    }
   }, []);
 
   const preferredCliApiKey = useMemo(() => {
@@ -67,18 +49,13 @@ export default function VscodeTokenAliasCard({
       return null;
     }
 
-    const storedCopilotKeyId =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem("omniroute-cli-key-copilot")
-        : null;
-
     return (
       (storedCopilotKeyId ? cliApiKeys.find((key) => key.id === storedCopilotKeyId) : null) ??
       cliApiKeys.find((key) => key.isActive !== false) ??
       cliApiKeys[0] ??
       null
     );
-  }, [cliApiKeys]);
+  }, [cliApiKeys, storedCopilotKeyId]);
 
   const tokenSegment = preferredCliApiKey?.rawKey || "{token}";
   const hasRealToken = Boolean(preferredCliApiKey?.rawKey);
@@ -106,9 +83,7 @@ export default function VscodeTokenAliasCard({
     ? t("vscodeAliasDescriptionReady", translationToken)
     : keysError
       ? t("vscodeAliasDescriptionError")
-      : keysLoading
-        ? t("vscodeAliasDescriptionLoading")
-        : t("vscodeAliasDescriptionPlaceholder", translationToken);
+      : t("vscodeAliasDescriptionPlaceholder", translationToken);
 
   if (variant === "catalog") {
     return (

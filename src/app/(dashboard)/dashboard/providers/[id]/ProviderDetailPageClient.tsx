@@ -36,7 +36,10 @@ import {
 } from "../providerPageUtils";
 import { findDefaultReferral } from "@/lib/radar/referrals";
 import { type ConnectionRowConnection } from "./components/ConnectionRow";
-import { useProviderConnections } from "./hooks/useProviderConnections";
+import {
+  useProviderConnections,
+  type ProviderConnectionsInitialData,
+} from "./hooks/useProviderConnections";
 import { useDevinAgenticAuthStatus } from "../hooks/useDevinAgenticAuthStatus";
 import { useProviderQuota } from "./hooks/useProviderQuota";
 import { useProviderSettings } from "./hooks/useProviderSettings";
@@ -74,7 +77,15 @@ import NoAuthProviderControls from "./components/NoAuthProviderControls";
 import AnonymousFallbackToggle from "./components/AnonymousFallbackToggle";
 // providerText used by UpstreamProxyCard (Phase 1t.7)
 
-export default function ProviderDetailPageClient() {
+export default function ProviderDetailPageClient({
+  initialConnectionsData,
+  revalidate,
+}: {
+  /** First-paint connections and node read by the route loader (absent: fetched client-side). */
+  initialConnectionsData?: ProviderConnectionsInitialData;
+  /** Re-runs the route loader after a write (absent: connections are re-fetched client-side). */
+  revalidate?: () => Promise<unknown>;
+} = {}) {
   const params = useParams();
   const [searchParams] = useSearchParams();
   const providerId = params.id as string;
@@ -175,7 +186,10 @@ export default function ProviderDetailPageClient() {
     parseApiErrorMessage,
     getAttachmentFilename,
     PAGE_SIZE,
-  } = useProviderConnections(providerId, isCompatible, isSearchProvider);
+  } = useProviderConnections(providerId, isCompatible, isSearchProvider, {
+    initial: initialConnectionsData,
+    revalidate,
+  });
 
   const {
     codexGlobalServiceMode,

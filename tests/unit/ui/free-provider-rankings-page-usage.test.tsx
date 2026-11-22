@@ -11,6 +11,7 @@
 
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -75,13 +76,21 @@ async function renderPageWithFixture(rankings: unknown[]) {
     json: async () => ({ rankings }),
   });
   vi.stubGlobal("fetch", fetchMock);
+  // The first paint comes from the route loader; later refetches (filters) use `fetch`.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: FreeProviderRankingsPage,
+      loader: () => ({ rankings, failed: false }),
+    },
+  ]);
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
   act(() => {
-    root.render(<FreeProviderRankingsPage />);
+    root.render(<Stub initialEntries={["/"]} />);
   });
-  for (let i = 0; i < 40 && el.textContent?.includes("loading"); i++) {
+  for (let i = 0; i < 40 && !el.querySelector("tbody tr"); i++) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   containers.push({ root, el });
@@ -113,8 +122,15 @@ afterEach(() => {
 });
 
 describe("FreeProviderRankingsPage — usage reliability column", () => {
-  it("every rankings fetch carries withUsage=1 and usageRange=24h", async () => {
-    const { fetchMock } = await renderPageWithFixture([HEALTHY]);
+  it("every client rankings fetch carries withUsage=1 and usageRange=24h", async () => {
+    const { el, fetchMock } = await renderPageWithFixture([HEALTHY]);
+    // The loader's first read is not a client fetch; a filter change is.
+    const toggle = Array.from(el.querySelectorAll("button")).find(
+      (b) => b.textContent === "filterConfiguredOnly"
+    );
+    act(() => {
+      toggle!.click();
+    });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
     const url = String(fetchMock.mock.calls[0][0]);
     expect(url).toContain("withUsage=1");

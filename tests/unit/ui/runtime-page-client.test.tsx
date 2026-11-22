@@ -2,6 +2,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { createRoutesStub } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RuntimePageClient from "../../../src/app/(dashboard)/dashboard/runtime/RuntimePageClient";
 
@@ -30,13 +31,25 @@ async function waitForText(text: string, timeoutMs = 3000) {
   }
 }
 
-async function renderRuntimePage() {
+// The page reads the health snapshot and the connections in its route loader and gets them as
+// `loaded`; it needs a router for `useRevalidator`.
+async function renderRuntimePage(health: Record<string, unknown> | null, connections = []) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
 
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: () => (
+        <RuntimePageClient
+          loaded={{ health: health as never, connections, serverNow: Date.now() }}
+        />
+      ),
+    },
+  ]);
   await act(async () => {
-    root.render(<RuntimePageClient />);
+    root.render(<Stub initialEntries={["/"]} />);
   });
 
   cleanupCallbacks.push(() => {
@@ -173,28 +186,17 @@ describe("RuntimePageClient", () => {
   });
 
   it("renders degraded and unknown provider breaker states without crashing", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const path = getRequestPath(input);
-      if (path === "/api/monitoring/health") {
-        return Promise.resolve(
-          jsonResponse({
-            providerBreakers: [
-              { provider: "free3", state: "DEGRADED", failureCount: 7, retryAfterMs: 0 },
-              { provider: "future-provider", state: "SUSPENDED", failureCount: 1, retryAfterMs: 0 },
-            ],
-            lockouts: {},
-            sessions: { activeCount: 0, stickyBoundCount: 0, byApiKey: {}, top: [] },
-            quotaMonitor: { active: 0, alerting: 0, exhausted: 0, errors: 0, monitors: [] },
-          })
-        );
-      }
-      if (path === "/api/providers/client") {
-        return Promise.resolve(jsonResponse({ connections: [] }));
-      }
-      return Promise.resolve(jsonResponse({}));
-    });
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({})));
 
-    await renderRuntimePage();
+    await renderRuntimePage({
+      providerBreakers: [
+        { provider: "free3", state: "DEGRADED", failureCount: 7, retryAfterMs: 0 },
+        { provider: "future-provider", state: "SUSPENDED", failureCount: 1, retryAfterMs: 0 },
+      ],
+      lockouts: {},
+      sessions: { activeCount: 0, stickyBoundCount: 0, byApiKey: {}, top: [] },
+      quotaMonitor: { active: 0, alerting: 0, exhausted: 0, errors: 0, monitors: [] },
+    });
 
     await waitForText("free3");
     await waitForText("future-provider");
@@ -207,47 +209,39 @@ describe("RuntimePageClient", () => {
   it("renders error and exhausted quota monitors without a nodeMap ReferenceError", async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = getRequestPath(input);
-      if (path === "/api/monitoring/health") {
-        return Promise.resolve(
-          jsonResponse({
-            providerBreakers: [],
-            lockouts: {},
-            sessions: { activeCount: 0, stickyBoundCount: 0, byApiKey: {}, top: [] },
-            quotaMonitor: {
-              active: 2,
-              alerting: 0,
-              exhausted: 1,
-              errors: 1,
-              monitors: [
-                {
-                  accountId: "acct-error",
-                  provider: "agy",
-                  window: "5h",
-                  status: "error",
-                  remainingPercent: 3,
-                },
-                {
-                  accountId: "acct-exhausted",
-                  provider: "volcengine-coding-plan",
-                  window: "5h",
-                  status: "exhausted",
-                  remainingPercent: 0,
-                },
-              ],
-            },
-          })
-        );
-      }
-      if (path === "/api/providers/client") {
-        return Promise.resolve(jsonResponse({ connections: [] }));
-      }
       if (path === "/api/provider-nodes") {
         return Promise.resolve(jsonResponse({ nodes: [] }));
       }
       return Promise.resolve(jsonResponse({}));
     });
 
-    await renderRuntimePage();
+    await renderRuntimePage({
+      providerBreakers: [],
+      lockouts: {},
+      sessions: { activeCount: 0, stickyBoundCount: 0, byApiKey: {}, top: [] },
+      quotaMonitor: {
+        active: 2,
+        alerting: 0,
+        exhausted: 1,
+        errors: 1,
+        monitors: [
+          {
+            accountId: "acct-error",
+            provider: "agy",
+            window: "5h",
+            status: "error",
+            remainingPercent: 3,
+          },
+          {
+            accountId: "acct-exhausted",
+            provider: "volcengine-coding-plan",
+            window: "5h",
+            status: "exhausted",
+            remainingPercent: 0,
+          },
+        ],
+      },
+    });
 
     await waitForText("Runtime");
     await waitForText("acct-error");

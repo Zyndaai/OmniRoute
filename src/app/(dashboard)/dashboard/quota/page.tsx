@@ -1,28 +1,26 @@
-import { useState, useEffect, Suspense } from "react";
+import { Suspense } from "react";
+import { useLoaderData } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { CardSkeleton } from "@/shared/components";
 import ProviderLimits from "../usage/components/ProviderLimits";
 
-export default function QuotaPage() {
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState(180);
+/** Optional read: when settings fail to load the page keeps its defaults (refresh off, 180 s). */
+export async function loader() {
+  const settings = await apiJsonOrNull<Record<string, unknown>>("/api/settings");
+  return {
+    autoRefreshEnabled:
+      typeof settings?.autoRefreshProviderQuota === "boolean"
+        ? settings.autoRefreshProviderQuota
+        : false,
+    autoRefreshInterval:
+      typeof settings?.autoRefreshProviderQuotaInterval === "number"
+        ? settings.autoRefreshProviderQuotaInterval
+        : 180,
+  };
+}
 
-  useEffect(() => {
-    fetch("/api/settings")
-      .then((r): Promise<Record<string, unknown>> | Record<string, unknown> =>
-        r.ok ? r.json() : {}
-      )
-      .then((data) => {
-        if (typeof data.autoRefreshProviderQuota === "boolean") {
-          setAutoRefreshEnabled(data.autoRefreshProviderQuota);
-        }
-        if (typeof data.autoRefreshProviderQuotaInterval === "number") {
-          setAutoRefreshInterval(data.autoRefreshProviderQuotaInterval);
-        }
-      })
-      .catch(() => {
-        /* keep defaults */
-      });
-  }, []);
+export default function QuotaPage() {
+  const { autoRefreshEnabled, autoRefreshInterval } = useLoaderData<typeof loader>();
 
   return (
     <div className="flex flex-col gap-6">

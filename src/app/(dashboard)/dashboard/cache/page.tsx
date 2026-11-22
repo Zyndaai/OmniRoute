@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore, type ReactNode } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { Progress } from "@omniroute/ui-kit/progress";
 import {
   Table,
@@ -13,7 +15,6 @@ import Button from "@/shared/components/Button";
 import Card from "@/shared/components/Card";
 import EmptyState from "@/shared/components/EmptyState";
 import Icon from "@/shared/components/Icon";
-import { Skeleton } from "@/shared/components/Loading";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useTranslations } from "use-intl";
@@ -320,6 +321,26 @@ function PromptTrendPanel({
   );
 }
 
+/**
+ * Optional read: when `/api/cache` fails the page keeps its last good stats, or shows its
+ * "unavailable" state when it has none.
+ */
+export async function loader() {
+  return { stats: await apiJsonOrNull<CacheStats>("/api/cache") };
+}
+
+const noopSubscribe = () => () => {};
+
+/** A timestamp in the viewer's locale and timezone: empty on the server, filled on the client. */
+function LocalDateTime({ iso }: { iso: string }) {
+  const text = useSyncExternalStore(
+    noopSubscribe,
+    () => new Date(iso).toLocaleString(),
+    () => ""
+  );
+  return <>{text}</>;
+}
+
 const REFRESH_INTERVAL_MS = 10_000;
 const REFRESH_INTERVAL_SECONDS = REFRESH_INTERVAL_MS / 1000;
 
@@ -330,32 +351,29 @@ export default function CachePage() {
   const notify = useNotificationStore();
   const nodeMap = useProviderNodeMap();
 
-  const [stats, setStats] = useState<CacheStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const loaded = useLoaderData<typeof loader>();
+  // Last good stats: a failed 10 s refresh keeps showing them (as before the loader).
+  const [stats, setStats] = useState<CacheStats | null>(loaded.stats);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    if (loaded.stats) setStats(loaded.stats);
+  }
+  const revalidator = useRevalidator();
+  const loading = revalidator.state !== "idle";
   const [clearing, setClearing] = useState(false);
   const [activeView, setActiveView] = useState<CacheView>("prompt");
 
-  const fetchStats = useCallback(async () => {
-    try {
-      const res = await fetch("/api/cache");
-      if (res.ok) {
-        const data: CacheStats = await res.json();
-        setStats(data);
-      }
-    } catch (error) {
-      console.error("[CachePage] Failed to fetch cache stats:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const fetchStats = useCallback(() => revalidator.revalidate(), [revalidator]);
 
   useEffect(() => {
-    void (async () => {
-      await fetchStats();
-    })();
-    const id = setInterval(() => void fetchStats(), REFRESH_INTERVAL_MS);
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
+    }, REFRESH_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [fetchStats]);
+  }, [revalidator]);
 
   const handleClearAll = async () => {
     setClearing(true);
@@ -364,7 +382,7 @@ export default function CachePage() {
       if (res.ok) {
         const data = await res.json();
         notify.success(t("clearSuccess", { count: data.cleared ?? 0 }));
-        await fetchStats();
+        await revalidator.revalidate();
       } else {
         notify.error(t("clearError"));
       }
@@ -432,13 +450,7 @@ export default function CachePage() {
         ]}
       />
 
-      {loading && (
-        <div className="grid grid-cols-1 gap-6" aria-busy="true" aria-label={t("loadingCacheAria")}>
-          <Skeleton className="h-96 w-full rounded-xl" />
-        </div>
-      )}
-
-      {!loading && !stats && (
+      {!stats && (
         <EmptyState
           icon="cached"
           title={t("unavailable")}
@@ -448,7 +460,7 @@ export default function CachePage() {
         />
       )}
 
-      {!loading && stats && activeView === "prompt" && (
+      {stats && activeView === "prompt" && (
         <Card>
           <div className="flex flex-col gap-6 p-5 md:p-6">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -465,7 +477,7 @@ export default function CachePage() {
               </div>
               {pc && (
                 <div className="text-sm text-text-muted">
-                  {t("lastUpdated")}: {new Date(pc.lastUpdated).toLocaleString()}
+                  {t("lastUpdated")}: <LocalDateTime iso={pc.lastUpdated} />
                 </div>
               )}
             </div>
@@ -612,7 +624,7 @@ export default function CachePage() {
         </Card>
       )}
 
-      {!loading && stats && activeView === "semantic" && (
+      {stats && activeView === "semantic" && (
         <Card>
           <div className="flex flex-col gap-6 p-5 md:p-6">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

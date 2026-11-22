@@ -1,11 +1,14 @@
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { useLoaderData, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { getTranslator } from "@/i18n/request.server";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { pageMeta } from "@/shared/utils/pageMeta";
-import ConductorPageClient from "./ConductorPageClient";
+import ConductorPageClient, { type FleetSnapshot } from "./ConductorPageClient";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const t = await getTranslator("conductor", request);
-  return { title: t("title"), description: t("subtitle") };
+  // The page polls this loader: a failed read is `null` and the page keeps its last snapshot.
+  const fleet = await apiJsonOrNull<FleetSnapshot>("/api/conductor/fleet");
+  return { title: t("title"), description: t("subtitle"), fleet };
 }
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
@@ -17,5 +20,6 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
   );
 
 export default function ConductorPage() {
-  return <ConductorPageClient />;
+  const { fleet } = useLoaderData<typeof loader>();
+  return <ConductorPageClient loaded={fleet} />;
 }

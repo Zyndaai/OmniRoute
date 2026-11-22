@@ -10,19 +10,29 @@ import {
 
 type TierValue = "default" | "priority" | "flex";
 
-export default function CodexFastTierTab() {
-  const [enabled, setEnabled] = useState(false);
-  const [tier, setTier] = useState<TierValue>("priority");
+/**
+ * `initialSettings` carries the route loader's `codexServiceTier` / `codexFastServiceTier`
+ * settings; without it the tab fetches `/api/settings` on mount.
+ */
+export default function CodexFastTierTab({
+  initialSettings,
+}: {
+  initialSettings?: { codexServiceTier?: unknown; codexFastServiceTier?: unknown };
+} = {}) {
+  const seeded = initialSettings ? resolveCodexGlobalFastServiceTier(initialSettings) : null;
+  const [enabled, setEnabled] = useState(seeded?.enabled ?? false);
+  const [tier, setTier] = useState<TierValue>(seeded?.tier ?? "priority");
   const [supportedModels, setSupportedModels] = useState<string[]>([
-    ...CODEX_FAST_TIER_DEFAULT_SUPPORTED_MODELS,
+    ...(seeded?.supportedModels ?? CODEX_FAST_TIER_DEFAULT_SUPPORTED_MODELS),
   ]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!seeded);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"" | "saved" | "error">("");
   const [modelsOpen, setModelsOpen] = useState(false);
   const t = useTranslations("settings");
 
   useEffect(() => {
+    if (initialSettings) return;
     let cancelled = false;
     fetch("/api/settings")
       .then((res) => res.json())
@@ -40,7 +50,7 @@ export default function CodexFastTierTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSettings]);
 
   const allCatalogModels = useMemo(() => {
     // Union of the catalog and any custom models the user has stored, so we don't

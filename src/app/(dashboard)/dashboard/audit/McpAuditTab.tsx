@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { DataTableFooter, DataTableShell } from "@omniroute/ui-kit/data-table-shell";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -13,6 +13,7 @@ import {
 import { TableLoadingState } from "@omniroute/ui-kit/table-loading";
 import { Badge, Button, Card, EmptyState, Input, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
+import LocalDateTime from "./LocalDateTime";
 
 type McpAuditEntry = {
   id: number;
@@ -42,16 +43,23 @@ type McpAuditStats = {
 
 const MCP_PAGE_SIZE = 25;
 
-export default function McpAuditTab() {
+export interface McpAuditInitial {
+  audit: Partial<McpAuditResponse> | null;
+  stats: McpAuditStats | null;
+}
+
+/** `initial` is the unfiltered first page and the stats from the route loader. */
+export default function McpAuditTab({ initial }: { initial?: McpAuditInitial }) {
   const t = useTranslations("compliance");
   const [data, setData] = useState<McpAuditResponse>({
-    entries: [],
-    total: 0,
-    limit: MCP_PAGE_SIZE,
-    offset: 0,
+    entries: Array.isArray(initial?.audit?.entries) ? initial.audit.entries : [],
+    total: Number(initial?.audit?.total || 0),
+    limit: Number(initial?.audit?.limit || MCP_PAGE_SIZE),
+    offset: Number(initial?.audit?.offset || 0),
   });
-  const [stats, setStats] = useState<McpAuditStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<McpAuditStats | null>(initial?.stats ?? null);
+  const [loading, setLoading] = useState(!initial);
+  const skipMountFetch = useRef(Boolean(initial));
   const [toolFilter, setToolFilter] = useState("");
   const [successFilter, setSuccessFilter] = useState<"all" | "true" | "false">("all");
   const [offset, setOffset] = useState(0);
@@ -66,9 +74,11 @@ export default function McpAuditTab() {
   }, []);
 
   useEffect(() => {
+    if (initial) return; // the loader already read the stats
     void (async () => {
       await fetchStats();
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `initial` only decides the mount
   }, [fetchStats]);
 
   const fetchAudit = useCallback(async () => {
@@ -98,6 +108,11 @@ export default function McpAuditTab() {
   }, [offset, successFilter, t, toolFilter]);
 
   useEffect(() => {
+    // The loader already holds the first page for the default filters.
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     void (async () => {
       await fetchAudit();
     })();
@@ -256,7 +271,7 @@ export default function McpAuditTab() {
               {data.entries.map((entry) => (
                 <TableRow key={entry.id}>
                   <TableCell className="font-mono text-xs text-text-muted">
-                    {new Date(entry.createdAt).toLocaleString()}
+                    <LocalDateTime value={entry.createdAt} />
                   </TableCell>
                   <TableCell className="font-mono text-xs text-text-main">
                     {entry.toolName}

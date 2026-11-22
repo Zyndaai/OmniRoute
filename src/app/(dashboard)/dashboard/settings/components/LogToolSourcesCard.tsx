@@ -2,12 +2,29 @@ import { useEffect, useState } from "react";
 import { Card, Toggle } from "@/shared/components";
 import { useTranslations } from "use-intl";
 
-export default function LogToolSourcesCard() {
-  const [logToolSources, setLogToolSources] = useState(false);
-  const [loading, setLoading] = useState(true);
+export default function LogToolSourcesCard({
+  initialLogToolSources,
+}: {
+  /** `settings.logToolSources` as read by the route loader; undefined: the card fetches it itself. */
+  initialLogToolSources?: boolean;
+} = {}) {
+  const [logToolSources, setLogToolSources] = useState(initialLogToolSources ?? false);
+  const [loading, setLoading] = useState(initialLogToolSources === undefined);
   const t = useTranslations("settings");
 
+  // A new loader result replaces the local value.
+  const [shownInitial, setShownInitial] = useState(initialLogToolSources);
+  if (initialLogToolSources !== shownInitial) {
+    setShownInitial(initialLogToolSources);
+    if (initialLogToolSources !== undefined) {
+      setLogToolSources(initialLogToolSources);
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the value.
+    if (initialLogToolSources !== undefined) return;
     let mounted = true;
 
     async function loadSettings() {
@@ -29,6 +46,7 @@ export default function LogToolSourcesCard() {
     return () => {
       mounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const updateLogToolSources = async (value: boolean) => {

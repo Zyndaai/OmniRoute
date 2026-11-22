@@ -1,15 +1,20 @@
-import { data, useLoaderData } from "react-router";
-import { CLI_TOOLS } from "@/shared/constants/cliTools";
+import { useLoaderData } from "react-router";
 import ToolDetailClient from "../components/ToolDetailClient";
+import { loadToolDetail } from "../components/toolDetailData.server";
 
-export function loader({ params }: { params: { id?: string } }) {
-  const id = params.id ?? "";
-  const tool = CLI_TOOLS[id];
-  if (!tool || tool.category !== "code") throw data(null, { status: 404 });
-  return { id };
+export async function loader({ params }: { params: { id?: string } }) {
+  return loadToolDetail(params.id ?? "", "code");
 }
 
 export default function CliCodeDetailPage() {
-  const { id } = useLoaderData<typeof loader>();
-  return <ToolDetailClient toolId={id} category="code" />;
+  const { id, connections, apiKeys, cloudEnabled } = useLoaderData<typeof loader>();
+  return (
+    <ToolDetailClient
+      toolId={id}
+      category="code"
+      connections={connections}
+      apiKeys={apiKeys}
+      cloudEnabled={cloudEnabled}
+    />
+  );
 }

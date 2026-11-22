@@ -83,8 +83,14 @@ async function settle() {
   });
 }
 
-async function renderPanel() {
-  render(<ExclusionsPanel />);
+// The list and load status the route loader hands the panel.
+async function renderPanel(
+  props: { exclusions: string[]; loadError: string | null } = {
+    exclusions: STORED,
+    loadError: null,
+  }
+) {
+  render(<ExclusionsPanel {...props} />);
   await settle();
   return {
     textarea: screen.getByTestId("compression-exclusions-textarea") as HTMLTextAreaElement,
@@ -192,17 +198,13 @@ describe("ExclusionsPanel reports failed saves and loads", () => {
     expect(status.textContent).toBe("compressionExclusionsSaved");
   });
 
-  it("shows no count while the stored list is still loading", async () => {
-    const server = startServer({ holdLoad: true });
+  it("shows the stored list and its count as soon as it renders", async () => {
+    startServer();
     const { textarea } = await renderPanel();
-    expect(textarea.disabled, "textarea disabled while loading").toBe(true);
-    const count = screen.getByTestId("compression-exclusions-count");
-    expect(count.textContent).toBe("");
-
-    server.releaseLoad();
-    await settle();
     expect(textarea.disabled).toBe(false);
-    expect(count.textContent).toBe("compressionExclusionsCount");
+    expect(screen.getByTestId("compression-exclusions-count").textContent).toBe(
+      "compressionExclusionsCount"
+    );
   });
 
   it("a save that never gets a reply gives up and says the save failed", async () => {
@@ -221,30 +223,14 @@ describe("ExclusionsPanel reports failed saves and loads", () => {
     expect(save.disabled, "Save usable again after the save gave up").toBe(false);
   });
 
-  it("a load that never gets a reply gives up, says so, and keeps the editor locked", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    routeTimeoutsThroughFakeClock();
-    startServer({ load: "hang" });
-    render(<ExclusionsPanel />);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(15_001);
-    });
-
-    expectShown("failedLoadWithStatus");
-    const textarea = screen.getByTestId("compression-exclusions-textarea") as HTMLTextAreaElement;
-    expect(textarea.disabled, "textarea locked after the load gave up").toBe(true);
-  });
-
-  it.each<[string, ServerOptions]>([
-    ["returns 500", { load: 500 }],
-    ["cannot reach the server", { load: "offline" }],
-    ["answers without an exclusions list", { loadBody: {} }],
+  it.each<[string, string]>([
+    ["returns 500", "500"],
+    ["answers without an exclusions list", ""],
   ])(
-    "shows the load-failed message and blocks editing and saving when loading %s",
-    async (_case, options) => {
-      const server = startServer(options);
-      const { textarea, save } = await renderPanel();
+    "shows the load-failed message and blocks editing and saving when the loader read %s",
+    async (_case, loadError) => {
+      const server = startServer();
+      const { textarea, save } = await renderPanel({ exclusions: [], loadError });
 
       expectShown("failedLoadWithStatus");
       expect(

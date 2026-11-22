@@ -41,14 +41,28 @@ vi.mock("../../src/app/(dashboard)/dashboard/radar/RadarCatalogTable", () => ({
   RadarCatalogTable: () => <div>catalog</div>,
 }));
 
+import { createRoutesStub } from "react-router";
 import RadarPage from "../../src/app/(dashboard)/dashboard/radar/page";
 
-function response(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  } as Response;
+/** What the route loader returns when the feature exists but the owner has not opted in. */
+const OPT_IN_PENDING = {
+  featureAvailable: true,
+  optIn: false,
+  hasSupporterKey: false,
+  supporterKeyMasked: null,
+  contributorClaimUrl: "https://radar.example.test/auth/github",
+  supporterPlansUrl: "https://radar.example.test/planos",
+  entries: [],
+  meta: null,
+  catalogError: "",
+  referrals: { fixed: [], campaigns: [], tier: null },
+  localStates: [],
+};
+
+/** The page needs a data router for its loader data: serve `data` as the loader result. */
+function renderRadarPage(root: Root, data: typeof OPT_IN_PENDING) {
+  const Stub = createRoutesStub([{ path: "/", Component: RadarPage, loader: () => data }]);
+  root.render(<Stub initialEntries={["/"]} />);
 }
 
 async function settle(): Promise<void> {
@@ -63,22 +77,6 @@ describe("Radar opt-in page", () => {
   let root: Root;
 
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url === "/api/radar/settings") {
-          return response({
-            optIn: false,
-            hasSupporterKey: false,
-            supporterKeyMasked: null,
-            contributorClaimUrl: "https://radar.example.test/auth/github",
-            supporterPlansUrl: "https://radar.example.test/planos",
-          });
-        }
-        throw new Error(`Unexpected request: ${url}`);
-      })
-    );
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -96,7 +94,7 @@ describe("Radar opt-in page", () => {
 
   it("renders activation when the feature exists but the owner has not opted in", async () => {
     await act(async () => {
-      root.render(<RadarPage />);
+      renderRadarPage(root, OPT_IN_PENDING);
     });
     await settle();
 
@@ -112,7 +110,7 @@ describe("Radar opt-in page", () => {
 
   it("shows the complete access and privacy explanation before every activation action", async () => {
     await act(async () => {
-      root.render(<RadarPage />);
+      renderRadarPage(root, OPT_IN_PENDING);
     });
     await settle();
 
@@ -149,10 +147,8 @@ describe("Radar opt-in page", () => {
   });
 
   it("keeps the page hidden when the feature endpoint returns 404", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(response({ error: "Not found" }, 404));
-
     await act(async () => {
-      root.render(<RadarPage />);
+      renderRadarPage(root, { ...OPT_IN_PENDING, featureAvailable: false, optIn: null as never });
     });
     await settle();
 

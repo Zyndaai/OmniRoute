@@ -19,11 +19,16 @@ async function fetchSessionsRemote(): Promise<SessionInfo[]> {
   return data.sessions ?? [];
 }
 
-export function useSessionRecorder() {
+/**
+ * `initialSessions` is the route loader's first-paint read of the session list; without it the
+ * hook fetches the list on mount.
+ */
+export function useSessionRecorder(initialSessions?: SessionInfo[]) {
   const [recording, setRecording] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessions, setSessions] = useState<SessionInfo[]>(initialSessions ?? []);
+  const hasInitialSessions = initialSessions !== undefined;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const mountedRef = useRef(true);
@@ -48,8 +53,10 @@ export function useSessionRecorder() {
     }
   }, []);
 
-  // Fetch sessions on mount — use an async wrapper to avoid direct setState in effect
+  // Fetch sessions on mount (unless the route loader supplied them) — use an async wrapper to
+  // avoid direct setState in effect
   useEffect(() => {
+    if (hasInitialSessions) return;
     let cancelled = false;
     fetchSessionsRemote()
       .then((list) => {
@@ -59,7 +66,7 @@ export function useSessionRecorder() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasInitialSessions]);
 
   const flushSnapshots = useCallback(async (sessionId: string) => {
     if (pendingSnapshotsRef.current.length === 0) return;

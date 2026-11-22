@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import Badge from "@/shared/components/Badge";
 import Card from "@/shared/components/Card";
 
-interface Summary {
+export interface CompressionStylesSummary {
   totalRuns: number;
   totalTokensSaved: number;
   runsWithStyles: number;
@@ -12,7 +11,7 @@ interface Summary {
   appliedStyleCounts: Record<string, number>;
 }
 
-const EMPTY: Summary = {
+export const EMPTY_STYLES_SUMMARY: CompressionStylesSummary = {
   totalRuns: 0,
   totalTokensSaved: 0,
   runsWithStyles: 0,
@@ -21,19 +20,18 @@ const EMPTY: Summary = {
   appliedStyleCounts: {},
 };
 
-export default function CompressionStylesTile() {
+/**
+ * The run-telemetry summary comes from the route loader (`settings/page.tsx`); `null` = the
+ * read failed, shown as an empty summary.
+ */
+export default function CompressionStylesTile({
+  summary: loadedSummary,
+}: {
+  summary: CompressionStylesSummary | null;
+}) {
   const t = useTranslations("settings");
   const locale = useLocale();
-  const [summary, setSummary] = useState<Summary>(EMPTY);
-
-  useEffect(() => {
-    fetch("/api/settings/compression/run-telemetry")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: Summary | null) => {
-        if (data) setSummary(data);
-      })
-      .catch(() => {});
-  }, []);
+  const summary = loadedSummary ?? EMPTY_STYLES_SUMMARY;
 
   const styles = Object.entries(summary.appliedStyleCounts);
 

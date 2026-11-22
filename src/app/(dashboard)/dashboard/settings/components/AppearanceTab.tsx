@@ -11,15 +11,30 @@ import {
 } from "@/shared/constants/comboConfigMode";
 import AccountEmailVisibilitySetting from "./AccountEmailVisibilitySetting";
 
-export default function AppearanceTab() {
+export default function AppearanceTab({
+  initialSettings,
+}: {
+  /** The settings fields read by the route loader; without them the tab fetches `/api/settings`. */
+  initialSettings?: Record<string, any> | null;
+} = {}) {
   const { theme, setTheme, isDark } = useTheme();
   const t = useTranslations("settings");
 
   const logoFileRef = useRef<HTMLInputElement>(null);
   const faviconFileRef = useRef<HTMLInputElement>(null);
 
-  const [settings, setSettings] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<Record<string, any>>(initialSettings ?? {});
+  const [loading, setLoading] = useState(!initialSettings);
+  // Keyed copy: a new loader result (compared by content) replaces the local settings.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setSettings(initialSettings);
+      setLoading(false);
+    }
+  }
   const [uploadError, setUploadError] = useState<{
     target: "logo" | "favicon";
     message: string;
@@ -47,6 +62,8 @@ export default function AppearanceTab() {
   };
 
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     fetch("/api/settings")
       .then((res) => {
         if (!res.ok) {
@@ -59,6 +76,7 @@ export default function AppearanceTab() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, []);
 
   const updateSetting = async (key: string, value: any) => {

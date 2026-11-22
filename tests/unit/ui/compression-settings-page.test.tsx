@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { createRoutesStub } from "react-router";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // ── Mock next-intl (CompressionSettingsTab calls useTranslations) ──────────
@@ -22,7 +22,7 @@ function mountInContainer(ui: React.ReactElement): HTMLElement {
   const root = createRoot(container);
   roots.push(root);
   act(() => {
-    root.render(<MemoryRouter>{ui}</MemoryRouter>);
+    root.render(ui);
   });
   return container;
 }
@@ -106,20 +106,19 @@ describe("CompressionSettingsPage", () => {
     const { default: CompressionSettingsPage } =
       await import("../../../src/app/(dashboard)/dashboard/context/settings/page");
 
+    const Stub = createRoutesStub([
+      { path: "/", Component: CompressionSettingsPage, loader: () => ({ stylesSummary: null }) },
+    ]);
     let container!: HTMLElement;
     await act(async () => {
-      container = mountInContainer(<CompressionSettingsPage />);
+      container = mountInContainer(<Stub initialEntries={["/"]} />);
     });
 
-    // Flush any pending microtasks from effects
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(container).toBeTruthy();
-    expect(container.children.length).toBeGreaterThan(0);
     // D0: the read-only telemetry tile is mounted alongside the panel.
-    expect(container.querySelector('[data-testid="compression-styles-tile"]')).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="compression-styles-tile"]')).toBeTruthy();
+    });
+    expect(container.children.length).toBeGreaterThan(0);
   });
 
   it("does not crash when fetch calls fail (fail-soft)", async () => {
@@ -128,9 +127,12 @@ describe("CompressionSettingsPage", () => {
     const { default: CompressionSettingsPage } =
       await import("../../../src/app/(dashboard)/dashboard/context/settings/page");
 
+    const Stub = createRoutesStub([
+      { path: "/", Component: CompressionSettingsPage, loader: () => ({ stylesSummary: null }) },
+    ]);
     let container!: HTMLElement;
     await act(async () => {
-      container = mountInContainer(<CompressionSettingsPage />);
+      container = mountInContainer(<Stub initialEntries={["/"]} />);
     });
 
     await act(async () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useRevalidator } from "react-router";
 import type { CooldownConnection } from "@/lib/resilience/cooldownManager";
 
 export type CooldownProfile = { baseCooldownMs: number; maxBackoffSteps: number };
@@ -42,37 +43,42 @@ async function fetchJson(url: string, init?: RequestInit): Promise<Record<string
   return res.json();
 }
 
-/** Connections + cooldown rules for the cooldown manager, polled while the tab is visible. */
-export function useCooldownData() {
-  const [connections, setConnections] = useState<CooldownConnection[] | null>(null);
-  const [rules, setRules] = useState<CooldownRules | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [receivedAt, setReceivedAt] = useState(0);
+/** What the route loader read: both reads succeeded, or `failed` with nothing else. */
+export interface CooldownLoad {
+  connections: CooldownConnection[] | null;
+  rules: CooldownRules | null;
+  failed: boolean;
+}
+
+/**
+ * Connections + cooldown rules for the cooldown manager. The route loader supplies them and
+ * this hook re-runs it every few seconds while the tab is visible; a failed re-read keeps the
+ * last good data (only `loadError` flips).
+ */
+export function useCooldownData(loaded: CooldownLoad) {
+  const revalidator = useRevalidator();
+  const [connections, setConnections] = useState(loaded.connections);
+  const [rules, setRules] = useState(loaded.rules);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    if (loaded.connections && loaded.rules) {
+      setConnections(loaded.connections);
+      setRules(loaded.rules);
+    }
+  }
+  const loadError = loaded.failed;
 
   const refresh = useCallback(async () => {
-    try {
-      const [list, settings] = await Promise.all([
-        fetchJson("/api/resilience/cooldowns"),
-        fetchJson("/api/resilience"),
-      ]);
-      setConnections((list.connections as CooldownConnection[]) ?? []);
-      setRules(toCooldownRules(settings));
-      setReceivedAt(Date.now());
-      setLoadError(false);
-    } catch {
-      setLoadError(true);
-    }
-  }, []);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   useEffect(() => {
-    // Initial load plus visibility-aware polling; the fetch resolves asynchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh();
     const timer = setInterval(() => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden && revalidator.state === "idle") void revalidator.revalidate();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [revalidator]);
 
   const clearCooldowns = useCallback(
     async (body: { connectionIds?: string[]; all?: boolean; provider?: string }) => {
@@ -99,5 +105,5 @@ export function useCooldownData() {
     setRules(toCooldownRules(json));
   }, []);
 
-  return { connections, rules, loadError, receivedAt, refresh, clearCooldowns, saveRules };
+  return { connections, rules, loadError, refresh, clearCooldowns, saveRules };
 }

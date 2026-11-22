@@ -23,6 +23,10 @@ vi.mock("react-router", async (importOriginal) => ({
   ),
 }));
 
+vi.mock("@/server/routing/dashboardApi.server", () => ({
+  apiJsonOrNull: async () => null,
+}));
+
 vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en",
@@ -61,7 +65,7 @@ async function renderPage(id: string): Promise<{ container: HTMLElement; notFoun
   let notFoundThrown = false;
 
   try {
-    loaderResult = loader({ params: { id } });
+    loaderResult = await loader({ params: { id } });
   } catch (err) {
     const status = (err as { init?: { status?: number } } | null)?.init?.status;
     if (status === 404) {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useLoaderData, useRevalidator } from "react-router";
+import { radarRead } from "../radarApi.server";
 import RadarNotFound from "../RadarNotFound";
 import { useLocale, useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -27,30 +28,51 @@ interface SettingsPayload {
   supporterPlansUrl?: string;
 }
 
+const NO_OFFERS: RadarOffer[] = [];
+
+/**
+ * Required read: the settings (404 = Radar flag off, other errors show `loadFailed`). With a
+ * supporter key the cached offers are read too; the sync with the feed stays a client call.
+ */
+export async function loader() {
+  const settingsRead = await radarRead<SettingsPayload>("/api/radar/settings");
+  const flagOff = settingsRead.status === 404;
+  const settings = settingsRead.body;
+  const hasSupporterKey = settings?.hasSupporterKey === true;
+  const offersRead = hasSupporterKey
+    ? await radarRead<{ offers?: RadarOffer[]; meta?: OffersMeta | null }>("/api/radar/offers")
+    : null;
+  return {
+    flagOff: flagOff || offersRead?.status === 404,
+    loadFailed: (!flagOff && !settings) || (offersRead !== null && !offersRead.body),
+    hasSupporterKey,
+    contributorClaimUrl:
+      typeof settings?.contributorClaimUrl === "string" ? settings.contributorClaimUrl : null,
+    supporterPlansUrl:
+      typeof settings?.supporterPlansUrl === "string" ? settings.supporterPlansUrl : null,
+    offers: Array.isArray(offersRead?.body?.offers) ? offersRead.body.offers : NO_OFFERS,
+    meta: offersRead?.body?.meta ?? null,
+  };
+}
+
 export default function RadarOffersPage() {
   const t = useTranslations("radarOffersPage");
   const locale = useLocale();
-  const [offers, setOffers] = useState<RadarOffer[]>([]);
-  const [meta, setMeta] = useState<OffersMeta | null>(null);
-  const [hasSupporterKey, setHasSupporterKey] = useState(false);
-  const [contributorClaimUrl, setContributorClaimUrl] = useState<string | null>(null);
-  const [supporterPlansUrl, setSupporterPlansUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const {
+    flagOff,
+    loadFailed,
+    hasSupporterKey: loadedHasKey,
+    contributorClaimUrl,
+    supporterPlansUrl,
+    offers,
+    meta,
+  } = useLoaderData<typeof loader>();
+  const [syncNoKey, setSyncNoKey] = useState(false);
+  const hasSupporterKey = loadedHasKey && !syncNoKey;
   const [refreshing, setRefreshing] = useState(false);
-  const [flagOff, setFlagOff] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadOffers = useCallback(async () => {
-    const response = await fetch("/api/radar/offers");
-    if (response.status === 404) {
-      setFlagOff(true);
-      return;
-    }
-    if (!response.ok) throw new Error("offers_load_failed");
-    const body = (await response.json()) as { offers?: RadarOffer[]; meta?: OffersMeta | null };
-    setOffers(Array.isArray(body.offers) ? body.offers : []);
-    setMeta(body.meta ?? null);
-  }, []);
+  const [syncError, setError] = useState("");
+  const error = syncError || (loadFailed ? t("loadFailed") : "");
 
   const syncAndLoad = useCallback(async () => {
     setRefreshing(true);
@@ -58,13 +80,13 @@ export default function RadarOffersPage() {
     try {
       const response = await fetch("/api/radar/offers/sync", { method: "POST" });
       if (response.status === 404) {
-        setFlagOff(true);
+        await revalidator.revalidate();
         return;
       }
       if (!response.ok) throw new Error("offers_sync_failed");
       const status = (await response.json()) as { status?: string; reason?: string };
       if (status.status === "no_key") {
-        setHasSupporterKey(false);
+        setSyncNoKey(true);
         return;
       }
       if (
@@ -78,46 +100,22 @@ export default function RadarOffersPage() {
       }
       // Preserve availability: even when refresh fails, render the last
       // verified local cache rather than clearing it.
-      await loadOffers();
+      await revalidator.revalidate();
     } catch {
       setError(t("loadFailed"));
-      try {
-        await loadOffers();
-      } catch {
-        // The primary error already explains the failed local read.
-      }
+      await revalidator.revalidate();
     } finally {
       setRefreshing(false);
     }
-  }, [loadOffers, t]);
+  }, [revalidator, t]);
 
+  // Sync with the feed once when the page opens with a supporter key.
+  const syncedOnOpenRef = useRef(false);
   useEffect(() => {
-    async function load(): Promise<void> {
-      try {
-        const response = await fetch("/api/radar/settings");
-        if (response.status === 404) {
-          setFlagOff(true);
-          return;
-        }
-        if (!response.ok) throw new Error("settings_load_failed");
-        const settings = (await response.json()) as SettingsPayload;
-        const hasKey = settings.hasSupporterKey === true;
-        setHasSupporterKey(hasKey);
-        setContributorClaimUrl(
-          typeof settings.contributorClaimUrl === "string" ? settings.contributorClaimUrl : null
-        );
-        setSupporterPlansUrl(
-          typeof settings.supporterPlansUrl === "string" ? settings.supporterPlansUrl : null
-        );
-        if (hasKey) await syncAndLoad();
-      } catch {
-        setError(t("loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-    void load();
-  }, [syncAndLoad, t]);
+    if (!loadedHasKey || flagOff || syncedOnOpenRef.current) return;
+    syncedOnOpenRef.current = true;
+    void syncAndLoad();
+  }, [loadedHasKey, flagOff, syncAndLoad]);
 
   const activeOffers = useMemo(() => filterActiveRadarOffers(offers, new Date()), [offers]);
 
@@ -166,11 +164,7 @@ export default function RadarOffersPage() {
 
       {error && <div className="p-3 rounded-lg bg-error/10 text-error text-sm">{error}</div>}
 
-      {loading ? (
-        <div className="flex min-h-48 items-center justify-center text-text-muted">
-          {t("loading")}
-        </div>
-      ) : !hasSupporterKey ? (
+      {!hasSupporterKey ? (
         <Card>
           <div className="flex flex-col items-center gap-4 py-8 text-center">
             <Icon name="redeem" size={36} className="text-primary" />
@@ -237,7 +231,8 @@ export default function RadarOffersPage() {
                     {localizeRadarOfferText(offer.conditions, locale)}
                   </span>
                 </div>
-                <p className="text-xs text-text-muted">
+                {/* Dates format in the viewer's time zone: may differ from the server render. */}
+                <p className="text-xs text-text-muted" suppressHydrationWarning>
                   {offer.validUntil
                     ? t("validUntil", {
                         date: new Date(offer.validUntil).toLocaleDateString(locale),
@@ -260,7 +255,7 @@ export default function RadarOffersPage() {
       )}
 
       {meta && (
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-text-muted" suppressHydrationWarning>
           {meta.version} · {new Date(meta.fetchedAt).toLocaleString(locale)}
         </p>
       )}

@@ -410,7 +410,33 @@ function GroupRow({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function SidebarTab() {
+type SidebarSettingsData = Record<string, any>;
+
+function readSidebarSettings(data: SidebarSettingsData | null | undefined) {
+  return {
+    hiddenItems: normalizeHiddenSidebarItems(data?.[HIDDEN_SIDEBAR_ITEMS_SETTING_KEY]),
+    hiddenSections: normalizeHiddenSidebarSections(data?.[HIDDEN_SIDEBAR_SECTIONS_SETTING_KEY]),
+    hiddenGroupLabels: normalizeHiddenSidebarGroupLabels(
+      data?.[HIDDEN_SIDEBAR_GROUP_LABELS_SETTING_KEY]
+    ),
+    sectionOrder: (Array.isArray(data?.[SIDEBAR_SECTION_ORDER_KEY])
+      ? data?.[SIDEBAR_SECTION_ORDER_KEY]
+      : []) as SidebarSectionId[],
+    itemOrder: (data?.[SIDEBAR_ITEM_ORDER_KEY] && typeof data[SIDEBAR_ITEM_ORDER_KEY] === "object"
+      ? data[SIDEBAR_ITEM_ORDER_KEY]
+      : {}) as SidebarItemOrder,
+    activePreset: (data?.[SIDEBAR_PRESET_KEY] ?? null) as SidebarPresetId | null,
+    showDebug: data?.debugMode === true,
+    radarAdminUrl: (data?.radarAdminUrl ?? null) as unknown,
+  };
+}
+
+export default function SidebarTab({
+  initialSettings,
+}: {
+  /** The settings fields read by the route loader; without them the tab fetches `/api/settings`. */
+  initialSettings?: SidebarSettingsData | null;
+} = {}) {
   const t = useTranslations("settings");
   const tSidebar = useTranslations("sidebar");
 
@@ -425,46 +451,53 @@ export default function SidebarTab() {
     [t]
   );
 
-  const [loading, setLoading] = useState(true);
-  const [hiddenSidebarItems, setHiddenSidebarItems] = useState<HideableSidebarItemId[]>([]);
-  const [hiddenSidebarSections, setHiddenSidebarSections] = useState<SidebarSectionId[]>([]);
+  const initial = readSidebarSettings(initialSettings);
+  const [loading, setLoading] = useState(!initialSettings);
+  const [hiddenSidebarItems, setHiddenSidebarItems] = useState<HideableSidebarItemId[]>(
+    initial.hiddenItems
+  );
+  const [hiddenSidebarSections, setHiddenSidebarSections] = useState<SidebarSectionId[]>(
+    initial.hiddenSections
+  );
   const [hiddenSidebarGroupLabels, setHiddenSidebarGroupLabels] = useState<
     HideableSidebarGroupId[]
-  >([]);
-  const [sectionOrder, setSectionOrder] = useState<SidebarSectionId[]>([]);
-  const [itemOrder, setItemOrder] = useState<SidebarItemOrder>({});
-  const [activePreset, setActivePreset] = useState<SidebarPresetId | null>(null);
+  >(initial.hiddenGroupLabels);
+  const [sectionOrder, setSectionOrder] = useState<SidebarSectionId[]>(initial.sectionOrder);
+  const [itemOrder, setItemOrder] = useState<SidebarItemOrder>(initial.itemOrder);
+  const [activePreset, setActivePreset] = useState<SidebarPresetId | null>(initial.activePreset);
   const [confirmPreset, setConfirmPreset] = useState<SidebarPresetId | null>(null);
-  const [showDebug, setShowDebug] = useState(false);
-  const [radarAdminUrl, setRadarAdminUrl] = useState<unknown>(null);
+  const [showDebug, setShowDebug] = useState(initial.showDebug);
+  const [radarAdminUrl, setRadarAdminUrl] = useState<unknown>(initial.radarAdminUrl);
+
+  const applyLoaded = (data: SidebarSettingsData | null | undefined) => {
+    const next = readSidebarSettings(data);
+    setHiddenSidebarItems(next.hiddenItems);
+    setHiddenSidebarSections(next.hiddenSections);
+    setHiddenSidebarGroupLabels(next.hiddenGroupLabels);
+    setSectionOrder(next.sectionOrder);
+    setItemOrder(next.itemOrder);
+    setActivePreset(next.activePreset);
+    setShowDebug(next.showDebug);
+    setRadarAdminUrl(next.radarAdminUrl);
+    setLoading(false);
+  };
+
+  // Keyed copy: a new loader result (compared by content) replaces the local drafts.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) applyLoaded(initialSettings);
+  }
 
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     fetch("/api/settings")
       .then((r) => r.json())
-      .then((data) => {
-        setHiddenSidebarItems(
-          normalizeHiddenSidebarItems(data?.[HIDDEN_SIDEBAR_ITEMS_SETTING_KEY])
-        );
-        setHiddenSidebarSections(
-          normalizeHiddenSidebarSections(data?.[HIDDEN_SIDEBAR_SECTIONS_SETTING_KEY])
-        );
-        setHiddenSidebarGroupLabels(
-          normalizeHiddenSidebarGroupLabels(data?.[HIDDEN_SIDEBAR_GROUP_LABELS_SETTING_KEY])
-        );
-        setSectionOrder(
-          Array.isArray(data?.[SIDEBAR_SECTION_ORDER_KEY]) ? data[SIDEBAR_SECTION_ORDER_KEY] : []
-        );
-        setItemOrder(
-          data?.[SIDEBAR_ITEM_ORDER_KEY] && typeof data[SIDEBAR_ITEM_ORDER_KEY] === "object"
-            ? data[SIDEBAR_ITEM_ORDER_KEY]
-            : {}
-        );
-        setActivePreset(data?.[SIDEBAR_PRESET_KEY] ?? null);
-        setShowDebug(data?.debugMode === true);
-        setRadarAdminUrl(data?.radarAdminUrl ?? null);
-        setLoading(false);
-      })
+      .then((data) => applyLoaded(data))
       .catch(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialSettings only gates the mount fetch
   }, []);
 
   const patch = async (updates: Record<string, unknown>) => {

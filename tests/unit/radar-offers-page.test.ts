@@ -17,9 +17,10 @@ test("Radar links to a dedicated supporter offers page", () => {
 
 test("offers page uses only local settings, sync, and cache routes", () => {
   const source = pageSource();
-  assert.match(source, /fetch\("\/api\/radar\/settings"\)/);
+  // Settings and cached offers are read by the loader; the sync stays a client POST.
+  assert.match(source, /radarRead<SettingsPayload>\("\/api\/radar\/settings"\)/);
   assert.match(source, /fetch\("\/api\/radar\/offers\/sync",\s*\{\s*method:\s*"POST"/);
-  assert.match(source, /fetch\("\/api\/radar\/offers"\)/);
+  assert.match(source, /radarRead<[^>]*>\("\/api\/radar\/offers"\)/);
   assert.doesNotMatch(source, /RADAR_FEED_URL|radar\.omniroute\.online|localDb|getDbInstance/);
 });
 

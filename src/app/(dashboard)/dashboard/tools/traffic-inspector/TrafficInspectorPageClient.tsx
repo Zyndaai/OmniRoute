@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import Button from "@/shared/components/Button";
@@ -6,7 +6,7 @@ import type { InterceptedRequest } from "@/mitm/inspector/types";
 import { useTrafficStream } from "./hooks/useTrafficStream";
 import { useTrafficFilters } from "./hooks/useTrafficFilters";
 import { useResizablePanels } from "./hooks/useResizablePanels";
-import { useSessionRecorder } from "./hooks/useSessionRecorder";
+import { useSessionRecorder, type SessionInfo } from "./hooks/useSessionRecorder";
 import { useSystemProxyExitGuard } from "./hooks/useSystemProxyExitGuard";
 import { CaptureModesToolbar } from "./components/CaptureModesToolbar";
 import { TopBarControls } from "./components/TopBarControls";
@@ -20,10 +20,16 @@ export function TrafficInspectorPageClient({
   title,
   subtitle,
   purpose,
+  initialCaptureModes,
+  initialSessions,
 }: {
   title?: string;
   subtitle?: string;
   purpose?: string;
+  /** Capture-mode state from the route loader (best-effort; null when the read failed). */
+  initialCaptureModes?: { systemProxy?: { applied: boolean } } | null;
+  /** Saved sessions from the route loader; when absent the recorder fetches them itself. */
+  initialSessions?: SessionInfo[];
 } = {}) {
   const t = useTranslations("trafficInspector");
   const [containerHeight, setContainerHeight] = useState(600);
@@ -41,27 +47,9 @@ export function TrafficInspectorPageClient({
   } = useTrafficFilters();
   const [{ listWidth, collapsed }, { startDrag, toggleCollapse }] = useResizablePanels();
   const [streamState, streamActions] = useTrafficStream(filters);
-  const recorder = useSessionRecorder();
-  const [captureModes, setCaptureModes] = useState<{ systemProxy?: { applied: boolean } } | null>(
-    null
-  );
+  const recorder = useSessionRecorder(initialSessions);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/tools/traffic-inspector/capture-modes")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { systemProxy?: { applied: boolean } } | null) => {
-        if (!cancelled) setCaptureModes(data);
-      })
-      .catch(() => {
-        /* best-effort */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useSystemProxyExitGuard({ applied: captureModes?.systemProxy?.applied ?? false });
+  useSystemProxyExitGuard({ applied: initialCaptureModes?.systemProxy?.applied ?? false });
 
   const listContainerCallback = useCallback((el: HTMLDivElement | null) => {
     listContainerRef.current = el;

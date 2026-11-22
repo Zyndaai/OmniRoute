@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Alert } from "@omniroute/ui-kit/alert";
 import { DataTableFooter, DataTableShell } from "@omniroute/ui-kit/data-table-shell";
@@ -22,6 +22,7 @@ import {
 import { TableLoadingState } from "@omniroute/ui-kit/table-loading";
 import { Badge, Button, EmptyState, Input, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
+import LocalDateTime from "./LocalDateTime";
 
 type AuditEntry = {
   id: number;
@@ -85,18 +86,27 @@ function formatLocalDate(value: string) {
   }
 }
 
-export default function ComplianceTab() {
+export interface ComplianceInitial {
+  entries: AuditEntry[];
+  totalCount: number;
+  /** The loader could not read the first page. */
+  failed: boolean;
+}
+
+/** `initial` is the unfiltered first page from the route loader; filters and paging refetch. */
+export default function ComplianceTab({ initial }: { initial?: ComplianceInitial }) {
   const t = useTranslations("compliance");
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [entries, setEntries] = useState<AuditEntry[]>(initial?.entries ?? []);
+  const [loading, setLoading] = useState(!initial);
+  const [error, setError] = useState<string | null>(initial?.failed ? t("failedFetch") : null);
+  const skipMountFetch = useRef(Boolean(initial));
   const [eventType, setEventType] = useState("");
   const [actor, setActor] = useState("");
   const [severity, setSeverity] = useState<"all" | Severity>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [offset, setOffset] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(initial?.totalCount ?? 0);
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
 
   const fetchEntries = useCallback(async () => {
@@ -129,6 +139,11 @@ export default function ComplianceTab() {
   }, [actor, eventType, from, offset, t, to]);
 
   useEffect(() => {
+    // The loader already holds the first page for the default filters.
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     void (async () => {
       await fetchEntries();
     })();
@@ -343,7 +358,7 @@ export default function ComplianceTab() {
                 return (
                   <TableRow key={entry.id}>
                     <TableCell className="font-mono text-xs text-text-muted">
-                      {formatLocalDate(entry.timestamp)}
+                      <LocalDateTime value={entry.timestamp} />
                     </TableCell>
                     <TableCell>
                       <Badge size="sm" className="font-mono">

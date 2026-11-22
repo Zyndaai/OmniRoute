@@ -15,7 +15,7 @@
  * (config/quality/complexity-baseline.json).
  */
 import { PageHeader } from "@omniroute/ui-kit/page-header";
-import { Spinner } from "@/shared/components/Loading";
+import type { ChaosPageConfig, ChaosProviderInfo } from "./chaosPageTypes";
 import { useChaosConfigPage } from "./useChaosConfigPage";
 import { ChaosModeSelector } from "./components/ChaosModeSelector";
 import { ChaosTestResultsPanel } from "./components/ChaosTestResultsPanel";
@@ -24,13 +24,18 @@ import { ChaosBasicSettingsFields } from "./components/ChaosBasicSettingsFields"
 import { ChaosConfigActionsBar } from "./components/ChaosConfigActionsBar";
 import { ChaosStatusMessage } from "./components/ChaosStatusMessage";
 
-export default function ChaosConfigPage() {
+export default function ChaosConfigPage({
+  initialConfig,
+  providers,
+}: {
+  initialConfig: ChaosPageConfig;
+  providers: ChaosProviderInfo[];
+}) {
   const {
     t,
     config,
     setConfig,
     availableProviders,
-    loading,
     saving,
     testing,
     testResult,
@@ -41,16 +46,7 @@ export default function ChaosConfigPage() {
     addOverride,
     updateOverride,
     removeOverride,
-  } = useChaosConfigPage();
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 h-64 text-text-muted">
-        <Spinner label={t("loadingProviderModels")} />
-        <span aria-hidden="true">{t("loadingProviderModels")}</span>
-      </div>
-    );
-  }
+  } = useChaosConfigPage(initialConfig, providers);
 
   return (
     <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">

@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card, Button, EmptyState } from "@/shared/components";
 import Badge from "@/shared/components/Badge";
@@ -16,33 +18,23 @@ interface PluginInfo {
   hooks: string[];
 }
 
+/** A failed read shows the empty list, as the old page did (optional read). */
+export async function loader() {
+  const data = await apiJsonOrNull<{ plugins?: PluginInfo[] }>("/api/plugins");
+  return { plugins: data?.plugins || [] };
+}
+
 export default function PluginsPage() {
   const { addNotification } = useNotificationStore();
   const t = useTranslations("plugins");
   const [confirm, confirmDialog] = useConfirmDialog();
-  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { plugins } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
   const [scanning, setScanning] = useState(false);
 
   const fetchPlugins = useCallback(async () => {
-    try {
-      const res = await fetch("/api/plugins");
-      if (res.ok) {
-        const data = await res.json();
-        setPlugins(data.plugins || []);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      await fetchPlugins();
-    })();
-  }, [fetchPlugins]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   const handleScan = async () => {
     setScanning(true);
@@ -90,14 +82,6 @@ export default function PluginsPage() {
       addNotification({ type: "error", message: t("uninstallFailed", { name }) });
     }
   };
-
-  if (loading) {
-    return (
-      <div role="status" className="p-6 text-text-muted">
-        {t("loading")}
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 p-6">

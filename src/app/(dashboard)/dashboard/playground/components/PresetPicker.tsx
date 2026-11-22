@@ -7,12 +7,15 @@ import Select from "@/shared/components/Select";
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
+import type { PlaygroundPresetListItem } from "@/shared/schemas/playground";
 import { usePresets } from "../hooks/usePresets";
 import type { ConfigState, ConfigStateSetter } from "./StudioConfigPane";
 
 interface PresetPickerProps {
   configState: ConfigState;
   setConfigState: ConfigStateSetter;
+  /** Presets read by the route loader; when absent the picker fetches them on mount. */
+  initialPresets?: PlaygroundPresetListItem[];
 }
 
 /**
@@ -21,18 +24,23 @@ interface PresetPickerProps {
  * Presets are stored in DB via /api/playground/presets (F3 backend).
  * Load applies preset values to configState; Save opens a name-input modal.
  */
-export default function PresetPicker({ configState, setConfigState }: PresetPickerProps) {
+export default function PresetPicker({
+  configState,
+  setConfigState,
+  initialPresets,
+}: PresetPickerProps) {
   const t = useTranslations("playground");
-  const { presets, loading, list, create, remove } = usePresets();
+  const { presets, loading, list, create, remove } = usePresets(initialPresets);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Load presets on mount
+  // Load presets on mount, unless the route loader already supplied them.
+  const hasInitialPresets = initialPresets !== undefined;
   useEffect(() => {
-    void list();
-  }, [list]);
+    if (!hasInitialPresets) void list();
+  }, [list, hasInitialPresets]);
 
   function handleLoad(presetId: string) {
     const preset = presets.find((p) => p.id === presetId);

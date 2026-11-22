@@ -5,13 +5,13 @@
  * mode breakdown, provider breakdown, and cost/token savings summary.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import SegmentedControl from "@/shared/components/SegmentedControl";
 import Icon from "@/shared/components/Icon";
 
-interface CompressionAnalyticsSummary {
+export interface CompressionAnalyticsSummary {
   totalRequests: number;
   totalTokensSaved: number;
   avgSavingsPct: number;
@@ -139,15 +139,28 @@ function ProviderBar({
   );
 }
 
-export default function CompressionAnalyticsTab() {
+/**
+ * `initial` is the 24h summary from the route loader (`null` if that read failed); choosing
+ * another window fetches client-side.
+ */
+export default function CompressionAnalyticsTab({
+  initial,
+}: {
+  initial?: CompressionAnalyticsSummary | null;
+}) {
   const t = useTranslations("analytics");
-  const [stats, setStats] = useState<CompressionAnalyticsSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<CompressionAnalyticsSummary | null>(initial ?? null);
+  const [loading, setLoading] = useState(initial === undefined);
   const [error, setError] = useState<string | null>(null);
   const [since, setSince] = useState<"24h" | "7d" | "30d" | "all">("24h");
   const nodeMap = useProviderNodeMap();
+  const skipMountFetch = useRef(initial !== undefined);
 
   useEffect(() => {
+    if (skipMountFetch.current) {
+      skipMountFetch.current = false;
+      return;
+    }
     fetch(`/api/analytics/compression?since=${since}`)
       .then((r) => r.json())
       .then((d) => {

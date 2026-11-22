@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslations } from "use-intl";
 
 type BridgeKind = "vision" | "audio" | "video";
@@ -17,7 +17,18 @@ interface BridgeStats {
 
 interface ModalityBridgeStatsRowProps {
   kind: BridgeKind;
+  /** The route loader's read of `/api/modality-bridge/stats`; without it the row fetches on mount. */
+  initialStats?: unknown;
 }
+
+function statsForKind(payload: unknown, kind: BridgeKind): BridgeStats | null {
+  if (!payload || typeof payload !== "object") return null;
+  return parseStats((payload as Record<string, unknown>)[kind]);
+}
+
+const subscribeNever = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 function parseStats(value: unknown): BridgeStats | null {
   if (!value || typeof value !== "object") return null;
@@ -61,13 +72,20 @@ function parseStats(value: unknown): BridgeStats | null {
   };
 }
 
-export default function ModalityBridgeStatsRow({ kind }: ModalityBridgeStatsRowProps) {
+export default function ModalityBridgeStatsRow({
+  kind,
+  initialStats,
+}: ModalityBridgeStatsRowProps) {
   const t = useTranslations("settings");
   const tProviderStats = useTranslations("providerStats");
   const tRoot = useTranslations();
-  const [stats, setStats] = useState<BridgeStats | null>(null);
+  const [stats, setStats] = useState<BridgeStats | null>(() => statsForKind(initialStats, kind));
+  // The last-used time is formatted in the viewer's locale and time zone, which the server does
+  // not know, so it is rendered only after hydration.
+  const hydrated = useSyncExternalStore(subscribeNever, clientSnapshot, serverSnapshot);
 
   useEffect(() => {
+    if (initialStats !== undefined) return;
     let cancelled = false;
     fetch("/api/modality-bridge/stats")
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("fetch"))))
@@ -81,13 +99,15 @@ export default function ModalityBridgeStatsRow({ kind }: ModalityBridgeStatsRowP
     return () => {
       cancelled = true;
     };
-  }, [kind]);
+  }, [kind, initialStats]);
 
   if (!stats) return null;
 
-  const lastUsed = stats.lastUsedAt
-    ? new Date(stats.lastUsedAt).toLocaleString()
-    : t("modalityBridgeStatsNever");
+  const lastUsed = !stats.lastUsedAt
+    ? t("modalityBridgeStatsNever")
+    : hydrated
+      ? new Date(stats.lastUsedAt).toLocaleString()
+      : "—";
 
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted" aria-live="polite">

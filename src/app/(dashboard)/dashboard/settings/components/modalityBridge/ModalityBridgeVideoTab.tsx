@@ -44,6 +44,10 @@ type RuntimeStatus =
 
 interface ModalityBridgeVideoTabProps {
   runtimeHostname?: string;
+  /** The route loader's read of `/api/settings`; without it the tab fetches it on mount. */
+  initialSettings?: Record<string, unknown>;
+  /** The route loader's read of `/api/modality-bridge/stats`. */
+  initialStats?: unknown;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -100,17 +104,23 @@ function clampNumber(raw: string, min: number, max: number, fallback: number): n
 
 export default function ModalityBridgeVideoTab({
   runtimeHostname,
+  initialSettings,
+  initialStats,
 }: ModalityBridgeVideoTabProps = {}) {
   const t = useTranslations("settings");
   const tRoot = useTranslations();
-  const [settings, setSettings] = useState<VideoState | null>(null);
+  const [seededSettings] = useState<VideoState | null>(() =>
+    initialSettings ? fromApi(initialSettings) : null
+  );
+  const [settings, setSettings] = useState<VideoState | null>(seededSettings);
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "unknown" });
   const [errorState, setErrorState] = useState<"load" | "save" | null>(null);
-  const persistedSettings = useRef<VideoState | null>(null);
+  const persistedSettings = useRef<VideoState | null>(seededSettings);
   const isVisionModel = useCallback((model: ApiModel) => model.supportsVision === true, []);
 
   useEffect(() => {
     let cancelled = false;
+    // The runtime probe depends on the browser's host name, so it always runs on the client.
     const hostname = runtimeHostname ?? window.location.hostname;
     const runtimeStatusRequest = isLoopbackDashboardHost(hostname)
       ? fetch("/api/modality-bridge/video/runtime")
@@ -118,19 +128,24 @@ export default function ModalityBridgeVideoTab({
           .catch(() => null)
       : Promise.resolve({ restricted: true });
     void Promise.all([
-      fetch("/api/settings").then((response) => {
-        if (!response.ok) throw new Error("settings load failed");
-        return response.json();
-      }),
+      initialSettings
+        ? Promise.resolve(initialSettings)
+        : fetch("/api/settings").then((response) => {
+            if (!response.ok) throw new Error("settings load failed");
+            return response.json();
+          }),
       runtimeStatusRequest,
     ])
       .then(([settingsValue, runtimeValue]: [unknown, unknown]) => {
         if (cancelled) return;
-        const loadedSettings = fromApi(settingsValue);
-        persistedSettings.current = loadedSettings;
-        setSettings(loadedSettings);
+        // Seeded settings may already carry unsaved local edits by the time the probe answers.
+        if (!initialSettings) {
+          const loadedSettings = fromApi(settingsValue);
+          persistedSettings.current = loadedSettings;
+          setSettings(loadedSettings);
+          setErrorState(null);
+        }
         setRuntime(parseRuntimeStatus(runtimeValue));
-        setErrorState(null);
       })
       .catch(() => {
         if (!cancelled) setErrorState("load");
@@ -138,7 +153,7 @@ export default function ModalityBridgeVideoTab({
     return () => {
       cancelled = true;
     };
-  }, [runtimeHostname]);
+  }, [runtimeHostname, initialSettings]);
 
   const update = async (patch: Partial<VideoState>) => {
     setErrorState(null);
@@ -339,7 +354,7 @@ export default function ModalityBridgeVideoTab({
           </div>
         </Collapsible>
 
-        <ModalityBridgeStatsRow kind="video" />
+        <ModalityBridgeStatsRow kind="video" initialStats={initialStats} />
       </div>
     </Card>
   );

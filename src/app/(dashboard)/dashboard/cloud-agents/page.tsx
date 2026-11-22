@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useId } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import Icon from "@/shared/components/Icon";
 import { Card, Button, Input, Badge } from "@/shared/components";
 import Checkbox from "@/shared/components/Checkbox";
@@ -106,6 +108,15 @@ function formatDuration(start: string, end: string) {
   return `${mins}m ${remainSecs}s`;
 }
 
+// ── Loader ───────────────────────────────────────────────────────────────────
+
+// Optional read: the old page showed an empty task list when the call failed.
+export async function loader() {
+  const body = await apiJsonOrNull<{ data?: CloudAgentTask[] }>("/api/v1/agents/tasks");
+  // `null` on a failed read: the page keeps the tasks it shows (empty on first paint).
+  return { tasks: body ? (Array.isArray(body.data) ? body.data : []) : null };
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function CloudAgentsPage() {
@@ -117,8 +128,16 @@ export default function CloudAgentsPage() {
 
   // ── Tasks state ──────────────────────────────────────────────────────────
 
-  const [tasks, setTasks] = useState<CloudAgentTask[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Local copy for upserts/deletes after writes; resets on every successful loader result
+  // (a failed poll keeps the tasks shown).
+  const { tasks: loadedTasks } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  const [tasks, setTasks] = useState<CloudAgentTask[]>(loadedTasks ?? []);
+  const [shownLoadedTasks, setShownLoadedTasks] = useState(loadedTasks);
+  if (loadedTasks !== shownLoadedTasks) {
+    setShownLoadedTasks(loadedTasks);
+    if (loadedTasks) setTasks(loadedTasks);
+  }
   const [creating, setCreating] = useState(false);
   const [selectedTask, setSelectedTask] = useState<CloudAgentTask | null>(null);
   const [newTask, setNewTask] = useState({
@@ -179,25 +198,6 @@ export default function CloudAgentsPage() {
     setSelectedTask((current) => (current?.id === task.id ? task : current));
   }, []);
 
-  const fetchTasks = useCallback(async () => {
-    try {
-      const res = await fetch("/api/v1/agents/tasks");
-      if (res.ok) {
-        const data = await res.json();
-        setTasks(Array.isArray(data.data) ? data.data : []);
-      }
-    } catch (err) {
-      console.error("Failed to fetch tasks:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const initialFetch = setTimeout(() => void fetchTasks(), 0);
-    return () => clearTimeout(initialFetch);
-  }, [fetchTasks]);
-
   // ── Auto-poll when tasks are running/queued ──────────────────────────────
 
   const hasActiveTasks = tasks.some((t) => t.status === "running" || t.status === "queued");
@@ -205,10 +205,12 @@ export default function CloudAgentsPage() {
   useEffect(() => {
     if (!hasActiveTasks) return;
     const id = setInterval(() => {
-      fetchTasks();
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
     }, 5000);
     return () => clearInterval(id);
-  }, [hasActiveTasks, fetchTasks]);
+  }, [hasActiveTasks, revalidator]);
 
   // ── Fetch agent health ───────────────────────────────────────────────────
 
@@ -386,15 +388,6 @@ export default function CloudAgentsPage() {
   ];
 
   // ── Loading state ────────────────────────────────────────────────────────
-
-  if (loading) {
-    return (
-      <div role="status" className="flex flex-col items-center justify-center min-h-[400px] gap-3">
-        <Icon name="progress_activity" size={32} className="animate-spin text-primary" />
-        <p className="text-sm text-text-muted">{t("loading")}</p>
-      </div>
-    );
-  }
 
   // ── Main render ──────────────────────────────────────────────────────────
 
@@ -585,7 +578,8 @@ export default function CloudAgentsPage() {
                             <p className="text-sm font-medium text-text-main line-clamp-1">
                               {task.prompt || t("untitledTask")}
                             </p>
-                            <p className="text-xs text-text-muted">
+                            {/* toLocaleString() can differ between server and browser timezone. */}
+                            <p className="text-xs text-text-muted" suppressHydrationWarning>
                               {agent.name} · {new Date(task.createdAt).toLocaleString(locale)}
                             </p>
                           </div>

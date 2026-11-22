@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToString } from "react-dom/server";
-import { BrowserRouter, MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -33,7 +31,11 @@ vi.mock("use-intl", () => ({
   },
 }));
 
-import ModelCatalogPage from "@/app/(dashboard)/dashboard/models/page";
+import {
+  ModelsPageRoute,
+  modelsPageLoader,
+  renderModelsPageToHtml,
+} from "./modelsPageRoute.helper";
 import {
   CATALOG_TEST_RESULTS_STORAGE_NAME,
   getComboTestKey,
@@ -258,11 +260,7 @@ describe("Models and Combos Catalog Page UI", () => {
 
   async function renderPage() {
     await act(async () => {
-      root.render(
-        <BrowserRouter>
-          <ModelCatalogPage />
-        </BrowserRouter>
-      );
+      root.render(<ModelsPageRoute />);
     });
     await flush();
   }
@@ -339,7 +337,7 @@ describe("Models and Combos Catalog Page UI", () => {
     expect(container.textContent).not.toContain("First Combo");
   });
 
-  it("server-renders the tab from the router's URL, without reading stored results", () => {
+  it("server-renders the tab from the router's URL, without reading stored results", async () => {
     installFetch();
     const key = getModelTestKey("alpha", "alpha-chat");
     localStorage.setItem(
@@ -350,10 +348,9 @@ describe("Models and Combos Catalog Page UI", () => {
     );
 
     const host = document.createElement("div");
-    host.innerHTML = renderToString(
-      <MemoryRouter initialEntries={["/dashboard/models?tab=combos&provider=beta"]}>
-        <ModelCatalogPage />
-      </MemoryRouter>
+    host.innerHTML = await renderModelsPageToHtml(
+      "/dashboard/models?tab=combos&provider=beta",
+      await modelsPageLoader()
     );
 
     const tabs = host.querySelectorAll('[role="tab"]');

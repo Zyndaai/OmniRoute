@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router";
+import { useCallback, useState } from "react";
+import { Link, useLoaderData, useRevalidator } from "react-router";
+import { radarRead } from "../radarApi.server";
 import RadarNotFound from "../RadarNotFound";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -24,29 +25,26 @@ interface IntelMeta {
   supporterVerified: true;
 }
 
+/** Required read: the cached intel feed (404 = Radar flag off, other errors show `loadFailed`). */
+export async function loader() {
+  const read = await radarRead<{ intel?: RadarIntelFeed | null; meta?: IntelMeta | null }>(
+    "/api/radar/intel"
+  );
+  return {
+    flagOff: read.status === 404,
+    loadFailed: read.status !== 404 && !read.body,
+    intel: read.body?.intel ?? null,
+    meta: read.body?.meta ?? null,
+  };
+}
+
 export default function RadarIntelPage() {
   const t = useTranslations("radarIntelPage");
-  const [intel, setIntel] = useState<RadarIntelFeed | null>(null);
-  const [meta, setMeta] = useState<IntelMeta | null>(null);
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const { flagOff, loadFailed, intel, meta } = useLoaderData<typeof loader>();
   const [syncing, setSyncing] = useState(false);
-  const [flagOff, setFlagOff] = useState(false);
-  const [error, setError] = useState("");
-
-  const load = useCallback(async () => {
-    const response = await fetch("/api/radar/intel");
-    if (response.status === 404) {
-      setFlagOff(true);
-      return;
-    }
-    if (!response.ok) throw new Error("intel_load_failed");
-    const body = (await response.json()) as {
-      intel?: RadarIntelFeed | null;
-      meta?: IntelMeta | null;
-    };
-    setIntel(body.intel ?? null);
-    setMeta(body.meta ?? null);
-  }, []);
+  const [syncError, setError] = useState("");
+  const error = syncError || (loadFailed ? t("loadFailed") : "");
 
   const sync = useCallback(async () => {
     setSyncing(true);
@@ -54,7 +52,7 @@ export default function RadarIntelPage() {
     try {
       const response = await fetch("/api/radar/intel/sync", { method: "POST" });
       if (response.status === 404) {
-        setFlagOff(true);
+        await revalidator.revalidate();
         return;
       }
       if (!response.ok) throw new Error("intel_sync_failed");
@@ -66,26 +64,14 @@ export default function RadarIntelPage() {
       ) {
         setError(t("loadFailed"));
       }
-      await load();
+      await revalidator.revalidate();
     } catch {
       setError(t("loadFailed"));
-      await load().catch(() => undefined);
+      await revalidator.revalidate();
     } finally {
       setSyncing(false);
     }
-  }, [load, t]);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        await load();
-      } catch {
-        setError(t("loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [load, t]);
+  }, [revalidator, t]);
 
   if (flagOff) return <RadarNotFound />;
 
@@ -119,11 +105,7 @@ export default function RadarIntelPage() {
 
       {error && <div className="rounded-lg bg-error/10 p-3 text-sm text-error">{error}</div>}
 
-      {loading ? (
-        <div className="flex min-h-48 items-center justify-center text-text-muted">
-          {t("loading")}
-        </div>
-      ) : !intel || !meta ? (
+      {!intel || !meta ? (
         <Card>
           <p className="py-8 text-center text-text-muted">{t("empty")}</p>
         </Card>

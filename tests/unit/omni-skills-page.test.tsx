@@ -53,8 +53,11 @@ describe("File structure — omni-skills directory", () => {
 describe("page.tsx — thin route module", () => {
   const src = readFileSync(resolve(join(base, "page.tsx")), "utf-8");
 
-  it("imports no server module (it ships in the browser bundle)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+  it("imports no server module except the API replay helper its loader uses", () => {
+    // The route `loader` and its `dashboardApi.server` import are stripped from the browser bundle.
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[/](?!routing[/]dashboardApi[.]server")[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("imports and renders OmniSkillsPageClient", () => {
@@ -78,7 +81,9 @@ describe("OmniSkillsPageClient.tsx", () => {
   const src = readFileSync(resolve(join(base, "OmniSkillsPageClient.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("has all 4 tab IDs", () => {
@@ -143,7 +148,9 @@ describe("OmniSkillCard.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniSkillCard.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("accepts skill, selected, onClick props", () => {
@@ -177,7 +184,9 @@ describe("SkillInspectorPane.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/SkillInspectorPane.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("has all 4 sub-tab IDs", () => {
@@ -246,7 +255,9 @@ describe("OmniExecutionsTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniExecutionsTab.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("renders a table with skill/status/duration/time columns", () => {
@@ -267,7 +278,9 @@ describe("OmniSandboxTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniSandboxTab.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("shows sandbox config values", () => {
@@ -283,7 +296,9 @@ describe("OmniMarketplaceTab.tsx", () => {
   const src = readFileSync(resolve(join(base, "components/OmniMarketplaceTab.tsx")), "utf-8");
 
   it("imports no server module (it runs in the browser)", () => {
-    expect(src).not.toMatch(/from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/);
+    expect(src).not.toMatch(
+      /from "(node:[^"]+|fs|path|@[/]lib[/]db[^"]*|@[/]server[^"]*|@[/]i18n[/]server|server-only)"|import "server-only"/
+    );
   });
 
   it("has marketplace search logic", () => {

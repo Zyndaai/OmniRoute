@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useCallback } from "react";
 import { useLocale, useTranslations } from "use-intl";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { radarRead } from "../radarApi.server";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Card } from "@/shared/components";
 import Button from "@/shared/components/Button";
@@ -47,87 +48,65 @@ function resolveText(text: RadarLocalizedText, locale: string): string {
 // Component
 // ---------------------------------------------------------------------------
 
+type SetupLoadError = "flagDisabled" | "providerNotFound" | "loadFailed";
+
+/**
+ * The provider comes from `?provider=`. Both reads are required: a 404 on the catalog means
+ * the Radar flag is off; any other failure shows the generic load error.
+ */
+export async function loader({ request }: LoaderFunctionArgs) {
+  const provider = new URL(request.url).searchParams.get("provider");
+  const none = { provider, setupData: null as ProviderSetupData | null, error: null };
+  if (!provider) return none;
+
+  const [catalogRead, connectionsRead] = await Promise.all([
+    radarRead<{ entries?: { provider: string; setup?: SetupInfo | null }[] }>("/api/radar/catalog"),
+    radarRead<{ connections?: RadarSetupConnection[] }>(providerConnectionsRequestUrl(provider)),
+  ]);
+  const fail = (error: SetupLoadError) => ({ ...none, error: error as SetupLoadError | null });
+  if (catalogRead.status === 404) return fail("flagDisabled");
+  if (!catalogRead.body || !connectionsRead.body || !Array.isArray(catalogRead.body.entries)) {
+    return fail("loadFailed");
+  }
+
+  // Find ALL entries for this provider and extract setup from the first one that has it
+  const providerEntries = catalogRead.body.entries.filter((e) => e.provider === provider);
+  if (providerEntries.length === 0) return fail("providerNotFound");
+
+  // Find setup info from feed entries (they carry the setup field)
+  const entryWithSetup = providerEntries.find(
+    (e) => e.setup && (e.setup.steps.length > 0 || e.setup.keyUrl)
+  );
+  const connectionId = firstProviderConnectionId(
+    Array.isArray(connectionsRead.body.connections) ? connectionsRead.body.connections : [],
+    provider
+  );
+  return {
+    provider,
+    setupData: {
+      provider,
+      setup: entryWithSetup?.setup ?? null,
+      configured: connectionId !== null,
+      connectionId,
+    } as ProviderSetupData | null,
+    error: null as SetupLoadError | null,
+  };
+}
+
 function RadarSetupPageContent() {
   const t = useTranslations("radarSetupPage");
   const locale = useLocale();
-  const [searchParams] = useSearchParams();
-  const provider = searchParams.get("provider");
-
-  const [setupData, setSetupData] = useState<ProviderSetupData | null>(null);
-  const [loading, setLoading] = useState(provider !== null);
-
-  // Adjust-during-render when the provider query param changes (React docs
-  // pattern): a null provider has nothing to load, any other transition
-  // restarts the loading state before the fetch effect fires.
-  const [prevProvider, setPrevProvider] = useState(provider);
-  if (provider !== prevProvider) {
-    setPrevProvider(provider);
-    setLoading(provider !== null);
-  }
-  const [error, setError] = useState("");
+  const { provider, setupData, error: loadError } = useLoaderData<typeof loader>();
+  const error =
+    loadError === "flagDisabled"
+      ? t("flagDisabled")
+      : loadError === "providerNotFound"
+        ? t("providerNotFound", { provider: provider ?? "" })
+        : loadError === "loadFailed"
+          ? t("loadFailed")
+          : "";
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  // Fetch catalog to find the provider's setup data
-  useEffect(() => {
-    if (!provider) {
-      return;
-    }
-
-    async function load() {
-      try {
-        const [res, connectionsRes] = await Promise.all([
-          fetch("/api/radar/catalog"),
-          fetch(providerConnectionsRequestUrl(provider)),
-        ]);
-        if (res.status === 404) {
-          setError(t("flagDisabled"));
-          setLoading(false);
-          return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        if (!connectionsRes.ok) throw new Error(`HTTP ${connectionsRes.status}`);
-        const data = await res.json();
-        const connectionsData = (await connectionsRes.json()) as {
-          connections?: RadarSetupConnection[];
-        };
-
-        // Find ALL entries for this provider and extract setup from the first one that has it
-        const providerEntries = data.entries.filter(
-          (e: { provider: string }) => e.provider === provider
-        );
-
-        if (providerEntries.length === 0) {
-          setError(t("providerNotFound", { provider }));
-          setLoading(false);
-          return;
-        }
-
-        // Find setup info from feed entries (they carry the setup field)
-        const entryWithSetup = providerEntries.find(
-          (e: { setup?: SetupInfo | null }) =>
-            e.setup && (e.setup.steps.length > 0 || e.setup.keyUrl)
-        );
-
-        const connectionId = firstProviderConnectionId(
-          Array.isArray(connectionsData.connections) ? connectionsData.connections : [],
-          provider
-        );
-        setSetupData({
-          provider,
-          setup: entryWithSetup?.setup ?? null,
-          configured: connectionId !== null,
-          connectionId,
-        });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t("loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, [provider, t]);
 
   // Test connection — uses the EXISTING connection-test endpoint
   const connectionId = setupData?.connectionId ?? null;
@@ -186,11 +165,7 @@ function RadarSetupPageContent() {
 
       {error && <div className="p-3 rounded-lg bg-error/10 text-error text-sm">{error}</div>}
 
-      {loading ? (
-        <div className="flex items-center justify-center min-h-[200px]">
-          <div className="text-text-muted">{t("loading")}</div>
-        </div>
-      ) : setupData ? (
+      {setupData ? (
         <>
           {/* Configured indicator */}
           {setupData.configured && (
@@ -291,9 +266,5 @@ function RadarSetupPageContent() {
 }
 
 export default function RadarSetupPage() {
-  return (
-    <Suspense fallback={null}>
-      <RadarSetupPageContent />
-    </Suspense>
-  );
+  return <RadarSetupPageContent />;
 }

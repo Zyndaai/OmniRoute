@@ -62,13 +62,25 @@ function formatNumber(value: number | undefined): string {
   return new Intl.NumberFormat().format(value ?? 0);
 }
 
-export default function CavemanContextPageClient() {
+/** The three first-paint reads, taken by the route loader (`./page`). */
+export interface CavemanInitialData {
+  analytics: AnalyticsSummary | null;
+  settings: CompressionSettings | null;
+  languagePacks: LanguagePack[];
+}
+
+/**
+ * With `initial` (the route loader's reads) the page renders them at first paint and fetches
+ * nothing on mount; without it (isolated rendering, tests) it fetches on mount as before.
+ */
+export default function CavemanContextPageClient({ initial }: { initial?: CavemanInitialData }) {
   const t = useTranslations("contextCaveman");
-  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
-  const [settings, setSettings] = useState<CompressionSettings | null>(null);
-  const [languagePacks, setLanguagePacks] = useState<LanguagePack[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(initial?.analytics ?? null);
+  const [settings, setSettings] = useState<CompressionSettings | null>(initial?.settings ?? null);
+  const [languagePacks, setLanguagePacks] = useState<LanguagePack[]>(initial?.languagePacks ?? []);
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<"simple" | "advanced">("simple");
+  const hasInitial = initial !== undefined;
 
   const refreshSettings = () => {
     fetch("/api/context/caveman/config")
@@ -78,6 +90,7 @@ export default function CavemanContextPageClient() {
   };
 
   useEffect(() => {
+    if (hasInitial) return;
     fetch("/api/context/analytics?since=7d")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => setAnalytics(data))
@@ -87,7 +100,7 @@ export default function CavemanContextPageClient() {
       .then((data) => setLanguagePacks(Array.isArray(data?.packs) ? data.packs : []))
       .catch(() => setLanguagePacks([]));
     refreshSettings();
-  }, []);
+  }, [hasInitial]);
 
   const languageConfig: LanguageConfig = settings?.languageConfig ?? {
     enabled: false,

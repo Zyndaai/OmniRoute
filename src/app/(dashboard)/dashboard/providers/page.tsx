@@ -1,10 +1,9 @@
 import Icon from "@/shared/components/Icon";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import {
   Badge,
   Card,
-  CardSkeleton,
   Button,
   Modal,
   ProviderCardGrid,
@@ -22,7 +21,10 @@ import { partitionNoAuthEntriesByBlocked } from "@/shared/utils/noAuthProviders"
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { EmptyState as KitEmptyState } from "@omniroute/ui-kit/empty-state";
 import { SectionHeader } from "@omniroute/ui-kit/page-header";
-import { useNavigate, useSearchParams } from "react-router";
+import { useLoaderData, useNavigate, useRevalidator, useSearchParams } from "react-router";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import { skipSearchOnlyRevalidation } from "@/shared/utils/routeRevalidation";
+import type { DeprecatedProviderLeftoverGroup } from "@/lib/providers/deprecatedProviderCleanup";
 import { getErrorCode, getRelativeTime } from "@/shared/utils";
 import {
   isProviderConnectionConnected,
@@ -45,7 +47,6 @@ import {
   isPrimaryLlmProviderEntry,
   resolveVisibleWebFetchEntries,
   upsertProviderNodeById,
-  loadProviderPageData,
 } from "./providerPageUtils";
 import type { ProviderEntry, OpenRouterProviderStatsEntry } from "./providerPageUtils";
 import { OpenRouterProviderStatsProvider } from "./context/openRouterProviderStatsContext";
@@ -57,7 +58,6 @@ import {
 import {
   getCodexEffectiveServiceTier,
   getCodexGlobalServiceMode,
-  type CodexGlobalServiceMode,
 } from "@/lib/providers/codexFastTier";
 import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 const AddCompatibleProviderModal = clientOnlyLazy(
@@ -201,37 +201,107 @@ function getConnectionErrorTag(connection, t: ProviderMessageTranslator) {
   return "ERR";
 }
 
-// OAuth-env repair status fetch, extracted so the callback below only sets
-// state after the await (errors come back as `null` instead of a setState
-// inside the catch block, which the react-hooks compiler rules reject when the
-// callback is invoked from an effect).
-async function loadOauthEnvRepairStatus(): Promise<{
-  available: boolean;
-  missingCount: number;
-} | null> {
-  try {
-    const res = await fetch("/api/system/env/repair", { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) return null;
-    return {
-      available: Boolean(data.available),
-      missingCount: Number(data.missingCount || 0),
-    };
-  } catch {
-    return null;
-  }
+// The search params only hold filter view state; the loader reads none of them.
+export const shouldRevalidate = skipSearchOnlyRevalidation;
+
+// Every read is optional: each degraded to a default in the old client fetch
+// (loadProviderPageData), so a failing route leaves that part of the page empty instead of
+// failing the whole page. The OpenRouter stats (may call upstream on a cache miss) and the
+// synced model catalog (large, only needed by the model-name filter) stay client-side.
+export async function loader() {
+  const [connectionsData, nodesData, expirationsData, settingsData, envRepairData, deprecatedData] =
+    await Promise.all([
+      apiJsonOrNull<{ connections?: any[] }>("/api/providers"),
+      apiJsonOrNull<{ nodes?: any[]; ccCompatibleProviderEnabled?: boolean }>(
+        "/api/provider-nodes"
+      ),
+      apiJsonOrNull<{ list?: any[]; summary?: { expired?: number; expiringSoon?: number } }>(
+        "/api/providers/expiration"
+      ),
+      apiJsonOrNull<Record<string, any>>("/api/settings"),
+      apiJsonOrNull<{ available?: unknown; missingCount?: unknown }>("/api/system/env/repair"),
+      apiJsonOrNull<{ leftovers?: DeprecatedProviderLeftoverGroup[] }>("/api/providers/deprecated"),
+    ]);
+
+  return {
+    // Only the fields the page and its card helpers read.
+    connections: (Array.isArray(connectionsData?.connections)
+      ? connectionsData.connections
+      : []
+    ).map((c: any) => ({
+      id: c.id,
+      provider: c.provider,
+      authType: c.authType,
+      name: c.name,
+      isActive: c.isActive,
+      testStatus: c.testStatus,
+      rateLimitedUntil: c.rateLimitedUntil,
+      lastError: c.lastError,
+      lastErrorAt: c.lastErrorAt,
+      lastErrorType: c.lastErrorType,
+      errorCode: c.errorCode,
+      providerSpecificData: {
+        baseUrl: c.providerSpecificData?.baseUrl,
+        apiKeyHealth: c.providerSpecificData?.apiKeyHealth,
+        requestDefaults: c.providerSpecificData?.requestDefaults,
+      },
+    })) as any[],
+    providerNodes: (Array.isArray(nodesData?.nodes) ? nodesData.nodes : []).map((n: any) => ({
+      id: n.id,
+      name: n.name,
+      type: n.type,
+      apiType: n.apiType,
+      iconUrl: n.iconUrl,
+    })) as any[],
+    ccCompatibleProviderEnabled: nodesData?.ccCompatibleProviderEnabled === true,
+    expirationList: (Array.isArray(expirationsData?.list) ? expirationsData.list : []).map(
+      (e: any) => ({ provider: e.provider, status: e.status })
+    ) as Array<{ provider: string; status: string }>,
+    // The expiration banner's counts.
+    expirationSummary: expirationsData?.summary
+      ? {
+          expired: Number(expirationsData.summary.expired || 0),
+          expiringSoon: Number(expirationsData.summary.expiringSoon || 0),
+        }
+      : null,
+    // `null` when settings failed to load: the page then keeps its current list.
+    blockedProviders: Array.isArray(settingsData?.blockedProviders)
+      ? (settingsData.blockedProviders as string[])
+      : null,
+    codexGlobalServiceMode: getCodexGlobalServiceMode(settingsData),
+    oauthEnvRepairStatus: envRepairData
+      ? {
+          available: Boolean(envRepairData.available),
+          missingCount: Number(envRepairData.missingCount || 0),
+        }
+      : null,
+    deprecatedLeftovers: Array.isArray(deprecatedData?.leftovers) ? deprecatedData.leftovers : [],
+  };
 }
 
 function ProvidersPageContent() {
   const navigate = useNavigate();
-  const [connections, setConnections] = useState<any[]>([]);
-  const [providerNodes, setProviderNodes] = useState<any[]>([]);
-  const [ccCompatibleProviderEnabled, setCcCompatibleProviderEnabled] = useState(false);
-  const [blockedProviders, setBlockedProviders] = useState<string[]>([]);
-  const [expirations, setExpirations] = useState<any>(null);
-  const [codexGlobalServiceMode, setCodexGlobalServiceMode] =
-    useState<CodexGlobalServiceMode>("none");
-  const [loading, setLoading] = useState(true);
+  const revalidator = useRevalidator();
+  const loaded = useLoaderData<typeof loader>();
+  const {
+    ccCompatibleProviderEnabled,
+    codexGlobalServiceMode,
+    oauthEnvRepairStatus,
+    deprecatedLeftovers,
+  } = loaded;
+  // Local copies for the optimistic edits (provider toggle, node upsert, blocked toggle);
+  // each is reset to the next loader result.
+  const [connections, setConnections] = useState<any[]>(loaded.connections);
+  const [providerNodes, setProviderNodes] = useState<any[]>(loaded.providerNodes);
+  const [blockedProviders, setBlockedProviders] = useState<string[]>(loaded.blockedProviders ?? []);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    setConnections(loaded.connections);
+    setProviderNodes(loaded.providerNodes);
+    if (loaded.blockedProviders) setBlockedProviders(loaded.blockedProviders);
+  }
+  const expirations = { list: loaded.expirationList, summary: loaded.expirationSummary };
   const [showAllProviders, setShowAllProviders] = useState(false);
   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
   const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] = useState(false);
@@ -240,10 +310,6 @@ function ProvidersPageContent() {
   const [testingMode, setTestingMode] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<any>(null);
   const [providerDisplayMode, setProviderDisplayMode] = useState<ProviderDisplayMode>("all");
-  const [oauthEnvRepairStatus, setOauthEnvRepairStatus] = useState<{
-    available: boolean;
-    missingCount: number;
-  } | null>(null);
   const [repairingEnv, setRepairingEnv] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
@@ -295,61 +361,41 @@ function ProvidersPageContent() {
     setActiveServiceKind,
   });
 
+  // OpenRouter enrichment: the route may call upstream on a cache miss, so it is not part of
+  // the loader. Fails soft to an empty list.
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Each request is time-bounded (see loadProviderPageData); a single
-        // stalled connection can no longer wedge `loading` on `true` and freeze
-        // the page on its skeleton forever.
-        const data = await loadProviderPageData();
-        setConnections(data.connections);
-        setProviderNodes(data.providerNodes);
-        setCcCompatibleProviderEnabled(data.ccCompatibleProviderEnabled);
-        if (data.expirations) setExpirations(data.expirations);
-        if (data.blockedProviders) setBlockedProviders(data.blockedProviders);
-        setCodexGlobalServiceMode(getCodexGlobalServiceMode(data.settings));
-        setOpenRouterProviderStats(data.openRouterProviderStats);
-      } catch (error) {
-        console.log("Error fetching data:", error);
-      } finally {
-        setLoading(false);
-      }
+    let cancelled = false;
+    fetch("/api/providers/openrouter-stats")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (!cancelled && Array.isArray(body?.data)) setOpenRouterProviderStats(body.data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
     };
-    fetchData();
   }, []);
 
   useEffect(() => {
-    if (!shouldSyncProviderDisplayMode(displayModePreferenceReady, loading)) return;
+    if (!shouldSyncProviderDisplayMode(displayModePreferenceReady, false)) return;
 
     const storedDisplayMode =
       connections.length === 0 && providerDisplayMode === "configured"
         ? "all"
         : providerDisplayMode;
     writeProviderDisplayModePreference(storedDisplayMode);
-  }, [connections.length, displayModePreferenceReady, providerDisplayMode, loading]);
+  }, [connections.length, displayModePreferenceReady, providerDisplayMode]);
 
   // "No connections → fall back to the 'all' view" is a state adjustment
   // derived from other state, applied during render (self-invalidating guard,
   // converges in one extra pass) instead of a synchronous setState effect.
   if (
-    shouldSyncProviderDisplayMode(displayModePreferenceReady, loading) &&
+    shouldSyncProviderDisplayMode(displayModePreferenceReady, false) &&
     connections.length === 0 &&
     providerDisplayMode === "configured"
   ) {
     setProviderDisplayMode("all");
   }
-
-  const fetchOauthEnvRepairStatus = useCallback(async () => {
-    setOauthEnvRepairStatus(await loadOauthEnvRepairStatus());
-  }, []);
-
-  useEffect(() => {
-    const run = async () => {
-      const status = await loadOauthEnvRepairStatus();
-      setOauthEnvRepairStatus(status);
-    };
-    void run();
-  }, []);
 
   const handleRepairEnv = async () => {
     if (!oauthEnvRepairStatus?.available || repairingEnv) return;
@@ -367,7 +413,7 @@ function ProvidersPageContent() {
       notify.success(
         data.backupPath ? `${t("repairEnvSuccess")} (${data.backupPath})` : t("repairEnvSuccess")
       );
-      await fetchOauthEnvRepairStatus();
+      await revalidator.revalidate();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : t("repairEnvFailed"));
     } finally {
@@ -879,22 +925,13 @@ function ProvidersPageContent() {
     ide: countConfigured(ideProviderEntriesAll),
     webfetch: countConfigured(webFetchEntriesAll),
   };
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-8">
-        <CardSkeleton />
-        <CardSkeleton />
-      </div>
-    );
-  }
-
   const showFirstProviderHint =
     shouldShowFirstProviderHint(connections.length, searchQuery) && !showAllProviders;
 
   return (
     <OpenRouterProviderStatsProvider entries={openRouterProviderStats}>
       <div className="flex flex-col gap-6">
-        <DeprecatedProviderBanner />
+        <DeprecatedProviderBanner initialLeftovers={deprecatedLeftovers} />
 
         {showFirstProviderHint && (
           <Card padding="lg">
@@ -1863,7 +1900,7 @@ function ProvidersPageContent() {
         <ProviderImportModals
           openModal={openImportModal}
           onClose={() => setOpenImportModal(null)}
-          onImported={async () => setConnections((await loadProviderPageData()).connections)}
+          onImported={() => revalidator.revalidate()}
         />
         {/* Test Results Modal */}
         <Modal

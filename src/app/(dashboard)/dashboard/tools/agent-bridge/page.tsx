@@ -1,5 +1,5 @@
 import { useLoaderData } from "react-router";
-import { getProviderConnections } from "@/lib/db/providers";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { ALL_TARGETS } from "@/mitm/targets/index";
 import AgentBridgePageClient from "./AgentBridgePageClient";
 import type { AgentBridgePageData } from "./AgentBridgePageClient";
@@ -10,17 +10,18 @@ import { normalizeAgentBridgeState } from "./normalizeState";
  * current state, and the target list (without the server-only `handler`).
  */
 export async function loader() {
-  // Check if any providers are configured (D15)
-  let hasProviders = false;
-  try {
-    const connections = await getProviderConnections();
-    hasProviders = Array.isArray(connections) && connections.length > 0;
-  } catch {
-    // If DB not ready yet, show empty state gracefully
-    hasProviders = false;
-  }
+  // Both reads are optional: the page degrades to an empty state / safe defaults when the API
+  // is not ready, and the client keeps polling /state.
+  const [providersBody, stateBody] = await Promise.all([
+    apiJsonOrNull<{ connections?: unknown[] }>("/api/providers"),
+    apiJsonOrNull<unknown>("/api/tools/agent-bridge/state"),
+  ]);
 
-  // Fetch initial AgentBridge state from the REST API
+  // Any provider configured? (D15)
+  const hasProviders = Array.isArray(providersBody?.connections)
+    ? providersBody.connections.length > 0
+    : false;
+
   // Falls back to a safe default if the API isn't ready yet
   let initialData: AgentBridgePageData = {
     serverState: {
@@ -39,23 +40,11 @@ export async function loader() {
     mappings: {},
   };
 
-  try {
-    const base =
-      process.env.OMNIROUTE_BASE_URL ??
-      process.env.BASE_URL ??
-      `http://127.0.0.1:${process.env.DASHBOARD_PORT ?? process.env.PORT ?? 20128}`;
-    const res = await fetch(`${base}/api/tools/agent-bridge/state`, {
-      cache: "no-store",
-      headers: { "x-internal-fetch": "1" },
-    });
-    if (res.ok) {
-      // #3318: normalize — the /state route returns `{ server, agents }`, not the
-      // page's `{ serverState, ... }` shape; replacing initialData verbatim left
-      // serverState undefined and crashed the page.
-      initialData = normalizeAgentBridgeState(await res.json());
-    }
-  } catch {
-    // Backend not yet available — use defaults; client will poll
+  if (stateBody) {
+    // #3318: normalize — the /state route returns `{ server, agents }`, not the
+    // page's `{ serverState, ... }` shape; replacing initialData verbatim left
+    // serverState undefined and crashed the page.
+    initialData = normalizeAgentBridgeState(stateBody);
   }
 
   return {

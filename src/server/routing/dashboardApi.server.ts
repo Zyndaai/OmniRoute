@@ -95,10 +95,45 @@ export async function apiJson<T = unknown>(path: string, init: ApiCallInit = {})
   throw data(body, { status: response.status });
 }
 
+/**
+ * For reads the page can do without: the JSON body of a successful call, or `null` when the
+ * route answers any other error, so the loader can fall back to a default. A 401 still
+ * redirects to the login page.
+ */
+export async function apiJsonOrNull<T = unknown>(
+  path: string,
+  init: ApiCallInit = {}
+): Promise<T | null> {
+  const result = await apiRead<T>(path, init);
+  return result.ok ? result.data : null;
+}
+
+/** Result of a read that may fail without failing the page. */
+export type ApiReadResult<T> =
+  { ok: true; status: number; data: T | null } | { ok: false; status: number; data?: undefined };
+
+/**
+ * Like `apiJsonOrNull()`, but a failure keeps its status, for pages that show "load failed
+ * (HTTP 503)" or keep their last good data on a failed refresh. A 401 still redirects to the
+ * login page.
+ */
+export async function apiRead<T = unknown>(
+  path: string,
+  init: ApiCallInit = {}
+): Promise<ApiReadResult<T>> {
+  const response = await apiRequest(path, init);
+  if (response.status === 401) throw loginRedirect();
+  if (!response.ok) {
+    await response.body?.cancel();
+    return { ok: false, status: response.status };
+  }
+  const body = await readBody(response);
+  return { ok: true, status: response.status, data: (body ?? null) as T | null };
+}
+
 /** Result of an action's API call: the body plus whether it succeeded, for forms to show. */
 export type ApiActionResult<T = unknown> =
-  | { ok: true; status: number; data: T }
-  | { ok: false; status: number; error: unknown };
+  { ok: true; status: number; data: T } | { ok: false; status: number; error: unknown };
 
 /**
  * For actions: like `apiJson()`, but an error other than 401 is returned (with its status set

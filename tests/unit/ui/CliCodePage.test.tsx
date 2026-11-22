@@ -151,6 +151,8 @@ globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) 
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
+const { profileSyncFromFlags } =
+  await import("@/app/(dashboard)/dashboard/cli-code/components/CliProfileAutoSyncToggles");
 const { default: CliCodePageClient } =
   await import("@/app/(dashboard)/dashboard/cli-code/CliCodePageClient");
 
@@ -158,6 +160,16 @@ const { default: CliCodePageClient } =
 
 const containers: HTMLElement[] = [];
 let roots: ReturnType<typeof createRoot>[] = [];
+
+// What the route loader hands the page, derived from the fixtures above.
+function loaderProps() {
+  return {
+    hasActiveProviders: (
+      (mockFetchResponse.connections ?? []) as Array<{ isActive?: boolean }>
+    ).some((c) => c.isActive !== false),
+    profileSync: { ...profileSyncFromFlags(mockFeatureFlagsResponse), error: null },
+  };
+}
 
 async function renderPage(props: { machineId?: string } = {}): Promise<HTMLElement> {
   const container = document.createElement("div");
@@ -168,7 +180,9 @@ async function renderPage(props: { machineId?: string } = {}): Promise<HTMLEleme
   roots.push(root);
 
   await act(async () => {
-    root.render(<CliCodePageClient machineId={props.machineId ?? "test-machine"} />);
+    root.render(
+      <CliCodePageClient machineId={props.machineId ?? "test-machine"} {...loaderProps()} />
+    );
   });
 
   // Let any pending microtasks (fetch promises) flush
@@ -290,7 +304,6 @@ describe("CliCodePageClient", () => {
 
     expect(codexToggle?.getAttribute("aria-checked")).toBe("true");
     expect(claudeToggle?.getAttribute("aria-checked")).toBe("false");
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/settings/feature-flags");
   });
 
   it("2c. persists CLI profile auto-sync toggle changes", async () => {
@@ -357,7 +370,7 @@ describe("CliCodePageClient", () => {
       // Reset and re-render a fresh instance to test filter results
       root2.render(
         <TestWrapper search="claude">
-          <CliCodePageClient machineId="test" />
+          <CliCodePageClient machineId="test" {...loaderProps()} />
         </TestWrapper>
       );
     });
@@ -448,12 +461,8 @@ describe("CliCodePageClient", () => {
     });
   });
 
-  it("10. skeletons shown when providersLoading is true (initial render)", async () => {
+  it("10. skeletons shown while the batch statuses load (initial render)", async () => {
     mockStatusesReturnValue = { statuses: null, loading: true, error: null, refetch: mockRefetch };
-
-    // Delay the fetch so providers loading is true on initial render
-    const slowFetch = vi.fn().mockImplementation(() => new Promise(() => {})) as typeof fetch;
-    globalThis.fetch = slowFetch;
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -464,7 +473,7 @@ describe("CliCodePageClient", () => {
 
     // Render without awaiting fetch resolution
     act(() => {
-      root.render(<CliCodePageClient machineId="test" />);
+      root.render(<CliCodePageClient machineId="test" {...loaderProps()} />);
     });
 
     const skeletons = container.querySelectorAll('[data-testid="card-skeleton"]');

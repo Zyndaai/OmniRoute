@@ -11,7 +11,9 @@ import {
   memo,
   Suspense,
 } from "react";
-import { Link, useSearchParams } from "react-router";
+import { Link, useLoaderData, useRevalidator, useSearchParams } from "react-router";
+import { apiJson, apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import { skipSearchOnlyRevalidation } from "@/shared/utils/routeRevalidation";
 import { clientOnlyLazy } from "@/shared/components/ClientOnly";
 import { buttonVariants } from "@omniroute/ui-kit/button";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -23,7 +25,6 @@ import Badge from "@/shared/components/Badge";
 import Button from "@/shared/components/Button";
 import GlobalModelSearchPanel from "./GlobalModelSearchPanel";
 import Card from "@/shared/components/Card";
-import { CardSkeleton } from "@/shared/components/Loading";
 import EmptyState from "@/shared/components/EmptyState";
 import Checkbox from "@/shared/components/Checkbox";
 import FilterPills from "@/shared/components/FilterPills";
@@ -859,25 +860,75 @@ function formatComboEntryDisplay(
   return `${providerLabel}/${modelLabel}`;
 }
 
+/**
+ * First paint of the combos page. Only the combo list is required (a failed read shows the
+ * error boundary); the other reads fall back to the defaults the page used before.
+ */
+export async function loader() {
+  const [combosData, providersData, metricsData, nodesData, settings, compression, proxy] =
+    await Promise.all([
+      apiJson<{ combos?: any[] }>("/api/combos"),
+      apiJsonOrNull<{ connections?: any[] }>("/api/providers"),
+      apiJsonOrNull<{ metrics?: Record<string, unknown> }>("/api/combos/metrics"),
+      apiJsonOrNull<{ nodes?: any[] }>("/api/provider-nodes"),
+      apiJsonOrNull<Record<string, unknown>>("/api/settings"),
+      apiJsonOrNull<{ enabled?: unknown }>("/api/settings/compression"),
+      apiJsonOrNull<{ combos?: Record<string, unknown> }>("/api/settings/proxy"),
+    ]);
+  return {
+    combos: (combosData.combos || []).filter((c) => !c.isHidden),
+    activeProviders: (providersData?.connections || []).filter(isEligibleActiveConnection),
+    metrics: metricsData?.metrics || {},
+    providerNodes: nodesData?.nodes || [],
+    comboConfigMode: normalizeComboConfigMode(settings?.comboConfigMode),
+    // Only what ComboRrLegibilityFields reads.
+    routingSettings: settings
+      ? {
+          stickyRoundRobinLimit: settings.stickyRoundRobinLimit,
+          comboStickyRoundRobinLimit: settings.comboStickyRoundRobinLimit,
+          connectionAwareExpansion: settings.connectionAwareExpansion,
+        }
+      : null,
+    promptCompressionEnabled: compression?.enabled === true,
+    // Combos that have a legacy proxy config entry.
+    legacyProxyComboIds: Object.keys(proxy?.combos || {}).filter((id) => !!proxy?.combos?.[id]),
+  };
+}
+
+/** `?filter=` only filters the loaded combos; switching it does not re-run the reads. */
+export const shouldRevalidate = skipSearchOnlyRevalidation;
+
 function CombosPageContent() {
   const t = useTranslations("combos");
   const tc = useTranslations("common");
   const [searchParams, setSearchParams] = useSearchParams();
-  const [combos, setCombos] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    combos: loadedCombos,
+    activeProviders,
+    metrics,
+    providerNodes,
+    comboConfigMode,
+    routingSettings,
+    promptCompressionEnabled,
+    legacyProxyComboIds,
+  } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  // Local copy for optimistic edits (toggle, reorder, delete); replaced by every new loader result.
+  const [combos, setCombos] = useState(loadedCombos);
+  const [shownLoadedCombos, setShownLoadedCombos] = useState(loadedCombos);
+  if (loadedCombos !== shownLoadedCombos) {
+    setShownLoadedCombos(loadedCombos);
+    setCombos(loadedCombos);
+  }
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingCombo, setEditingCombo] = useState(null);
-  const [activeProviders, setActiveProviders] = useState([]);
-  const [metrics, setMetrics] = useState({});
   const [testResults, setTestResults] = useState(null);
   const [testingCombo, setTestingCombo] = useState(null);
   const { copied, copy } = useCopyToClipboard();
   const notify = useNotificationStore();
   const [confirm, confirmDialog] = useConfirmDialog();
   const [proxyTargetCombo, setProxyTargetCombo] = useState(null);
-  const [proxyConfig, setProxyConfig] = useState(null);
   const { comboProxyAssignedIds, fetchComboProxyAssignments } = useComboProxyAssignments();
-  const [providerNodes, setProviderNodes] = useState([]);
   // SSR has no localStorage, so a lazy initializer reading it here returns a
   // different value server-side (always "not dismissed") than the client's
   // real stored value -- exactly the kind of source React's hydration
@@ -900,9 +951,6 @@ function CombosPageContent() {
   const [comboDragIndex, setComboDragIndex] = useState(null);
   const [comboDragOverIndex, setComboDragOverIndex] = useState(null);
   const [savingComboOrder, setSavingComboOrder] = useState(false);
-  const [comboConfigMode, setComboConfigMode] = useState("guided");
-  const [routingSettings, setRoutingSettings] = useState(null);
-  const [promptCompressionEnabled, setPromptCompressionEnabled] = useState(false);
   const [selectedIntelligentComboId, setSelectedIntelligentComboId] = useState<string | null>(null);
   const comboDragIndexRef = useRef<number | null>(null);
   const activeFilter = normalizeIntelligentRoutingFilter(searchParams.get("filter"));
@@ -933,57 +981,8 @@ function CombosPageContent() {
     setSelectedIntelligentComboId(null);
   }
 
-  const fetchData = async () => {
-    try {
-      const [combosRes, providersRes, metricsRes, nodesRes] = await Promise.all([
-        fetch("/api/combos"),
-        fetch("/api/providers"),
-        fetch("/api/combos/metrics"),
-        fetch("/api/provider-nodes"),
-      ]);
-      const combosData = await combosRes.json();
-      const providersData = await providersRes.json();
-      const metricsData = await metricsRes.json();
-      const nodesData = nodesRes.ok ? await nodesRes.json() : { nodes: [] };
-
-      if (combosRes.ok) setCombos((combosData.combos || []).filter((c) => !c.isHidden));
-      if (providersRes.ok) {
-        const active = (providersData.connections || []).filter(isEligibleActiveConnection);
-        setActiveProviders(active);
-      }
-      if (metricsRes.ok) setMetrics(metricsData.metrics || {});
-      setProviderNodes(nodesData.nodes || []);
-    } catch (error) {
-      console.log("Error fetching data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Mount load — placed after fetchData so the effect does not read the binding in its
-  // TDZ (react-hooks/immutability); the call sits behind an async boundary
-  // (react-hooks/set-state-in-effect).
-  useEffect(() => {
-    void (async () => {
-      await fetchData();
-    })();
-    fetch("/api/settings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((settings) => {
-        if (!settings) return;
-        setComboConfigMode(normalizeComboConfigMode(settings.comboConfigMode));
-        setRoutingSettings(settings);
-      })
-      .catch(() => setComboConfigMode("guided"));
-    fetch("/api/settings/compression")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((settings) => setPromptCompressionEnabled(settings?.enabled === true))
-      .catch(() => setPromptCompressionEnabled(false));
-    fetch("/api/settings/proxy")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((c) => setProxyConfig(c))
-      .catch(() => {});
-  }, []);
+  // Re-runs the loader after a write (replaces the old client re-fetch).
+  const fetchData = () => revalidator.revalidate();
 
   const handleCreate = async (data) => {
     try {
@@ -1044,6 +1043,7 @@ function CombosPageContent() {
       if (res.ok) {
         setCombos(combos.filter((c) => c.id !== id));
         notify.success(t("comboDeleted"));
+        void fetchData();
       } else {
         const err = await res.json().catch(() => null);
         notify.error(err?.error?.message || err?.error || t("errorDeleting"));
@@ -1249,15 +1249,6 @@ function CombosPageContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex flex-col gap-6">
-        <CardSkeleton />
-        <CardSkeleton />
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-6">
       {confirmDialog}
@@ -1443,7 +1434,9 @@ function CombosPageContent() {
                 onTest={() => handleTestCombo(combo)}
                 testing={testingCombo === combo.name}
                 onProxy={() => setProxyTargetCombo(combo)}
-                hasProxy={comboProxyAssignedIds.has(combo.id) || !!proxyConfig?.combos?.[combo.id]}
+                hasProxy={
+                  comboProxyAssignedIds.has(combo.id) || legacyProxyComboIds.includes(combo.id)
+                }
                 onToggle={() => handleToggleCombo(combo)}
                 dragDisabled={savingComboOrder || activeFilter !== "all" || combos.length < 2}
                 isDragged={comboDragIndex === index}

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLoaderData, useRevalidator, useSearchParams } from "react-router";
 import { useTranslations } from "use-intl";
 
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
+import { skipSearchOnlyRevalidation } from "@/shared/utils/routeRevalidation";
 import { PageHeader } from "@omniroute/ui-kit/page-header";
 import { Button, Card, ConfirmModal, EmptyState, Skeleton } from "@/shared/components";
 import CatalogBulkActionBar from "./CatalogBulkActionBar";
@@ -65,8 +67,54 @@ const PAGE_SIZE = 50;
 type PendingBulkRun =
   { kind: "models"; targets: ModelTestTarget[] } | { kind: "combos"; targets: ComboTestTarget[] };
 
+type HealthState = "healthy" | "degraded" | "down";
+
+/**
+ * The tab and the filters live in the query string but only filter the rows already loaded, so
+ * changing them must not re-run the three reads. Same-URL revalidation (Refresh, after a
+ * visibility change) still does.
+ */
+export const shouldRevalidate = skipSearchOnlyRevalidation;
+
+/**
+ * The catalog (with hidden rows), the combos and the provider health matrix. Each read is
+ * optional, as before: a failing catalog or combo read shows its error panel (with Retry), a
+ * failing health matrix leaves the health badges out.
+ */
+export async function loader() {
+  const [catalogBody, combosBody, matrixBody] = await Promise.all([
+    apiJsonOrNull<{ catalog?: unknown }>("/api/models/catalog", { query: { includeHidden: 1 } }),
+    apiJsonOrNull<{ combos?: unknown }>("/api/combos"),
+    apiJsonOrNull<{ providers?: Array<{ provider: string; state: HealthState }> }>(
+      "/api/providers/health-matrix"
+    ),
+  ]);
+  const providerHealthMap: Record<string, HealthState> = {};
+  for (const item of matrixBody?.providers || []) {
+    if (item.provider) providerHealthMap[item.provider] = item.state;
+  }
+  return {
+    models: flattenCatalog(catalogBody?.catalog ?? null),
+    modelsError: catalogBody === null,
+    combos: flattenCombos(combosBody?.combos ?? null),
+    combosError: combosBody === null,
+    providerHealthMap,
+  };
+}
+
 function useCatalogPageState() {
   const t = useTranslations("modelCatalog");
+  const revalidator = useRevalidator();
+  const loaded = useLoaderData<typeof loader>();
+  const models = loaded.models as CatalogModelRow[];
+  const combos = loaded.combos as ComboCatalogRow[];
+  const providerHealthMap = loaded.providerHealthMap;
+  // True while the loader re-runs (Refresh, Retry, after a visibility change).
+  const reloading = revalidator.state !== "idle";
+  const modelsLoading = reloading;
+  const combosLoading = reloading;
+  const modelsError = loaded.modelsError && !reloading;
+  const combosError = loaded.combosError && !reloading;
 
   // The tab and the filters live in the query string (a shareable view); changes go through
   // `setSearchParams` in `useCatalogPageActions`.
@@ -77,27 +125,16 @@ function useCatalogPageState() {
   const [pendingBulkRun, setPendingBulkRun] = useState<PendingBulkRun | null>(null);
 
   // Models State
-  const [models, setModels] = useState<CatalogModelRow[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState(false);
   const [modelSortField, setModelSortField] = useState<CatalogSortField>("provider");
   const [modelSortDirection, setModelSortDirection] = useState<CatalogSortDirection>("asc");
   const [requestedModelPage, setRequestedModelPage] = useState(0);
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
 
   // Combos State
-  const [combos, setCombos] = useState<ComboCatalogRow[]>([]);
-  const [combosLoading, setCombosLoading] = useState(true);
-  const [combosError, setCombosError] = useState(false);
   const [comboSortField, setComboSortField] = useState<ComboSortField>("name");
   const [comboSortDirection, setComboSortDirection] = useState<ComboSortDirection>("asc");
   const [requestedComboPage, setRequestedComboPage] = useState(0);
   const [selectedComboIds, setSelectedComboIds] = useState<Set<string>>(new Set());
-
-  // Provider Health State
-  const [providerHealthMap, setProviderHealthMap] = useState<
-    Record<string, "healthy" | "degraded" | "down">
-  >({});
 
   const runner = useCatalogTestRunner();
   return {
@@ -108,11 +145,8 @@ function useCatalogPageState() {
     pendingBulkRun,
     setPendingBulkRun,
     models,
-    setModels,
     modelsLoading,
-    setModelsLoading,
     modelsError,
-    setModelsError,
     modelSortField,
     setModelSortField,
     modelSortDirection,
@@ -122,11 +156,8 @@ function useCatalogPageState() {
     selectedModelIds,
     setSelectedModelIds,
     combos,
-    setCombos,
     combosLoading,
-    setCombosLoading,
     combosError,
-    setCombosError,
     comboSortField,
     setComboSortField,
     comboSortDirection,
@@ -136,128 +167,19 @@ function useCatalogPageState() {
     selectedComboIds,
     setSelectedComboIds,
     providerHealthMap,
-    setProviderHealthMap,
+    revalidator,
     rawModelFilters,
     rawComboFilters,
     t,
   };
 }
-// Load provider health matrix
-async function fetchCatalogHealth(
-  controller: AbortController,
-  setProviderHealthMap: React.Dispatch<
-    React.SetStateAction<Record<string, "healthy" | "degraded" | "down">>
-  >
-) {
-  try {
-    const response = await fetch("/api/providers/health-matrix", { signal: controller.signal });
-    if (!response.ok) return;
-    const payload: unknown = await response.json();
-    if (typeof payload === "object" && payload !== null && "providers" in payload) {
-      const list = (
-        payload as {
-          providers: Array<{ provider: string; state: "healthy" | "degraded" | "down" }>;
-        }
-      ).providers;
-      const map: Record<string, "healthy" | "degraded" | "down"> = {};
-      for (const item of list || []) {
-        if (item.provider) map[item.provider] = item.state;
-      }
-      setProviderHealthMap(map);
-    }
-  } catch {
-    // Soft fail
-  }
-}
-
+/** Reload the catalog, combos and health matrix: re-run the route loader. */
 function useCatalogPageLoading(state: ReturnType<typeof useCatalogPageState>) {
-  const {
-    setModels,
-    setModelsLoading,
-    setModelsError,
-
-    setCombos,
-    setCombosLoading,
-    setCombosError,
-    setProviderHealthMap,
-  } = state;
-  const requestController = useRef<AbortController | null>(null);
-  // Data Loading
-  const loadData = useCallback(async () => {
-    requestController.current?.abort();
-    const controller = new AbortController();
-    requestController.current = controller;
-
-    // Load models
-    const fetchModels = async () => {
-      try {
-        const response = await fetch("/api/models/catalog?includeHidden=1", {
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error("catalog request failed");
-        const payload: unknown = await response.json();
-        const catalog =
-          typeof payload === "object" && payload !== null && "catalog" in payload
-            ? (payload as { catalog: unknown }).catalog
-            : null;
-        setModels(flattenCatalog(catalog));
-        setModelsError(false);
-      } catch {
-        if (!controller.signal.aborted) setModelsError(true);
-      } finally {
-        if (!controller.signal.aborted) setModelsLoading(false);
-      }
-    };
-
-    // Load combos
-    const fetchCombos = async () => {
-      try {
-        const response = await fetch("/api/combos", { signal: controller.signal });
-        if (!response.ok) throw new Error("combos request failed");
-        const payload: unknown = await response.json();
-        const rawCombos =
-          typeof payload === "object" && payload !== null && "combos" in payload
-            ? (payload as { combos: unknown }).combos
-            : null;
-        setCombos(flattenCombos(rawCombos));
-        setCombosError(false);
-      } catch {
-        if (!controller.signal.aborted) setCombosError(true);
-      } finally {
-        if (!controller.signal.aborted) setCombosLoading(false);
-      }
-    };
-
-    const fetchHealth = () => fetchCatalogHealth(controller, setProviderHealthMap);
-    await Promise.allSettled([fetchModels(), fetchCombos(), fetchHealth()]);
-  }, [
-    requestController,
-    setCombos,
-    setCombosError,
-    setCombosLoading,
-    setModels,
-    setModelsError,
-    setModelsLoading,
-    setProviderHealthMap,
-  ]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadData();
-    }, 0);
-    return () => {
-      window.clearTimeout(timer);
-      requestController.current?.abort();
-    };
-  }, [loadData, requestController]);
-
+  const { revalidator } = state;
+  const loadData = useCallback(() => revalidator.revalidate(), [revalidator]);
   const refreshAll = useCallback(() => {
-    setModelsLoading(true);
-    setCombosLoading(true);
-    setModelsError(false);
-    setCombosError(false);
-    void loadData();
-  }, [loadData, setCombosError, setCombosLoading, setModelsError, setModelsLoading]);
+    void revalidator.revalidate();
+  }, [revalidator]);
 
   return { loadData, refreshAll };
 }

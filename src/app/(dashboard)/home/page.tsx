@@ -1,17 +1,22 @@
 import { useLoaderData } from "react-router";
 
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { getMachineId } from "@/shared/utils/machine";
-import { loadHomeSettings } from "./loadHomeSettings";
 import HomePageClient from "../dashboard/HomePageClient";
 import BootstrapBanner from "../dashboard/BootstrapBanner";
 import FirstRunReadinessCard from "../dashboard/FirstRunReadinessCard";
 import UnpricedUsageBanner from "../dashboard/UnpricedUsageBanner";
 
 export async function loader() {
-  // Settings failures degrade to defaults here (display-only) — see loadHomeSettings (#14060).
-  const [settings, machineId] = await Promise.all([loadHomeSettings(), getMachineId()]);
+  // Display-only read: an unreadable settings table degrades to "setup not complete" instead
+  // of failing the whole Home render (#14060). The failure stays in the API route; auth callers
+  // of getSettings() still fail closed.
+  const [settings, machineId] = await Promise.all([
+    apiJsonOrNull<{ setupComplete?: unknown }>("/api/settings"),
+    getMachineId(),
+  ]);
   return {
-    setupComplete: Boolean(settings.setupComplete),
+    setupComplete: Boolean(settings?.setupComplete),
     machineId,
     isBootstrapped: process.env.OMNIROUTE_BOOTSTRAPPED === "true",
   };

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vite
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import React from "react";
+import { createRoutesStub } from "react-router";
 import CachePage from "../page";
 
 // The kit Table (KEA-7886) mounts a persistent horizontal scrollbar that measures the table
@@ -133,71 +134,68 @@ describe("CachePage", () => {
   });
 
   it("switches between prompt and semantic cache views", async () => {
-    fetchMock.mockImplementation(async (input: string) => {
-      if (input.startsWith("/api/cache/entries")) {
-        return {
-          ok: true,
-          json: async () => ({
-            entries: [],
-            pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
-          }),
-        };
-      }
-
+    fetchMock.mockImplementation(async () => {
       return {
         ok: true,
         json: async () => ({
-          semanticCache: {
-            memoryEntries: 0,
-            dbEntries: 0,
-            hits: 0,
-            misses: 3,
-            hitRate: "0.0",
-            tokensSaved: 0,
-          },
-          promptCache: {
-            totalRequests: 10,
-            requestsWithCacheControl: 6,
-            totalInputTokens: 1000,
-            totalCachedTokens: 550,
-            totalCacheCreationTokens: 180,
-            tokensSaved: 550,
-            estimatedCostSaved: 0.12,
-            byProvider: {
-              claude: {
-                requests: 6,
-                totalRequests: 10,
-                cachedRequests: 6,
-                inputTokens: 1000,
-                cachedTokens: 550,
-                cacheCreationTokens: 180,
-              },
-            },
-            byStrategy: {},
-            lastUpdated: "2026-04-11T05:00:00.000Z",
-          },
-          trend: [
-            {
-              timestamp: "2026-04-11T05:00:00.000Z",
-              requests: 10,
-              cachedRequests: 6,
-              inputTokens: 1000,
-              cachedTokens: 550,
-              cacheCreationTokens: 180,
-            },
-          ],
-          idempotency: {
-            activeKeys: 2,
-            windowMs: 5000,
-          },
-          config: {
-            semanticCacheEnabled: false,
-          },
+          entries: [],
+          pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
         }),
       };
     });
 
-    render(<CachePage />);
+    // The page's first paint comes from its route loader, not from a fetch.
+    const stats = {
+      semanticCache: {
+        memoryEntries: 0,
+        dbEntries: 0,
+        hits: 0,
+        misses: 3,
+        hitRate: "0.0",
+        tokensSaved: 0,
+      },
+      promptCache: {
+        totalRequests: 10,
+        requestsWithCacheControl: 6,
+        totalInputTokens: 1000,
+        totalCachedTokens: 550,
+        totalCacheCreationTokens: 180,
+        tokensSaved: 550,
+        estimatedCostSaved: 0.12,
+        byProvider: {
+          claude: {
+            requests: 6,
+            totalRequests: 10,
+            cachedRequests: 6,
+            inputTokens: 1000,
+            cachedTokens: 550,
+            cacheCreationTokens: 180,
+          },
+        },
+        byStrategy: {},
+        lastUpdated: "2026-04-11T05:00:00.000Z",
+      },
+      trend: [
+        {
+          timestamp: "2026-04-11T05:00:00.000Z",
+          requests: 10,
+          cachedRequests: 6,
+          inputTokens: 1000,
+          cachedTokens: 550,
+          cacheCreationTokens: 180,
+        },
+      ],
+      idempotency: {
+        activeKeys: 2,
+        windowMs: 5000,
+      },
+      config: {
+        semanticCacheEnabled: false,
+      },
+    };
+
+    const Stub = createRoutesStub([{ path: "/", Component: CachePage, loader: () => ({ stats }) }]);
+    render(<Stub initialEntries={["/"]} />);
 
     await waitFor(() => {
       expect(screen.getByText("Breakdown by Provider")).toBeInTheDocument();

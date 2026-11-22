@@ -11,6 +11,7 @@ import { useTranslations } from "use-intl";
 import ParamSliders, { type PlaygroundParams } from "./ParamSliders";
 import type { PlaygroundEndpoint } from "@/lib/playground/codeExport";
 import { endpointToPath } from "@/lib/playground/codeExport";
+import type { PlaygroundPresetListItem } from "@/shared/schemas/playground";
 import PresetPicker from "./PresetPicker";
 import ImprovePromptButton from "./ImprovePromptButton";
 import { useProviderOptions } from "@/app/(dashboard)/dashboard/translator/hooks/useProviderOptions";
@@ -42,6 +43,8 @@ export type ConfigStateSetter = Dispatch<SetStateAction<ConfigState>>;
 interface StudioConfigPaneProps {
   configState: ConfigState;
   setConfigState: ConfigStateSetter;
+  /** Presets from the route loader, handed to the preset picker. */
+  initialPresets?: PlaygroundPresetListItem[];
 }
 
 const ENDPOINT_OPTIONS: Array<{ value: PlaygroundEndpoint; labelKey: string }> = [
@@ -66,7 +69,11 @@ const ENDPOINT_OPTIONS: Array<{ value: PlaygroundEndpoint; labelKey: string }> =
  *   - SLOT_PRESETS: PresetPicker will be injected here
  *   - SLOT_IMPROVE: ImprovePromptButton will be injected here
  */
-export default function StudioConfigPane({ configState, setConfigState }: StudioConfigPaneProps) {
+export default function StudioConfigPane({
+  configState,
+  setConfigState,
+  initialPresets,
+}: StudioConfigPaneProps) {
   const t = useTranslations("common");
   const tp = useTranslations("playground");
   const modelLabelId = useId();
@@ -186,7 +193,11 @@ export default function StudioConfigPane({ configState, setConfigState }: Studio
 
       <div className="flex flex-col gap-5 p-4">
         {/* PresetPicker — injected by F7 */}
-        <PresetPicker configState={configState} setConfigState={setConfigState} />
+        <PresetPicker
+          configState={configState}
+          setConfigState={setConfigState}
+          initialPresets={initialPresets}
+        />
 
         {/* Endpoint */}
         <Select

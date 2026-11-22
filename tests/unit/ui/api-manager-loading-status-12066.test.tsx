@@ -2,7 +2,7 @@
 
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router";
+import { createRoutesStub } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 (
@@ -25,13 +25,15 @@ function mountPage() {
   document.body.appendChild(container);
   const root = createRoot(container);
   roots.push({ root, container });
-  act(() =>
-    root.render(
-      <MemoryRouter>
-        <ApiManagerPageClient />
-      </MemoryRouter>
-    )
-  );
+  // The key list comes from the route loader, so the first render already has it.
+  const Stub = createRoutesStub([
+    {
+      path: "/",
+      Component: ApiManagerPageClient,
+      loader: () => ({ keys: [], allowKeyReveal: false, quotaPoolGroup: {} }),
+    },
+  ]);
+  act(() => root.render(<Stub initialEntries={["/"]} />));
   return container;
 }
 
@@ -44,34 +46,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("API manager loading gate accessibility (#12066)", () => {
-  it("exposes a busy polite status while the initial /api/keys fetch is pending", () => {
-    // Never settles: the page stays on its skeleton gate for the whole test.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => new Promise(() => undefined))
-    );
-
-    const container = mountPage();
-    const status = container.querySelector('[role="status"]');
-
-    expect(status).not.toBeNull();
-    expect(status?.getAttribute("aria-live")).toBe("polite");
-    expect(status?.getAttribute("aria-busy")).toBe("true");
-    // The only text in the accessibility tree during the gate is the loading label.
-    expect(status?.textContent).toContain("loading");
-    // The skeleton cards themselves stay decorative.
-    expect(container.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(0);
-  });
-
-  it("drops the loading status once /api/keys has settled", async () => {
+describe("API manager has no loading gate (#12066)", () => {
+  it("renders the page header without a busy status once the loader has answered", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true, json: async () => ({}) }))
     );
 
     const container = mountPage();
-    for (let i = 0; i < 40 && container.querySelector('[role="status"]'); i++) {
+    for (let i = 0; i < 40 && !container.querySelector("h1"); i++) {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       });

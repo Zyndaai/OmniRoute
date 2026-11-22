@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 import Button from "@/shared/components/Button";
 import Icon from "@/shared/components/Icon";
@@ -48,7 +49,7 @@ type AutopilotProvider = {
   issues: AutopilotIssue[];
 };
 
-type AutopilotReport = {
+export type AutopilotReport = {
   status: "healthy" | "warning" | "critical";
   checkedAt: string;
   summary: {
@@ -227,39 +228,34 @@ function ProviderIssues({
   );
 }
 
-export default function ProviderHealthAutopilotCard() {
+/**
+ * The report comes from the health page's loader (`/api/providers/health-autopilot`), which the
+ * page re-runs every 15 seconds and after an action. `null` = the last read failed; the card
+ * then keeps the previous report, as its own polling did.
+ */
+export default function ProviderHealthAutopilotCard({
+  report: loadedReport,
+}: {
+  report: AutopilotReport | null;
+}) {
   const t = useTranslations("providerHealthAutopilot");
+  const revalidator = useRevalidator();
   const [confirm, confirmDialog] = useConfirmDialog();
   const nodeMap = useProviderNodeMap();
-  const [report, setReport] = useState<AutopilotReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState(loadedReport);
+  const [shownLoadedReport, setShownLoadedReport] = useState(loadedReport);
+  if (loadedReport !== shownLoadedReport) {
+    setShownLoadedReport(loadedReport);
+    if (loadedReport) setReport(loadedReport);
+  }
+  const loading = revalidator.state !== "idle";
+  const error = loadedReport === null && report === null ? t("loadFailed") : null;
   const [message, setMessage] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/providers/health-autopilot?includeHealthy=false", {
-        cache: "no-store",
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(getErrorMessage(json, `HTTP ${res.status}`));
-      setReport(json);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
-  useEffect(() => {
-    void (async () => {
-      await load();
-    })();
-    const timer = setInterval(() => void load(), 15000);
-    return () => clearInterval(timer);
-  }, [load]);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   const topProviders = useMemo(
     () =>

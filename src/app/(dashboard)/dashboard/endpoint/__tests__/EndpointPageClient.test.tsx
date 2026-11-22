@@ -2,7 +2,8 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import EndpointPageClient from "../EndpointPageClient";
+import { createRoutesStub } from "react-router";
+import EndpointPageClient, { type EndpointLoaded } from "../EndpointPageClient";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -60,14 +61,33 @@ async function waitForText(text: string) {
   }
 }
 
-function renderEndpointPage() {
+// The page reads its settings, search providers, network info and CLI keys in its route loader
+// and gets them as `loaded`; it needs a router for `useRevalidator`.
+function loadedData(
+  settings: Record<string, unknown> | null,
+  overrides: Partial<EndpointLoaded> = {}
+): EndpointLoaded {
+  return {
+    settings,
+    searchProviders: [],
+    network: null,
+    cliKeys: { keys: [], failed: false },
+    ...overrides,
+  };
+}
+
+function renderEndpointPage(loaded: EndpointLoaded) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   let mounted = true;
 
+  const Stub = createRoutesStub([
+    { path: "/", Component: () => <EndpointPageClient machineId="" loaded={loaded} /> },
+  ]);
+
   act(() => {
-    root.render(<EndpointPageClient machineId="" />);
+    root.render(<Stub initialEntries={["/"]} />);
   });
 
   const unmount = () => {
@@ -172,21 +192,19 @@ vi.mock("use-intl", () => ({
 
 describe("EndpointPageClient", () => {
   it("requires credential-upload consent before enabling cloud sync", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      if (getRequestPath(input) === "/api/settings")
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: true,
-            cloudUrl: "https://cloud.example",
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-          })
-        );
-      return Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }));
-    });
-    renderEndpointPage();
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }))
+    );
+    renderEndpointPage(
+      loadedData({
+        cloudEnabled: false,
+        cloudConfigured: true,
+        cloudUrl: "https://cloud.example",
+        hideEndpointCloudflaredTunnel: true,
+        hideEndpointTailscaleFunnel: true,
+        hideEndpointNgrokTunnel: true,
+      })
+    );
     await waitForText("https://cloud.example");
     const enable = Array.from(document.querySelectorAll("button")).find((b) =>
       b.textContent?.includes("enableCloud")
@@ -233,39 +251,32 @@ describe("EndpointPageClient", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = getRequestPath(input);
-      if (path === "/api/settings") {
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: false,
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-          })
-        );
-      }
-      if (path === "/api/network/info") {
-        return Promise.resolve(
-          jsonResponse({
-            localUrl: "http://localhost:20131/v1",
-            lanUrls: [],
-            tailscaleIpUrl: null,
-          })
-        );
-      }
       if (path === "/v1/models") return Promise.resolve(jsonResponse({ data: [] }));
       if (path === "/api/mcp/status") return Promise.resolve(jsonResponse({ online: false }));
       if (path === "/api/a2a/status") {
         return Promise.resolve(jsonResponse({ status: "ok", tasks: { activeStreams: 0 } }));
       }
-      if (path === "/api/search/providers") {
-        return Promise.resolve(jsonResponse({ providers: [] }));
-      }
-      if (path === "/api/cli-tools/keys") return Promise.resolve(jsonResponse({ keys: [] }));
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    renderEndpointPage();
+    renderEndpointPage(
+      loadedData(
+        {
+          cloudEnabled: false,
+          cloudConfigured: false,
+          hideEndpointCloudflaredTunnel: true,
+          hideEndpointTailscaleFunnel: true,
+          hideEndpointNgrokTunnel: true,
+        },
+        {
+          network: {
+            localUrl: "http://localhost:20131/v1",
+            lanUrls: [],
+            tailscaleIpUrl: null,
+          },
+        }
+      )
+    );
 
     await waitForText("https://api.example.com/v1");
     await waitForText("http://localhost:20131/v1");
@@ -282,21 +293,19 @@ describe("EndpointPageClient", () => {
   // split mid-word ("Cloud sync d|estination"). Only the URL may break anywhere now, and the
   // row wraps instead of squeezing the text block.
   it("breaks only the cloud destination URL, never the label words", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      if (getRequestPath(input) === "/api/settings")
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: true,
-            cloudUrl: "https://cloud.example",
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-          })
-        );
-      return Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }));
-    });
-    renderEndpointPage();
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }))
+    );
+    renderEndpointPage(
+      loadedData({
+        cloudEnabled: false,
+        cloudConfigured: true,
+        cloudUrl: "https://cloud.example",
+        hideEndpointCloudflaredTunnel: true,
+        hideEndpointTailscaleFunnel: true,
+        hideEndpointNgrokTunnel: true,
+      })
+    );
     await waitForText("https://cloud.example");
     const line = document.querySelector<HTMLElement>('[data-testid="cloud-sync-destination"]')!;
     expect(line).not.toBeNull();
@@ -307,20 +316,18 @@ describe("EndpointPageClient", () => {
   });
 
   it("does not break-all the 'not configured' fallback when no cloud URL is set", async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      if (getRequestPath(input) === "/api/settings")
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: false,
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-          })
-        );
-      return Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }));
-    });
-    renderEndpointPage();
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(jsonResponse({ data: [], providers: [], keys: [] }))
+    );
+    renderEndpointPage(
+      loadedData({
+        cloudEnabled: false,
+        cloudConfigured: false,
+        hideEndpointCloudflaredTunnel: true,
+        hideEndpointTailscaleFunnel: true,
+        hideEndpointNgrokTunnel: true,
+      })
+    );
     await waitForText("notConfigured");
     const line = document.querySelector<HTMLElement>('[data-testid="cloud-sync-destination"]')!;
     expect(line).not.toBeNull();
@@ -337,18 +344,6 @@ describe("EndpointPageClient", () => {
 
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = getRequestPath(input);
-      if (path === "/api/settings") {
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: false,
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-            machineId: "machine-12345678",
-          })
-        );
-      }
       if (path === "/v1/models") {
         return modelsDeferred.promise;
       }
@@ -358,37 +353,27 @@ describe("EndpointPageClient", () => {
       if (path === "/api/a2a/status") {
         return Promise.resolve(jsonResponse({ status: "ok", tasks: { activeStreams: 0 } }));
       }
-      if (path === "/api/search/providers") {
-        return Promise.resolve(jsonResponse({ providers: [] }));
-      }
-      if (path === "/api/cli-tools/keys") {
-        return Promise.resolve(
-          jsonResponse({
-            keys: [
-              {
-                id: "key-1",
-                key: "sk-test-1234",
-                rawKey: "sk-test-1234",
-                isActive: true,
-              },
-            ],
-          })
-        );
-      }
-      if (path === "/api/settings/compression") {
-        return Promise.resolve(
-          jsonResponse({
-            enabled: true,
-            cavemanConfig: { enabled: true, intensity: "full" },
-            cavemanOutputMode: { enabled: false, intensity: "full" },
-            rtkConfig: { enabled: true, intensity: "standard" },
-          })
-        );
-      }
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    renderEndpointPage();
+    renderEndpointPage(
+      loadedData(
+        {
+          cloudEnabled: false,
+          cloudConfigured: false,
+          hideEndpointCloudflaredTunnel: true,
+          hideEndpointTailscaleFunnel: true,
+          hideEndpointNgrokTunnel: true,
+          machineId: "machine-12345678",
+        },
+        {
+          cliKeys: {
+            keys: [{ id: "key-1", key: "sk-test-1234", rawKey: "sk-test-1234", isActive: true }],
+            failed: false,
+          },
+        }
+      )
+    );
 
     await waitForText("Endpoint");
     expect(document.body.textContent).toContain("Loading available models...");
@@ -421,51 +406,35 @@ describe("EndpointPageClient", () => {
     expect(document.body.textContent).toContain("/api/v1/vscode/sk-test-1234/models");
   });
 
-  it("does not start background endpoint requests after unmounting during settings load", async () => {
-    const settingsDeferred = createDeferred<Response>();
+  it("probes the tunnels the loaded settings leave visible", async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = getRequestPath(input);
-      if (path === "/api/settings") {
-        return settingsDeferred.promise;
-      }
-      throw new Error(`Unexpected request after unmount: ${path}`);
+      if (path === "/v1/models") return Promise.resolve(jsonResponse({ data: [] }));
+      if (path === "/api/mcp/status") return Promise.resolve(jsonResponse({ online: false }));
+      if (path === "/api/a2a/status") return Promise.resolve(jsonResponse({ status: "ok" }));
+      if (path.startsWith("/api/tunnels/")) return Promise.resolve(jsonResponse({}));
+      throw new Error(`Unexpected request: ${path}`);
     });
 
-    const { unmount } = renderEndpointPage();
-    unmount();
+    renderEndpointPage(
+      loadedData({
+        cloudEnabled: false,
+        cloudConfigured: false,
+        hideEndpointCloudflaredTunnel: false,
+        hideEndpointTailscaleFunnel: true,
+        hideEndpointNgrokTunnel: true,
+      })
+    );
 
-    await act(async () => {
-      settingsDeferred.resolve(
-        jsonResponse({
-          cloudEnabled: false,
-          cloudConfigured: false,
-          hideEndpointCloudflaredTunnel: false,
-          hideEndpointTailscaleFunnel: false,
-          hideEndpointNgrokTunnel: false,
-        })
-      );
-      await settingsDeferred.promise;
-    });
-
-    const requestPaths = fetchMock.mock.calls.map(([input]) => getRequestPath(input));
-    expect(requestPaths.length).toBeGreaterThan(0);
-    expect(requestPaths.every((path) => path === "/api/settings")).toBe(true);
+    await waitForText("Endpoint");
+    expect(fetchMock).toHaveBeenCalledWith("/api/tunnels/cloudflared", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/tunnels/tailscale", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/tunnels/ngrok", expect.anything());
   });
 
-  it("does not load compression settings on the Endpoint page", async () => {
+  it("does not load compression settings, and no first-paint read runs in the browser", async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const path = getRequestPath(input);
-      if (path === "/api/settings") {
-        return Promise.resolve(
-          jsonResponse({
-            cloudEnabled: false,
-            cloudConfigured: false,
-            hideEndpointCloudflaredTunnel: true,
-            hideEndpointTailscaleFunnel: true,
-            hideEndpointNgrokTunnel: true,
-          })
-        );
-      }
       if (path === "/v1/models") {
         return Promise.resolve(jsonResponse({ data: [] }));
       }
@@ -475,16 +444,18 @@ describe("EndpointPageClient", () => {
       if (path === "/api/a2a/status") {
         return Promise.resolve(jsonResponse({ status: "ok", tasks: { activeStreams: 0 } }));
       }
-      if (path === "/api/search/providers") {
-        return Promise.resolve(jsonResponse({ providers: [] }));
-      }
-      if (path === "/api/cli-tools/keys") {
-        return Promise.resolve(jsonResponse({ keys: [] }));
-      }
       throw new Error(`Unexpected request: ${path}`);
     });
 
-    renderEndpointPage();
+    renderEndpointPage(
+      loadedData({
+        cloudEnabled: false,
+        cloudConfigured: false,
+        hideEndpointCloudflaredTunnel: true,
+        hideEndpointTailscaleFunnel: true,
+        hideEndpointNgrokTunnel: true,
+      })
+    );
 
     await waitForText("Endpoint");
     await waitForText("0 models across");
@@ -492,5 +463,14 @@ describe("EndpointPageClient", () => {
     const requestPaths = fetchMock.mock.calls.map(([input]) => getRequestPath(input));
     expect(document.body.textContent).not.toContain("Token Saver");
     expect(requestPaths).not.toContain("/api/settings/compression");
+    // These come from the route loader now.
+    for (const loaderPath of [
+      "/api/settings",
+      "/api/search/providers",
+      "/api/network/info",
+      "/api/cli-tools/keys",
+    ]) {
+      expect(requestPaths).not.toContain(loaderPath);
+    }
   });
 });

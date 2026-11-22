@@ -17,12 +17,18 @@ import TestBenchAccordion from "./components/advanced/TestBenchAccordion";
 import CompressionPreviewAccordion from "./components/advanced/CompressionPreviewAccordion";
 import { useTranslateDeepLink } from "./hooks/useTranslateDeepLink";
 import { useTranslateSession } from "./hooks/useTranslateSession";
+import type { ProviderOptionsData } from "./hooks/useProviderOptions";
 import type { AdvancedSlug, TranslatorTab } from "./types";
 
-export default function TranslatorPageClient() {
+export default function TranslatorPageClient({
+  providerData,
+}: {
+  /** Providers and provider nodes from the route loader (see `./page`). */
+  providerData?: ProviderOptionsData | null;
+}) {
   return (
     <Suspense fallback={<TranslatorLoading />}>
-      <TranslatorPageClientInner />
+      <TranslatorPageClientInner providerData={providerData} />
     </Suspense>
   );
 }
@@ -32,7 +38,11 @@ function TranslatorLoading() {
   return <div className="p-8 text-text-muted">{t("loading")}</div>;
 }
 
-function TranslatorPageClientInner() {
+function TranslatorPageClientInner({
+  providerData,
+}: {
+  providerData?: ProviderOptionsData | null;
+}) {
   const t = useTranslations("translator");
   const [sharedInputContent, setSharedInputContent] = useState("");
   const { state, setTab, setAdvanced } = useTranslateDeepLink();
@@ -184,6 +194,7 @@ function TranslatorPageClientInner() {
           onAdvancedSlugChange={(slug) => setAdvanced(slug)}
           session={session}
           onInputChange={setSharedInputContent}
+          providerData={providerData}
         />
       )}
 

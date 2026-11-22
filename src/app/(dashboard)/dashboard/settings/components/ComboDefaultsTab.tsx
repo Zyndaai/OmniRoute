@@ -84,29 +84,131 @@ function toGlobalRoutingPatch(strategy: string | undefined, stickyRoundRobinLimi
   return patch;
 }
 
-export default function ComboDefaultsTab() {
-  const [comboDefaults, setComboDefaults] = useState<any>({
-    strategy: "priority",
-    maxRetries: 1,
-    retryDelayMs: 2000,
-    maxComboDepth: 3,
-    trackMetrics: true,
-    reasoningTokenBufferEnabled: true,
-    handoffThreshold: 0.85,
-    handoffModel: "",
-    maxMessagesForSummary: 30,
-    stickyRoundRobinLimit: 3,
-    disableSessionStickiness: false,
-    resetAwareQuotaCacheTtlMs: 0,
-    resetAwareQuotaCacheMaxStaleMs: 0,
-    zeroLatencyOptimizationsEnabled: false,
-  });
-  const [sessionAffinityTtlMs, setSessionAffinityTtlMs] = useState(0);
-  const [promptCacheAffinityEnabled, setPromptCacheAffinityEnabled] = useState(true);
-  const [providerOverrides, setProviderOverrides] = useState<any>({});
-  const [availableProviders, setAvailableProviders] = useState<{ id: string; provider: string }[]>(
-    []
+const DEFAULT_COMBO_DEFAULTS: Record<string, any> = {
+  strategy: "priority",
+  maxRetries: 1,
+  retryDelayMs: 2000,
+  maxComboDepth: 3,
+  trackMetrics: true,
+  reasoningTokenBufferEnabled: true,
+  handoffThreshold: 0.85,
+  handoffModel: "",
+  maxMessagesForSummary: 30,
+  stickyRoundRobinLimit: 3,
+  disableSessionStickiness: false,
+  resetAwareQuotaCacheTtlMs: 0,
+  resetAwareQuotaCacheMaxStaleMs: 0,
+  zeroLatencyOptimizationsEnabled: false,
+};
+
+/**
+ * Names of the providers that have at least one active connection (a provider whose connections
+ * are all inactive is excluded), sorted. Reads the `/api/providers` list.
+ */
+export function activeProviderNames(response: any[] | { connections?: any[] } | null): string[] {
+  // `/api/providers` answers `{ connections, total }`; the old code iterated the response as if
+  // it were an array, which threw and always left the list empty.
+  const providers = Array.isArray(response) ? response : (response?.connections ?? []);
+  const byProvider = new Map<string, any[]>();
+  for (const p of providers) {
+    if (!p?.provider) continue;
+    const list = byProvider.get(p.provider) || [];
+    list.push(p);
+    byProvider.set(p.provider, list);
+  }
+  return Array.from(byProvider.entries())
+    .filter(([, conns]) => conns.some((c) => c.isActive !== false))
+    .map(([name]) => name)
+    .sort();
+}
+
+/** What the route loader hands the tab: the combo-defaults read plus the settings fields it uses. */
+export interface ComboDefaultsInitialData {
+  comboDefaults?: any;
+  providerOverrides?: any;
+  settings: {
+    fallbackStrategy?: any;
+    stickyRoundRobinLimit?: any;
+    disableSessionStickiness?: any;
+    sessionAffinityTtlMs?: any;
+    promptCacheAffinityEnabled?: any;
+  };
+  providerNames: string[];
+}
+
+function deriveComboDefaultsState(
+  comboData: { comboDefaults?: any; providerOverrides?: any },
+  settingsData: ComboDefaultsInitialData["settings"],
+  prev: Record<string, any> = DEFAULT_COMBO_DEFAULTS
+) {
+  return {
+    comboDefaults: {
+      ...prev,
+      ...sanitizeComboRuntimeConfig(comboData.comboDefaults),
+      strategy: comboData.comboDefaults?.strategy ?? settingsData.fallbackStrategy ?? prev.strategy,
+      stickyRoundRobinLimit:
+        settingsData.stickyRoundRobinLimit ??
+        comboData.comboDefaults?.stickyRoundRobinLimit ??
+        prev.stickyRoundRobinLimit,
+      disableSessionStickiness:
+        settingsData.disableSessionStickiness ??
+        comboData.comboDefaults?.disableSessionStickiness ??
+        prev.disableSessionStickiness,
+    } as Record<string, any>,
+    providerOverrides: comboData.providerOverrides
+      ? sanitizeProviderOverrides(comboData.providerOverrides)
+      : null,
+    sessionAffinityTtlMs: Number.isFinite(Number(settingsData.sessionAffinityTtlMs))
+      ? Number(settingsData.sessionAffinityTtlMs)
+      : 0,
+    promptCacheAffinityEnabled: settingsData.promptCacheAffinityEnabled !== false,
+  };
+}
+
+export default function ComboDefaultsTab({
+  initialData,
+}: {
+  /** Data read by the route loader; without it the tab fetches everything itself. */
+  initialData?: ComboDefaultsInitialData | null;
+} = {}) {
+  const initialState = initialData
+    ? deriveComboDefaultsState(
+        {
+          comboDefaults: initialData.comboDefaults,
+          providerOverrides: initialData.providerOverrides,
+        },
+        initialData.settings
+      )
+    : null;
+  const [comboDefaults, setComboDefaults] = useState<any>(
+    () => initialState?.comboDefaults ?? DEFAULT_COMBO_DEFAULTS
   );
+  const [sessionAffinityTtlMs, setSessionAffinityTtlMs] = useState(
+    () => initialState?.sessionAffinityTtlMs ?? 0
+  );
+  const [promptCacheAffinityEnabled, setPromptCacheAffinityEnabled] = useState(
+    () => initialState?.promptCacheAffinityEnabled ?? true
+  );
+  const [providerOverrides, setProviderOverrides] = useState<any>(
+    () => initialState?.providerOverrides ?? {}
+  );
+  const [availableProviders, setAvailableProviders] = useState<{ id: string; provider: string }[]>(
+    () => (initialData?.providerNames ?? []).map((p) => ({ id: p, provider: p }))
+  );
+
+  // Keyed copy: a new loader result (compared by content) resets the edited draft.
+  const initialKey = initialData ? JSON.stringify(initialData) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialData && initialState) {
+      setComboDefaults(initialState.comboDefaults);
+      setProviderOverrides(initialState.providerOverrides ?? {});
+      setSessionAffinityTtlMs(initialState.sessionAffinityTtlMs);
+      setPromptCacheAffinityEnabled(initialState.promptCacheAffinityEnabled);
+      setAvailableProviders(initialData.providerNames.map((p) => ({ id: p, provider: p })));
+    }
+  }
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedIdx, setHighlightedIdx] = useState(0);
@@ -134,6 +236,8 @@ export default function ComboDefaultsTab() {
   ];
 
   useEffect(() => {
+    // The route loader already supplied everything.
+    if (initialData) return;
     Promise.all([
       fetch("/api/settings/combo-defaults").then((res) => res.json()),
       fetch("/api/settings").then((res) => res.json()),
@@ -142,49 +246,25 @@ export default function ComboDefaultsTab() {
         .then((providers: any[]) => {
           // Filter: include a provider only if at least one of its connections is active.
           // Disabled providers (all connections inactive) are excluded.
-          const byProvider = new Map<string, any[]>();
-          for (const p of providers) {
-            if (!p.provider) continue;
-            const list = byProvider.get(p.provider) || [];
-            list.push(p);
-            byProvider.set(p.provider, list);
-          }
-          const activeProviders = Array.from(byProvider.entries())
-            .filter(([, conns]) => conns.some((c) => c.isActive !== false))
-            .map(([name]) => name)
-            .sort();
-          setAvailableProviders(activeProviders.map((p) => ({ id: p, provider: p })));
+          setAvailableProviders(
+            activeProviderNames(providers).map((p) => ({ id: p, provider: p }))
+          );
         })
         .catch(() => {
           /* providers fetch is non-critical */
         }),
     ])
       .then(([comboData, settingsData]) => {
-        setComboDefaults((prev) => ({
-          ...prev,
-          ...sanitizeComboRuntimeConfig(comboData.comboDefaults),
-          strategy:
-            comboData.comboDefaults?.strategy ?? settingsData.fallbackStrategy ?? prev.strategy,
-          stickyRoundRobinLimit:
-            settingsData.stickyRoundRobinLimit ??
-            comboData.comboDefaults?.stickyRoundRobinLimit ??
-            prev.stickyRoundRobinLimit,
-          disableSessionStickiness:
-            settingsData.disableSessionStickiness ??
-            comboData.comboDefaults?.disableSessionStickiness ??
-            prev.disableSessionStickiness,
-        }));
-        if (comboData.providerOverrides) {
-          setProviderOverrides(sanitizeProviderOverrides(comboData.providerOverrides));
-        }
-        setSessionAffinityTtlMs(
-          Number.isFinite(Number(settingsData.sessionAffinityTtlMs))
-            ? Number(settingsData.sessionAffinityTtlMs)
-            : 0
+        const next = deriveComboDefaultsState(comboData, settingsData);
+        setComboDefaults(
+          (prev) => deriveComboDefaultsState(comboData, settingsData, prev).comboDefaults
         );
-        setPromptCacheAffinityEnabled(settingsData.promptCacheAffinityEnabled !== false);
+        if (next.providerOverrides) setProviderOverrides(next.providerOverrides);
+        setSessionAffinityTtlMs(next.sessionAffinityTtlMs);
+        setPromptCacheAffinityEnabled(next.promptCacheAffinityEnabled);
       })
       .catch((err) => console.error("Failed to fetch combo defaults:", err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   // Close dropdown on outside click

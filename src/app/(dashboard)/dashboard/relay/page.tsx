@@ -1,11 +1,18 @@
-import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { useLoaderData, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { getTranslator } from "@/i18n/request.server";
+import { apiJsonOrNull } from "@/server/routing/dashboardApi.server";
 import { pageMeta } from "@/shared/utils/pageMeta";
-import RelayProxyClient from "./RelayProxyClient";
+import RelayProxyClient, { type RelayToken } from "./RelayProxyClient";
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const t = await getTranslator("metadata", request);
-  return { title: t("relayTitle"), description: t("relayDescription") };
+  // Optional read: a failed read shows no tokens, as the old page did.
+  const tokens = await apiJsonOrNull<RelayToken[]>("/api/relay/tokens");
+  return {
+    title: t("relayTitle"),
+    description: t("relayDescription"),
+    tokens: Array.isArray(tokens) ? tokens : [],
+  };
 }
 
 export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
@@ -17,5 +24,6 @@ export const meta: MetaFunction<typeof loader> = ({ loaderData, matches }) =>
   );
 
 export default function RelayProxyPage() {
-  return <RelayProxyClient />;
+  const { tokens } = useLoaderData<typeof loader>();
+  return <RelayProxyClient tokens={tokens} />;
 }

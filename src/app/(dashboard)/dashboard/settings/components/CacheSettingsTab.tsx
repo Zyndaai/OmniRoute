@@ -46,8 +46,51 @@ const DEFAULT_TTL_MS = 1500;
 const MIN_TTL_MS = 100;
 const MAX_TTL_MS = 60000;
 
-export default function CacheSettingsTab() {
+/** The tab's field values for a cache-config body; absent fields keep the defaults. */
+function deriveCacheState(config?: CacheConfigResponse | null) {
+  const c = config ?? ({} as CacheConfigResponse);
+  const ms = c.modelCatalogCacheTtlMs ?? DEFAULT_TTL_MS;
+  return {
+    catalogTtl: typeof ms === "number" && Number.isFinite(ms) ? String(ms) : String(DEFAULT_TTL_MS),
+    semEnabled: c.semanticCacheEnabled !== undefined ? c.semanticCacheEnabled : true,
+    // Vector-similarity layer is opt-in (#14159): off unless the operator turns it on.
+    semVectorEnabled:
+      c.semanticCacheVectorEnabled !== undefined ? c.semanticCacheVectorEnabled : false,
+    semBackend: (c.semanticCacheBackend === "redis" || c.semanticCacheBackend === "memory"
+      ? c.semanticCacheBackend
+      : "memory") as "memory" | "redis",
+    semThreshold: typeof c.semanticCacheThreshold === "number" ? c.semanticCacheThreshold : 0.8,
+    semTtlMinutes:
+      typeof c.semanticCacheTTL === "number" ? Math.round(c.semanticCacheTTL / 60000) : 30,
+    semMaxSize: typeof c.semanticCacheMaxSize === "number" ? c.semanticCacheMaxSize : 1000,
+    semProvider: c.semanticCacheEmbeddingProvider || "lemonade",
+    semModel: c.semanticCacheEmbeddingModel || "harrier-oss-v1-0.6b",
+    semDimension: (typeof c.semanticCacheEmbeddingDimension === "number"
+      ? c.semanticCacheEmbeddingDimension
+      : 1024) as number | undefined,
+    semBaseUrl:
+      typeof c.semanticCacheEmbeddingBaseUrl === "string" ? c.semanticCacheEmbeddingBaseUrl : "",
+    semApiKey:
+      typeof c.semanticCacheEmbeddingApiKey === "string" ? c.semanticCacheEmbeddingApiKey : "",
+    semRedisUrl: typeof c.semanticCacheRedisUrl === "string" ? c.semanticCacheRedisUrl : "",
+    semRedisPrefix:
+      typeof c.semanticCacheRedisPrefix === "string"
+        ? c.semanticCacheRedisPrefix
+        : "omniroute:semcache:",
+    semRequireZeroTemp:
+      c.semanticCacheRequireZeroTemp !== undefined ? c.semanticCacheRequireZeroTemp : true,
+    embeddingOptions: Array.isArray(c.embeddingOptions) ? c.embeddingOptions : [],
+  };
+}
+
+export default function CacheSettingsTab({
+  initialConfig,
+}: {
+  /** The `/api/settings/cache-config` body read by the route loader; without it the tab fetches. */
+  initialConfig?: CacheConfigResponse | null;
+} = {}) {
   const t = useTranslations("settings");
+  const init = deriveCacheState(initialConfig);
   const format = useFormatter();
   const inputTypeLabels: Record<string, string> = {
     text: t("semanticCacheInputText"),
@@ -57,28 +100,27 @@ export default function CacheSettingsTab() {
   };
 
   // Model Catalog Cache State
-  const [catalogTtl, setCatalogTtl] = useState(String(DEFAULT_TTL_MS));
-  const [savedCatalogTtl, setSavedCatalogTtl] = useState(String(DEFAULT_TTL_MS));
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogTtl, setCatalogTtl] = useState(init.catalogTtl);
+  const [savedCatalogTtl, setSavedCatalogTtl] = useState(init.catalogTtl);
+  const [catalogLoading, setCatalogLoading] = useState(!initialConfig);
   const [catalogSaving, setCatalogSaving] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState<Message | null>(null);
 
   // Semantic Cache State
-  const [semEnabled, setSemEnabled] = useState(true);
-  // Vector-similarity layer is opt-in (#14159): off unless the operator turns it on.
-  const [semVectorEnabled, setSemVectorEnabled] = useState(false);
-  const [semBackend, setSemBackend] = useState<"memory" | "redis">("memory");
-  const [semThreshold, setSemThreshold] = useState(0.8);
-  const [semTtlMinutes, setSemTtlMinutes] = useState(30);
-  const [semMaxSize, setSemMaxSize] = useState(1000);
-  const [semProvider, setSemProvider] = useState("lemonade");
-  const [semModel, setSemModel] = useState("harrier-oss-v1-0.6b");
-  const [semDimension, setSemDimension] = useState<number | undefined>(1024);
-  const [semBaseUrl, setSemBaseUrl] = useState("");
-  const [semApiKey, setSemApiKey] = useState("");
-  const [semRedisUrl, setSemRedisUrl] = useState("");
-  const [semRedisPrefix, setSemRedisPrefix] = useState("omniroute:semcache:");
-  const [semRequireZeroTemp, setSemRequireZeroTemp] = useState(true);
+  const [semEnabled, setSemEnabled] = useState(init.semEnabled);
+  const [semVectorEnabled, setSemVectorEnabled] = useState(init.semVectorEnabled);
+  const [semBackend, setSemBackend] = useState<"memory" | "redis">(init.semBackend);
+  const [semThreshold, setSemThreshold] = useState(init.semThreshold);
+  const [semTtlMinutes, setSemTtlMinutes] = useState(init.semTtlMinutes);
+  const [semMaxSize, setSemMaxSize] = useState(init.semMaxSize);
+  const [semProvider, setSemProvider] = useState(init.semProvider);
+  const [semModel, setSemModel] = useState(init.semModel);
+  const [semDimension, setSemDimension] = useState<number | undefined>(init.semDimension);
+  const [semBaseUrl, setSemBaseUrl] = useState(init.semBaseUrl);
+  const [semApiKey, setSemApiKey] = useState(init.semApiKey);
+  const [semRedisUrl, setSemRedisUrl] = useState(init.semRedisUrl);
+  const [semRedisPrefix, setSemRedisPrefix] = useState(init.semRedisPrefix);
+  const [semRequireZeroTemp, setSemRequireZeroTemp] = useState(init.semRequireZeroTemp);
 
   // Saved Semantic Cache State
   const [semSaving, setSemSaving] = useState(false);
@@ -86,7 +128,36 @@ export default function CacheSettingsTab() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Dynamic Options
-  const [embeddingOptions, setEmbeddingOptions] = useState<EmbeddingProviderOption[]>([]);
+  const [embeddingOptions, setEmbeddingOptions] = useState<EmbeddingProviderOption[]>(
+    init.embeddingOptions
+  );
+
+  // Keyed copy: a new loader result (compared by content) resets the drafts to the saved config.
+  const initialKey = initialConfig ? JSON.stringify(initialConfig) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialConfig) {
+      setCatalogTtl(init.catalogTtl);
+      setSavedCatalogTtl(init.catalogTtl);
+      setSemEnabled(init.semEnabled);
+      setSemVectorEnabled(init.semVectorEnabled);
+      setSemBackend(init.semBackend);
+      setSemThreshold(init.semThreshold);
+      setSemTtlMinutes(init.semTtlMinutes);
+      setSemMaxSize(init.semMaxSize);
+      setSemProvider(init.semProvider);
+      setSemModel(init.semModel);
+      setSemDimension(init.semDimension);
+      setSemBaseUrl(init.semBaseUrl);
+      setSemApiKey(init.semApiKey);
+      setSemRedisUrl(init.semRedisUrl);
+      setSemRedisPrefix(init.semRedisPrefix);
+      setSemRequireZeroTemp(init.semRequireZeroTemp);
+      setEmbeddingOptions(init.embeddingOptions);
+      setCatalogLoading(false);
+    }
+  }
 
   // Test Connection State
   const [testingConnection, setTestingConnection] = useState(false);
@@ -104,6 +175,8 @@ export default function CacheSettingsTab() {
 
   // Load Cache Config and Dynamic Options in a single request
   useEffect(() => {
+    // The route loader already supplied the config.
+    if (initialConfig) return;
     let active = true;
 
     fetch("/api/settings/cache-config")
@@ -176,6 +249,7 @@ export default function CacheSettingsTab() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialConfig only gates the mount fetch
   }, [t]);
 
   // Catalog TTL validation and save

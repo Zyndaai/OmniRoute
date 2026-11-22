@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type { ChaosProviderOverride } from "./components/ChaosProviderOverridesPanel";
+import type { ChaosPageConfig, ChaosProviderInfo } from "./chaosPageTypes";
 import { useChaosConfigData } from "./useChaosConfigData";
 import { useChaosConfigPersistence } from "./useChaosConfigPersistence";
 import { useChaosTestRun } from "./useChaosTestRun";
@@ -14,8 +15,8 @@ export { DEFAULT_CHAOS_PAGE_CONFIG } from "./chaosPageTypes";
  * component itself stays a thin render function under the complexity/size
  * ratchet (config/quality/complexity-baseline.json).
  */
-export function useChaosConfigPage() {
-  const { config, setConfig, availableProviders, loading } = useChaosConfigData();
+export function useChaosConfigPage(loadedConfig: ChaosPageConfig, providers: ChaosProviderInfo[]) {
+  const { config, setConfig, availableProviders } = useChaosConfigData(loadedConfig, providers);
   const { t, saving, message, setMessage, saveConfig, resetConfig } = useChaosConfigPersistence(
     config,
     setConfig
@@ -25,7 +26,10 @@ export function useChaosConfigPage() {
   const addOverride = useCallback(() => {
     setConfig((prev) => ({
       ...prev,
-      providerOverrides: [...prev.providerOverrides, { providerId: "", modelId: "", enabled: true }],
+      providerOverrides: [
+        ...prev.providerOverrides,
+        { providerId: "", modelId: "", enabled: true },
+      ],
     }));
   }, [setConfig]);
 
@@ -55,7 +59,6 @@ export function useChaosConfigPage() {
     config,
     setConfig,
     availableProviders,
-    loading,
     saving,
     testing,
     testResult,

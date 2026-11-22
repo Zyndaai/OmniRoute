@@ -60,11 +60,25 @@ function clampNumber(raw: string, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
 }
 
-export default function ModalityBridgeVisionTab() {
+/**
+ * `initialSettings` is the route loader's read of `/api/settings` (the modalityBridge* and legacy
+ * visionBridge* keys) and `initialStats` its read of `/api/modality-bridge/stats`; without
+ * `initialSettings` the tab fetches `/api/settings` on mount.
+ */
+export default function ModalityBridgeVisionTab({
+  initialSettings,
+  initialStats,
+}: {
+  initialSettings?: Record<string, unknown>;
+  initialStats?: unknown;
+} = {}) {
   const t = useTranslations("settings");
-  const [settings, setSettings] = useState<VisionState | null>(null);
+  const [settings, setSettings] = useState<VisionState | null>(() =>
+    initialSettings ? fromApi(initialSettings) : null
+  );
 
   useEffect(() => {
+    if (initialSettings) return;
     let cancelled = false;
     fetch("/api/settings")
       .then((response) => (response.ok ? response.json() : null))
@@ -78,7 +92,7 @@ export default function ModalityBridgeVisionTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSettings]);
 
   const update = async (patch: Partial<VisionState>) => {
     try {
@@ -307,7 +321,7 @@ export default function ModalityBridgeVisionTab() {
           </div>
         </Collapsible>
 
-        <ModalityBridgeStatsRow kind="vision" />
+        <ModalityBridgeStatsRow kind="vision" initialStats={initialStats} />
         <ModalityBridgeTestButton />
       </div>
     </Card>

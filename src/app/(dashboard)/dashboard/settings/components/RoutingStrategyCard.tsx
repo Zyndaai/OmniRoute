@@ -39,17 +39,34 @@ function numericLimit(value: number | string | undefined, fallback: number): num
 /** Loads/persists the routing-strategy settings and tracks loading/busy state.
  * Extracted out of the component body to keep RoutingStrategyCard's own render
  * function under the complexity/size gate. */
-function useRoutingStrategySettings() {
-  const [settings, setSettings] = useState<RoutingSettings>({
-    fallbackStrategy: "fill-first",
-    stickyRoundRobinLimit: 3,
-    comboStrategy: "fallback",
-    comboStickyRoundRobinLimit: 1,
-  });
-  const [loading, setLoading] = useState(true);
+function withDefaults(data: RoutingSettings | null | undefined): RoutingSettings {
+  return {
+    fallbackStrategy: data?.fallbackStrategy || "fill-first",
+    stickyRoundRobinLimit: data?.stickyRoundRobinLimit ?? 3,
+    comboStrategy: data?.comboStrategy || "fallback",
+    comboStickyRoundRobinLimit: data?.comboStickyRoundRobinLimit ?? 1,
+  };
+}
+
+function useRoutingStrategySettings(initialSettings?: RoutingSettings | null) {
+  const [settings, setSettings] = useState<RoutingSettings>(() => withDefaults(initialSettings));
+  const [loading, setLoading] = useState(!initialSettings);
   const [busy, setBusy] = useState(false);
 
+  // Keyed copy: a new loader result (compared by content) resets the local edits.
+  const initialKey = initialSettings ? JSON.stringify(initialSettings) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialSettings) {
+      setSettings(withDefaults(initialSettings));
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
+    // The route loader already supplied the settings.
+    if (initialSettings) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -57,12 +74,7 @@ function useRoutingStrategySettings() {
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
-        setSettings({
-          fallbackStrategy: data?.fallbackStrategy || "fill-first",
-          stickyRoundRobinLimit: data?.stickyRoundRobinLimit ?? 3,
-          comboStrategy: data?.comboStrategy || "fallback",
-          comboStickyRoundRobinLimit: data?.comboStickyRoundRobinLimit ?? 1,
-        });
+        setSettings(withDefaults(data));
       } catch (e) {
         console.error(e);
       } finally {
@@ -72,6 +84,7 @@ function useRoutingStrategySettings() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const run = useCallback(async (fn: () => Promise<void>) => {
@@ -250,10 +263,15 @@ function RoutingSummaryFooter({
  * 9router-style Routing Strategy card (Profile → Routing Strategy parity).
  * Settings → Routing, first card on the page.
  */
-export default function RoutingStrategyCard() {
+export default function RoutingStrategyCard({
+  initialSettings,
+}: {
+  /** Settings read by the route loader; without it the card fetches them itself. */
+  initialSettings?: RoutingSettings | null;
+} = {}) {
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  const { settings, setSettings, loading, busy, run } = useRoutingStrategySettings();
+  const { settings, setSettings, loading, busy, run } = useRoutingStrategySettings(initialSettings);
 
   const accountRoundRobin = settings.fallbackStrategy === "round-robin";
   const comboRoundRobin = settings.comboStrategy === "round-robin";

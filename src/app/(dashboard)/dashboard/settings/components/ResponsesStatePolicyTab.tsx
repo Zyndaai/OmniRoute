@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Card, Select } from "@/shared/components";
 import Icon from "@/shared/components/Icon";
@@ -16,16 +16,23 @@ function normalizeMode(value: unknown): ResponsesPreviousResponseIdMode {
     : DEFAULT_RESPONSES_PREVIOUS_RESPONSE_ID_MODE;
 }
 
-export default function ResponsesStatePolicyTab() {
+/** `initialMode` is the route loader's `responsesPreviousResponseIdMode` setting; without it the tab fetches `/api/settings` on mount. */
+export default function ResponsesStatePolicyTab({
+  initialMode,
+}: {
+  initialMode?: unknown;
+} = {}) {
+  const hasInitial = initialMode !== undefined;
   const [mode, setMode] = useState<ResponsesPreviousResponseIdMode>(
-    DEFAULT_RESPONSES_PREVIOUS_RESPONSE_ID_MODE
+    hasInitial ? normalizeMode(initialMode) : DEFAULT_RESPONSES_PREVIOUS_RESPONSE_ID_MODE
   );
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasInitial);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"" | "saved" | "error">("");
   const t = useTranslations("settings");
 
   useEffect(() => {
+    if (hasInitial) return;
     let cancelled = false;
     fetch("/api/settings")
       .then((res) => res.json())
@@ -40,7 +47,7 @@ export default function ResponsesStatePolicyTab() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hasInitial]);
 
   const save = async (nextMode: ResponsesPreviousResponseIdMode) => {
     if (saving || loading || nextMode === mode) return;

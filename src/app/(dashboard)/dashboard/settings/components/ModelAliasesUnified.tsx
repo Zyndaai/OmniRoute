@@ -18,12 +18,41 @@ function translateOrFallback(
   return typeof t.has === "function" && t.has(key) ? t(key) : fallback;
 }
 
-export default function ModelAliasesUnified() {
-  const [wildcardAliases, setWildcardAliases] = useState<WildcardAlias[]>([]);
-  const [builtInAliases, setBuiltInAliases] = useState<Record<string, string>>({});
-  const [customAliases, setCustomAliases] = useState<Record<string, string>>({});
+export interface InitialModelAliases {
+  wildcardAliases: WildcardAlias[];
+  builtIn: Record<string, string>;
+  custom: Record<string, string>;
+}
+
+export default function ModelAliasesUnified({
+  initialAliases,
+}: {
+  /** Aliases read by the route loader; without them the component fetches them itself. */
+  initialAliases?: InitialModelAliases | null;
+} = {}) {
+  const [wildcardAliases, setWildcardAliases] = useState<WildcardAlias[]>(
+    () => initialAliases?.wildcardAliases ?? []
+  );
+  const [builtInAliases, setBuiltInAliases] = useState<Record<string, string>>(
+    () => initialAliases?.builtIn ?? {}
+  );
+  const [customAliases, setCustomAliases] = useState<Record<string, string>>(
+    () => initialAliases?.custom ?? {}
+  );
   const [aliasMode, setAliasMode] = useState<AliasMode>("exact");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialAliases);
+
+  // Keyed copy: a new loader result (compared by content) resets the lists.
+  const initialKey = initialAliases ? JSON.stringify(initialAliases) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialAliases) {
+      setWildcardAliases(initialAliases.wildcardAliases);
+      setBuiltInAliases(initialAliases.builtIn);
+      setCustomAliases(initialAliases.custom);
+    }
+  }
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error" | ""; message: string }>({
     type: "",
@@ -36,6 +65,8 @@ export default function ModelAliasesUnified() {
   const customEntries = Object.entries(customAliases);
 
   useEffect(() => {
+    // The route loader already supplied the aliases.
+    if (initialAliases) return;
     const loadAliases = async () => {
       try {
         const [settingsRes, aliasesRes] = await Promise.all([
@@ -55,6 +86,7 @@ export default function ModelAliasesUnified() {
     };
 
     loadAliases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only fallback fetch
   }, []);
 
   const showStatus = (type: "success" | "error", message: string) => {

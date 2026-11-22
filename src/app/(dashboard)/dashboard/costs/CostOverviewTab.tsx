@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useLocale, useTranslations } from "use-intl";
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
@@ -121,7 +121,7 @@ interface UsageAnalyticsServiceTierRow {
   usageSavingsTokens?: number;
 }
 
-interface UsageAnalyticsPayload {
+export interface UsageAnalyticsPayload {
   summary: UsageAnalyticsSummary;
   byProvider: UsageAnalyticsProviderRow[];
   byModel: UsageAnalyticsModelRow[];
@@ -314,7 +314,27 @@ function downloadFile(content: string, filename: string, mimeType: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function CostOverviewTab() {
+function presetCostsOf(payload: UsageAnalyticsPayload | null): Record<"1d" | "7d" | "30d", number> {
+  const presets = payload?.presetSummaries;
+  return {
+    "1d": presets?.["1d"]?.totalCost || 0,
+    "7d": presets?.["7d"]?.totalCost || 0,
+    "30d": presets?.["30d"]?.totalCost || 0,
+  };
+}
+
+export interface CostOverviewInitial {
+  /** The analytics the route loader read for `range` and `apiKeyFilter`; null if the read failed. */
+  analytics: UsageAnalyticsPayload | null;
+  range: CostRange;
+  apiKeyFilter: string;
+}
+
+/**
+ * `initial` is the first paint from the route loader. Changing the range or the API key filter
+ * refetches client-side; the mount fetch is skipped while they still match the loader's.
+ */
+export default function CostOverviewTab({ initial }: { initial?: CostOverviewInitial }) {
   const t = useTranslations("costs");
   const locale = useLocale();
   const nodeMap = useProviderNodeMap();
@@ -325,15 +345,19 @@ export default function CostOverviewTab() {
   const apiKeyFilter = useMemo(() => selectedApiKeyIds.join(","), [selectedApiKeyIds]);
   const currencyFormatter = useMemo(() => createCurrencyFormatter(locale), [locale]);
   const [range, setRange] = useState<CostRange>(() => parseCostRange(searchParams.get("range")));
-  const [analytics, setAnalytics] = useState<UsageAnalyticsPayload | null>(null);
-  const [presetCosts, setPresetCosts] = useState<Record<"1d" | "7d" | "30d", number>>({
-    "1d": 0,
-    "7d": 0,
-    "30d": 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [summaryLoading, setSummaryLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [analytics, setAnalytics] = useState<UsageAnalyticsPayload | null>(
+    initial?.analytics ?? null
+  );
+  const [presetCosts, setPresetCosts] = useState<Record<"1d" | "7d" | "30d", number>>(() =>
+    presetCostsOf(initial?.analytics ?? null)
+  );
+  const [loading, setLoading] = useState(!initial);
+  const [summaryLoading, setSummaryLoading] = useState(!initial);
+  const [error, setError] = useState<string | null>(
+    initial && !initial.analytics ? t("overviewLoadFailed") : null
+  );
+  // The loader's analytics stand in for the first fetch while range and key filter still match.
+  const initialRef = useRef(initial);
   const [explorerGroupBy, setExplorerGroupBy] = useState<CostExplorerGroupBy>(() =>
     parseExplorerGroupBy(searchParams.get("groupBy"))
   );
@@ -349,6 +373,12 @@ export default function CostOverviewTab() {
 
   useEffect(() => {
     let active = true;
+
+    const fromLoader = initialRef.current;
+    initialRef.current = undefined;
+    if (fromLoader && fromLoader.range === range && fromLoader.apiKeyFilter === apiKeyFilter) {
+      return;
+    }
 
     async function loadRange() {
       try {
@@ -367,13 +397,7 @@ export default function CostOverviewTab() {
         const payload = (await response.json()) as UsageAnalyticsPayload;
         if (!active) return;
         setAnalytics(payload);
-        if (payload.presetSummaries) {
-          setPresetCosts({
-            "1d": payload.presetSummaries["1d"]?.totalCost || 0,
-            "7d": payload.presetSummaries["7d"]?.totalCost || 0,
-            "30d": payload.presetSummaries["30d"]?.totalCost || 0,
-          });
-        }
+        if (payload.presetSummaries) setPresetCosts(presetCostsOf(payload));
         setError(null);
       } catch (loadError) {
         if (!active) return;

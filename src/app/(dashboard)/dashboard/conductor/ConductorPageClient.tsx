@@ -5,6 +5,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
 
 import { PageHeader } from "@omniroute/ui-kit/page-header";
@@ -40,7 +41,7 @@ interface FleetTask {
   updated_at: string | null;
 }
 
-interface FleetSnapshot {
+export interface FleetSnapshot {
   offline: boolean;
   runners: FleetRunner[];
   tasks: FleetTask[];
@@ -63,30 +64,36 @@ function statusVariant(status: string): "success" | "error" | "warning" | "info"
   return "default";
 }
 
-export default function ConductorPageClient() {
+/**
+ * `loaded` is the fleet snapshot from the route loader (`null` when the read failed). The page
+ * re-runs the loader every few seconds; a failed read keeps the last good snapshot.
+ */
+export default function ConductorPageClient({ loaded }: { loaded: FleetSnapshot | null }) {
   const t = useTranslations("conductor");
-  const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(null);
+  const revalidator = useRevalidator();
+  const [snapshot, setSnapshot] = useState<FleetSnapshot | null>(loaded);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    if (loaded) setSnapshot(loaded);
+  }
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
   const [err, setErr] = useState("");
 
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/conductor/fleet");
-      if (res.ok) setSnapshot(await res.json());
-    } catch {
-      // rede local instável: mantém o último snapshot; o banner offline vem do servidor
-    }
-  }, []);
+    await revalidator.revalidate();
+  }, [revalidator]);
 
   useEffect(() => {
-    void (async () => {
-      await load();
-    })();
-    const timer = setInterval(() => void load(), REFRESH_MS);
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
+    }, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [revalidator]);
 
   const openDetail = async (taskId: string) => {
     setErr("");

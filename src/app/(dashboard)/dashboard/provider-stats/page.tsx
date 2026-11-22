@@ -6,7 +6,9 @@
  */
 
 import { useState, useEffect, useCallback, Fragment } from "react";
+import { useLoaderData, useRevalidator } from "react-router";
 import { useTranslations } from "use-intl";
+import { apiRead } from "@/server/routing/dashboardApi.server";
 
 import { useProviderNodeMap, resolveProviderName } from "@/lib/display/useProviderNodeMap";
 import { formatComboSuccessRate } from "@/lib/usage/providerStatsFormatters";
@@ -84,61 +86,77 @@ function formatLatency(ms: number | null): string {
   return `${Math.round(ms)}ms`;
 }
 
+interface ProviderStatsData {
+  providers: ProviderStat[];
+  models: ModelStat[];
+  comboMetrics: Record<string, unknown>;
+  telemetry: Record<string, unknown>;
+  toolLatency: Record<string, ToolLatencyStat>;
+  windowSince?: string;
+}
+
+/**
+ * The stats, or the failure (`HTTP <status>`). A failed read does not reach the error boundary:
+ * the page keeps its last good stats on a failed refresh and shows an alert only when it has
+ * none.
+ */
+export async function loader() {
+  const result = await apiRead<ProviderStatsData>("/api/provider-stats");
+  return result.ok && result.data
+    ? { stats: result.data, error: null }
+    : { stats: null, error: result.ok ? "empty response" : `HTTP ${result.status}` };
+}
+
 export default function ProviderStatsPage() {
   const t = useTranslations("providerStats");
   const tc = useTranslations("common");
   const nodeMap = useProviderNodeMap();
-  const [data, setData] = useState<{
-    providers: ProviderStat[];
-    models: ModelStat[];
-    comboMetrics: Record<string, unknown>;
-    telemetry: Record<string, unknown>;
-    toolLatency: Record<string, ToolLatencyStat>;
-    windowSince?: string;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const loaded = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  // Last good stats: a failed refresh keeps showing them (as before the loader).
+  const [data, setData] = useState<ProviderStatsData | null>(loaded.stats);
+  const [shownLoaded, setShownLoaded] = useState(loaded);
+  if (loaded !== shownLoaded) {
+    setShownLoaded(loaded);
+    if (loaded.stats) setData(loaded.stats);
+  }
+  const error = loaded.error;
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("totalRequests");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
-  const fetchData = useCallback(async () => {
-    try {
-      const res = await fetch("/api/provider-stats");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      setData(json);
-      setError(null);
-      setLastRefresh(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("unknownError"));
-    }
-  }, [t]);
+  const fetchData = useCallback(() => revalidator.revalidate(), [revalidator]);
+
+  // The time is client-only (`Date`, locale and timezone) so it is set in an effect: the
+  // server-rendered header must not differ from the first client render.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- stamps each good loader result
+    if (loaded.stats) setLastRefresh(new Date());
+  }, [loaded]);
 
   useEffect(() => {
-    // Async continuation — see react-hooks/set-state-in-effect.
-    void (async () => {
-      await fetchData();
-    })();
     // Skip ticks while the tab is hidden; a hidden tab gets nothing from a
     // refetch, so the poll only costs the server. The interval keeps running —
     // hosts that report a permanent "hidden" state without ever firing a
     // visibilitychange still refresh, and a real background tab stops costing
     // a computation every tick.
     const interval = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      void fetchData();
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
     }, 30000);
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      void fetchData();
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        void revalidator.revalidate();
+      }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       clearInterval(interval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchData]);
+  }, [revalidator]);
 
   // Compute summary stats
   const totalRequests = data?.providers.reduce((s, p) => s + (p.totalRequests || 0), 0) ?? 0;
@@ -171,23 +189,6 @@ export default function ProviderStatsPage() {
     modelsByProvider.get(m.provider)!.push(m);
   }
 
-  if (!data && !error) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center" role="status" aria-live="polite">
-          <Icon
-            name="progress_activity"
-            size={32}
-            className="mx-auto animate-spin text-text-muted"
-          />
-          <p className="text-text-muted mt-4">{t("loading")}</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Header (title + refresh) is shared by the error-only state and the data view, so a
-  // dismissed error never leaves a blank page.
   const pageHeader = (
     <PageHeader
       compact
@@ -213,17 +214,17 @@ export default function ProviderStatsPage() {
     />
   );
 
-  if (error && !data) {
+  if (!data) {
     return (
       <div className="space-y-6">
         {pageHeader}
         {/* Re-keyed on the message: a new failure re-shows a dismissed alert. The header's
             refresh button stays as the retry affordance after a dismiss. */}
         <Alert
-          key={error}
+          key={error ?? "error"}
           variant="critical"
           icon={<Icon name="error" size={20} />}
-          title={t("loadFailed", { error })}
+          title={t("loadFailed", { error: error ?? "" })}
           dismissLabel={tc("close")}
           actions={
             <Button variant="secondary" size="sm" icon="refresh" onClick={fetchData}>

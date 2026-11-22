@@ -2,7 +2,7 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ApiEndpointsTab from "../ApiEndpointsTab";
+import ApiEndpointsTab, { type ApiEndpointsLoaded } from "../ApiEndpointsTab";
 import { DEFAULT_DISPLAY_BASE_URL } from "@/shared/hooks/useDisplayBaseUrl";
 
 vi.mock("react-router", async (importOriginal) => ({
@@ -69,14 +69,6 @@ vi.mock("use-intl", () => ({
   },
 }));
 
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => data,
-  } as Response;
-}
-
 const cleanupCallbacks: Array<() => void> = [];
 
 async function waitForText(text: string) {
@@ -89,14 +81,26 @@ async function waitForText(text: string) {
   }
 }
 
-function renderApiEndpointsTab() {
+// The page reads the catalog, API keys and CLI keys in its route loader and gets them as props.
+function loadedData(overrides: Partial<ApiEndpointsLoaded> = {}): ApiEndpointsLoaded {
+  return {
+    catalog: null,
+    catalogStatus: null,
+    apiKeys: [],
+    apiKeysStatus: null,
+    cliKeys: { keys: [], failed: false },
+    ...overrides,
+  };
+}
+
+function renderApiEndpointsTab(loaded: ApiEndpointsLoaded) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   let mounted = true;
 
   act(() => {
-    root.render(<ApiEndpointsTab />);
+    root.render(<ApiEndpointsTab loaded={loaded} />);
   });
 
   const unmount = () => {
@@ -132,15 +136,9 @@ describe("ApiEndpointsTab", () => {
   });
 
   it("shows an API catalog error state instead of a blank page", async () => {
-    fetchMock.mockImplementation(async (input) => {
-      if (input === "/api/cli-tools/keys") {
-        return jsonResponse({ keys: [] });
-      }
-
-      return jsonResponse({ error: "openapi.yaml not found" }, 404);
-    });
-
-    renderApiEndpointsTab();
+    renderApiEndpointsTab(
+      loadedData({ catalogStatus: 404, catalogMessage: "openapi.yaml not found" })
+    );
 
     await waitForText("VS Code Token Alias");
     await waitForText("API catalog unavailable");
@@ -150,35 +148,33 @@ describe("ApiEndpointsTab", () => {
   });
 
   it("renders catalog content when the OpenAPI catalog loads", async () => {
-    fetchMock.mockImplementation(async (input) => {
-      if (input === "/api/cli-tools/keys") {
-        return jsonResponse({
+    renderApiEndpointsTab(
+      loadedData({
+        cliKeys: {
           keys: [{ id: "copilot", key: "sk-***", rawKey: "sk-live-123", isActive: true }],
-        });
-      }
-
-      return jsonResponse({
-        info: { title: "OmniRoute API", version: "3.7.6" },
-        servers: [],
-        tags: [{ name: "Chat" }],
-        endpoints: [
-          {
-            method: "POST",
-            path: "/api/v1/chat/completions",
-            tags: ["Chat"],
-            summary: "Create chat completion",
-            description: "Create chat completion",
-            security: true,
-            parameters: [],
-            requestBody: true,
-            responses: ["200"],
-          },
-        ],
-        schemas: [],
-      });
-    });
-
-    renderApiEndpointsTab();
+          failed: false,
+        },
+        catalog: {
+          info: { title: "OmniRoute API", version: "3.7.6" },
+          servers: [],
+          tags: [{ name: "Chat" }],
+          endpoints: [
+            {
+              method: "POST",
+              path: "/api/v1/chat/completions",
+              tags: ["Chat"],
+              summary: "Create chat completion",
+              description: "Create chat completion",
+              security: true,
+              parameters: [],
+              requestBody: true,
+              responses: ["200"],
+            },
+          ],
+          schemas: [],
+        },
+      })
+    );
 
     await waitForText("VS Code Token Alias");
     await waitForText("OmniRoute API");
@@ -191,33 +187,29 @@ describe("ApiEndpointsTab", () => {
 
   it("renders curl example using window.location.origin when NEXT_PUBLIC_BASE_URL is unset", async () => {
     vi.stubEnv("NEXT_PUBLIC_BASE_URL", "");
-    fetchMock.mockImplementation(async (input) => {
-      if (input === "/api/cli-tools/keys") {
-        return jsonResponse({ keys: [] });
-      }
-
-      return jsonResponse({
-        info: { title: "OmniRoute API", version: "3.7.6" },
-        servers: [],
-        tags: [{ name: "Chat" }],
-        endpoints: [
-          {
-            method: "POST",
-            path: "/api/v1/chat/completions",
-            tags: ["Chat"],
-            summary: "Create chat completion",
-            description: "Create chat completion",
-            security: false,
-            parameters: [],
-            requestBody: false,
-            responses: ["200"],
-          },
-        ],
-        schemas: [],
-      });
-    });
-
-    renderApiEndpointsTab();
+    renderApiEndpointsTab(
+      loadedData({
+        catalog: {
+          info: { title: "OmniRoute API", version: "3.7.6" },
+          servers: [],
+          tags: [{ name: "Chat" }],
+          endpoints: [
+            {
+              method: "POST",
+              path: "/api/v1/chat/completions",
+              tags: ["Chat"],
+              summary: "Create chat completion",
+              description: "Create chat completion",
+              security: false,
+              parameters: [],
+              requestBody: false,
+              responses: ["200"],
+            },
+          ],
+          schemas: [],
+        },
+      })
+    );
 
     await waitForText("OmniRoute API");
     await waitForText("1 endpoints across 1 categories");

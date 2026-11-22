@@ -6,6 +6,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRoutesStub } from "react-router";
 import EndpointPageClient from "../EndpointPageClient";
 
 vi.mock("react-router", async (importOriginal) => ({
@@ -55,8 +56,24 @@ async function renderPage(): Promise<HTMLDivElement> {
   const el = document.createElement("div");
   document.body.appendChild(el);
   const root = createRoot(el);
+  // The settings arrive from the route loader; the page needs a router for `useRevalidator`.
+  const loaded = {
+    settings: {
+      cloudEnabled: false,
+      cloudConfigured: false,
+      hideEndpointCloudflaredTunnel: false,
+      hideEndpointTailscaleFunnel: true,
+      hideEndpointNgrokTunnel: true,
+    },
+    searchProviders: [],
+    network: null,
+    cliKeys: { keys: [], failed: false },
+  };
+  const Stub = createRoutesStub([
+    { path: "/", Component: () => <EndpointPageClient machineId="" loaded={loaded} /> },
+  ]);
   await act(async () => {
-    root.render(<EndpointPageClient machineId="" />);
+    root.render(<Stub initialEntries={["/"]} />);
   });
   roots.push({ root, el });
   return el;
@@ -88,18 +105,6 @@ describe("#15294 cloudflare tunnel object error body", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = requestPath(input);
-        if (path === "/api/settings") {
-          return new Response(
-            JSON.stringify({
-              cloudEnabled: false,
-              cloudConfigured: false,
-              hideEndpointCloudflaredTunnel: false,
-              hideEndpointTailscaleFunnel: true,
-              hideEndpointNgrokTunnel: true,
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
-          );
-        }
         if (path === "/api/tunnels/cloudflared" && (!init?.method || init.method === "GET")) {
           return new Response(JSON.stringify(STOPPED_STATUS), {
             status: 200,

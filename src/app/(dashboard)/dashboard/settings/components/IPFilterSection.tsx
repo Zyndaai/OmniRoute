@@ -11,20 +11,39 @@ const MODES = [
   { value: "whitelist-priority", labelKey: "ipModeWhitelistPriority", icon: "priority_high" },
 ];
 
-export default function IPFilterSection() {
-  const [config, setConfig] = useState({
-    enabled: false,
-    mode: "blacklist",
-    blacklist: [],
-    whitelist: [],
-    tempBans: [],
-  });
-  const [loading, setLoading] = useState(true);
+export default function IPFilterSection({
+  initialConfig,
+}: {
+  /** The `/api/settings/ip-filter` body read by the route loader; without it the section fetches. */
+  initialConfig?: any;
+} = {}) {
+  const [config, setConfig] = useState(
+    initialConfig ?? {
+      enabled: false,
+      mode: "blacklist",
+      blacklist: [],
+      whitelist: [],
+      tempBans: [],
+    }
+  );
+  const [loading, setLoading] = useState(!initialConfig);
+  // Keyed copy: a new loader result (compared by content) replaces the local config.
+  const initialKey = initialConfig ? JSON.stringify(initialConfig) : null;
+  const [shownKey, setShownKey] = useState(initialKey);
+  if (initialKey !== shownKey) {
+    setShownKey(initialKey);
+    if (initialConfig) {
+      setConfig(initialConfig);
+      setLoading(false);
+    }
+  }
   const [newIP, setNewIP] = useState("");
   const [listTarget, setListTarget] = useState("blacklist");
   const t = useTranslations("settings");
 
   useEffect(() => {
+    // The route loader already supplied the config.
+    if (initialConfig) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -41,6 +60,7 @@ export default function IPFilterSection() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialConfig only gates the mount fetch
   }, []);
 
   const updateConfig = async (updates) => {
