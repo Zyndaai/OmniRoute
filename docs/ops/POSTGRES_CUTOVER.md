@@ -1,3 +1,8 @@
+---
+title: "PostgreSQL cut-over (omniport.ink)"
+lastUpdated: 2026-11-22
+---
+
 # PostgreSQL cut-over (omniport.ink)
 
 Moves production from the single SQLite container to the cluster: PostgreSQL, Redis and one
