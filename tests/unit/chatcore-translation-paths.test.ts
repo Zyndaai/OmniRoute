@@ -14,7 +14,7 @@ fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 fs.mkdirSync(TEST_PLUGINS_DIR, { recursive: true });
 process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.OMNIROUTE_PLUGINS_DIR = TEST_PLUGINS_DIR;
-const core = await import("../../src/lib/db/core.ts");
+await import("../../src/lib/db/core.ts");
 const { resetTestDb } = await import("../helpers/postgres.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");

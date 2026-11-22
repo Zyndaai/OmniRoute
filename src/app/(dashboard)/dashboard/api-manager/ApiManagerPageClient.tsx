@@ -39,6 +39,8 @@ import { extractApiErrorMessage } from "@/shared/http/apiErrorMessage";
 import { hasProviderQuotaBypassScope } from "@/shared/constants/apiKeyPolicyScopes";
 import RoutingEntryLink from "@/shared/components/routing/RoutingEntryLink";
 import { ALL_COMBOS_ACCESS_RULE } from "@/shared/constants/comboAccess";
+// Type only: the route module imports server-only helpers for its loader.
+import type { loader as ApiManagerLoader } from "./page";
 
 // Constants for validation
 const MAX_KEY_NAME_LENGTH = 200;
@@ -135,7 +137,7 @@ export default function ApiManagerPageClient() {
     keys: loadedKeys,
     allowKeyReveal,
     quotaPoolGroup,
-  } = useLoaderData<typeof import("./page").loader>();
+  } = useLoaderData<typeof ApiManagerLoader>();
   const [confirm, confirmDialog] = useConfirmDialog();
   const newKeyNameInputId = useId();
   const createKeyFormRef = useRef<HTMLDivElement | null>(null);

@@ -42,8 +42,11 @@ const HOUR_MS = 60 * 60 * 1000;
 // whether ITS connection was probed and make only ITS probes fail.
 const probeCalls = new Map<string, number>();
 const failingNodes = new Set<string>();
+// Install the probe stub after the production wrapper's one-time initialization,
+// so importing the real routes cannot replace it with a network transport.
+await import("../../open-sse/utils/proxyFetch.ts");
 const originalFetch = globalThis.fetch;
-globalThis.fetch = (async (input: string | URL | Request) => {
+const probeFetch = (async (input: string | URL | Request) => {
   const url =
     typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
   const match = VALIDATION_PATH.exec(url);
@@ -59,6 +62,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   }
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
+globalThis.fetch = probeFetch;
 
 const core = await import("../../src/lib/db/core.ts");
 const providerNodesRoute = await import("../../src/app/api/provider-nodes/route.ts");
@@ -73,6 +77,9 @@ const settingsDb = await import("../../src/lib/db/settings.ts");
 const { getTestBackend } = await import("../helpers/postgres.ts");
 const { maybeAutoDisableBannedAccount } =
   await import("../../src/sse/services/autoDisableBannedAccount.ts");
+// Loading the routes can install the proxy fetch interceptor. Keep every probe
+// on the fixture transport, including the initial fire-and-forget auto-test.
+globalThis.fetch = probeFetch;
 
 const OPERATOR_DISABLED_AT_KEY = operatorDisable.OPERATOR_DISABLED_AT_KEY;
 // Not imported from the module on purpose: the marker is persisted JSON, and the

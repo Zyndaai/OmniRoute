@@ -8,7 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-combo-con
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { handleComboChat } = await import("../../open-sse/services/combo.ts");
-const core = await import("../../src/lib/db/core.ts");
+await import("../../src/lib/db/core.ts");
 const handoffDb = await import("../../src/lib/db/contextHandoffs.ts");
 const { scopeHandoffSessionId } =
   await import("../../open-sse/services/combo/handoffSessionScope.ts");
@@ -620,7 +620,7 @@ test("context_cache_protection: does NOT pin when no session history exists (fir
       config: { maxRetries: 0 },
       context_cache_protection: true,
     },
-    handleSingleModel: async (body, modelStr) => {
+    handleSingleModel: async (_body, modelStr) => {
       capturedModels.push(modelStr);
       return okResponse();
     },

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -25,6 +25,8 @@ type McpTransport = "stdio" | "sse" | "streamable-http";
 
 const TRANSPORTS: readonly McpTransport[] = ["stdio", "sse", "streamable-http"];
 const STATUS_POLL_MS = 30_000;
+
+const noopSubscribe = () => () => {};
 
 async function readMcpOnline(): Promise<boolean> {
   try {
@@ -198,11 +200,12 @@ export default function McpPage() {
   const revalidator = useRevalidator();
   const toggleFetcher = useFetcher<typeof action>();
   const transportFetcher = useFetcher<typeof action>();
-  const [baseUrl, setBaseUrl] = useState("");
-
-  useEffect(() => {
-    setBaseUrl(`${window.location.protocol}//${window.location.host}`);
-  }, []);
+  // The browser's own origin; empty on the server, filled in at hydration without a re-render.
+  const baseUrl = useSyncExternalStore(
+    noopSubscribe,
+    () => `${window.location.protocol}//${window.location.host}`,
+    () => ""
+  );
 
   // Re-runs the loader, which re-reads the server status. Skipped while the tab is hidden.
   useEffect(() => {

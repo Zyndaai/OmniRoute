@@ -26,11 +26,14 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 process.env.API_KEY_SECRET = "operator-disable-test-secret";
 
 const VALIDATION_BASE_URL = "https://proxy.operator-disable.example.com/v1";
+// Initialize the production wrapper before installing the probe stub. Otherwise
+// its first import replaces the stub and sends fake provider URLs to the proxy.
+await import("../../open-sse/utils/proxyFetch.ts");
 const originalFetch = globalThis.fetch;
 // When set, every validation probe waits on this promise before answering, so a
 // test can hold a connection test mid-probe while the operator acts.
 let probeGate: Promise<void> | null = null;
-globalThis.fetch = (async (input: string | URL | Request) => {
+const probeFetch = (async (input: string | URL | Request) => {
   const url =
     typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
   if (url === `${VALIDATION_BASE_URL}/models`) {
@@ -39,6 +42,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   }
   return new Response("not found", { status: 404 });
 }) as typeof fetch;
+globalThis.fetch = probeFetch;
 
 const core = await import("../../src/lib/db/core.ts");
 const { getTestBackend, resetTestDb } = await import("../helpers/postgres.ts");
@@ -48,6 +52,8 @@ const providerByIdRoute = await import("../../src/app/api/providers/[id]/route.t
 const { testSingleConnection } = await import("../../src/app/api/providers/[id]/test/route.ts");
 const { OPERATOR_DISABLED_AT_KEY, isOperatorDisabled } =
   await import("../../src/lib/providers/operatorDisable.ts");
+// Loading the routes can install the proxy fetch interceptor; keep probes on the stub.
+globalThis.fetch = probeFetch;
 
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
   const text = await response.text();

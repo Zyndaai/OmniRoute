@@ -15,11 +15,8 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-gemini-i
 
 const { claudeToGeminiRequest } =
   await import("../../open-sse/translator/request/claude-to-gemini.ts");
-const {
-  buildGeminiThoughtSignatureKey,
-  storeGeminiThoughtSignature,
-  clearGeminiThoughtSignatures,
-} = await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
+const { buildGeminiThoughtSignatureKey, clearGeminiThoughtSignatures } =
+  await import("../../open-sse/services/geminiThoughtSignatureStore.ts");
 const { resetDbInstance } = await import("../../src/lib/db/core.ts");
 
 type Part = { inlineData?: { data: string }; text?: string };
@@ -32,7 +29,7 @@ test.after(() => {
   resetDbInstance();
 });
 
-function screenshotSession(ns: string, count: number): Record<string, unknown> {
+function screenshotSession(_ns: string, count: number): Record<string, unknown> {
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: "start" }];
   for (let i = 0; i < count; i++) {
     messages.push({

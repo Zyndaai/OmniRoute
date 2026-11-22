@@ -26,6 +26,8 @@ import CombosTab, { type ComboOption } from "./tabs/CombosTab";
 import ConnectionsTab from "./tabs/ConnectionsTab";
 import LimitsTab from "./tabs/LimitsTab";
 import BehaviourTab from "./tabs/BehaviourTab";
+// Type only: the route module imports server-only helpers for its loader.
+import type { loader as ApiKeyAccessLoader } from "./page";
 
 const TABS: Array<{ id: AccessEditorTab; icon: string; labelKey: string }> = [
   { id: "general", icon: "tune", labelKey: "tabGeneral" },
@@ -680,7 +682,7 @@ async function loadAccessEditorModels({
  * client-side: it is read from `/v1/models` (not an `/api` route) with a fallback chain.
  */
 function useAccessEditorData() {
-  const loaded = useLoaderData<typeof import("./page").loader>();
+  const loaded = useLoaderData<typeof ApiKeyAccessLoader>();
   const t = useTranslations("apiManager");
   // `setApiKey` keeps what was just saved on screen; every new loader result replaces it.
   const [apiKey, setApiKey] = useState<ApiKeyAccessData | null>(

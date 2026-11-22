@@ -209,7 +209,13 @@ test("bifrost route: records relay usage after SSE stream completion", async () 
 
   assert.match(await res.text(), /delta/);
 
-  const logs = await getRelayLogs(relayToken.id, 10);
+  // The route records usage fire-and-forget when the stream closes (an async PostgreSQL
+  // write), so wait for the row instead of reading it in the same tick.
+  let logs = await getRelayLogs(relayToken.id, 10);
+  for (let attempt = 0; logs.length === 0 && attempt < 50; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    logs = await getRelayLogs(relayToken.id, 10);
+  }
   assert.equal(logs.length, 1);
   assert.equal(logs[0].status, "success");
   assert.equal(logs[0].status_code, 200);

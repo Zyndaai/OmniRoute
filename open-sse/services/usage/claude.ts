@@ -84,6 +84,8 @@ export interface ClaudeUsageResult {
 interface CachedClaudeUsage {
   value: ClaudeUsageResult;
   fetchedAt: number;
+  /** Set when the quota changed upstream (a reset claim): never reused, still the stale fallback. */
+  expired?: boolean;
 }
 
 // Keyed by sha256(accessToken) — raw tokens never sit as map keys.
@@ -257,7 +259,7 @@ function getClaudeUsageFromEndpoint(
   const reuseForMs = options.forceRefresh
     ? CLAUDE_USAGE_FORCED_MIN_INTERVAL_MS
     : CLAUDE_USAGE_SUCCESS_TTL_MS;
-  if (cached && Date.now() - cached.fetchedAt < reuseForMs) {
+  if (cached && !cached.expired && Date.now() - cached.fetchedAt < reuseForMs) {
     return Promise.resolve(cached.value);
   }
 
@@ -392,6 +394,16 @@ async function fetchClaudeUsage(
   } catch (error) {
     return { message: unableToFetchMessage(error), bootstrap: await bootstrapPromise };
   }
+}
+
+/**
+ * Mark the last successful read as outdated, e.g. after a reset claim changed the quota, so
+ * the next read polls Anthropic instead of reusing it. It still backs a stale answer on 429.
+ */
+export function expireClaudeUsageCache(accessToken?: string): void {
+  if (!accessToken) return;
+  const cached = lastSuccessfulUsage.get(hashClaudeCredential(accessToken));
+  if (cached) cached.expired = true;
 }
 
 /** Test-only: clear the success cache, observed headers and in-flight polls. */
