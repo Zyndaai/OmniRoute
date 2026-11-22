@@ -843,8 +843,8 @@ behavior) and is out of scope for a single-provider rule addition.
    `applyComboTargetExhaustion()`
    (`open-sse/services/combo/targetExhaustion.ts`); without it, `scope`
    still flows through `fallbackResult.ruleScope` but nothing acts on it.
-3. Add unit tests mirroring `tests/unit/upstream-status-restatement.test.ts`
-   and `tests/unit/agentrouter-error-rules.test.ts` (including the
+3. Add unit tests mirroring the `upstream-status-restatement` describe in
+   `tests/unit/chatcore/accounts-resilience.test.ts` and `tests/unit/agentrouter-error-rules.test.ts` (including the
    not-permanent / not-creditsExhausted guards, and — if the provider needs
    the allowlist — a test asserting `resolveRuleMatchBody()` returns the
    full text only for that provider).

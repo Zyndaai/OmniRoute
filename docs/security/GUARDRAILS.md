@@ -960,7 +960,8 @@ Guardrails that throw are recorded with `error: <message>` and logged via
 ## Coverage and limits
 
 The guardrail registry is wired into the chat pipeline only. These limits are
-pinned by `tests/unit/guardrail-pipeline-wiring-characterization.test.ts` and
+pinned by `tests/unit/chatcore/request-shaping.test.ts` (describe
+`guardrail-pipeline-wiring-characterization`) and
 `tests/unit/guardrail-pipeline-characterization.test.ts`; update those tests
 deliberately when the behavior changes.
 

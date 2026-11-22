@@ -20,7 +20,8 @@
  * cold — otherwise a cached second call would make the assertion vacuous.
  *
  * The behavioural contract (which models a quota-exclusive key sees) is pinned by
- * tests/unit/quota-exclusive-catalog-4806.test.ts and must stay green alongside.
+ * the `quota-exclusive-catalog-4806` describe in tests/unit/api/models-catalog-combos.test.ts
+ * and must stay green alongside.
  */
 
 import test from "node:test";

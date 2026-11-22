@@ -2049,11 +2049,6 @@
       "count": 2
     }
   },
-  "tests/unit/9034-alias-backed-prefix-id-repro.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 2
-    }
-  },
   "tests/unit/9560-turbopack-nft-lazy-module-fs.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
@@ -2133,11 +2128,6 @@
   "tests/unit/anthropic-compat-validation-v1-messages.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
-    }
-  },
-  "tests/unit/antigravity-429-quota-cooldown.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 2
     }
   },
   "tests/unit/antigravity-discovery-bootstrap.test.ts": {
@@ -2374,7 +2364,7 @@
       "count": 2
     }
   },
-  "tests/unit/cc-compatible-provider.test.ts": {
+  "tests/unit/chatcore/cc-compatible-provider.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 37
     }
@@ -2404,15 +2394,12 @@
       "count": 15
     }
   },
-  "tests/unit/chat-route-edge-cases.test.ts": {
+  "tests/unit/chatcore/chat-route-pipeline.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 7
     }
   },
-  "tests/unit/chat-safetynet-reqid-6097.test.ts": {
+  "tests/unit/chatcore/chat-handler-routing-and-policy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
@@ -2430,7 +2417,17 @@
       "count": 1
     }
   },
-  "tests/unit/chatcore-translation-paths.test.ts": {
+  "tests/unit/chatcore/codex-openai.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "tests/unit/chatcore/providers.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "tests/unit/chatcore/translation-paths.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 30
     }
@@ -2805,11 +2802,6 @@
       "count": 2
     }
   },
-  "tests/unit/cloudflare-models-uuid-4259.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    }
-  },
   "tests/unit/cloudflaredTunnel-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
@@ -2833,11 +2825,6 @@
       "count": 1
     }
   },
-  "tests/unit/codex-stream-false.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    }
-  },
   "tests/unit/combo-auto-promote.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
@@ -2851,11 +2838,6 @@
   "tests/unit/combo-context-length.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
-    }
-  },
-  "tests/unit/combo-context-overflow-compression-probe.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
     }
   },
   "tests/unit/combo-context-relay.test.ts": {
@@ -3486,9 +3468,9 @@
       "count": 19
     }
   },
-  "tests/unit/glm-provider-model-import-route.test.ts": {
+  "tests/unit/api/provider-models-vendor-discovery.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 3
+      "count": 6
     },
     "@typescript-eslint/no-unused-vars": {
       "count": 2
@@ -3974,14 +3956,6 @@
     }
   },
   "tests/unit/provider-proxy-lazy.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/unit/provider-request-failure-pipeline.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 6
-    },
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }

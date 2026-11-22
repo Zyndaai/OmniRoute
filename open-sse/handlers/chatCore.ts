@@ -337,7 +337,7 @@ type VideoBridgeLogParam = { observed: boolean; redaction: VideoBridgeLogRedacti
  * @param {string} options.connectionId - Connection ID for settings lookup
  */
 // extractSystemRoleMessages extracted to chatCore/claudeSystemRole.ts (#3501); re-exported above so
-// existing importers (e.g. tests/unit/system-role-extraction.test.ts) keep resolving it from here.
+// existing importers (e.g. tests/unit/chatcore/claude-passthrough.test.ts) keep resolving it from here.
 export async function handleChatCore(args: Parameters<typeof handleChatCoreInner>[0]) {
   // one implicit resilience store per attempt (combo legs each run
   // handleChatCore, so each leg gets its own isolated store).

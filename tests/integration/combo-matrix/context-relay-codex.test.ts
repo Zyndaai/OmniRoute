@@ -28,7 +28,7 @@
 // Seams used:
 //   - registerCodexConnection / unregisterCodexConnection (codexQuotaFetcher.ts)
 //   - clearSessions (sessionManager.ts) — cleanup between tests
-//   - buildCodexResponsesSse helper (mirrors codex-stream-false.test.ts)
+//   - buildCodexResponsesSse helper (mirrors codex-stream-false in unit/chatcore/codex-openai)
 //   - Custom fetch mock distinguishes quota URL / summary dispatch / main dispatch
 
 import test from "node:test";
@@ -85,7 +85,7 @@ const CODEX_SUMMARY_JSON = JSON.stringify({
   activeEntities: ["combo.ts", "codexQuotaFetcher.ts", "contextHandoff.ts"],
 });
 
-// ── SSE builder (mirrors codex-stream-false.test.ts) ─────────────────────────
+// ── SSE builder (mirrors codex-stream-false in unit/chatcore/codex-openai.test.ts) ──
 
 function buildCodexResponsesSse(text = "codex assistant reply") {
   return new Response(

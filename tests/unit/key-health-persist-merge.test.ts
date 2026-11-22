@@ -3,8 +3,9 @@
  *
  * `creds.providerSpecificData` is the per-request copy taken when the connection was selected.
  * Writing it back whole replaced whatever another writer stored in the meantime (here: the Codex
- * Spark cooldown persisted by the 429 rotation, which `chatcore-codex-account-pool.test.ts` saw
- * vanish intermittently) and stored request-local keys on the shared row.
+ * Spark cooldown persisted by the 429 rotation, which the `chatcore-codex-account-pool` describe in
+ * `tests/unit/chatcore/codex-openai.test.ts` saw vanish intermittently) and stored request-local
+ * keys on the shared row.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -20,7 +20,8 @@
  * `applyErrorState` and `resetAccountState` are synchronous and fire the DB write
  * without awaiting it, so these tests poll until the write lands.
  *
- * These tests mirror the harness from `antigravity-429-quota-cooldown.test.ts`
+ * These tests mirror the harness from the `antigravity-429-quota-cooldown` describe in
+ * `tests/unit/chatcore/providers.test.ts`
  * so they share the same DATA_DIR sandbox. Each test file gets its own Postgres
  * database from tests/_setup/isolatePostgres.ts.
  */

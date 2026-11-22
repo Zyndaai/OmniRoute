@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 // Isolated unit coverage for the capacity-limit merge policy, independent of
 // the /api/providers/[id]/models route. See
 // src/app/api/providers/[id]/models/discovery/codex.ts::mergeCapacityLimitConservatively
-// and the guard test in tests/unit/provider-models-route-codex.test.ts (#7012).
+// and the guard test in tests/unit/api/provider-models-route-codex-and-guards.test.ts, describe "provider-models-route-codex" (#7012).
 const codexDiscovery = await import(
   "../../src/app/api/providers/[id]/models/discovery/codex.ts"
 );

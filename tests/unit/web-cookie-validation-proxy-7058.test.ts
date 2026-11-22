@@ -7,7 +7,8 @@
 // safeOutboundFetch to use the pre-patch native fetch and skip proxy-context/
 // env-var resolution entirely. That bypass was introduced in #3226 as a narrow,
 // documented exception for a single NVIDIA NIM workaround
-// (see tests/unit/proxy-bypass-scope-guard-3226.test.ts) but validateWebCookieProvider
+// (see the "proxy-bypass-scope-guard-3226" describe in
+// tests/unit/chatcore/accounts-resilience.test.ts) but validateWebCookieProvider
 // adopted it as its default transport from inception (#4023), silently extending the
 // bypass to every web-cookie provider with a registry entry (zai-web among them).
 //

@@ -11,7 +11,8 @@ const BASE_URL = "http://localhost:20128";
 // catalog reads answer 401 there while they answer 200 on a bare dev box.
 // These are SHAPE contracts, so authenticate them with the deployment env key
 // (`isConfiguredEnvApiKey` → `validateApiKey` returns true) and let
-// tests/unit/v1-models-auth-leak-9320.test.ts own the auth-gate contract.
+// the `v1-models-auth-leak-9320` describe in tests/unit/api/models-catalog-access.test.ts own
+// the auth-gate contract.
 const TEST_API_KEY = "sk-v1-contracts-behavior-test-key";
 const previousEnvApiKey = process.env.OMNIROUTE_API_KEY;
 process.env.OMNIROUTE_API_KEY = TEST_API_KEY;

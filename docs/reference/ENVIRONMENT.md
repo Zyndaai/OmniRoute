@@ -441,7 +441,8 @@ The switch does not control wreq TLS fingerprinting or provider-specific transpo
 > `src/lib/providers/validation.ts::directHttpsRequest()` intentionally bypasses the
 > proxy patch for that one validation call using `safeOutboundFetch({ bypassProxyPatch: true })`.
 > This is a documented, scoped exception — it does **not** affect chat/usage egress.
-> The bypass is scope-pinned by `tests/unit/proxy-bypass-scope-guard-3226.test.ts`.
+> The bypass is scope-pinned by `tests/unit/chatcore/accounts-resilience.test.ts`
+> (describe `proxy-bypass-scope-guard-3226`).
 
 ---
 

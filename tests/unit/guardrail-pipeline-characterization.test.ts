@@ -1,7 +1,8 @@
 // Characterization tests — guardrail PIPELINE behavior (plan item V3-1, before the v4 module
 // extraction). Companion of tests/unit/characterization-guardrails.test.ts (which pins the
-// barrel surface) and tests/unit/guardrail-pipeline-wiring-characterization.test.ts (which
-// pins the call-site wiring with static source assertions).
+// barrel surface) and the guardrail-pipeline-wiring-characterization describe in
+// tests/unit/chatcore/request-shaping.test.ts (which pins the call-site wiring with static
+// source assertions).
 //
 // Everything in this file is BEHAVIORAL — real functions called with real inputs:
 //   1. Disable channels — resolveDisabledGuardrails (src/lib/guardrails/registry.ts) and the

@@ -28,7 +28,7 @@ import {
 // INSIDE the mutex closure (atomic [network + persist]). The old src/sse-side
 // mutex Map was redundant and created the illusion of two locks when there was
 // actually only one. Removing it eliminates the dual-Map confusion. See
-// docs/architecture/SSE_BOUNDARY.md and tests/unit/token-refresh-race-comprehensive.test.ts.
+// docs/architecture/SSE_BOUNDARY.md and tests/unit/chatcore/accounts-resilience.test.ts.
 
 export const TOKEN_EXPIRY_BUFFER_MS = BUFFER_MS;
 

@@ -213,7 +213,8 @@ test("a PerDay violation locks only the model, not the whole Gemini connection",
 
 test("the streaming leg carries the PerDay signal into its classification message", async () => {
   // The streaming leg cannot be driven standalone in a unit test (see
-  // upstream-status-restatement.test.ts R10); assert the wiring at the parse site.
+  // upstream-status-restatement R10 in chatcore/accounts-resilience.test.ts); assert the
+  // wiring at the parse site.
   const { readFile } = await import("node:fs/promises");
   const src = await readFile(
     new URL("../../open-sse/handlers/chatCore/streamingResponse.ts", import.meta.url),

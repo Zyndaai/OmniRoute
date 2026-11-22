@@ -131,7 +131,7 @@ describe("DashScope OpenAI-compat cache_control preservation (#2069)", () => {
     assert.equal(providerHonorsOpenAIFormatCacheControl("xiaomi-mimo"), true);
     // openai / codex / azure are caching providers via AUTOMATIC prefix caching
     // (#3955) — they do NOT take explicit cache_control in the request and must
-    // NOT receive passthrough (regression guard for chatcore-translation-paths).
+    // NOT receive passthrough (regression guard for chatcore/translation-paths).
     assert.equal(providerHonorsOpenAIFormatCacheControl("openai"), false);
     assert.equal(providerHonorsOpenAIFormatCacheControl("codex"), false);
     assert.equal(providerHonorsOpenAIFormatCacheControl("azure"), false);
@@ -172,7 +172,7 @@ describe("DashScope OpenAI-compat cache_control preservation (#2069)", () => {
   });
 
   test("openai provider strips cache_control even with preserveCacheControl=true (implicit cache)", async () => {
-    // Mirrors tests/unit/chatcore-translation-paths.test.ts: a Claude Code request
+    // Mirrors tests/unit/chatcore/translation-paths.test.ts: a Claude Code request
     // routed to the `openai` provider must arrive WITHOUT cache_control even though
     // shouldPreserveCacheControl() returns true (openai ∈ CACHING_PROVIDERS).
     assert.equal(providerSupportsCaching("openai"), true);

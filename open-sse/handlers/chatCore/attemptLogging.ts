@@ -90,7 +90,7 @@ function mutableVideoLogMessage(
  * unrelated legitimate message. Scanning every part in the named container
  * for an exact text match finds the video part wherever it ended up and
  * never touches a part whose text differs — see
- * `tests/unit/video-bridge-log-redaction.test.ts`'s "Scenario A" test for the
+ * the "Scenario A" test (video-bridge-log-redaction, tests/unit/chatcore/providers.test.ts) for the
  * reproduction this fixes.
  *
  * #12430 item 4 (P2c): a message's `content` can also be a plain STRING that

@@ -12,7 +12,8 @@
  * guarded). It must skip the proactive refresh and defer to the reactive,
  * serialized 401 path. Non-rotating providers keep refreshing on demand.
  *
- * Mirrors the source-assertion style of token-refresh-race-comprehensive.test.ts.
+ * Mirrors the source-assertion style of the "token-refresh-race-comprehensive" describe in
+ * tests/unit/chatcore/accounts-resilience.test.ts.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

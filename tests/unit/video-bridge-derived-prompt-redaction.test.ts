@@ -26,7 +26,7 @@
 // (open-sse/handlers/chatCore/attemptLogging.ts) directly — it is a pure
 // function (no DB), so no persistAttemptLogs/DB harness is needed here; that
 // integration-level proof already lives in
-// tests/unit/video-bridge-log-redaction.test.ts.
+// the video-bridge-log-redaction describe in tests/unit/chatcore/providers.test.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

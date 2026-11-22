@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
  * into a translated one: `nativeCodexPassthrough` reads `false`, the request goes
  * through the Chat→Responses translation and then through the #2608 allowlist,
  * which drops client fields the native path is supposed to forward verbatim
- * (`metadata` was how this surfaced — `chatcore-translation-paths` caught it).
+ * (`metadata` was how this surfaced — `chatcore/translation-paths` caught it).
  *
  * The split below keeps the leak fix intact: `_omniroute*` (and anything routing
  * owns) still goes at the boundary; executor-owned markers survive to their

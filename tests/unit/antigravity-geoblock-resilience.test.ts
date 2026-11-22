@@ -125,7 +125,7 @@ test("isGeoBlockedError rejects lookalike errors", () => {
 // ── 3. classify429: RESOURCE_EXHAUSTED stays rate_limited ───────────────────
 
 test("classify429 keeps Google 'Resource has been exhausted (per minute)' as rate_limited", () => {
-  // Deliberate existing behavior (antigravity-429-quota-cooldown.test.ts): Google
+  // Deliberate existing behavior (antigravity-429-quota-cooldown in chatcore/providers): Google
   // uses RESOURCE_EXHAUSTED for per-minute rate limits too, and the
   // "(e.g. queries per minute limit was reached)" phrasing is the RPM case —
   // short cooldown + same-auth retry, NOT a daily quota wall.

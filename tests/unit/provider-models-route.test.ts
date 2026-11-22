@@ -158,7 +158,7 @@ test("provider models route rejects OpenAI-compatible providers without a base U
 });
 
 // #6939: model-list discovery must match the test-connection guard tier (local-first ON by
-// default allows LAN/loopback hosts) — see provider-models-route-lan-guard.test.ts for the
+// default allows LAN/loopback hosts) — see the "provider-models-route-lan-guard" describe in api/provider-models-route-codex-and-guards.test.ts for the
 // disabled-default (still-blocked) counterpart.
 test("provider models route allows private/LAN OpenAI-compatible base URLs under the local-first default (#6939)", async () => {
   delete process.env.OMNIROUTE_ALLOW_PRIVATE_PROVIDER_URLS;

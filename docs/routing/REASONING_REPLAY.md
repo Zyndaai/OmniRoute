@@ -175,7 +175,7 @@ Muse (`muse-code`) returns caller-bound opaque reasoning (`encrypted_content`). 
 - An empty upstream response (`upstream_empty_response` / `empty_response`, nothing emitted to the caller) is retried at most twice on the same owner, after 0.5 s then 1.5 s (`MUSE_EMPTY_RESPONSE_RETRY_DELAYS_MS`). If all attempts are empty, the original 502 is returned without cooldown or breaker marking, so a flaky reply never locks out the owner.
 - All `muse-code` requests bypass semantic-cache reads and writes, including streaming writes, so cached opaque output cannot acquire a different session owner.
 
-Regression guards: `tests/unit/muse-session-ownership.test.ts`, `tests/unit/muse-session-ownership-retention.test.ts`, `tests/unit/muse-empty-response-retry.test.ts`, and `tests/unit/chatcore-semantic-cache.test.ts`.
+Regression guards: `tests/unit/chatcore/providers.test.ts` (the `muse-session-ownership` describe), `tests/unit/muse-session-ownership-retention.test.ts`, `tests/unit/chatcore/chat-handler-empty-turn-retry.test.ts` (the `muse-empty-response-retry` describe), and `tests/unit/chatcore-semantic-cache.test.ts`.
 
 ## See Also
 
