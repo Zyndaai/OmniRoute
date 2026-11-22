@@ -21,6 +21,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
+import { exitWithParent } from "../build/runtime-env.mjs";
 import { createOmnirouteWsBridge } from "./v1-ws-bridge.mjs";
 import { createResponsesWsProxy } from "./responses-ws-proxy.mjs";
 import { ensurePeerStampToken, stampPeerIp } from "./peer-stamp.mjs";
@@ -416,6 +417,9 @@ async function main() {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   // #8045: Windows maps console-window close to SIGHUP.
   process.on("SIGHUP", () => void shutdown("SIGHUP"));
+  // Started by run-standalone.mjs (Docker CMD, PM2): if the launcher is killed outright, shut
+  // down with it instead of holding the port as an unmanaged orphan.
+  exitWithParent(() => void shutdown("parent-exit"));
 
   const loaded = await loadServerModule(mode, server);
   viteDevServer = loaded.viteDevServer;

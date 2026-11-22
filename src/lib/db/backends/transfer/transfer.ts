@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import pg from "pg";
 
@@ -25,7 +26,10 @@ import { decrypt, isEncryptionEnabled, looksEncrypted } from "@/lib/db/encryptio
 import { opaqueTokenFingerprint } from "@omniroute/open-sse/utils/opaqueTokenFingerprint.ts";
 
 import { createPostgresBackend } from "../postgres/postgresBackend";
-import { runPostgresMigrations } from "../postgres/migrationRunner";
+import {
+  getBundledPostgresMigrationHead,
+  runPostgresMigrations,
+} from "../postgres/migrationRunner";
 import { loadTargetCatalog, type TargetCatalog, type TargetTable } from "./catalog";
 import { convertValue, isProblem, type Problem, type TargetColumn } from "./convert";
 import { dispatchKeyValue, type KeyValueRow } from "./keyValue";
@@ -101,6 +105,19 @@ type Cell = unknown | typeof DEFAULT;
 type TargetRow = Map<string, Cell>;
 
 class TransferAbort extends Error {}
+
+/**
+ * The PostgreSQL migrations, by this module's own location: `../postgres/migrations` both in a
+ * checkout (`.../transfer/transfer.ts`) and in the image (`/app/src/lib/db/backends/transfer/cli.js`).
+ * The migration runner's own search walks up from its module and takes the first `migrations`
+ * folder it meets; from the transfer folder that is the SQLite `src/lib/db/migrations`, whose
+ * 3-digit files it ignores, so it applied nothing (found by the server rehearsal).
+ */
+export function transferMigrationsDir(): string {
+  const configured = process.env.OMNIROUTE_PG_MIGRATIONS_DIR?.trim();
+  if (configured) return path.resolve(configured);
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../postgres/migrations");
+}
 
 /** Skip reasons that are part of the mapping, not a sign of unexpected data. */
 const EXPECTED_SKIPS = new Set(["older pin of the same (combo, session)"]);
@@ -357,10 +374,19 @@ export async function runTransfer(options: TransferOptions): Promise<TransferRec
   }
 
   const pool = new pg.Pool({ connectionString: options.targetUrl, max: 2 });
+  const migrationsDir = transferMigrationsDir();
+  if (getBundledPostgresMigrationHead(migrationsDir) === null) {
+    await pool.end();
+    throw new TransferAbort(`No PostgreSQL migrations found in ${migrationsDir}`);
+  }
   const migrated = await runPostgresMigrations(createPostgresBackend(pool), {
+    dir: migrationsDir,
     logger: { info: (line: string) => log(line) },
   });
   await pool.end();
+  if (migrated.applied.length === 0) {
+    throw new TransferAbort(`The migrations in ${migrationsDir} applied nothing to the target`);
+  }
   log(`[transfer] target migrated: ${migrated.applied.join(", ")}`);
 
   // Read a private copy: a WAL-mode file (a backup-API snapshot keeps the flag) needs a -shm

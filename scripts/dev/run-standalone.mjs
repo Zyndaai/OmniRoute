@@ -42,6 +42,8 @@ childEnv.OMNIROUTE_LAUNCHER_ENV_READY = "1";
 const launcher = fileURLToPath(new URL("./run-server.mjs", import.meta.url));
 
 spawnWithForwardedSignals(process.execPath, [launcher, "start"], {
-  stdio: "inherit",
+  // The IPC channel closes when this process dies for any reason; the server exits with it
+  // (exitWithParent in run-server.mjs), so a killed launcher never leaves an orphan on the port.
+  stdio: ["inherit", "inherit", "inherit", "ipc"],
   env: childEnv,
 });

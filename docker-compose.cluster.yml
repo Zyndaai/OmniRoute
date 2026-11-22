@@ -98,6 +98,9 @@ services:
     container_name: omniroute
     # Leader + workers under PM2 instead of the image's single-process default command.
     command: ["pm2-runtime", "ecosystem.config.cjs"]
+    # A real init as PID 1 reaps exited grandchildren (a server whose launcher was killed exits
+    # with it, see scripts/build/runtime-env.mjs exitWithParent, and is re-parented to PID 1).
+    init: true
     environment:
       <<: *omniroute-env
       # Roles, instance ids and ports are assigned per process by ecosystem.config.cjs.

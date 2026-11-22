@@ -190,6 +190,19 @@ export function sanitizeColorEnv(env = {}) {
   return sanitized;
 }
 
+/**
+ * For a process started with an IPC channel (run-standalone.mjs spawns the server that way):
+ * calls `onParentExit` once the channel closes, i.e. when the parent died without forwarding a
+ * signal (kill -9, an out-of-memory kill). Without it the server outlives its launcher as an
+ * orphan that still holds its port while PM2 starts a replacement that cannot bind. Returns false
+ * (and does nothing) for a process started without IPC.
+ */
+export function exitWithParent(onParentExit, proc = process) {
+  if (typeof proc.send !== "function") return false;
+  proc.once("disconnect", onParentExit);
+  return true;
+}
+
 export function spawnWithForwardedSignals(command, args, options = {}) {
   const child = spawn(command, args, options);
 

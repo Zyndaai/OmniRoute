@@ -18,7 +18,8 @@ import pg from "pg";
 const adminUrl = process.env.OMNIROUTE_TEST_POSTGRES_URL?.trim();
 const skip = adminUrl ? false : "OMNIROUTE_TEST_POSTGRES_URL is not set";
 
-const { runTransfer } = await import("../../../src/lib/db/backends/transfer/transfer.ts");
+const { runTransfer, transferMigrationsDir } =
+  await import("../../../src/lib/db/backends/transfer/transfer.ts");
 const { parseEnumCheck } = await import("../../../src/lib/db/backends/transfer/catalog.ts");
 const { parseInstant } = await import("../../../src/lib/db/backends/transfer/convert.ts");
 
@@ -451,4 +452,35 @@ test("refuses a live source (non-empty WAL)", async () => {
     /looks live/
   );
   db.close();
+});
+
+test("finds the PostgreSQL migrations by its own location, never the SQLite ones", () => {
+  const saved = process.env.OMNIROUTE_PG_MIGRATIONS_DIR;
+  delete process.env.OMNIROUTE_PG_MIGRATIONS_DIR;
+  try {
+    const dir = transferMigrationsDir();
+    assert.equal(path.basename(path.dirname(dir)), "postgres");
+    assert.ok(fs.existsSync(path.join(dir, "0001_init.sql")), `${dir} holds 0001_init.sql`);
+  } finally {
+    if (saved !== undefined) process.env.OMNIROUTE_PG_MIGRATIONS_DIR = saved;
+  }
+});
+
+test("stops when the migrations folder holds no PostgreSQL migrations", { skip }, async () => {
+  const { file, db } = newSourceDb();
+  db.close();
+  const empty = fs.mkdtempSync(path.join(workDir, "no-migrations-"));
+  // The SQLite migrations' 3-digit names, which the PostgreSQL runner ignores.
+  fs.writeFileSync(path.join(empty, "001_initial_schema.sql"), "SELECT 1;");
+  const saved = process.env.OMNIROUTE_PG_MIGRATIONS_DIR;
+  process.env.OMNIROUTE_PG_MIGRATIONS_DIR = empty;
+  try {
+    await assert.rejects(
+      runTransfer({ sqlitePath: file, targetUrl: await newTargetDb() }),
+      /No PostgreSQL migrations found/
+    );
+  } finally {
+    if (saved === undefined) delete process.env.OMNIROUTE_PG_MIGRATIONS_DIR;
+    else process.env.OMNIROUTE_PG_MIGRATIONS_DIR = saved;
+  }
 });

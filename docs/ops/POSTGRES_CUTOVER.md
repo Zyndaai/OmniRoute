@@ -38,6 +38,8 @@ R="docker compose -p omniroute-rehearsal -f docker-compose.cluster.yml -f docker
 
 $R pull omniroute
 $R up -d postgres redis                           # creates the rehearsal network and volumes
+$R create omniroute                               # creates rehearsal-data (owned by compose,
+                                                  # so `down -v` removes it); does not start it
 
 # 1. A copy of the live database (SQLite backup API: safe while the app runs).
 docker exec -w /app omniroute node -e '
@@ -50,7 +52,8 @@ docker run --rm -v omniroute-rehearsal_rehearsal-data:/data -v /root/rehearsal.s
 rm -f /root/rehearsal.sqlite
 
 # 2. The transfer, with the image's own tool (this is the cut-over baseline).
-$R run --rm --no-deps --entrypoint sh omniroute -c \
+# -T: no TTY and no stdin, or `run` reads the rest of a script fed through `bash -s`.
+$R run -T --rm --no-deps --entrypoint sh omniroute -c \
   'OMNIROUTE_TRANSFER_TARGET_URL="$OMNIROUTE_POSTGRES_URL" exec node src/lib/db/backends/transfer/cli.js --source /app/data/storage.sqlite --receipt /app/data/transfer-receipt.json'
 echo "exit $?"     # 0 = verified; 3 = verified with review items (keep them for B6); 1 = stop
 docker run --rm -v omniroute-rehearsal_rehearsal-data:/data alpine cat /data/transfer-receipt.json \
@@ -80,6 +83,7 @@ Then remove everything the rehearsal made, keep only the baseline receipt:
 
 ```bash
 $R down -v
+docker volume ls -q | grep '^omniroute-rehearsal_' | xargs -r docker volume rm   # leftovers, if any
 ```
 
 Send the main OmniRoute session the transfer summary (exit code, the `review` list) and the
@@ -113,7 +117,7 @@ docker tag "$OLD_IMAGE" omniroute-rollback:sqlite
 5. **Database up:** `docker compose up -d postgres redis` (waits for both health checks).
 6. **Transfer:**
    ```bash
-   docker compose run --rm --no-deps --entrypoint sh omniroute -c \
+   docker compose run -T --rm --no-deps --entrypoint sh omniroute -c \
      'OMNIROUTE_TRANSFER_TARGET_URL="$OMNIROUTE_POSTGRES_URL" exec node src/lib/db/backends/transfer/cli.js --source /app/data/storage.sqlite --receipt /app/data/transfer-receipt.json'
    ```
    Go on only with exit 0, or exit 3 whose `review` list holds nothing that the baseline
@@ -139,8 +143,16 @@ docker tag "$OLD_IMAGE" omniroute-rollback:sqlite
    `scripts/docker/rehearsal/Caddyfile`.
 10. **First PostgreSQL backup:** `docker compose exec -T postgres pg_dump -U omniroute -Fc
     omniroute > /root/omniroute-migration/post-cutover.dump`
-11. Autodeploy stays paused until its script is rewritten for PostgreSQL (`pg_dump` /
-    `pg_restore`, leader first).
+11. **Autodeploy for the cluster.** Install the rewritten script (it backs up with `pg_dump`,
+    restarts only the app container, waits for every PM2 process, and restores the dump on a
+    failed deploy):
+    ```bash
+    install -m 750 <repo>/scripts/docker/autodeploy/omniroute-autodeploy /usr/local/sbin/
+    /usr/local/sbin/omniroute-autodeploy --dry-run    # must say up-to-date (running = :latest)
+    rm /opt/omniroute/AUTODEPLOY_PAUSED
+    ```
+    Watch the first real deploy (`journalctl -u omniroute-autodeploy -f`): its rollback path has
+    not run on the server yet.
 
 ### Rollback
 

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# omniroute-autodeploy — deploy a new ghcr.io/zyndaai/omniroute:latest on a single-VPS host
-# (docker-compose.vps.yml in /opt/omniroute). Run by omniroute-autodeploy.timer every 5 minutes,
-# as root. The image is only rebuilt when a maintainer starts the build workflow by hand.
+# omniroute-autodeploy — deploy a new ghcr.io/zyndaai/omniroute:latest on the omniport.ink host,
+# running the cluster stack (docker-compose.cluster.yml copied to /opt/omniroute/docker-compose.yml:
+# PostgreSQL, Redis and one OmniRoute container with a leader and workers under PM2). Run by
+# omniroute-autodeploy.timer every 5 minutes, as root. The image is only rebuilt when a maintainer
+# starts the build workflow by hand.
 #
-# Each new image may run one-way DB migrations, so a deploy is:
-#   pull new image -> stop -> tar the data volume -> start new image -> wait for healthy
-#   -> on failure: restore the volume tarball + previous tag, start the old image again,
-#      and remember the bad digest so it is not retried every 5 minutes.
+# A new image may run one-way migrations, so a deploy is:
+#   pull -> stop the app container -> pg_dump the database -> start the new image (the leader
+#   migrates, workers wait for it) -> wait until healthy and every PM2 process is online
+#   -> on failure: restore the dump into a recreated database, start the previous image again, and
+#      remember the bad digest so it is not retried every 5 minutes.
+# PostgreSQL and Redis keep running throughout; only the app container restarts.
 #
 # Usage:  omniroute-autodeploy            check and deploy if :latest changed
 #         omniroute-autodeploy --dry-run  only report running vs remote digest
@@ -18,12 +22,13 @@ set -euo pipefail
 REPO=ghcr.io/zyndaai/omniroute
 APP_DIR=/opt/omniroute
 CONTAINER=omniroute
-VOLUME_DIR=/var/lib/docker/volumes/omniroute-data/_data
+DB=omniroute
+DB_USER=omniroute
 BACKUP_DIR=/root/omniroute-migration/auto
 STATE_DIR=/var/lib/omniroute-autodeploy
 PAUSE_FILE=$APP_DIR/AUTODEPLOY_PAUSED
 KEEP_BACKUPS=5
-HEALTH_TIMEOUT=240
+HEALTH_TIMEOUT=300
 
 MODE=${1:-}
 log() { echo "$(date -u +%H:%M:%S) $*"; }
@@ -36,6 +41,13 @@ flock -n 9 || { log "another deploy is running, skipping"; exit 0; }
 if [[ -e $PAUSE_FILE && $MODE != --dry-run ]]; then
   log "paused ($PAUSE_FILE exists), skipping"
   exit 0
+fi
+
+cd "$APP_DIR"
+# Never deploy a PostgreSQL build onto the single-container SQLite stack.
+if ! docker compose config --services 2>/dev/null | grep -qx postgres; then
+  log "$APP_DIR/docker-compose.yml has no postgres service (not the cluster stack); refusing to deploy"
+  exit 1
 fi
 
 remote=$(docker buildx imagetools inspect "$REPO:latest" --format '{{json .Manifest.Digest}}' | tr -d '"')
@@ -54,17 +66,26 @@ if [[ $MODE != --force ]] && grep -qx "$remote" "$STATE_DIR/bad-digests" 2>/dev/
   exit 0
 fi
 
-cd "$APP_DIR"
 prev_tag=$(grep -E '^OMNIROUTE_TAG=' .env | cut -d= -f2-)
 new_tag="latest@$remote"
 log "deploying $remote (running: $running, tag: $prev_tag)"
 
 set_tag() { sed -i "s|^OMNIROUTE_TAG=.*|OMNIROUTE_TAG=$1|" .env; }
+psql_admin() { docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d postgres -qc "$1"; }
 wait_healthy() {
   local s=""
   for _ in $(seq 1 $((HEALTH_TIMEOUT / 3))); do
     s=$(docker inspect "$CONTAINER" --format '{{.State.Health.Status}}' 2>/dev/null || echo missing)
-    [[ $s == healthy ]] && return 0
+    if [[ $s == healthy ]]; then
+      # The container's health check probes the leader; every worker must be up too.
+      # Counted inside the container (node and pm2 are there; the host may have neither).
+      local down
+      down=$(docker exec "$CONTAINER" node -e '
+        const list = JSON.parse(require("node:child_process").execSync("pm2 jlist").toString());
+        console.log(list.length ? list.filter((p) => p.pm2_env.status !== "online").length : 1);
+      ' 2>/dev/null || echo 1)
+      [[ $down == 0 ]] && return 0
+    fi
     [[ $s == unhealthy ]] && break
     sleep 3
   done
@@ -75,18 +96,18 @@ wait_healthy() {
 docker pull -q "$REPO@$remote" >/dev/null
 log "pulled"
 
-backup="$BACKUP_DIR/omniroute-data.$(date -u +%Y%m%dT%H%M%SZ).tgz"
-docker stop -t 30 "$CONTAINER" >/dev/null
-tar -C "$VOLUME_DIR" -czf "$backup" .
+docker compose stop -t 30 "$CONTAINER" >/dev/null
+backup="$BACKUP_DIR/omniroute-pg.$(date -u +%Y%m%dT%H%M%SZ).dump"
+docker compose exec -T postgres pg_dump -U "$DB_USER" -Fc "$DB" > "$backup"
 chmod 600 "$backup"
-log "stopped, volume backup $(du -h "$backup" | cut -f1) -> $backup"
+log "stopped, database dump $(du -h "$backup" | cut -f1) -> $backup"
 
 set_tag "$new_tag"
-docker compose up -d --quiet-pull >/dev/null 2>&1
+docker compose up -d --quiet-pull "$CONTAINER" >/dev/null 2>&1
 if wait_healthy; then
   log "healthy on $remote, deploy done"
-  # Keep the newest backups and the previous image (for a manual rollback); drop older ones.
-  ls -1t "$BACKUP_DIR"/omniroute-data.*.tgz | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+  # Keep the newest dumps and the previous image (for a manual rollback); drop older ones.
+  ls -1t "$BACKUP_DIR"/omniroute-pg.*.dump | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
   prev_image=$running
   docker image ls --no-trunc --format '{{.ID}}' "$REPO" | sort -u | while read -r id; do
     [[ $id == "$remote" || $id == "$prev_image" ]] || docker rmi -f "$id" >/dev/null 2>&1 || true
@@ -97,13 +118,16 @@ fi
 log "NEW IMAGE FAILED its health check, rolling back to $prev_tag"
 docker compose logs --no-color --tail 40 "$CONTAINER" 2>&1 | sed 's/^/  | /' || true
 echo "$remote" >> "$STATE_DIR/bad-digests"
-docker stop -t 30 "$CONTAINER" >/dev/null 2>&1 || true
-find "$VOLUME_DIR" -mindepth 1 -delete
-tar -C "$VOLUME_DIR" -xzpf "$backup"
+docker compose stop -t 30 "$CONTAINER" >/dev/null 2>&1 || true
+# The new image may have migrated: put the pre-deploy database back (the schema needs C collation).
+psql_admin "DROP DATABASE IF EXISTS $DB WITH (FORCE)"
+psql_admin "CREATE DATABASE $DB OWNER $DB_USER TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C' ENCODING 'UTF8'"
+docker compose exec -T postgres pg_restore -U "$DB_USER" -d "$DB" --no-owner < "$backup"
+log "database restored from $backup"
 set_tag "$prev_tag"
-docker compose up -d >/dev/null 2>&1
+docker compose up -d "$CONTAINER" >/dev/null 2>&1
 if wait_healthy; then
-  log "rolled back: running $prev_tag again with the pre-deploy data"
+  log "rolled back: running $prev_tag again with the pre-deploy database"
 else
   log "ROLLBACK ALSO UNHEALTHY: check 'docker compose -f $APP_DIR/docker-compose.yml logs'"
 fi

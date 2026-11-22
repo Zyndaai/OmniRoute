@@ -291,14 +291,18 @@ releases as updates and never shows upstream's news feed. Updating the hosted in
 1. Push to `main`, then start "Build and Push Docker Image" from the Actions tab. It builds and
    pushes `ghcr.io/zyndaai/omniroute:<sha>` and `:latest`.
 2. The VPS deploys the new `:latest` by itself within about 5 minutes:
-   `scripts/docker/autodeploy/omniroute-autodeploy` runs from a systemd timer, and when the
-   `:latest` digest changes it pulls the image, stops the container, archives the data volume,
-   starts the new image and waits for it to report healthy. If it does not, the script restores
-   the archive and the previous `OMNIROUTE_TAG`, starts the old image again and skips that
-   digest from then on. It logs to `journalctl -u omniroute-autodeploy`.
+   `scripts/docker/autodeploy/omniroute-autodeploy` runs from a systemd timer on the cluster stack
+   (`docker-compose.cluster.yml` as `/opt/omniroute/docker-compose.yml`; it refuses a compose
+   file without a `postgres` service). When the `:latest` digest changes it pulls the image,
+   stops the app container, takes a `pg_dump` of the database, starts the new image (the leader
+   migrates, the workers wait for it) and waits until the container is healthy and every PM2
+   process is online. If not, it recreates the database from the dump, restores the previous
+   `OMNIROUTE_TAG`, starts the old image again and skips that digest from then on. PostgreSQL and
+   Redis keep running. It logs to `journalctl -u omniroute-autodeploy`.
 3. To hold deploys, `touch /opt/omniroute/AUTODEPLOY_PAUSED`; delete the file to resume. To deploy
    by hand instead, set `OMNIROUTE_TAG` in `/opt/omniroute/.env` and run
-   `docker compose pull && docker compose up -d` in `/opt/omniroute`, after backing up the volume.
+   `docker compose pull omniroute && docker compose up -d omniroute` in `/opt/omniroute`, after a
+   `pg_dump` (see `docs/ops/POSTGRES_CUTOVER.md`).
 4. The auto-deploy rewrites only `OMNIROUTE_TAG`, so any other setting in `/opt/omniroute/.env`
    survives deploys. The hosted instance sets `OMNIROUTE_DISABLE_CONVERSATION_TRACKING=1` there
    (since 2026-11-12): tracking fed only the dashboard's conversation view and cost ~5% of CPU
