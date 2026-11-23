@@ -154,8 +154,8 @@ import { isCodexDiscoveryModelExcluded } from "@/shared/services/codexDiscoveryP
 import { buildErrorBody } from "@omniroute/open-sse/utils/error";
 
 // Public API of this module is preserved after the catalog helper extraction:
-// `isVisionModelId` (vision-detection-consistency.test.ts) and
-// `getCustomVisionCapabilityFields` (llm-selector-custom-vision-models.test.ts)
+// `isVisionModelId` (vision-detection-consistency in tests/unit/api/models-catalog-capabilities.test.ts)
+// and `getCustomVisionCapabilityFields` (llm-selector-custom-vision-models, same file)
 // are still importable from here.
 export { isVisionModelId } from "@/shared/constants/visionModels";
 export { getCustomVisionCapabilityFields };
@@ -351,7 +351,7 @@ async function buildUnifiedModelsResponseCore(
     const hiddenModelRowsByModality = new Map(
       await Promise.all(
         // Fail closed: if the hidden-model flags cannot be read, the endpoint answers 500
-        // instead of listing models the operator hid (tests/unit/models-catalog-route.test.ts).
+        // instead of listing models the operator hid (tests/unit/db/models-catalog-route.test.ts).
         hiddenModalities.map(
           async (modality) => [modality, await getHiddenModelsByProvider(modality)] as const
         )

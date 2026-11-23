@@ -17,12 +17,18 @@
  * probes' time to first token vary for reasons that have nothing to do with load.
  * Pass '{}' for a probe model that rejects the field. Runbook: docs/ops/LOAD_TESTING.md.
  *
+ * Every request carries a fresh `x-session-affinity`, which Caddy hashes to pick a
+ * cluster process. Without it Caddy falls back to the client IP, so a run from one
+ * machine lands on one process and measures only that one. `--affinity none` sends
+ * no header, to measure a single process on purpose.
+ *
  * Stops the run, rather than going on, when a synthetic request is answered by
  * anything but the mock provider, a probe is answered by the mock, two probes in
  * a stage fail, or most synthetic requests in a stage fail. Every request is
  * written to raw/*.jsonl; summary.json and the printed table are per stage.
  */
 
+import { randomUUID } from "node:crypto";
 import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -41,6 +47,7 @@ const maxProbes = Number(args["max-probes"] || 160);
 const maxInflight = Number(args["max-inflight"] || 600);
 const timeoutMs = Number(args["timeout-ms"] || 60_000);
 const probeExtra = JSON.parse(args["probe-extra-json"] || '{"thinking":{"type":"disabled"}}');
+const spreadAcrossProcesses = (args.affinity || "per-request") !== "none";
 const stages = (args.stages || "0@60,5@60,0@60").split(",").map((spec, index, all) => {
   const [rps, seconds] = spec.split("@").map(Number);
   const name = rps > 0 ? `s${rps}` : index === 0 ? "baseline" : index === all.length - 1 ? "recovery" : `idle${index}`;
@@ -81,6 +88,7 @@ async function call({ key, model, maxTokens, prompt, extra = {} }) {
         authorization: `Bearer ${key}`,
         "content-type": "application/json",
         "x-omniroute-no-cache": "true",
+        ...(spreadAcrossProcesses ? { "x-session-affinity": randomUUID() } : {}),
       },
       body: JSON.stringify({
         ...extra,
@@ -103,8 +111,17 @@ async function call({ key, model, maxTokens, prompt, extra = {} }) {
       if (row.ttft === null && /"content":"[^"]/.test(text)) row.ttft = Math.round(performance.now() - started);
     }
     row.done = text.includes("[DONE]");
-    const usage = text.match(/"usage":(\{[^}]*\})/);
-    if (usage) row.usage = JSON.parse(usage[1]);
+    // Usage arrives in its own frame and can nest (prompt_tokens_details), so read it
+    // from the parsed frames rather than with a pattern.
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data: {")) continue;
+      try {
+        const usage = JSON.parse(line.slice(6)).usage;
+        if (usage) row.usage = usage;
+      } catch {
+        // a frame that is not JSON carries no usage
+      }
+    }
   } catch (error) {
     row.error = error?.name === "TimeoutError" ? "timeout" : String(error?.message ?? error).slice(0, 120);
   }
@@ -238,6 +255,10 @@ syntheticLog.end();
 probeLog.end();
 writeFileSync(
   path.join(outDir, "summary.json"),
-  JSON.stringify({ runId, base, mockModel, probeModel, startedAt: new Date(runStart).toISOString(), stopReason, stages: results }, null, 2)
+  JSON.stringify(
+    { runId, base, mockModel, probeModel, spreadAcrossProcesses, startedAt: new Date(runStart).toISOString(), stopReason, stages: results },
+    null,
+    2
+  )
 );
 console.log(`\n${runId}: ${stopReason ? `stopped (${stopReason})` : "completed"}; results in ${outDir}`);

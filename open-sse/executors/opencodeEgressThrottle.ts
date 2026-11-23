@@ -675,7 +675,7 @@ export function logRefusedOutcome(
   refusal: "geo-blocked" | "burst 429",
   egress = ""
 ): void {
-  // Egress label position is pinned by tests/unit/opencode-egress-label.test.ts:
+  // Egress label position is pinned by tests/unit/executors/opencode-egress-label.test.ts:
   // after the account for a burst 429, at the very end for a geo-block.
   const burst = refusal === "burst 429";
   log?.warn?.(

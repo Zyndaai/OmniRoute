@@ -133,7 +133,7 @@ one identity per account.
   import), else `HMAC(API_KEY_SECRET, "claude-device:<connectionId>")`. Without `API_KEY_SECRET`
   (standalone only) both fall back to per-process random values. `account_uuid` falls back to a
   value derived from the access token when none is persisted, so it changes when the token does.
-  Test: `tests/unit/cluster-claude-identity.test.ts`.
+  Test: `tests/unit/executors/cluster-claude-identity.test.ts`.
 - **Codex** installation, session and thread ids derive from a persisted seed
   (`open-sse/config/codexIdentity.ts`); the **Antigravity** session id is a hash of the account key
   (`open-sse/services/antigravityIdentity.ts`). Both are identical across processes.

@@ -20,9 +20,9 @@
  *
  * The behavioral path (allowedQuotas → scope → filterModelsToQuotaPools → models)
  * is covered by:
- *   - tests/unit/quota-catalog-filter.test.ts — filterModelsToQuotaPools unit tests
- *   - tests/unit/quota-key-resolve.test.ts   — resolveQuotaKeyScope unit tests
- *   - tests/unit/quota-group-scope.test.ts   — group-scoped pool resolution
+ *   - tests/unit/lib/quota-catalog-filter.test.ts — filterModelsToQuotaPools unit tests
+ *   - tests/unit/db/quota-key-resolve.test.ts   — resolveQuotaKeyScope unit tests
+ *   - tests/unit/db/quota-group-scope.test.ts   — group-scoped pool resolution
  * Re-testing the same logic inline here would duplicate DB-setup boilerplate
  * without additional signal. Source-scan matches the project's established
  * convention for route test files (quota-groups-route.test.ts, etc.).

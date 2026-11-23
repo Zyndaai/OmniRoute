@@ -2,7 +2,7 @@
 // Account, credential and failure-path resilience around handleChatCore: per-key 429
 // cooldown, refresh guards, provider-failure call logs, resource pressure, dedup/idempotency,
 // status restatement and the stream-readiness fallback. (The managed-lease inventory stays in
-// tests/unit/hard-session-lease-bypass-inventory.test.ts: another test reads it as evidence.)
+// tests/unit/api/hard-session-lease-bypass-inventory.test.ts: another test reads it as evidence.)
 // Merged from eleven files so the chatCore module graph loads once; each original file is
 // one `describe` below, named after the file it came from. Three of the sources carried
 // `// @ts-nocheck`, so the merged file does too.
@@ -1854,7 +1854,7 @@ describe("proxy-bypass-scope-guard-3226", () => {
    * This test asserts that the bypass is CONFINED to the validation path and has
    * NOT silently spread to the chat hot path (chatHelpers / chatCore).
    *
-   * See also: tests/unit/nvidia-validation-bypass-proxy-3226.test.ts (mechanism seam tests).
+   * See also: tests/unit/shared/nvidia-validation-bypass-proxy-3226.test.ts (mechanism seam tests).
    */
 
   test("bypassProxyPatch is present in the NVIDIA validation path (#3226 documented exception)", () => {

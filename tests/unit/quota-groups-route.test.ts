@@ -4,7 +4,7 @@
  * Task B7 — source-level assertions for the quota groups REST routes.
  *
  * Uses the same source-scan technique as:
- *   tests/unit/budget-route-auth.test.ts
+ *   tests/unit/api/budget-route-auth.test.ts
  *   tests/unit/quota-pool-log-route.test.ts
  *
  * This allows the test to run with the Node.js native test runner without

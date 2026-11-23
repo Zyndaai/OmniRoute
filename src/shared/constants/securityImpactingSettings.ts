@@ -18,7 +18,7 @@
  *   may log in. Changing them without re-auth would let a stolen session or management
  *   credential point dashboard login at an attacker-controlled IdP, allowlist the
  *   attacker's own subject, or send the code to another host. Every `oidc*` key of the
- *   settings schema belongs here (pinned by `tests/unit/oidc-settings-reauth.test.ts`).
+ *   settings schema belongs here (pinned by `tests/unit/shared/oidc-settings-reauth.test.ts`).
  * - `corsOrigins` / `bruteForceProtection`: which browser origins may call the management
  *   API with the operator's cookie, and whether repeated failed logins are throttled.
  *   Loosening either weakens the login defenses, so both need the same re-auth (the Security
@@ -27,11 +27,11 @@
  *   tokens are trusted (`entraAuthorityHost` / `entraTenantId` / `entraClientId` /
  *   `entraApiAudience`), which key-group policy SSO users land in (`entraGroupMappings` /
  *   `entraDefaultKeyGroupId`) and the Graph fallback and its secret. Every `entra*` key of
- *   the settings schema belongs here (pinned by `tests/unit/entra-sso-auth.test.ts`).
+ *   the settings schema belongs here (pinned by `tests/unit/authz/entra-sso-auth.test.ts`).
  *
  * Every key here is also OPERATOR-ONLY on `PATCH /api/settings`: a manage-scoped API key or an
  * `oma_` access token is refused with 403 even when it knows the password
- * (`tests/unit/security-settings-operator.test.ts`).
+ * (`tests/unit/lib/security-settings-operator.test.ts`).
  *
  * Note: `mcpEnabled` is NOT gated server-side — the dedicated MCP page
  * (/dashboard/mcp) toggles it via patchSetting() without a currentPassword
@@ -70,7 +70,7 @@ export const SECURITY_IMPACTING_SETTINGS_KEYS = [
  * change sets (`SESSIONS_VALID_AFTER_SETTING`) and the ids of signed-out sessions
  * (`REVOKED_SESSIONS_SETTING`), both in `src/shared/utils/dashboardSessionToken.ts`. Kept as
  * literals so this constants module does not pull in `jose`; the names are pinned to those
- * constants by `tests/unit/settings-import-json-session-state.test.ts`.
+ * constants by `tests/unit/shared/settings-import-json-session-state.test.ts`.
  */
 export const DASHBOARD_SESSION_STATE_SETTINGS_KEYS = [
   "sessionsValidAfter",

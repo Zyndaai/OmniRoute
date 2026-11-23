@@ -4,7 +4,7 @@
 // ../../src/... import would also resolve outside an image that ships the
 // launcher files in one folder (the #7065 class: ERR_MODULE_NOT_FOUND at boot).
 // Parity with src/shared/utils/runtimeTimeouts.ts#getMainServerTimeoutConfig
-// is enforced by tests/unit/main-server-timeouts-parity.test.ts.
+// is enforced by tests/unit/build/main-server-timeouts-parity.test.ts.
 
 export const DEFAULT_MAIN_SERVER_KEEPALIVE_TIMEOUT_MS = 65_000;
 export const DEFAULT_MAIN_SERVER_HEADERS_TIMEOUT_MS = 66_000;

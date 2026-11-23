@@ -15,7 +15,7 @@ import { createHash, createHmac } from "node:crypto";
  * `js/insufficient-password-hash` a single sink: the query reports once here, with the
  * rationale above, instead of once per call site. New call sites must use this helper,
  * never an inline `createHash("sha256").update(token)`;
- * `tests/unit/opaque-token-fingerprint.test.ts` guards the migrated files.
+ * `tests/unit/services/opaque-token-fingerprint.test.ts` guards the migrated files.
  *
  * Output: lowercase hex, 64 chars (or the first `length` chars). Plain mode is
  * byte-for-byte the historical `createHash("sha256").update(token).digest("hex")`, so

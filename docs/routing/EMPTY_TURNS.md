@@ -57,7 +57,7 @@ mechanism.
 
 ## Regression evidence
 
-[The HTTP regression suite](../../tests/unit/valid-empty-stop-dispatch-16072.test.ts)
+[The HTTP regression suite](../../tests/unit/api/valid-empty-stop-dispatch-16072.test.ts)
 uses the real API routes, stored synthetic connections, provider executors,
 translation, and combos. It intercepts outbound transport and counts generation
 requests. It covers official endpoint shapes, native JSON and SSE, unknown origins,
@@ -65,7 +65,7 @@ errors, deduplication, and the optional empty-turn retry. These tests do not con
 real provider accounts or reproduce the reporter's deployment or token totals.
 
 ```sh
-node --import tsx/esm --import ./open-sse/utils/setupPolyfill.ts --test --test-force-exit tests/unit/valid-empty-stop-dispatch-16072.test.ts
+node --import tsx/esm --import ./open-sse/utils/setupPolyfill.ts --test --test-force-exit tests/unit/api/valid-empty-stop-dispatch-16072.test.ts
 ```
 
 The policy implementation is in

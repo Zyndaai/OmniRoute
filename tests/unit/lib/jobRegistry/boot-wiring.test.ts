@@ -9,7 +9,7 @@
  *
  * Neither entry point can be driven from a unit test - both are process-boot
  * functions that reach the real cloud sync - so these read the wiring, the same
- * way tests/unit/model-sync-scheduler.test.ts already asserts on this file.
+ * way tests/unit/shared/model-sync-scheduler.test.ts already asserts on this file.
  */
 
 import test from "node:test";

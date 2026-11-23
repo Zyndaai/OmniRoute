@@ -44,8 +44,13 @@ if [[ -e $PAUSE_FILE && $MODE != --dry-run ]]; then
 fi
 
 cd "$APP_DIR"
-# Never deploy a PostgreSQL build onto the single-container SQLite stack.
-if ! docker compose config --services 2>/dev/null | grep -qx postgres; then
+# Never deploy a PostgreSQL build onto the single-container SQLite stack. A compose error is
+# reported as itself, not mistaken for a missing postgres service.
+if ! services=$(docker compose config --services 2>&1); then
+  log "docker compose config failed in $APP_DIR: $services"
+  exit 1
+fi
+if ! grep -qx postgres <<<"$services"; then
   log "$APP_DIR/docker-compose.yml has no postgres service (not the cluster stack); refusing to deploy"
   exit 1
 fi
@@ -107,6 +112,7 @@ docker compose up -d --quiet-pull "$CONTAINER" >/dev/null 2>&1
 if wait_healthy; then
   log "healthy on $remote, deploy done"
   # Keep the newest dumps and the previous image (for a manual rollback); drop older ones.
+  # Every other $REPO image goes, including ones pulled or tagged in advance.
   ls -1t "$BACKUP_DIR"/omniroute-pg.*.dump | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
   prev_image=$running
   docker image ls --no-trunc --format '{{.ID}}' "$REPO" | sort -u | while read -r id; do
@@ -116,8 +122,11 @@ if wait_healthy; then
 fi
 
 log "NEW IMAGE FAILED its health check, rolling back to $prev_tag"
-docker compose logs --no-color --tail 40 "$CONTAINER" 2>&1 | sed 's/^/  | /' || true
-echo "$remote" >> "$STATE_DIR/bad-digests"
+# The lines that explain a failure (errors, migrations, cluster roles), then the last few lines.
+docker compose logs --no-color --tail 2000 "$CONTAINER" 2>&1 \
+  | grep -iE 'error|fatal|fail|exception|migrat|\[DB\]|\[CLUSTER\]' | tail -n 40 | sed 's/^/  ! /' || true
+docker compose logs --no-color --tail 10 "$CONTAINER" 2>&1 | sed 's/^/  | /' || true
+grep -qx "$remote" "$STATE_DIR/bad-digests" 2>/dev/null || echo "$remote" >> "$STATE_DIR/bad-digests"
 docker compose stop -t 30 "$CONTAINER" >/dev/null 2>&1 || true
 # The new image may have migrated: put the pre-deploy database back (the schema needs C collation).
 psql_admin "DROP DATABASE IF EXISTS $DB WITH (FORCE)"

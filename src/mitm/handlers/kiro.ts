@@ -6,7 +6,7 @@
  * `/v1/chat/completions` — the router's translator will adapt the request
  * shape back to whatever upstream provider the mapped model points to.
  *
- * Non-regressive: see `tests/unit/mitm-handler-kiro.test.ts`.
+ * Non-regressive: see `tests/unit/mitm/mitm-handler-kiro.test.ts`.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentId } from "../types";

@@ -49,7 +49,7 @@ function listProjectFiles(relPath: string): string[] {
 //
 // src/server-init.ts was removed: it was never imported anywhere and duplicated
 // the wiring below, which is the boot path that actually runs (Next.js
-// instrumentation hook). See tests/unit/credential-health-boot-wiring.test.ts and
+// instrumentation hook). See tests/unit/server/credential-health-boot-wiring.test.ts and
 // tests/unit/thinking-budget-boot-wiring-5312.test.ts for the incidents that
 // wiring into the dead module caused.
 

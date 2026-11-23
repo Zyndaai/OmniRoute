@@ -8,7 +8,7 @@ import { updateProviderConnection } from "@/lib/db/providers";
  *
  * Kept as a named export rather than inline: it is the only nondeterminism in this
  * path, and a caller that needs a decision it can predict — a test — has to be able
- * to replace it. `tests/unit/token-health-check-kimi.test.ts` used a token expiring
+ * to replace it. `tests/unit/lib/token-health-check-kimi.test.ts` used a token expiring
  * in 90 s and asserted a refresh, which is a coin the draw loses 1 in 6 times
  * (a refresh needs `jitter >= 90`, i.e. 150 of the 180 possible values). It failed
  * that way on the Node 26 nightly and was triaged as a Node-compat break.

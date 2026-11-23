@@ -638,7 +638,7 @@ class BedrockItemRejectedError extends Error {}
  *
  * Accepts a bare string, an array of strings, and the repo's canonical
  * structured item `{type:"image"|"text", source:{type:"base64"|"url", data|url}}`
- * (see `tests/unit/embeddings-multimodal-7956.test.ts`) plus the Jina-native
+ * (see `tests/unit/handlers/embeddings-multimodal-7956.test.ts`) plus the Jina-native
  * `{image: …}` shorthand. Token arrays are rejected explicitly — Bedrock
  * embedding models take text/images, not token ids.
  *

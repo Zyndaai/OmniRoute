@@ -104,6 +104,7 @@ Read the nearest `AGENTS.md` and the linked deep-dive before making a non-trivia
 ## File placement & repo-root hygiene
 
 - **Test files**: ALL unit tests, integration tests, ecosystem tests, or Vitest files MUST strictly be placed within the `tests/` directory (e.g., `tests/unit/`, `tests/integration/`). NEVER create test files in the project root (`/`).
+- **New unit tests** go in the `tests/unit/<area>/` folder that matches the code they test (`executors/`, `services/`, `translator/`, `db/`, `api/`, …), or extend an existing file there, never the root of `tests/unit/`. `scripts/dev/run-unit-tests.mjs` runs every subfolder, so a new folder needs no `package.json` edit.
 - **Scripts and utilities**: ALL maintenance, debugging, generation, or experimental scripts (`.cjs`, `.mjs`, `.js`, `.ts`) MUST be placed strictly inside one of the `scripts/` subfolders (`build/`, `check/`, `cli/`, `db/`, `dev/`, `docker/`, `docs/`, `i18n/`, `ops/`, `packs/`, `skills/`). One-shot or experimental code goes under `scripts/ad-hoc/` (create it when needed). NEVER dump loose scripts in the project root (`/`) or the top-level `scripts/` folder.
 
 **The project root MUST ONLY contain:**

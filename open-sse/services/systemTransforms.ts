@@ -86,7 +86,7 @@ export const DEFAULT_OBFUSCATE_WORDS = [
   "cline",
   "roo-cline",
   "roo_cline",
-  "cursor",
+  // Not "cursor": see DEFAULT_SENSITIVE_WORDS in claudeCodeObfuscation.ts.
   "windsurf",
   "aider",
   "continue.dev",

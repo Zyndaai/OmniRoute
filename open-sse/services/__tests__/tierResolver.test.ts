@@ -264,7 +264,7 @@ describe("TierResolver", () => {
     it("lands free on a zero price through the same thresholds the async path uses", async () => {
       // The async path reads the database through a chain (settings ->
       // read cache -> postgres pool), so a live async round-trip is
-      // covered by tests/unit/tier-pricing-cache.test.ts on the node runner.
+      // covered by tests/unit/services/tier-pricing-cache.test.ts on the node runner.
       // This pins the shared half of the parity here: the same zero-price
       // fixture lands FREE through the snapshot lookup and sits below the
       // free threshold both paths compare against.

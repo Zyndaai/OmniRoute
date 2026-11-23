@@ -317,7 +317,7 @@ describe("provider-models-custom-merge-6247", () => {
   // discovery-success paths. Fix: merge getCustomModels(provider) (dedup by id,
   // owned_by: provider) into the route's returned model list.
   //
-  // Harness copied (minimal) from tests/unit/provider-models-route.test.ts — the
+  // Harness copied (minimal) from tests/unit/db/provider-models-route.test.ts — the
   // frozen file's own note says the seedConnection/callRoute harness is not
   // separately extractable, so a small local copy is acceptable.
   interface SeedOverrides {

@@ -625,7 +625,7 @@ export function sanitizeReasoningEffortForProvider(
   // suffix-alias catalog, and it disagrees with this flat-field clamp. Do not
   // "fix" that by letting flat max through: the opaque-400 probe test records
   // that mimo-v2.5-pro returns the same 400
-  // (tests/unit/reasoning-effort-opaque-400-probe.test.ts). EFFORT_TIERS in
+  // (tests/unit/executors/reasoning-effort-opaque-400-probe.test.ts). EFFORT_TIERS in
   // executors/opencode.ts documents that suffix table, not this contract.
   //
   // Family-scoped inside the OpenCode provider family (opencode-go,

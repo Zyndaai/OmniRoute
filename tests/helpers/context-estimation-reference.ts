@@ -5,7 +5,7 @@
  * `jsonLength`) and the full-recount `pruneOlderInlineImages` loop as they
  * existed BEFORE the fused-measurement/incremental-delta optimization
  * (branched from e82d6370f1). The optimization must reproduce these outputs
- * exactly — `tests/unit/context-manager-estimation-parity.test.ts` compares
+ * exactly — `tests/unit/services/context-manager-estimation-parity.test.ts` compares
  * the live implementations against this reference over seeded structures.
  *
  * Test-only. Never import from production code. The shared block matchers are

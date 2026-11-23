@@ -41,7 +41,7 @@ interface AssistantRoleChunk {
  * OpenAI-compatible clients continue tool-result processing instead of stopping prematurely.
  *
  * Lives here (not pureHelpers.ts) because it takes stream `state` — pureHelpers.ts is
- * guarded (tests/unit/response-openai-responses-purehelpers-split.test.ts) to have NO
+ * guarded (tests/unit/translator/response-openai-responses-purehelpers-split.test.ts) to have NO
  * state coupling at all.
  */
 export function computeFinishReason(state: CompletionState): FinishReason {

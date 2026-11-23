@@ -88,7 +88,7 @@ export async function revertTproxy(
 /**
  * Starts (or confirms) the sing-box supervisor before TPROXY rules are applied.
  * Never throws — `applyTproxy()` always proceeds to install the firewall rules
- * regardless of the outcome (pre-existing behavior, `tests/unit/tproxy-setup.test.ts`
+ * regardless of the outcome (pre-existing behavior, `tests/unit/mitm/tproxy-setup.test.ts`
  * exercises `applyTproxy()` with no sing-box supervisor registered at all) — but
  * every failure path logs at error level instead of being swallowed by a bare
  * `.catch(() => false)`, so an operator has a visible signal that TPROXY rules were
@@ -99,7 +99,7 @@ export async function revertTproxy(
  *  - every sing-box outbound is SO_MARK'd with `cfg.bypassMark`, the mark the OUTPUT
  *    rule excludes. Without a `bypassMark` that exclusion does not exist, so sing-box is
  *    not started at all rather than looping its own egress.
- * Covered by `tests/unit/singbox-tproxy-coexistence.test.ts`.
+ * Covered by `tests/unit/lib/singbox-tproxy-coexistence.test.ts`.
  */
 export async function ensureSingboxTproxy(cfg: TproxyConfig): Promise<boolean> {
   const supervisor = getSupervisor("singbox");

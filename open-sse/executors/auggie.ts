@@ -307,7 +307,7 @@ function isEnoentLike(message: string): boolean {
 // Auggie's actual fixed wording (not generic words like "quota"/"usage" alone) so
 // a legitimate reply that merely discusses usage/quota in passing is not
 // misclassified — see the "no false positive" case in
-// tests/unit/issue-12949-auggie-quota-exhausted-200.test.ts.
+// tests/unit/executors/issue-12949-auggie-quota-exhausted-200.test.ts.
 const AUGGIE_QUOTA_EXHAUSTED_PATTERNS = [
   /you have run out of usage/i,
   /run out of usage for/i,

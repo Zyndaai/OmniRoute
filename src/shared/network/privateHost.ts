@@ -3,7 +3,7 @@
 // #11122: `open-sse/config/providerRegistry.ts` needs `isPrivateHost`, and that module is
 // reachable from `ProviderDetailPageClient.tsx`. `outboundUrlGuard.ts` reached for `node:net`'s
 // `isIP`, so importing it from the registry broke the browser bundle with
-// `Could not resolve "node:net"` (caught by tests/unit/media-page-client-browser-bundle.test.ts,
+// `Could not resolve "node:net"` (caught by tests/unit/ui/media-page-client-browser-bundle.test.ts,
 // which has been red on the release branch since #11122 merged).
 // The classification therefore lives here, on a pure-JS `ipVersion`, with NO platform imports.
 //

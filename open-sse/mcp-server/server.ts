@@ -797,7 +797,7 @@ export async function createMcpServer(options?: CreateMcpServerOptions): Promise
 
   // ── Web-Session Pool Tools (#3368 observability) ─
   // Typed structurally (not `any`) — the shape is pinned by
-  // tests/unit/mcp-tool-collections-shape.test.ts, so the loop can stay strict.
+  // tests/unit/mcp/mcp-tool-collections-shape.test.ts, so the loop can stay strict.
   Object.values(poolTools).forEach(
     (toolDef: {
       name: string;

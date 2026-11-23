@@ -460,7 +460,7 @@ export async function runProviderExecutionPipeline(
         await state.onClearSessionAffinity?.({ failedConnectionId: failedId });
       }
       // Both arms stay direct `connection.*` calls so the hard-lease credential
-      // inventory (tests/unit/hard-session-lease-bypass-inventory.test.ts) keeps
+      // inventory (tests/unit/api/hard-session-lease-bypass-inventory.test.ts) keeps
       // seeing this rotation site; an aliased selector would hide it.
       const codexFailoverOptions = { excludeConnectionIds: [...excludedIds] };
       const nextCreds = await (

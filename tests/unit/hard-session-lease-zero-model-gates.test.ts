@@ -12,28 +12,28 @@ type GateEvidence = {
 };
 
 const evidence = (file: string, pattern: RegExp): GateEvidence => ({ file, pattern });
-const db = (pattern: RegExp) => evidence("tests/unit/exclusive-connection-leases.test.ts", pattern);
-const auth = (pattern: RegExp) => evidence("tests/unit/sse-auth-exclusive-leases.test.ts", pattern);
+const db = (pattern: RegExp) => evidence("tests/unit/db/exclusive-connection-leases.test.ts", pattern);
+const auth = (pattern: RegExp) => evidence("tests/unit/services/sse-auth-exclusive-leases.test.ts", pattern);
 const chat = (pattern: RegExp) =>
-  evidence("tests/unit/chat-managed-lease-routing.test.ts", pattern);
-const route = (pattern: RegExp) => evidence("tests/unit/session-leases-route.test.ts", pattern);
-const context = (pattern: RegExp) => evidence("tests/unit/lease-context.test.ts", pattern);
+  evidence("tests/unit/db/chat-managed-lease-routing.test.ts", pattern);
+const route = (pattern: RegExp) => evidence("tests/unit/db/session-leases-route.test.ts", pattern);
+const context = (pattern: RegExp) => evidence("tests/unit/sse/lease-context.test.ts", pattern);
 const isolation = (pattern: RegExp) =>
-  evidence("tests/unit/exclusive-lease-auxiliary-isolation.test.ts", pattern);
+  evidence("tests/unit/api/exclusive-lease-auxiliary-isolation.test.ts", pattern);
 const inventory = (pattern: RegExp) =>
-  evidence("tests/unit/hard-session-lease-bypass-inventory.test.ts", pattern);
+  evidence("tests/unit/api/hard-session-lease-bypass-inventory.test.ts", pattern);
 const managedSet = (pattern: RegExp) =>
-  evidence("tests/unit/exclusive-lease-managed-set.test.ts", pattern);
+  evidence("tests/unit/db/exclusive-lease-managed-set.test.ts", pattern);
 const connectionIsolation = (pattern: RegExp) =>
-  evidence("tests/unit/exclusive-lease-connection-test-isolation.test.ts", pattern);
+  evidence("tests/unit/api/exclusive-lease-connection-test-isolation.test.ts", pattern);
 const ws = (pattern: RegExp) =>
-  evidence("tests/unit/codex-ws-policy-enforcement-6564.test.ts", pattern);
+  evidence("tests/unit/db/codex-ws-policy-enforcement-6564.test.ts", pattern);
 const internalKey = (pattern: RegExp) =>
-  evidence("tests/unit/pick-internal-api-key-6372.test.ts", pattern);
+  evidence("tests/unit/db/pick-internal-api-key-6372.test.ts", pattern);
 const requestLogger = (pattern: RegExp) =>
-  evidence("tests/unit/request-logger-endpoints.test.ts", pattern);
+  evidence("tests/unit/utils/request-logger-endpoints.test.ts", pattern);
 const executorHeaders = (pattern: RegExp) =>
-  evidence("tests/unit/chatcore-executor-client-headers.test.ts", pattern);
+  evidence("tests/unit/handlers/chatcore-executor-client-headers.test.ts", pattern);
 
 const GATES = new Map<number, GateEvidence[]>([
   [1, [auth(/managed capacity scales/)]],
@@ -115,7 +115,7 @@ const GATES = new Map<number, GateEvidence[]>([
   [65, [chat(/identical prompts with different owners never share/)]],
   [66, [chat(/changing prompt, tools, and request model/)]],
   [67, [context(/routing session identity is never accepted/)]],
-  [68, [evidence("tests/unit/sse-auth.test.ts", /session .*affinity/i)]],
+  [68, [evidence("tests/unit/services/sse-auth.test.ts", /session .*affinity/i)]],
   [69, [auth(/live owner binding is reused/), auth(/foreign top candidate/)]],
   [70, [inventory(/managed request surfaces are fenced centrally/)]],
   [71, [inventory(/managed request surfaces are fenced centrally/)]],
@@ -138,7 +138,7 @@ const GATES = new Map<number, GateEvidence[]>([
   [88, [inventory(/provider === "codex"/)]],
   [89, [ws(/LEASE_UNSUPPORTED_TRANSPORT|lease:exclusive/)]],
   [90, [chat(/managed combos reject every fan-out route/)]],
-  [91, [evidence("tests/unit/chat-context-relay.test.ts", /context-relay/i)]],
+  [91, [evidence("tests/unit/services/chat-context-relay.test.ts", /context-relay/i)]],
   [92, [chat(/managed combos reject every fan-out route/)]],
   [93, [chat(/managed combos reject every fan-out route/), chat(/one-step managed pipeline/)]],
   [94, [chat(/direct foreign connection pin/)]],

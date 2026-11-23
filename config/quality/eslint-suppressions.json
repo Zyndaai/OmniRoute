@@ -2044,22 +2044,22 @@
       "count": 3
     }
   },
-  "tests/unit/8370-priority-affinity-reorder.test.ts": {
+  "tests/unit/services/8370-priority-affinity-reorder.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/9560-turbopack-nft-lazy-module-fs.test.ts": {
+  "tests/unit/shared/9560-turbopack-nft-lazy-module-fs.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/9568-gemini-tool-casing-mismatch.test.ts": {
+  "tests/unit/translator/9568-gemini-tool-casing-mismatch.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/account-fallback-service.test.ts": {
+  "tests/unit/services/account-fallback-service.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -2067,37 +2067,37 @@
       "count": 2
     }
   },
-  "tests/unit/account-selector.test.ts": {
+  "tests/unit/services/account-selector.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/acp-agents-route.test.ts": {
+  "tests/unit/api/acp-agents-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/adaptive-admission-runtime.test.ts": {
+  "tests/unit/services/adaptive-admission-runtime.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/admin-audit-events.test.ts": {
+  "tests/unit/api/admin-audit-events.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     }
   },
-  "tests/unit/admission-virtual-lanes-9654.test.ts": {
+  "tests/unit/services/admission-virtual-lanes-9654.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/adobe-firefly.test.ts": {
+  "tests/unit/services/adobe-firefly.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/adversarialPii.test.ts": {
+  "tests/unit/lib/adversarialPii.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
@@ -2105,7 +2105,7 @@
       "count": 3
     }
   },
-  "tests/unit/agent-bridge-mappings-sync-8656.test.ts": {
+  "tests/unit/db/agent-bridge-mappings-sync-8656.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -2115,32 +2115,32 @@
       "count": 1
     }
   },
-  "tests/unit/agentrouter-quota-visibility.test.ts": {
+  "tests/unit/services/agentrouter-quota-visibility.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/agy-usage-quota.test.ts": {
+  "tests/unit/services/agy-usage-quota.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/anthropic-compat-validation-v1-messages.test.ts": {
+  "tests/unit/providers/anthropic-compat-validation-v1-messages.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/antigravity-discovery-bootstrap.test.ts": {
+  "tests/unit/services/antigravity-discovery-bootstrap.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/antigravity-local-usage-fallback-3821.test.ts": {
+  "tests/unit/services/antigravity-local-usage-fallback-3821.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/antigravity-model-aliases.test.ts": {
+  "tests/unit/config/antigravity-model-aliases.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
@@ -2150,7 +2150,7 @@
       "count": 4
     }
   },
-  "tests/unit/api-key-reveal-route.test.ts": {
+  "tests/unit/api/api-key-reveal-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
@@ -2185,57 +2185,57 @@
       "count": 1
     }
   },
-  "tests/unit/apikey-connection-health-check.test.ts": {
+  "tests/unit/lib/apikey-connection-health-check.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/apikeypolicy-disable-non-public.test.ts": {
+  "tests/unit/shared/apikeypolicy-disable-non-public.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/audio-speech-handler.test.ts": {
+  "tests/unit/handlers/audio-speech-handler.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/audio-transcription-handler.test.ts": {
+  "tests/unit/handlers/audio-transcription-handler.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/audio-translations-route.test.ts": {
+  "tests/unit/handlers/audio-translations-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/auggie-executor.test.ts": {
+  "tests/unit/executors/auggie-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/auth-clear-account-error.test.ts": {
+  "tests/unit/sse/auth-clear-account-error.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/auth-clear-provider-routes.test.ts": {
+  "tests/unit/api/auth-clear-provider-routes.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/auth-disable-cooling-2997.test.ts": {
+  "tests/unit/sse/auth-disable-cooling-2997.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     }
   },
-  "tests/unit/auth-ollama-cloud-per-model-403-3027.test.ts": {
+  "tests/unit/sse/auth-ollama-cloud-per-model-403-3027.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     }
   },
-  "tests/unit/auth-terminal-status.test.ts": {
+  "tests/unit/sse/auth-terminal-status.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
@@ -2245,12 +2245,12 @@
       "count": 3
     }
   },
-  "tests/unit/autocombo-unification.test.ts": {
+  "tests/unit/shared/autocombo-unification.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/bailian-quota-fetcher.test.ts": {
+  "tests/unit/services/bailian-quota-fetcher.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 21
     },
@@ -2258,47 +2258,47 @@
       "count": 1
     }
   },
-  "tests/unit/bailian-usage.test.ts": {
+  "tests/unit/services/bailian-usage.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 5
     }
   },
-  "tests/unit/base-executor-buildheaders-extra-keys-8493.test.ts": {
+  "tests/unit/executors/base-executor-buildheaders-extra-keys-8493.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/base-executor-sanitize-effort.test.ts": {
+  "tests/unit/executors/base-executor-sanitize-effort.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/batch-a-domain.test.ts": {
+  "tests/unit/shared/batch-a-domain.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/batch-b-final.test.ts": {
+  "tests/unit/lib/batch-b-final.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/batch-page-static.test.ts": {
+  "tests/unit/ui/batch-page-static.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/batch-processor.test.ts": {
+  "tests/unit/db/batch-processor.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 6
     }
   },
-  "tests/unit/batch_api.test.ts": {
+  "tests/unit/api/batch_api.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/batch_results.test.ts": {
+  "tests/unit/db/batch_results.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
@@ -2306,12 +2306,12 @@
       "count": 3
     }
   },
-  "tests/unit/blackbox-web.test.ts": {
+  "tests/unit/executors/blackbox-web.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/body-timeout-integration.test.ts": {
+  "tests/unit/handlers/body-timeout-integration.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
@@ -2326,32 +2326,32 @@
       "count": 4
     }
   },
-  "tests/unit/bypass-handler.test.ts": {
+  "tests/unit/utils/bypass-handler.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/cache-sweeps.test.ts": {
+  "tests/unit/services/cache-sweeps.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/call-log-startup.test.ts": {
+  "tests/unit/usage/call-log-startup.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/call-logs-correlation-sort.test.ts": {
+  "tests/unit/api/call-logs-correlation-sort.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/capability-filter.test.ts": {
+  "tests/unit/shared/capability-filter.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/cc-bridge-transforms.test.ts": {
+  "tests/unit/services/cc-bridge-transforms.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 31
     },
@@ -2359,9 +2359,9 @@
       "count": 1
     }
   },
-  "tests/unit/cc-compatible-model-catalog.test.ts": {
+  "tests/unit/api/models-catalog-capabilities.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 2
+      "count": 6
     }
   },
   "tests/unit/chatcore/cc-compatible-provider.test.ts": {
@@ -2369,27 +2369,27 @@
       "count": 37
     }
   },
-  "tests/unit/chat-body-admission.test.ts": {
+  "tests/unit/shared/chat-body-admission.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/chat-combo-live-test.test.ts": {
+  "tests/unit/api/chat-combo-live-test.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/chat-context-relay.test.ts": {
+  "tests/unit/services/chat-context-relay.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/chat-rate-limit-body-lock.test.ts": {
+  "tests/unit/services/chat-rate-limit-body-lock.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/chat-route-coverage.test.ts": {
+  "tests/unit/services/chat-route-coverage.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
@@ -2404,7 +2404,7 @@
       "count": 2
     }
   },
-  "tests/unit/chatcore-compression-integration.test.ts": {
+  "tests/unit/services/chatcore-compression-integration.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     },
@@ -2412,7 +2412,7 @@
       "count": 5
     }
   },
-  "tests/unit/chatcore-memory-pressure.test.ts": {
+  "tests/unit/utils/chatcore-memory-pressure.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -2442,37 +2442,37 @@
       "count": 1
     }
   },
-  "tests/unit/claude-code-compatible-helpers.test.ts": {
+  "tests/unit/services/claude-code-compatible-helpers.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/claude-code-compatible-request.test.ts": {
+  "tests/unit/services/claude-code-compatible-request.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 27
     }
   },
-  "tests/unit/claude-empty-stream-error-3685.test.ts": {
+  "tests/unit/usage/claude-empty-stream-error-3685.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/claude-helper-minimax-output-config.test.ts": {
+  "tests/unit/translator/claude-helper-minimax-output-config.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/claude-to-openai-image-toolresult.test.ts": {
+  "tests/unit/translator/claude-to-openai-image-toolresult.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/claude-web-auto-refresh.test.ts": {
+  "tests/unit/services/claude-web-auto-refresh.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/claude-web.test.ts": {
+  "tests/unit/executors/claude-web.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
@@ -2482,7 +2482,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-a2a-invoke-commands.test.ts": {
+  "tests/unit/cli/cli-a2a-invoke-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     },
@@ -2490,12 +2490,12 @@
       "count": 1
     }
   },
-  "tests/unit/cli-audit-commands.test.ts": {
+  "tests/unit/cli/cli-audit-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
   },
-  "tests/unit/cli-batches-commands.test.ts": {
+  "tests/unit/cli/cli-batches-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     },
@@ -2503,7 +2503,7 @@
       "count": 3
     }
   },
-  "tests/unit/cli-chat.test.ts": {
+  "tests/unit/cli/cli-chat.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     },
@@ -2511,7 +2511,7 @@
       "count": 3
     }
   },
-  "tests/unit/cli-cloud-commands.test.ts": {
+  "tests/unit/cli/cli-cloud-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 18
     },
@@ -2519,7 +2519,7 @@
       "count": 6
     }
   },
-  "tests/unit/cli-combo-suggest-commands.test.ts": {
+  "tests/unit/cli/cli-combo-suggest-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 14
     },
@@ -2527,17 +2527,17 @@
       "count": 1
     }
   },
-  "tests/unit/cli-completion-dynamic.test.ts": {
+  "tests/unit/cli/cli-completion-dynamic.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     }
   },
-  "tests/unit/cli-compression-commands.test.ts": {
+  "tests/unit/compression/cli-compression-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 20
     }
   },
-  "tests/unit/cli-context-eng-commands.test.ts": {
+  "tests/unit/cli/cli-context-eng-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 19
     },
@@ -2545,22 +2545,22 @@
       "count": 2
     }
   },
-  "tests/unit/cli-cost.test.ts": {
+  "tests/unit/cli/cli-cost.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/cli-eval-commands.test.ts": {
+  "tests/unit/cli/cli-eval-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 22
     }
   },
-  "tests/unit/cli-expanded-commands.test.ts": {
+  "tests/unit/cli/cli-expanded-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/cli-files-commands.test.ts": {
+  "tests/unit/cli/cli-files-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     },
@@ -2581,7 +2581,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-lang-commands.test.ts": {
+  "tests/unit/cli/cli-lang-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -2589,27 +2589,27 @@
       "count": 1
     }
   },
-  "tests/unit/cli-mcp-call-commands.test.ts": {
+  "tests/unit/cli/cli-mcp-call-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/cli-memory-commands.test.ts": {
+  "tests/unit/cli/cli-memory-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 18
     }
   },
-  "tests/unit/cli-memory-types.test.mjs": {
+  "tests/unit/cli/cli-memory-types.test.mjs": {
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     }
   },
-  "tests/unit/cli-nodes-commands.test.ts": {
+  "tests/unit/cli/cli-nodes-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
   },
-  "tests/unit/cli-oauth-commands.test.ts": {
+  "tests/unit/cli/cli-oauth-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 20
     },
@@ -2617,7 +2617,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-oneproxy-commands.test.ts": {
+  "tests/unit/cli/cli-oneproxy-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 13
     },
@@ -2625,7 +2625,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-open-command.test.ts": {
+  "tests/unit/cli/cli-open-command.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
@@ -2635,7 +2635,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-openapi-commands.test.ts": {
+  "tests/unit/cli/cli-openapi-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     },
@@ -2648,7 +2648,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-policy-commands.test.ts": {
+  "tests/unit/cli/cli-policy-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 20
     },
@@ -2656,12 +2656,12 @@
       "count": 3
     }
   },
-  "tests/unit/cli-pricing-commands.test.ts": {
+  "tests/unit/cli/cli-pricing-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/cli-process-supervisor.test.ts": {
+  "tests/unit/cli/cli-process-supervisor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     },
@@ -2669,47 +2669,47 @@
       "count": 2
     }
   },
-  "tests/unit/cli-program.test.ts": {
+  "tests/unit/cli/cli-program.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/cli-providers-metrics.test.ts": {
+  "tests/unit/cli/cli-providers-metrics.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
   },
-  "tests/unit/cli-redis-command.test.ts": {
+  "tests/unit/cli/cli-redis-command.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/cli-remote-mode.test.ts": {
+  "tests/unit/cli/cli-remote-mode.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/cli-resilience-commands.test.ts": {
+  "tests/unit/cli/cli-resilience-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/cli-runtime-extended.test.ts": {
+  "tests/unit/shared/cli-runtime-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/cli-serve-stop-command.test.ts": {
+  "tests/unit/cli/cli-serve-stop-command.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/cli-server-commands.test.ts": {
+  "tests/unit/cli/cli-server-commands.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/cli-sessions-commands.test.ts": {
+  "tests/unit/cli/cli-sessions-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     },
@@ -2717,22 +2717,22 @@
       "count": 1
     }
   },
-  "tests/unit/cli-simulate.test.ts": {
+  "tests/unit/cli/cli-simulate.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 13
     }
   },
-  "tests/unit/cli-skills-commands.test.ts": {
+  "tests/unit/cli/cli-skills-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/cli-stop-supervisor-respawn-9455.test.ts": {
+  "tests/unit/cli/cli-stop-supervisor-respawn-9455.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/cli-stream.test.ts": {
+  "tests/unit/cli/cli-stream.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 13
     },
@@ -2740,7 +2740,7 @@
       "count": 2
     }
   },
-  "tests/unit/cli-sync-commands.test.ts": {
+  "tests/unit/cli/cli-sync-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     },
@@ -2748,7 +2748,7 @@
       "count": 2
     }
   },
-  "tests/unit/cli-tags-commands.test.ts": {
+  "tests/unit/cli/cli-tags-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     },
@@ -2756,7 +2756,7 @@
       "count": 1
     }
   },
-  "tests/unit/cli-telemetry-commands.test.ts": {
+  "tests/unit/cli/cli-telemetry-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     },
@@ -2764,7 +2764,7 @@
       "count": 2
     }
   },
-  "tests/unit/cli-translator-commands.test.ts": {
+  "tests/unit/cli/cli-translator-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     },
@@ -2772,12 +2772,12 @@
       "count": 3
     }
   },
-  "tests/unit/cli-usage.test.ts": {
+  "tests/unit/cli/cli-usage.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     }
   },
-  "tests/unit/cli-webhooks-commands.test.ts": {
+  "tests/unit/cli/cli-webhooks-commands.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 23
     }
@@ -2792,17 +2792,17 @@
       "count": 1
     }
   },
-  "tests/unit/cliproxyapi-executor.test.ts": {
+  "tests/unit/executors/cliproxyapi-executor.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/cloud-agent-cursor-4227.test.ts": {
+  "tests/unit/lib/cloud-agent-cursor-4227.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/cloudflaredTunnel-extended.test.ts": {
+  "tests/unit/lib/cloudflaredTunnel-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     },
@@ -2810,57 +2810,52 @@
       "count": 1
     }
   },
-  "tests/unit/codex-banked-reset-credits-5199.test.ts": {
+  "tests/unit/services/codex-banked-reset-credits-5199.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/codex-connection-defaults.test.ts": {
+  "tests/unit/providers/codex-connection-defaults.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/codex-session-affinity-reset-aware-5903.test.ts": {
+  "tests/unit/db/codex-session-affinity-reset-aware-5903.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/combo-auto-promote.test.ts": {
+  "tests/unit/lib/combo-auto-promote.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/combo-builder-options-route.test.ts": {
+  "tests/unit/db/combo-builder-options-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/combo-context-length.test.ts": {
+  "tests/unit/db/combo-context-length.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/combo-context-relay.test.ts": {
+  "tests/unit/services/combo-pipeline.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combo-pipeline.test.ts": {
+  "tests/unit/combo/capability-and-context-target-filtering.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combo-prescreen.test.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/unit/combo-provider-cooldown.test.ts": {
+  "tests/unit/utils/combo-provider-cooldown.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/combo-provider-wildcard.test.ts": {
+  "tests/unit/services/combo-provider-wildcard.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 18
     },
@@ -2868,92 +2863,92 @@
       "count": 1
     }
   },
-  "tests/unit/combo-quota-share-cooldown-wait.test.ts": {
+  "tests/unit/combo/quota-fallback-and-cooldown.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combo-routes-composite-tiers.test.ts": {
+  "tests/unit/api/combo-routes-composite-tiers.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/combo-routing-engine.test.ts": {
+  "tests/unit/services/combo-routing-engine.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 267
     }
   },
-  "tests/unit/combo-same-provider-cascade.test.ts": {
+  "tests/unit/utils/combo-same-provider-cascade.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/combo-selected-connection-success.test.ts": {
+  "tests/unit/services/combo-selected-connection-success.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combo-session-stickiness.test.ts": {
+  "tests/unit/services/combo-session-stickiness.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combo-sessionless-pin-3825.test.ts": {
+  "tests/unit/combo/rr-stickiness-strategies.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     }
   },
-  "tests/unit/combo-strategy-fallbacks.test.ts": {
+  "tests/unit/services/combo-strategy-fallbacks.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 33
     }
   },
-  "tests/unit/combo-stream-readiness-fallback.test.ts": {
+  "tests/unit/combo/stream-quality-validation.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     }
   },
-  "tests/unit/combo-task-aware.test.ts": {
+  "tests/unit/services/combo-task-aware.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/combos-duplicate-resolution-audit.test.ts": {
+  "tests/unit/services/combos-duplicate-resolution-audit.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/combos-quota-protected.test.ts": {
+  "tests/unit/db/combos-quota-protected.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/comfyui-baseurl-override-6928.test.ts": {
+  "tests/unit/handlers/comfyui-baseurl-override-6928.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/command-code-executor.test.ts": {
+  "tests/unit/config/command-code-executor.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/command-code-maxtokens-negative-5166.test.ts": {
+  "tests/unit/executors/command-code-maxtokens-negative-5166.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/commandClassification.test.ts": {
+  "tests/unit/lib/commandClassification.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/compliance-audit-route.test.ts": {
+  "tests/unit/lib/compliance-audit-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/compliance-index.test.ts": {
+  "tests/unit/lib/compliance-index.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
@@ -3033,37 +3028,37 @@
       "count": 2
     }
   },
-  "tests/unit/conductor-agent-card.test.ts": {
+  "tests/unit/api/conductor-agent-card.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/conductor-ask-route.test.ts": {
+  "tests/unit/api/conductor-ask-route.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/context-manager.test.ts": {
+  "tests/unit/services/context-manager.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/context-pinning-tool-calls.test.ts": {
+  "tests/unit/services/context-pinning-tool-calls.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/copilot-free-quota-not-inverted.test.ts": {
+  "tests/unit/services/copilot-free-quota-not-inverted.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/cursor-usage-fetcher.test.ts": {
+  "tests/unit/services/cursor-usage-fetcher.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/custom-headers-provider-nodes.test.ts": {
+  "tests/unit/api/custom-headers-provider-nodes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
@@ -3078,17 +3073,17 @@
       "count": 1
     }
   },
-  "tests/unit/db-agent-bridge-bypass.test.ts": {
+  "tests/unit/db/db-agent-bridge-bypass.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-agent-bridge-mappings.test.ts": {
+  "tests/unit/db/db-agent-bridge-mappings.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-agent-bridge-state.test.ts": {
+  "tests/unit/db/db-agent-bridge-state.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -3098,12 +3093,12 @@
       "count": 1
     }
   },
-  "tests/unit/db-combos-crud.test.ts": {
+  "tests/unit/db/db-combos-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/db-core-extended.test.ts": {
+  "tests/unit/db/db-core-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
@@ -3116,12 +3111,12 @@
       "count": 1
     }
   },
-  "tests/unit/db-core.test.ts": {
+  "tests/unit/db/db-core.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/db-credit-balance.test.ts": {
+  "tests/unit/db/db-credit-balance.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -3131,7 +3126,7 @@
       "count": 4
     }
   },
-  "tests/unit/db-domainState-crud.test.ts": {
+  "tests/unit/db/db-domainState-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
@@ -3146,12 +3141,12 @@
       "count": 7
     }
   },
-  "tests/unit/db-inspector-custom-hosts.test.ts": {
+  "tests/unit/db/db-inspector-custom-hosts.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-inspector-sessions.test.ts": {
+  "tests/unit/db/db-inspector-sessions.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -3164,32 +3159,32 @@
       "count": 1
     }
   },
-  "tests/unit/db-model-aliases-cascade.test.ts": {
+  "tests/unit/db/db-model-aliases-cascade.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-models-crud.test.ts": {
+  "tests/unit/db/db-models-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/db-models-extended.test.ts": {
+  "tests/unit/db/db-models-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/db-playground-presets.test.ts": {
+  "tests/unit/db/db-playground-presets.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-provider-plans.test.ts": {
+  "tests/unit/db/db-provider-plans.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-providers-crud.test.ts": {
+  "tests/unit/db/db-providers-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 18
     },
@@ -3197,12 +3192,12 @@
       "count": 1
     }
   },
-  "tests/unit/db-proxies-crud.test.ts": {
+  "tests/unit/db/db-proxies-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/db-quota-consumption.test.ts": {
+  "tests/unit/db/db-quota-consumption.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -3212,12 +3207,12 @@
       "count": 1
     }
   },
-  "tests/unit/db-quota-pools.test.ts": {
+  "tests/unit/db/db-quota-pools.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-read-cache.test.ts": {
+  "tests/unit/db/db-read-cache.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -3225,27 +3220,27 @@
       "count": 2
     }
   },
-  "tests/unit/db-registeredKeys-crud.test.ts": {
+  "tests/unit/db/db-registeredKeys-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/db-secrets.test.ts": {
+  "tests/unit/db/db-secrets.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/db-settings-crud.test.ts": {
+  "tests/unit/db/db-settings-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 20
     }
   },
-  "tests/unit/db-settings-extended.test.ts": {
+  "tests/unit/db/db-settings-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/deepseek-quota-fetcher.test.ts": {
+  "tests/unit/services/deepseek-quota-fetcher.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     },
@@ -3253,27 +3248,27 @@
       "count": 5
     }
   },
-  "tests/unit/deepseek-web-autorefresh-401-response.test.ts": {
+  "tests/unit/executors/deepseek-web-autorefresh-401-response.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/deepseek-web.test.ts": {
+  "tests/unit/executors/deepseek-web.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/display-and-error-utils.test.ts": {
+  "tests/unit/lib/display-and-error-utils.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/dns-config-generic.test.ts": {
+  "tests/unit/mitm/dns-config-generic.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/domain-branch-hardening.test.ts": {
+  "tests/unit/domain/domain-branch-hardening.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -3281,27 +3276,27 @@
       "count": 1
     }
   },
-  "tests/unit/domain-cost-rules.test.ts": {
+  "tests/unit/domain/domain-cost-rules.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/domain-fallback-policy.test.ts": {
+  "tests/unit/domain/domain-fallback-policy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/domain-lockout-policy.test.ts": {
+  "tests/unit/domain/domain-lockout-policy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/domain-persistence.test.ts": {
+  "tests/unit/domain/domain-persistence.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/duckduckgo-web-executor.test.ts": {
+  "tests/unit/executors/duckduckgo-web-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     },
@@ -3309,92 +3304,92 @@
       "count": 1
     }
   },
-  "tests/unit/embedding-cooldown-integration-10347.test.ts": {
+  "tests/unit/lib/embedding-cooldown-integration-10347.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/embeddings-auth.test.ts": {
+  "tests/unit/api/embeddings-auth.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/embeddings-nvidia-input-type.test.ts": {
+  "tests/unit/handlers/embeddings-nvidia-input-type.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/embeddings-proxy-forwarding.test.ts": {
+  "tests/unit/lib/embeddings-proxy-forwarding.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/empty-tool-name-loop.test.ts": {
+  "tests/unit/translator/empty-tool-name-loop.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/endpoint-restrictions-policy.test.ts": {
+  "tests/unit/shared/endpoint-restrictions-policy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/error-message-sanitization.test.ts": {
+  "tests/unit/utils/error-message-sanitization.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 19
     }
   },
-  "tests/unit/eviction-guards-codexQuotaFetcher.test.ts": {
+  "tests/unit/services/eviction-guards-codexQuotaFetcher.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/executor-agy.test.ts": {
+  "tests/unit/executors/executor-agy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/executor-antigravity.test.ts": {
+  "tests/unit/services/executor-antigravity.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/executor-base-utils.test.ts": {
+  "tests/unit/executors/executor-base-utils.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/executor-claude-identity.test.ts": {
+  "tests/unit/executors/executor-claude-identity.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/executor-cloudflare-ai.test.ts": {
+  "tests/unit/executors/executor-cloudflare-ai.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/executor-codex.test.ts": {
+  "tests/unit/executors/executor-codex.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/executor-default-base.test.ts": {
+  "tests/unit/executors/executor-default-base.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 42
     }
   },
-  "tests/unit/executor-github.test.ts": {
+  "tests/unit/config/executor-github.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/executor-pollinations.test.ts": {
+  "tests/unit/executors/executor-pollinations.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/fetch-timeout.test.ts": {
+  "tests/unit/shared/fetch-timeout.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     },
@@ -3402,12 +3397,12 @@
       "count": 1
     }
   },
-  "tests/unit/field-400-downgrade.test.ts": {
+  "tests/unit/executors/field-400-downgrade.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/file-expiration-policy.test.ts": {
+  "tests/unit/db/file-expiration-policy.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -3415,7 +3410,7 @@
       "count": 1
     }
   },
-  "tests/unit/fix-tool-adjacency.test.ts": {
+  "tests/unit/services/fix-tool-adjacency.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     },
@@ -3428,42 +3423,42 @@
       "count": 20
     }
   },
-  "tests/unit/functional-gateway-mirrors-append.test.ts": {
+  "tests/unit/utils/functional-gateway-mirrors-append.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/gemini-finish-reason-normalization.test.ts": {
+  "tests/unit/translator/gemini-finish-reason-normalization.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/gemini-tool-params-object-3357.test.ts": {
+  "tests/unit/translator/gemini-tool-params-object-3357.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/gemini-web.test.ts": {
+  "tests/unit/executors/gemini-web.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/github-claude-reasoning-effort-granular.test.ts": {
+  "tests/unit/executors/github-claude-reasoning-effort-granular.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/gitlab-duo-toolcalls-6051.test.ts": {
+  "tests/unit/executors/gitlab-duo-toolcalls-6051.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/gitlawb-provider.test.ts": {
+  "tests/unit/config/gitlawb-provider.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/glm-executor.test.ts": {
+  "tests/unit/executors/glm-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 19
     }
@@ -3481,12 +3476,12 @@
       "count": 7
     }
   },
-  "tests/unit/grok-web.test.ts": {
+  "tests/unit/executors/grok-web.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 25
     }
   },
-  "tests/unit/gtts-provider.test.ts": {
+  "tests/unit/executors/gtts-provider.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -3496,57 +3491,57 @@
       "count": 2
     }
   },
-  "tests/unit/head-request-closes-6400.test.ts": {
+  "tests/unit/build/head-request-closes-6400.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/i18n-nest-dotted-keys.test.ts": {
+  "tests/unit/ui/i18n-nest-dotted-keys.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/image-generation-fetch-timeout.test.ts": {
+  "tests/unit/handlers/image-generation-fetch-timeout.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/image-generation-handler.test.ts": {
+  "tests/unit/handlers/image-generation-handler.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/image-generation-route.test.ts": {
+  "tests/unit/api/image-generation-route.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/injection-guard-nonchat-route-logging.test.ts": {
+  "tests/unit/lib/injection-guard-nonchat-route-logging.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/inspector-agent-bridge-hook.test.ts": {
+  "tests/unit/db/inspector-agent-bridge-hook.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/json-size-exactness.test.ts": {
+  "tests/unit/utils/json-size-exactness.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/kimi-credentials-extract.test.ts": {
+  "tests/unit/providers/kimi-credentials-extract.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/kimi-web-401-retry.test.ts": {
+  "tests/unit/executors/kimi-web-401-retry.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/kiro-tool-args-streaming.test.ts": {
+  "tests/unit/executors/kiro-tool-args-streaming.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -3571,32 +3566,32 @@
       "count": 3
     }
   },
-  "tests/unit/llamacpp-model-delete.test.ts": {
+  "tests/unit/db/llamacpp-model-delete.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/lmarena-split-cookie-4271.test.ts": {
+  "tests/unit/executors/lmarena-split-cookie-4271.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/lmarena-string-chunk-repro.test.ts": {
+  "tests/unit/executors/lmarena-string-chunk-repro.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/log-retention.test.ts": {
+  "tests/unit/lib/log-retention.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     }
   },
-  "tests/unit/log-rotation.test.ts": {
+  "tests/unit/lib/log-rotation.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/management-password.test.ts": {
+  "tests/unit/auth/management-password.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
@@ -3641,62 +3636,62 @@
       "count": 2
     }
   },
-  "tests/unit/minimax-tts-1043.test.ts": {
+  "tests/unit/handlers/minimax-tts-1043.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/model-alias-route.test.ts": {
+  "tests/unit/api/models-catalog-routes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/model-aliases-settings-route-selfheal.test.ts": {
+  "tests/unit/services/model-aliases-settings-route-selfheal.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/model-deprecation.test.ts": {
+  "tests/unit/services/model-deprecation.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/model-lockout-decay.test.ts": {
+  "tests/unit/services/model-lockout-decay.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/model-lockout-max-cooldown.test.ts": {
+  "tests/unit/combo/lockout-rate-limit-breaker.test.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 4
+      "count": 9
     }
   },
-  "tests/unit/model-overrides-provider-prefix-9557.test.ts": {
+  "tests/unit/db/model-overrides-provider-prefix-9557.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/model-strip.test.ts": {
+  "tests/unit/services/model-strip.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/model-sync-route.test.ts": {
+  "tests/unit/db/model-sync-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/model-sync-scheduler.test.ts": {
+  "tests/unit/shared/model-sync-scheduler.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/model-test-route.test.ts": {
+  "tests/unit/api/model-test-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/models-catalog-route.test.ts": {
+  "tests/unit/db/models-catalog-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 79
     },
@@ -3704,12 +3699,12 @@
       "count": 3
     }
   },
-  "tests/unit/modelsDevSync-extended.test.ts": {
+  "tests/unit/lib/modelsDevSync-extended.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/moderations-handler.test.ts": {
+  "tests/unit/handlers/moderations-handler.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
@@ -3719,47 +3714,47 @@
       "count": 2
     }
   },
-  "tests/unit/next-config.test.ts": {
+  "tests/unit/server/next-config.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/nvidia-nim-validator.test.ts": {
+  "tests/unit/providers/nvidia-nim-validator.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/oauth-400-recovery.test.ts": {
+  "tests/unit/api/oauth-400-recovery.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/oauth-providers-config.test.ts": {
+  "tests/unit/oauth/oauth-providers-config.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/observability-fase04.test.ts": {
+  "tests/unit/shared/observability-fase04.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/obsidian-plugin-sync.test.ts": {
+  "tests/unit/utils/obsidian-plugin-sync.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/ocr-route.test.ts": {
+  "tests/unit/api/ocr-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/oidc-callback.test.ts": {
+  "tests/unit/api/oidc-callback.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/openai-tool-opaque-object-schema.test.ts": {
+  "tests/unit/services/openai-tool-opaque-object-schema.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
@@ -3769,62 +3764,57 @@
       "count": 1
     }
   },
-  "tests/unit/openapi-security-tiers.test.ts": {
+  "tests/unit/authz/openapi-security-tiers.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/openapi-spec-route.test.ts": {
+  "tests/unit/api/openapi-spec-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/openapi-try-route.test.ts": {
+  "tests/unit/api/openapi-try-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/opencode-executor.test.ts": {
+  "tests/unit/executors/opencode-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/opencode-proxy-rotation-4954.test.ts": {
+  "tests/unit/executors/opencode-proxy-rotation-4954.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/openrouter-vision-sync-4264.test.ts": {
+  "tests/unit/translator/orphaned-tool-filter.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/orphaned-tool-filter.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    }
-  },
-  "tests/unit/payload-rules-route.test.ts": {
+  "tests/unit/api/payload-rules-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/payload-rules.test.ts": {
+  "tests/unit/services/payload-rules.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/perplexity-web-streaming-tools-5927.test.ts": {
+  "tests/unit/executors/perplexity-web-streaming-tools-5927.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/perplexity-web.test.ts": {
+  "tests/unit/executors/perplexity-web.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 7
     }
   },
-  "tests/unit/persist-429-cooldown-account-fallback.test.ts": {
+  "tests/unit/services/persist-429-cooldown-account-fallback.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
@@ -3834,22 +3824,22 @@
       "count": 20
     }
   },
-  "tests/unit/plugins-config-route.test.ts": {
+  "tests/unit/db/plugins-config-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/plugins-config.test.ts": {
+  "tests/unit/lib/plugins-config.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/plugins-dev-mode.test.ts": {
+  "tests/unit/lib/plugins-dev-mode.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/plugins-edge-cases.test.ts": {
+  "tests/unit/lib/plugins-edge-cases.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -3859,12 +3849,12 @@
       "count": 1
     }
   },
-  "tests/unit/plugins-hooks.test.ts": {
+  "tests/unit/lib/plugins-hooks.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/plugins-index.test.ts": {
+  "tests/unit/lib/plugins-index.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     },
@@ -3872,12 +3862,12 @@
       "count": 2
     }
   },
-  "tests/unit/plugins-manager-lifecycle.test.ts": {
+  "tests/unit/lib/plugins-manager-lifecycle.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/plugins-welcome-banner-e2e.test.ts": {
+  "tests/unit/lib/plugins-welcome-banner-e2e.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -3885,37 +3875,37 @@
       "count": 4
     }
   },
-  "tests/unit/pollinations-jsonmode-3981.test.ts": {
+  "tests/unit/executors/pollinations-jsonmode-3981.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/probe-9575-tool-name-case.test.ts": {
+  "tests/unit/translator/probe-9575-tool-name-case.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     }
   },
-  "tests/unit/prompt-injection-guard.test.ts": {
+  "tests/unit/lib/prompt-injection-guard.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/provider-connection-apikey-dedup.test.ts": {
+  "tests/unit/db/provider-connection-apikey-dedup.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/provider-connection-healthcheck-interval-zero.test.ts": {
+  "tests/unit/db/provider-connection-healthcheck-interval-zero.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/provider-connections-quota-threshold.test.ts": {
+  "tests/unit/shared/provider-connections-quota-threshold.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/provider-limits-proxy-fail-closed.test.ts": {
+  "tests/unit/usage/provider-limits-proxy-fail-closed.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
@@ -3925,62 +3915,62 @@
       "count": 3
     }
   },
-  "tests/unit/provider-models-management-route.test.ts": {
+  "tests/unit/db/provider-models-management-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/provider-models-route.test.ts": {
+  "tests/unit/db/provider-models-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 54
     }
   },
-  "tests/unit/provider-models-token-limits.test.ts": {
+  "tests/unit/db/provider-models-token-limits.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/provider-node-icon-url.test.ts": {
+  "tests/unit/api/provider-node-icon-url.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/provider-nodes-route.test.ts": {
+  "tests/unit/api/provider-nodes-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 13
     }
   },
-  "tests/unit/provider-nodes-validate-modelid.test.ts": {
+  "tests/unit/api/provider-nodes-validate-modelid.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/provider-proxy-lazy.test.ts": {
+  "tests/unit/shared/provider-proxy-lazy.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/provider-scoped-aliases.test.ts": {
+  "tests/unit/db/provider-scoped-aliases.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/provider-validation-hardening.test.ts": {
+  "tests/unit/providers/provider-validation-hardening.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/provider-validation-specialty.test.ts": {
+  "tests/unit/services/provider-validation-specialty.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     }
   },
-  "tests/unit/providers-route-managed-catalog.test.ts": {
+  "tests/unit/api/providers-route-managed-catalog.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/providers-validate-route.test.ts": {
+  "tests/unit/lib/providers-validate-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     },
@@ -3988,12 +3978,12 @@
       "count": 1
     }
   },
-  "tests/unit/proxy-egress-visibility.test.ts": {
+  "tests/unit/lib/proxy-egress-visibility.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/proxy-fetch.test.ts": {
+  "tests/unit/utils/proxy-fetch.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -4001,17 +3991,17 @@
       "count": 1
     }
   },
-  "tests/unit/proxy-management-v1-route.test.ts": {
+  "tests/unit/api/proxy-management-v1-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 22
     }
   },
-  "tests/unit/proxy-pool-sync-4878.test.ts": {
+  "tests/unit/api/proxy-pool-sync-4878.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/proxy-registry.test.ts": {
+  "tests/unit/shared/proxy-registry.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 54
     },
@@ -4019,155 +4009,147 @@
       "count": 1
     }
   },
-  "tests/unit/proxy-resolution-status-filter.test.ts": {
+  "tests/unit/db/proxy-resolution-status-filter.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/proxySubscription.service.test.ts": {
+  "tests/unit/db/proxySubscription.service.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/qoder-executor.test.ts": {
+  "tests/unit/config/qoder-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/quota-cache-is-exhausted-per-window-5923.test.ts": {
+  "tests/unit/db/quota-cache-is-exhausted-per-window-5923.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/quota-concept-card-i18n.test.ts": {
+  "tests/unit/ui/quota-concept-card-i18n.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/quota-email-privacy.test.ts": {
+  "tests/unit/lib/quota-email-privacy.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/quota-enforce.test.ts": {
+  "tests/unit/lib/quota-enforce.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 6
     }
   },
-  "tests/unit/quota-fetch-throttle-scope-6911.test.ts": {
+  "tests/unit/services/quota-fetch-throttle-scope-6911.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/quota-groups-crud.test.ts": {
+  "tests/unit/db/quota-groups-crud.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/quota-groups-migration.test.ts": {
+  "tests/unit/db/quota-groups-migration.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/quota-helpers.test.ts": {
+  "tests/unit/ui/quota-helpers.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/quota-phase2.test.ts": {
+  "tests/unit/lib/quota-phase2.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/quota-pool-connections.test.ts": {
+  "tests/unit/db/quota-pool-connections.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/quota-pool-delete-prune.test.ts": {
+  "tests/unit/db/quota-pool-delete-prune.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/quota-pool-single-provider.test.ts": {
+  "tests/unit/db/quota-pool-single-provider.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/quota-redis-store.test.ts": {
+  "tests/unit/lib/quota-redis-store.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/quota-spend-recorder.test.ts": {
+  "tests/unit/lib/quota-spend-recorder.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/quota-store-factory.test.ts": {
+  "tests/unit/lib/quota-store-factory.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/quota-summed-budget.test.ts": {
+  "tests/unit/lib/quota-summed-budget.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/radar-api-routes.test.ts": {
+  "tests/unit/api/radar-api-routes.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/radar-apply-feed.test.ts": {
+  "tests/unit/lib/radar-apply-feed.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/radar-db.test.ts": {
+  "tests/unit/db/radar-db.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 5
     }
   },
-  "tests/unit/radar-referrals-sync.test.ts": {
+  "tests/unit/lib/radar-referrals-sync.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/radar-sync.test.ts": {
+  "tests/unit/lib/radar-sync.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/rate-limit-enhanced.test.ts": {
+  "tests/unit/services/rate-limit-enhanced.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/rate-limit-queue-timeout-lockout.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "tests/unit/rateLimitManager-idle-eviction.test.ts": {
+  "tests/unit/services/rateLimitManager-idle-eviction.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/rateLimitManager-update-sequencing.test.ts": {
+  "tests/unit/services/rateLimitManager-update-sequencing.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/refactor-buildHeaders-preamble.test.ts": {
+  "tests/unit/executors/refactor-buildHeaders-preamble.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/refactor-resolveBaseUrl.test.ts": {
+  "tests/unit/executors/refactor-resolveBaseUrl.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
@@ -4177,62 +4159,62 @@
       "count": 2
     }
   },
-  "tests/unit/registry-utils.test.ts": {
+  "tests/unit/config/registry-utils.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/remaining-tasks.test.ts": {
+  "tests/unit/domain/remaining-tasks.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/repro-7023.test.ts": {
+  "tests/unit/translator/repro-7023.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/repro-9406-claude-web-429-valid.test.ts": {
+  "tests/unit/services/repro-9406-claude-web-429-valid.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/request-log-payloads.test.ts": {
+  "tests/unit/usage/request-log-payloads.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/request-logger-endpoints.test.ts": {
+  "tests/unit/utils/request-logger-endpoints.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/request-logger-signature.test.ts": {
+  "tests/unit/shared/request-logger-signature.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/resolve-proxy-family.test.ts": {
+  "tests/unit/utils/resolve-proxy-family.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/response-sanitizer.test.ts": {
+  "tests/unit/handlers/response-sanitizer.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 83
     }
   },
-  "tests/unit/responses-transformer.test.ts": {
+  "tests/unit/translator/responses-transformer.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/responses-translation-fixes.test.ts": {
+  "tests/unit/translator/responses-translation-fixes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 34
     }
   },
-  "tests/unit/route-edge-coverage.test.ts": {
+  "tests/unit/api/route-edge-coverage.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 57
     },
@@ -4240,42 +4222,42 @@
       "count": 1
     }
   },
-  "tests/unit/route-guard-loopback-via-proxy.test.ts": {
+  "tests/unit/authz/route-guard-loopback-via-proxy.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/routing-events-concurrency.test.ts": {
+  "tests/unit/services/routing-events-concurrency.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/safe-outbound-fetch-probe-timeout.test.ts": {
+  "tests/unit/shared/safe-outbound-fetch-probe-timeout.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/safe-outbound-fetch.test.ts": {
+  "tests/unit/shared/safe-outbound-fetch.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/schema-coercion.test.ts": {
+  "tests/unit/translator/schema-coercion.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     }
   },
-  "tests/unit/search-blocked-providers.test.ts": {
+  "tests/unit/api/search-blocked-providers.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/search-handler-extended.test.ts": {
+  "tests/unit/handlers/search-handler-extended.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/search-route.test.ts": {
+  "tests/unit/api/search-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     },
@@ -4288,27 +4270,27 @@
       "count": 5
     }
   },
-  "tests/unit/service-combo-metrics.test.ts": {
+  "tests/unit/services/service-combo-metrics.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/service-context-handoff.test.ts": {
+  "tests/unit/services/service-context-handoff.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/service-context-manager.test.ts": {
+  "tests/unit/services/service-context-manager.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/service-intent-classifier.test.ts": {
+  "tests/unit/services/service-intent-classifier.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/service-system-transforms.test.ts": {
+  "tests/unit/services/service-system-transforms.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     },
@@ -4316,12 +4298,12 @@
       "count": 1
     }
   },
-  "tests/unit/service-token-limit-counter.test.ts": {
+  "tests/unit/services/service-token-limit-counter.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/services-branch-hardening.test.ts": {
+  "tests/unit/services/services-branch-hardening.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -4364,77 +4346,77 @@
       "count": 1
     }
   },
-  "tests/unit/session-pool-modular.test.ts": {
+  "tests/unit/services/session-pool-modular.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/session-pool-rest-api.test.ts": {
+  "tests/unit/services/session-pool-rest-api.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/session-pool.test.ts": {
+  "tests/unit/services/session-pool.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/settings-route-password.test.ts": {
+  "tests/unit/api/settings-route-password.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/shared-api-utils.test.ts": {
+  "tests/unit/shared/shared-api-utils.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
     }
   },
-  "tests/unit/sidebar-customization.test.ts": {
+  "tests/unit/shared/sidebar-customization.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 11
     }
   },
-  "tests/unit/sidebar-visibility.test.ts": {
+  "tests/unit/ui/sidebar-visibility.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/signature-cache.test.ts": {
+  "tests/unit/services/signature-cache.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/silent-sse-close-7699.test.ts": {
+  "tests/unit/utils/silent-sse-close-7699.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/skills-collect-routes.test.ts": {
+  "tests/unit/api/skills-collect-routes.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/skills-registry.test.ts": {
+  "tests/unit/lib/skills-registry.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/skills-routes.test.ts": {
+  "tests/unit/api/skills-routes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/skills-skillssh.test.ts": {
+  "tests/unit/lib/skills-skillssh.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/spend-batch-writer.test.ts": {
+  "tests/unit/domain/spend-batch-writer.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/sse-auth.test.ts": {
+  "tests/unit/services/sse-auth.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 13
     },
@@ -4442,37 +4424,37 @@
       "count": 1
     }
   },
-  "tests/unit/sse-heartbeat-integration.test.ts": {
+  "tests/unit/utils/sse-heartbeat-integration.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/sseTextTransform.test.ts": {
+  "tests/unit/lib/sseTextTransform.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     }
   },
-  "tests/unit/startup-stale-cooldown-recovery.test.ts": {
+  "tests/unit/db/startup-stale-cooldown-recovery.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/stream-prompt-tokens-zero-upstream.test.ts": {
+  "tests/unit/utils/stream-prompt-tokens-zero-upstream.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/stream-timing.test.ts": {
+  "tests/unit/utils/stream-timing.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/stream-utilities.test.ts": {
+  "tests/unit/utils/stream-utilities.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/stream-utils.test.ts": {
+  "tests/unit/utils/stream-utils.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 14
     },
@@ -4480,92 +4462,87 @@
       "count": 2
     }
   },
-  "tests/unit/streamingPiiTransform.test.ts": {
+  "tests/unit/lib/streamingPiiTransform.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 18
     }
   },
-  "tests/unit/sync-bundle.test.ts": {
+  "tests/unit/db/sync-bundle.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/sync-routes.test.ts": {
+  "tests/unit/api/sync-routes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/t08-allowed-connections.test.ts": {
+  "tests/unit/shared/t08-allowed-connections.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/t19-codex-responses-empty-content.test.ts": {
+  "tests/unit/handlers/t19-codex-responses-empty-content.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/t23-t24-fallback-resilience.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "tests/unit/t3-chat-web.test.ts": {
+  "tests/unit/executors/t3-chat-web.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/t31-t33-t34-t38-model-specs.test.ts": {
+  "tests/unit/services/t31-t33-t34-t38-model-specs.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/t3chat-web-cookie-hint-5465.test.ts": {
+  "tests/unit/ui/t3chat-web-cookie-hint-5465.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/t43-gemini-tool-call-no-thought-signature.test.ts": {
+  "tests/unit/translator/t43-gemini-tool-call-no-thought-signature.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/tag-routing.test.ts": {
+  "tests/unit/services/tag-routing.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/tailscaleTunnel-anti-fold-10293.test.ts": {
+  "tests/unit/lib/tailscaleTunnel-anti-fold-10293.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/telemetry-summary-route.test.ts": {
+  "tests/unit/services/telemetry-summary-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/thundering-herd.test.ts": {
+  "tests/unit/config/thundering-herd.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/tlsClient-circuit-breaker.test.ts": {
+  "tests/unit/utils/tlsClient-circuit-breaker.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/token-health-check-circuit-breaker.test.ts": {
+  "tests/unit/lib/token-health-check-circuit-breaker.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/token-health-check.test.ts": {
+  "tests/unit/config/token-health-check.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/token-limits.test.ts": {
+  "tests/unit/db/token-limits.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -4573,12 +4550,12 @@
       "count": 1
     }
   },
-  "tests/unit/token-refresh-route-service.test.ts": {
+  "tests/unit/sse/token-refresh-route-service.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 10
     }
   },
-  "tests/unit/token-refresh-service.test.ts": {
+  "tests/unit/services/token-refresh-service.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 17
     },
@@ -4586,32 +4563,32 @@
       "count": 3
     }
   },
-  "tests/unit/tool-request-sanitization.test.ts": {
+  "tests/unit/translator/tool-request-sanitization.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     }
   },
-  "tests/unit/trae-executor.test.ts": {
+  "tests/unit/executors/trae-executor.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 7
     }
   },
-  "tests/unit/transform-stream-hwm.test.ts": {
+  "tests/unit/utils/transform-stream-hwm.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/translator-claude-helper-thinking.test.ts": {
+  "tests/unit/translator/translator-claude-helper-thinking.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 21
     }
   },
-  "tests/unit/translator-claude-to-gemini.test.ts": {
+  "tests/unit/translator/translator-claude-to-gemini.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 15
     }
   },
-  "tests/unit/translator-claude-to-openai.test.ts": {
+  "tests/unit/translator/translator-claude-to-openai.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
@@ -4631,77 +4608,77 @@
       "count": 1
     }
   },
-  "tests/unit/translator-helper-branches.test.ts": {
+  "tests/unit/translator/translator-helper-branches.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 25
     }
   },
-  "tests/unit/translator-openai-responses-req.test.ts": {
+  "tests/unit/translator/translator-openai-responses-req.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 76
     }
   },
-  "tests/unit/translator-openai-to-claude.test.ts": {
+  "tests/unit/config/translator-openai-to-claude.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/translator-openai-to-gemini.test.ts": {
+  "tests/unit/translator/translator-openai-to-gemini.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 63
     }
   },
-  "tests/unit/translator-openai-to-kiro.test.ts": {
+  "tests/unit/translator/translator-openai-to-kiro.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 14
     }
   },
-  "tests/unit/translator-redacted-thinking-model-aware-4479.test.ts": {
+  "tests/unit/translator/translator-redacted-thinking-model-aware-4479.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/translator-resp-antigravity-thinking-boundary.test.ts": {
+  "tests/unit/translator/translator-resp-antigravity-thinking-boundary.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
     }
   },
-  "tests/unit/translator-resp-empty-string-tool-arg.test.ts": {
+  "tests/unit/translator/translator-resp-empty-string-tool-arg.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "tests/unit/translator-resp-gemini-to-openai.test.ts": {
+  "tests/unit/translator/translator-resp-gemini-to-openai.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 75
     }
   },
-  "tests/unit/translator-resp-openai-responses-roundtrip.test.ts": {
+  "tests/unit/translator/translator-resp-openai-responses-roundtrip.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 4
     }
   },
-  "tests/unit/translator-resp-openai-to-claude.test.ts": {
+  "tests/unit/translator/translator-resp-openai-to-claude.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 14
     }
   },
-  "tests/unit/translator-thinking-provider-compat-2043.test.ts": {
+  "tests/unit/translator/translator-thinking-provider-compat-2043.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 12
     }
   },
-  "tests/unit/translator-tool-call-shim.test.ts": {
+  "tests/unit/translator/translator-tool-call-shim.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
   },
-  "tests/unit/translator-tools-anthropic-shape.test.ts": {
+  "tests/unit/translator/translator-tools-anthropic-shape.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 9
     }
   },
-  "tests/unit/tryBackedChat.test.ts": {
+  "tests/unit/services/tryBackedChat.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
@@ -4801,17 +4778,17 @@
       "count": 1
     }
   },
-  "tests/unit/universal-handoff.test.ts": {
+  "tests/unit/services/universal-handoff.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 16
     }
   },
-  "tests/unit/usage-analytics-route.test.ts": {
+  "tests/unit/usage/usage-analytics-route.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/usage-analytics.test.ts": {
+  "tests/unit/usage/usage-analytics.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
@@ -4821,22 +4798,22 @@
       "count": 17
     }
   },
-  "tests/unit/usage-providers.test.ts": {
+  "tests/unit/services/usage-providers.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/usage-service-hardening.test.ts": {
+  "tests/unit/services/usage-service-hardening.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 56
     }
   },
-  "tests/unit/v1-ws-bridge.test.ts": {
+  "tests/unit/build/v1-ws-bridge.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/v1-ws-route.test.ts": {
+  "tests/unit/api/v1-ws-route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
     }
@@ -4846,7 +4823,7 @@
       "count": 1
     }
   },
-  "tests/unit/version-manager.test.ts": {
+  "tests/unit/lib/version-manager.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -4854,7 +4831,7 @@
       "count": 1
     }
   },
-  "tests/unit/versionManager-orchestrator.test.ts": {
+  "tests/unit/lib/versionManager-orchestrator.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     },
@@ -4862,22 +4839,22 @@
       "count": 2
     }
   },
-  "tests/unit/vertex-express-apikey.test.ts": {
+  "tests/unit/executors/vertex-express-apikey.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/vertex-media.test.ts": {
+  "tests/unit/executors/vertex-media.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "tests/unit/video-custom-provider-route.test.ts": {
+  "tests/unit/db/video-custom-provider-route.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/vscode-token-routes.test.ts": {
+  "tests/unit/api/vscode-token-routes.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 65
     },
@@ -4885,47 +4862,47 @@
       "count": 1
     }
   },
-  "tests/unit/waitForServer-tcp-fallback-6800.test.mjs": {
+  "tests/unit/cli/waitForServer-tcp-fallback-6800.test.mjs": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/warmupScheduler.test.ts": {
+  "tests/unit/lib/warmupScheduler.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "tests/unit/web-cookie-providers-new.test.ts": {
+  "tests/unit/executors/web-cookie-providers-new.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 5
     }
   },
-  "tests/unit/web-runtime-env.test.ts": {
+  "tests/unit/lib/web-runtime-env.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/web-search-9279-repro.test.ts": {
+  "tests/unit/services/web-search-9279-repro.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "tests/unit/web-search-fallback-format.test.ts": {
+  "tests/unit/services/web-search-fallback-format.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     }
   },
-  "tests/unit/web-session-pool-health.test.ts": {
+  "tests/unit/services/web-session-pool-health.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "tests/unit/webhook-abort-timer-cleanup.test.ts": {
+  "tests/unit/lib/webhook-abort-timer-cleanup.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
     }
   },
-  "tests/unit/xiaomi-providers-registry.test.ts": {
+  "tests/unit/config/xiaomi-providers-registry.test.ts": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }

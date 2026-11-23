@@ -75,7 +75,7 @@ function errorResponse(status: number, message: string, code: string): Response 
 /**
  * Wrap a Response into the executor wrapper contract shape
  * `{response, url, headers, transformedBody}` that `chatCore.ts` and the
- * web-cookie/noauth sweep (tests/unit/executor-web-cookie-sweep.test.ts)
+ * web-cookie/noauth sweep (tests/unit/handlers/executor-web-cookie-sweep.test.ts)
  * require. `headers` and `transformedBody` are the ACTUAL upstream request
  * headers and body — chatCore surfaces them as the provider-request-capture
  * ("what we actually sent") in the dashboard and uses the body for service-tier

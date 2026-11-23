@@ -303,7 +303,7 @@ export const WEB_COOKIE_PROVIDERS = {
     // alias. Aliases resolve 1:1 to a provider id, so the dashboard's model-string
     // routing always picked v0-vercel, silently hiding this provider's own
     // credentials. Follows the established secondary-web-variant convention (see
-    // kimi-web / huggingchat in tests/unit/provider-alias-uniqueness.test.ts):
+    // kimi-web / huggingchat in tests/unit/config/provider-alias-uniqueness.test.ts):
     // the web/secondary variant uses its own id as alias instead of a short prefix.
     alias: "v0-vercel-web",
     name: "v0 Vercel Web (Code Gen)",

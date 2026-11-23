@@ -112,7 +112,7 @@ async function buildLogExportStream({
           // Node HTTP response (as any Node-based adapter does), a source error does not
           // end or destroy the destination response — the client's fetch() never resolves
           // and never rejects, and it hangs forever (proven by
-          // tests/unit/repro-13999-mid-stream-error.test.ts). Instead of erroring the
+          // tests/unit/usage/repro-13999-mid-stream-error.test.ts). Instead of erroring the
           // stream, close the JSON document out cleanly with a trailing `error`/`emitted`
           // marker so the HTTP response always completes, and log the failure server-side.
           streamError = err;

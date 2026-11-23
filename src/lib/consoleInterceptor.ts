@@ -108,7 +108,7 @@ const CLOCK_TOKEN_RE = /^\d{2}:\d{2}:\d{2}$/;
 // (ANSI_ESCAPE_RE, ReDoS-safe: bounded classes, no nested quantifiers). Importing that
 // module here would pull the translator formats and the provider registry into the
 // startup path, so the pattern is duplicated and kept in sync by the parity test in
-// tests/unit/console-interceptor-message-fidelity.test.ts.
+// tests/unit/lib/console-interceptor-message-fidelity.test.ts.
 const ANSI_PATTERN_RE =
   /\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[A-Z\[\]\\^_`])|[\x00-\x08\x0b\x0c\x0e-\x1f]/;
 

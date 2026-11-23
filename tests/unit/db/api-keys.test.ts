@@ -2,7 +2,7 @@
  * Unit coverage for the api_keys DB layer — focused on the `scopes` column
  * and the audit-event emission contract for privileged scope changes.
  *
- * The fixtures here intentionally mirror tests/unit/api-auth.test.ts so the
+ * The fixtures here intentionally mirror tests/unit/lib/api-auth.test.ts so the
  * two suites share the same bootstrap shape (isolated database per test file,
  * fresh tables per test, env reset).
  */

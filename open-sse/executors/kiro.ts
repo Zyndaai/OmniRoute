@@ -1005,7 +1005,7 @@ export class KiroExecutor extends BaseExecutor {
             // Handle token usage. Kiro reports it under more than one frame: the
             // `metricsEvent` shape covered by unit tests, and a `metadataEvent`
             // carrying a nested `usage` object — the shape observed on live
-            // API-key traffic (see tests/unit/executor-kiro.test.ts, the
+            // API-key traffic (see tests/unit/executors/executor-kiro.test.ts, the
             // "live API-key event shape" case, whose frames are
             // assistantResponseEvent / metadataEvent / contextUsageEvent /
             // meteringEvent with no metricsEvent at all). Reading only

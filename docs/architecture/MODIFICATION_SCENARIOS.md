@@ -11,7 +11,7 @@ lastUpdated: 2026-10-18
 
 ## Adding a New Provider
 
-0. Check `docs/reference/REMOVED_PROVIDERS.md` first — providers removed at their operator's request must never be reintroduced (guarded by `tests/unit/removed-providers-blocklist.test.ts`)
+0. Check `docs/reference/REMOVED_PROVIDERS.md` first — providers removed at their operator's request must never be reintroduced (guarded by `tests/unit/config/removed-providers-blocklist.test.ts`)
 1. Register in `src/shared/constants/providers.ts` (Zod-validated at load)
 2. Add executor in `open-sse/executors/` if custom logic needed (extend `BaseExecutor`)
 3. Add translator in `open-sse/translator/` if non-OpenAI format

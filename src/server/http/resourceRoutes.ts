@@ -6,7 +6,7 @@
  * proxy forwards the embedded app's own writes.
  *
  * Keep in sync with the `route.ts` files under `src/app` outside `src/app/api`
- * (`tests/unit/page-action-origin.test.ts` fails when one is missing).
+ * (`tests/unit/server/page-action-origin.test.ts` fails when one is missing).
  */
 import { matchPathPattern } from "./pathPattern";
 

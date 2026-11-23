@@ -101,7 +101,7 @@ function mutableVideoLogMessage(
  * mutually exclusive with the array branch (a message's `content` is one or
  * the other, never both) and uses `String.prototype.replaceAll` against the
  * trusted `fullText` literal to swap every occurrence — see
- * `tests/unit/video-bridge-derived-prompt-redaction.test.ts`.
+ * `tests/unit/handlers/video-bridge-derived-prompt-redaction.test.ts`.
  * When persisting an observed video request, every shadow entry must match:
  * a partial match can otherwise leave another video's transcript in the log.
  */

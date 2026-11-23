@@ -542,7 +542,7 @@ test("VB-S03/#8430: combo-mapping describe failure replaces the image with an er
   // image_url part is now replaced with an "(unavailable)" error stub instead
   // of being preserved. The original #4012 preserve-raw behavior still applies
   // to the reroute path, where the upstream model might still be vision-capable
-  // (see tests/unit/vision-bridge-preserve-on-failure-4012.test.ts, updated by
+  // (see tests/unit/guardrails/vision-bridge-preserve-on-failure-4012.test.ts, updated by
   // the same #8430 commit).
   const imagePart = content.find((p) => p.type === "image_url");
   assert.strictEqual(

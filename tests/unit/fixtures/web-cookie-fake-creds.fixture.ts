@@ -1,7 +1,7 @@
 /**
  * Shared FAKE_CREDS fixture for the web-cookie executor sweep.
  *
- * Extracted out of tests/unit/executor-web-cookie-sweep.test.ts (issue #14480) so
+ * Extracted out of tests/unit/handlers/executor-web-cookie-sweep.test.ts (issue #14480) so
  * a focused regression test can import the exact per-provider fake-credential
  * value the sweep uses WITHOUT importing the sweep test file itself — importing
  * that file also registers (and runs) its own `describe()` sweep over all 26

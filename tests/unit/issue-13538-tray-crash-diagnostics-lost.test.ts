@@ -45,7 +45,7 @@ test("#13538: supervisor give-up path persists a discoverable crash record (curr
   const exits: Array<number | undefined> = [];
   const origExit = process.exit.bind(process);
   // @ts-ignore — stub so the real give-up exit doesn't kill the test runner,
-  // exactly like tests/unit/cli-process-supervisor.test.ts does.
+  // exactly like tests/unit/cli/cli-process-supervisor.test.ts does.
   process.exit = (code?: number) => {
     exits.push(code);
   };

@@ -2,7 +2,7 @@
 // Unit tests for the first extracted combo phase (god-file decomposition fase 1):
 // createComboContext (combo/context.ts) + phaseComboSetup (combo/comboSetup.ts).
 // The pinning-ON path (getLastSessionModel) is covered end-to-end by the existing combo
-// characterization suite (combo-sessionless-pin-3825, combo-config, etc.); here we exercise
+// characterization suite (rr-stickiness-strategies.test.ts > combo-sessionless-pin-3825, combo-config, etc.); here we exercise
 // the pure path (context_cache_protection OFF, no settings -> no DB) and the body carrier.
 import { test } from "node:test";
 import assert from "node:assert/strict";

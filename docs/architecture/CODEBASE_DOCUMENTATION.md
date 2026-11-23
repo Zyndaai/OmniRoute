@@ -679,7 +679,7 @@ Common commands:
 
 | Command                                                  | What it runs                                                     |
 | -------------------------------------------------------- | ---------------------------------------------------------------- |
-| `npm run test:unit`                                      | All `tests/unit/*.test.ts` via Node test runner (concurrency 10) |
+| `npm run test:unit`                                      | All `tests/unit/**/*.test.ts` via `scripts/dev/run-unit-tests.mjs` (concurrency 8) |
 | `npm run test:vitest`                                    | Vitest suite (MCP, autoCombo, cache)                             |
 | `npm run test:e2e`                                       | Playwright UI suite                                              |
 | `npm run test:protocols:e2e`                             | MCP + A2A protocol e2e                                           |

@@ -16,7 +16,7 @@
  *    custom base, …);
  *  - hostnames compare case-insensitively (the WHATWG parser already lowercases them).
  *
- * `tests/unit/url-host.test.ts` pins these rules and guards the migrated call sites.
+ * `tests/unit/services/url-host.test.ts` pins these rules and guards the migrated call sites.
  */
 
 /** Parsed, lowercased hostname of `value`, or `null` when it is empty or unparseable. */

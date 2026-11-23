@@ -26,5 +26,5 @@ describe("TLS proxy context with case-insensitive environment names", async () =
     assert.equal(process.env.OMNIROUTE_TEST_CASE_INSENSITIVE, undefined);
   });
 
-  await import("./tls-proxy-context.test.ts");
+  await import("./utils/tls-proxy-context.test.ts");
 });

@@ -6,7 +6,7 @@
  * This is a CLIENT-SAFE projection of the canonical server-side registry in
  * `src/mitm/targets/`. The MITM target modules pull in node-only handler logic, so the
  * dashboard cannot import them directly — this plain-data map is kept in lock-step with
- * `ALL_TARGETS` by `tests/unit/mitm-tool-hosts.test.ts` (a drift here fails that test).
+ * `ALL_TARGETS` by `tests/unit/mitm/mitm-tool-hosts.test.ts` (a drift here fails that test).
  */
 export const MITM_TOOL_HOSTS: Record<string, string[]> = {
   antigravity: [

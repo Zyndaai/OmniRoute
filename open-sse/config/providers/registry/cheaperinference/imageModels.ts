@@ -12,7 +12,7 @@
  * bare `nano-banana-2` keeps routing to Firefly (pre-existing behaviour) and these
  * models are reachable only as `cheaperinference/<id>` / `cinf/<id>`. Do NOT add
  * IMAGE_MODEL_ALIASES entries for them — that would silently re-route Firefly
- * users. Guarded by tests/unit/cheaperinference-image-models.test.ts.
+ * users. Guarded by tests/unit/config/cheaperinference-image-models.test.ts.
  *
  * The endpoint ignores `response_format:"url"` and always returns `b64_json`
  * (measured twice). The OpenAI image path already handles b64_json; this is not a

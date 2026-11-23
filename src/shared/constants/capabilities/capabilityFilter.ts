@@ -187,7 +187,7 @@ function collectCapabilityFailures(
   // stricter than the combo gate: #17289 lets combos try targets whose vision is
   // unknown (only an explicit `false` vetoes), but with this flag on, every
   // unknown-vision target is still rejected here with a 400. Pinned by
-  // tests/unit/capability-filter.test.ts.
+  // tests/unit/shared/capability-filter.test.ts.
   if (requirements.requiresVision && caps.supportsVision !== true) {
     failures.push("vision");
   }

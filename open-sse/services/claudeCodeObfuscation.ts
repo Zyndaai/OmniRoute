@@ -15,7 +15,9 @@ const DEFAULT_SENSITIVE_WORDS = [
   "cline",
   "roo-cline",
   "roo_cline",
-  "cursor",
+  // Not "cursor": as a plain word it means a paging cursor in tool descriptions and results,
+  // and the joiner reached users' answers on the /v1/messages path, which does not strip it.
+  // Cursor's own prompts are still caught by the getcursor/cursor paragraph anchor.
   "windsurf",
   "aider",
   "continue.dev",

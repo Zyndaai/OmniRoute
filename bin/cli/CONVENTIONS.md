@@ -218,5 +218,5 @@ Commands that mutate state (delete, reset, `--force`) **must**:
 - CLAUDE.md hard rules — especially #11 (publicCreds), #12 (error
   sanitization), #13 (shell injection).
 - `docs/security/ERROR_SANITIZATION.md` — the only acceptable error shapes.
-- `tests/unit/cli-tools-i18n.test.ts` — current i18n infrastructure (pre-`t()`).
+- `tests/unit/ui/cli-tools-i18n.test.ts` — current i18n infrastructure (pre-`t()`).
 - Commander.js docs — Options & subcommand patterns.

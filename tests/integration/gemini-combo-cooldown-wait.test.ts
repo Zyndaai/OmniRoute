@@ -19,7 +19,7 @@
  * in the worst case, a 429 with a SHORT retry-after (never propagated as a
  * hard combo failure). "Best effort" like gemini-live-429-classification.test.ts:
  * if the burst doesn't trip a real rate limit, the test logs and passes — the
- * hermetic regression guard is tests/unit/combo-quota-share-cooldown-wait.test.ts
+ * hermetic regression guard is tests/unit/combo/quota-fallback-and-cooldown.test.ts (combo-quota-share-cooldown-wait)
  * ("auto strategy (2 models, both rate-limited) → waits for the SHORTER
  * cooldown, then succeeds"), which proves the exact behavior deterministically.
  *
@@ -97,7 +97,7 @@ test(
         "[COMBO] no long-held request observed — burst likely did not trip a real TPM/RPM 429 " +
           "on both targets simultaneously (Gemini limits may be more generous in practice). " +
           "The exact wait/retry-shorter-cooldown behavior is proven deterministically by " +
-          "tests/unit/combo-quota-share-cooldown-wait.test.ts."
+          "tests/unit/combo/quota-fallback-and-cooldown.test.ts (combo-quota-share-cooldown-wait)."
       );
     }
 

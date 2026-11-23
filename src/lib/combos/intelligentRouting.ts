@@ -45,7 +45,7 @@ export type IntelligentProviderScore = {
 };
 
 // Kept in sync with DEFAULT_WEIGHTS by
-// tests/unit/combo-scoring-weights-schema-coverage.test.ts. This is a copy on
+// tests/unit/services/combo-scoring-weights-schema-coverage.test.ts. This is a copy on
 // purpose: this module is imported by a client component, and importing the
 // scorer would pull the tier resolver and per-provider cost data into the
 // browser bundle. The test is what makes the copy safe.

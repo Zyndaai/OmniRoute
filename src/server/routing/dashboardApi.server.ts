@@ -12,7 +12,7 @@
  * then the route runs with its own checks. A loader therefore gets exactly what the browser's
  * own `fetch("/api/...")` would get, and never more. Reading `@/lib/db/*` directly from a loader
  * would skip every rule that is keyed on the API path, so dashboard routes must not do that
- * (`tests/unit/dashboard-loaders-use-api.test.ts`).
+ * (`tests/unit/db/dashboard-loaders-use-api.test.ts`).
  */
 import { data, redirect } from "react-router";
 

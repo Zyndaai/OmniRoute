@@ -2600,7 +2600,7 @@ describe("muse-session-ownership", () => {
 describe("video-bridge-log-redaction (#12150)", () => {
   // P1b of #12150 (Video Bridge transcript retention) — surface 1 (call-log sink).
   // Exercises the real persistAttemptLogs serialization (same harness pattern as
-  // tests/unit/chatcore-attempt-logging.test.ts): a real temp DB, a poll for the
+  // tests/unit/usage/chatcore-attempt-logging.test.ts): a real temp DB, a poll for the
   // async saveCallLog write, and assertions on the persisted requestBody.
   //
   // Proves: when PersistAttemptLogsContext carries a videoBridgeLogRedaction map

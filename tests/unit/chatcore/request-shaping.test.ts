@@ -1620,7 +1620,7 @@ describe("chatcore-strip-stale-headers", () => {
 
 describe("guardrail-pipeline-wiring-characterization", () => {
   // Characterization tests — guardrail pipeline WIRING (plan item V3-1, before the v4 module
-  // extraction). Companion of tests/unit/guardrail-pipeline-characterization.test.ts, which
+  // extraction). Companion of tests/unit/guardrails/guardrail-pipeline-characterization.test.ts, which
   // pins the behavior of the pieces; this describe pins where they are plugged in.
   //
   // Approach: STATIC SOURCE ASSERTIONS. Driving handleChat / handleChatCore end to end needs the

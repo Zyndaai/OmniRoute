@@ -19,6 +19,10 @@ upstream: <https://github.com/cheaper-inference/OmniRoute/blob/release/v3.8.53/C
   `{type: "between_tools"}`, the value Anthropic's 400 names for it, instead of being dropped.
   Dropped, Sonnet fell back to adaptive thinking and every no-thinking call billed 200–350
   reasoning tokens (new spec field `disabledThinkingType`).
+- **fix(claude):** "cursor" is no longer obfuscated with a zero-width joiner on the Claude OAuth
+  path. As a plain word it is a paging cursor in tool descriptions and results, and on
+  `/v1/messages` the joiner came back in the model's answers. Cursor's own prompts are still
+  dropped by the `getcursor/cursor` paragraph anchor.
 
 ### 📝 Maintenance
 

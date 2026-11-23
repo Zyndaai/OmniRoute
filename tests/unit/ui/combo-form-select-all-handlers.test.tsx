@@ -4,7 +4,7 @@
 // batch logic by hand as a parallel copy — that copy could stay green while
 // the real component logic broke (#8526). The regression guard that actually
 // blocks CI is the node:test copy of this file at
-// tests/unit/combo-select-all-batch-8526.test.ts (this file's location,
+// tests/unit/lib/combo-select-all-batch-8526.test.ts (this file's location,
 // tests/unit/ui/*.test.tsx, is only collected by the advisory
 // `test:vitest:ui` — see CONTRIBUTING.md "Both test runners must pass").
 import { describe, expect, it } from "vitest";

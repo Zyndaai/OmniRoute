@@ -47,7 +47,7 @@ export interface SearchProviderConfig {
    * host the base URL resolves to, so honoring a caller-chosen value hands that
    * key to the caller's server (GHSA-3f8g-pfh9-j687). The invariant
    * "never set alongside authType: apikey" is enforced by
-   * tests/unit/search-baseurl-client-override-3f8g.test.ts.
+   * tests/unit/config/search-baseurl-client-override-3f8g.test.ts.
    */
   allowClientBaseUrlOverride?: boolean;
   /**
@@ -313,7 +313,7 @@ export const SEARCH_PROVIDERS: Record<string, SearchProviderConfig> = {
     primaryWhenConfigured: true,
     // Keyless and self-hosted by definition: the caller names their own SearXNG
     // instance and no operator credential travels with the request. This is a
-    // documented flow (tests/unit/search-route.test.ts). Still block-metadata
+    // documented flow (tests/unit/api/search-route.test.ts). Still block-metadata
     // guarded, so IMDS stays unreachable.
     allowClientBaseUrlOverride: true,
   },

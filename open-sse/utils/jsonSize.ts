@@ -10,7 +10,7 @@
  * `jsonLength()` walks the value and counts instead. Same O(n) scan, no allocation.
  *
  * It is EXACT, not an approximation: every consumer feeds a threshold, and an approximation
- * would silently shift routing and timeout decisions. `tests/unit/json-size-exactness.test.ts`
+ * would silently shift routing and timeout decisions. `tests/unit/utils/json-size-exactness.test.ts`
  * property-tests `jsonLength(x) === JSON.stringify(x).length` over generated structures.
  *
  * Anything outside the plain-JSON subset (Date, toJSON, class instances, Map, ...) falls back to

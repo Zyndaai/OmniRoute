@@ -812,7 +812,7 @@ export const PROVIDER_MODELS_CONFIG: Record<string, ProviderModelsConfigEntry> =
   // xai-oauth intentionally NOT registered here: it stays on the frozen
   // static seed unless XAI_OAUTH_LIVE_MODEL_DISCOVERY is on (see
   // getXaiOauthLiveModelsConfig above) — keeping this map's keys in lockstep
-  // with HARDCODED_MODELS_CONFIG_IDS (tests/unit/discovery-class.test.ts)
+  // with HARDCODED_MODELS_CONFIG_IDS (tests/unit/providers/discovery-class.test.ts)
   // means the flag gate has to live at the lookup call site, not here.
   mistral: {
     url: "https://api.mistral.ai/v1/models",

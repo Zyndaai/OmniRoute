@@ -103,7 +103,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     // dedicated path.
     //
     // NB: keep the generic helper's name out of the comments above its real
-    // call site. tests/unit/codex-manual-refresh-rotating-guard.test.ts finds
+    // call site. tests/unit/api/codex-manual-refresh-rotating-guard.test.ts finds
     // that call with a plain substring search and asserts the openai-auth0
     // rotation guard precedes it, so an earlier textual mention would become
     // the match instead of the actual invocation.

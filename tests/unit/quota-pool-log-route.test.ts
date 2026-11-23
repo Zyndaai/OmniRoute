@@ -4,7 +4,7 @@
  * Task 7 — source-level assertions for the usage-log endpoint + card.
  *
  * Follows the same pattern as:
- *   tests/unit/budget-route-auth.test.ts (source-scan)
+ *   tests/unit/api/budget-route-auth.test.ts (source-scan)
  *   tests/unit/quota-account-quota-row.test.ts (source-scan)
  *
  * We use source-scan assertions (readFileSync) so the test works with

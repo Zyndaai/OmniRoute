@@ -18,7 +18,7 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 600_000;
 // resolveStreamActiveTimeoutMs in open-sse/handlers/chatCore/upstreamTimeouts.ts.
 // The default is the largest per-model budget (1_200_000ms, the Codex models in
 // open-sse/config/providers/registry/codex) plus a one-minute margin.
-// tests/unit/stream-active-timeout-covers-model-budgets.test.ts re-derives both
+// tests/unit/config/stream-active-timeout-covers-model-budgets.test.ts re-derives both
 // from the registry (#12913).
 export const MAX_REGISTERED_MODEL_TIMEOUT_MARGIN_MS = 60_000;
 export const DEFAULT_STREAM_ACTIVE_TIMEOUT_MS = 1_260_000;

@@ -472,7 +472,7 @@ test.describe("Combos flow", () => {
     // #11433 (PR #11670): a manually typed alias prefix ("cx/") is kept verbatim in
     // `model` — rebuilding it from the canonical id can collide with a routing-alias
     // override — while `providerId` still resolves to the canonical "codex".
-    // Same contract as tests/unit/combo-builder-draft.test.ts.
+    // Same contract as tests/unit/lib/combo-builder-draft.test.ts.
     expect(state.lastPayload?.models).toEqual([
       {
         kind: "model",

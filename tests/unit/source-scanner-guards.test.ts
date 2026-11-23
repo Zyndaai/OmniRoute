@@ -27,7 +27,7 @@
 // KNOWN LIMITATION (deliberate): variables are keyed by name per FILE, not per scope.
 // A file that declares `const source` in two separate test bodies pools both sets of
 // usages, so an anchor on one can mask a negative-only guard on the other
-// (tests/unit/8395-plugin-hooks-fire.test.ts is the current example). This errs toward
+// (tests/unit/lib/8395-plugin-hooks-fire.test.ts is the current example). This errs toward
 // UNDER-reporting — it never invents a violation — and closing it needs real
 // scope-aware parsing, which is not worth the complexity for the size of this problem.
 import assert from "node:assert/strict";

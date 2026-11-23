@@ -5,7 +5,7 @@
  * credential-health if it ever routes through the chat path) MUST execute
  * inside runAsProbe() so deactivation guards can refuse probe-origin
  * failures (invariant #9817: only a real request-path failure deactivates
- * a connection). Pinned by tests/unit/probe-testall-isolation.test.ts.
+ * a connection). Pinned by tests/unit/lib/probe-testall-isolation.test.ts.
  *
  * NOTE: when a probe dispatches through a scheduler with a queue
  * (the rate limiter via withRateLimit), runAsProbe must wrap the scheduled fn

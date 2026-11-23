@@ -33,7 +33,7 @@ function certFilePath() {
 // A legacy-leaf install is the server.crt + server.key PAIR with no CA pair
 // (cert/migration.ts::decideCertMigration). A lone server.crt resolves to the
 // root-CA model, whose active cert is ca.crt — see
-// tests/unit/agent-bridge-cert-download-active-ca.test.ts for that side.
+// tests/unit/api/agent-bridge-cert-download-active-ca.test.ts for that side.
 function writeLegacyLeaf(pem: string) {
   fs.writeFileSync(certFilePath(), pem);
   fs.writeFileSync(

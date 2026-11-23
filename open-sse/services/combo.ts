@@ -646,7 +646,7 @@ export async function buildAutoCandidates(
 
 // Context-cache pin health gate — moved to combo/dispatchPrelude.ts alongside the
 // pinned-model dispatch branch that consumes it. Re-exported so existing importers
-// (tests/unit/combo-pin-health-gate.test.ts) keep resolving from combo.ts.
+// (tests/unit/combo/auto-pool-connection-scope-hidden-leaf.test.ts) keep resolving from combo.ts.
 export { pinIsDurablyUnhealthy };
 
 /**

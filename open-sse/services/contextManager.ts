@@ -304,7 +304,7 @@ export function pruneOlderInlineImages(
  * materializing that tree. On a multi-megabyte agent body the old path
  * allocated a full placeholder copy of the structure only to measure it.
  *
- * Semantics are frozen by tests/unit/context-manager-estimation-parity.test.ts
+ * Semantics are frozen by tests/unit/services/context-manager-estimation-parity.test.ts
  * against the pre-optimization implementation
  * (tests/helpers/context-estimation-reference.ts), including its quirks:
  * - a node matching a media shape collapses entirely to its placeholder

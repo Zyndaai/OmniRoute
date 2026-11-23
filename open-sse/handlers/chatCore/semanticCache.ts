@@ -200,7 +200,7 @@ export async function checkSemanticCache({
       const headers: Record<string, string> = {
         "Content-Type": cachedSse ? "text/event-stream" : "application/json",
         // Keep the legacy `HIT` value verbatim: consumers match it exactly
-        // (tests/unit/chatcore-semantic-cache.test.ts and the chat-route suites).
+        // (tests/unit/handlers/chatcore-semantic-cache.test.ts and the chat-route suites).
         // A similarity hit is distinguished by X-OmniRoute-Cache-Similarity below.
         [OMNIROUTE_RESPONSE_HEADERS.cache]: "HIT",
         // Marker for latency measurement tools: this response served from cache

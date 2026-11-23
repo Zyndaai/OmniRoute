@@ -7,7 +7,7 @@
  * shells out to `which omp` to detect the CLI install, so it is classified
  * local-only in routeGuard.ts (Hard Rules #15 + #17) AND guarded by
  * requireCliToolsAuth() like every other cli-tools route
- * (tests/unit/cli-tools-auth-hardening.test.ts).
+ * (tests/unit/lib/cli-tools-auth-hardening.test.ts).
  */
 import test from "node:test";
 import assert from "node:assert/strict";

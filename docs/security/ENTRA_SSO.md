@@ -8,7 +8,7 @@ lastUpdated: 2026-09-23
 
 > **Source of truth:** `src/server/authz/entra/`, `src/lib/db/ssoIdentities.ts`
 > **Client helper:** `scripts/cli/omniroute-sso.mjs`
-> **Tests:** `tests/unit/entra-sso-auth.test.ts`, `tests/unit/entra-sso-client-script.test.ts`, `tests/integration/entra-sso-e2e.int.test.ts` (opt-in)
+> **Tests:** `tests/unit/authz/entra-sso-auth.test.ts`, `tests/unit/build/entra-sso-client-script.test.ts`, `tests/integration/entra-sso-e2e.int.test.ts` (opt-in)
 > **Audience:** Administrators rolling OmniRoute out to a Microsoft Entra ID tenant, and the developers signing in to it.
 
 Developers authenticate to `/v1/*` with a short-lived Microsoft Entra ID token

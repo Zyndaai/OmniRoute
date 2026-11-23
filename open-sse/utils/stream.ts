@@ -2445,7 +2445,7 @@ export function createSSEStream(options: StreamOptions = {}) {
                   // A genuine OpenAI upstream sends its usage in a trailing empty-choices
                   // chunk AFTER the finish; estimating here marked passthroughForwardedUsage
                   // and made the real trailing block get dropped in favor of the estimate
-                  // (billing regression pinned by tests/unit/stream-utils.test.ts). The
+                  // (billing regression pinned by tests/unit/utils/stream-utils.test.ts). The
                   // estimate is now emitted in flush(), only when the upstream stayed silent.
                   if (isFinishChunk && hasValidUsage(usage) && !passthroughForwardedUsage) {
                     const buffered = addBufferToUsage(usage);

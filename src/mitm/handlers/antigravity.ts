@@ -17,7 +17,7 @@
  *   - pipe the SSE response back to the IDE.
  *
  * Non-regressive: any change here must keep the Antigravity flow working as
- * before (see `tests/unit/mitm-handler-antigravity.test.ts`).
+ * before (see `tests/unit/mitm/mitm-handler-antigravity.test.ts`).
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentId } from "../types";

@@ -191,7 +191,7 @@ the database directly:
   `src/server/http/handler.ts` in the request context), so a loader gets exactly what the
   browser's own `fetch("/api/...")` would get. A 401 redirects to `<basePath>/login`. Return only
   the fields the page renders: loader data is serialized into the HTML. Tests:
-  `tests/unit/dashboard-api-parity.test.ts`; `tests/unit/dashboard-loaders-use-api.test.ts` fails
+  `tests/unit/server/dashboard-api-parity.test.ts`; `tests/unit/db/dashboard-loaders-use-api.test.ts` fails
   when a dashboard page imports `@/lib/db/*` or `@/sse/services/*` for data.
 - **Page writes are origin-checked for every caller.** React Router's own action check compares
   `Origin` with `request.url`, which this server builds from its bound address, so
@@ -201,14 +201,14 @@ the database directly:
   (`validateBrowserMutationOrigin`), with the dashboard CSRF token as the fallback for a
   session (`src/server/origin/pageActionOrigin.ts`). The authz pipeline's own origin check covers
   dashboard sessions only; this one also covers anonymous callers under `requireLogin=false`.
-  Test: `tests/unit/page-action-origin.test.ts`, which also fails when a `route.ts` outside
+  Test: `tests/unit/server/page-action-origin.test.ts`, which also fails when a `route.ts` outside
   `src/app/api` is missing from `resourceRoutes.ts`.
 - **CSRF token on action posts.** `installDashboardCsrfFetch` (`src/shared/utils/dashboardCsrf.ts`)
   attaches the token to `/dashboard/....data` and `/home.data` posts as well as `/api/...` writes.
 - **Expired session on a data request.** A plain 307 would be followed by `fetch()` (a POST stays a
   POST, so `/login` answers 405) and land on the error boundary. The pipeline answers a `.data`
   request with React Router's redirect form instead: 204 with `X-Remix-Redirect: <basePath>/login`
-  and `X-Remix-Reload-Document: true`. Test: `tests/unit/dashboard-data-login-redirect.test.ts`.
+  and `X-Remix-Reload-Document: true`. Test: `tests/unit/server/dashboard-data-login-redirect.test.ts`.
 
 ### Policy contracts
 
@@ -308,7 +308,7 @@ export async function POST(request: Request) {
 
 ### Pattern 3 — Adding to the public allowlist
 
-Pick the set by shape, not by convenience. One route goes in `PUBLIC_API_ROUTES_EXACT` (or `PUBLIC_READONLY_CORS_API_ROUTES` for GET-only); only a genuine subtree goes in `PUBLIC_API_ROUTE_PREFIXES`, and it **must end in `/`**. Putting a single route in the prefix list also publishes every adjacent path that shares its leading characters — including dynamic-segment siblings added later (GHSA-74g9-q8f6-793h). Update unit tests at `tests/unit/public-api-routes.test.ts`, `tests/unit/authz/public-route-exact-match.test.ts` and `tests/unit/authz/classify.test.ts`.
+Pick the set by shape, not by convenience. One route goes in `PUBLIC_API_ROUTES_EXACT` (or `PUBLIC_READONLY_CORS_API_ROUTES` for GET-only); only a genuine subtree goes in `PUBLIC_API_ROUTE_PREFIXES`, and it **must end in `/`**. Putting a single route in the prefix list also publishes every adjacent path that shares its leading characters — including dynamic-segment siblings added later (GHSA-74g9-q8f6-793h). Update unit tests at `tests/unit/shared/public-api-routes.test.ts`, `tests/unit/authz/public-route-exact-match.test.ts` and `tests/unit/authz/classify.test.ts`.
 
 ## Scopes
 
@@ -370,7 +370,7 @@ The `/api/v1/agents/tasks/*` and `/api/resilience/model-cooldowns` endpoints **n
 ## Testing
 
 - Unit tests: `tests/unit/authz/` — `classify.test.ts`, `pipeline.test.ts`, `client-api-policy.test.ts`, `management-policy.test.ts`, `public-policy.test.ts`.
-- Public allowlist: `tests/unit/public-api-routes.test.ts`.
+- Public allowlist: `tests/unit/shared/public-api-routes.test.ts`.
 - Run focused: `node --import tsx/esm --test tests/unit/authz/classify.test.ts`.
 
 ## Debugging

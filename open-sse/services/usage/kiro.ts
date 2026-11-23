@@ -388,7 +388,7 @@ export async function getKiroUsage(accessToken?: string, providerSpecificData?: 
     }
 
     // Hard (non-auth) failure keeps the pre-#6587 reject semantics — callers and
-    // tests/unit/usage-service-hardening.test.ts rely on the rejection; prefer the last
+    // tests/unit/services/usage-service-hardening.test.ts rely on the rejection; prefer the last
     // HTTP-status failure (most informative) over a network-level error.
     throw new Error(
       outcome.lastHttpFailure ||

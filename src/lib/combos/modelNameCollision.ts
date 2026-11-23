@@ -6,8 +6,8 @@
  * `acme-responses/gpt-5.5`, `backup-responses/gpt-5.5` — as THE supported
  * mechanism for per-model provider fallback on bare Responses model ids
  * (reusing the #3227/#3233 combo-before-rewrite precedence, which is
- * regression-tested in `tests/unit/responses-combo-resolution-3227.test.ts`
- * and `tests/unit/combo-name-codex-responses-rewrite.test.ts`).
+ * regression-tested in `tests/unit/api/responses-combo-resolution-3227.test.ts`
+ * and `tests/unit/api/combo-name-codex-responses-rewrite.test.ts`).
  *
  * So a colliding name is NOT rejected — it is a supported, intentional
  * pattern. This module only makes the collision *observable*: callers use it

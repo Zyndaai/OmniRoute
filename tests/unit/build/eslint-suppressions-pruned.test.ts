@@ -52,7 +52,7 @@ const KNOWN_STALE = [
   "src/app/api/v1/vscode/[token]/combos/route.ts",
   "src/app/api/v1/vscode/raw/[token]/combos/route.ts",
   "src/lib/oauth/providers/ghe-copilot.ts",
-  "tests/unit/cursor-agent-session.test.ts",
+  "tests/unit/utils/cursor-agent-session.test.ts",
 ];
 
 test("SHAPE-SANITY: the suppressions file is keyed by FILE first, then rule", () => {

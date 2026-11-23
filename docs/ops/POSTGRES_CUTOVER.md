@@ -151,8 +151,9 @@ docker tag "$OLD_IMAGE" omniroute-rollback:sqlite
     /usr/local/sbin/omniroute-autodeploy --dry-run    # must say up-to-date (running = :latest)
     rm /opt/omniroute/AUTODEPLOY_PAUSED
     ```
-    Watch the first real deploy (`journalctl -u omniroute-autodeploy -f`): its rollback path has
-    not run on the server yet.
+    Its deploy and rollback paths were tested on a throwaway copy on 2026-11-23. Its first
+    successful deploy deletes every other `ghcr.io/zyndaai/omniroute` image, including the
+    `omniroute-rollback:sqlite` tag.
 
 ### Rollback
 

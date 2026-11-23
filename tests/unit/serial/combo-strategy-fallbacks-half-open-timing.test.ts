@@ -1,7 +1,7 @@
 /**
  * tests/unit/serial/combo-strategy-fallbacks-half-open-timing.test.ts
  *
- * Extracted from tests/unit/combo-strategy-fallbacks.test.ts (#6803).
+ * Extracted from tests/unit/services/combo-strategy-fallbacks.test.ts (#6803).
  *
  * This scenario races a real 80ms setTimeout against a 40ms circuit-breaker
  * resetTimeout before asserting breaker.getStatus().state === 'HALF_OPEN'.

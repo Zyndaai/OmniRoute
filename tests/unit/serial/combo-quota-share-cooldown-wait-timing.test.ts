@@ -1,7 +1,8 @@
 /**
  * tests/unit/serial/combo-quota-share-cooldown-wait-timing.test.ts
  *
- * Extracted from tests/unit/combo-quota-share-cooldown-wait.test.ts (#6803).
+ * Extracted from the combo-quota-share-cooldown-wait describe in
+ * tests/unit/combo/quota-fallback-and-cooldown.test.ts (#6803).
  *
  * The quota_exhausted scenario below asserts a wall-clock ceiling
  * (`elapsed < 10000`) around a handleComboChat() call that also performs real

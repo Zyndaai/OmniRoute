@@ -199,7 +199,7 @@ function resolveCaseModel(evalCase: Record<string, unknown>, target: EvalTargetI
  * does not, because the key is what gives the request a memory owner (#13139).
  *
  * Exported so the header contract can be asserted without invoking the chat
- * route — see tests/unit/evals-runtime-self-managed-headers-13139.test.ts.
+ * route — see tests/unit/lib/evals-runtime-self-managed-headers-13139.test.ts.
  */
 export function buildEvalCaseRequest(
   evalCase: Record<string, unknown>,

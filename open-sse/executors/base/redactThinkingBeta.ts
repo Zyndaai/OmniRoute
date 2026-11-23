@@ -27,7 +27,7 @@ type EnvLike = Record<string, string | undefined>;
 // The server feature-flag resolver (DB override > env > definition default) is
 // published on globalThis by src/shared/utils/featureFlagResolverBridge.ts under
 // this process-wide symbol. Reading it here keeps open-sse free of a new src
-// import (boundary ratchet); tests/unit/claude-summarized-thinking-redact-beta.test.ts
+// import (boundary ratchet); tests/unit/executors/claude-summarized-thinking-redact-beta.test.ts
 // locks the key against the bridge.
 const FEATURE_FLAG_RESOLVER_KEY = Symbol.for("omniroute.featureFlagResolver");
 

@@ -1,7 +1,7 @@
 ---
 title: "Load testing and profiling the hosted instance"
 version: 3.8.53
-lastUpdated: 2026-11-12
+lastUpdated: 2026-11-23
 ---
 
 # Load testing and profiling the hosted instance
@@ -14,19 +14,35 @@ instance needs the operator's go-ahead first (see AGENTS.md, "Managing a hosted 
 
 ## What we know so far
 
-As of 2026-11-12, on the 6-vCPU VPS with ~2.4 s mock answers:
+As of 2026-11-23, on the 6-vCPU VPS running the PostgreSQL cluster (a leader and two workers
+under PM2 behind Caddy, Redis for shared state; `docs/ops/POSTGRES_CUTOVER.md`), image
+`de9f7e66`, with ~2.4 s mock answers and the load spread by `x-session-affinity`:
 
-- **One OmniRoute process carries about 20–25 streaming requests a second.** Clean up to 10
-  RPS. At 25 RPS the process used a full core (103–109%), the Docker healthcheck (5 s timeout)
-  failed, and the probes' first token went from ~1.6 s to ~8.2 s, while the host stayed at 23%
-  CPU. It recovered within a minute, with no leak. Longer real answers mean more chunks per
-  request, so a real ceiling is lower.
-- **At 10 RPS about half the samples were idle.** Of the rest: conversation tracking ~5%
-  (since turned off on the instance), `getGlobalModel` registry scans ~3–4% and gamification
-  ~1.7% (both removed from the code); nearly everything else is passing and translating stream
-  chunks.
-- **More cores means more processes,** each with its own data folder and its own share of the
-  provider accounts: [Docker guide](../guides/DOCKER_GUIDE.md#scale-out-n-independent-processes).
+- **The cluster carries about 65–70 streaming requests a second.** Every stage up to 65 RPS
+  answered every request with no restart, unhealthy upstream, database or Redis error:
+
+  | RPS | Each process, mean (peak), % of one core | PostgreSQL | Host, % of 6 vCPU | Total p95 | Probe first token, max |
+  |---|---|---|---|---|---|
+  | 10 | 17–19 (30–33) | 22 | 22 | 2.45 s | 1.10 s |
+  | 25 | 37–39 (51) | 44 | 39 | 2.46 s | 0.90 s |
+  | 50 | 67–72 (85–87) | 83 | 67 | 2.61 s | 1.42 s |
+  | 65 | 84–86 (96–98) | 112 | 81 | 3.13 s | 1.82 s |
+
+  At 65 RPS every process touched its single core, so the next limit is each Node process, with
+  the host at 87% peak. A fourth worker would raise the ceiling; 75 RPS was not run on the live
+  server. Longer real answers mean more chunks per request, so a real ceiling is lower.
+- **One process costs about the same as before the cut-over:** ~1.4% of a core per RPS of its
+  share. On 2026-11-12 a single process on SQLite used a full core at 25 RPS, and the Docker
+  healthcheck failed there.
+- **PostgreSQL is the second-largest user of CPU,** about 1.7% of a core per RPS. The three pools
+  (`OMNIROUTE_PG_POOL_MAX`, default 10 each) were all open from 50 RPS on, yet at most 7
+  queries ran at once, so the pool did not limit. Redis was idle with the request queue off.
+- **Memory grows under load and is given back when idle** (leader 535 MB idle, 824 MB peak at 65
+  RPS), well under PM2's restart points (about 1434 MB leader, 1075 MB workers).
+- **Where one process's CPU goes** (profile at 10 RPS on 2026-11-12, before the cut-over):
+  conversation tracking ~5% (since turned off on the instance), `getGlobalModel` registry scans
+  ~3–4% and gamification ~1.7% (both removed from the code); nearly everything else is passing
+  and translating stream chunks.
 
 ## Before a run
 
@@ -36,13 +52,24 @@ As of 2026-11-12, on the 6-vCPU VPS with ~2.4 s mock answers:
    (`cc/claude-haiku-5-5`). Check each key is refused (403) on the other's model. Put them in a
    git-ignored keys file as `LOADTEST_MOCK_KEY` and `LOADTEST_PROBE_KEY`.
 3. **Point the mock's provider connection at the mock.** The instance has an OpenAI-compatible
-   connection, `stressmock-test` (prefix `stressmock`). Its node update needs `name`, `prefix`
-   and `apiType` alongside the new base URL, and its API key must match the mock's key file.
-   The mock key and the OmniRoute client keys are different credentials.
-4. **Budget the probes.** They spend real subscription quota. 20 probes per stage over 5–6
-   stages is about 120; check the probe account's weekly use first.
-5. **Agree the stages, the stop rules and the window** with the operator. The defaults below
-   start at no load, rise through 5, 10 and 25 RPS, and end with a recovery stage.
+   connection named `stressmock` (deleted after the 2026-11-23 run; recreate it as an
+   OpenAI-compatible node with that prefix). Its node update needs `name`, `prefix` and
+   `apiType` alongside the new base URL, and its API key must match the mock's key file. The
+   mock key and the OmniRoute client keys are different credentials. A request sent before the
+   keys match gets a 401 that marks the connection's credentials expired; a connection test
+   (`POST /api/providers/<id>/test`) clears it.
+4. **Lift the request queue for the window.** API-key connections, the mock's included, are
+   auto-enrolled in the request queue (60 RPM, 6 concurrent; `/api/resilience`). On 2026-11-23
+   it held the mock to about 2 RPS and queued the rest into timeouts. Set
+   `requestQueue.autoEnableApiKeyProviders` to false for the run and back to true after; besides
+   the mock it covers only API-key providers. A per-connection override cannot do it, because the
+   global gap between requests stays the floor.
+5. **Budget the probes.** They spend real subscription quota on the same logins production
+   uses. 10 per stage is enough; check the probe account's weekly use first.
+6. **Agree the stages, the stop rules and the window** with the operator, and have the server
+   operator sample each process's CPU (from `/proc`: `pm2 monit` sees only the launcher),
+   PostgreSQL, Caddy and the host every 5 s. Run a 60 s smoke stage at 5 and 25 RPS first:
+   achieved must equal offered, or a limiter is in the way.
 
 ## Where the mock runs
 
@@ -69,7 +96,7 @@ MOCK_API_KEY_FILE=keys/mock.key node scripts/ops/load-test/mock-provider.mjs
 
 # from any machine that reaches omniport.ink
 node scripts/ops/load-test/load.mjs --keys-file .env.loadtest \
-  --stages 0@120,5@180,10@180,25@180,0@120 --probes 20 --out _artifacts/loadtest
+  --stages 0@120,10@180,25@180,50@180,65@180,0@180 --probes 10 --out _artifacts/loadtest
 ```
 
 `load.mjs` sends requests at a fixed rate whatever the answers do, sends the probes evenly
@@ -78,6 +105,14 @@ stops by itself when a synthetic request is served by anything but the mock, a p
 by the mock, two probes in a stage fail, or most synthetic requests in a stage fail. Probes go
 out with thinking turned off (`--probe-extra-json`), because a Claude Code login thinks unless
 told not to, which makes first-token times vary for reasons unrelated to load.
+
+**Every request carries a fresh `x-session-affinity`,** because Caddy picks a cluster process by
+hashing that header and falls back to the client IP without it: a run from one machine would land
+on one process and report one process's ceiling. `--affinity none` measures a single process on
+purpose. The client cannot see which process answered, `docker stats` shows only the container
+total and `pm2 monit` only the launcher, so confirm the spread from each process's
+`chat/completions` lines in its PM2 log, or from per-process CPU read from `/proc` (2026-11-23:
+24 random-header requests split 8/8/8, 6 with one fixed header all went to one process).
 
 While it runs, watch the container (`docker stats`, `docker inspect` health), the host
 (Grafana's Node Exporter dashboard), the mock's `/metrics` counters, and Caddy's request rate.
@@ -95,11 +130,12 @@ unexpected 401/403/429 from the mock, or the probe account nearing its quota.
   but the client timed out, the time was lost between them.
 - **Compare achieved and offered RPS.** API-key provider connections are auto-protected by the
   global request-queue defaults (60 RPM, 350 ms gap, 6 concurrent, 30 s wait; read them from
-  `/api/resilience`). On 6 Nov that fit a "1 RPS ceiling" exactly; on 10–12 Nov the same
-  connection was not throttled, for reasons not chased. A plateau at a round number is the
-  limiter, not the server.
-- **Container CPU above 100% is one core full.** Host CPU low at the same time means the
-  limit is the single process.
+  `/api/resilience`). On 6 Nov that fit a "1 RPS ceiling" exactly, on 10–12 Nov the same
+  connection was not throttled (not chased), and on 23 Nov it held the mock to about 2 RPS
+  until auto-enable was turned off. A plateau at a round number is the limiter, not the server.
+- **Read CPU per process, not per container.** The container holds three processes, so its
+  CPU runs up to 600%. A process near 100% is its core full; host CPU well below that at the
+  same time means the limit is the single process, and another worker would help.
 
 ## Profiling the live server
 

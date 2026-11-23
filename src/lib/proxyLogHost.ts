@@ -3,7 +3,7 @@
  * `proxyLogger.ts` loaded that module's import-time `loadFromDb()` hydration into every
  * DB module that reaches proxyLogs (settings → proxies → proxies/rotation → proxyLogs),
  * so a cold `getPricingForModel()` paid two extra proxy_logs queries
- * (tests/unit/pricing-for-model-cached-13891.test.ts).
+ * (tests/unit/db/pricing-for-model-cached-13891.test.ts).
  */
 
 /**

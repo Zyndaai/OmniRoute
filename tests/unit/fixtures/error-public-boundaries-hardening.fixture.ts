@@ -98,7 +98,7 @@ test("sanitizeErrorMessage redacts extensionless POSIX paths without hiding expl
   // #14110 (2026-09-21, owner decision (a) fail-closed): an unknown-root
   // POSIX path with an ambiguous tail is now redacted AND swallowed (a path
   // may contain spaces), matching the treatment a known filesystem root
-  // already got. See tests/unit/error-path-redaction-route-truncation-13144.test.ts
+  // already got. See tests/unit/utils/error-path-redaction-route-truncation-13144.test.ts
   // for the accepted trade-off with unanchored routes in prose.
   assert.doesNotMatch(spaced, /custom\/internal|secret directory/);
   assert.doesNotMatch(body.error.message, /custom\/internal\/secret/);

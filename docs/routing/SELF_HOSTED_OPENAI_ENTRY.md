@@ -78,7 +78,7 @@ key system is expected to take over this header.
 
 ## Tests
 
-`tests/unit/self-hosted-entry.test.ts` covers provider selection, model-prefix
+`tests/unit/services/self-hosted-entry.test.ts` covers provider selection, model-prefix
 forwarding, header hygiene, auth, upstream-error normalization, SSE streaming
 passthrough, and the fall-through / misconfig paths — all over real HTTP against a
 local upstream.

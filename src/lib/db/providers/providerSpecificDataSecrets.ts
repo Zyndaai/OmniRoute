@@ -13,7 +13,7 @@ import { isWordPressLoggedInKey } from "@omniroute/open-sse/utils/wordpressSessi
  * response sanitizer (src/lib/providers/requestDefaults.ts — strips these fields,
  * masks `extraApiKeys` like `apiKey`) and the compliance audit summary
  * (src/lib/compliance/providerAudit.ts). A field added here is covered on every side;
- * tests/unit/provider-specific-data-secrets-drift.test.ts iterates the list.
+ * tests/unit/shared/provider-specific-data-secrets-drift.test.ts iterates the list.
  */
 export const PROVIDER_SPECIFIC_SECRET_FIELDS = [
   "consoleApiKey",

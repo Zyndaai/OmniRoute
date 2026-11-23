@@ -56,7 +56,7 @@ validation error instead of `401`): with `REQUIRE_API_KEY=true`, an unauthentica
 `POST /v1/chat/completions` is rejected at the auth layer (middleware **and**
 handler) **before** `request.json()` / Zod `safeParse`. This is pinned by
 `tests/unit/authz/handler-auth-bypass.test.ts` and
-`tests/unit/security-posture.test.ts`.
+`tests/unit/lib/security-posture.test.ts`.
 
 `OMNIROUTE_API_KEY` (and legacy `ROUTER_API_KEY`) is an **optional** persistent
 passthrough/service key that always validates (`src/sse/services/auth.ts`). It
@@ -94,7 +94,7 @@ The `/v1/*` surface may echo the request `Origin` (or `*` only when there is no
 `Origin` header) for **token-bearing** requests, and **never** pairs that with
 `Access-Control-Allow-Credentials` (`applyCorsHeaders` never sets that header) —
 this is the hardened GHSA-7px7-29v2-m97p behavior and is deliberately preserved,
-not loosened. Pinned by `tests/unit/security-posture.test.ts`.
+not loosened. Pinned by `tests/unit/lib/security-posture.test.ts`.
 
 ### 2.3 Agent Card public URL
 
@@ -109,7 +109,7 @@ ignored.
 / `NEXT_PUBLIC_APP_URL`, then a trusted `X-Forwarded-Host`, then the request
 origin) → `localhost`. In **every** branch an unroutable host (`0.0.0.0`, `::`,
 wildcard) is rejected and falls through, so the card can never advertise the bind
-address. Pinned by `tests/unit/well-known-agent-card-url.test.ts`.
+address. Pinned by `tests/unit/api/well-known-agent-card-url.test.ts`.
 
 To advertise the real public address behind the reverse proxy, set:
 
@@ -133,9 +133,9 @@ Automated (run now, no production needed):
 ```bash
 node --import tsx/esm --test \
   tests/unit/authz/handler-auth-bypass.test.ts \
-  tests/unit/security-posture.test.ts \
-  tests/unit/well-known-agent-card-url.test.ts \
-  tests/unit/least-privilege-key-and-combos.test.ts
+  tests/unit/lib/security-posture.test.ts \
+  tests/unit/api/well-known-agent-card-url.test.ts \
+  tests/unit/shared/least-privilege-key-and-combos.test.ts
 ```
 
 Production smoke test (run on the deployed instance, after setting the env above):
@@ -223,7 +223,7 @@ The dashboard (API Manager) performs the same operations through the UI.
 rows, gated by `allowedCombos`; provider models and `auto/*` are hidden
 (`allowAutoCombos:false` also suppresses auto-combo synthesis). So the `prod-client`
 key sees exactly its approved catalog IDs. Pinned by
-`tests/unit/least-privilege-key-and-combos.test.ts`.
+`tests/unit/shared/least-privilege-key-and-combos.test.ts`.
 
 > Caveat: `GET /v1/combos` (the combos listing) does **not** per-key-filter — it
 > returns all combos. The client app should discover its catalog via `/v1/models`, which

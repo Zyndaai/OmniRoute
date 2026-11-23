@@ -1,7 +1,7 @@
 /**
  * MCP Origin guard on OmniRoute's own server (scripts/dev/run-server.mjs).
  *
- * The unit suite (tests/unit/mcp-origin-validation.test.ts) builds requests by
+ * The unit suite (tests/unit/authz/mcp-origin-validation.test.ts) builds requests by
  * hand, so it cannot show what the real server puts in `request.url`. That matters:
  * `request.url` is one of the Origin candidates, so if the server derived it from
  * the client's Host header a DNS-rebinding page (`Host: evil.test` +

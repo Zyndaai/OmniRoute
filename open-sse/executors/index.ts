@@ -22,7 +22,7 @@ import { getDefaultExecutor } from "./defaultResolver.ts";
 // top of the minimal set — even for deployments that use a handful of
 // providers. Bundlers split the dynamic imports into on-demand chunks.
 //
-// Contract preserved (pinned by tests/unit/executor-map-golden.test.ts):
+// Contract preserved (pinned by tests/unit/executors/executor-map-golden.test.ts):
 //   - keys and their ORDER are byte-stable
 //   - each alias still gets its OWN instance (aliases never share)
 //   - ctor arguments are unchanged

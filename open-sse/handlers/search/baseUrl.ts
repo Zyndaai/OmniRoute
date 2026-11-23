@@ -21,7 +21,7 @@
  *     fetch internal services and read the answer back. Loopback/LAN instances go
  *     on the stored connection instead. See searchBaseUrlGuard().
  *
- * Full coverage: tests/unit/search-baseurl-client-override-3f8g.test.ts.
+ * Full coverage: tests/unit/config/search-baseurl-client-override-3f8g.test.ts.
  */
 
 import {

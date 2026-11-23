@@ -109,7 +109,7 @@ function emptyContent200(connectionId = "c-fail"): Response {
   );
 }
 
-// "invalid message format" — same fixture as combo-body-specific-400-stop-4279.test.ts
+// "invalid message format" — same fixture as the combo-body-specific-400-stop-4279 describe in terminal-errors-and-stops.test.ts
 function bodySpecific400(): Response {
   return new Response(
     JSON.stringify({

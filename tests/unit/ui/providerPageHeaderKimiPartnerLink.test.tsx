@@ -4,7 +4,7 @@
  * website link for the 3 visible Kimi (Moonshot AI) provider cards
  * (kimi-coding, kimi-web, moonshot). Presentation only — see
  * featuredProviders.ts (isKimiPartnerProviderId) and the aff-link URLs
- * asserted in tests/unit/kimi-partner-aff-links.test.ts.
+ * asserted in tests/unit/shared/kimi-partner-aff-links.test.ts.
  */
 import React from "react";
 import { act } from "react";

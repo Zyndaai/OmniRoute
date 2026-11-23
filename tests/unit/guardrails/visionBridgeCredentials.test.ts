@@ -18,7 +18,7 @@
  *
  * This suite exercises the real DB-backed path (createProviderConnection +
  * getProviderConnections) — same pattern as
- * tests/unit/8779-agy-prefix-credential-lookup.test.ts. Isolated DATA_DIR per
+ * tests/unit/sse/8779-agy-prefix-credential-lookup.test.ts. Isolated DATA_DIR per
  * PII learnings §3: resetDbInstance() + cleanup in test.after so the node:test
  * runner doesn't hang on open handles.
  */

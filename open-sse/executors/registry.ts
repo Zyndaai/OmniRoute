@@ -7,7 +7,7 @@ import type { BaseExecutor } from "./base.ts";
 // host.registerProvider) extends — today the surface is internal-only.
 //
 // The alias → executor mapping is characterized by
-// tests/unit/executor-map-golden.test.ts (tests/snapshots/executors/): any
+// tests/unit/executors/executor-map-golden.test.ts (tests/snapshots/executors/): any
 // change to keys, classes or instance sharing shows up as a golden diff.
 
 const registry = new Map<string, BaseExecutor>();

@@ -71,7 +71,7 @@ export function createPinnedFetch(address: string, family: number): typeof fetch
       // form here (as an earlier draft did) throws `ERR_INVALID_IP_ADDRESS`
       // for every real request once autoSelectFamily kicks in, silently
       // breaking every pinned fetch — verified by
-      // `tests/unit/remote-image-fetch-pin-dns-connection.test.ts`.
+      // `tests/unit/shared/remote-image-fetch-pin-dns-connection.test.ts`.
       lookup: (_hostname, options, callback) => {
         if (options && typeof options === "object" && "all" in options && options.all) {
           callback(null, [{ address, family }]);

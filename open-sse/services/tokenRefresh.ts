@@ -142,7 +142,7 @@ export const REFRESH_LEAD_MS: Record<string, number> = {
  *
  * Deprecation, not deletion: a connection here becomes terminal with a reason that names
  * where to go instead, rather than silently sitting at `active` doing nothing. The
- * migration target must be routable — `tests/unit/gemini-cli-deprecation.test.ts` asserts
+ * migration target must be routable — `tests/unit/config/gemini-cli-deprecation.test.ts` asserts
  * that, so the notice can never point somewhere useless.
  */
 export const DEPRECATED_PROVIDERS: Readonly<

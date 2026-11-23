@@ -67,7 +67,7 @@ Below the threshold the provider is **not** considered cooling; a success clears
 the window. Connection-level entries (`provider:connectionId`) keep the
 exponential `minRetryCooldownMs → maxRetryCooldownMs` backoff instead. Overrides:
 `OMNIROUTE_PROVIDER_BREAKER_{OAUTH,API_KEY}_{FAILURE_THRESHOLD,FAILURE_WINDOW_MS,COOLDOWN_MS}`.
-Regression guard: `tests/unit/provider-cooldown-window-gate.test.ts`.
+Regression guard: `tests/unit/services/provider-cooldown-window-gate.test.ts`.
 
 ## 2. Connection Cooldown
 
@@ -211,8 +211,8 @@ connection** (Edit connection → Claude section → `lowPriorityMode` / `autoLi
   failure backs off 15 minutes. The reset is once a week and still counts toward the
   weekly limit.
 
-Regression guards: `tests/unit/claude-low-priority-mode.test.ts`,
-`tests/unit/claude-limit-reset.test.ts`, `tests/unit/claude-low-priority-executor.test.ts`.
+Regression guards: `tests/unit/services/claude-low-priority-mode.test.ts`,
+`tests/unit/services/claude-limit-reset.test.ts`, `tests/unit/services/claude-low-priority-executor.test.ts`.
 
 ### Session affinity (#7274)
 
@@ -523,7 +523,7 @@ cleared the moment the job leaves QUEUED and starts executing
 (`rateLimitManager.ts`, `wrappedFn`). A request that exceeds it never reaches
 the upstream. Default 30000ms, supplied by `DEFAULT_REQUEST_QUEUE_MAX_WAIT_MS`
 in `src/lib/resilience/settings.ts` and pinned by
-`tests/unit/ratelimit-admission-control-6593.test.ts`, so a change to it turns
+`tests/unit/services/ratelimit-admission-control-6593.test.ts`, so a change to it turns
 that test red rather than leaving this paragraph quietly stale.
 
 `resilienceSettings.requestQueue.executionMaxWaitMs` is what the limiter
@@ -578,8 +578,8 @@ away at once with the queue-timeout code (`checkLimiterPause`) rather than
 waiting that time out; the recorded end is anchored before the pause is
 applied (applying it restarts the refill clock), and any later change to the
 reservoir forgets it. Covered by
-`tests/unit/rate-limit-long-body-retry-lockout.test.ts` and
-`tests/unit/rate-limit-body-retry-pause.test.ts`.
+`tests/unit/services/rate-limit-long-body-retry-lockout.test.ts` and
+`tests/unit/services/rate-limit-body-retry-pause.test.ts`.
 
 **`maxQueueDepth` — opt-in admission cap (new).** `resilienceSettings.requestQueue.maxQueueDepth`
 bounds how many requests may sit queued (not yet dispatched) for one
@@ -844,7 +844,7 @@ behavior) and is out of scope for a single-provider rule addition.
    (`open-sse/services/combo/targetExhaustion.ts`); without it, `scope`
    still flows through `fallbackResult.ruleScope` but nothing acts on it.
 3. Add unit tests mirroring the `upstream-status-restatement` describe in
-   `tests/unit/chatcore/accounts-resilience.test.ts` and `tests/unit/agentrouter-error-rules.test.ts` (including the
+   `tests/unit/chatcore/accounts-resilience.test.ts` and `tests/unit/config/agentrouter-error-rules.test.ts` (including the
    not-permanent / not-creditsExhausted guards, and — if the provider needs
    the allowlist — a test asserting `resolveRuleMatchBody()` returns the
    full text only for that provider).

@@ -115,10 +115,10 @@ for "why this model, why not that one".
 
 ## Tests
 
-- `tests/unit/routing-strategies.test.ts` — 25 unit tests over the pure strategy engine:
+- `tests/unit/services/routing-strategies.test.ts` — 25 unit tests over the pure strategy engine:
   parse, blacklist/whitelist, cooldown breaker, cost-priority, latency-aware, fallback
   chain, combined pipeline, explainability.
-- `tests/unit/self-hosted-entry.test.ts` — fault injection over real HTTP: primary down
+- `tests/unit/services/self-hosted-entry.test.ts` — fault injection over real HTTP: primary down
   → fallback succeeds; all-down → last error; pinned-blacklisted → 400; cooldown
   excludes a failing provider on the next request; no-eligible → 503 with explainable
   decision.

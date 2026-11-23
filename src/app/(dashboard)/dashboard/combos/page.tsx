@@ -3083,7 +3083,7 @@ function ComboFormModal({
   // changes and the combo is created with targets that resolve to nothing. The
   // three Qoder entries below replace `kimi-k2-thinking`, `qwen3-coder-plus` and
   // `deepseek-v3.2`, which the Qoder registry no longer carries.
-  // `tests/unit/combo-preset-models-resolve-14077.test.ts` pins every entry
+  // `tests/unit/ui/combo-preset-models-resolve-14077.test.ts` pins every entry
   // against the registry so the next catalog change fails there instead of in a
   // user's combo.
   const FREE_STACK_PRESET_MODELS = [

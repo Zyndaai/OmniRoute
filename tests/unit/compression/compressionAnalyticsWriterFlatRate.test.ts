@@ -5,7 +5,7 @@
  * Cost rows on those lanes are for pre-flight estimates only — booking them as
  * compression savings invents money the operator never pays (audit §5.1).
  *
- * Mirrors the flat-rate convention established by tests/unit/flat-rate-cost-5552.test.ts
+ * Mirrors the flat-rate convention established by tests/unit/usage/flat-rate-cost-5552.test.ts
  * (upstream #5552) and the opt-in used by src/app/api/usage/analytics/route.ts.
  */
 

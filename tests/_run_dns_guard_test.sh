@@ -22,4 +22,4 @@ fi
 
 cd "$REPO_ROOT"
 node --import tsx/esm --import ./tests/_setup/isolateDataDir.ts \
-  --test tests/unit/mitm-dnsConfig.test.ts
+  --test tests/unit/mitm/mitm-dnsConfig.test.ts

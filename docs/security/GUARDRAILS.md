@@ -829,7 +829,7 @@ to the upstream provider or back to the client.
 - The guardrail never blocks; it only rewrites (`modifiedPayload` /
   `modifiedResponse`) and annotates (`meta.credentialsRedacted`, `meta.count`).
 
-Regression guard: `tests/unit/credential-masker-guardrail.test.ts`.
+Regression guard: `tests/unit/guardrails/credential-masker-guardrail.test.ts`.
 
 ## Base Contract (`base.ts`)
 
@@ -962,7 +962,7 @@ Guardrails that throw are recorded with `error: <message>` and logged via
 The guardrail registry is wired into the chat pipeline only. These limits are
 pinned by `tests/unit/chatcore/request-shaping.test.ts` (describe
 `guardrail-pipeline-wiring-characterization`) and
-`tests/unit/guardrail-pipeline-characterization.test.ts`; update those tests
+`tests/unit/guardrails/guardrail-pipeline-characterization.test.ts`; update those tests
 deliberately when the behavior changes.
 
 ### Where the hooks run
@@ -1077,8 +1077,8 @@ Steps:
    call `guardrailRegistry.register(...)` at runtime — the registry replaces
    any prior guardrail with the same normalized name.
 4. Add tests under `tests/unit/` (existing examples:
-   `tests/unit/guardrails-registry.test.ts`,
-   `tests/unit/prompt-injection-guard.test.ts`,
+   `tests/unit/guardrails/guardrails-registry.test.ts`,
+   `tests/unit/lib/prompt-injection-guard.test.ts`,
    `tests/unit/guardrails/visionBridge.test.ts`).
 
 ## Testing

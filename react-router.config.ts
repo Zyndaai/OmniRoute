@@ -12,6 +12,6 @@ export default {
   // React Router's action origin check compares `Origin` with `request.url`, which this server
   // builds from its bound address, so it would refuse every same-origin dashboard write. The
   // request pipeline checks page writes against the trusted public origins instead
-  // (src/server/origin/pageActionOrigin.ts, tests/unit/page-action-origin.test.ts).
+  // (src/server/origin/pageActionOrigin.ts, tests/unit/server/page-action-origin.test.ts).
   allowedActionOrigins: ["**"],
 } satisfies Config;

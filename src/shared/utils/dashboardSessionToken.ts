@@ -10,7 +10,7 @@
  * cookie and reached instance-wide operations. Every place that trusts the
  * cookie goes through `verifyDashboardSessionToken`; a bare `jwtVerify` on
  * `auth_token` is a regression (guarded by
- * tests/unit/dashboard-session-verifier-source-guard.test.ts).
+ * tests/unit/shared/dashboard-session-verifier-source-guard.test.ts).
  */
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 

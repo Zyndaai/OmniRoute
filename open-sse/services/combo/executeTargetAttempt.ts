@@ -258,7 +258,7 @@ export async function executeTargetAttempt(
     state.comboAttemptOrder.push({ provider: provider ?? "unknown", model: modelStr });
 
     // Copy-on-write, not a deep clone (#7847 — 9.53 MiB at 3 targets). Writes here are
-    // top-level scalars. Invariant: tests/unit/combo-attempt-body-isolation-7847.test.ts.
+    // top-level scalars. Invariant: tests/unit/combo/fallback-locks-and-limits.test.ts (combo-attempt-body-isolation-7847).
     let attemptBody = { ...(deps.body as Record<string, unknown>) } as typeof deps.body;
 
     // Proactive Context Compression for fallbacks (Zero-Latency optimization)

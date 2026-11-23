@@ -297,8 +297,11 @@ releases as updates and never shows upstream's news feed. Updating the hosted in
    stops the app container, takes a `pg_dump` of the database, starts the new image (the leader
    migrates, the workers wait for it) and waits until the container is healthy and every PM2
    process is online. If not, it recreates the database from the dump, restores the previous
-   `OMNIROUTE_TAG`, starts the old image again and skips that digest from then on. PostgreSQL and
-   Redis keep running. It logs to `journalctl -u omniroute-autodeploy`.
+   `OMNIROUTE_TAG`, starts the old image again and skips that digest from then on (both paths were
+   tested on a throwaway copy of production on 2026-11-23, the rollback with an image that had
+   already migrated). PostgreSQL and Redis keep running. After a good deploy it deletes every
+   `ghcr.io/zyndaai/omniroute` image except the new and the previous one, including images pulled
+   or tagged by hand. It logs to `journalctl -u omniroute-autodeploy`.
 3. To hold deploys, `touch /opt/omniroute/AUTODEPLOY_PAUSED`; delete the file to resume. To deploy
    by hand instead, set `OMNIROUTE_TAG` in `/opt/omniroute/.env` and run
    `docker compose pull omniroute && docker compose up -d omniroute` in `/opt/omniroute`, after a

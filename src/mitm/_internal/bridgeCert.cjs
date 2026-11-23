@@ -12,7 +12,7 @@
  *     (via `cert/activeCert.ts`) uses to pick the legacy leaf or the root CA, honoring
  *     `MITM_ROOT_CA_ENABLED === "true"` exactly like the server and the AgentBridge routes.
  *
- * `tests/unit/antigravity-bridge-active-cert.test.ts` checks both against the TS sources,
+ * `tests/unit/mitm/antigravity-bridge-active-cert.test.ts` checks both against the TS sources,
  * so keep them byte-for-byte in behavior. Per-host leaf issuance is not reimplemented
  * here: the root-CA path reuses `DynamicCertStore` from `./rootCaShim.cjs`, the same
  * issuer `server.cjs` feeds its SNICallback with.

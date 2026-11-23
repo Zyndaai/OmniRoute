@@ -17,7 +17,7 @@
  * it spawns the helper as a subprocess a dozen times, and the always-on
  * `test:integration` gate is already at its CI ceiling (#15306). The server-side
  * verification path — including the real `jose` JWKS flow and every negative
- * case — is covered unconditionally by tests/unit/entra-sso-auth.test.ts.
+ * case — is covered unconditionally by tests/unit/authz/entra-sso-auth.test.ts.
  *
  *   RUN_ENTRA_SSO_E2E=1 node --import tsx/esm --test \
  *     tests/integration/entra-sso-e2e.int.test.ts

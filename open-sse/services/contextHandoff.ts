@@ -692,7 +692,7 @@ export async function shouldGenerateUniversalHandoff(options: {
 // usable handoff" outcome is tracked. A transient upstream failure
 // (`!response.ok`) is NOT — that one is worth retrying on the next switch, and
 // the context-relay path relies on exactly that behavior
-// (tests/unit/context-handoff.test.ts → "allows a new attempt after a failed
+// (tests/unit/db/context-handoff.test.ts → "allows a new attempt after a failed
 // in-flight generation").
 const HANDOFF_UNPARSEABLE_BASE_COOLDOWN_MS = 5 * 60 * 1000;
 const HANDOFF_UNPARSEABLE_MAX_COOLDOWN_MS = 60 * 60 * 1000;
